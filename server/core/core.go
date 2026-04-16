@@ -10,6 +10,7 @@ import (
 	"builder/server/askview"
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/idempotency"
 	"builder/server/launch"
 	"builder/server/metadata"
 	"builder/server/primaryrun"
@@ -19,6 +20,7 @@ import (
 	"builder/server/promptactivity"
 	"builder/server/promptcontrol"
 	"builder/server/registry"
+	"builder/server/rootlock"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
@@ -45,7 +47,9 @@ type Core struct {
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
+	rootLock         *rootlock.Lease
 	metadataStore    *metadata.Store
+	mutationDedup    *idempotency.Coordinator
 	runtimeRegistry  *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
 	projectID        string
@@ -69,36 +73,46 @@ type Core struct {
 type unregisteredSessionLaunchClient struct{}
 
 func (unregisteredSessionLaunchClient) PlanSession(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
-	return serverapi.SessionPlanResponse{}, metadata.ErrWorkspaceNotRegistered
+	return serverapi.SessionPlanResponse{}, serverapi.ErrWorkspaceNotRegistered
 }
 
 type unregisteredRunPromptClient struct{}
 
 func (unregisteredRunPromptClient) RunPrompt(context.Context, serverapi.RunPromptRequest, serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
-	return serverapi.RunPromptResponse{}, metadata.ErrWorkspaceNotRegistered
+	return serverapi.RunPromptResponse{}, serverapi.ErrWorkspaceNotRegistered
 }
 
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	rootLease, err := rootlock.Acquire(cfg.PersistenceRoot)
+	if err != nil {
+		return nil, err
+	}
 	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, nil); err != nil {
+		_ = rootLease.Close()
 		return nil, err
 	}
 	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
 	if err != nil {
+		_ = rootLease.Close()
 		return nil, err
 	}
 	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
 	if err != nil {
+		_ = rootLease.Close()
 		return nil, err
 	}
 	if authSupport.AuthManager == nil {
+		_ = rootLease.Close()
 		_ = metadataStore.Close()
 		return nil, fmt.Errorf("auth manager is required")
 	}
 	if runtimeSupport.Background == nil {
+		_ = rootLease.Close()
 		_ = metadataStore.Close()
 		return nil, fmt.Errorf("background manager is required")
 	}
 	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
+	mutationDedup := idempotency.NewCoordinator(metadataStore, idempotency.DefaultRetention)
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
 	projectService, err := projectview.NewMetadataService(metadataStore, "", "")
@@ -108,15 +122,15 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	}
 	askService := askview.NewService(runtimeRegistry)
 	approvalService := approvalview.NewService(runtimeRegistry)
-	processService := processview.NewService(runtimeSupport.Background)
+	processService := processview.NewService(runtimeSupport.Background).WithIdempotencyCoordinator(mutationDedup)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
-	promptControlService := promptcontrol.NewService(runtimeRegistry)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
-	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
+	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
-	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
-	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -125,7 +139,9 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		fastModeState:    runtimeSupport.FastModeState,
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
+		rootLock:         rootLease,
 		metadataStore:    metadataStore,
+		mutationDedup:    mutationDedup,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		projectViews:     projectViews,
@@ -145,7 +161,8 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		runPrompt:        unregisteredRunPromptClient{},
 	}
 	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
-	if err != nil && !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+	if err != nil && !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+		_ = rootLease.Close()
 		_ = metadataStore.Close()
 		return nil, err
 	}
@@ -153,11 +170,13 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		core.projectID = binding.ProjectID
 		core.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
 		if err != nil {
+			_ = rootLease.Close()
 			_ = metadataStore.Close()
 			return nil, err
 		}
 		core.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
 		if err != nil {
+			_ = rootLease.Close()
 			_ = metadataStore.Close()
 			return nil, err
 		}
@@ -213,6 +232,7 @@ func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, proje
 	}
 	service := sessionlaunch.NewDeduplicatingService(
 		sessionlaunch.ScopeID(projectCtx.config, projectCtx.projectSession),
+		s.mutationDedup,
 		sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores),
 	)
 	return client.NewLoopbackSessionLaunchClient(service), nil
@@ -236,6 +256,7 @@ func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID
 		Background:       s.background,
 		RuntimeRegistry:  s.runtimeRegistry,
 		BackgroundRouter: s.backgroundRouter,
+		Coordinator:      s.mutationDedup,
 	}), nil
 }
 
@@ -263,7 +284,7 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 				projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
 			}, nil
 		}
-		if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 			return projectContext{}, err
 		}
 	}
@@ -276,7 +297,7 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 	}
 	switch overview.Project.Availability {
 	case clientui.ProjectAvailabilityMissing, clientui.ProjectAvailabilityInaccessible:
-		return projectContext{}, metadata.ProjectUnavailableError{
+		return projectContext{}, serverapi.ProjectUnavailableError{
 			ProjectID:    trimmedProjectID,
 			RootPath:     overview.Project.RootPath,
 			Availability: overview.Project.Availability,
@@ -302,6 +323,9 @@ func (s *Core) Close() error {
 	}
 	if s.metadataStore != nil {
 		err = errors.Join(err, s.metadataStore.Close())
+	}
+	if s.rootLock != nil {
+		err = errors.Join(err, s.rootLock.Close())
 	}
 	return err
 }

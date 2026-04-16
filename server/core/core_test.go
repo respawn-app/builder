@@ -10,6 +10,7 @@ import (
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/metadata"
+	"builder/server/rootlock"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
@@ -98,15 +99,56 @@ func TestNewProvidesRegistrationSafeClientsForUnregisteredWorkspace(t *testing.T
 		t.Fatal("expected run prompt client stub")
 	}
 	_, err = appCore.SessionLaunchClient().PlanSession(context.Background(), serverapi.SessionPlanRequest{})
-	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("PlanSession error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	_, err = appCore.RunPromptClient().RunPrompt(context.Background(), serverapi.RunPromptRequest{}, nil)
-	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("RunPrompt error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	if _, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects via core client: %v", err)
+	}
+}
+
+func TestNewRejectsSecondCoreForSamePersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	authSupportA, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport A: %v", err)
+	}
+	runtimeSupportA, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport A: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupportA.Background.Close() })
+
+	first, err := New(resolved.Config, authSupportA, runtimeSupportA)
+	if err != nil {
+		t.Fatalf("New first: %v", err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+
+	authSupportB, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport B: %v", err)
+	}
+	runtimeSupportB, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport B: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupportB.Background.Close() })
+
+	_, err = New(resolved.Config, authSupportB, runtimeSupportB)
+	if !errors.Is(err, rootlock.ErrPersistenceRootBusy) {
+		t.Fatalf("New second error = %v, want ErrPersistenceRootBusy", err)
 	}
 }
 
@@ -136,7 +178,7 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsMissingProject(t *testing.
 	t.Cleanup(func() { _ = appCore.Close() })
 
 	_, err = appCore.SessionLaunchClientForProjectWorkspace(context.Background(), "project-missing", workspace)
-	if !errors.Is(err, metadata.ErrProjectNotFound) {
+	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("SessionLaunchClientForProjectWorkspace error = %v, want ErrProjectNotFound", err)
 	}
 }
@@ -181,10 +223,10 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsUnavailableProjectRoot(t *
 	t.Cleanup(func() { _ = appCore.Close() })
 
 	_, err = appCore.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, workspaceB)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("SessionLaunchClientForProjectWorkspace error = %v, want ErrProjectUnavailable", err)
 	}
-	unavailable, ok := metadata.AsProjectUnavailable(err)
+	unavailable, ok := serverapi.AsProjectUnavailable(err)
 	if !ok {
 		t.Fatalf("expected ProjectUnavailableError, got %v", err)
 	}
@@ -248,10 +290,10 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsInaccessibleProjectRoot(t 
 	t.Cleanup(func() { _ = appCore.Close() })
 
 	_, err = appCore.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, workspaceB)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("SessionLaunchClientForProjectWorkspace error = %v, want ErrProjectUnavailable", err)
 	}
-	unavailable, ok := metadata.AsProjectUnavailable(err)
+	unavailable, ok := serverapi.AsProjectUnavailable(err)
 	if !ok {
 		t.Fatalf("expected ProjectUnavailableError, got %v", err)
 	}

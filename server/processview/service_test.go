@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/server/idempotency"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/serverapi"
@@ -205,7 +206,7 @@ func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
 
 func TestServiceKillProcessDeduplicatesSuccessfulRetryByClientRequestID(t *testing.T) {
 	processes := &stubKillProcessSource{}
-	svc := NewService(processes)
+	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}
 	if _, err := svc.KillProcess(context.Background(), req); err != nil {
 		t.Fatalf("first KillProcess: %v", err)
@@ -219,20 +220,23 @@ func TestServiceKillProcessDeduplicatesSuccessfulRetryByClientRequestID(t *testi
 	}
 }
 
-func TestServiceKillProcessRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
+func TestServiceKillProcessScopesClientRequestIDByProcess(t *testing.T) {
 	processes := &stubKillProcessSource{}
-	svc := NewService(processes)
+	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); err != nil {
 		t.Fatalf("first KillProcess: %v", err)
 	}
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-2"}); err == nil || !strings.Contains(err.Error(), "reused with different payload") {
-		t.Fatalf("expected payload reuse error, got %v", err)
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-2"}); err != nil {
+		t.Fatalf("second KillProcess: %v", err)
+	}
+	if processes.killCalls != 2 {
+		t.Fatalf("kill call count = %d, want 2", processes.killCalls)
 	}
 }
 
 func TestServiceKillProcessReturnsContextCanceledWhileWaitingForDuplicateInFlight(t *testing.T) {
 	processes := &blockingKillProcessSource{started: make(chan struct{}), release: make(chan struct{})}
-	svc := NewService(processes)
+	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 	done := make(chan error, 1)
 	go func() {
 		_, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"})

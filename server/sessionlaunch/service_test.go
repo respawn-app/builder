@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"builder/server/idempotency"
 	"builder/server/launch"
 	"builder/server/registry"
 	"builder/shared/config"
@@ -54,7 +55,6 @@ func TestServicePlanSessionRegistersStoreAndReturnsPlan(t *testing.T) {
 }
 
 func TestDeduplicatingServiceReturnsSameSessionForDuplicateNewSession(t *testing.T) {
-	dedupeRegistry.entries = map[string]*dedupeEntry{}
 	stores := registry.NewSessionStoreRegistry()
 	persistenceRoot := t.TempDir()
 	containerDir := t.TempDir()
@@ -62,7 +62,7 @@ func TestDeduplicatingServiceReturnsSameSessionForDuplicateNewSession(t *testing
 		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
 		ContainerDir: containerDir,
 	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), inner)
+	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), idempotency.NewCoordinator(nil, idempotency.DefaultRetention), inner)
 	req := serverapi.SessionPlanRequest{
 		ClientRequestID: "dup-1",
 		Mode:            serverapi.SessionLaunchModeInteractive,
@@ -83,7 +83,6 @@ func TestDeduplicatingServiceReturnsSameSessionForDuplicateNewSession(t *testing
 }
 
 func TestDeduplicatingServiceRejectsReusedRequestIDWithDifferentPayload(t *testing.T) {
-	dedupeRegistry.entries = map[string]*dedupeEntry{}
 	stores := registry.NewSessionStoreRegistry()
 	persistenceRoot := t.TempDir()
 	containerDir := t.TempDir()
@@ -91,7 +90,7 @@ func TestDeduplicatingServiceRejectsReusedRequestIDWithDifferentPayload(t *testi
 		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
 		ContainerDir: containerDir,
 	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), inner)
+	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), idempotency.NewCoordinator(nil, idempotency.DefaultRetention), inner)
 
 	_, err := service.PlanSession(context.Background(), serverapi.SessionPlanRequest{
 		ClientRequestID: "dup-2",

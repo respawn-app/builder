@@ -23,6 +23,62 @@ func (q *Queries) CountProjectWorkspaces(ctx context.Context, projectID string) 
 	return workspace_count, err
 }
 
+const deleteExpiredMutationDedupRecords = `-- name: DeleteExpiredMutationDedupRecords :execrows
+DELETE FROM mutation_dedupe
+WHERE expires_at_unix_ms <= ?1
+`
+
+func (q *Queries) DeleteExpiredMutationDedupRecords(ctx context.Context, expiresAtUnixMs int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteExpiredMutationDedupRecords, expiresAtUnixMs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const getMutationDedupRecord = `-- name: GetMutationDedupRecord :one
+SELECT
+    method,
+    resource_id,
+    client_request_id,
+    payload_fingerprint,
+    response_json,
+    error_code,
+    error_message,
+    completed_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+FROM mutation_dedupe
+WHERE method = ?1
+  AND resource_id = ?2
+  AND client_request_id = ?3
+LIMIT 1
+`
+
+type GetMutationDedupRecordParams struct {
+	Method          string
+	ResourceID      string
+	ClientRequestID string
+}
+
+func (q *Queries) GetMutationDedupRecord(ctx context.Context, arg GetMutationDedupRecordParams) (MutationDedupe, error) {
+	row := q.db.QueryRowContext(ctx, getMutationDedupRecord, arg.Method, arg.ResourceID, arg.ClientRequestID)
+	var i MutationDedupe
+	err := row.Scan(
+		&i.Method,
+		&i.ResourceID,
+		&i.ClientRequestID,
+		&i.PayloadFingerprint,
+		&i.ResponseJson,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.CompletedAtUnixMs,
+		&i.ExpiresAtUnixMs,
+		&i.MetadataJson,
+	)
+	return i, err
+}
+
 const getProjectDisplayName = `-- name: GetProjectDisplayName :one
 SELECT display_name
 FROM projects
@@ -657,6 +713,69 @@ func (q *Queries) UpdateWorktreeCanonicalRoot(ctx context.Context, arg UpdateWor
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertMutationDedupRecord = `-- name: UpsertMutationDedupRecord :exec
+INSERT INTO mutation_dedupe (
+    method,
+    resource_id,
+    client_request_id,
+    payload_fingerprint,
+    response_json,
+    error_code,
+    error_message,
+    completed_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10
+)
+ON CONFLICT(method, resource_id, client_request_id) DO UPDATE SET
+    payload_fingerprint = excluded.payload_fingerprint,
+    response_json = excluded.response_json,
+    error_code = excluded.error_code,
+    error_message = excluded.error_message,
+    completed_at_unix_ms = excluded.completed_at_unix_ms,
+    expires_at_unix_ms = excluded.expires_at_unix_ms,
+    metadata_json = excluded.metadata_json
+`
+
+type UpsertMutationDedupRecordParams struct {
+	Method             string
+	ResourceID         string
+	ClientRequestID    string
+	PayloadFingerprint string
+	ResponseJson       string
+	ErrorCode          string
+	ErrorMessage       string
+	CompletedAtUnixMs  int64
+	ExpiresAtUnixMs    int64
+	MetadataJson       string
+}
+
+func (q *Queries) UpsertMutationDedupRecord(ctx context.Context, arg UpsertMutationDedupRecordParams) error {
+	_, err := q.db.ExecContext(ctx, upsertMutationDedupRecord,
+		arg.Method,
+		arg.ResourceID,
+		arg.ClientRequestID,
+		arg.PayloadFingerprint,
+		arg.ResponseJson,
+		arg.ErrorCode,
+		arg.ErrorMessage,
+		arg.CompletedAtUnixMs,
+		arg.ExpiresAtUnixMs,
+		arg.MetadataJson,
+	)
+	return err
 }
 
 const upsertProject = `-- name: UpsertProject :exec

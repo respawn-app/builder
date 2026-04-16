@@ -23,6 +23,7 @@ func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 		&testEmbeddedServer{},
 		nil,
 		"",
+		"",
 		UITransition{Action: UIActionResume},
 	)
 	if err != nil {
@@ -50,6 +51,7 @@ func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{},
 		nil,
+		"",
 		"",
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
@@ -99,6 +101,7 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{background: manager},
 		nil,
+		"",
 		"",
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
@@ -172,6 +175,7 @@ func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T)
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root},
 		nil,
 		store.Meta().SessionID,
+		"lease-test-controller",
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 1},
 	)
 	if err != nil {
@@ -213,13 +217,14 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 	m := newProjectedStaticUIModel()
 	testSetRollbackEditing(m, 0, 0)
 	m.input = "edited user message"
+	server := &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
 		t.Fatal("expected quit cmd for rollback fork")
 	}
-	if err := persistSessionDraft(store, updated); err != nil {
+	if err := persistSessionDraftToServer(context.Background(), server, store.Meta().SessionID, "lease-test-controller", updated); err != nil {
 		t.Fatalf("persist source draft: %v", err)
 	}
 	reopenedSource, err := session.Open(store.Dir())
@@ -230,7 +235,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 		t.Fatalf("expected no persisted source draft after fork handoff, got %q", reopenedSource.Meta().InputDraft)
 	}
 
-	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}, nil, reopenedSource.Meta().SessionID, updated.Transition())
+	resolved, err := resolveSessionAction(context.Background(), server, nil, reopenedSource.Meta().SessionID, "lease-test-controller", updated.Transition())
 	if err != nil {
 		t.Fatalf("resolve session action: %v", err)
 	}
@@ -247,6 +252,7 @@ func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{},
 		nil,
+		"",
 		"",
 		UITransition{Action: UIActionOpenSession, TargetSessionID: "session-42", InitialInput: "draft reply"},
 	)
@@ -323,17 +329,18 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 				childModel.forwardToView(tui.SetConversationMsg{Entries: childModel.transcriptEntries, Ongoing: tt.childOngoing})
 			}
 			childModel.input = "/back"
+			server := &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}
 
 			next, cmd := childModel.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			updatedChild := next.(*uiModel)
 			if cmd == nil {
 				t.Fatal("expected quit cmd for /back")
 			}
-			if err := persistSessionDraft(childStore, updatedChild); err != nil {
+			if err := persistSessionDraftToServer(context.Background(), server, childStore.Meta().SessionID, "lease-test-controller", updatedChild); err != nil {
 				t.Fatalf("persist child draft: %v", err)
 			}
 
-			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}, nil, childStore.Meta().SessionID, updatedChild.Transition())
+			resolved, err := resolveSessionAction(context.Background(), server, nil, childStore.Meta().SessionID, "lease-test-controller", updatedChild.Transition())
 			if err != nil {
 				t.Fatalf("resolve session action: %v", err)
 			}
@@ -354,7 +361,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 			}
 			parentModel := newProjectedEngineUIModel(
 				parentEngine,
-				WithUIInitialInput(sessionLaunchInitialInput(reopenedParent, resolved.InitialInput)),
+				WithUIInitialInput(sessionLaunchInitialInputFromServer(context.Background(), server, reopenedParent.Meta().SessionID, resolved.InitialInput)),
 			)
 
 			if parentModel.input != tt.want {
@@ -397,6 +404,7 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root},
 		nil,
 		store.Meta().SessionID,
+		"lease-test-controller",
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},
 	)
 	if err != nil {

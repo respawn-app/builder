@@ -26,16 +26,19 @@ type SessionInitialInputResponse struct {
 }
 
 type SessionPersistInputDraftRequest struct {
-	SessionID string `json:"session_id"`
-	Input     string `json:"input,omitempty"`
+	ClientRequestID   string `json:"client_request_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id"`
+	Input             string `json:"input,omitempty"`
 }
 
 type SessionPersistInputDraftResponse struct{}
 
 type SessionResolveTransitionRequest struct {
-	ClientRequestID string            `json:"client_request_id"`
-	SessionID       string            `json:"session_id,omitempty"`
-	Transition      SessionTransition `json:"transition"`
+	ClientRequestID   string            `json:"client_request_id"`
+	SessionID         string            `json:"session_id,omitempty"`
+	ControllerLeaseID string            `json:"controller_lease_id,omitempty"`
+	Transition        SessionTransition `json:"transition"`
 }
 
 type SessionResolveTransitionResponse struct {
@@ -55,7 +58,13 @@ type SessionLifecycleService interface {
 }
 
 func (r SessionPersistInputDraftRequest) Validate() error {
-	return validateLifecycleSessionID(r.SessionID)
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
+	if err := validateLifecycleSessionID(r.SessionID); err != nil {
+		return err
+	}
+	return validateControllerLeaseID(r.ControllerLeaseID)
 }
 
 func (r SessionInitialInputRequest) Validate() error {
@@ -71,6 +80,9 @@ func (r SessionResolveTransitionRequest) Validate() error {
 	}
 	if strings.TrimSpace(r.SessionID) != "" {
 		if err := validateLifecycleSessionID(r.SessionID); err != nil {
+			return err
+		}
+		if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {
 			return err
 		}
 	}

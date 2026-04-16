@@ -14,6 +14,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -319,7 +320,7 @@ func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *te
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectNotFound) {
+	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "Restart Builder and choose another project") || !strings.Contains(got, "project-missing") {
@@ -369,7 +370,7 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing
 	if _, err := ensureInteractiveProjectBinding(context.Background(), server); err == nil || !strings.Contains(err.Error(), "startup canceled by user") {
 		t.Fatalf("expected startup canceled error, got %v", err)
 	}
-	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("ResolveBinding after picker cancel = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -415,7 +416,7 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *
 	if _, err := ensureInteractiveProjectBinding(context.Background(), server); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled from project name prompt, got %v", err)
 	}
-	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("ResolveBinding after naming cancel = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -489,11 +490,11 @@ func TestEnsureInteractiveProjectBindingFormatsMissingBoundProjectError(t *testi
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: fmt.Errorf("bind project: %w", metadata.ErrProjectNotFound),
+		bindErr: fmt.Errorf("bind project: %w", serverapi.ErrProjectNotFound),
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectNotFound) {
+	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "attached to missing project") || !strings.Contains(got, binding.ProjectID) {
@@ -530,11 +531,11 @@ func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *t
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityMissing},
+		bindErr: serverapi.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityMissing},
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "builder rebind") || !strings.Contains(got, "missing") {
@@ -571,11 +572,11 @@ func TestEnsureInteractiveProjectBindingFormatsInaccessibleBoundProjectError(t *
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityInaccessible},
+		bindErr: serverapi.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityInaccessible},
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "Restore access") || !strings.Contains(got, "inaccessible") || !strings.Contains(got, "builder rebind") {

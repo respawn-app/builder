@@ -15,7 +15,9 @@ import (
 	"builder/server/auth"
 	"builder/server/runtime"
 	"builder/server/session"
+	"builder/server/sessionview"
 	"builder/server/tools"
+	"builder/shared/client"
 	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -922,13 +924,18 @@ func TestStatusUsageWindowsByLabelDisambiguatesDuplicateExtraBucketsWithoutUniqu
 	}
 }
 
-func TestStatusParentSessionNameResolvesFromPersistenceRoot(t *testing.T) {
+func TestStatusParentSessionNameResolvesFromSessionViews(t *testing.T) {
 	persistenceRoot := t.TempDir()
 	parentStore := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/work-a")
 	if err := parentStore.SetName("incident-root"); err != nil {
 		t.Fatalf("set parent name: %v", err)
 	}
-	if got := statusParentSessionName(persistenceRoot, parentStore.Meta().SessionID); got != "incident-root" {
+	sessionViews := client.NewLoopbackSessionViewClient(sessionview.NewService(sessionview.NewStaticSessionResolver(parentStore), nil, nil))
+	got, warning := statusParentSessionName(context.Background(), sessionViews, parentStore.Meta().SessionID)
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if got != "incident-root" {
 		t.Fatalf("parent session name = %q", got)
 	}
 }

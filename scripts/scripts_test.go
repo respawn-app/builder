@@ -99,6 +99,136 @@ func TestUpdateDepsUnknownArgument(t *testing.T) {
 	}
 }
 
+func TestSandboxServeDryRunPlansBuildAndRun(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "up", "--dry-run", "--host-port", "53100", "--", "--model", "gpt-5.4", "--openai-base-url", "http://sandbox.test/v1")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected dry run to succeed: %v (%s)", err, output)
+	}
+	text := string(output)
+	for _, needle := range []string{
+		"GOOS=linux GOARCH=",
+		"docker build",
+		"docker run",
+		"ws://127.0.0.1:53100/rpc",
+		"--model",
+		"gpt-5.4",
+		"--openai-base-url",
+		"http://sandbox.test/v1",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected %q in output, got %q", needle, text)
+		}
+	}
+}
+
+func TestSandboxServeDryRunFailsWithoutAuthMaterial(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "up", "--dry-run")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected auth preflight failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "sandbox auth preflight failed") {
+		t.Fatalf("expected auth preflight message, got %q", text)
+	}
+}
+
+func TestSandboxServeEnvPrintsHostExports(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "env", "--host-port", "53100")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected env command to succeed: %v (%s)", err, output)
+	}
+	text := string(output)
+	for _, needle := range []string{"export BUILDER_SERVER_HOST=127.0.0.1", "export BUILDER_SERVER_PORT=53100"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected %q in output, got %q", needle, text)
+		}
+	}
+}
+
+func TestSandboxServeDownDryRunPlansVolumeReset(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "down", "--dry-run", "--name", "sandbox-x", "--reset")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected down dry run to succeed: %v (%s)", err, output)
+	}
+	text := string(output)
+	for _, needle := range []string{"container sandbox-x not running", "docker volume rm -f sandbox-x-workspace sandbox-x-home"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected %q in output, got %q", needle, text)
+		}
+	}
+}
+
+func TestSandboxServeShellDryRunUsesDefaultShell(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "shell", "--dry-run", "--name", "sandbox-x")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected shell dry run to succeed: %v (%s)", err, output)
+	}
+	text := string(output)
+	if !strings.Contains(text, "docker exec -it sandbox-x /bin/bash") {
+		t.Fatalf("expected default shell command, got %q", text)
+	}
+}
+
+func TestSandboxServeReportsMissingOptionValue(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "up", "--host-port")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected missing option value failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "Missing required argument value: --host-port") {
+		t.Fatalf("expected clear missing option error, got %q", text)
+	}
+	if strings.Contains(text, "shift count out of range") {
+		t.Fatalf("expected guarded argument failure instead of shift error, got %q", text)
+	}
+}
+
+func TestSandboxServeUnknownArgument(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	cmd := exec.Command("bash", script, "up", "--wat")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected unknown argument failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "Unknown argument: --wat") {
+		t.Fatalf("expected explicit unknown arg error, got %q", text)
+	}
+}
+
 func gitHookEnv(t *testing.T, root string) []string {
 	t.Helper()
 	gitDir := gitOutput(t, root, "rev-parse", "--git-dir")

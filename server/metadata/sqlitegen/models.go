@@ -8,6 +8,19 @@ import (
 	"database/sql"
 )
 
+type MutationDedupe struct {
+	Method             string
+	ResourceID         string
+	ClientRequestID    string
+	PayloadFingerprint string
+	ResponseJson       string
+	ErrorCode          string
+	ErrorMessage       string
+	CompletedAtUnixMs  int64
+	ExpiresAtUnixMs    int64
+	MetadataJson       string
+}
+
 type Project struct {
 	ID              string
 	DisplayName     string

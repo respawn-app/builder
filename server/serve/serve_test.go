@@ -14,6 +14,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/metadata"
+	"builder/server/rootlock"
 	"builder/server/startup"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -95,7 +96,14 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartCore: %v", err)
 	}
-	defer func() { _ = appCore.Close() }()
+	coreProjectID := appCore.ProjectID()
+	coreProjects, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("core ListProjects: %v", err)
+	}
+	if err := appCore.Close(); err != nil {
+		t.Fatalf("appCore.Close: %v", err)
+	}
 
 	server, err := Start(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -106,15 +114,11 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	if server.Core == nil {
 		t.Fatal("expected standalone server to expose core")
 	}
-	if server.ProjectID() != appCore.ProjectID() {
-		t.Fatalf("project id mismatch: server=%q core=%q", server.ProjectID(), appCore.ProjectID())
+	if server.ProjectID() != coreProjectID {
+		t.Fatalf("project id mismatch: server=%q core=%q", server.ProjectID(), coreProjectID)
 	}
 	if server.ProjectViewClient() == nil || server.SessionViewClient() == nil || server.ProcessViewClient() == nil || server.ProcessOutputClient() == nil || server.RunPromptClient() == nil {
 		t.Fatal("expected standalone server to expose core-backed clients")
-	}
-	coreProjects, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
-	if err != nil {
-		t.Fatalf("core ListProjects: %v", err)
 	}
 	serverProjects, err := server.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
 	if err != nil {
@@ -125,6 +129,29 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	}
 	if coreProjects.Projects[0].ProjectID != serverProjects.Projects[0].ProjectID {
 		t.Fatalf("project listing mismatch core=%+v server=%+v", coreProjects.Projects[0], serverProjects.Projects[0])
+	}
+}
+
+func TestStartRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	authHandler := envAuthHandler{}
+	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
+
+	first, err := Start(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("Start first: %v", err)
+	}
+	defer func() { _ = first.Close() }()
+
+	_, err = Start(context.Background(), request, authHandler, onboarding)
+	if !errors.Is(err, rootlock.ErrPersistenceRootBusy) {
+		t.Fatalf("Start second error = %v, want ErrPersistenceRootBusy", err)
 	}
 }
 

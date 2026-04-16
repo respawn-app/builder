@@ -12,6 +12,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/session"
 	"builder/server/storagemigration"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/toolspec"
 )
@@ -94,7 +95,7 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 			},
 			containerDir: containerDir,
 		},
-		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			if len(summaries) != 2 {
 				t.Fatalf("expected two summaries, got %d", len(summaries))
 			}
@@ -176,7 +177,7 @@ func TestSessionLaunchPlannerInteractiveUsesMigratedLegacySession(t *testing.T) 
 			},
 			containerDir: containerDir,
 		},
-		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			if len(summaries) != 1 {
 				t.Fatalf("expected one legacy summary, got %d", len(summaries))
 			}
@@ -252,7 +253,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 			},
 			containerDir: containerDir,
 		},
-		pickSession: func([]session.Summary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			t.Fatal("did not expect picker for explicit session id")
 			return sessionPickerResult{}, nil
 		},

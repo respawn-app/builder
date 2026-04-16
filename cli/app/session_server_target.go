@@ -80,7 +80,7 @@ func tryDialConfiguredRemoteServer(ctx context.Context, opts Options, interactor
 }
 
 func startLocalInteractiveSessionDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
-	cfg, _, _, err := loadRemoteAttachState(ctx, opts)
+	cfg, err := loadRemoteAttachConfig(opts)
 	if err != nil {
 		return nil, nil, false, err
 	}
