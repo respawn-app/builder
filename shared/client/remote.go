@@ -114,6 +114,11 @@ func (c *Remote) AttachWorkspaceToProject(ctx context.Context, req serverapi.Pro
 	return resp, c.callUnscoped(ctx, protocol.MethodProjectAttachWorkspace, req, &resp)
 }
 
+func (c *Remote) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	var resp serverapi.ProjectRebindWorkspaceResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectRebindWorkspace, req, &resp)
+}
+
 func (c *Remote) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	var resp serverapi.ProjectGetOverviewResponse
 	return resp, c.callUnscoped(ctx, protocol.MethodProjectGetOverview, req, &resp)
@@ -757,6 +762,16 @@ func protocolError(resp *protocol.ResponseError) error {
 	switch resp.Code {
 	case protocol.ErrCodeStreamGap:
 		return errors.Join(serverapi.ErrStreamGap, errors.New(message))
+	case protocol.ErrCodeWorkspaceNotRegistered:
+		return errors.Join(serverapi.ErrWorkspaceNotRegistered, errors.New(message))
+	case protocol.ErrCodeProjectNotFound:
+		return errors.Join(serverapi.ErrProjectNotFound, errors.New(message))
+	case protocol.ErrCodeProjectUnavailable:
+		return errors.Join(serverapi.ErrProjectUnavailable, errors.New(message))
+	case protocol.ErrCodeSessionAlreadyControlled:
+		return errors.Join(serverapi.ErrSessionAlreadyControlled, errors.New(message))
+	case protocol.ErrCodeInvalidControllerLease:
+		return errors.Join(serverapi.ErrInvalidControllerLease, errors.New(message))
 	case protocol.ErrCodeStreamUnavailable:
 		return errors.Join(serverapi.ErrStreamUnavailable, errors.New(message))
 	case protocol.ErrCodeStreamFailed:

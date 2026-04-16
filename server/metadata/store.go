@@ -15,12 +15,11 @@ import (
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"github.com/google/uuid"
 	sqlitedriver "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
-
-var ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
 
 var statPathForAvailability = os.Stat
 
@@ -67,6 +66,19 @@ type RuntimeLeaseRecord struct {
 
 func (r RuntimeLeaseRecord) Active() bool {
 	return strings.TrimSpace(r.State) == runtimeLeaseStateActive
+}
+
+type MutationDedupRecord struct {
+	Method             string
+	ResourceID         string
+	ClientRequestID    string
+	PayloadFingerprint string
+	ResponseJSON       string
+	ErrorCode          string
+	ErrorMessage       string
+	CompletedAt        time.Time
+	ExpiresAt          time.Time
+	MetadataJSON       string
 }
 
 type Store struct {
@@ -155,7 +167,7 @@ func (s *Store) EnsureWorkspaceBinding(ctx context.Context, workspaceRoot string
 		return binding, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return Binding{}, ErrWorkspaceNotRegistered
+		return Binding{}, serverapi.ErrWorkspaceNotRegistered
 	}
 	return Binding{}, err
 }
@@ -247,7 +259,7 @@ func (s *Store) AttachWorkspaceToProject(ctx context.Context, projectID string, 
 	projectName, err := s.queries.GetProjectDisplayName(ctx, trimmedProjectID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Binding{}, fmt.Errorf("%w: %q", ErrProjectNotFound, trimmedProjectID)
+			return Binding{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
 		}
 		return Binding{}, fmt.Errorf("get project display name: %w", err)
 	}
@@ -293,7 +305,7 @@ func (s *Store) RebindWorkspace(ctx context.Context, oldWorkspaceRoot string, ne
 	oldWorkspace, err := q.GetWorkspaceByCanonicalRoot(ctx, oldCanonicalRoot)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Binding{}, ErrWorkspaceNotRegistered
+			return Binding{}, serverapi.ErrWorkspaceNotRegistered
 		}
 		return Binding{}, fmt.Errorf("get old workspace binding: %w", err)
 	}
@@ -560,7 +572,7 @@ func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clien
 	project, err := s.queries.GetProjectSummary(ctx, strings.TrimSpace(projectID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return clientui.ProjectOverview{}, fmt.Errorf("%w: %q", ErrProjectNotFound, strings.TrimSpace(projectID))
+			return clientui.ProjectOverview{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(projectID))
 		}
 		return clientui.ProjectOverview{}, fmt.Errorf("get project summary: %w", err)
 	}
@@ -952,6 +964,76 @@ func runtimeLeaseRecordFromRow(row sqlitegen.RuntimeLease) RuntimeLeaseRecord {
 		ClientID:     row.ClientID,
 		MetadataJSON: row.MetadataJson,
 	}
+}
+
+func (s *Store) GetMutationDedupRecord(ctx context.Context, method string, resourceID string, clientRequestID string) (MutationDedupRecord, bool, error) {
+	if s == nil || s.queries == nil {
+		return MutationDedupRecord{}, false, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetMutationDedupRecord(ctx, sqlitegen.GetMutationDedupRecordParams{
+		Method:          strings.TrimSpace(method),
+		ResourceID:      strings.TrimSpace(resourceID),
+		ClientRequestID: strings.TrimSpace(clientRequestID),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return MutationDedupRecord{}, false, nil
+		}
+		return MutationDedupRecord{}, false, fmt.Errorf("get mutation dedup record: %w", err)
+	}
+	return mutationDedupRecordFromRow(row), true, nil
+}
+
+func (s *Store) UpsertMutationDedupRecord(ctx context.Context, record MutationDedupRecord) error {
+	if s == nil || s.queries == nil {
+		return errors.New("metadata store is required")
+	}
+	return s.queries.UpsertMutationDedupRecord(ctx, sqlitegen.UpsertMutationDedupRecordParams{
+		Method:             strings.TrimSpace(record.Method),
+		ResourceID:         strings.TrimSpace(record.ResourceID),
+		ClientRequestID:    strings.TrimSpace(record.ClientRequestID),
+		PayloadFingerprint: strings.TrimSpace(record.PayloadFingerprint),
+		ResponseJson:       record.ResponseJSON,
+		ErrorCode:          strings.TrimSpace(record.ErrorCode),
+		ErrorMessage:       record.ErrorMessage,
+		CompletedAtUnixMs:  record.CompletedAt.UTC().UnixMilli(),
+		ExpiresAtUnixMs:    record.ExpiresAt.UTC().UnixMilli(),
+		MetadataJson:       normalizeMetadataJSON(record.MetadataJSON),
+	})
+}
+
+func (s *Store) DeleteExpiredMutationDedupRecords(ctx context.Context, expiresAt time.Time) (int64, error) {
+	if s == nil || s.queries == nil {
+		return 0, errors.New("metadata store is required")
+	}
+	deleted, err := s.queries.DeleteExpiredMutationDedupRecords(ctx, expiresAt.UTC().UnixMilli())
+	if err != nil {
+		return 0, fmt.Errorf("delete expired mutation dedup records: %w", err)
+	}
+	return deleted, nil
+}
+
+func mutationDedupRecordFromRow(row sqlitegen.MutationDedupe) MutationDedupRecord {
+	return MutationDedupRecord{
+		Method:             row.Method,
+		ResourceID:         row.ResourceID,
+		ClientRequestID:    row.ClientRequestID,
+		PayloadFingerprint: row.PayloadFingerprint,
+		ResponseJSON:       row.ResponseJson,
+		ErrorCode:          row.ErrorCode,
+		ErrorMessage:       row.ErrorMessage,
+		CompletedAt:        timeFromStoredTimestamp(row.CompletedAtUnixMs),
+		ExpiresAt:          timeFromStoredTimestamp(row.ExpiresAtUnixMs),
+		MetadataJSON:       row.MetadataJson,
+	}
+}
+
+func normalizeMetadataJSON(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "{}"
+	}
+	return trimmed
 }
 
 func normalizeSessionCwdRelpath(value string) string {

@@ -10,17 +10,22 @@ import (
 const JSONRPCVersion = "2.0"
 
 const (
-	ErrCodeParseError        = -32700
-	ErrCodeInvalidRequest    = -32600
-	ErrCodeMethodNotFound    = -32601
-	ErrCodeInvalidParams     = -32602
-	ErrCodeInternalError     = -32603
-	ErrCodeStreamGap         = -32010
-	ErrCodeStreamUnavailable = -32011
-	ErrCodeStreamFailed      = -32012
-	ErrCodePromptNotFound    = -32020
-	ErrCodePromptResolved    = -32021
-	ErrCodePromptUnsupported = -32022
+	ErrCodeParseError               = -32700
+	ErrCodeInvalidRequest           = -32600
+	ErrCodeMethodNotFound           = -32601
+	ErrCodeInvalidParams            = -32602
+	ErrCodeInternalError            = -32603
+	ErrCodeStreamGap                = -32010
+	ErrCodeStreamUnavailable        = -32011
+	ErrCodeStreamFailed             = -32012
+	ErrCodeWorkspaceNotRegistered   = -32013
+	ErrCodeProjectNotFound          = -32014
+	ErrCodeProjectUnavailable       = -32015
+	ErrCodeSessionAlreadyControlled = -32016
+	ErrCodeInvalidControllerLease   = -32017
+	ErrCodePromptNotFound           = -32020
+	ErrCodePromptResolved           = -32021
+	ErrCodePromptUnsupported        = -32022
 )
 
 type Request struct {

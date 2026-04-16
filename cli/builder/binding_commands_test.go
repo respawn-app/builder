@@ -4,18 +4,131 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"builder/server/auth"
+	"builder/server/authflow"
 	"builder/server/metadata"
+	"builder/server/serve"
+	serverstartup "builder/server/startup"
 	"builder/shared/config"
+	"builder/shared/protocol"
+	"builder/shared/serverapi"
 )
+
+type bindingCommandMemoryAuthHandler struct {
+	state auth.State
+}
+
+func (h bindingCommandMemoryAuthHandler) WrapStore(auth.Store) auth.Store {
+	return auth.NewMemoryStore(h.state)
+}
+
+func (bindingCommandMemoryAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
+	return !req.Gate.Ready
+}
+
+func (bindingCommandMemoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
+}
+
+func (bindingCommandMemoryAuthHandler) LookupEnv(string) string {
+	return ""
+}
+
+type bindingCommandAutoOnboarding struct{}
+
+func (bindingCommandAutoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
+	path, created, err := config.WriteDefaultSettingsFile()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded, err := req.ReloadConfig()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded.Source.CreatedDefaultConfig = created
+	reloaded.Source.SettingsPath = path
+	reloaded.Source.SettingsFileExists = true
+	return reloaded, nil
+}
+
+func configureBindingCommandTestServerPort(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	t.Setenv("BUILDER_SERVER_PORT", fmt.Sprintf("%d", port))
+}
+
+func startBindingCommandServer(t *testing.T, workspace string) func() {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load server workspace: %v", err)
+	}
+	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
+	srv, err := serve.Start(context.Background(), serverstartup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, Model: "gpt-5"}, bindingCommandMemoryAuthHandler{state: auth.State{
+		Scope:     auth.ScopeGlobal,
+		Method:    auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
+		UpdatedAt: time.Now().UTC(),
+	}}, bindingCommandAutoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	waitForBindingCommandServer(t, workspace)
+	return func() {
+		cancel()
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve error: %v", err)
+		}
+		_ = srv.Close()
+	}
+}
+
+func waitForBindingCommandServer(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load health workspace: %v", err)
+	}
+	healthURL := config.ServerHTTPBaseURL(cfg) + protocol.HealthPath
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("binding command test server did not become healthy at %s", healthURL)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestProjectSubcommandPrintsBoundProjectID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -25,6 +138,8 @@ func TestProjectSubcommandPrintsBoundProjectID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, workspace)
+	defer cleanup()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -44,6 +159,7 @@ func TestProjectSubcommandTreatsNestedDirectoryAsUnregistered(t *testing.T) {
 		t.Fatalf("MkdirAll nested: %v", err)
 	}
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -53,6 +169,8 @@ func TestProjectSubcommandTreatsNestedDirectoryAsUnregistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, workspace)
+	defer cleanup()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -72,6 +190,7 @@ func TestAttachSubcommandPathFirstBindsTargetToCurrentProject(t *testing.T) {
 	source := t.TempDir()
 	target := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(source, config.LoadOptions{})
 	if err != nil {
@@ -81,6 +200,8 @@ func TestAttachSubcommandPathFirstBindsTargetToCurrentProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterBinding source: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, source)
+	defer cleanup()
 
 	previousWD, err := os.Getwd()
 	if err != nil {
@@ -119,6 +240,7 @@ func TestAttachSubcommandExplicitProjectOverridesCurrentWorkspace(t *testing.T) 
 	target := t.TempDir()
 	working := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(source, config.LoadOptions{})
 	if err != nil {
@@ -128,6 +250,8 @@ func TestAttachSubcommandExplicitProjectOverridesCurrentWorkspace(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RegisterBinding source: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, source)
+	defer cleanup()
 
 	previousWD, err := os.Getwd()
 	if err != nil {
@@ -153,6 +277,9 @@ func TestAttachSubcommandWithoutProjectGuidanceFailsWhenCurrentWorkspaceUnregist
 	working := t.TempDir()
 	target := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
+	cleanup := startBindingCommandServer(t, working)
+	defer cleanup()
 
 	previousWD, err := os.Getwd()
 	if err != nil {
@@ -180,6 +307,9 @@ func TestAttachSubcommandRejectsUnknownExplicitProjectIDCleanly(t *testing.T) {
 	home := t.TempDir()
 	target := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
+	cleanup := startBindingCommandServer(t, target)
+	defer cleanup()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -200,6 +330,7 @@ func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
 	newParent := t.TempDir()
 	newWorkspace := filepath.Join(newParent, "workspace-moved")
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
@@ -212,6 +343,8 @@ func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
 	if err := os.Rename(oldWorkspace, newWorkspace); err != nil {
 		t.Fatalf("Rename workspace: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, newWorkspace)
+	defer cleanup()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -228,7 +361,7 @@ func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
 	if newProjectID != binding.ProjectID {
 		t.Fatalf("new project id = %q, want %q", newProjectID, binding.ProjectID)
 	}
-	if _, err := projectIDForPath(context.Background(), oldWorkspace); !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+	if _, err := projectIDForPath(context.Background(), oldWorkspace); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("projectIDForPath oldWorkspace error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -239,6 +372,7 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	otherWorkspace := t.TempDir()
 	missingWorkspace := filepath.Join(t.TempDir(), "missing")
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
@@ -256,6 +390,8 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterBinding otherWorkspace: %v", err)
 	}
+	cleanup := startBindingCommandServer(t, oldWorkspace)
+	defer cleanup()
 
 	assertRebindError := func(args []string, want string) {
 		t.Helper()

@@ -16,6 +16,7 @@ import (
 
 	"builder/internal/testopenai"
 	"builder/server/auth"
+	"builder/server/idempotency"
 	"builder/server/primaryrun"
 	"builder/server/session"
 	"builder/shared/config"
@@ -51,22 +52,14 @@ func (s *stubRunPromptService) CallCount() int {
 	return s.calls
 }
 
-func resetRunPromptDedupeRegistry() {
-	runPromptDedupeRegistry.mu.Lock()
-	defer runPromptDedupeRegistry.mu.Unlock()
-	runPromptDedupeRegistry.entries = map[string]*dedupeEntry{}
-}
-
-func runPromptDedupeEntryCount() int {
-	runPromptDedupeRegistry.mu.Lock()
-	defer runPromptDedupeRegistry.mu.Unlock()
-	return len(runPromptDedupeRegistry.entries)
+func newTestPromptCoordinator(retention time.Duration) *idempotency.Coordinator {
+	if retention <= 0 {
+		retention = idempotency.DefaultRetention
+	}
+	return idempotency.NewCoordinator(nil, retention)
 }
 
 func TestDeduplicatingPromptServiceSharesInFlightAndCachedResult(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
 	inner := &stubRunPromptService{
@@ -76,7 +69,7 @@ func TestDeduplicatingPromptServiceSharesInFlightAndCachedResult(t *testing.T) {
 			return serverapi.RunPromptResponse{SessionID: "session-1", Result: "echo:" + req.Prompt}, nil
 		},
 	}
-	service := newDeduplicatingPromptService("scope-a", inner)
+	service := newDeduplicatingPromptService("scope-a", newTestPromptCoordinator(0), inner)
 	req := serverapi.RunPromptRequest{ClientRequestID: "dup-1", SelectedSessionID: "session-1", Prompt: "hello"}
 
 	type result struct {
@@ -129,15 +122,12 @@ func TestDeduplicatingPromptServiceSharesInFlightAndCachedResult(t *testing.T) {
 }
 
 func TestDeduplicatingPromptServiceRejectsPayloadMismatch(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	inner := &stubRunPromptService{
 		run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 			return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: req.Prompt}, nil
 		},
 	}
-	service := newDeduplicatingPromptService("scope-b", inner)
+	service := newDeduplicatingPromptService("scope-b", newTestPromptCoordinator(0), inner)
 	base := serverapi.RunPromptRequest{ClientRequestID: "dup-2", SelectedSessionID: "session-2", Prompt: "first"}
 
 	if _, err := service.RunPrompt(context.Background(), base, nil); err != nil {
@@ -161,15 +151,12 @@ func TestDeduplicatingPromptServiceRejectsPayloadMismatch(t *testing.T) {
 }
 
 func TestDeduplicatingPromptServiceRejectsOverrideMismatch(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	inner := &stubRunPromptService{
 		run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 			return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: req.Prompt}, nil
 		},
 	}
-	service := newDeduplicatingPromptService("scope-b-overrides", inner)
+	service := newDeduplicatingPromptService("scope-b-overrides", newTestPromptCoordinator(0), inner)
 	base := serverapi.RunPromptRequest{
 		ClientRequestID:   "dup-2-overrides",
 		SelectedSessionID: "session-2",
@@ -209,9 +196,6 @@ func TestDeduplicatingPromptServiceRejectsOverrideMismatch(t *testing.T) {
 }
 
 func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	inner := &stubRunPromptService{}
 	inner.run = func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 		if inner.CallCount() == 1 {
@@ -219,7 +203,7 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 		}
 		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
 	}
-	service := newDeduplicatingPromptService("scope-c", inner)
+	service := newDeduplicatingPromptService("scope-c", newTestPromptCoordinator(0), inner)
 	req := serverapi.RunPromptRequest{ClientRequestID: "dup-3", SelectedSessionID: "session-3", Prompt: "retry me"}
 
 	_, err := service.RunPrompt(context.Background(), req, nil)
@@ -228,9 +212,6 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	}
 	if got := inner.CallCount(); got != 1 {
 		t.Fatalf("inner call count after canceled run = %d, want 1", got)
-	}
-	if got := runPromptDedupeEntryCount(); got != 0 {
-		t.Fatalf("entry count after canceled run = %d, want 0", got)
 	}
 
 	response, err := service.RunPrompt(context.Background(), req, nil)
@@ -246,9 +227,6 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 }
 
 func TestDeduplicatingPromptServiceDoesNotCacheActivePrimaryRunErrors(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	inner := &stubRunPromptService{}
 	inner.run = func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 		if inner.CallCount() == 1 {
@@ -256,7 +234,7 @@ func TestDeduplicatingPromptServiceDoesNotCacheActivePrimaryRunErrors(t *testing
 		}
 		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
 	}
-	service := newDeduplicatingPromptService("scope-active", inner)
+	service := newDeduplicatingPromptService("scope-active", newTestPromptCoordinator(0), inner)
 	req := serverapi.RunPromptRequest{ClientRequestID: "dup-active", SelectedSessionID: "session-active", Prompt: "retry me"}
 
 	if _, err := service.RunPrompt(context.Background(), req, nil); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
@@ -265,10 +243,6 @@ func TestDeduplicatingPromptServiceDoesNotCacheActivePrimaryRunErrors(t *testing
 	if got := inner.CallCount(); got != 1 {
 		t.Fatalf("inner call count after active-run error = %d, want 1", got)
 	}
-	if got := runPromptDedupeEntryCount(); got != 0 {
-		t.Fatalf("entry count after active-run error = %d, want 0", got)
-	}
-
 	response, err := service.RunPrompt(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("retry run error: %v", err)
@@ -282,19 +256,16 @@ func TestDeduplicatingPromptServiceDoesNotCacheActivePrimaryRunErrors(t *testing
 }
 
 func TestDeduplicatingPromptServiceScopesClientRequestIDByWorkspace(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	serviceA := newDeduplicatingPromptService(runPromptDedupeScopeID(HeadlessBootstrap{
 		Config:       config.App{PersistenceRoot: "/tmp/persistence", WorkspaceRoot: "/tmp/workspace-a"},
 		ContainerDir: "/tmp/persistence/workspace-a",
-	}), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+	}), newTestPromptCoordinator(0), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 		return serverapi.RunPromptResponse{SessionID: "session-a", Result: "workspace-a"}, nil
 	}})
 	serviceB := newDeduplicatingPromptService(runPromptDedupeScopeID(HeadlessBootstrap{
 		Config:       config.App{PersistenceRoot: "/tmp/persistence", WorkspaceRoot: "/tmp/workspace-b"},
 		ContainerDir: "/tmp/persistence/workspace-b",
-	}), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+	}), newTestPromptCoordinator(0), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 		return serverapi.RunPromptResponse{SessionID: "session-b", Result: "workspace-b"}, nil
 	}})
 
@@ -319,30 +290,18 @@ func TestDeduplicatingPromptServiceScopesClientRequestIDByWorkspace(t *testing.T
 }
 
 func TestDeduplicatingPromptServiceEvictsExpiredCacheEntries(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
-	originalNow := runPromptDedupeNow
-	now := time.Unix(1_700_000_000, 0)
-	runPromptDedupeNow = func() time.Time { return now }
-	t.Cleanup(func() { runPromptDedupeNow = originalNow })
-
 	inner := &stubRunPromptService{}
 	inner.run = func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: fmt.Sprintf("call-%d", inner.CallCount())}, nil
 	}
-	service := newDeduplicatingPromptService("scope-ttl", inner)
+	service := newDeduplicatingPromptService("scope-ttl", newTestPromptCoordinator(time.Millisecond), inner)
 	req := serverapi.RunPromptRequest{ClientRequestID: "dup-ttl", SelectedSessionID: "session-ttl", Prompt: "hello"}
 
 	first, err := service.RunPrompt(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("first run error: %v", err)
 	}
-	if got := runPromptDedupeEntryCount(); got != 1 {
-		t.Fatalf("entry count after first run = %d, want 1", got)
-	}
-
-	now = now.Add(runPromptDedupeRetention + time.Second)
+	time.Sleep(10 * time.Millisecond)
 	second, err := service.RunPrompt(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("second run error: %v", err)
@@ -352,9 +311,6 @@ func TestDeduplicatingPromptServiceEvictsExpiredCacheEntries(t *testing.T) {
 	}
 	if first.Result == second.Result {
 		t.Fatalf("expired cache entry reused old response: first=%+v second=%+v", first, second)
-	}
-	if got := runPromptDedupeEntryCount(); got != 1 {
-		t.Fatalf("entry count after eviction + rerun = %d, want 1", got)
 	}
 }
 
@@ -385,9 +341,6 @@ func TestGuardingPromptServiceRejectsConcurrentSelectedSessionRun(t *testing.T) 
 }
 
 func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
@@ -450,9 +403,6 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 }
 
 func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
-	resetRunPromptDedupeRegistry()
-	t.Cleanup(resetRunPromptDedupeRegistry)
-
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")

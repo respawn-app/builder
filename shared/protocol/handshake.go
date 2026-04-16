@@ -15,6 +15,7 @@ const (
 	MethodProjectResolvePath                       = "project.resolvePath"
 	MethodProjectCreate                            = "project.create"
 	MethodProjectAttachWorkspace                   = "project.attachWorkspace"
+	MethodProjectRebindWorkspace                   = "project.rebindWorkspace"
 	MethodProjectGetOverview                       = "project.getOverview"
 	MethodSessionListByProject                     = "session.listByProject"
 	MethodSessionPlan                              = "session.plan"

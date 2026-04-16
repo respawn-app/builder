@@ -112,6 +112,10 @@ func (s *stubControllerProjectViewService) AttachWorkspaceToProject(_ context.Co
 	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("AttachWorkspaceToProject should not be called in controller tests")
 }
 
+func (s *stubControllerProjectViewService) RebindWorkspace(_ context.Context, _ serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("RebindWorkspace should not be called in controller tests")
+}
+
 func (s *stubControllerProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	return s.overview, nil
 }

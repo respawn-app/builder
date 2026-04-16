@@ -9,10 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"builder/server/metadata"
+	"builder/shared/client"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
+
+const bindingCommandRPCTimeout = 5 * time.Second
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder project", flag.ContinueOnError)
@@ -93,82 +97,95 @@ func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func projectIDForPath(ctx context.Context, path string) (string, error) {
-	trimmedPath := strings.TrimSpace(path)
-	if trimmedPath == "" {
-		trimmedPath = "."
-	}
-	cfg, err := loadBindingCommandConfig(trimmedPath)
+	cfg, remote, err := openBindingCommandRemote(ctx, path)
 	if err != nil {
 		return "", err
 	}
-	store, err := metadata.Open(cfg.PersistenceRoot)
+	defer func() { _ = remote.Close() }()
+	binding, err := resolveWorkspaceBinding(ctx, remote, cfg.WorkspaceRoot)
 	if err != nil {
 		return "", err
-	}
-	defer func() { _ = store.Close() }()
-	_, binding, err := store.ResolveWorkspacePath(ctx, cfg.WorkspaceRoot)
-	if err != nil {
-		return "", err
-	}
-	if binding == nil {
-		return "", metadata.ErrWorkspaceNotRegistered
 	}
 	return strings.TrimSpace(binding.ProjectID), nil
 }
 
 func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath string) (string, error) {
-	targetCfg, err := loadBindingCommandConfig(targetPath)
+	targetCfg, remote, err := openBindingCommandRemote(ctx, targetPath)
 	if err != nil {
 		return "", err
 	}
-	store, err := metadata.Open(targetCfg.PersistenceRoot)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = remote.Close() }()
 	projectID := strings.TrimSpace(explicitProjectID)
 	if projectID == "" {
 		sourceCfg, err := loadBindingCommandConfig(".")
 		if err != nil {
 			return "", err
 		}
-		if sourceCfg.PersistenceRoot != targetCfg.PersistenceRoot {
-			return "", errors.New("attach requires source and target workspaces to share the same persistence root")
+		if config.ServerRPCURL(sourceCfg) != config.ServerRPCURL(targetCfg) {
+			return "", errors.New("attach requires source and target workspaces to share the same configured server")
 		}
-		_, binding, err := store.ResolveWorkspacePath(ctx, sourceCfg.WorkspaceRoot)
+		sourceBinding, err := resolveWorkspaceBinding(ctx, remote, sourceCfg.WorkspaceRoot)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%w: current workspace is not attached to a project; run `builder project` in a workspace that already belongs to the target project or pass --project <project-id>", err)
 		}
-		if binding == nil {
-			return "", fmt.Errorf("%w: current workspace is not attached to a project; run `builder project` in a workspace that already belongs to the target project or pass --project <project-id>", metadata.ErrWorkspaceNotRegistered)
-		}
-		projectID = strings.TrimSpace(binding.ProjectID)
+		projectID = strings.TrimSpace(sourceBinding.ProjectID)
 	}
-	binding, err := store.AttachWorkspaceToProject(ctx, projectID, targetCfg.WorkspaceRoot)
+	resp, err := remote.AttachWorkspaceToProject(ctx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: targetCfg.WorkspaceRoot})
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(binding.ProjectID), nil
+	return strings.TrimSpace(resp.Binding.ProjectID), nil
 }
 
-func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (metadata.Binding, error) {
+func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serverapi.ProjectBinding, error) {
 	oldCfg, err := loadBindingCommandConfig(oldPath)
 	if err != nil {
-		return metadata.Binding{}, err
+		return serverapi.ProjectBinding{}, err
 	}
 	newCfg, err := loadBindingCommandConfig(newPath)
 	if err != nil {
-		return metadata.Binding{}, err
+		return serverapi.ProjectBinding{}, err
 	}
-	if oldCfg.PersistenceRoot != newCfg.PersistenceRoot {
-		return metadata.Binding{}, errors.New("rebind requires old and new workspaces to share the same persistence root")
+	if config.ServerRPCURL(oldCfg) != config.ServerRPCURL(newCfg) {
+		return serverapi.ProjectBinding{}, errors.New("rebind requires old and new workspaces to share the same configured server")
 	}
-	store, err := metadata.Open(newCfg.PersistenceRoot)
+	ctx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
+	defer cancel()
+	remote, err := client.DialRemoteURL(ctx, config.ServerRPCURL(newCfg))
 	if err != nil {
-		return metadata.Binding{}, err
+		return serverapi.ProjectBinding{}, err
 	}
-	defer func() { _ = store.Close() }()
-	return store.RebindWorkspace(ctx, oldCfg.WorkspaceRoot, newCfg.WorkspaceRoot)
+	defer func() { _ = remote.Close() }()
+	resp, err := remote.RebindWorkspace(ctx, serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: oldCfg.WorkspaceRoot, NewWorkspaceRoot: newCfg.WorkspaceRoot})
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	return resp.Binding, nil
+}
+
+func openBindingCommandRemote(ctx context.Context, path string) (config.App, *client.Remote, error) {
+	cfg, err := loadBindingCommandConfig(path)
+	if err != nil {
+		return config.App{}, nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
+	defer cancel()
+	remote, err := client.DialRemoteURL(ctx, config.ServerRPCURL(cfg))
+	if err != nil {
+		return config.App{}, nil, err
+	}
+	return cfg, remote, nil
+}
+
+func resolveWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (serverapi.ProjectBinding, error) {
+	resp, err := projectViews.ResolveProjectPath(ctx, serverapi.ProjectResolvePathRequest{Path: workspaceRoot})
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	if resp.Binding == nil {
+		return serverapi.ProjectBinding{}, errWorkspaceNotRegistered
+	}
+	return *resp.Binding, nil
 }
 
 func loadBindingCommandConfig(path string) (config.App, error) {
@@ -185,3 +202,5 @@ func loadBindingCommandConfig(path string) (config.App, error) {
 	}
 	return config.Load(absPath, config.LoadOptions{})
 }
+
+var errWorkspaceNotRegistered = serverapi.ErrWorkspaceNotRegistered
