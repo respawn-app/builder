@@ -23,6 +23,7 @@ const (
 	ErrCodeProjectUnavailable       = -32015
 	ErrCodeSessionAlreadyControlled = -32016
 	ErrCodeInvalidControllerLease   = -32017
+	ErrCodeAuthRequired             = -32018
 	ErrCodePromptNotFound           = -32020
 	ErrCodePromptResolved           = -32021
 	ErrCodePromptUnsupported        = -32022

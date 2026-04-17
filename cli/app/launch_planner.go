@@ -91,6 +91,11 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 		}
 	}
 	cfg := p.server.Config()
+	authManager := p.server.AuthManager()
+	authStatePath := ""
+	if authManager != nil {
+		authStatePath = config.GlobalAuthConfigPath(cfg)
+	}
 	plan := sessionLaunchPlan{
 		Mode:                req.Mode,
 		SessionID:           resp.Plan.SessionID,
@@ -105,8 +110,8 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 			SessionViews:    p.server.SessionViewClient(),
 			Settings:        resp.Plan.ActiveSettings,
 			Source:          resp.Plan.Source,
-			AuthManager:     p.server.AuthManager(),
-			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
+			AuthManager:     authManager,
+			AuthStatePath:   authStatePath,
 			OwnsServer:      p.server.OwnsServer(),
 		},
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,

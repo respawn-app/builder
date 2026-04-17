@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
@@ -25,13 +24,57 @@ import (
 	serverstartup "builder/server/startup"
 	"builder/server/tools/askquestion"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 )
 
 type memoryAuthHandler struct {
 	state auth.State
+}
+
+type headlessProjectViewStubService struct {
+	listProjectsResp serverapi.ProjectListResponse
+	listProjectsErr  error
+	overviews        map[string]serverapi.ProjectGetOverviewResponse
+	overviewErr      error
+}
+
+func (s headlessProjectViewStubService) ListProjects(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	return s.listProjectsResp, s.listProjectsErr
+}
+
+func (headlessProjectViewStubService) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
+}
+
+func (headlessProjectViewStubService) CreateProject(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+}
+
+func (headlessProjectViewStubService) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (headlessProjectViewStubService) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+}
+
+func (s headlessProjectViewStubService) GetProjectOverview(_ context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	if s.overviewErr != nil {
+		return serverapi.ProjectGetOverviewResponse{}, s.overviewErr
+	}
+	resp, ok := s.overviews[req.ProjectID]
+	if !ok {
+		return serverapi.ProjectGetOverviewResponse{}, errors.New("missing overview")
+	}
+	return resp, nil
+}
+
+func (headlessProjectViewStubService) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
 }
 
 func (h memoryAuthHandler) WrapStore(auth.Store) auth.Store {
@@ -496,6 +539,7 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
@@ -510,6 +554,26 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	}
 	if !strings.Contains(err.Error(), "builder project") || !strings.Contains(err.Error(), "builder attach") {
 		t.Fatalf("expected recovery guidance in error, got %q", err)
+	}
+}
+
+func TestSelectSingleRemoteWorkspaceForHeadlessChoosesOnlyWorkspace(t *testing.T) {
+	client := client.NewLoopbackProjectViewClient(headlessProjectViewStubService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}},
+		overviews: map[string]serverapi.ProjectGetOverviewResponse{
+			"project-1": {Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1"}}}},
+		},
+	})
+
+	selection, found, err := selectSingleRemoteWorkspaceForHeadless(context.Background(), client)
+	if err != nil {
+		t.Fatalf("selectSingleRemoteWorkspaceForHeadless: %v", err)
+	}
+	if !found {
+		t.Fatal("expected single workspace selection")
+	}
+	if selection.ProjectID != "project-1" || selection.WorkspaceID != "workspace-1" {
+		t.Fatalf("unexpected selection: %+v", selection)
 	}
 }
 

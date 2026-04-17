@@ -9,6 +9,8 @@ import (
 
 const (
 	MethodHandshake                                = "protocol.handshake"
+	MethodAuthGetBootstrapStatus                   = "auth.getBootstrapStatus"
+	MethodAuthCompleteBootstrap                    = "auth.completeBootstrap"
 	MethodAttachProject                            = "project.attach"
 	MethodAttachSession                            = "session.attach"
 	MethodProjectList                              = "project.list"
@@ -75,6 +77,7 @@ type HandshakeResponse struct {
 
 type AttachProjectRequest struct {
 	ProjectID     string `json:"project_id"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
 }
 
@@ -83,9 +86,11 @@ type AttachSessionRequest struct {
 }
 
 type AttachResponse struct {
-	Kind      string `json:"kind"`
-	ProjectID string `json:"project_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	Kind          string `json:"kind"`
+	ProjectID     string `json:"project_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
 }
 
 type SubscribeResponse struct {
@@ -120,8 +125,14 @@ func (r AttachProjectRequest) Validate() error {
 	if strings.TrimSpace(r.ProjectID) == "" {
 		return errors.New("project_id is required")
 	}
+	if trimmed := strings.TrimSpace(r.WorkspaceID); r.WorkspaceID != "" && trimmed == "" {
+		return errors.New("workspace_id must not be blank")
+	}
 	if r.WorkspaceRoot != "" && strings.TrimSpace(r.WorkspaceRoot) == "" {
 		return errors.New("workspace_root must not be blank")
+	}
+	if strings.TrimSpace(r.WorkspaceID) != "" && strings.TrimSpace(r.WorkspaceRoot) != "" {
+		return errors.New("workspace_id and workspace_root are mutually exclusive")
 	}
 	return nil
 }

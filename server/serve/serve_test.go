@@ -239,6 +239,80 @@ func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestServeStartsUnauthenticatedAndReportsBootstrapReadiness(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, AllowUnauthenticated: true}
+	authHandler := envAuthHandler{}
+	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
+
+	server, err := Start(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(ctx)
+	}()
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
+	readyURL := config.ServerHTTPBaseURL(loadCfg) + protocol.ReadinessPath
+	deadline := time.Now().Add(5 * time.Second)
+	var healthResp *http.Response
+	for {
+		healthResp, err = http.Get(healthURL)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET health: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer func() { _ = healthResp.Body.Close() }()
+	if healthResp.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", healthResp.StatusCode)
+	}
+	var healthBody map[string]any
+	if err := json.NewDecoder(healthResp.Body).Decode(&healthBody); err != nil {
+		t.Fatalf("decode health body: %v", err)
+	}
+	if healthBody["auth_ready"] != false {
+		t.Fatalf("expected auth_ready=false health payload, got %+v", healthBody)
+	}
+
+	readyResp, err := http.Get(readyURL)
+	if err != nil {
+		t.Fatalf("GET ready: %v", err)
+	}
+	defer func() { _ = readyResp.Body.Close() }()
+	if readyResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status = %d, want 503", readyResp.StatusCode)
+	}
+	var readyBody map[string]any
+	if err := json.NewDecoder(readyResp.Body).Decode(&readyBody); err != nil {
+		t.Fatalf("decode ready body: %v", err)
+	}
+	if readyBody["ready"] != false || readyBody["auth_ready"] != false || readyBody["transport_ready"] != true {
+		t.Fatalf("unexpected readiness payload: %+v", readyBody)
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
 func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

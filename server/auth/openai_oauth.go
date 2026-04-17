@@ -39,6 +39,11 @@ type DeviceCode struct {
 	PollInterval    time.Duration
 }
 
+type DeviceAuthorizationGrant struct {
+	AuthorizationCode string
+	CodeVerifier      string
+}
+
 type deviceUserCodeResponse struct {
 	DeviceAuthID string `json:"device_auth_id"`
 	UserCode     string `json:"user_code"`
@@ -71,7 +76,9 @@ type idTokenClaims struct {
 }
 
 func normalizeOpenAIOAuthOptions(opts OpenAIOAuthOptions) OpenAIOAuthOptions {
-	opts.Issuer = DefaultOpenAIIssuer
+	if strings.TrimSpace(opts.Issuer) == "" {
+		opts.Issuer = DefaultOpenAIIssuer
+	}
 	if strings.TrimSpace(opts.ClientID) == "" {
 		opts.ClientID = DefaultOpenAIClientID
 	}
@@ -105,6 +112,35 @@ func RunOpenAIDeviceCodeFlow(ctx context.Context, opts OpenAIOAuthOptions, onCod
 		return Method{}, err
 	}
 	return method, nil
+}
+
+func CollectOpenAIDeviceAuthorizationGrant(ctx context.Context, opts OpenAIOAuthOptions, onCode func(DeviceCode)) (DeviceAuthorizationGrant, error) {
+	opts = normalizeOpenAIOAuthOptions(opts)
+	code, err := requestOpenAIDeviceCode(ctx, opts)
+	if err != nil {
+		return DeviceAuthorizationGrant{}, err
+	}
+	if onCode != nil {
+		onCode(code)
+	}
+	poll, err := pollOpenAIDeviceAuthToken(ctx, opts, code)
+	if err != nil {
+		return DeviceAuthorizationGrant{}, err
+	}
+	return DeviceAuthorizationGrant{
+		AuthorizationCode: poll.AuthorizationCode,
+		CodeVerifier:      poll.CodeVerifier,
+	}, nil
+}
+
+func CompleteOpenAIDeviceAuthorizationGrant(ctx context.Context, opts OpenAIOAuthOptions, authorizationCode string, codeVerifier string) (Method, error) {
+	if strings.TrimSpace(authorizationCode) == "" {
+		return Method{}, errors.New("device authorization code is required")
+	}
+	if strings.TrimSpace(codeVerifier) == "" {
+		return Method{}, errors.New("device code verifier is required")
+	}
+	return exchangeOpenAIAuthorizationCode(ctx, opts, authorizationCode, codeVerifier, issuerRedirectURI(opts))
 }
 
 func requestOpenAIDeviceCode(ctx context.Context, opts OpenAIOAuthOptions) (DeviceCode, error) {

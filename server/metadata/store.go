@@ -177,6 +177,35 @@ func (s *Store) ResolveWorkspacePath(ctx context.Context, workspaceRoot string) 
 	return "", nil, err
 }
 
+func (s *Store) LookupWorkspaceBindingByID(ctx context.Context, workspaceID string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetWorkspaceBindingByID(ctx, strings.TrimSpace(workspaceID))
+	if err == nil {
+		return Binding{
+			ProjectID:       row.ProjectID,
+			ProjectName:     row.ProjectDisplayName,
+			WorkspaceID:     row.WorkspaceID,
+			CanonicalRoot:   row.WorkspaceRoot,
+			WorkspaceName:   filepath.Base(row.WorkspaceRoot),
+			WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
+		}, nil
+	}
+	return Binding{}, fmt.Errorf("lookup workspace binding by id: %w", err)
+}
+
+func (s *Store) GetWorkspaceByID(ctx context.Context, workspaceID string) (sqlitegen.Workspace, error) {
+	if s == nil || s.queries == nil {
+		return sqlitegen.Workspace{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetWorkspaceByID(ctx, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return sqlitegen.Workspace{}, fmt.Errorf("get workspace by id: %w", err)
+	}
+	return row, nil
+}
+
 func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
 	if s == nil || s.queries == nil {
 		return Binding{}, errors.New("metadata store is required")
@@ -567,10 +596,30 @@ func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clien
 	if err != nil {
 		return clientui.ProjectOverview{}, err
 	}
+	workspaces, err := s.ListProjectWorkspaces(ctx, projectID)
+	if err != nil {
+		return clientui.ProjectOverview{}, err
+	}
 	return clientui.ProjectOverview{
-		Project:  projectSummaryFromRow(project.ID, project.DisplayName, project.RootPath, project.SessionCount, project.LatestActivityUnixMs),
-		Sessions: sessions,
+		Project:    projectSummaryFromRow(project.ID, project.DisplayName, project.RootPath, project.SessionCount, project.LatestActivityUnixMs),
+		Workspaces: workspaces,
+		Sessions:   sessions,
 	}, nil
+}
+
+func (s *Store) ListProjectWorkspaces(ctx context.Context, projectID string) ([]clientui.ProjectWorkspaceSummary, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("metadata store is required")
+	}
+	rows, err := s.queries.ListProjectWorkspaces(ctx, strings.TrimSpace(projectID))
+	if err != nil {
+		return nil, fmt.Errorf("list project workspaces: %w", err)
+	}
+	out := make([]clientui.ProjectWorkspaceSummary, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.DisplayName, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
+	}
+	return out, nil
 }
 
 func (s *Store) ListSessionsByProject(ctx context.Context, projectID string) ([]clientui.SessionSummary, error) {
@@ -908,6 +957,18 @@ func projectSummaryFromRow(projectID string, displayName string, rootPath string
 		DisplayName:  displayName,
 		RootPath:     rootPath,
 		Availability: clientui.ProjectAvailability(availabilityForPath(rootPath)),
+		SessionCount: int(sessionCount),
+		UpdatedAt:    timeFromStoredTimestamp(latestActivityUnixMs),
+	}
+}
+
+func projectWorkspaceSummaryFromRow(workspaceID string, displayName string, rootPath string, isPrimary bool, sessionCount int64, latestActivityUnixMs int64) clientui.ProjectWorkspaceSummary {
+	return clientui.ProjectWorkspaceSummary{
+		WorkspaceID:  workspaceID,
+		DisplayName:  displayName,
+		RootPath:     rootPath,
+		Availability: clientui.ProjectAvailability(availabilityForPath(rootPath)),
+		IsPrimary:    isPrimary,
 		SessionCount: int(sessionCount),
 		UpdatedAt:    timeFromStoredTimestamp(latestActivityUnixMs),
 	}

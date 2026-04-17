@@ -16,13 +16,14 @@ import (
 
 	"builder/server/serve"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
-var dialConfiguredRemote = client.DialRemoteURLForProjectWorkspace
+var dialConfiguredRemote = client.DialRemoteURLForProjectWorkspaceID
 var dialConfiguredProjectViewRemote = client.DialRemoteURL
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
@@ -52,13 +53,23 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	if err != nil {
 		return nil, nil, err
 	}
-	if remote, ok := tryDialConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt); ok {
+	if remote, ok, err := tryDialConfiguredRunPromptRemote(ctx, opts); err != nil {
+		return nil, nil, err
+	} else if ok {
+		if err := ensureRemoteAuthReady(ctx, remote, cfg.Settings, newHeadlessAuthInteractor()); err != nil {
+			_ = remote.Close()
+			return nil, nil, err
+		}
 		return remote, remote.Close, nil
 	}
 	launchErr := error(nil)
 	if remote, closeFn, ok, err := launchRunPromptDaemon(ctx, opts); err != nil {
 		launchErr = err
 	} else if ok {
+		if err := ensureRemoteAuthReady(ctx, remote, cfg.Settings, newHeadlessAuthInteractor()); err != nil {
+			_ = closeFn()
+			return nil, nil, err
+		}
 		if strings.TrimSpace(remote.ProjectID()) == "" {
 			_ = closeFn()
 			return nil, nil, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
@@ -77,6 +88,84 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 		return nil, nil, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
 	}
 	return server.RunPromptClient(), server.Close, nil
+}
+
+func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {
+	cfg, err := loadRemoteAttachConfig(opts)
+	if err != nil {
+		return nil, false, err
+	}
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, config.ServerRPCURL(cfg))
+	if err != nil {
+		return nil, false, nil
+	}
+	if !configuredRemoteSupportsRunPrompt(projectViews.Identity().Capabilities) {
+		_ = projectViews.Close()
+		return nil, false, nil
+	}
+	bindingResp, err := projectViews.ResolveProjectPath(attachCtx, serverapi.ProjectResolvePathRequest{Path: cfg.WorkspaceRoot})
+	if err != nil {
+		_ = projectViews.Close()
+		return nil, true, err
+	}
+	if bindingResp.Binding != nil {
+		_ = projectViews.Close()
+		remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
+		if err != nil {
+			return nil, true, err
+		}
+		return remote, true, nil
+	}
+	if bindingResp.PathAvailability == clientui.ProjectAvailabilityAvailable {
+		_ = projectViews.Close()
+		return nil, true, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
+	}
+	workspace, found, err := selectSingleRemoteWorkspaceForHeadless(attachCtx, projectViews)
+	_ = projectViews.Close()
+	if err != nil {
+		return nil, true, err
+	}
+	if !found {
+		return nil, true, headlessRemoteWorkspaceSelectionError()
+	}
+	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), workspace.ProjectID, workspace.WorkspaceID)
+	if err != nil {
+		return nil, true, err
+	}
+	return remote, true, nil
+}
+
+type remoteWorkspaceSelection struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func selectSingleRemoteWorkspaceForHeadless(ctx context.Context, projectViews client.ProjectViewClient) (remoteWorkspaceSelection, bool, error) {
+	projects, err := projectViews.ListProjects(ctx, serverapi.ProjectListRequest{})
+	if err != nil {
+		return remoteWorkspaceSelection{}, false, err
+	}
+	selection := remoteWorkspaceSelection{}
+	count := 0
+	for _, project := range projects.Projects {
+		overview, err := projectViews.GetProjectOverview(ctx, serverapi.ProjectGetOverviewRequest{ProjectID: project.ProjectID})
+		if err != nil {
+			return remoteWorkspaceSelection{}, false, err
+		}
+		for _, workspace := range overview.Overview.Workspaces {
+			count++
+			selection = remoteWorkspaceSelection{ProjectID: project.ProjectID, WorkspaceID: workspace.WorkspaceID}
+			if count > 1 {
+				return remoteWorkspaceSelection{}, false, nil
+			}
+		}
+	}
+	if count == 0 {
+		return remoteWorkspaceSelection{}, false, nil
+	}
+	return selection, true, nil
 }
 
 func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
@@ -123,7 +212,7 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 		return projectViews, true
 	}
 	_ = projectViews.Close()
-	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), binding.ProjectID, cfg.WorkspaceRoot)
+	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), binding.ProjectID, binding.WorkspaceID)
 	if err != nil {
 		return nil, false
 	}
@@ -236,6 +325,10 @@ func headlessWorkspaceRegistrationError(workspaceRoot string) error {
 		trimmedRoot = "current workspace"
 	}
 	return fmt.Errorf("%w: %s is not attached to a project. Run `builder project` in a workspace that already belongs to the target project, then run `builder attach <path>` from there or `builder attach --project <project-id> <path>`", errWorkspaceNotRegistered, trimmedRoot)
+}
+
+func headlessRemoteWorkspaceSelectionError() error {
+	return errors.New("remote server could not resolve the current workspace and no single server workspace could be chosen automatically. Run `builder project list`, `builder project create --path <server-path> --name <project-name>`, or `builder attach --project <project-id> <server-path>` against the configured server, or start interactive Builder to choose an existing server project/workspace")
 }
 
 func newOwnedDaemonClose(remote *client.Remote, cmd *exec.Cmd, errCh <-chan error) func() error {

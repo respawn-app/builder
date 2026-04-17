@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"builder/server/auth"
 	"builder/server/core"
 	"builder/shared/clientui"
 	"builder/shared/protocol"
@@ -22,11 +23,34 @@ type Gateway struct {
 	identity protocol.ServerIdentity
 }
 
+var gatewayAllowedPreAuthMethods = map[string]struct{}{
+	protocol.MethodAuthGetBootstrapStatus:   {},
+	protocol.MethodAuthCompleteBootstrap:    {},
+	protocol.MethodAttachProject:            {},
+	protocol.MethodAttachSession:            {},
+	protocol.MethodProjectList:              {},
+	protocol.MethodProjectResolvePath:       {},
+	protocol.MethodProjectCreate:            {},
+	protocol.MethodProjectAttachWorkspace:   {},
+	protocol.MethodProjectRebindWorkspace:   {},
+	protocol.MethodProjectGetOverview:       {},
+	protocol.MethodSessionListByProject:     {},
+	protocol.MethodSessionGetMainView:       {},
+	protocol.MethodSessionGetTranscriptPage: {},
+	protocol.MethodSessionGetInitialInput:   {},
+	protocol.MethodProcessList:              {},
+	protocol.MethodProcessGet:               {},
+	protocol.MethodAskListPending:           {},
+	protocol.MethodApprovalListPending:      {},
+	protocol.MethodRunGet:                   {},
+}
+
 type connectionState struct {
-	handshakeDone       bool
-	attachedProject     string
-	attachedProjectRoot string
-	attachedSession     string
+	handshakeDone         bool
+	attachedProject       string
+	attachedWorkspaceID   string
+	attachedWorkspaceRoot string
+	attachedSession       string
 }
 
 func NewGateway(appCore *core.Core, identity protocol.ServerIdentity) (*Gateway, error) {
@@ -76,6 +100,13 @@ func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state 
 	if !state.handshakeDone {
 		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
 	}
+	ready, err := g.serverAuthReady(ctx)
+	if err != nil {
+		return sendResponse(ws, responseForError(req.ID, err))
+	}
+	if !ready {
+		return sendResponse(ws, responseForError(req.ID, serverapi.ErrServerAuthRequired))
+	}
 	params, err := decodeParams[serverapi.RunPromptRequest](req.Params)
 	if err != nil {
 		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
@@ -111,6 +142,15 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 	if req.Method != protocol.MethodHandshake && !state.handshakeDone {
 		return protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods")
 	}
+	if g.methodRequiresServerAuth(req.Method) {
+		ready, err := g.serverAuthReady(ctx)
+		if err != nil {
+			return responseForError(req.ID, err)
+		}
+		if !ready {
+			return responseForError(req.ID, serverapi.ErrServerAuthRequired)
+		}
+	}
 	switch req.Method {
 	case protocol.MethodHandshake:
 		params, err := decodeParams[protocol.HandshakeRequest](req.Params)
@@ -125,6 +165,22 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		}
 		state.handshakeDone = true
 		return protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: g.identity})
+	case protocol.MethodAuthGetBootstrapStatus:
+		return decodeAndHandle(req, func(params serverapi.AuthGetBootstrapStatusRequest) (serverapi.AuthGetBootstrapStatusResponse, error) {
+			client := g.core.AuthBootstrapClient()
+			if client == nil {
+				return serverapi.AuthGetBootstrapStatusResponse{}, serverapi.ErrServerAuthRequired
+			}
+			return client.GetAuthBootstrapStatus(ctx, params)
+		})
+	case protocol.MethodAuthCompleteBootstrap:
+		return decodeAndHandle(req, func(params serverapi.AuthCompleteBootstrapRequest) (serverapi.AuthCompleteBootstrapResponse, error) {
+			client := g.core.AuthBootstrapClient()
+			if client == nil {
+				return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
+			}
+			return client.CompleteAuthBootstrap(ctx, params)
+		})
 	case protocol.MethodAttachProject:
 		return decodeAndHandle(req, func(params protocol.AttachProjectRequest) (protocol.AttachResponse, error) {
 			if err := params.Validate(); err != nil {
@@ -133,14 +189,15 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := g.core.ProjectExists(ctx, params.ProjectID); err != nil {
 				return protocol.AttachResponse{}, err
 			}
-			attachedRoot, err := g.resolveAttachedProjectRoot(ctx, params.ProjectID, params.WorkspaceRoot)
+			attachedWorkspaceID, attachedRoot, err := g.resolveAttachedProjectWorkspace(ctx, params.ProjectID, params.WorkspaceID, params.WorkspaceRoot)
 			if err != nil {
 				return protocol.AttachResponse{}, err
 			}
 			state.attachedProject = params.ProjectID
-			state.attachedProjectRoot = attachedRoot
+			state.attachedWorkspaceID = attachedWorkspaceID
+			state.attachedWorkspaceRoot = attachedRoot
 			state.attachedSession = ""
-			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID}, nil
+			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID, WorkspaceID: attachedWorkspaceID, WorkspaceRoot: attachedRoot}, nil
 		})
 	case protocol.MethodAttachSession:
 		return decodeAndHandle(req, func(params protocol.AttachSessionRequest) (protocol.AttachResponse, error) {
@@ -150,7 +207,8 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
 				return protocol.AttachResponse{}, err
 			}
-			state.attachedProjectRoot = ""
+			state.attachedWorkspaceID = ""
+			state.attachedWorkspaceRoot = ""
 			state.attachedSession = params.SessionID
 			return protocol.AttachResponse{Kind: "session", SessionID: params.SessionID}, nil
 		})
@@ -437,30 +495,57 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 	}
 }
 
-func (g *Gateway) resolveAttachedProjectRoot(ctx context.Context, projectID string, workspaceRoot string) (string, error) {
+func (g *Gateway) resolveAttachedProjectWorkspace(ctx context.Context, projectID string, workspaceID string, workspaceRoot string) (string, string, error) {
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if trimmedWorkspaceID != "" {
+		binding, err := g.core.MetadataStore().LookupWorkspaceBindingByID(ctx, trimmedWorkspaceID)
+		if err != nil {
+			return "", "", err
+		}
+		if strings.TrimSpace(binding.ProjectID) != strings.TrimSpace(projectID) {
+			return "", "", fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, strings.TrimSpace(projectID))
+		}
+		return binding.WorkspaceID, strings.TrimSpace(binding.CanonicalRoot), nil
+	}
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
 	if trimmedWorkspaceRoot == "" {
-		return "", nil
+		overview, err := g.core.ProjectViewClient().GetProjectOverview(ctx, serverapi.ProjectGetOverviewRequest{ProjectID: strings.TrimSpace(projectID)})
+		if err != nil {
+			return "", "", err
+		}
+		if len(overview.Overview.Workspaces) == 0 {
+			return "", "", fmt.Errorf("project %q has no attached workspaces", strings.TrimSpace(projectID))
+		}
+		if len(overview.Overview.Workspaces) > 1 {
+			return "", "", fmt.Errorf("project %q requires explicit workspace selection", strings.TrimSpace(projectID))
+		}
+		workspace := overview.Overview.Workspaces[0]
+		return strings.TrimSpace(workspace.WorkspaceID), strings.TrimSpace(workspace.RootPath), nil
 	}
 	resolved, err := g.core.ProjectViewClient().ResolveProjectPath(ctx, serverapi.ProjectResolvePathRequest{Path: trimmedWorkspaceRoot})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if resolved.Binding == nil {
-		return "", fmt.Errorf("workspace %q is not registered", resolved.CanonicalRoot)
+		return "", "", fmt.Errorf("workspace %q is not registered", resolved.CanonicalRoot)
 	}
 	if strings.TrimSpace(resolved.Binding.ProjectID) != strings.TrimSpace(projectID) {
-		return "", fmt.Errorf("workspace %q is not bound to project %q", resolved.Binding.CanonicalRoot, strings.TrimSpace(projectID))
+		return "", "", fmt.Errorf("workspace %q is not bound to project %q", resolved.Binding.CanonicalRoot, strings.TrimSpace(projectID))
 	}
-	return strings.TrimSpace(resolved.Binding.CanonicalRoot), nil
+	return strings.TrimSpace(resolved.Binding.WorkspaceID), strings.TrimSpace(resolved.Binding.CanonicalRoot), nil
 }
 
-func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (client serverapi.SessionLaunchService, _ error) {
+func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (service serverapi.SessionLaunchService, _ error) {
 	projectID, err := g.activeProjectID(ctx, state)
 	if err != nil {
 		return nil, err
 	}
-	launchClient, err := g.core.SessionLaunchClientForProjectWorkspace(ctx, projectID, state.attachedProjectRoot)
+	var launchClient any
+	if strings.TrimSpace(state.attachedWorkspaceID) == "" {
+		launchClient, err = g.core.SessionLaunchClientForProjectWorkspace(ctx, projectID, state.attachedWorkspaceRoot)
+	} else {
+		launchClient, err = g.core.SessionLaunchClientForProjectWorkspaceID(ctx, projectID, state.attachedWorkspaceID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +563,12 @@ func (g *Gateway) runPromptClientForState(ctx context.Context, state *connection
 	if err != nil {
 		return nil, err
 	}
-	runClient, err := g.core.RunPromptClientForProjectWorkspace(ctx, projectID, state.attachedProjectRoot)
+	var runClient any
+	if strings.TrimSpace(state.attachedWorkspaceID) == "" {
+		runClient, err = g.core.RunPromptClientForProjectWorkspace(ctx, projectID, state.attachedWorkspaceRoot)
+	} else {
+		runClient, err = g.core.RunPromptClientForProjectWorkspaceID(ctx, projectID, state.attachedWorkspaceID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +829,32 @@ func protocolError(err error) (int, string) {
 	if errors.Is(err, serverapi.ErrPromptUnsupported) {
 		return protocol.ErrCodePromptUnsupported, message
 	}
+	if errors.Is(err, serverapi.ErrServerAuthRequired) || errors.Is(err, auth.ErrAuthNotConfigured) {
+		return protocol.ErrCodeAuthRequired, message
+	}
 	return protocol.ErrCodeInternalError, message
+}
+
+func (g *Gateway) serverAuthReady(ctx context.Context) (bool, error) {
+	if g == nil || g.core == nil || g.core.AuthManager() == nil {
+		return false, nil
+	}
+	state, err := g.core.AuthManager().Load(ctx)
+	if err != nil {
+		return false, err
+	}
+	return auth.EvaluateStartupGate(state).Ready, nil
+}
+
+func (g *Gateway) methodRequiresServerAuth(method string) bool {
+	trimmed := strings.TrimSpace(method)
+	if trimmed == "" || trimmed == protocol.MethodHandshake {
+		return false
+	}
+	if _, ok := gatewayAllowedPreAuthMethods[trimmed]; ok {
+		return false
+	}
+	return true
 }
 
 func streamCompleteParams(err error) protocol.StreamCompleteParams {

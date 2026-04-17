@@ -9,6 +9,7 @@ import (
 	"builder/server/approvalview"
 	"builder/server/askview"
 	"builder/server/auth"
+	"builder/server/authbootstrap"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/launch"
 	"builder/server/metadata"
@@ -36,6 +37,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )
 
@@ -52,6 +54,7 @@ type Core struct {
 	sessionStores    *registry.SessionStoreRegistry
 	projectID        string
 	projectViews     client.ProjectViewClient
+	authBootstrap    client.AuthBootstrapClient
 	askViews         client.AskViewClient
 	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
@@ -126,6 +129,14 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
+	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, []string{
+		protocol.MethodAuthGetBootstrapStatus,
+		protocol.MethodAuthCompleteBootstrap,
+		protocol.MethodProjectList,
+		protocol.MethodProjectResolvePath,
+		protocol.MethodProjectGetOverview,
+		protocol.MethodSessionListByProject,
+	})
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
@@ -141,6 +152,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		projectViews:     projectViews,
+		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
 		processControls:  client.NewLoopbackProcessControlClient(processService),
@@ -221,8 +233,17 @@ func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID stri
 	return s.SessionLaunchClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
 }
 
+func (s *Core) SessionLaunchClientForProjectWorkspaceID(ctx context.Context, projectID string, workspaceID string) (client.SessionLaunchClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceID, "")
+	if err != nil {
+		return nil, err
+	}
+	service := sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores)
+	return client.NewLoopbackSessionLaunchClient(service), nil
+}
+
 func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.SessionLaunchClient, error) {
-	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceRoot)
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, "", workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +255,8 @@ func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) 
 	return s.RunPromptClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
 }
 
-func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.RunPromptClient, error) {
-	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceRoot)
+func (s *Core) RunPromptClientForProjectWorkspaceID(ctx context.Context, projectID string, workspaceID string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -251,13 +272,57 @@ func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID
 	}), nil
 }
 
-func (s *Core) resolveProjectContext(ctx context.Context, projectID string, workspaceRoot string) (projectContext, error) {
+func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, "", workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	return runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
+		Config:           projectCtx.config,
+		ContainerDir:     projectCtx.projectSession,
+		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
+		AuthManager:      s.oauthOpts.AuthManager,
+		FastModeState:    s.fastModeState,
+		Background:       s.background,
+		RuntimeRegistry:  s.runtimeRegistry,
+		BackgroundRouter: s.backgroundRouter,
+	}), nil
+}
+
+func (s *Core) resolveProjectContext(ctx context.Context, projectID string, workspaceID string, workspaceRoot string) (projectContext, error) {
 	if s == nil || s.metadataStore == nil {
 		return projectContext{}, errors.New("metadata store is required")
 	}
 	trimmedProjectID := strings.TrimSpace(projectID)
 	if trimmedProjectID == "" {
 		return projectContext{}, errors.New("project id is required")
+	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if trimmedWorkspaceID != "" {
+		binding, err := s.metadataStore.LookupWorkspaceBindingByID(ctx, trimmedWorkspaceID)
+		if err != nil {
+			return projectContext{}, err
+		}
+		if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
+			return projectContext{}, fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, trimmedProjectID)
+		}
+		availability := clientui.ProjectAvailability(binding.WorkspaceStatus)
+		switch availability {
+		case clientui.ProjectAvailabilityMissing, clientui.ProjectAvailabilityInaccessible:
+			return projectContext{}, serverapi.ProjectUnavailableError{
+				ProjectID:    trimmedProjectID,
+				RootPath:     binding.CanonicalRoot,
+				Availability: availability,
+			}
+		}
+		projectCfg := s.cfg
+		projectCfg.WorkspaceRoot = binding.CanonicalRoot
+		return projectContext{
+			config:         projectCfg,
+			projectID:      trimmedProjectID,
+			projectRoot:    binding.CanonicalRoot,
+			projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+		}, nil
 	}
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
 	if trimmedWorkspaceRoot != "" {
@@ -335,6 +400,13 @@ func (s *Core) ContainerDir() string {
 	return s.containerDir
 }
 
+func (s *Core) MetadataStore() *metadata.Store {
+	if s == nil {
+		return nil
+	}
+	return s.metadataStore
+}
+
 func (s *Core) OAuthOptions() auth.OpenAIOAuthOptions {
 	if s == nil {
 		return auth.OpenAIOAuthOptions{}
@@ -389,6 +461,13 @@ func (s *Core) ProjectViewClient() client.ProjectViewClient {
 		return nil
 	}
 	return s.projectViews
+}
+
+func (s *Core) AuthBootstrapClient() client.AuthBootstrapClient {
+	if s == nil {
+		return nil
+	}
+	return s.authBootstrap
 }
 
 func (s *Core) AskViewClient() client.AskViewClient {

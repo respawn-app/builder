@@ -67,6 +67,7 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	server, err := startServeServer(ctx, serverstartup.Request{
 		WorkspaceRoot:         flags.WorkspaceRoot,
 		WorkspaceRootExplicit: flags.WorkspaceExplicit,
+		AllowUnauthenticated:  true,
 		Model:                 flags.Model,
 		ProviderOverride:      flags.ProviderOverride,
 		ThinkingLevel:         flags.ThinkingLevel,

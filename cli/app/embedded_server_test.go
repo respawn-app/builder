@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/internal/testopenai"
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
@@ -30,6 +29,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 	"github.com/google/uuid"
 )
 
@@ -43,6 +43,7 @@ type testEmbeddedServer struct {
 	backgroundRouter     serverembedded.BackgroundRouter
 	runPromptClient      client.RunPromptClient
 	projectID            string
+	boundWorkspaceID     string
 	askViewClient        client.AskViewClient
 	approvalViewClient   client.ApprovalViewClient
 	promptControlClient  client.PromptControlClient
@@ -151,6 +152,7 @@ func (s *testEmbeddedServer) BindProject(_ context.Context, projectID string) (e
 		backgroundRouter:     s.backgroundRouter,
 		runPromptClient:      s.runPromptClient,
 		projectID:            strings.TrimSpace(projectID),
+		boundWorkspaceID:     s.boundWorkspaceID,
 		askViewClient:        s.askViewClient,
 		approvalViewClient:   s.approvalViewClient,
 		promptControlClient:  s.promptControlClient,
@@ -173,6 +175,17 @@ func (s *testEmbeddedServer) BindProject(_ context.Context, projectID string) (e
 		reauthenticate:       s.reauthenticate,
 	}
 	return clone, nil
+}
+
+func (s *testEmbeddedServer) BindProjectWorkspace(ctx context.Context, projectID string, workspaceID string) (embeddedServer, error) {
+	bound, err := s.BindProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if embedded, ok := bound.(*testEmbeddedServer); ok {
+		embedded.boundWorkspaceID = strings.TrimSpace(workspaceID)
+	}
+	return bound, nil
 }
 func (s *testEmbeddedServer) ProjectID() string {
 	if strings.TrimSpace(s.projectID) != "" {

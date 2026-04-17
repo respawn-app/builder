@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"builder/server/auth"
 	"builder/server/core"
 	"builder/server/startup"
 	"builder/server/transport"
@@ -104,6 +105,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		PID:             os.Getpid(),
 		Capabilities: protocol.CapabilityFlags{
 			JSONRPCWebSocket:        true,
+			AuthBootstrap:           true,
 			ProjectAttach:           true,
 			SessionAttach:           true,
 			HealthEndpoint:          true,
@@ -127,23 +129,31 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
+		authReady := serverAuthReady(s.Core)
 		writeStatusJSON(w, http.StatusOK, map[string]any{
-			"status":    "ok",
-			"server_id": identity.ServerID,
-			"pid":       identity.PID,
+			"status":     "ok",
+			"server_id":  identity.ServerID,
+			"pid":        identity.PID,
+			"auth_ready": authReady,
 		})
 	})
 	s.ready.Store(true)
 	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, _ *http.Request) {
+		authReady := serverAuthReady(s.Core)
 		status := http.StatusServiceUnavailable
-		body := map[string]any{"ready": false}
-		if s.ready.Load() {
+		body := map[string]any{"ready": false, "auth_ready": authReady}
+		if s.ready.Load() && authReady {
 			status = http.StatusOK
 			body = map[string]any{
-				"ready":     true,
-				"server_id": identity.ServerID,
-				"pid":       identity.PID,
+				"ready":      true,
+				"server_id":  identity.ServerID,
+				"pid":        identity.PID,
+				"auth_ready": true,
 			}
+		} else if s.ready.Load() {
+			body["transport_ready"] = true
+			body["server_id"] = identity.ServerID
+			body["pid"] = identity.PID
 		}
 		writeStatusJSON(w, status, body)
 	})
@@ -176,4 +186,15 @@ func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func serverAuthReady(appCore *core.Core) bool {
+	if appCore == nil || appCore.AuthManager() == nil {
+		return false
+	}
+	state, err := appCore.AuthManager().Load(context.Background())
+	if err != nil {
+		return false
+	}
+	return auth.EvaluateStartupGate(state).Ready
 }
