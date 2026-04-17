@@ -350,6 +350,12 @@ Examples:
 - `review` should be implementable as a frontend-owned built-in workflow composed from generic server capabilities rather than requiring a dedicated server-native state machine,
 - frontend-owned prompt commands such as `/init` or file-backed prompt commands remain frontend-side command-catalog concerns.
 
+The minimum server-admin setup command surface must include:
+
+- `builder project list` to enumerate existing projects without requiring users to remember ids,
+- `builder project create --path <server-path> --name <project-name>` to register the first server project/workspace against a running daemon,
+- `builder attach --project <project-id> <server-path>` to attach an additional server workspace to an existing project.
+
 When a frontend creates a child session for a workflow like `review`, parent linkage should be set atomically at session creation time.
 
 The protocol should not assume that frontend-owned command expansions are plain text forever. It should leave room for future structured `client_meta` inside a submission envelope without requiring server-side command provisioning in v1.
@@ -367,6 +373,11 @@ Requirements:
 - it can start or embed a local server when needed,
 - if startup cwd does not resolve to any registered project/workspace/worktree, the CLI shows an explicit project-picker or registration flow rather than implicitly creating a project,
 - that startup flow may create a new project and attach the current workspace as its first workspace, or explicitly attach the current workspace to an existing project,
+- if the server cannot resolve the client's requested path, or the client has no meaningful cwd/path at all, startup must switch to server-browsing mode rather than trying to bind the client path,
+- in server-browsing mode, the client opens existing server projects/workspaces only and must not offer "bind this workspace" or "create a project for this client path",
+- if no server projects/workspaces exist in server-browsing mode, the client shows an explicit empty state with server-admin setup instructions instead of a dead-end picker,
+- first setup for server-browsing mode is server-admin only for now; remote filesystem traversal/browsing is out of scope,
+- server-admin setup commands must prefer RPC to the configured running daemon when one exists and must not require the user to shut the server down,
 - if it started an embedded local server, exit flow prompts for the intended server lifecycle instead of assuming shutdown behavior,
 - that exit flow presents neutral choices without a recommended default,
 - it uses the same client boundary that future frontends will use,
