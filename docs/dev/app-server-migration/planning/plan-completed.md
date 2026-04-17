@@ -4,6 +4,17 @@ This file archives phases that are complete so `plan.md` can stay focused on ope
 
 ## Completed Phases
 
+### Hard-Cut Rollback: Remove SQLite-Backed Request Dedup Persistence
+
+Completed.
+
+Outcome:
+
+- SQLite-backed persisted dedup was hard-cut back out of production code and storage contracts
+- `client_request_id` remains on API surfaces where still intended, but no shipped behavior depends on SQLite replay authority
+- rollback-related tests and docs were reconciled to the non-persisted duplicate-protection model
+- the one-off local operator follow-through for Nek was executed during the rollback slice
+
 ### Phase 0: Freeze Behavior And Define Proof Obligations
 
 Completed.
@@ -172,6 +183,20 @@ Outcome:
 - remaining intentional `cli/* -> builder/server/*` imports were audited and documented as a temporary shared-runtime adapter set rather than persistence-boundary leaks; persistence-specific frontend bypasses and dead local-only persistence helpers were removed
 - current-TUI device-global-server acceptance proof is covered by `server/serve/serve_test.go` (`TestStartBuildsStandaloneServerFromCoreStartup`, `TestServeExposesConfiguredHealthEndpoints`) and `cli/app/session_server_target_test.go` (`TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow`, `TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces`, `TestRemoteReadOnlyClientHydratesCommittedTranscriptAcrossWorkspaces`)
 - the active plan was reduced to residual open work, with completed Phase 2 implementation slices archived here
+
+### Remote-Server Blockers: Server-Owned Auth Bootstrap And Path-Independent Attach
+
+Completed.
+
+Outcome:
+
+- standalone/remote `builder serve` now boots far enough to expose transport before auth is configured
+- auth bootstrap is server-owned via explicit pre-auth RPC (`auth.getBootstrapStatus`, `auth.completeBootstrap`)
+- remote attach no longer depends on host-local project/workspace binding metadata
+- remote attach is resilient to host/server path mismatch via explicit server-owned `workspace_id` selection
+- interactive startup now splits local-path mode vs server-browsing mode based on server-side path availability
+- first-setup remote/server-browsing admin commands landed: `builder project list`, `builder project create --path <server-path> --name <project-name>`, and `builder attach --project <project-id> <server-path>`
+- transport/integration proof landed for the shipped remote attach/auth behavior, including multi-workspace explicit selection coverage
 
 ## Still Partially Open Elsewhere
 
