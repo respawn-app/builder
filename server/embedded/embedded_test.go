@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
@@ -24,6 +23,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 )
 
 type testAuthHandler struct {

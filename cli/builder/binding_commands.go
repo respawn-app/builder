@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -19,6 +20,14 @@ import (
 const bindingCommandRPCTimeout = 5 * time.Second
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			return projectListSubcommand(args[1:], stdout, stderr)
+		case "create":
+			return projectCreateSubcommand(args[1:], stdout, stderr)
+		}
+	}
 	fs := flag.NewFlagSet("builder project", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
@@ -42,6 +51,54 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, projectID)
+	return 0
+}
+
+func projectListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("builder project list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if len(fs.Args()) != 0 {
+		fmt.Fprintln(stderr, "project list does not accept positional arguments")
+		return 2
+	}
+	projects, err := listProjects(context.Background())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	for _, project := range projects {
+		_, _ = fmt.Fprintf(stdout, "%s\t%s\t%s\n", project.ProjectID, project.DisplayName, project.RootPath)
+	}
+	return 0
+}
+
+func projectCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("builder project create", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	name := fs.String("name", "", "project display name")
+	path := fs.String("path", "", "server-visible workspace path")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if len(fs.Args()) != 0 {
+		fmt.Fprintln(stderr, "project create does not accept positional arguments")
+		return 2
+	}
+	binding, err := createProject(context.Background(), *name, *path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	_, _ = fmt.Fprintln(stdout, binding.ProjectID)
 	return 0
 }
 
@@ -97,12 +154,16 @@ func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func projectIDForPath(ctx context.Context, path string) (string, error) {
-	cfg, remote, err := openBindingCommandRemote(ctx, path)
+	_, remote, err := openBindingCommandRemote(ctx, ".")
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = remote.Close() }()
-	binding, err := resolveWorkspaceBinding(ctx, remote, cfg.WorkspaceRoot)
+	targetPath, err := normalizeBindingCommandPath(path)
+	if err != nil {
+		return "", err
+	}
+	binding, err := resolveWorkspaceBinding(ctx, remote, targetPath)
 	if err != nil {
 		return "", err
 	}
@@ -110,31 +171,62 @@ func projectIDForPath(ctx context.Context, path string) (string, error) {
 }
 
 func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath string) (string, error) {
-	targetCfg, remote, err := openBindingCommandRemote(ctx, targetPath)
+	sourceCfg, remote, err := openBindingCommandRemote(ctx, ".")
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = remote.Close() }()
 	projectID := strings.TrimSpace(explicitProjectID)
 	if projectID == "" {
-		sourceCfg, err := loadBindingCommandConfig(".")
-		if err != nil {
-			return "", err
-		}
-		if config.ServerRPCURL(sourceCfg) != config.ServerRPCURL(targetCfg) {
-			return "", errors.New("attach requires source and target workspaces to share the same configured server")
-		}
 		sourceBinding, err := resolveWorkspaceBinding(ctx, remote, sourceCfg.WorkspaceRoot)
 		if err != nil {
 			return "", fmt.Errorf("%w: current workspace is not attached to a project; run `builder project` in a workspace that already belongs to the target project or pass --project <project-id>", err)
 		}
 		projectID = strings.TrimSpace(sourceBinding.ProjectID)
 	}
-	resp, err := remote.AttachWorkspaceToProject(ctx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: targetCfg.WorkspaceRoot})
+	normalizedTargetPath, err := normalizeBindingCommandPath(targetPath)
+	if err != nil {
+		return "", err
+	}
+	resp, err := remote.AttachWorkspaceToProject(ctx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: normalizedTargetPath})
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(resp.Binding.ProjectID), nil
+}
+
+func listProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
+	_, remote, err := openBindingCommandRemote(ctx, ".")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = remote.Close() }()
+	resp, err := remote.ListProjects(ctx, serverapi.ProjectListRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Projects, nil
+}
+
+func createProject(ctx context.Context, displayName string, workspaceRoot string) (serverapi.ProjectBinding, error) {
+	trimmedDisplayName := strings.TrimSpace(displayName)
+	if trimmedDisplayName == "" {
+		return serverapi.ProjectBinding{}, errors.New("project name is required")
+	}
+	normalizedWorkspaceRoot, err := normalizeBindingCommandPath(workspaceRoot)
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	_, remote, err := openBindingCommandRemote(ctx, ".")
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	defer func() { _ = remote.Close() }()
+	resp, err := remote.CreateProject(ctx, serverapi.ProjectCreateRequest{DisplayName: trimmedDisplayName, WorkspaceRoot: normalizedWorkspaceRoot})
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	return resp.Binding, nil
 }
 
 func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serverapi.ProjectBinding, error) {
@@ -175,6 +267,17 @@ func openBindingCommandRemote(ctx context.Context, path string) (config.App, *cl
 		return config.App{}, nil, err
 	}
 	return cfg, remote, nil
+}
+
+func normalizeBindingCommandPath(path string) (string, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return "", errors.New("path is required")
+	}
+	if filepath.IsAbs(trimmedPath) {
+		return filepath.Clean(trimmedPath), nil
+	}
+	return filepath.Abs(trimmedPath)
 }
 
 func resolveWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (serverapi.ProjectBinding, error) {

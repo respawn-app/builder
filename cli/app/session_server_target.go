@@ -36,6 +36,10 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 	if remote, ok, err := dialInteractiveRemoteSessionServer(ctx, opts, interactor); err != nil {
 		return nil, err
 	} else if ok {
+		if err := remote.Reauthenticate(ctx, interactor); err != nil {
+			_ = remote.Close()
+			return nil, err
+		}
 		return remote, nil
 	}
 	lookupEnv, wrapStore := remoteAuthHooks(interactor)
@@ -49,7 +53,12 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 			}
 			return nil, cfgErr
 		}
-		return newRemoteAppServerWithAuth(remote, cfg, closeFn, lookupEnv, wrapStore), nil
+		appServer := newRemoteAppServerWithAuth(remote, cfg, closeFn, lookupEnv, wrapStore)
+		if err := appServer.Reauthenticate(ctx, interactor); err != nil {
+			_ = appServer.Close()
+			return nil, err
+		}
+		return appServer, nil
 	}
 	return startInteractiveEmbeddedSessionServer(ctx, opts, interactor)
 }

@@ -23,32 +23,38 @@ type Remote struct {
 	rpcURL        string
 	identity      protocol.ServerIdentity
 	projectID     string
+	workspaceID   string
 	workspaceRoot string
 	closed        atomic.Bool
 }
 
 func DialRemote(ctx context.Context, record protocol.DiscoveryRecord) (*Remote, error) {
-	return dialRemoteURL(ctx, record.RPCURL, "", "")
+	return dialRemoteURL(ctx, record.RPCURL, "", "", "")
 }
 
 func DialRemoteURL(ctx context.Context, rpcURL string) (*Remote, error) {
-	return dialRemoteURL(ctx, rpcURL, "", "")
+	return dialRemoteURL(ctx, rpcURL, "", "", "")
 }
 
 func DialRemoteURLForProject(ctx context.Context, rpcURL string, projectID string) (*Remote, error) {
-	return dialRemoteURL(ctx, rpcURL, projectID, "")
+	return dialRemoteURL(ctx, rpcURL, projectID, "", "")
 }
 
 func DialRemoteURLForProjectWorkspace(ctx context.Context, rpcURL string, projectID string, workspaceRoot string) (*Remote, error) {
-	return dialRemoteURL(ctx, rpcURL, projectID, workspaceRoot)
+	return dialRemoteURL(ctx, rpcURL, projectID, "", workspaceRoot)
 }
 
-func dialRemoteURL(ctx context.Context, rpcURL string, projectID string, workspaceRoot string) (*Remote, error) {
+func DialRemoteURLForProjectWorkspaceID(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*Remote, error) {
+	return dialRemoteURL(ctx, rpcURL, projectID, workspaceID, "")
+}
+
+func dialRemoteURL(ctx context.Context, rpcURL string, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
 	rpcURL = strings.TrimSpace(rpcURL)
 	if rpcURL == "" {
 		return nil, errors.New("rpc_url is required")
 	}
 	trimmedProjectID := strings.TrimSpace(projectID)
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
 	conn, cleanup, err := dialRPC(ctx, rpcURL)
 	if err != nil {
@@ -59,10 +65,10 @@ func dialRemoteURL(ctx context.Context, rpcURL string, projectID string, workspa
 	if err != nil {
 		return nil, err
 	}
-	if err := attachProjectRPC(ctx, conn, trimmedProjectID, trimmedWorkspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, trimmedProjectID, trimmedWorkspaceID, trimmedWorkspaceRoot); err != nil {
 		return nil, err
 	}
-	return &Remote{rpcURL: rpcURL, identity: identity, projectID: trimmedProjectID, workspaceRoot: trimmedWorkspaceRoot}, nil
+	return &Remote{rpcURL: rpcURL, identity: identity, projectID: trimmedProjectID, workspaceID: trimmedWorkspaceID, workspaceRoot: trimmedWorkspaceRoot}, nil
 }
 
 func (c *Remote) Close() error {
@@ -92,6 +98,23 @@ func (c *Remote) WorkspaceRoot() string {
 		return ""
 	}
 	return c.workspaceRoot
+}
+
+func (c *Remote) WorkspaceID() string {
+	if c == nil {
+		return ""
+	}
+	return c.workspaceID
+}
+
+func (c *Remote) GetAuthBootstrapStatus(ctx context.Context, req serverapi.AuthGetBootstrapStatusRequest) (serverapi.AuthGetBootstrapStatusResponse, error) {
+	var resp serverapi.AuthGetBootstrapStatusResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodAuthGetBootstrapStatus, req, &resp)
+}
+
+func (c *Remote) CompleteAuthBootstrap(ctx context.Context, req serverapi.AuthCompleteBootstrapRequest) (serverapi.AuthCompleteBootstrapResponse, error) {
+	var resp serverapi.AuthCompleteBootstrapResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodAuthCompleteBootstrap, req, &resp)
 }
 
 func (c *Remote) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
@@ -300,7 +323,7 @@ func (c *Remote) SubscribePromptActivity(ctx context.Context, req serverapi.Prom
 		cleanup()
 		return nil, err
 	}
-	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -328,7 +351,7 @@ func (c *Remote) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, 
 	if _, err := handshakeRPC(ctx, conn); err != nil {
 		return serverapi.RunPromptResponse{}, err
 	}
-	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
 		return serverapi.RunPromptResponse{}, err
 	}
 	params, err := json.Marshal(req)
@@ -382,7 +405,7 @@ func (c *Remote) SubscribeSessionActivity(ctx context.Context, req serverapi.Ses
 		cleanup()
 		return nil, err
 	}
-	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -410,7 +433,7 @@ func (c *Remote) SubscribeProcessOutput(ctx context.Context, req serverapi.Proce
 		cleanup()
 		return nil, err
 	}
-	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -434,7 +457,7 @@ func (c *Remote) call(ctx context.Context, method string, params any, out any) e
 	if _, err := handshakeRPC(ctx, conn); err != nil {
 		return err
 	}
-	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
 		return err
 	}
 	return callRPC(ctx, conn, method, method, params, out)
@@ -455,12 +478,12 @@ func (c *Remote) callUnscoped(ctx context.Context, method string, params any, ou
 	return callRPC(ctx, conn, method, method, params, out)
 }
 
-func attachProjectRPC(ctx context.Context, conn *websocket.Conn, projectID string, workspaceRoot string) error {
+func attachProjectRPC(ctx context.Context, conn *websocket.Conn, projectID string, workspaceID string, workspaceRoot string) error {
 	trimmedProjectID := strings.TrimSpace(projectID)
 	if trimmedProjectID == "" {
 		return nil
 	}
-	return callRPC(ctx, conn, "attach-project", protocol.MethodAttachProject, protocol.AttachProjectRequest{ProjectID: trimmedProjectID, WorkspaceRoot: strings.TrimSpace(workspaceRoot)}, nil)
+	return callRPC(ctx, conn, "attach-project", protocol.MethodAttachProject, protocol.AttachProjectRequest{ProjectID: trimmedProjectID, WorkspaceID: strings.TrimSpace(workspaceID), WorkspaceRoot: strings.TrimSpace(workspaceRoot)}, nil)
 }
 
 func (c *Remote) ensureOpen() error {

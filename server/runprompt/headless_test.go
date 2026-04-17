@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/primaryrun"
 	"builder/server/session"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 	"builder/shared/toolspec"
 )
 

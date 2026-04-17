@@ -961,7 +961,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 	}
 }
 
-func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
+func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1020,13 +1020,9 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 
 	originalFetcher := statusUsagePayloadFetcher
 	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	called := false
 	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
-		if baseURL != statusUsageBaseURL {
-			t.Fatalf("base URL = %q", baseURL)
-		}
-		if state.Method.OAuth == nil || state.Method.OAuth.Email != "user@example.com" || state.Method.OAuth.AccountID != "acct-123" {
-			t.Fatalf("unexpected auth state: %+v", state.Method.OAuth)
-		}
+		called = true
 		return statusUsagePayload{PlanType: "pro"}, nil
 	}
 
@@ -1044,8 +1040,11 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	if plan.StatusConfig.AuthManager == nil {
-		t.Fatal("expected status auth manager for remote session")
+	if plan.StatusConfig.AuthManager != nil {
+		t.Fatal("expected remote session status to avoid local auth manager")
+	}
+	if plan.StatusConfig.AuthStatePath != "" {
+		t.Fatalf("expected empty remote auth state path, got %q", plan.StatusConfig.AuthStatePath)
 	}
 
 	collector := defaultUIStatusCollector{}
@@ -1061,11 +1060,14 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect status: %v", err)
 	}
-	if got := snapshot.Auth.Summary; got != "user@example.com" {
+	if got := snapshot.Auth.Summary; got != "Not configured" {
 		t.Fatalf("auth summary = %q", got)
 	}
-	if got := snapshot.Subscription.Summary; got != "Pro subscription" {
-		t.Fatalf("subscription summary = %q", got)
+	if snapshot.Subscription.Applicable {
+		t.Fatalf("expected remote status subscription to remain unavailable, got %+v", snapshot.Subscription)
+	}
+	if called {
+		t.Fatal("expected remote session status to avoid local subscription lookup")
 	}
 }
 
@@ -1075,13 +1077,57 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
 
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
 	called := false
 	originalLaunch := launchSessionServerDaemon
+	originalDial := dialInteractiveRemoteSessionServer
 	t.Cleanup(func() { launchSessionServerDaemon = originalLaunch })
+	t.Cleanup(func() { dialInteractiveRemoteSessionServer = originalDial })
+	dialInteractiveRemoteSessionServer = func(context.Context, Options, authInteractor) (*remoteAppServer, bool, error) {
+		return nil, false, nil
+	}
 	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
-		return &client.Remote{}, func() error {
+		remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(loadCfg))
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return remote, func() error {
 			called = true
-			return nil
+			return remote.Close()
 		}, true, nil
 	}
 

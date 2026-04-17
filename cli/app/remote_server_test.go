@@ -2,115 +2,75 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
-	"time"
 
 	"builder/server/auth"
-	"builder/server/authflow"
+	"builder/server/serve"
+	serverstartup "builder/server/startup"
 	"builder/shared/client"
 	"builder/shared/config"
 )
 
-type remoteReauthInteractor struct {
-	configured bool
-}
-
-func (i *remoteReauthInteractor) WrapStore(base auth.Store) auth.Store { return base }
-func (i *remoteReauthInteractor) LookupEnv(string) string              { return "" }
-func (i *remoteReauthInteractor) Interactive() bool                    { return true }
-func (i *remoteReauthInteractor) NeedsInteraction(req authInteraction) bool {
-	return !req.Gate.Ready
-}
-
-func (i *remoteReauthInteractor) Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
-	i.configured = true
-	_, err := req.Manager.SwitchMethod(ctx, auth.Method{
-		Type:   auth.MethodAPIKey,
-		APIKey: &auth.APIKeyMethod{Key: "reauthed-key"},
-	}, true)
-	return authflow.InteractionOutcome{}, err
-}
-
-func TestRemoteAppServerReauthenticateUsesLocalAuthStore(t *testing.T) {
+func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "reauthed-key")
+	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
-	manager := auth.NewManager(store, nil, time.Now)
-	if _, err := manager.ClearMethod(context.Background(), true); err != nil {
-		t.Fatalf("ClearMethod: %v", err)
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		AllowUnauthenticated:  true,
+	}, memoryAuthHandler{state: auth.EmptyState()}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
 	}
+	defer func() { _ = srv.Close() }()
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(serveCtx) }()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server := &remoteAppServer{cfg: cfg}
-	interactor := &remoteReauthInteractor{}
-	if err := server.Reauthenticate(context.Background(), interactor); err != nil {
+	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
+	if err != nil {
+		t.Fatalf("DialRemoteURL: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	server := newRemoteAppServer(remote, cfg)
+	if err := server.Reauthenticate(context.Background(), newHeadlessAuthInteractor()); err != nil {
 		t.Fatalf("Reauthenticate: %v", err)
 	}
-	if !interactor.configured {
-		t.Fatal("expected reauthenticate to invoke auth interactor")
-	}
 
-	state, err := manager.StoredState(context.Background())
+	state, err := srv.AuthManager().StoredState(context.Background())
 	if err != nil {
 		t.Fatalf("StoredState: %v", err)
 	}
 	if state.Method.APIKey == nil || state.Method.APIKey.Key != "reauthed-key" {
 		t.Fatalf("unexpected stored auth state: %+v", state.Method)
 	}
-
-	if _, err := os.Stat(config.GlobalAuthConfigPath(cfg)); err != nil {
-		t.Fatalf("expected auth file to exist: %v", err)
+	if _, err := os.Stat(config.GlobalAuthConfigPath(cfg)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected client auth file to remain absent, got %v", err)
 	}
 }
 
-func TestRemoteAppServerAuthManagerUsesLocalAuthStore(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
-	if err := store.Save(context.Background(), auth.State{
-		Scope: auth.ScopeGlobal,
-		Method: auth.Method{
-			Type: auth.MethodOAuth,
-			OAuth: &auth.OAuthMethod{
-				AccessToken: "access-token",
-				AccountID:   "acct-123",
-				Email:       "user@example.com",
-			},
-		},
-		UpdatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("save auth state: %v", err)
-	}
-
-	server := &remoteAppServer{cfg: cfg}
-	manager := server.AuthManager()
-	if manager == nil {
-		t.Fatal("expected auth manager")
-	}
-	state, err := manager.Load(context.Background())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if state.Method.Type != auth.MethodOAuth {
-		t.Fatalf("expected oauth auth, got %+v", state.Method)
-	}
-	if state.Method.OAuth == nil || state.Method.OAuth.Email != "user@example.com" || state.Method.OAuth.AccountID != "acct-123" {
-		t.Fatalf("unexpected oauth state: %+v", state.Method.OAuth)
-	}
-	if manager != server.AuthManager() {
-		t.Fatal("expected auth manager to be memoized")
+func TestRemoteAppServerHasNoLocalAuthManager(t *testing.T) {
+	server := newRemoteAppServer(&client.Remote{}, config.App{})
+	if server.AuthManager() != nil {
+		t.Fatal("expected remote app server auth manager to remain nil")
 	}
 }
 

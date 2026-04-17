@@ -28,8 +28,9 @@ type ProjectResolvePathRequest struct {
 }
 
 type ProjectResolvePathResponse struct {
-	CanonicalRoot string          `json:"canonical_root"`
-	Binding       *ProjectBinding `json:"binding,omitempty"`
+	CanonicalRoot    string                       `json:"canonical_root"`
+	PathAvailability clientui.ProjectAvailability `json:"path_availability"`
+	Binding          *ProjectBinding              `json:"binding,omitempty"`
 }
 
 type ProjectCreateRequest struct {
