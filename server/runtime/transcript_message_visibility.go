@@ -42,7 +42,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	case llm.MessageTypeHandoffFutureMessage:
 		return ChatEntry{Role: string(transcript.EntryRoleDeveloperContext), Text: msg.Content}, true
 	case llm.MessageTypeManualCompactionCarryover:
-		return ChatEntry{Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content}, true
+		return ChatEntry{}, false
 	default:
 		return ChatEntry{}, false
 	}

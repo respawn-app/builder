@@ -12,6 +12,7 @@ import (
 	"builder/server/llm"
 	"builder/shared/cachewarn"
 	"builder/shared/compaction"
+	"builder/shared/transcript"
 	"builder/shared/toolspec"
 )
 
@@ -666,7 +667,11 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	}
 	if mode == compactionModeManual {
 		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
-			if err := e.appendMessage(stepID, carryover); err != nil {
+			if err := e.appendMessageWithoutConversationUpdate(stepID, carryover); err != nil {
+				statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+				return compactionResult{}, errors.Join(err, statusErr)
+			}
+			if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleManualCompactionCarryover), carryover.Content); err != nil {
 				statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 				return compactionResult{}, errors.Join(err, statusErr)
 			}

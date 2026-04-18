@@ -166,13 +166,14 @@ func TestFormatPersistedToolCallBuildsFallbackMetadata(t *testing.T) {
 	}
 }
 
-func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTranscript(t *testing.T) {
+func TestPersistedTranscriptScanUsesLocalCarryoverEntryWhileHiddenCarryoverMessageStaysInvisible(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
 	events := []session.Event{
 		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}),
 		mustPersistedScanEvent(t, "history_replaced", historyReplacementPayload{Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}})}),
 		mustPersistedScanEvent(t, "local_entry", storedLocalEntry{Role: "compaction_summary", Text: "condensed summary"}),
 		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeManualCompactionCarryover, Content: "Last user message before handoff\n\ncarry this forward"}),
+		mustPersistedScanEvent(t, "local_entry", storedLocalEntry{Role: "manual_compaction_carryover", Text: "Last user message before handoff\n\ncarry this forward"}),
 	}
 	for _, evt := range events {
 		if err := scan.ApplyPersistedEvent(evt); err != nil {
@@ -187,7 +188,7 @@ func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTransc
 	if page.Entries[1].Role != "compaction_summary" || page.Entries[1].Text != "condensed summary" {
 		t.Fatalf("expected persisted compaction summary entry, got %+v", page.Entries[1])
 	}
-	if page.Entries[2].Role != "manual_compaction_carryover" {
+	if page.Entries[2].Role != "manual_compaction_carryover" || page.Entries[2].Text != "Last user message before handoff\n\ncarry this forward" {
 		t.Fatalf("expected manual compaction carryover entry, got %+v", page.Entries[2])
 	}
 }

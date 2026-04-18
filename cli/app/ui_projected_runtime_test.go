@@ -182,14 +182,63 @@ func TestWaitRuntimeEventDoesNotSuppressCommittedConversationUpdateWhenNextEvent
 	if !ok {
 		t.Fatalf("expected runtimeEventBatchMsg, got %T", waitRuntimeEvent(ch)())
 	}
-	if len(msg.events) != 1 {
-		t.Fatalf("events len = %d, want 1", len(msg.events))
+	if len(msg.events) != 2 {
+		t.Fatalf("events len = %d, want 2", len(msg.events))
 	}
 	if msg.events[0].Kind != clientui.EventConversationUpdated {
 		t.Fatalf("event kind = %q, want conversation_updated", msg.events[0].Kind)
 	}
-	if msg.carry == nil || msg.carry.Kind != clientui.EventLocalEntryAdded {
-		t.Fatalf("expected reviewer completion carried behind replacement update, got %+v", msg.carry)
+	if msg.events[1].Kind != clientui.EventLocalEntryAdded {
+		t.Fatalf("second event kind = %q, want local_entry_added", msg.events[1].Kind)
+	}
+	if msg.carry != nil {
+		t.Fatalf("did not expect carry when same-step committed tail should batch with replacement update, got %+v", msg.carry)
+	}
+}
+
+func TestPlainConversationUpdateDoesNotDelayCompactionNoticeAppend(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), nil)
+	m.startupCmds = nil
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Committed: true}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	next, cmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{{
+		Kind:               clientui.EventConversationUpdated,
+		StepID:             "step-1",
+		TranscriptRevision: 11,
+	}}})
+	updated := next.(*uiModel)
+	if updated.waitRuntimeEventAfterHydration {
+		t.Fatal("did not expect plain conversation update to arm hydration fence")
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect plain conversation update to trigger hydration, got %+v", msg)
+		}
+	}
+
+	next, _ = updated.Update(runtimeEventBatchMsg{events: []clientui.Event{{
+		Kind:                       clientui.EventLocalEntryAdded,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "compaction_notice",
+			Text: "context compacted for the 1st time",
+		}},
+	}}})
+	updated = next.(*uiModel)
+	if got := len(updated.transcriptEntries); got != 2 {
+		t.Fatalf("expected compaction notice appended immediately, got %+v", updated.transcriptEntries)
+	}
+	if got := updated.transcriptEntries[1].Role; got != "compaction_notice" {
+		t.Fatalf("second transcript role = %q, want compaction_notice", got)
 	}
 }
 
@@ -659,7 +708,7 @@ func TestRuntimeModelHiddenCommittedSkipDoesNotTriggerFollowUpCommittedConversat
 	}
 }
 
-func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
+func TestRuntimeModelReplacementAndSameStepTailConvergeWithoutDuplicateRows(t *testing.T) {
 	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     11,
@@ -703,6 +752,9 @@ func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected runtimeEventBatchMsg, got %T", first())
 	}
+	if got := len(msg.events); got != 2 {
+		t.Fatalf("expected replacement update and same-step tail in one batch, got %+v", msg.events)
+	}
 	next, cmd := m.Update(msg)
 	updated := next.(*uiModel)
 	if cmd == nil {
@@ -714,6 +766,18 @@ func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
 	}
 	next, follow := updated.Update(refresh)
 	updated = next.(*uiModel)
+	pending := collectCmdMessages(t, follow)
+	for len(pending) > 0 {
+		msg := pending[0]
+		pending = pending[1:]
+		refreshMsg, ok := msg.(runtimeTranscriptRefreshedMsg)
+		if !ok {
+			continue
+		}
+		next, nextCmd := updated.Update(refreshMsg)
+		updated = next.(*uiModel)
+		pending = append(pending, collectCmdMessages(t, nextCmd)...)
+	}
 	if got := len(updated.transcriptEntries); got != 2 {
 		t.Fatalf("transcript entry count = %d, want 2", got)
 	}
@@ -722,11 +786,6 @@ func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
 	}
 	if got := updated.transcriptEntries[1].Text; got != "Supervisor ran: no changes." {
 		t.Fatalf("second transcript entry = %q, want reviewer status", got)
-	}
-	for _, followMsg := range collectCmdMessages(t, follow) {
-		if _, ok := followMsg.(runtimeTranscriptRefreshedMsg); ok {
-			t.Fatalf("did not expect same-step reviewer tail to schedule a second hydration after replacement apply, got %+v", followMsg)
-		}
 	}
 }
 

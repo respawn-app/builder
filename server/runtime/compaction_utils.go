@@ -62,7 +62,11 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		if persistErr := e.store.SetUsageState(nil); persistErr != nil {
 			return persistErr
 		}
-		e.emitCommittedTranscriptAdvanced(stepID)
+		if payload.Engine == "reviewer_rollback" {
+			e.emitCommittedTranscriptAdvanced(stepID)
+		} else {
+			e.emitConversationUpdated(stepID)
+		}
 	}
 	return err
 }
