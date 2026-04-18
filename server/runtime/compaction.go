@@ -719,9 +719,13 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 	if err != nil {
 		return compactionResult{}, err
 	}
+	replacement, err := e.buildCanonicalCompactionReplacement(sanitized)
+	if err != nil {
+		return compactionResult{}, err
+	}
 	return compactionResult{
 		engine:            "remote",
-		items:             sanitized,
+		items:             replacement,
 		usage:             resp.Usage,
 		trimmedItemsCount: extraTrimmed + resp.TrimmedItemsCount,
 		provider:          providerID,
