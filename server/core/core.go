@@ -117,6 +117,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
 	projectService, err := projectview.NewMetadataService(metadataStore, "", "")
 	if err != nil {
+		_ = rootLease.Close()
 		_ = metadataStore.Close()
 		return nil, err
 	}

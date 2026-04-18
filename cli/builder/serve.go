@@ -86,7 +86,7 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	defer func() { _ = server.Close() }()
-	_, _ = fmt.Fprintf(stderr, "Builder server ready for workspace %s (project %s). Press Ctrl+C to stop.\n", server.Config().WorkspaceRoot, server.ProjectID())
+	_, _ = fmt.Fprintf(stderr, "Builder server started for workspace %s (project %s). Press Ctrl+C to stop.\n", server.Config().WorkspaceRoot, server.ProjectID())
 	if err := server.Serve(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return 130

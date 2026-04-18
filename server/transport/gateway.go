@@ -527,7 +527,7 @@ func (g *Gateway) resolveAttachedProjectWorkspace(ctx context.Context, projectID
 		return "", "", err
 	}
 	if resolved.Binding == nil {
-		return "", "", fmt.Errorf("workspace %q is not registered", resolved.CanonicalRoot)
+		return "", "", errors.Join(serverapi.ErrWorkspaceNotRegistered, fmt.Errorf("workspace %q is not registered", resolved.CanonicalRoot))
 	}
 	if strings.TrimSpace(resolved.Binding.ProjectID) != strings.TrimSpace(projectID) {
 		return "", "", fmt.Errorf("workspace %q is not bound to project %q", resolved.Binding.CanonicalRoot, strings.TrimSpace(projectID))
@@ -647,6 +647,17 @@ func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, sta
 	if !state.handshakeDone {
 		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
 		return
+	}
+	if g.methodRequiresServerAuth(req.Method) {
+		ready, err := g.serverAuthReady(ctx)
+		if err != nil {
+			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			return
+		}
+		if !ready {
+			_ = websocket.JSON.Send(ws, responseForError(req.ID, serverapi.ErrServerAuthRequired))
+			return
+		}
 	}
 	switch req.Method {
 	case protocol.MethodSessionSubscribeActivity:

@@ -128,8 +128,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
-		authReady := serverAuthReady(s.Core)
+	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		writeStatusJSON(w, http.StatusOK, map[string]any{
 			"status":     "ok",
 			"server_id":  identity.ServerID,
@@ -138,8 +138,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		})
 	})
 	s.ready.Store(true)
-	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, _ *http.Request) {
-		authReady := serverAuthReady(s.Core)
+	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		status := http.StatusServiceUnavailable
 		body := map[string]any{"ready": false, "auth_ready": authReady}
 		if s.ready.Load() && authReady {
@@ -188,11 +188,14 @@ func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func serverAuthReady(appCore *core.Core) bool {
+func serverAuthReady(ctx context.Context, appCore *core.Core) bool {
 	if appCore == nil || appCore.AuthManager() == nil {
 		return false
 	}
-	state, err := appCore.AuthManager().Load(context.Background())
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state, err := appCore.AuthManager().Load(ctx)
 	if err != nil {
 		return false
 	}

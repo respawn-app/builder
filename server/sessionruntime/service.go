@@ -181,26 +181,28 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	leaseID := strings.TrimSpace(req.LeaseID)
-	leaseErr := error(nil)
-	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
-		leaseErr = err
-	}
 	s.mu.Lock()
 	handle := s.handles[sessionID]
 	if handle == nil {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
+		return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", sessionID))
 	}
-	if strings.TrimSpace(handle.controllerLeaseID) != leaseID {
+	s.mu.Unlock()
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return serverapi.SessionRuntimeReleaseResponse{}, err
+	}
+	s.mu.Lock()
+	current := s.handles[sessionID]
+	if current == nil || current != handle || strings.TrimSpace(current.controllerLeaseID) != leaseID {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
+		return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", sessionID))
 	}
 	delete(s.handles, sessionID)
-	ready := handle.ready
-	closeFn := handle.close
+	closeFn := current.close
 	s.mu.Unlock()
-	if ready != nil {
-		<-ready
+	leaseErr := error(nil)
+	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
+		leaseErr = err
 	}
 	if closeFn != nil {
 		closeFn()
