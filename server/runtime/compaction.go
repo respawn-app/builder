@@ -710,7 +710,6 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 		return compactionResult{}, err
 	}
 	contextLimit := e.effectiveContextTokenLimit()
-	canonicalContext := extractCanonicalContext(input)
 	requestItems := compactionConversationReplicaItems(input)
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
@@ -728,12 +727,9 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 	if err != nil {
 		return compactionResult{}, err
 	}
-	replacement := make([]llm.ResponseItem, 0, len(canonicalContext)+len(sanitized))
-	replacement = append(replacement, canonicalContext...)
-	replacement = append(replacement, sanitized...)
 	return compactionResult{
 		engine:            "remote",
-		items:             replacement,
+		items:             sanitized,
 		usage:             resp.Usage,
 		trimmedItemsCount: extraTrimmed + resp.TrimmedItemsCount,
 		provider:          providerID,
@@ -941,14 +937,7 @@ func localCompactionWindow(input []llm.ResponseItem) []llm.ResponseItem {
 		}
 	}
 	window := llm.CloneResponseItems(input[start:])
-	if start == 0 {
-		return window
-	}
-	canonical := extractCanonicalContext(input)
-	out := make([]llm.ResponseItem, 0, len(canonical)+len(window))
-	out = append(out, canonical...)
-	out = append(out, window...)
-	return out
+	return window
 }
 
 func isCompactionBoundaryItem(item llm.ResponseItem) bool {
@@ -960,7 +949,6 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 	}
 	return false
 }
-
 
 func lastVisibleUserMessageSinceLatestCompaction(items []llm.ResponseItem) string {
 	start := 0

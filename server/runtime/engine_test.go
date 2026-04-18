@@ -11070,8 +11070,8 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 		}
 	}
 
-	if !foundCanonical {
-		t.Fatalf("expected canonical developer context in local compaction request, got %+v", client.calls[0].Items)
+	if foundCanonical {
+		t.Fatalf("did not expect pre-compaction developer context in local compaction request, got %+v", client.calls[0].Items)
 	}
 	if !foundCheckpoint {
 		t.Fatalf("expected last compaction checkpoint item in local compaction request, got %+v", client.calls[0].Items)
@@ -11440,7 +11440,7 @@ func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.
 	}
 }
 
-func TestAutoCompactionRemoteCarriesCanonicalContextWithoutDuplication(t *testing.T) {
+func TestAutoCompactionRemoteDropsPreCompactionDeveloperContext(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".builder")
@@ -11523,14 +11523,14 @@ func TestAutoCompactionRemoteCarriesCanonicalContextWithoutDuplication(t *testin
 			envCount++
 		}
 	}
-	if globalCount != 1 {
-		t.Fatalf("expected exactly one global AGENTS context item after compaction, got %d", globalCount)
+	if globalCount != 0 {
+		t.Fatalf("expected remote compaction to drop prior global AGENTS context, got %d", globalCount)
 	}
-	if workspaceCount != 1 {
-		t.Fatalf("expected exactly one workspace AGENTS context item after compaction, got %d", workspaceCount)
+	if workspaceCount != 0 {
+		t.Fatalf("expected remote compaction to drop prior workspace AGENTS context, got %d", workspaceCount)
 	}
-	if envCount != 1 {
-		t.Fatalf("expected exactly one environment context item after compaction, got %d", envCount)
+	if envCount != 0 {
+		t.Fatalf("expected remote compaction to drop prior environment context, got %d", envCount)
 	}
 }
 
