@@ -10972,17 +10972,22 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 	}
 
 	summaryIndex := -1
+	summaryCount := 0
 	carryoverIndex := -1
 	for i, entry := range entries {
 		switch entry.Role {
 		case "compaction_summary":
 			summaryIndex = i
+			summaryCount++
 		case "manual_compaction_carryover":
 			carryoverIndex = i
 		}
 	}
 	if summaryIndex < 0 || carryoverIndex < 0 {
 		t.Fatalf("expected summary and carryover entries, got %+v", entries)
+	}
+	if summaryCount != 1 {
+		t.Fatalf("expected exactly one compaction summary entry, got %d entries=%+v", summaryCount, entries)
 	}
 	if summaryIndex >= carryoverIndex {
 		t.Fatalf("expected compaction summary before manual carryover, got %+v", entries)
