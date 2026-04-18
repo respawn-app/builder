@@ -43,12 +43,12 @@ type metaContextBuildOptions struct {
 }
 
 type metaContextBuildResult struct {
-	Agents       []llm.Message
-	SkillWarning []llm.Message
-	Skills       []llm.Message
-	Environment  []llm.Message
-	Headless     []llm.Message
-	HeadlessExit []llm.Message
+	Agents        []llm.Message
+	SkillWarnings []string
+	Skills        []llm.Message
+	Environment   []llm.Message
+	Headless      []llm.Message
+	HeadlessExit  []llm.Message
 }
 
 func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
@@ -62,14 +62,7 @@ func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
 }
 
 func (r metaContextBuildResult) OrderedInjectionMessages() []llm.Message {
-	out := make([]llm.Message, 0, len(r.Agents)+len(r.SkillWarning)+len(r.Skills)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit))
-	out = append(out, r.Agents...)
-	out = append(out, r.SkillWarning...)
-	out = append(out, r.Skills...)
-	out = append(out, r.Environment...)
-	out = append(out, r.Headless...)
-	out = append(out, r.HeadlessExit...)
-	return out
+	return r.OrderedMetaMessages()
 }
 
 type metaContextBuilder struct {
@@ -112,7 +105,7 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 			return metaContextBuildResult{}, err
 		}
 		if opts.IncludeSkillWarnings {
-			collector.addWarnings(skillDiscoveryWarnings(issues))
+			collector.addWarnings(skillDiscoveryWarningTexts(issues))
 		}
 		if len(skills) > 0 {
 			collector.addMessages([]llm.Message{{
@@ -216,17 +209,13 @@ func headlessModeExitMetaMessage() (llm.Message, bool) {
 	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: content}, true
 }
 
-func skillDiscoveryWarnings(issues []skillDiscoveryIssue) []llm.Message {
+func skillDiscoveryWarningTexts(issues []skillDiscoveryIssue) []string {
 	if len(issues) == 0 {
 		return nil
 	}
-	out := make([]llm.Message, 0, len(issues))
+	out := make([]string, 0, len(issues))
 	for _, issue := range issues {
-		out = append(out, llm.Message{
-			Role:        llm.RoleDeveloper,
-			MessageType: llm.MessageTypeErrorFeedback,
-			Content:     formatSkillDiscoveryWarning(issue),
-		})
+		out = append(out, formatSkillDiscoveryWarning(issue))
 	}
 	return out
 }
@@ -247,7 +236,7 @@ type metaContextCollector struct {
 	environment         *llm.Message
 	headless            *llm.Message
 	headlessExit        *llm.Message
-	warnings            []llm.Message
+	warnings            []string
 }
 
 func newMetaContextCollector(agentRanks map[string]int) *metaContextCollector {
@@ -264,17 +253,14 @@ func (c *metaContextCollector) addMessages(messages []llm.Message) {
 	}
 }
 
-func (c *metaContextCollector) addWarnings(messages []llm.Message) {
+func (c *metaContextCollector) addWarnings(messages []string) {
 	for _, message := range messages {
-		if message.Role != llm.RoleDeveloper || message.MessageType != llm.MessageTypeErrorFeedback {
-			continue
-		}
-		key := strings.TrimSpace(message.Content)
+		key := strings.TrimSpace(message)
 		if key == "" || c.seenWarningMessages[key] {
 			continue
 		}
 		c.seenWarningMessages[key] = true
-		c.warnings = append(c.warnings, message)
+		c.warnings = append(c.warnings, key)
 	}
 }
 
@@ -335,8 +321,8 @@ func (c *metaContextCollector) result() metaContextBuildResult {
 		return c.agents[i].seq < c.agents[j].seq
 	})
 	result := metaContextBuildResult{
-		Agents:       make([]llm.Message, 0, len(c.agents)),
-		SkillWarning: append([]llm.Message(nil), c.warnings...),
+		Agents:        make([]llm.Message, 0, len(c.agents)),
+		SkillWarnings: append([]string(nil), c.warnings...),
 	}
 	for _, agent := range c.agents {
 		result.Agents = append(result.Agents, agent.message)

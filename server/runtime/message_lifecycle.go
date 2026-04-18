@@ -9,6 +9,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type defaultMessageLifecycle struct {
@@ -275,6 +276,15 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, warning := range metaResult.SkillWarnings {
+		if err := e.appendPersistedLocalEntryRecord(stepID, storedLocalEntry{
+			Visibility: transcript.EntryVisibilityAll,
+			Role:       "warning",
+			Text:       warning,
+		}); err != nil {
+			return err
+		}
 	}
 	for _, message := range metaResult.OrderedInjectionMessages() {
 		if err := e.appendMessage(stepID, message); err != nil {
