@@ -10,6 +10,7 @@ Properties:
 - Builder persistence lives in a separate named Docker volume mounted at `/root`, so sandbox auth/session state diverges after first boot and becomes sandbox-owned.
 - The workspace defaults to `/workspace/builder` inside the container. Builder no longer needs the host repo path mirrored into the sandbox.
 - First boot registers the cloned workspace as server project `builder` via the documented server-admin CLI surface.
+- The sandbox image includes Builder-oriented dev/debug tools such as `git`, `gh`, `jq`, `yq`, `ripgrep`, `fd`, `fzf`, `sqlite3`, `strace`, `lsof`, `iproute2`, `dnsutils`, `netcat`, `tree`, `rsync`, `zip`, `python3`, `pip`, `venv`, and `uv`.
 
 Bootstrap order:
 
