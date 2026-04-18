@@ -783,6 +783,8 @@ func protocolError(resp *protocol.ResponseError) error {
 		message = "protocol request failed"
 	}
 	switch resp.Code {
+	case protocol.ErrCodeAuthRequired:
+		return errors.Join(serverapi.ErrServerAuthRequired, errors.New(message))
 	case protocol.ErrCodeStreamGap:
 		return errors.Join(serverapi.ErrStreamGap, errors.New(message))
 	case protocol.ErrCodeWorkspaceNotRegistered:

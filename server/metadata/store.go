@@ -192,6 +192,9 @@ func (s *Store) LookupWorkspaceBindingByID(ctx context.Context, workspaceID stri
 			WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
 		}, nil
 	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, serverapi.ErrWorkspaceNotRegistered
+	}
 	return Binding{}, fmt.Errorf("lookup workspace binding by id: %w", err)
 }
 
