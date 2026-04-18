@@ -632,7 +632,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	instructions := compactionInstructions(args)
 	manualCarryover := ""
 	if mode == compactionModeManual && includeManualCarryover {
-		manualCarryover = e.lastVisibleUserMessage()
+		manualCarryover = lastVisibleUserMessageSinceLatestCompaction(input)
 	}
 	var result compactionResult
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
@@ -961,18 +961,25 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 	return false
 }
 
-func (e *Engine) lastVisibleUserMessage() string {
-	messages := e.snapshotMessages()
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != llm.RoleUser {
+
+func lastVisibleUserMessageSinceLatestCompaction(items []llm.ResponseItem) string {
+	start := 0
+	for i := len(items) - 1; i >= 0; i-- {
+		if !isCompactionBoundaryItem(items[i]) {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || msg.MessageType == llm.MessageTypeCompactionSummary {
+		start = i + 1
+		break
+	}
+	for i := len(items) - 1; i >= start; i-- {
+		item := items[i]
+		if item.Type != llm.ResponseItemTypeMessage || item.Role != llm.RoleUser {
 			continue
 		}
-		return msg.Content
+		if item.MessageType == llm.MessageTypeCompactionSummary || strings.TrimSpace(item.Content) == "" {
+			continue
+		}
+		return item.Content
 	}
 	return ""
 }
