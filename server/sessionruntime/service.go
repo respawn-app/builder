@@ -225,10 +225,19 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 		return err
 	}
-	if handle.activationErr != nil {
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
 		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
 	}
-	if strings.TrimSpace(handle.controllerLeaseID) != trimmedLeaseID {
+	activationErr := current.activationErr
+	controllerLeaseID := strings.TrimSpace(current.controllerLeaseID)
+	s.mu.Unlock()
+	if activationErr != nil {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+	}
+	if controllerLeaseID != trimmedLeaseID {
 		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
 	}
 	return nil

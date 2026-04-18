@@ -253,6 +253,35 @@ func TestRequireControllerLeaseRejectsUnknownLease(t *testing.T) {
 	}
 }
 
+func TestRequireControllerLeaseRejectsReplacedHandleAfterReadyWait(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	original := svc.handles["session-1"]
+	replacement := &runtimeHandle{
+		controllerRequestID: "req-2",
+		controllerLeaseID:   "lease-2",
+		ready:               make(chan struct{}),
+	}
+	close(replacement.ready)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.RequireControllerLease(context.Background(), "session-1", "lease-1")
+	}()
+	svc.mu.Lock()
+	svc.handles["session-1"] = replacement
+	svc.mu.Unlock()
+	close(original.ready)
+	err := <-errCh
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("RequireControllerLease error = %v, want invalid controller lease", err)
+	}
+}
+
 func TestResolveStoreFallsBackThroughMetadataAuthority(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)

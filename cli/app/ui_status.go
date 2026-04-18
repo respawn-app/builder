@@ -284,25 +284,13 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 }
 
 func (c defaultUIStatusCollector) Collect(ctx context.Context, req uiStatusRequest) (uiStatusSnapshot, error) {
-	snapshot := c.CollectBase(req)
+	snapshot := enrichStatusBaseSnapshot(ctx, req, c.CollectBase(req))
 	authResult := c.CollectAuth(ctx, req, snapshot)
 	gitResult := c.CollectGit(ctx, req, snapshot)
 	envResult := c.CollectEnvironment(ctx, req, snapshot)
 	snapshot.Auth = authResult.Auth
 	snapshot.Subscription = authResult.Subscription
 	snapshot.Git = gitResult.Git
-	if parentSessionID := strings.TrimSpace(snapshot.ParentSessionID); parentSessionID != "" {
-		if parentSessionName, warning := statusParentSessionName(ctx, req.SessionViews, parentSessionID); strings.TrimSpace(parentSessionName) != "" {
-			snapshot.ParentSessionName = parentSessionName
-		} else if strings.TrimSpace(warning) != "" {
-			warnings := make([]string, 0, 1)
-			if strings.TrimSpace(snapshot.CollectorWarning) != "" {
-				warnings = append(warnings, strings.TrimSpace(snapshot.CollectorWarning))
-			}
-			warnings = append(warnings, warning)
-			snapshot.CollectorWarning = strings.Join(warnings, " | ")
-		}
-	}
 	snapshot.Skills = envResult.Skills
 	snapshot.SkillTokenCounts = envResult.SkillTokenCounts
 	snapshot.AgentsPaths = envResult.AgentsPaths
@@ -361,6 +349,28 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 		},
 		CompactionCount: compactionCount,
 	}
+}
+
+func enrichStatusBaseSnapshot(ctx context.Context, req uiStatusRequest, snapshot uiStatusSnapshot) uiStatusSnapshot {
+	if parentSessionID := strings.TrimSpace(snapshot.ParentSessionID); parentSessionID != "" {
+		if parentSessionName, warning := statusParentSessionName(ctx, req.SessionViews, parentSessionID); strings.TrimSpace(parentSessionName) != "" {
+			snapshot.ParentSessionName = parentSessionName
+		} else if strings.TrimSpace(warning) != "" {
+			snapshot.CollectorWarning = joinStatusWarnings(snapshot.CollectorWarning, warning)
+		}
+	}
+	return snapshot
+}
+
+func joinStatusWarnings(existing string, warning string) string {
+	parts := make([]string, 0, 2)
+	if trimmed := strings.TrimSpace(existing); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	if trimmed := strings.TrimSpace(warning); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	return strings.Join(parts, " | ")
 }
 
 func statusParentSessionName(ctx context.Context, sessionViews client.SessionViewClient, parentSessionID string) (string, string) {
@@ -1045,8 +1055,9 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 		m.status.error = ""
 		m.status.pendingSections = nil
 		m.status.sectionWarnings = seed.Warnings
-		m.startStatusSectionRefresh(seed.PendingSections...)
-		cmds := make([]tea.Cmd, 0, len(seed.PendingSections))
+		m.startStatusSectionRefresh(append([]uiStatusSection{uiStatusSectionBase}, seed.PendingSections...)...)
+		cmds := make([]tea.Cmd, 0, len(seed.PendingSections)+1)
+		cmds = append(cmds, m.statusBaseRefreshCmd(token, request, base))
 		for _, section := range seed.PendingSections {
 			switch section {
 			case uiStatusSectionAuth:
@@ -1072,9 +1083,11 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 	}
 }
 
-func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, collector uiStatusProgressiveCollector) tea.Cmd {
+func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
-		return statusBaseRefreshDoneMsg{token: token, snapshot: collector.CollectBase(request)}
+		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
+		defer cancel()
+		return statusBaseRefreshDoneMsg{token: token, snapshot: enrichStatusBaseSnapshot(ctx, request, base)}
 	}
 }
 

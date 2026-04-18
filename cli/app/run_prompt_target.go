@@ -24,7 +24,9 @@ import (
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
 var dialConfiguredRemote = client.DialRemoteURLForProjectWorkspaceID
-var dialConfiguredProjectViewRemote = client.DialRemoteURL
+var dialConfiguredProjectViewRemote = func(ctx context.Context, rpcURL string) (configuredProjectViewRemote, error) {
+	return client.DialRemoteURL(ctx, rpcURL)
+}
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
@@ -44,9 +46,17 @@ var forceKillOwnedDaemonProcess = func(process *os.Process) error {
 }
 
 const launchedDaemonShutdownTimeout = 5 * time.Second
-const configuredRemoteAttachTimeout = 500 * time.Millisecond
+
+var configuredRemoteAttachTimeout = 500 * time.Millisecond
+var configuredRemoteWorkspaceDiscoveryTimeout = 5 * time.Second
 
 var errWorkspaceNotRegistered = serverapi.ErrWorkspaceNotRegistered
+
+type configuredProjectViewRemote interface {
+	client.ProjectViewClient
+	Close() error
+	Identity() protocol.ServerIdentity
+}
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
 	cfg, err := loadRemoteAttachConfig(opts)
@@ -95,9 +105,10 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 	if err != nil {
 		return nil, false, err
 	}
+	rpcURL := config.ServerRPCURL(cfg)
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, config.ServerRPCURL(cfg))
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, rpcURL)
 	if err != nil {
 		return nil, false, nil
 	}
@@ -112,7 +123,7 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 	}
 	if bindingResp.Binding != nil {
 		_ = projectViews.Close()
-		remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
+		remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -122,7 +133,9 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 		_ = projectViews.Close()
 		return nil, true, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
 	}
-	workspace, found, err := selectSingleRemoteWorkspaceForHeadless(attachCtx, projectViews)
+	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, configuredRemoteWorkspaceDiscoveryTimeout)
+	workspace, found, err := selectSingleRemoteWorkspaceForHeadless(discoveryCtx, projectViews)
+	discoveryCancel()
 	_ = projectViews.Close()
 	if err != nil {
 		return nil, true, err
@@ -130,7 +143,7 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 	if !found {
 		return nil, true, headlessRemoteWorkspaceSelectionError()
 	}
-	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), workspace.ProjectID, workspace.WorkspaceID)
+	remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, workspace.ProjectID, workspace.WorkspaceID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -185,9 +198,10 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 	if err != nil {
 		return nil, false
 	}
+	rpcURL := config.ServerRPCURL(cfg)
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, config.ServerRPCURL(cfg))
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, rpcURL)
 	if err != nil {
 		return nil, false
 	}
@@ -209,14 +223,25 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 			_ = projectViews.Close()
 			return nil, false
 		}
-		return projectViews, true
+		remote, ok := projectViews.(*client.Remote)
+		if !ok {
+			_ = projectViews.Close()
+			return nil, false
+		}
+		return remote, true
 	}
 	_ = projectViews.Close()
-	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), binding.ProjectID, binding.WorkspaceID)
+	remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, binding.ProjectID, binding.WorkspaceID)
 	if err != nil {
 		return nil, false
 	}
 	return remote, true
+}
+
+func dialConfiguredRemoteWorkspace(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	return dialConfiguredRemote(attachCtx, rpcURL, projectID, workspaceID)
 }
 
 func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
