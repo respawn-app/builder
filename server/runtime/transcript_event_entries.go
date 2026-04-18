@@ -18,7 +18,7 @@ func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
 			entries = append(entries, entry)
 		}
 	case llm.RoleAssistant:
-		if strings.TrimSpace(msg.Content) != "" {
+		if strings.TrimSpace(msg.Content) != "" && !isNoopFinalAnswer(msg) {
 			entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 		}
 		for _, call := range msg.ToolCalls {

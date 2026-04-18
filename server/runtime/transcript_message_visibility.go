@@ -43,6 +43,8 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		return ChatEntry{Role: string(transcript.EntryRoleInterruption), Text: msg.Content}, true
 	case llm.MessageTypeErrorFeedback:
 		return ChatEntry{Role: string(transcript.EntryRoleDeveloperFeedback), Text: msg.Content}, true
+	case llm.MessageTypeReviewerFeedback:
+		return ChatEntry{}, false
 	case llm.MessageTypeCompactionSoonReminder:
 		return ChatEntry{Role: "warning", Text: msg.Content}, true
 	case llm.MessageTypeBackgroundNotice:
