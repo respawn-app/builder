@@ -191,9 +191,15 @@ func (c *countingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRe
 	return c.inner.LoadTranscriptPage(req)
 }
 func (c *countingRuntimeClient) Status() clientui.RuntimeStatus { return c.inner.Status() }
-func (c *countingRuntimeClient) SessionView() clientui.RuntimeSessionView { return c.inner.SessionView() }
-func (c *countingRuntimeClient) SetSessionName(name string) error { return c.inner.SetSessionName(name) }
-func (c *countingRuntimeClient) SetThinkingLevel(level string) error { return c.inner.SetThinkingLevel(level) }
+func (c *countingRuntimeClient) SessionView() clientui.RuntimeSessionView {
+	return c.inner.SessionView()
+}
+func (c *countingRuntimeClient) SetSessionName(name string) error {
+	return c.inner.SetSessionName(name)
+}
+func (c *countingRuntimeClient) SetThinkingLevel(level string) error {
+	return c.inner.SetThinkingLevel(level)
+}
 func (c *countingRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 	return c.inner.SetFastModeEnabled(enabled)
 }
@@ -225,13 +231,15 @@ func (c *countingRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inn
 func (c *countingRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
 	return c.inner.SubmitQueuedUserMessages(ctx)
 }
-func (c *countingRuntimeClient) Interrupt() error { return c.inner.Interrupt() }
+func (c *countingRuntimeClient) Interrupt() error             { return c.inner.Interrupt() }
 func (c *countingRuntimeClient) QueueUserMessage(text string) { c.inner.QueueUserMessage(text) }
 func (c *countingRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
 	return c.inner.DiscardQueuedUserMessagesMatching(text)
 }
-func (c *countingRuntimeClient) RecordPromptHistory(text string) error { return c.inner.RecordPromptHistory(text) }
-func (c *countingRuntimeClient) LoadCalls() int { return int(c.loadCalls.Load()) }
+func (c *countingRuntimeClient) RecordPromptHistory(text string) error {
+	return c.inner.RecordPromptHistory(text)
+}
+func (c *countingRuntimeClient) LoadCalls() int    { return int(c.loadCalls.Load()) }
 func (c *countingRuntimeClient) RefreshCalls() int { return int(c.refreshCalls.Load()) }
 
 func (c localCompactionSummaryClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
