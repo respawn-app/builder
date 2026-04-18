@@ -23,7 +23,7 @@ Usage:
 
 Start an isolated Docker sandbox that builds `builder` from the same repo
 snapshot copied into the image, clones a sandboxed Builder repo into the
-mirrored workspace path, seeds only `config.toml` and `auth.json` into an
+container workspace path, seeds only `config.toml` and `auth.json` into an
 isolated home volume on first boot, registers project `builder`, and exposes
 the JSON-RPC WebSocket gateway to the host machine.
 
@@ -36,8 +36,8 @@ Options:
   --host-port PORT        Host port to expose. Default: 53082
   --container-port PORT   Container listen port. Default: 53082
   --platform PLATFORM     Docker platform. Default: linux/<host-arch>
-  --workspace-root PATH   Absolute workspace path mirrored inside container.
-                          Default: canonical repo root
+  --workspace-root PATH   Absolute container workspace path.
+                          Default: /workspace/builder
   --project-name NAME     Server-side project display name. Default: builder
   --config-seed PATH      Host config.toml copied once into sandbox /root/.builder/
                           Default: $HOME/.builder/config.toml
@@ -126,15 +126,23 @@ snapshot_ref() {
 	printf 'local'
 }
 
-canonical_path() {
+normalize_absolute_path() {
 	local target="${1:-}"
 	if [ -z "$target" ]; then
 		die "path is required"
 	fi
-	(
-		cd -- "$target"
-		pwd -P
-	)
+	case "$target" in
+	/*) ;;
+	*) die "path must be absolute: $target" ;;
+	esac
+	local parent
+	parent="$(dirname -- "$target")"
+	if [ -d "$parent" ]; then
+		parent="$(cd -- "$parent" && pwd -P)"
+		printf '%s/%s' "$parent" "$(basename -- "$target")"
+		return 0
+	fi
+	printf '%s' "$target"
 }
 
 canonical_file_path() {
@@ -213,7 +221,7 @@ build_image() {
 }
 
 run_up() {
-	workspace_root="$(canonical_path "$workspace_root")"
+	workspace_root="$(normalize_absolute_path "$workspace_root")"
 	workspace_volume="${workspace_volume:-${container_name}-workspace}"
 	home_volume="${home_volume:-${container_name}-home}"
 	serve_args=("${passthrough_args[@]}")
@@ -319,7 +327,7 @@ image_tag="builder-sandbox:local"
 host_port="53082"
 container_port="53082"
 platform="$(default_platform)"
-workspace_root="$repo_root"
+workspace_root="/workspace/builder"
 project_name="builder"
 config_seed="${HOME:-}/.builder/config.toml"
 auth_seed="${HOME:-}/.builder/auth.json"
