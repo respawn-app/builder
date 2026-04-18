@@ -121,6 +121,26 @@ func TestResolveWorkspacePathLeavesNestedDirectoryUnbound(t *testing.T) {
 	}
 }
 
+func TestLookupWorkspaceBindingByIDReturnsWorkspaceNotRegisteredForUnknownID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if _, err := store.LookupWorkspaceBindingByID(context.Background(), "workspace-missing"); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+		t.Fatalf("LookupWorkspaceBindingByID error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+}
+
 func TestAttachWorkspaceToProjectAllowsNestedPathAsSeparateWorkspace(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

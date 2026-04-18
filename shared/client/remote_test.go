@@ -500,6 +500,12 @@ func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	}
 }
 
+func TestProtocolErrorMapsAuthRequiredCode(t *testing.T) {
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeAuthRequired, Message: "auth required"}); !errors.Is(err, serverapi.ErrServerAuthRequired) {
+		t.Fatalf("expected server auth required, got %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)
