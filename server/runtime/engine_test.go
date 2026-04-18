@@ -10776,6 +10776,71 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 	}
 }
 
+func TestReopenedManualCompactionKeepsModelCarryoverHiddenFromTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+
+	messages := restored.snapshotMessages()
+	carryoverMessages := 0
+	for _, message := range messages {
+		if message.MessageType != llm.MessageTypeManualCompactionCarryover {
+			continue
+		}
+		carryoverMessages++
+		if !strings.Contains(message.Content, "please keep tests green") {
+			t.Fatalf("expected reopened model carryover to preserve last user text, got %q", message.Content)
+		}
+	}
+	if carryoverMessages != 1 {
+		t.Fatalf("manual compaction carryover message count = %d, want 1; messages=%+v", carryoverMessages, messages)
+	}
+
+	entries := restored.ChatSnapshot().Entries
+	carryoverEntries := 0
+	for _, entry := range entries {
+		if entry.Role != string(transcript.EntryRoleManualCompactionCarryover) {
+			continue
+		}
+		carryoverEntries++
+		if !strings.Contains(entry.Text, "please keep tests green") {
+			t.Fatalf("expected reopened transcript carryover to preserve last user text, got %q", entry.Text)
+		}
+	}
+	if carryoverEntries != 1 {
+		t.Fatalf("manual compaction carryover transcript entry count = %d, want 1; entries=%+v", carryoverEntries, entries)
+	}
+}
+
 func TestRemoteCompactionTrimUsesSublinearPreciseTokenCountCalls(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

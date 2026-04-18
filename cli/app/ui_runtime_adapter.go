@@ -1348,6 +1348,9 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 					if runtimeEventCoversDeferredCommittedConversationUpdate(evt, next) {
 						return runtimeEventBatchMsg{events: []clientui.Event{next}}
 					}
+					if runtimeEventShouldBatchAfterCommittedConversationFence(evt, next) {
+						return runtimeEventBatchMsg{events: []clientui.Event{evt, next}}
+					}
 					if runtimeEventBatchFence(next) {
 						carry := next
 						return runtimeEventBatchMsg{events: events, carry: &carry}
@@ -1415,6 +1418,25 @@ func runtimeEventCoversDeferredCommittedConversationUpdate(update clientui.Event
 		return false
 	}
 	if next.CommittedEntryCount != update.CommittedEntryCount {
+		return false
+	}
+	return true
+}
+
+func runtimeEventShouldBatchAfterCommittedConversationFence(update clientui.Event, next clientui.Event) bool {
+	if !runtimeEventCanDeferCommittedConversationFence(update) {
+		return false
+	}
+	if !next.CommittedTranscriptChanged || len(next.TranscriptEntries) == 0 {
+		return false
+	}
+	if strings.TrimSpace(next.StepID) == "" || strings.TrimSpace(next.StepID) != strings.TrimSpace(update.StepID) {
+		return false
+	}
+	if update.TranscriptRevision > 0 && next.TranscriptRevision > 0 && next.TranscriptRevision < update.TranscriptRevision {
+		return false
+	}
+	if runtimeEventCoversDeferredCommittedConversationUpdate(update, next) {
 		return false
 	}
 	return true
