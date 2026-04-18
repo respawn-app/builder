@@ -333,6 +333,9 @@
 - Main UI startup clears the visible terminal viewport once before rendering (including `native` mode), so each session (including `/new`) starts from a clean visible slate.
 - During continuous attachment, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to paper over same-session logical divergence.
 - For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite.
+- User-visible transcript history is never truncated by compaction or handoff. Compaction may replace model context, but detail/ongoing transcript reads must preserve all pre-compaction committed history across any number of compactions.
+- Any latest-compaction boundary or floor is tail/model metadata only. Detail transcript paging and rendering must ignore it and show the full append-only transcript in persisted order.
+- Legacy persisted `history_replaced` entries with `engine="reviewer_rollback"` are compatibility no-ops on replay. Builder must tolerate and ignore them rather than treating them as transcript-rewrite semantics.
 - Rollback/fork is navigation or attachment to a different session target, not a same-session transcript mutation.
 - Assistant streaming is rendered in the ongoing live viewport and is not appended to normal-buffer scrollback until commit.
 - Ongoing-mode normal-buffer scrollback is committed-transcript only. Tool-progress, assistant deltas, reasoning deltas, and any other provisional live activity are transient viewport state only and must never become immutable scrollback authority.

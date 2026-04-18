@@ -61,21 +61,18 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return err
 			}
 		case "history_replaced":
-			var payload historyReplacementPayload
-			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+			if err != nil {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
-			e.resetLocalDiagnostics()
-			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				e.chat.restoreHistoryItems(payload.Items)
-				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())
-				reminderIssued = itemsContainCompactionSoonReminder(payload.Items)
-			} else {
-				e.chat.replaceHistory(payload.Items)
-				e.compactionCount++
-				recoveredHandoff.ClearSatisfiedByCompaction()
-				reminderIssued = false
+			if ignoredLegacy {
+				return nil
 			}
+			e.resetLocalDiagnostics()
+			e.chat.replaceHistory(payload.Items)
+			e.compactionCount++
+			recoveredHandoff.ClearSatisfiedByCompaction()
+			reminderIssued = false
 		}
 		return nil
 	}); err != nil {

@@ -52,9 +52,12 @@ func VisibleChatEntriesFromPersistedEvent(evt session.Event) ([]ChatEntry, bool,
 		}
 		return chat.snapshot().Entries, false, nil
 	case "history_replaced":
-		var payload historyReplacementPayload
-		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+		payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+		if err != nil {
 			return nil, false, fmt.Errorf("decode history_replaced event: %w", err)
+		}
+		if ignoredLegacy {
+			return nil, false, nil
 		}
 		return visibleChatEntriesFromResponseItems(payload.Items), true, nil
 	default:

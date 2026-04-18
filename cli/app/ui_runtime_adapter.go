@@ -343,11 +343,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			OngoingError: m.view.OngoingErrorText(),
 		})
 	}
-	if plan.mode == projectedTranscriptEntryPlanAppend && m.view.Mode() == tui.ModeDetail && !allTranscriptEntriesTransient(convertedEntries) && m.view.TranscriptBaseOffset() == m.transcriptBaseOffset {
+	if plan.mode == projectedTranscriptEntryPlanAppend && m.view.Mode() == tui.ModeDetail && !allTranscriptEntriesTransient(convertedEntries) && m.detailTranscript.loaded && m.view.TranscriptBaseOffset() == m.detailTranscript.offset {
 		m.forwardToView(tui.SetConversationMsg{
-			BaseOffset:   m.transcriptBaseOffset,
-			TotalEntries: m.transcriptTotalEntries,
-			Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
+			BaseOffset:   m.detailTranscript.offset,
+			TotalEntries: m.detailTranscript.totalEntries,
+			Entries:      append([]tui.TranscriptEntry(nil), m.detailTranscript.entries...),
 			Ongoing:      m.view.OngoingStreamingText(),
 			OngoingError: m.view.OngoingErrorText(),
 		})
@@ -650,6 +650,35 @@ func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.Transcri
 	return false
 }
 
+func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.TranscriptPage) bool {
+	if m == nil {
+		return false
+	}
+	trimmedLiveOngoing := strings.TrimSpace(m.view.OngoingStreamingText())
+	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
+		return false
+	}
+	entries := page.Entries
+	if len(entries) == 0 {
+		return false
+	}
+	currentStart := m.transcriptBaseOffset
+	currentEnd := currentStart + len(m.transcriptEntries)
+	for idx, entry := range entries {
+		if strings.TrimSpace(entry.Role) != "assistant" || strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
+			continue
+		}
+		absolute := page.Offset + idx
+		if absolute < currentStart || absolute >= currentEnd {
+			return true
+		}
+		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[absolute-currentStart], entry) {
+			return true
+		}
+	}
+	return false
+}
+
 func committedTranscriptAlreadyMatchesAssistantOngoing(entries []tui.TranscriptEntry, liveOngoing string) bool {
 	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
 	if trimmedLiveOngoing == "" {
@@ -695,6 +724,9 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 		return "stale_total_entries"
 	}
 	if page.Revision == effectiveRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		if authoritativePageCommitsLiveAssistantOngoing(m, page) {
+			return ""
+		}
 		if authoritativePageDuplicatesCommittedAssistantOngoing(transcriptEntriesFromPage(page), page.Ongoing, m.view.OngoingStreamingText()) {
 			return ""
 		}

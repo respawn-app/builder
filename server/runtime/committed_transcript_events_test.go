@@ -56,12 +56,6 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 	assertEventFlags(t, events[start:], []eventFlagExpectation{{kind: EventLocalEntryAdded, stepID: "compact-step", committedChanged: true}, {kind: EventConversationUpdated, stepID: "compact-step", committedChanged: false}})
 
 	start = len(events)
-	if err := eng.replaceHistory("rollback-step", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
-		t.Fatalf("replace history for reviewer rollback: %v", err)
-	}
-	assertEventFlags(t, events[start:], []eventFlagExpectation{{kind: EventConversationUpdated, stepID: "rollback-step", committedChanged: true}})
-
-	start = len(events)
 	if err := eng.appendMessage("message-step", llm.Message{Role: llm.RoleAssistant, Content: "persisted assistant", Phase: llm.MessagePhaseFinal}); err != nil {
 		t.Fatalf("append persisted message: %v", err)
 	}

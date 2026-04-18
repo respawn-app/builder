@@ -984,6 +984,9 @@ func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBrid
 			sawAssistantDelta = true
 		}
 		if evt.Kind == clientui.EventConversationUpdated {
+			if evt.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+				t.Fatalf("expected synthetic bridge-gap recovery cause, got %+v", evt)
+			}
 			sawRecovery = true
 		}
 	}
@@ -1064,6 +1067,12 @@ func TestBridgeGapHydratesTranscriptStateInProjectedUI(t *testing.T) {
 			refresh, ok := msg.(runtimeTranscriptRefreshedMsg)
 			if !ok {
 				continue
+			}
+			if refresh.syncCause != runtimeTranscriptSyncCauseContinuityRecovery {
+				t.Fatalf("bridge-gap sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseContinuityRecovery)
+			}
+			if refresh.recoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+				t.Fatalf("bridge-gap recovery cause = %q, want %q", refresh.recoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
 			}
 			next, follow := m.Update(refresh)
 			m = next.(*uiModel)

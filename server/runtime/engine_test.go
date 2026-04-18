@@ -2538,6 +2538,16 @@ func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice
 	if !notice.CommittedEntryStartSet || notice.CommittedEntryStart != 3 {
 		t.Fatalf("unexpected compaction notice committed start: %+v", *notice)
 	}
+	conversationUpdatedCount := 0
+	for _, evt := range events {
+		if evt.Kind != EventConversationUpdated || evt.StepID != "step-1" {
+			continue
+		}
+		conversationUpdatedCount++
+	}
+	if conversationUpdatedCount != 1 {
+		t.Fatalf("expected one compaction conversation update, got %+v", events)
+	}
 }
 
 func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *testing.T) {
@@ -4119,7 +4129,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 	}
 }
 
-func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
+func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -4167,47 +4177,56 @@ func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testi
 			t.Fatalf("restore engine: %v", result.err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("restore engine timed out; possible store-lock deadlock while replaying reviewer_rollback history replacement")
+		t.Fatal("restore engine timed out while ignoring legacy reviewer_rollback history replacement")
 	}
 	items := restored.snapshotItems()
-	if len(items) != len(legacyItems) {
-		t.Fatalf("expected %d restored items, got %+v", len(legacyItems), items)
-	}
-	if items[0].Role != llm.RoleUser || items[0].Content != "before" {
-		t.Fatalf("unexpected restored first item: %+v", items[0])
-	}
-	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != "call_1" {
-		t.Fatalf("unexpected restored function call item: %+v", items[1])
-	}
-	if string(items[1].ToolPresentation) != string(presentation) {
-		t.Fatalf("expected stored tool presentation preserved, got %+v", items[1])
+	if len(items) != 0 {
+		t.Fatalf("expected legacy reviewer rollback replacement to be ignored, got %+v", items)
 	}
 	snapshot := restored.ChatSnapshot()
-	if len(snapshot.Entries) != 2 {
-		t.Fatalf("expected restored user and tool call entries, got %+v", snapshot.Entries)
-	}
-	if snapshot.Entries[1].Role != "tool_call" || snapshot.Entries[1].ToolCall == nil || snapshot.Entries[1].ToolCall.Command != "pwd" {
-		t.Fatalf("expected restored tool call transcript entry, got %+v", snapshot.Entries[1])
+	if len(snapshot.Entries) != 0 {
+		t.Fatalf("expected ignored legacy reviewer rollback to produce no transcript entries, got %+v", snapshot.Entries)
 	}
 }
 
 func TestRestoreMessagesFailsOnMalformedHistoryReplacementPayload(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
-		StepID:  "legacy-step",
-		Kind:    "history_replaced",
-		Payload: json.RawMessage(`{"engine":"reviewer_rollback","items":"not-an-array"}`),
-	}}); err != nil {
-		t.Fatalf("append malformed replay event: %v", err)
-	}
+	t.Run("non-legacy payload still fails", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := session.Create(dir, "ws", dir)
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+		if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
+			StepID:  "legacy-step",
+			Kind:    "history_replaced",
+			Payload: json.RawMessage(`{"engine":"local","items":"not-an-array"}`),
+		}}); err != nil {
+			t.Fatalf("append malformed replay event: %v", err)
+		}
 
-	if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
-		t.Fatalf("expected malformed history replacement decode error, got %v", err)
-	}
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
+			t.Fatalf("expected malformed history replacement decode error, got %v", err)
+		}
+	})
+
+	t.Run("legacy reviewer rollback payload is ignored", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := session.Create(dir, "ws", dir)
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+		if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
+			StepID:  "legacy-step",
+			Kind:    "history_replaced",
+			Payload: json.RawMessage(`{"engine":"reviewer_rollback","items":"not-an-array"}`),
+		}}); err != nil {
+			t.Fatalf("append malformed replay event: %v", err)
+		}
+
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err != nil {
+			t.Fatalf("expected malformed legacy reviewer rollback payload to be ignored, got %v", err)
+		}
+	})
 }
 
 func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
@@ -9084,7 +9103,7 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	}
 }
 
-func TestReviewerRollbackClearsPersistedUsageStateAcrossReopen(t *testing.T) {
+func TestLegacyReviewerRollbackHistoryReplacementIsIgnoredAcrossReopen(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -9104,19 +9123,19 @@ func TestReviewerRollbackClearsPersistedUsageStateAcrossReopen(t *testing.T) {
 	if store.Meta().UsageState == nil {
 		t.Fatal("expected usage state persisted before rollback")
 	}
-	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
-		t.Fatalf("replace history: %v", err)
+	if _, err := store.AppendEvent("step-rollback", "history_replaced", historyReplacementPayload{Engine: "reviewer_rollback", Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})}); err != nil {
+		t.Fatalf("append legacy reviewer rollback history replacement: %v", err)
 	}
-	if store.Meta().UsageState != nil {
-		t.Fatalf("expected reviewer rollback to clear persisted usage state, got %+v", store.Meta().UsageState)
+	if store.Meta().UsageState == nil {
+		t.Fatal("expected ignored legacy reviewer rollback to leave persisted usage state intact")
 	}
 
 	reopenedStore, err := session.Open(store.Dir())
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	if reopenedStore.Meta().UsageState != nil {
-		t.Fatalf("expected reopened session to keep usage state cleared, got %+v", reopenedStore.Meta().UsageState)
+	if reopenedStore.Meta().UsageState == nil {
+		t.Fatal("expected reopened session to keep usage state intact after ignored legacy reviewer rollback")
 	}
 }
 
@@ -10593,7 +10612,7 @@ func TestReopenedSessionAfterFailedTriggerHandoffDoesNotRequeuePendingHandoff(t 
 	}
 }
 
-func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(t *testing.T) {
+func TestReopenedSessionAfterLegacyReviewerRollbackStillRequeuesPendingTriggerHandoff(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -10626,8 +10645,8 @@ func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(
 	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: toolspec.ToolTriggerHandoff, Output: resultOutput}); err != nil {
 		t.Fatalf("persist tool completion: %v", err)
 	}
-	if err := eng.replaceHistory("step-1", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
-		t.Fatalf("append reviewer rollback history replacement: %v", err)
+	if _, err := store.AppendEvent("step-1", "history_replaced", historyReplacementPayload{Engine: "reviewer_rollback", Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})}); err != nil {
+		t.Fatalf("append legacy reviewer rollback history replacement: %v", err)
 	}
 
 	reopenedStore, err := session.Open(store.Dir())
@@ -10643,7 +10662,7 @@ func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(
 		t.Fatalf("restore engine: %v", err)
 	}
 	if restored.pendingHandoffRequest == nil {
-		t.Fatal("expected reviewer rollback to preserve pending handoff recovery")
+		t.Fatal("expected ignored legacy reviewer rollback to preserve pending handoff recovery")
 	}
 	if got, want := restored.pendingHandoffRequest.futureAgentMessage, "resume after rollback"; got != want {
 		t.Fatalf("pending future_agent_message = %q, want %q", got, want)

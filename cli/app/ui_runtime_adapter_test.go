@@ -1778,6 +1778,51 @@ func TestApplyRuntimeTranscriptPageAcceptsSameRevisionEmptyOngoingWhenCommittedT
 	}
 }
 
+func TestApplyRuntimeTranscriptPageAcceptsSameRevisionEmptyOngoingWhenPageCommitsLiveAssistantBeforeCommittedSuffix(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "prompt"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 3
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "done"})
+	m.sawAssistantDelta = true
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "assistant", Text: "done", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_status", Text: "Supervisor ran: no changes."},
+		},
+		Ongoing: "",
+	}
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected same-revision authoritative page to clear stale live ongoing when assistant is committed before suffix, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected same-revision authoritative page to clear assistant delta flag when assistant is committed before suffix")
+	}
+	if got, want := len(m.transcriptEntries), 3; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.transcriptEntries[1].Text; got != "done" {
+		t.Fatalf("assistant text = %q, want done", got)
+	}
+	if got := m.transcriptEntries[2].Role; got != "reviewer_status" {
+		t.Fatalf("suffix role = %q, want reviewer_status", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected native sync command after authoritative page apply")
+	}
+}
+
 func TestInvalidateTransientTranscriptStateClearsDeferredCommittedTail(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{rangeStart: 1, rangeEnd: 2, revision: 7, entries: []clientui.ChatEntry{{Role: "user", Text: "queued"}}}}

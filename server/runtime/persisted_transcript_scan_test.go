@@ -96,7 +96,7 @@ func TestPersistedTranscriptScanKeepsLatestCompactionSegmentInDormantOngoingTail
 	}
 }
 
-func TestPersistedTranscriptScanReviewerRollbackClearsProjectedCompactionEntries(t *testing.T) {
+func TestPersistedTranscriptScanIgnoresLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
 	events := []session.Event{
 		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "before"}),
@@ -110,11 +110,14 @@ func TestPersistedTranscriptScanReviewerRollbackClearsProjectedCompactionEntries
 	}
 
 	page := scan.CollectedPageSnapshot()
-	if got := len(page.Entries); got != 1 {
-		t.Fatalf("len(page.Entries) = %d, want 1 (%+v)", got, page.Entries)
+	if got := len(page.Entries); got != 2 {
+		t.Fatalf("len(page.Entries) = %d, want 2 (%+v)", got, page.Entries)
 	}
-	if got := page.Entries[0].Text; got != "rolled back" {
-		t.Fatalf("entry[0] = %q, want rolled back", got)
+	if got := page.Entries[0].Text; got != "before" {
+		t.Fatalf("entry[0] = %q, want before", got)
+	}
+	if got := page.Entries[1].Text; got != "summary" {
+		t.Fatalf("entry[1] = %q, want summary", got)
 	}
 }
 

@@ -72,7 +72,6 @@ type localChatEntry struct {
 	Entry             ChatEntry
 	AfterMessageCount int
 	MarksBoundary     bool
-	ProjectedHistory  bool
 }
 
 type compactionCheckpoint struct {
@@ -120,28 +119,6 @@ func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 		Items:              llm.CloneResponseItems(items),
 	}
 	s.headlessModeActive = headlessModeActive(llm.MessagesFromItems(items))
-	s.providerTokenEstimateDirty = true
-}
-
-func (s *chatStore) restoreHistoryItems(items []llm.ResponseItem) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.items = llm.CloneResponseItems(items)
-	if len(s.local) > 0 {
-		// reviewer_rollback is a real visible-history replacement, so synthetic
-		// compaction rows from earlier non-reviewer history_replaced events must be
-		// discarded when restoring the rolled-back transcript.
-		preserved := make([]localChatEntry, 0, len(s.local))
-		for _, entry := range s.local {
-			if entry.ProjectedHistory {
-				continue
-			}
-			preserved = append(preserved, entry)
-		}
-		s.local = preserved
-	}
-	s.compact = nil
-	s.rebuildTranscriptStatsLocked()
 	s.providerTokenEstimateDirty = true
 }
 
@@ -253,16 +230,16 @@ func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ong
 }
 
 func (s *chatStore) appendProjectedEntry(entry ChatEntry) {
-	s.appendProjectedEntryWithMetadata(entry, false, false)
+	s.appendProjectedEntryWithMetadata(entry, false)
 }
 
-func (s *chatStore) appendProjectedEntryWithMetadata(entry ChatEntry, marksBoundary bool, projectedHistory bool) {
+func (s *chatStore) appendProjectedEntryWithMetadata(entry ChatEntry, marksBoundary bool) {
 	if strings.TrimSpace(entry.Role) == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.appendProjectedEntryLocked(entry, marksBoundary, projectedHistory)
+	s.appendProjectedEntryLocked(entry, marksBoundary)
 }
 
 func (s *chatStore) appendProjectedHistoryReplacementEntries(entries []ChatEntry) {
@@ -276,18 +253,17 @@ func (s *chatStore) appendProjectedHistoryReplacementEntries(entries []ChatEntry
 
 func (s *chatStore) appendProjectedHistoryReplacementEntriesLocked(entries []ChatEntry) {
 	for idx, entry := range entries {
-		s.appendProjectedEntryLocked(entry, idx == 0, true)
+		s.appendProjectedEntryLocked(entry, idx == 0)
 	}
 }
 
-func (s *chatStore) appendProjectedEntryLocked(entry ChatEntry, marksBoundary bool, projectedHistory bool) {
+func (s *chatStore) appendProjectedEntryLocked(entry ChatEntry, marksBoundary bool) {
 	entry.Visibility = transcript.NormalizeEntryVisibility(entry.Visibility)
 	entry.ToolCallID = strings.TrimSpace(entry.ToolCallID)
 	s.local = append(s.local, localChatEntry{
 		Entry:             entry,
 		AfterMessageCount: s.messageCount,
 		MarksBoundary:     marksBoundary,
-		ProjectedHistory:  projectedHistory,
 	})
 	s.transcriptEntryCount++
 }
