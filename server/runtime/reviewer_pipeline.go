@@ -31,7 +31,6 @@ func (r *defaultReviewerPipeline) ShouldRunTurn(frequency string, reviewerClient
 
 func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string, original llm.Message, originalCommittedStart int, originalCommittedStartSet bool, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
 	e := r.engine
-	baselineItems := e.snapshotItems()
 	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
 	reviewerResult, err := r.RunSuggestions(ctx, stepID, reviewerClient)
 	if err != nil {
@@ -92,9 +91,6 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 	if followUp.NoopFinalAnswer || isNoopFinalAnswer(followUp.Message) {
-		if !followUp.ExecutedToolCall {
-			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
-		}
 		status := ReviewerStatus{
 			Outcome:               "noop",
 			SuggestionsCount:      len(suggestions),

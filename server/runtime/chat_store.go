@@ -395,6 +395,9 @@ func (s *chatStore) applyLastCommittedAssistantFinalAnswerLocked(msg llm.Message
 	if shouldSkipTrailingAssistantHandoffMessage(msg) {
 		return
 	}
+	if isNoopFinalAnswer(msg) {
+		return
+	}
 	if msg.Role == llm.RoleAssistant && msg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(msg.Content) != "" {
 		s.lastCommittedAssistantFinalAnswer = msg.Content
 		return
@@ -567,7 +570,7 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 				entries = append(entries, entry)
 			}
 		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" {
+			if strings.TrimSpace(msg.Content) != "" && !isNoopFinalAnswer(msg) {
 				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 			}
 			if len(msg.ToolCalls) > 0 {

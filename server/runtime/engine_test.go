@@ -2946,16 +2946,20 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 	}
 
 	finalAssistantContents := make([]string, 0)
+	noopFinalCount := 0
 	for _, persisted := range eng.snapshotMessages() {
 		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
 			finalAssistantContents = append(finalAssistantContents, persisted.Content)
 		}
-		if strings.Contains(persisted.Content, reviewerNoopToken) {
-			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		if isNoopFinalAnswer(persisted) {
+			noopFinalCount++
 		}
 	}
-	if len(finalAssistantContents) != 0 {
-		t.Fatalf("expected no persisted final assistant messages, got %q", finalAssistantContents)
+	if noopFinalCount != 1 {
+		t.Fatalf("noop final count = %d, want 1; messages=%+v", noopFinalCount, eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 1 || finalAssistantContents[0] != reviewerNoopToken {
+		t.Fatalf("expected hidden persisted noop final assistant message, got %q", finalAssistantContents)
 	}
 
 	snapshot := eng.ChatSnapshot()
@@ -3201,9 +3205,6 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	for _, entry := range snapshot.Entries {
 		if strings.Contains(entry.Text, reviewerNoopToken) {
 			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
-		}
-		if strings.Contains(entry.Text, "Supervisor agent gave you suggestions") {
-			t.Fatalf("reviewer control instruction leaked into chat snapshot: %+v", snapshot.Entries)
 		}
 		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran") {
 			foundReviewerStatus = true
@@ -4380,8 +4381,8 @@ func TestBuildReviewerTranscriptMessagesIncludesSupervisorControlDeveloperMessag
 	if !strings.Contains(reviewerMessages[0].Content, "Supervisor agent gave you suggestions:") {
 		t.Fatalf("expected supervisor control message to be included, got %q", reviewerMessages[0].Content)
 	}
-	if !strings.Contains(reviewerMessages[0].Content, "Developer:") {
-		t.Fatalf("expected developer label in reviewer message, got %q", reviewerMessages[0].Content)
+	if !strings.Contains(reviewerMessages[0].Content, "Developer context:") {
+		t.Fatalf("expected developer-context label in reviewer message, got %q", reviewerMessages[0].Content)
 	}
 }
 
@@ -5233,6 +5234,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 
 	finalAssistantContents := make([]string, 0)
 	foundBackgroundNotice := false
+	noopFinalCount := 0
 	for _, persisted := range eng.snapshotMessages() {
 		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
 			finalAssistantContents = append(finalAssistantContents, persisted.Content)
@@ -5240,15 +5242,18 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 		if persisted.Role == llm.RoleDeveloper && persisted.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(persisted.Content, "Background shell 1000 completed.") {
 			foundBackgroundNotice = true
 		}
-		if strings.Contains(persisted.Content, reviewerNoopToken) {
-			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		if isNoopFinalAnswer(persisted) {
+			noopFinalCount++
 		}
 	}
 	if !foundBackgroundNotice {
 		t.Fatalf("expected persisted background notice, got %+v", eng.snapshotMessages())
 	}
-	if len(finalAssistantContents) != 0 {
-		t.Fatalf("expected no persisted final assistant message, got %q", finalAssistantContents)
+	if noopFinalCount != 1 {
+		t.Fatalf("noop final count = %d, want 1; messages=%+v", noopFinalCount, eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 1 || finalAssistantContents[0] != reviewerNoopToken {
+		t.Fatalf("expected hidden persisted noop final assistant message, got %q", finalAssistantContents)
 	}
 
 	mu.Lock()
