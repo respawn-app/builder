@@ -193,6 +193,38 @@ func TestPersistedTranscriptScanUsesLocalCarryoverEntryWhileHiddenCarryoverMessa
 	}
 }
 
+func TestPersistedTranscriptScanMaterializesCompactedDeveloperContextInDetailPage(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}),
+		mustPersistedScanEvent(t, "local_entry", storedLocalEntry{Role: "error", Text: "before replace"}),
+		mustPersistedScanEvent(t, "history_replaced", historyReplacementPayload{Items: llm.ItemsFromMessages([]llm.Message{
+			{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+			{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+		})}),
+		mustPersistedScanEvent(t, "local_entry", storedLocalEntry{Role: "compaction_notice", Text: "after replace notice"}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if got := len(page.Entries); got != 3 {
+		t.Fatalf("len(page.Entries) = %d, want 3 (%+v)", got, page.Entries)
+	}
+	if got := page.Entries[0]; got.Role != "developer_context" || got.Text != "environment info" {
+		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
+	}
+	if got := page.Entries[1]; got.Role != "compaction_summary" || got.Text != "condensed summary" {
+		t.Fatalf("entry[1] = %+v, want compacted summary", got)
+	}
+	if got := page.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[2] = %+v, want post-compaction local entry", got)
+	}
+}
+
 func TestPersistedTranscriptScanReplaysCacheWarnings(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
 	if err := scan.ApplyPersistedEvent(mustPersistedScanEvent(t, sessionEventCacheWarning, cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix})); err != nil {
