@@ -12,8 +12,8 @@ import (
 	"builder/server/llm"
 	"builder/shared/cachewarn"
 	"builder/shared/compaction"
-	"builder/shared/transcript"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type compactionMode string
@@ -665,17 +665,8 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 			return compactionResult{}, errors.Join(err, statusErr)
 		}
 	}
-	if mode == compactionModeManual {
-		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
-			if err := e.appendMessageWithoutConversationUpdate(stepID, carryover); err != nil {
-				statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-				return compactionResult{}, errors.Join(err, statusErr)
-			}
-			if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleManualCompactionCarryover), carryover.Content); err != nil {
-				statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-				return compactionResult{}, errors.Join(err, statusErr)
-			}
-		}
+	if err := e.appendPostCompactionMessages(stepID, e.postCompactionMessages(input, mode, manualCarryover)); err != nil {
+		return compactionResult{}, err
 	}
 	compactionNumber := e.nextCompactionCount()
 	windowTokens := result.usage.WindowTokens
@@ -861,17 +852,21 @@ func isCompactionContextOverflow(err error) bool {
 }
 
 func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
-	locked, err := e.ensureLocked()
-	if err != nil {
-		return compactionResult{}, err
-	}
 	summary, err := e.localCompactionSummary(ctx, input, instructions)
 	if err != nil {
 		return compactionResult{}, err
 	}
-	replacement := e.rebuildLocalCompactionHistory(ctx, locked.Model, input, summary, e.cfg.LocalCompactionCarryoverLimit)
+	replacement, err := e.buildCanonicalCompactionReplacement([]llm.ResponseItem{{
+		Type:        llm.ResponseItemTypeMessage,
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeCompactionSummary,
+		Content:     strings.TrimSpace(summary),
+	}})
+	if err != nil {
+		return compactionResult{}, err
+	}
 	usageInputTokens := estimateItemsTokens(replacement)
-	if preciseInput, ok := e.inputTokensForItems(ctx, locked.Model, "", replacement); ok {
+	if preciseInput, ok := e.inputTokensForItems(ctx, e.currentModel(), "", replacement); ok {
 		usageInputTokens = preciseInput
 	}
 	return compactionResult{
@@ -1054,17 +1049,82 @@ func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string)
 		return nil
 	}
 	if _, err := e.compactNow(ctx, stepID, compactionModeHandoff, req.summarizerPrompt, false); err != nil {
+		if e.pendingHandoffFutureMessageSnapshot() != "" {
+			e.clearPendingHandoffRequest()
+		}
 		return err
 	}
 	e.clearPendingHandoffRequest()
-	if futureMessage := strings.TrimSpace(req.futureAgentMessage); futureMessage != "" {
-		e.queuePendingHandoffFutureMessage(futureMessage)
-		if msg := handoffFutureAgentMessage(futureMessage); strings.TrimSpace(msg.Content) != "" {
-			if err := e.appendMessage(stepID, msg); err != nil {
-				return err
+	return nil
+}
+
+func (e *Engine) buildCanonicalCompactionReplacement(prefix []llm.ResponseItem) ([]llm.ResponseItem, error) {
+	meta, err := e.compactionReinjectedBaseMessages()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]llm.ResponseItem, 0, len(prefix)+len(meta))
+	out = append(out, llm.CloneResponseItems(prefix)...)
+	out = append(out, llm.ItemsFromMessages(meta)...)
+	return out, nil
+}
+
+func (e *Engine) compactionReinjectedBaseMessages() ([]llm.Message, error) {
+	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{
+		IncludeAgents:      true,
+		IncludeSkills:      true,
+		IncludeEnvironment: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return metaResult.OrderedBaseMessages(), nil
+}
+
+func (e *Engine) postCompactionMessages(input []llm.ResponseItem, mode compactionMode, manualCarryover string) []llm.Message {
+	out := make([]llm.Message, 0, 3)
+	if mode == compactionModeManual {
+		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
+			out = append(out, carryover)
+		}
+	}
+	if mode == compactionModeHandoff {
+		if req := e.pendingHandoffRequestSnapshot(); req != nil {
+			if futureMessage := handoffFutureAgentMessage(req.futureAgentMessage); strings.TrimSpace(futureMessage.Content) != "" {
+				out = append(out, futureMessage)
 			}
 		}
-		e.clearPendingHandoffFutureMessage()
+	}
+	if headlessModeActive(llm.MessagesFromItems(input)) {
+		if headless, ok := headlessModeMetaMessage(); ok {
+			out = append(out, headless)
+		}
+	}
+	return out
+}
+
+func (e *Engine) appendPostCompactionMessages(stepID string, messages []llm.Message) error {
+	for _, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeManualCompactionCarryover:
+			if err := e.appendMessageWithoutConversationUpdate(stepID, message); err != nil {
+				return err
+			}
+			if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleManualCompactionCarryover), message.Content); err != nil {
+				return err
+			}
+		default:
+			if err := e.appendMessage(stepID, message); err != nil {
+				if message.MessageType == llm.MessageTypeHandoffFutureMessage {
+					e.queuePendingHandoffFutureMessage(message.Content)
+				}
+				return err
+			}
+			if message.MessageType == llm.MessageTypeHandoffFutureMessage {
+				e.clearPendingHandoffFutureMessage()
+			}
+		}
 	}
 	return nil
 }

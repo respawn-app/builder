@@ -839,20 +839,14 @@ func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 4 {
-		t.Fatalf("expected 4 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected replaced history plus new local entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "a" {
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "after replace" {
 		t.Fatalf("unexpected first entry after replace: %+v", snap.Entries[0])
 	}
-	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "b" {
-		t.Fatalf("unexpected second entry after replace: %+v", snap.Entries[1])
-	}
-	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "before replace" {
-		t.Fatalf("expected old local entry after visible history, got %+v", snap.Entries[2])
-	}
-	if snap.Entries[3].Role != "compaction_notice" || snap.Entries[3].Text != "after replace notice" {
-		t.Fatalf("expected new local entry after old local entry, got %+v", snap.Entries[3])
+	if snap.Entries[1].Role != "compaction_notice" || snap.Entries[1].Text != "after replace notice" {
+		t.Fatalf("expected new local entry after replaced history, got %+v", snap.Entries[1])
 	}
 }
 
@@ -863,7 +857,7 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 
 	replacement := []llm.ResponseItem{
 		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleDeveloper, Content: "ctx"},
-		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "compact-summary"},
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "compact-summary"},
 	}
 	s.replaceHistory(replacement)
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "after"})
@@ -884,12 +878,12 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 
 	snap := s.snapshot()
 	if len(snap.Entries) != 3 {
-		t.Fatalf("expected full visible transcript to remain intact, got %d (%+v)", len(snap.Entries), snap.Entries)
+		t.Fatalf("expected logical replaced transcript, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "before-1" {
+	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != "ctx" {
 		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
 	}
-	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "before-2" {
+	if snap.Entries[1].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[1].Text != "compact-summary" {
 		t.Fatalf("unexpected visible entry[1]: %+v", snap.Entries[1])
 	}
 	if snap.Entries[2].Role != "user" || snap.Entries[2].Text != "after" {

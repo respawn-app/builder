@@ -250,7 +250,7 @@ func (s *chatStore) snapshotMessages() []llm.Message {
 }
 
 func (s *chatStore) snapshotMessagesLocked() []llm.Message {
-	return llm.MessagesFromItems(llm.CloneResponseItems(s.items))
+	return llm.MessagesFromItems(s.snapshotProviderItemsLocked())
 }
 
 func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
@@ -530,96 +530,37 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	messages := s.snapshotMessagesLocked()
-	entries := make([]ChatEntry, 0, len(messages)+len(s.local))
-	compactionEntryStart := -1
-	compactionCutoff := -1
-	if s.compact != nil {
-		compactionCutoff = s.compact.CutoffItemCount
-	}
-	materializedToolResults := make(map[string]struct{})
-	for _, msg := range messages {
-		if msg.Role != llm.RoleTool {
-			continue
-		}
-		callID := strings.TrimSpace(msg.ToolCallID)
-		if callID == "" {
-			continue
-		}
-		materializedToolResults[callID] = struct{}{}
-	}
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
+	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: 0, Limit: 0}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	appendLocalEntries := func(processedMessages int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > processedMessages {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > processedMessages {
 				break
 			}
-			entries = append(entries, s.local[localIndex].Entry)
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
 	appendLocalEntries(0)
 	processedMessages := 0
-	for _, msg := range messages {
-		if compactionCutoff >= 0 && compactionEntryStart < 0 && processedMessages >= compactionCutoff {
-			compactionEntryStart = len(entries)
-		}
-		switch msg.Role {
-		case llm.RoleUser:
-			if entry, ok := visibleUserTranscriptEntry(msg); ok {
-				entries = append(entries, entry)
-			}
-		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" && !isNoopFinalAnswer(msg) {
-				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
-			}
-			if len(msg.ToolCalls) > 0 {
-				for _, call := range msg.ToolCalls {
-					entries = append(entries, s.formatToolCall(call))
-					if synthesized, ok := s.synthesizedToolResult(call, materializedToolResults); ok {
-						entries = append(entries, synthesized)
-					}
-				}
-			}
-		case llm.RoleTool:
-			callID := strings.TrimSpace(msg.ToolCallID)
-			result := tools.Result{
-				CallID: callID,
-				Name:   toolspec.ID(strings.TrimSpace(msg.Name)),
-				Output: json.RawMessage(msg.Content),
-			}
-			if completion, ok := s.toolCompletions[callID]; ok {
-				if result.Name == "" {
-					result.Name = completion.Name
-				}
-				if strings.TrimSpace(msg.Content) == "" && len(completion.Output) > 0 {
-					result.Output = completion.Output
-				}
-				result.IsError = completion.IsError
-			}
-			if result.Name == "" {
-				result.Name = toolspec.ID("tool")
-			}
-			entries = append(entries, toolResultChatEntry(result))
-		case llm.RoleDeveloper:
-			if entry, ok := visibleDeveloperChatEntry(msg); ok {
-				entries = append(entries, entry)
-			}
-		}
+	walker := newResponseItemMessageWalker(func(msg llm.Message) {
+		scan.ApplyMessage(msg)
 		processedMessages++
 		appendLocalEntries(processedMessages)
+	})
+	for _, item := range items {
+		walker.Apply(item)
 	}
-	appendLocalEntries(len(messages))
-	if compactionCutoff >= 0 && compactionEntryStart < 0 {
-		compactionEntryStart = len(entries)
-	}
+	walker.Flush()
+	appendLocalEntries(processedMessages)
+	snapshot := scan.PageSnapshot().Snapshot
+	snapshot.Ongoing = s.ongoing
+	snapshot.OngoingError = s.ongoingError
 	return materializedChatSnapshot{
-		Snapshot: ChatSnapshot{
-			Entries:      entries,
-			Ongoing:      s.ongoing,
-			OngoingError: s.ongoingError,
-		},
-		CompactionEntryStart: compactionEntryStart,
+		Snapshot:             snapshot,
+		CompactionEntryStart: -1,
 	}
 }
 
