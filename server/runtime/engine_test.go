@@ -10696,11 +10696,11 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
-		t.Fatalf("append user message: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "older summary"}); err != nil {
 		t.Fatalf("append compaction summary: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
 	}
 
 	if err := eng.CompactContext(context.Background(), ""); err != nil {
@@ -10783,6 +10783,47 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 	}
 	if summaryIndex >= carryoverIndex {
 		t.Fatalf("expected compaction summary before manual carryover, got %+v", entries)
+	}
+}
+
+func TestManualLocalCompactionOmitsCarryoverWithoutNewUserMessageSincePreviousCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "older user message"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "previous compaction summary"}); err != nil {
+		t.Fatalf("append previous compaction summary: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	for _, message := range eng.snapshotMessages() {
+		if message.MessageType == llm.MessageTypeManualCompactionCarryover {
+			t.Fatalf("did not expect manual carryover message when no user message followed prior compaction, got %+v", eng.snapshotMessages())
+		}
+	}
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if entry.Role == string(transcript.EntryRoleManualCompactionCarryover) {
+			t.Fatalf("did not expect manual carryover transcript entry when no user message followed prior compaction, got %+v", eng.ChatSnapshot().Entries)
+		}
 	}
 }
 
