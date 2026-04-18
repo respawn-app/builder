@@ -647,6 +647,22 @@ func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T)
 	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[1].Text != "Environment context" {
 		t.Fatalf("unexpected environment context entry: %+v", snap.Entries[1])
 	}
+	if snap.Entries[0].Visibility != transcript.EntryVisibilityDetailOnly || snap.Entries[1].Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("expected developer context visibility to be detail-only, got %+v", snap.Entries)
+	}
+}
+
+func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageType("custom_internal"), Content: "Internal developer note"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("unexpected unknown developer context entry: %+v", got)
+	}
 }
 
 func TestChatStoreSnapshotIncludesInterruptionAsOngoingVisibleRole(t *testing.T) {

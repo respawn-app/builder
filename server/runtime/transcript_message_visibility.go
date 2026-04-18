@@ -7,6 +7,14 @@ import (
 	"builder/shared/transcript"
 )
 
+func detailOnlyDeveloperContextEntry(text string) ChatEntry {
+	return ChatEntry{
+		Visibility: transcript.EntryVisibilityDetailOnly,
+		Role:       string(transcript.EntryRoleDeveloperContext),
+		Text:       text,
+	}
+}
+
 func visibleUserTranscriptEntry(msg llm.Message) (ChatEntry, bool) {
 	content := strings.TrimSpace(msg.Content)
 	if content == "" {
@@ -28,7 +36,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		llm.MessageTypeEnvironment,
 		llm.MessageTypeHeadlessMode,
 		llm.MessageTypeHeadlessModeExit:
-		return ChatEntry{Role: string(transcript.EntryRoleDeveloperContext), Text: msg.Content}, true
+		return detailOnlyDeveloperContextEntry(msg.Content), true
 	case llm.MessageTypeCompactionSummary:
 		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true
 	case llm.MessageTypeInterruption:
@@ -40,10 +48,10 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	case llm.MessageTypeBackgroundNotice:
 		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
 	case llm.MessageTypeHandoffFutureMessage:
-		return ChatEntry{Role: string(transcript.EntryRoleDeveloperContext), Text: msg.Content}, true
+		return detailOnlyDeveloperContextEntry(msg.Content), true
 	case llm.MessageTypeManualCompactionCarryover:
 		return ChatEntry{}, false
 	default:
-		return ChatEntry{}, false
+		return detailOnlyDeveloperContextEntry(msg.Content), true
 	}
 }
