@@ -187,6 +187,43 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.
 	}
 }
 
+func TestReleaseSessionRuntimeRejectsMismatchedControllerLeaseWithoutClosingHandle(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	_, err = fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         "lease-other",
+	})
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ReleaseSessionRuntime error = %v, want invalid controller lease", err)
+	}
+	if closed.Load() != 0 {
+		t.Fatalf("expected closeFn not to run for mismatched lease, got %d", closed.Load())
+	}
+	if got := fixture.service.handles[fixture.store.Meta().SessionID]; got != handle {
+		t.Fatalf("expected runtime handle preserved for mismatched lease, got %+v", got)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("expected original runtime lease to remain releasable after mismatched release, got %v", err)
+	}
+}
+
 func TestRequireControllerLeaseAcceptsActiveController(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {

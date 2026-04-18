@@ -294,7 +294,11 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	if err != nil {
 		return nil, err
 	}
-	leaseID := activateResp.LeaseID
+	leaseID := strings.TrimSpace(activateResp.LeaseID)
+	if leaseID == "" {
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
+		return nil, errors.New("session runtime activation returned empty controller lease id")
+	}
 	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)

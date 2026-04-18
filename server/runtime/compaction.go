@@ -1074,7 +1074,7 @@ func (e *Engine) buildCanonicalCompactionReplacement(prefix []llm.ResponseItem) 
 }
 
 func (e *Engine) compactionReinjectedBaseMessages() ([]llm.Message, error) {
-	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.currentModel(), e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		IncludeAgents:      true,
 		IncludeSkills:      true,
