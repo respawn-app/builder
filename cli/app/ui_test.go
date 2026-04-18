@@ -4987,7 +4987,7 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	}
 }
 
-func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testing.T) {
+func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.T) {
 	client := &refreshingRuntimeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
@@ -5015,8 +5015,8 @@ func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testi
 		UserMessage:                "steered message",
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
 	})
-	if got := len(m.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected deferred committed user tail before hydration, got %d", got)
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush to stop using deferred committed tail, got %d", got)
 	}
 
 	m.busy = false
@@ -5039,8 +5039,8 @@ func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testi
 		},
 	})
 	updated := next.(*uiModel)
-	if got := len(updated.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected stale hydrate + queued drain path to preserve deferred committed tail, got %d", got)
+	if got := len(updated.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected stale hydrate + queued drain path to keep deferred committed tail empty, got %d", got)
 	}
 	if updated.pendingPreSubmitText != "follow up" {
 		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got pending=%q", updated.pendingPreSubmitText)
