@@ -111,6 +111,9 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Forking is server-owned.
 - Compaction is primarily server-owned.
 - For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite that justifies non-append recovery behavior.
+- User-visible transcript history is not truncated by compaction or handoff; only model context may be replaced. Server-owned transcript paging must preserve pre-compaction history across any number of compactions.
+- Any latest-compaction boundary or floor is tail/model metadata only. Detail transcript paging and rendering must ignore it and show the full append-only transcript in persisted order.
+- Legacy persisted `history_replaced` entries with `engine="reviewer_rollback"` are compatibility no-ops on replay. Builder must tolerate and ignore them rather than treating them as transcript-rewrite semantics.
 - Process control, including background shell and subprocess execution, is purely server-owned.
 - Asks and approvals should be first-class API resources or method families rather than only event shapes.
 - Approvals are split: the server blocks and enforces policy; the frontend exposes controls and sends responses.

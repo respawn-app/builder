@@ -1114,35 +1114,3 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
 	}
 }
-
-func TestChatStoreCommittedEntryCountRebuildsAfterRestoreHistoryItems(t *testing.T) {
-	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
-	s.appendLocalEntry("system", "local note")
-	s.restoreHistoryItems(llm.ItemsFromMessages([]llm.Message{
-		{Role: llm.RoleAssistant, Content: "after"},
-		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"},
-	}))
-
-	if got := s.committedEntryCount(); got != 3 {
-		t.Fatalf("committed entry count after restore = %d, want 3", got)
-	}
-	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
-		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
-	}
-}
-
-func TestChatStoreRestoreHistoryItemsClearsProjectedHistoryReplacementEntries(t *testing.T) {
-	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
-	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}))
-	s.restoreHistoryItems(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}}))
-
-	snapshot := s.snapshot()
-	if got := len(snapshot.Entries); got != 1 {
-		t.Fatalf("entry count after rollback restore = %d, want 1 (%+v)", got, snapshot.Entries)
-	}
-	if got := snapshot.Entries[0].Text; got != "rolled back" {
-		t.Fatalf("entry[0] = %q, want rolled back", got)
-	}
-}

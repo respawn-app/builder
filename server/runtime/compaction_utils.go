@@ -36,26 +36,17 @@ func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabili
 
 func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, items []llm.ResponseItem) error {
 	payload := historyReplacementPayload{
-		Engine: strings.TrimSpace(engine),
+		Engine: normalizeHistoryReplacementEngine(engine),
 		Mode:   string(mode),
 		Items:  llm.CloneResponseItems(items),
 	}
 	reminderIssued := false
 	projectedStart := e.CommittedTranscriptEntryCount()
 	projectedEntries := transcriptEntriesFromHistoryReplacement(payload.Items)
-	if payload.Engine == "reviewer_rollback" {
-		e.resetCurrentPreciseInputTracking()
-		e.resetLocalDiagnostics()
-		e.chat.restoreHistoryItems(payload.Items)
-		e.syncCompactionSoonReminderIssuedFromItems(payload.Items)
-		e.clearActivePromptCacheLineages()
-		reminderIssued = e.handoffToolEnabled()
-	} else {
-		e.resetCurrentPreciseInputTracking()
-		e.resetLocalDiagnostics()
-		e.chat.replaceHistory(payload.Items)
-		e.setCompactionSoonReminderIssued(false)
-	}
+	e.resetCurrentPreciseInputTracking()
+	e.resetLocalDiagnostics()
+	e.chat.replaceHistory(payload.Items)
+	e.setCompactionSoonReminderIssued(false)
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
 		if persistErr := e.store.SetCompactionSoonReminderIssued(reminderIssued); persistErr != nil {
@@ -64,12 +55,8 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		if persistErr := e.store.SetUsageState(nil); persistErr != nil {
 			return persistErr
 		}
-		if payload.Engine == "reviewer_rollback" {
-			e.emitCommittedTranscriptAdvanced(stepID)
-		} else {
-			e.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
-			e.emitConversationUpdated(stepID)
-		}
+		e.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
+		e.emitConversationUpdated(stepID)
 	}
 	return err
 }
