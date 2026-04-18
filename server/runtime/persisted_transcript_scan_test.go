@@ -55,16 +55,16 @@ func TestPersistedTranscriptScanTracksDormantOngoingTailWindow(t *testing.T) {
 	}
 
 	window := scan.OngoingTailSnapshot()
-	if window.TotalEntries != 7 {
-		t.Fatalf("window.TotalEntries = %d, want 7", window.TotalEntries)
+	if window.TotalEntries != 3 {
+		t.Fatalf("window.TotalEntries = %d, want 3", window.TotalEntries)
 	}
-	if window.Offset != 4 {
-		t.Fatalf("window.Offset = %d, want 4", window.Offset)
+	if window.Offset != 0 {
+		t.Fatalf("window.Offset = %d, want 0", window.Offset)
 	}
 	if len(window.Snapshot.Entries) != 3 {
 		t.Fatalf("len(window.Snapshot.Entries) = %d, want 3", len(window.Snapshot.Entries))
 	}
-	if window.Snapshot.Entries[0].Text != "before-4" || window.Snapshot.Entries[1].Text != "after-0" || window.Snapshot.Entries[2].Text != "after-1" {
+	if window.Snapshot.Entries[0].Text != "summary" || window.Snapshot.Entries[1].Text != "after-0" || window.Snapshot.Entries[2].Text != "after-1" {
 		t.Fatalf("unexpected tail entries: %+v", window.Snapshot.Entries)
 	}
 }

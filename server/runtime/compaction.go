@@ -658,7 +658,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
 	}
-	if strings.TrimSpace(result.summary) != "" {
+	if strings.TrimSpace(result.summary) != "" && result.engine != "local" {
 		summary := strings.TrimSpace(result.summary)
 		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", summary); err != nil {
 			statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())

@@ -435,24 +435,23 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	cutoff := -1
-	if s.compact != nil {
-		cutoff = s.compact.CutoffItemCount
-	}
-	materializedToolResults := collectMaterializedToolCalls(s.items)
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
 	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{
-		TrackOngoingTail:     true,
-		TailLimit:            maxEntries,
-		CompactionItemCutoff: cutoff,
+		TrackOngoingTail: true,
+		TailLimit:        maxEntries,
 	}, s.toolCompletions, materializedToolResults)
+	if s.compact != nil {
+		scan.MarkCompactionBoundary()
+	}
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > messageCount {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > messageCount {
 				break
 			}
-			scan.appendEntry(s.local[localIndex].Entry)
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
@@ -462,11 +461,7 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 		processedMessages++
 		appendLocalEntries(processedMessages)
 	})
-	for idx, item := range s.items {
-		if cutoff >= 0 && idx >= cutoff && !scan.hasCompactionCheckpoint {
-			walker.Flush()
-			scan.MarkCompactionBoundary()
-		}
+	for _, item := range items {
 		walker.Apply(item)
 	}
 	walker.Flush()
