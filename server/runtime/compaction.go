@@ -13,7 +13,6 @@ import (
 	"builder/shared/cachewarn"
 	"builder/shared/compaction"
 	"builder/shared/toolspec"
-	"builder/shared/transcript"
 )
 
 type compactionMode string
@@ -1114,9 +1113,6 @@ func (e *Engine) appendPostCompactionMessages(stepID string, messages []llm.Mess
 		switch message.MessageType {
 		case llm.MessageTypeManualCompactionCarryover:
 			if err := e.appendMessageWithoutConversationUpdate(stepID, message); err != nil {
-				return err
-			}
-			if err := e.appendPersistedLocalEntry(stepID, string(transcript.EntryRoleManualCompactionCarryover), message.Content); err != nil {
 				return err
 			}
 		default:
