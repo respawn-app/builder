@@ -508,24 +508,7 @@ func formatOutputTypeCounts(counts map[string]int) string {
 	return strings.Join(parts, ",")
 }
 
-func extractCanonicalContext(items []llm.ResponseItem) []llm.ResponseItem {
-	contextItems := make([]llm.ResponseItem, 0, 8)
-	for _, item := range items {
-		if item.Type != llm.ResponseItemTypeMessage {
-			continue
-		}
-		if item.Role == llm.RoleUser {
-			break
-		}
-		if item.Role == llm.RoleDeveloper || item.Role == llm.RoleSystem {
-			contextItems = append(contextItems, item)
-		}
-	}
-	return llm.CloneResponseItems(contextItems)
-}
-
 func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string, items []llm.ResponseItem, summary string, carryoverLimit int) []llm.ResponseItem {
-	contextItems := extractCanonicalContext(items)
 	userMessages := make([]llm.ResponseItem, 0, len(items))
 	for _, item := range items {
 		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType != llm.MessageTypeCompactionSummary && strings.TrimSpace(item.Content) != "" {
@@ -545,8 +528,7 @@ func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string
 		Content:     strings.TrimSpace(summary),
 	}
 
-	out := make([]llm.ResponseItem, 0, len(contextItems)+len(selected)+1)
-	out = append(out, contextItems...)
+	out := make([]llm.ResponseItem, 0, len(selected)+1)
 	out = append(out, selected...)
 	out = append(out, summaryMessage)
 	return out
