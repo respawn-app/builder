@@ -567,6 +567,15 @@ func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
 	if got := xansi.Strip(serverPicker.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
 		t.Fatalf("server picker notice missing or padded unexpectedly: %q", got)
 	}
+	serverPicker.width = 32
+	serverPicker.height = 12
+	narrowView := xansi.Strip(serverPicker.View())
+	if !strings.Contains(narrowView, "Couldn") || !strings.Contains(narrowView, "…\n\n") {
+		t.Fatalf("server picker narrow notice should truncate cleanly with ellipsis, got %q", narrowView)
+	}
+	if strings.Contains(narrowView, "\n\n  ") {
+		t.Fatalf("server picker narrow notice has unexpected left padding: %q", narrowView)
+	}
 
 	prompt := newProjectNamePromptModel("demo", "dark")
 	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
