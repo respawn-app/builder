@@ -348,7 +348,7 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testi
 	}
 }
 
-func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t *testing.T) {
+func TestServiceDormantReviewerRollbackIsIgnoredOnRead(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -380,14 +380,20 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 	if err != nil {
 		t.Fatalf("get session transcript page: %v", err)
 	}
-	if transcriptResp.Transcript.TotalEntries != 1 {
-		t.Fatalf("total entries = %d, want 1", transcriptResp.Transcript.TotalEntries)
+	if transcriptResp.Transcript.TotalEntries != 3 {
+		t.Fatalf("total entries = %d, want 3", transcriptResp.Transcript.TotalEntries)
 	}
-	if len(transcriptResp.Transcript.Entries) != 1 {
-		t.Fatalf("entry count = %d, want 1", len(transcriptResp.Transcript.Entries))
+	if len(transcriptResp.Transcript.Entries) != 3 {
+		t.Fatalf("entry count = %d, want 3", len(transcriptResp.Transcript.Entries))
 	}
 	if got := transcriptResp.Transcript.Entries[0].Text; got != "u1" {
-		t.Fatalf("visible transcript entries = %+v, want only u1", transcriptResp.Transcript.Entries)
+		t.Fatalf("first visible transcript entry = %+v, want u1", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[1].Text; got != "rolled back final" {
+		t.Fatalf("second visible transcript entry = %+v, want rolled back final", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[2].Text; got != "u2" {
+		t.Fatalf("third visible transcript entry = %+v, want u2", transcriptResp.Transcript.Entries)
 	}
 
 	mainViewResp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
@@ -395,10 +401,10 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 		t.Fatalf("get session main view: %v", err)
 	}
 	if got := mainViewResp.MainView.Status.LastCommittedAssistantFinalAnswer; got != "" {
-		t.Fatalf("last committed assistant final answer = %q, want empty after rollback", got)
+		t.Fatalf("last committed assistant final answer = %q, want empty because later user message supersedes it", got)
 	}
-	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 1 {
-		t.Fatalf("committed entry count = %d, want 1", got)
+	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 3 {
+		t.Fatalf("committed entry count = %d, want 3", got)
 	}
 }
 
