@@ -44,10 +44,10 @@ func (e *Engine) appendUserMessageWithoutConversationUpdate(stepID, text string)
 }
 
 func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error {
-	messages := e.snapshotMessages()
 	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	headlessActive := e.chat.headlessActive()
 	if e.cfg.HeadlessMode {
-		if !shouldInjectHeadlessModePrompt(messages) {
+		if !shouldInjectHeadlessModePromptForState(headlessActive) {
 			return nil
 		}
 		metaResult, err := builder.Build(metaContextBuildOptions{IncludeHeadless: true})
@@ -59,7 +59,7 @@ func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error
 		}
 		return e.appendMessage(stepID, metaResult.Headless[0])
 	}
-	if !shouldInjectHeadlessModeExitPrompt(messages) {
+	if !shouldInjectHeadlessModeExitPromptForState(headlessActive) {
 		return nil
 	}
 	metaResult, err := builder.Build(metaContextBuildOptions{IncludeHeadlessExit: true})
@@ -72,12 +72,20 @@ func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error
 	return e.appendMessage(stepID, metaResult.HeadlessExit[0])
 }
 
+func shouldInjectHeadlessModePromptForState(active bool) bool {
+	return !active
+}
+
+func shouldInjectHeadlessModeExitPromptForState(active bool) bool {
+	return active
+}
+
 func shouldInjectHeadlessModePrompt(messages []llm.Message) bool {
-	return !headlessModeActive(messages)
+	return shouldInjectHeadlessModePromptForState(headlessModeActive(messages))
 }
 
 func shouldInjectHeadlessModeExitPrompt(messages []llm.Message) bool {
-	return headlessModeActive(messages)
+	return shouldInjectHeadlessModeExitPromptForState(headlessModeActive(messages))
 }
 
 func headlessModeActive(messages []llm.Message) bool {
