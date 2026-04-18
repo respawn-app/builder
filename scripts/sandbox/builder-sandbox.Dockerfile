@@ -13,24 +13,40 @@ RUN apt-get update \
 		bash \
 		ca-certificates \
 		curl \
+		dnsutils \
 		fd-find \
 		file \
+		fzf \
 		gh \
 		git \
+		iproute2 \
 		jq \
 		less \
+		lsof \
+		netcat-openbsd \
 		openssh-client \
 		patch \
+		python3-pip \
+		python3-venv \
 		procps \
 		python3 \
 		ripgrep \
+		rsync \
+		sqlite3 \
+		strace \
 		tini \
 		tmux \
+		tree \
 		trash-cli \
 		unzip \
 		xz-utils \
+		yq \
+		zip \
 		zsh \
+	&& python3 -m pip install --break-system-packages --no-cache-dir uv \
 	&& ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+	&& ln -sf /usr/bin/pip3 /usr/local/bin/pip \
+	&& ln -sf /usr/bin/python3 /usr/local/bin/python \
 	&& ln -sf /usr/local/go/bin/go /usr/local/bin/go \
 	&& ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
 	&& printf 'export PATH=/go/bin:/usr/local/go/bin:$PATH\n' >/etc/profile.d/go-path.sh
