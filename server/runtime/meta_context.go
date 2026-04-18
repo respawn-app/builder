@@ -53,16 +53,22 @@ type metaContextBuildResult struct {
 
 func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
 	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit))
-	out = append(out, r.Agents...)
-	out = append(out, r.Skills...)
-	out = append(out, r.Environment...)
+	out = append(out, r.OrderedBaseMessages()...)
 	out = append(out, r.Headless...)
 	out = append(out, r.HeadlessExit...)
 	return out
 }
 
+func (r metaContextBuildResult) OrderedBaseMessages() []llm.Message {
+	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment))
+	out = append(out, r.Environment...)
+	out = append(out, r.Skills...)
+	out = append(out, r.Agents...)
+	return out
+}
+
 func (r metaContextBuildResult) OrderedInjectionMessages() []llm.Message {
-	return r.OrderedMetaMessages()
+	return r.OrderedBaseMessages()
 }
 
 type metaContextBuilder struct {

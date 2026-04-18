@@ -3131,13 +3131,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if len(requestMessages(reviewerReq)) == 0 {
 		t.Fatalf("expected reviewer request to include transcript entry messages")
 	}
-	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(requestMessages(reviewerReq)[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", requestMessages(reviewerReq)[0])
+	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected reviewer message[0] to be environment meta developer message, got %+v", requestMessages(reviewerReq)[0])
 	}
+	agentsIdx := -1
 	environmentIdx := -1
 	boundaryIdx := -1
 	skillsMetaIdx := -1
 	for idx, message := range requestMessages(reviewerReq) {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD && strings.Contains(message.Content, "source: "+globalPath) {
+			agentsIdx = idx
+		}
 		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
 			environmentIdx = idx
 		}
@@ -3155,11 +3159,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if boundaryIdx < 0 {
 		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", requestMessages(reviewerReq))
 	}
+	if agentsIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include AGENTS context, got %+v", requestMessages(reviewerReq))
+	}
 	if environmentIdx >= boundaryIdx {
 		t.Fatalf("expected environment metadata before boundary, env=%d boundary=%d", environmentIdx, boundaryIdx)
 	}
-	if skillsMetaIdx >= 0 && (skillsMetaIdx <= 0 || skillsMetaIdx >= environmentIdx) {
-		t.Fatalf("expected skills metadata between AGENTS and environment when present, skills=%d env=%d", skillsMetaIdx, environmentIdx)
+	if agentsIdx <= environmentIdx {
+		t.Fatalf("expected AGENTS metadata after environment, agents=%d env=%d", agentsIdx, environmentIdx)
+	}
+	if skillsMetaIdx >= 0 && (skillsMetaIdx <= environmentIdx || skillsMetaIdx >= agentsIdx) {
+		t.Fatalf("expected skills metadata between environment and AGENTS when present, skills=%d env=%d agents=%d", skillsMetaIdx, environmentIdx, agentsIdx)
 	}
 	foundAgentLabel := false
 	foundToolCallEntry := false
@@ -4412,14 +4422,14 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	if len(got) != 4 {
 		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
 	}
-	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected first prepended global AGENTS developer message, got %+v", got[0])
+	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected prepended environment developer message first, got %+v", got[0])
 	}
-	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
-		t.Fatalf("expected second prepended workspace AGENTS developer message, got %+v", got[1])
+	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS developer message after environment, got %+v", got[1])
 	}
-	if got[2].Role != llm.RoleDeveloper || got[2].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[2].Content, environmentInjectedHeader) {
-		t.Fatalf("expected prepended environment developer message, got %+v", got[2])
+	if got[2].Role != llm.RoleDeveloper || got[2].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS developer message last in base context, got %+v", got[2])
 	}
 	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
 		t.Fatalf("expected original message at tail, got %+v", got[3])
@@ -4493,14 +4503,14 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || got[1].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected AGENTS metadata to remain first, got %+v %+v", got[0], got[1])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata first, got %+v", got[0])
 	}
-	if got[2].MessageType != llm.MessageTypeSkills {
-		t.Fatalf("expected skills metadata to be inserted after AGENTS, got %+v", got[2])
+	if got[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata after environment, got %+v", got[1])
 	}
-	if got[3].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment metadata after skills, got %+v", got[3])
+	if got[2].MessageType != llm.MessageTypeAgentsMD || got[3].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected AGENTS metadata after environment+skills, got %+v %+v", got[2], got[3])
 	}
 	if got[4].Role != llm.RoleUser || got[4].Content != "request" {
 		t.Fatalf("expected transcript content to stay at tail, got %+v", got[4])
@@ -4531,11 +4541,11 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeSkills {
-		t.Fatalf("expected skills metadata first when agents are absent, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata first when already present, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment metadata after skills, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata after environment, got %+v", got[1])
 	}
 	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
 		t.Fatalf("expected transcript content to stay at tail, got %+v", got[2])
@@ -4576,14 +4586,14 @@ func TestAppendMissingReviewerMetaContextBackfillsMissingWorkspaceAgentsSource(t
 	if len(got) != 4 {
 		t.Fatalf("expected global+workspace agents, environment, and transcript, got %d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected global AGENTS first, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment first, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
-		t.Fatalf("expected missing workspace AGENTS to be backfilled second, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after environment, got %+v", got[1])
 	}
-	if got[2].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment after AGENTS, got %+v", got[2])
+	if got[2].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected missing workspace AGENTS to be backfilled last in base context, got %+v", got[2])
 	}
 	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
 		t.Fatalf("expected transcript content at tail, got %+v", got[3])
@@ -4627,11 +4637,11 @@ func TestAppendMissingReviewerMetaContextLeavesUntypedLegacyMetaInTranscript(t *
 	if len(got) != 6 {
 		t.Fatalf("expected live metadata plus preserved legacy transcript entries, got %d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected live global AGENTS to be backfilled first, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected live environment metadata first, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[1].Content, environmentInjectedHeader) {
-		t.Fatalf("expected live environment metadata second, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected live global AGENTS after environment, got %+v", got[1])
 	}
 	if got[2].Role != llm.RoleDeveloper || !strings.Contains(got[2].Content, legacyWorkspacePath) {
 		t.Fatalf("expected untyped legacy AGENTS text to remain transcript content, got %+v", got[2])
@@ -6802,24 +6812,24 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	if requestMessages(firstReq)[0].Role != llm.RoleDeveloper || requestMessages(firstReq)[0].Content != "existing context" {
 		t.Fatalf("expected first message to be existing context, got %+v", requestMessages(firstReq)[0])
 	}
-	if requestMessages(firstReq)[1].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[1].Content, "source: "+globalPath) {
-		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[1])
-	}
-	if requestMessages(firstReq)[1].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[1])
-	}
-	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+workspacePath) {
-		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
-	}
-	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[2])
-	}
-	envMsg := requestMessages(firstReq)[3]
+	envMsg := requestMessages(firstReq)[1]
 	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
-		t.Fatalf("expected fourth message to be environment developer injection, got %+v", envMsg)
+		t.Fatalf("expected second message to be environment developer injection, got %+v", envMsg)
 	}
 	if envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected environment message type, got %+v", envMsg)
+	}
+	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+globalPath) {
+		t.Fatalf("expected third message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
+	}
+	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[2])
+	}
+	if requestMessages(firstReq)[3].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[3].Content, "source: "+workspacePath) {
+		t.Fatalf("expected fourth message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[3])
+	}
+	if requestMessages(firstReq)[3].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[3])
 	}
 	for _, required := range []string{
 		"\nYour model: gpt-5\n",
@@ -6963,8 +6973,8 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	if userIdx < 0 {
 		t.Fatalf("expected first user message in first request, messages=%+v", requestMessages(firstReq))
 	}
-	if !(skillsIdx < envIdx && envIdx < userIdx) {
-		t.Fatalf("expected skills -> environment -> user ordering, got skills=%d env=%d user=%d", skillsIdx, envIdx, userIdx)
+	if !(envIdx < skillsIdx && skillsIdx < userIdx) {
+		t.Fatalf("expected environment -> skills -> user ordering, got env=%d skills=%d user=%d", envIdx, skillsIdx, userIdx)
 	}
 
 	secondReq := client.calls[1]
@@ -9960,8 +9970,8 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 	eng, err = New(store, client, registry, Config{
 		Model:                 "gpt-5",
 		CompactionMode:        "local",
-		ContextWindowTokens:   2_000,
-		AutoCompactTokenLimit: 1_000,
+		ContextWindowTokens:   20_000,
+		AutoCompactTokenLimit: 10_000,
 		EnabledTools:          []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
@@ -9970,7 +9980,7 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+	eng.setLastUsage(llm.Usage{InputTokens: 8_900, WindowTokens: 20_000})
 
 	msg, err := eng.runStepLoop(context.Background(), "step-1")
 	if err != nil {
@@ -10734,6 +10744,116 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	}
 	if strings.Contains(carryover.Content, "older summary") {
 		t.Fatalf("did not expect prior compaction summary in carryover, got %q", carryover.Content)
+	}
+}
+
+func TestManualLocalCompactionRebuildsCanonicalContextOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) < 6 {
+		t.Fatalf("expected canonical post-compaction messages, got %+v", messages)
+	}
+	if messages[0].MessageType != llm.MessageTypeCompactionSummary {
+		t.Fatalf("expected compaction summary first, got %+v", messages[0])
+	}
+	if messages[1].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment second, got %+v", messages[1])
+	}
+	if messages[2].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills third, got %+v", messages[2])
+	}
+	if messages[3].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[3].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after skills, got %+v", messages[3])
+	}
+	if messages[4].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[4].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS after global AGENTS, got %+v", messages[4])
+	}
+	if messages[5].MessageType != llm.MessageTypeManualCompactionCarryover || !strings.Contains(messages[5].Content, "please keep tests green") {
+		t.Fatalf("expected manual carryover after reinjected base context, got %+v", messages[5])
+	}
+}
+
+func TestHandoffCompactionAppendsFutureMessageBeforeHeadlessReentry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless enter: %v", err)
+	}
+	eng.queueHandoffRequest("", "resume with tests")
+
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("apply pending handoff: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	futureIdx := -1
+	headlessIdx := -1
+	for idx, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeHandoffFutureMessage:
+			futureIdx = idx
+		case llm.MessageTypeHeadlessMode:
+			if idx > 0 {
+				headlessIdx = idx
+			}
+		}
+	}
+	if futureIdx < 0 {
+		t.Fatalf("expected future-agent message after handoff compaction, got %+v", messages)
+	}
+	if headlessIdx < 0 {
+		t.Fatalf("expected headless enter reinjection after handoff compaction, got %+v", messages)
+	}
+	if futureIdx >= headlessIdx {
+		t.Fatalf("expected future-agent message before headless reinjection, future=%d headless=%d messages=%+v", futureIdx, headlessIdx, messages)
 	}
 }
 
