@@ -230,6 +230,31 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 	}
 }
 
+func TestChatStoreTranscriptPageSnapshotUsesCompactedBaseAndPostCompactionLocals(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
+	s.appendLocalEntry("error", "before replace")
+	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	}))
+	s.appendLocalEntry("compaction_notice", "after replace notice")
+
+	page := s.transcriptPageSnapshot(0, 0)
+	if got := len(page.Snapshot.Entries); got != 3 {
+		t.Fatalf("entry count = %d, want 3 (%+v)", got, page.Snapshot.Entries)
+	}
+	if got := page.Snapshot.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
+		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
+	}
+	if got := page.Snapshot.Entries[1]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" {
+		t.Fatalf("entry[1] = %+v, want compacted summary", got)
+	}
+	if got := page.Snapshot.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[2] = %+v, want post-compaction local entry", got)
+	}
+}
+
 func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
 	out := tools.FormatGenericOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
 	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {

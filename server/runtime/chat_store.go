@@ -73,8 +73,10 @@ type localChatEntry struct {
 }
 
 type compactionCheckpoint struct {
-	CutoffItemCount int
-	Items           []llm.ResponseItem
+	CutoffItemCount    int
+	CutoffMessageCount int
+	CutoffLocalCount   int
+	Items              []llm.ResponseItem
 }
 
 func newChatStore() *chatStore {
@@ -105,8 +107,10 @@ func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.compact = &compactionCheckpoint{
-		CutoffItemCount: len(s.items),
-		Items:           llm.CloneResponseItems(items),
+		CutoffItemCount:    len(s.items),
+		CutoffMessageCount: s.messageCount,
+		CutoffLocalCount:   len(s.local),
+		Items:              llm.CloneResponseItems(items),
 	}
 	s.providerTokenEstimateDirty = true
 }
@@ -452,16 +456,17 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	materializedToolResults := collectMaterializedToolCalls(s.items)
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
 	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: offset, Limit: limit}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > messageCount {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > messageCount {
 				break
 			}
-			scan.appendEntry(s.local[localIndex].Entry)
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
@@ -471,7 +476,7 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 		processedMessages++
 		appendLocalEntries(processedMessages)
 	})
-	for _, item := range s.items {
+	for _, item := range items {
 		walker.Apply(item)
 	}
 	walker.Flush()
@@ -480,6 +485,37 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 	page.Snapshot.Ongoing = s.ongoing
 	page.Snapshot.OngoingError = s.ongoingError
 	return page
+}
+
+func (s *chatStore) detailTranscriptSourceLocked() ([]llm.ResponseItem, []localChatEntry) {
+	if s.compact == nil {
+		return llm.CloneResponseItems(s.items), append([]localChatEntry(nil), s.local...)
+	}
+	items := s.providerItemsSourceLocked()
+	baseMessageCount := countMessagesInResponseItems(s.compact.Items)
+	locals := make([]localChatEntry, 0, max(0, len(s.local)-s.compact.CutoffLocalCount))
+	for _, local := range s.local[s.compact.CutoffLocalCount:] {
+		remapped := local
+		delta := remapped.AfterMessageCount - s.compact.CutoffMessageCount
+		if delta < 0 {
+			delta = 0
+		}
+		remapped.AfterMessageCount = baseMessageCount + delta
+		locals = append(locals, remapped)
+	}
+	return items, locals
+}
+
+func countMessagesInResponseItems(items []llm.ResponseItem) int {
+	count := 0
+	walker := newResponseItemMessageWalker(func(llm.Message) {
+		count++
+	})
+	for _, item := range items {
+		walker.Apply(item)
+	}
+	walker.Flush()
+	return count
 }
 
 type materializedChatSnapshot struct {
