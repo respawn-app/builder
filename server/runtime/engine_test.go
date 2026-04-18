@@ -11030,7 +11030,7 @@ func TestManualLocalCompactionOmitsCarryoverWithoutNewUserMessageSincePreviousCo
 	}
 }
 
-func TestReopenedManualCompactionKeepsModelCarryoverHiddenFromTranscript(t *testing.T) {
+func TestReopenedManualCompactionKeepsCarryoverAsSingleDetailTranscriptEntry(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -11088,6 +11088,9 @@ func TestReopenedManualCompactionKeepsModelCarryoverHiddenFromTranscript(t *test
 		carryoverEntries++
 		if !strings.Contains(entry.Text, "please keep tests green") {
 			t.Fatalf("expected reopened transcript carryover to preserve last user text, got %q", entry.Text)
+		}
+		if entry.Visibility != transcript.EntryVisibilityDetailOnly {
+			t.Fatalf("expected reopened transcript carryover to stay detail-only, got %+v", entry)
 		}
 	}
 	if carryoverEntries != 1 {

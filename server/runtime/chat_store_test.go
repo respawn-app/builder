@@ -768,7 +768,7 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	}
 }
 
-func TestChatStoreSnapshotKeepsManualCompactionCarryoverMessageHidden(t *testing.T) {
+func TestChatStoreSnapshotShowsManualCompactionCarryoverAsDetailOnlyMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{
 		Role:        llm.RoleDeveloper,
@@ -777,8 +777,11 @@ func TestChatStoreSnapshotKeepsManualCompactionCarryoverMessageHidden(t *testing
 	})
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 0 {
-		t.Fatalf("expected hidden model-only carryover message to stay out of transcript, got %+v", snap.Entries)
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected carryover message to project once into transcript, got %+v", snap.Entries)
+	}
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleManualCompactionCarryover) || got.Text != "# Last user message before manual compaction\n\nplease keep tests green" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("unexpected carryover transcript entry: %+v", got)
 	}
 }
 
