@@ -634,6 +634,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if mode == compactionModeManual && includeManualCarryover {
 		manualCarryover = lastVisibleUserMessageSinceLatestCompaction(input)
 	}
+	wasHeadless := e.chat.headlessActive()
 	var result compactionResult
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, stepID, input, providerID, instructions)
@@ -665,7 +666,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 			return compactionResult{}, errors.Join(err, statusErr)
 		}
 	}
-	if err := e.appendPostCompactionMessages(stepID, e.postCompactionMessages(input, mode, manualCarryover)); err != nil {
+	if err := e.appendPostCompactionMessages(stepID, e.postCompactionMessages(mode, manualCarryover, wasHeadless)); err != nil {
 		return compactionResult{}, err
 	}
 	compactionNumber := e.nextCompactionCount()
@@ -1082,7 +1083,7 @@ func (e *Engine) compactionReinjectedBaseMessages() ([]llm.Message, error) {
 	return metaResult.OrderedBaseMessages(), nil
 }
 
-func (e *Engine) postCompactionMessages(input []llm.ResponseItem, mode compactionMode, manualCarryover string) []llm.Message {
+func (e *Engine) postCompactionMessages(mode compactionMode, manualCarryover string, wasHeadless bool) []llm.Message {
 	out := make([]llm.Message, 0, 3)
 	if mode == compactionModeManual {
 		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
@@ -1096,7 +1097,7 @@ func (e *Engine) postCompactionMessages(input []llm.ResponseItem, mode compactio
 			}
 		}
 	}
-	if headlessModeActive(llm.MessagesFromItems(input)) {
+	if wasHeadless {
 		if headless, ok := headlessModeMetaMessage(); ok {
 			out = append(out, headless)
 		}
