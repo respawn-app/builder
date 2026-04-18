@@ -224,7 +224,7 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
 		t.Fatalf("unexpected base url mapping: %+v", got)
 	}
-	if !strings.Contains(stderr.String(), "Builder server ready for workspace") {
+	if !strings.Contains(stderr.String(), "Builder server started for workspace") {
 		t.Fatalf("stderr = %q, want serve startup message", stderr.String())
 	}
 	if stdout.Len() != 0 {
