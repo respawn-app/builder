@@ -552,9 +552,92 @@ func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
 		t.Fatalf("picker header has unexpected left padding: %q", got)
 	}
 
+	serverPicker := newProjectBindingPickerModel(nil, "dark", projectPickerOptions{
+		AllowCreate:    false,
+		HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+		HeaderFallback: serverProjectPickerHeaderFallback,
+		NoticeText:     serverProjectPickerNoticeText,
+		GroupLabel:     serverProjectExistingLabel,
+	})
+	if got := xansi.Strip(serverPicker.renderHeader()); strings.HasPrefix(got, "  ") {
+		t.Fatalf("server picker header has unexpected left padding: %q", got)
+	}
+	serverPicker.width = 240
+	serverPicker.height = 12
+	if got := xansi.Strip(serverPicker.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
+		t.Fatalf("server picker notice missing or padded unexpectedly: %q", got)
+	}
+
 	prompt := newProjectNamePromptModel("demo", "dark")
 	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("project name header has unexpected left padding: %q", got)
+	}
+}
+
+func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	service := projectBindingFlowStubProjectViewService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{
+			ProjectID:   "project-1",
+			DisplayName: "Remote Project",
+			RootPath:    "/srv/project",
+		}}},
+		projectOverviewResp: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{
+			Project: clientui.ProjectSummary{ProjectID: "project-1", DisplayName: "Remote Project", RootPath: "/srv/project"},
+			Workspaces: []clientui.ProjectWorkspaceSummary{{
+				WorkspaceID: "workspace-1",
+				DisplayName: "Workspace 1",
+				RootPath:    "/srv/project",
+			}},
+		}},
+	}
+
+	originalRemotePicker := runServerProjectPickerFlow
+	originalWorkspacePicker := runProjectWorkspacePickerFlow
+	t.Cleanup(func() {
+		runServerProjectPickerFlow = originalRemotePicker
+		runProjectWorkspacePickerFlow = originalWorkspacePicker
+	})
+	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		model := newProjectBindingPickerModel(projects, theme, projectPickerOptions{
+			AllowCreate:    false,
+			HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+			HeaderFallback: serverProjectPickerHeaderFallback,
+			NoticeText:     serverProjectPickerNoticeText,
+			GroupLabel:     serverProjectExistingLabel,
+		})
+		model.width = 240
+		model.height = 12
+		if got := xansi.Strip(model.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
+			t.Fatalf("server browsing picker notice missing or padded unexpectedly: %q", got)
+		}
+		picked := projects[0]
+		return projectBindingPickerResult{Project: &picked}, nil
+	}
+	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string, config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+		t.Fatal("did not expect workspace picker for single workspace project")
+		return projectWorkspacePickerResult{}, nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	bound, err := ensureInteractiveServerBrowsingBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveServerBrowsingBinding: %v", err)
+	}
+	if got := bound.ProjectID(); got != "project-1" {
+		t.Fatalf("bound project id = %q, want project-1", got)
 	}
 }
 

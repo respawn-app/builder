@@ -28,7 +28,7 @@ const (
 	projectBindingExistingLabel          = "Attach to existing project:"
 	serverProjectPickerHeaderMarkdown    = "**Open Server Project**"
 	serverProjectPickerHeaderFallback    = "Open Server Project"
-	serverProjectPickerNoticeText        = "This client directory is not available on the server. Open an existing server project."
+	serverProjectPickerNoticeText        = "Couldn't find the path the client requested - looks like the client & server might be in different locations. Open an existing registered project workspace, or run `builder project create` in the server location."
 	serverProjectExistingLabel           = "Available server projects:"
 	projectWorkspacePickerHeaderMarkdown = "**Select Workspace**"
 	projectWorkspacePickerHeaderFallback = "Select Workspace"
