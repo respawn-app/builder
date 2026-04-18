@@ -2472,6 +2472,74 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 	}
 }
 
+func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	replacement := llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	})
+	if err := eng.replaceHistory("step-1", "local", compactionModeManual, replacement); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+	if err := eng.emitCompactionStatus("step-1", EventCompactionCompleted, compactionModeManual, "local", "", 2, 1, ""); err != nil {
+		t.Fatalf("emit compaction status: %v", err)
+	}
+
+	var projected []Event
+	var notice *Event
+	for idx := range events {
+		evt := events[idx]
+		if evt.Kind != EventLocalEntryAdded || evt.LocalEntry == nil {
+			continue
+		}
+		if evt.LocalEntry.Role == "compaction_notice" {
+			notice = &events[idx]
+			continue
+		}
+		projected = append(projected, evt)
+	}
+	if len(projected) != 2 {
+		t.Fatalf("expected 2 projected replacement entry events, got %+v", events)
+	}
+	if projected[0].LocalEntry.Role != string(transcript.EntryRoleDeveloperContext) || projected[0].LocalEntry.Text != "environment info" {
+		t.Fatalf("unexpected first projected event: %+v", projected[0])
+	}
+	if !projected[0].CommittedEntryStartSet || projected[0].CommittedEntryStart != 1 {
+		t.Fatalf("unexpected first projected committed start: %+v", projected[0])
+	}
+	if projected[1].LocalEntry.Role != string(transcript.EntryRoleCompactionSummary) || projected[1].LocalEntry.Text != "condensed summary" {
+		t.Fatalf("unexpected second projected event: %+v", projected[1])
+	}
+	if !projected[1].CommittedEntryStartSet || projected[1].CommittedEntryStart != 2 {
+		t.Fatalf("unexpected second projected committed start: %+v", projected[1])
+	}
+	if notice == nil {
+		t.Fatalf("expected compaction notice event, got %+v", events)
+	}
+	if !notice.CommittedEntryStartSet || notice.CommittedEntryStart != 3 {
+		t.Fatalf("unexpected compaction notice committed start: %+v", *notice)
+	}
+}
+
 func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

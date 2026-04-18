@@ -230,7 +230,7 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 	}
 }
 
-func TestChatStoreTranscriptPageSnapshotUsesCompactedBaseAndPostCompactionLocals(t *testing.T) {
+func TestChatStoreTranscriptPageSnapshotPreservesHistoryAcrossCompaction(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
 	s.appendLocalEntry("error", "before replace")
@@ -241,21 +241,27 @@ func TestChatStoreTranscriptPageSnapshotUsesCompactedBaseAndPostCompactionLocals
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	page := s.transcriptPageSnapshot(0, 0)
-	if got := len(page.Snapshot.Entries); got != 3 {
-		t.Fatalf("entry count = %d, want 3 (%+v)", got, page.Snapshot.Entries)
+	if got := len(page.Snapshot.Entries); got != 5 {
+		t.Fatalf("entry count = %d, want 5 (%+v)", got, page.Snapshot.Entries)
 	}
-	if got := page.Snapshot.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
-		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
+	if got := page.Snapshot.Entries[0]; got.Role != "user" || got.Text != "before compaction" {
+		t.Fatalf("entry[0] = %+v, want preserved pre-compaction user entry", got)
 	}
-	if got := page.Snapshot.Entries[1]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" {
-		t.Fatalf("entry[1] = %+v, want compacted summary", got)
+	if got := page.Snapshot.Entries[1]; got.Role != "error" || got.Text != "before replace" {
+		t.Fatalf("entry[1] = %+v, want preserved pre-compaction local entry", got)
 	}
-	if got := page.Snapshot.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
-		t.Fatalf("entry[2] = %+v, want post-compaction local entry", got)
+	if got := page.Snapshot.Entries[2]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
+		t.Fatalf("entry[2] = %+v, want compacted developer context", got)
+	}
+	if got := page.Snapshot.Entries[3]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" {
+		t.Fatalf("entry[3] = %+v, want compacted summary", got)
+	}
+	if got := page.Snapshot.Entries[4]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[4] = %+v, want post-compaction local entry", got)
 	}
 }
 
-func TestChatStoreOngoingTailUsesCompactedLogicalHistory(t *testing.T) {
+func TestChatStoreOngoingTailUsesLatestCompactionBoundaryAsFloor(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
 	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{
@@ -268,11 +274,11 @@ func TestChatStoreOngoingTailUsesCompactedLogicalHistory(t *testing.T) {
 	if got := len(window.Snapshot.Entries); got != 3 {
 		t.Fatalf("entry count = %d, want 3 (%+v)", got, window.Snapshot.Entries)
 	}
-	if got := window.TotalEntries; got != 3 {
-		t.Fatalf("total entries = %d, want 3", got)
+	if got := window.TotalEntries; got != 4 {
+		t.Fatalf("total entries = %d, want 4", got)
 	}
-	if got := window.Offset; got != 0 {
-		t.Fatalf("offset = %d, want 0", got)
+	if got := window.Offset; got != 1 {
+		t.Fatalf("offset = %d, want 1", got)
 	}
 	if got := window.Snapshot.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
 		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
@@ -282,6 +288,32 @@ func TestChatStoreOngoingTailUsesCompactedLogicalHistory(t *testing.T) {
 	}
 	if got := window.Snapshot.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
 		t.Fatalf("entry[2] = %+v, want post-compaction local entry", got)
+	}
+}
+
+func TestChatStoreOngoingTailUsesMostRecentCompactionBoundary(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-1"}})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "between"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-2"}})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
+
+	window := s.ongoingTailSnapshot(1)
+	if got := window.TotalEntries; got != 5 {
+		t.Fatalf("total entries = %d, want 5", got)
+	}
+	if got := window.Offset; got != 3 {
+		t.Fatalf("offset = %d, want 3", got)
+	}
+	if got := len(window.Snapshot.Entries); got != 2 {
+		t.Fatalf("entry count = %d, want 2 (%+v)", got, window.Snapshot.Entries)
+	}
+	if got := window.Snapshot.Entries[0].Text; got != "summary-2" {
+		t.Fatalf("entry[0] = %q, want summary-2", got)
+	}
+	if got := window.Snapshot.Entries[1].Text; got != "after" {
+		t.Fatalf("entry[1] = %q, want after", got)
 	}
 }
 
@@ -861,7 +893,7 @@ func TestChatStoreSnapshotPlacesLocalEntriesAtInsertionPoint(t *testing.T) {
 	}
 }
 
-func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.T) {
+func TestChatStoreSnapshotKeepsHistoryAcrossHistoryReplace(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "a"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "b"})
@@ -872,14 +904,23 @@ func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 2 {
-		t.Fatalf("expected replaced history plus new local entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected preserved history plus projected replacement, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "after replace" {
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "a" {
 		t.Fatalf("unexpected first entry after replace: %+v", snap.Entries[0])
 	}
-	if snap.Entries[1].Role != "compaction_notice" || snap.Entries[1].Text != "after replace notice" {
-		t.Fatalf("expected new local entry after replaced history, got %+v", snap.Entries[1])
+	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "b" {
+		t.Fatalf("unexpected second entry after replace: %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "before replace" {
+		t.Fatalf("unexpected third entry after replace: %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "user" || snap.Entries[3].Text != "after replace" {
+		t.Fatalf("unexpected projected replacement entry: %+v", snap.Entries[3])
+	}
+	if snap.Entries[4].Role != "compaction_notice" || snap.Entries[4].Text != "after replace notice" {
+		t.Fatalf("expected new local entry after projected replacement, got %+v", snap.Entries[4])
 	}
 }
 
@@ -910,17 +951,40 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 	}
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 3 {
-		t.Fatalf("expected logical replaced transcript, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected full transcript history plus projected compaction entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != "ctx" {
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "before-1" {
 		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
 	}
-	if snap.Entries[1].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[1].Text != "compact-summary" {
+	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "before-2" {
 		t.Fatalf("unexpected visible entry[1]: %+v", snap.Entries[1])
 	}
-	if snap.Entries[2].Role != "user" || snap.Entries[2].Text != "after" {
-		t.Fatalf("unexpected visible entry[2]: %+v", snap.Entries[2])
+	if snap.Entries[2].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[2].Text != "ctx" {
+		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
+	}
+	if snap.Entries[3].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[3].Text != "compact-summary" {
+		t.Fatalf("unexpected visible entry[3]: %+v", snap.Entries[3])
+	}
+	if snap.Entries[4].Role != "user" || snap.Entries[4].Text != "after" {
+		t.Fatalf("unexpected visible entry[4]: %+v", snap.Entries[4])
+	}
+}
+
+func TestChatStoreSnapshotKeepsProjectedEntriesAcrossMultipleCompactions(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-1"}})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "between"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-2"}})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected full transcript across compactions, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Text != "before" || snap.Entries[1].Text != "summary-1" || snap.Entries[2].Text != "between" || snap.Entries[3].Text != "summary-2" || snap.Entries[4].Text != "after" {
+		t.Fatalf("unexpected multi-compaction transcript: %+v", snap.Entries)
 	}
 }
 
@@ -1065,5 +1129,20 @@ func TestChatStoreCommittedEntryCountRebuildsAfterRestoreHistoryItems(t *testing
 	}
 	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
 		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
+	}
+}
+
+func TestChatStoreRestoreHistoryItemsClearsProjectedHistoryReplacementEntries(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}))
+	s.restoreHistoryItems(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}}))
+
+	snapshot := s.snapshot()
+	if got := len(snapshot.Entries); got != 1 {
+		t.Fatalf("entry count after rollback restore = %d, want 1 (%+v)", got, snapshot.Entries)
+	}
+	if got := snapshot.Entries[0].Text; got != "rolled back" {
+		t.Fatalf("entry[0] = %q, want rolled back", got)
 	}
 }

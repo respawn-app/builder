@@ -41,6 +41,8 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		Items:  llm.CloneResponseItems(items),
 	}
 	reminderIssued := false
+	projectedStart := e.CommittedTranscriptEntryCount()
+	projectedEntries := transcriptEntriesFromHistoryReplacement(payload.Items)
 	if payload.Engine == "reviewer_rollback" {
 		e.resetCurrentPreciseInputTracking()
 		e.resetLocalDiagnostics()
@@ -65,10 +67,34 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		if payload.Engine == "reviewer_rollback" {
 			e.emitCommittedTranscriptAdvanced(stepID)
 		} else {
+			e.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
 			e.emitConversationUpdated(stepID)
 		}
 	}
 	return err
+}
+
+func (e *Engine) emitProjectedHistoryReplacementEntries(stepID string, start int, entries []ChatEntry) {
+	if e == nil || len(entries) == 0 {
+		return
+	}
+	// Live subscribers must observe the same committed transcript progression that
+	// restart hydration reconstructs from history_replaced. Emit projected
+	// compaction rows first, then the persisted compaction_notice/error local entry.
+	if start < 0 {
+		start = 0
+	}
+	for idx, entry := range entries {
+		copyEntry := clonePersistedChatEntry(entry)
+		e.emit(Event{
+			Kind:                       EventLocalEntryAdded,
+			StepID:                     stepID,
+			LocalEntry:                 &copyEntry,
+			CommittedTranscriptChanged: true,
+			CommittedEntryStart:        start + idx,
+			CommittedEntryStartSet:     true,
+		})
+	}
 }
 
 func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compactionMode, engine, provider string, trimmed, count int, errText string) error {

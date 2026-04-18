@@ -1232,6 +1232,88 @@ func TestProjectedCompactionStatusUsesPersistedLocalEntryAsTranscriptSource(t *t
 	}
 }
 
+func TestProjectedCompactionReplacementEntriesAndNoticeAppendWithoutHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "before compaction"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	for _, evt := range []clientui.Event{
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         11,
+			CommittedEntryCount:        3,
+			CommittedEntryStart:        1,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:       "developer_context",
+				Text:       "environment info",
+				Visibility: clientui.EntryVisibilityDetailOnly,
+			}},
+		},
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         11,
+			CommittedEntryCount:        3,
+			CommittedEntryStart:        2,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role: "compaction_summary",
+				Text: "condensed summary",
+			}},
+		},
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         11,
+			CommittedEntryCount:        4,
+			CommittedEntryStart:        3,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role: "compaction_notice",
+				Text: "context compacted for the 1st time",
+			}},
+		},
+	} {
+		msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(evt))
+		for _, msg := range msgs {
+			if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+				t.Fatalf("did not expect projected compaction transcript entries to trigger hydration, got %+v", msgs)
+			}
+		}
+	}
+
+	if got, want := len(m.transcriptEntries), 4; got != want {
+		t.Fatalf("transcript entry count after projected compaction events = %d, want %d (%+v)", got, want, m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Role; got != "developer_context" {
+		t.Fatalf("second transcript role = %q, want developer_context", got)
+	}
+	if got := m.transcriptEntries[2].Role; got != "compaction_summary" {
+		t.Fatalf("third transcript role = %q, want compaction_summary", got)
+	}
+	if got := m.transcriptEntries[3].Role; got != "compaction_notice" {
+		t.Fatalf("fourth transcript role = %q, want compaction_notice", got)
+	}
+}
+
 func TestHandleProjectedRuntimeEventAppendsLocalEntryImmediately(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptRevision = 10
@@ -3709,7 +3791,7 @@ func TestProjectedCommittedGapRequestsExplicitCommittedGapHydration(t *testing.T
 	}
 }
 
-func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIsLive(t *testing.T) {
+func TestProjectedUserMessageFlushedRequestsHydrationForCommittedGapWhileAssistantStreamIsLive(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
@@ -3742,33 +3824,32 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 			Text: "steered message",
 		}},
 	})
-	if msgs := collectCmdMessages(t, cmd); len(msgs) > 0 {
-		t.Fatalf("did not expect transcript refresh while deferring queued user flush, got %+v", msgs)
+	msgs := collectCmdMessages(t, cmd)
+	refresh, ok := msgs[0].(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected committed gap hydration after queued user flush, got %+v", msgs)
+	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseCommittedGap {
+		t.Fatalf("sync cause = %q, want committed_gap", refresh.syncCause)
 	}
 	if len(m.transcriptEntries) != 0 {
-		t.Fatalf("expected optimistic user append deferred until assistant catch-up, got %+v", m.transcriptEntries)
+		t.Fatalf("expected live user append to wait for authoritative hydrate when assistant commit is missing, got %+v", m.transcriptEntries)
 	}
-	if got := len(m.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected one deferred committed tail entry, got %d", got)
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush to stop using deferred committed tail, got %d", got)
 	}
-	if got := m.deferredCommittedTail[0].rangeStart; got != 1 {
-		t.Fatalf("deferred range start = %d, want 1", got)
-	}
-	if got := m.deferredCommittedTail[0].rangeEnd; got != 2 {
-		t.Fatalf("deferred range end = %d, want 2", got)
-	}
-	if got := m.view.OngoingStreamingText(); got != "foreground done" {
-		t.Fatalf("expected live assistant stream preserved while deferring user flush append, got %q", got)
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected committed gap hydration to clear stale live assistant text, got %q", got)
 	}
 	if client.recordedPromptHistory != "steered message" {
 		t.Fatalf("expected prompt history still recorded, got %q", client.recordedPromptHistory)
 	}
 	if len(m.pendingInjected) != 0 {
-		t.Fatalf("expected pending injected queue consumed even while append is deferred, got %+v", m.pendingInjected)
+		t.Fatalf("expected pending injected queue consumed even while hydrate is pending, got %+v", m.pendingInjected)
 	}
-	queuedPane := strings.Split(stripANSIAndTrimRight(strings.Join(m.renderQueuedMessagesPane(80), "\n")), "\n")
-	if len(queuedPane) != 1 || queuedPane[0] != "next: steered message" {
-		t.Fatalf("expected deferred flushed user message to remain visible in queued pane, got %+v", queuedPane)
+	queuedPane := strings.TrimSpace(stripANSIAndTrimRight(strings.Join(m.renderQueuedMessagesPane(80), "\n")))
+	if queuedPane != "" {
+		t.Fatalf("expected flushed user message to leave queued pane once prompt history advances, got %q", queuedPane)
 	}
 	if m.inputSubmitLocked {
 		t.Fatal("expected input submit lock cleared")
@@ -3776,8 +3857,8 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	if m.input != "" {
 		t.Fatalf("expected cleared input after deferred flushed user message, got %q", m.input)
 	}
-	if !m.sawAssistantDelta {
-		t.Fatal("expected live assistant delta flag preserved while deferring user flush append")
+	if m.sawAssistantDelta {
+		t.Fatal("expected committed gap hydration to clear assistant delta flag")
 	}
 }
 
@@ -3813,7 +3894,7 @@ func TestDeferredCommittedUserFlushRequestsTranscriptRefreshWhenRunEndsWithoutCa
 	}
 }
 
-func TestProjectedConversationUpdatedSkipsHydrationWhenDeferredCommittedUserFlushBridgesCount(t *testing.T) {
+func TestProjectedConversationUpdatedSkipsHydrationAfterImmediateUserFlushAppend(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
@@ -3839,6 +3920,9 @@ func TestProjectedConversationUpdatedSkipsHydrationWhenDeferredCommittedUserFlus
 		UserMessage:                "steered message",
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
 	})
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected queued user flush to append immediately once committed tail is contiguous, got %d entries", got)
+	}
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
 		Kind:                       clientui.EventConversationUpdated,
@@ -3849,11 +3933,11 @@ func TestProjectedConversationUpdatedSkipsHydrationWhenDeferredCommittedUserFlus
 	})
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
-			t.Fatalf("did not expect committed conversation_updated to hydrate while deferred user flush already bridges the committed count, got %+v", msg)
+			t.Fatalf("did not expect committed conversation_updated to hydrate after immediate user append, got %+v", msg)
 		}
 	}
-	if got := len(m.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected deferred committed tail preserved until a contiguous committed event arrives, got %d", got)
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush path to avoid deferred committed tail, got %d", got)
 	}
 }
 

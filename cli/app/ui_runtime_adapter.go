@@ -245,16 +245,6 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		})
 		return nil, false, false
 	}
-	if shouldDeferProjectedUserMessageFlushAppend(m, evt) {
-		deferProjectedCommittedTail(m, evt)
-		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
-			"path":           "live_event",
-			"incoming_count": strconv.Itoa(incomingCount),
-			"reason":         "defer_user_flush_until_assistant_catch_up",
-			"applied_count":  "0",
-		})
-		return nil, false, false
-	}
 	plan := planProjectedTranscriptEntries(m, evt)
 	m.logProjectedTranscriptPlanDiag(evt, plan, incomingCount)
 	switch plan.mode {
@@ -285,6 +275,16 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			}
 			return m.requestRuntimeCommittedGapSync(), false, true
 		}
+		return nil, false, false
+	}
+	if plan.mode == projectedTranscriptEntryPlanAppend && shouldDeferProjectedUserMessageFlushAppend(m, evt) {
+		deferProjectedCommittedTail(m, evt)
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "deferred_tail",
+			"applied_count":  "0",
+		})
 		return nil, false, false
 	}
 	entries = plan.entries
@@ -1128,12 +1128,11 @@ func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) 
 			return false
 		}
 	}
-	committed := committedTranscriptEntriesForApp(m.transcriptEntries)
-	if len(committed) == 0 {
+	if !m.hasRuntimeClient() {
 		return true
 	}
-	lastCommittedRole := strings.TrimSpace(committed[len(committed)-1].Role)
-	return lastCommittedRole == "user"
+	committed := committedTranscriptEntriesForApp(m.transcriptEntries)
+	return len(committed) == 0
 }
 
 func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bool {

@@ -71,6 +71,8 @@ type chatStore struct {
 type localChatEntry struct {
 	Entry             ChatEntry
 	AfterMessageCount int
+	MarksBoundary     bool
+	ProjectedHistory  bool
 }
 
 type compactionCheckpoint struct {
@@ -107,6 +109,10 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Non-reviewer compaction keeps user-visible transcript history append-only by
+	// materializing replacement items as synthetic local entries at the compaction
+	// boundary while provider/model history switches to the compacted checkpoint.
+	s.appendProjectedHistoryReplacementEntriesLocked(transcriptEntriesFromHistoryReplacement(items))
 	s.compact = &compactionCheckpoint{
 		CutoffItemCount:    len(s.items),
 		CutoffMessageCount: s.messageCount,
@@ -121,6 +127,19 @@ func (s *chatStore) restoreHistoryItems(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.items = llm.CloneResponseItems(items)
+	if len(s.local) > 0 {
+		// reviewer_rollback is a real visible-history replacement, so synthetic
+		// compaction rows from earlier non-reviewer history_replaced events must be
+		// discarded when restoring the rolled-back transcript.
+		preserved := make([]localChatEntry, 0, len(s.local))
+		for _, entry := range s.local {
+			if entry.ProjectedHistory {
+				continue
+			}
+			preserved = append(preserved, entry)
+		}
+		s.local = preserved
+	}
 	s.compact = nil
 	s.rebuildTranscriptStatsLocked()
 	s.providerTokenEstimateDirty = true
@@ -229,6 +248,46 @@ func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ong
 	s.local = append(s.local, localChatEntry{
 		Entry:             ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
 		AfterMessageCount: messageCount,
+	})
+	s.transcriptEntryCount++
+}
+
+func (s *chatStore) appendProjectedEntry(entry ChatEntry) {
+	s.appendProjectedEntryWithMetadata(entry, false, false)
+}
+
+func (s *chatStore) appendProjectedEntryWithMetadata(entry ChatEntry, marksBoundary bool, projectedHistory bool) {
+	if strings.TrimSpace(entry.Role) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendProjectedEntryLocked(entry, marksBoundary, projectedHistory)
+}
+
+func (s *chatStore) appendProjectedHistoryReplacementEntries(entries []ChatEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendProjectedHistoryReplacementEntriesLocked(entries)
+}
+
+func (s *chatStore) appendProjectedHistoryReplacementEntriesLocked(entries []ChatEntry) {
+	for idx, entry := range entries {
+		s.appendProjectedEntryLocked(entry, idx == 0, true)
+	}
+}
+
+func (s *chatStore) appendProjectedEntryLocked(entry ChatEntry, marksBoundary bool, projectedHistory bool) {
+	entry.Visibility = transcript.NormalizeEntryVisibility(entry.Visibility)
+	entry.ToolCallID = strings.TrimSpace(entry.ToolCallID)
+	s.local = append(s.local, localChatEntry{
+		Entry:             entry,
+		AfterMessageCount: s.messageCount,
+		MarksBoundary:     marksBoundary,
+		ProjectedHistory:  projectedHistory,
 	})
 	s.transcriptEntryCount++
 }
@@ -441,9 +500,6 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 		TrackOngoingTail: true,
 		TailLimit:        maxEntries,
 	}, s.toolCompletions, materializedToolResults)
-	if s.compact != nil {
-		scan.MarkCompactionBoundary()
-	}
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
@@ -451,14 +507,23 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 			if localEntries[localIndex].AfterMessageCount > messageCount {
 				break
 			}
+			if localEntries[localIndex].MarksBoundary {
+				scan.MarkCompactionBoundary()
+			}
 			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
 	appendLocalEntries(0)
+	if s.compact != nil && s.compact.CutoffMessageCount == 0 {
+		scan.MarkCompactionBoundary()
+	}
 	walker := newResponseItemMessageWalker(func(msg llm.Message) {
 		scan.ApplyMessage(msg)
 		processedMessages++
+		if s.compact != nil && processedMessages == s.compact.CutoffMessageCount {
+			scan.MarkCompactionBoundary()
+		}
 		appendLocalEntries(processedMessages)
 	})
 	for _, item := range items {
@@ -508,34 +573,7 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 }
 
 func (s *chatStore) detailTranscriptSourceLocked() ([]llm.ResponseItem, []localChatEntry) {
-	if s.compact == nil {
-		return llm.CloneResponseItems(s.items), append([]localChatEntry(nil), s.local...)
-	}
-	items := s.providerItemsSourceLocked()
-	baseMessageCount := countMessagesInResponseItems(s.compact.Items)
-	locals := make([]localChatEntry, 0, max(0, len(s.local)-s.compact.CutoffLocalCount))
-	for _, local := range s.local[s.compact.CutoffLocalCount:] {
-		remapped := local
-		delta := remapped.AfterMessageCount - s.compact.CutoffMessageCount
-		if delta < 0 {
-			delta = 0
-		}
-		remapped.AfterMessageCount = baseMessageCount + delta
-		locals = append(locals, remapped)
-	}
-	return items, locals
-}
-
-func countMessagesInResponseItems(items []llm.ResponseItem) int {
-	count := 0
-	walker := newResponseItemMessageWalker(func(llm.Message) {
-		count++
-	})
-	for _, item := range items {
-		walker.Apply(item)
-	}
-	walker.Flush()
-	return count
+	return llm.CloneResponseItems(s.items), append([]localChatEntry(nil), s.local...)
 }
 
 type materializedChatSnapshot struct {

@@ -69,6 +69,23 @@ func (p *TranscriptProjector) ApplyPersistedEvent(evt session.Event) error {
 	return nil
 }
 
+func transcriptEntriesFromHistoryReplacement(items []llm.ResponseItem) []ChatEntry {
+	if len(items) == 0 {
+		return nil
+	}
+	projected := newChatStore()
+	projected.restoreHistoryItems(items)
+	snapshot := projected.snapshot()
+	if len(snapshot.Entries) == 0 {
+		return nil
+	}
+	entries := make([]ChatEntry, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		entries = append(entries, clonePersistedChatEntry(entry))
+	}
+	return entries
+}
+
 func (p *TranscriptProjector) ChatSnapshot() ChatSnapshot {
 	if p == nil || p.chat == nil {
 		return ChatSnapshot{}
