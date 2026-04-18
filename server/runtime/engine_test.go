@@ -9134,8 +9134,8 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:                 "gpt-5",
-		ContextWindowTokens:   2_000,
-		AutoCompactTokenLimit: 1_000,
+		ContextWindowTokens:   20_000,
+		AutoCompactTokenLimit: 10_000,
 		MaxTokens:             20,
 		CompactionMode:        "native",
 	})
@@ -9145,7 +9145,7 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.setLastUsage(llm.Usage{InputTokens: 990, WindowTokens: 2_000})
+	eng.setLastUsage(llm.Usage{InputTokens: 9_990, WindowTokens: 20_000})
 
 	msg, err := eng.runStepLoop(context.Background(), "step-1")
 	if err != nil {
@@ -11726,14 +11726,86 @@ func TestAutoCompactionRemoteDropsPreCompactionDeveloperContext(t *testing.T) {
 			envCount++
 		}
 	}
-	if globalCount != 0 {
-		t.Fatalf("expected remote compaction to drop prior global AGENTS context, got %d", globalCount)
+	if globalCount != 1 {
+		t.Fatalf("expected remote compaction to reinject exactly one current global AGENTS context, got %d", globalCount)
 	}
-	if workspaceCount != 0 {
-		t.Fatalf("expected remote compaction to drop prior workspace AGENTS context, got %d", workspaceCount)
+	if workspaceCount != 1 {
+		t.Fatalf("expected remote compaction to reinject exactly one current workspace AGENTS context, got %d", workspaceCount)
 	}
-	if envCount != 0 {
-		t.Fatalf("expected remote compaction to drop prior environment context, got %d", envCount)
+	if envCount != 1 {
+		t.Fatalf("expected remote compaction to reinject exactly one current environment context, got %d", envCount)
+	}
+}
+
+func TestManualRemoteCompactionRebuildsCanonicalPrefixOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{compactionResponses: []llm.CompactionResponse{{
+		OutputItems: []llm.ResponseItem{
+			{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "remote summary"},
+			{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+		},
+		Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless mode: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	if _, err := eng.compactNow(context.Background(), "step-1", compactionModeManual, "", false); err != nil {
+		t.Fatalf("compactNow: %v", err)
+	}
+
+	items := eng.snapshotItems()
+	if len(items) < 7 {
+		t.Fatalf("expected canonical remote compaction prefix, got %+v", items)
+	}
+	if items[0].MessageType != llm.MessageTypeCompactionSummary || items[0].Content != "remote summary" {
+		t.Fatalf("expected provider summary first, got %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeCompaction || items[1].EncryptedContent != "enc_1" {
+		t.Fatalf("expected provider checkpoint second, got %+v", items[1])
+	}
+	if items[2].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment after provider output, got %+v", items[2])
+	}
+	if items[3].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills after environment, got %+v", items[3])
+	}
+	if items[4].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(items[4].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after skills, got %+v", items[4])
+	}
+	if items[5].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(items[5].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS after global AGENTS, got %+v", items[5])
+	}
+	if items[6].MessageType != llm.MessageTypeHeadlessMode {
+		t.Fatalf("expected headless reinjection after canonical base context, got %+v", items[6])
 	}
 }
 
