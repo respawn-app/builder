@@ -42,6 +42,65 @@ type headlessProjectViewStubService struct {
 	overviewErr      error
 }
 
+type configuredProjectViewRemoteStub struct {
+	identity           protocol.ServerIdentity
+	resolveProjectPath func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error)
+	listProjects       func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error)
+	getProjectOverview func(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error)
+	closed             atomic.Bool
+}
+
+func (s *configuredProjectViewRemoteStub) Close() error {
+	if s != nil {
+		s.closed.Store(true)
+	}
+	return nil
+}
+
+func (s *configuredProjectViewRemoteStub) Identity() protocol.ServerIdentity {
+	if s == nil {
+		return protocol.ServerIdentity{}
+	}
+	return s.identity
+}
+
+func (s *configuredProjectViewRemoteStub) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	if s != nil && s.listProjects != nil {
+		return s.listProjects(ctx, req)
+	}
+	return serverapi.ProjectListResponse{}, errors.New("unexpected ListProjects call")
+}
+
+func (s *configuredProjectViewRemoteStub) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	if s != nil && s.resolveProjectPath != nil {
+		return s.resolveProjectPath(ctx, req)
+	}
+	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
+}
+
+func (*configuredProjectViewRemoteStub) CreateProject(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+}
+
+func (*configuredProjectViewRemoteStub) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (*configuredProjectViewRemoteStub) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+}
+
+func (s *configuredProjectViewRemoteStub) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	if s != nil && s.getProjectOverview != nil {
+		return s.getProjectOverview(ctx, req)
+	}
+	return serverapi.ProjectGetOverviewResponse{}, errors.New("unexpected GetProjectOverview call")
+}
+
+func (*configuredProjectViewRemoteStub) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
+}
+
 func (s headlessProjectViewStubService) ListProjects(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	return s.listProjectsResp, s.listProjectsErr
 }
@@ -574,6 +633,77 @@ func TestSelectSingleRemoteWorkspaceForHeadlessChoosesOnlyWorkspace(t *testing.T
 	}
 	if selection.ProjectID != "project-1" || selection.WorkspaceID != "workspace-1" {
 		t.Fatalf("unexpected selection: %+v", selection)
+	}
+}
+
+func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDiscovery(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	originalRemoteDial := dialConfiguredRemote
+	originalAttachTimeout := configuredRemoteAttachTimeout
+	originalDiscoveryTimeout := configuredRemoteWorkspaceDiscoveryTimeout
+	t.Cleanup(func() {
+		dialConfiguredProjectViewRemote = originalProjectViewsDial
+		dialConfiguredRemote = originalRemoteDial
+		configuredRemoteAttachTimeout = originalAttachTimeout
+		configuredRemoteWorkspaceDiscoveryTimeout = originalDiscoveryTimeout
+	})
+
+	configuredRemoteAttachTimeout = 20 * time.Millisecond
+	configuredRemoteWorkspaceDiscoveryTimeout = 120 * time.Millisecond
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
+		},
+		listProjects: func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+			return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}}, nil
+		},
+		getProjectOverview: func(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+			time.Sleep(configuredRemoteAttachTimeout + 10*time.Millisecond)
+			if err := ctx.Err(); err != nil {
+				return serverapi.ProjectGetOverviewResponse{}, err
+			}
+			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1"}}}}, nil
+		},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+	var dialRemaining time.Duration
+	dialConfiguredRemote = func(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected dial context deadline")
+		}
+		dialRemaining = time.Until(deadline)
+		if projectID != "project-1" || workspaceID != "workspace-1" {
+			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
+		}
+		return new(client.Remote), nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected configured remote attach to succeed")
+	}
+	if remote == nil {
+		t.Fatal("expected remote client")
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected project view remote to close after workspace selection")
+	}
+	if dialRemaining <= configuredRemoteAttachTimeout/2 {
+		t.Fatalf("expected fresh attach timeout after workspace discovery, remaining=%v attach=%v", dialRemaining, configuredRemoteAttachTimeout)
 	}
 }
 
