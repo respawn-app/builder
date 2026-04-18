@@ -7070,11 +7070,16 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	if !foundSkills {
 		t.Fatalf("expected skills developer message in first request, messages=%+v", requestMessages(client.calls[0]))
 	}
+	for _, msg := range requestMessages(client.calls[0]) {
+		if strings.Contains(msg.Content, "Skipped skill \"broken-skill\"") {
+			t.Fatalf("expected broken skill warning to stay out of model request, got %+v", requestMessages(client.calls[0]))
+		}
+	}
 
 	snapshot := eng.ChatSnapshot()
 	foundWarning := false
 	for _, entry := range snapshot.Entries {
-		if entry.Role != string(transcript.EntryRoleDeveloperFeedback) {
+		if entry.Role != "warning" || entry.Visibility != transcript.EntryVisibilityAll {
 			continue
 		}
 		if strings.Contains(entry.Text, "Skipped skill \"broken-skill\"") && strings.Contains(entry.Text, filepath.ToSlash(brokenLinkPath)) {
