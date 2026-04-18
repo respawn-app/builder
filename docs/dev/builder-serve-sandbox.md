@@ -1,6 +1,6 @@
 # Builder Serve Sandbox
 
-`scripts/sandbox-serve.sh` builds a Docker image that compiles `builder` from the same copied repo snapshot it ships, seeds only host `config.toml` and `auth.json` into an isolated container home on first boot, clones a sandboxed Builder repo at the container workspace path, registers project `builder`, then runs `builder serve` in the container.
+`scripts/sandbox-serve.sh` builds a two-stage Docker image: `builder` is compiled in a Go build stage, then copied into a `debian:bookworm-slim` runtime image together with the Go toolchain and the sandbox repo snapshot. On first boot the container seeds host `config.toml` and `auth.json` into an isolated container home, clones a sandboxed Builder repo at the container workspace path, registers project `builder`, then runs `builder serve`.
 
 Properties:
 
@@ -11,6 +11,7 @@ Properties:
 - The workspace defaults to `/workspace/builder` inside the container. Builder no longer needs the host repo path mirrored into the sandbox.
 - First boot registers the cloned workspace as server project `builder` via the documented server-admin CLI surface.
 - The sandbox image includes Builder-oriented dev/debug tools such as `git`, `gh`, `jq`, `yq`, `ripgrep`, `fd`, `fzf`, `sqlite3`, `strace`, `lsof`, `iproute2`, `dnsutils`, `netcat`, `tree`, `rsync`, `zip`, `python3`, `pip`, `venv`, and `uv`.
+- Container startup validates that the expected dev/debug binaries are on `PATH` so Dockerfile drift fails fast.
 
 Bootstrap order:
 

@@ -11,6 +11,20 @@ server_port="${BUILDER_SERVER_PORT:-53082}"
 sandbox_home="${SANDBOX_HOME:-/root}"
 builder_bin="${BUILDER_SANDBOX_BUILDER_BIN:-/usr/local/bin/builder}"
 
+require_commands() {
+	local missing=()
+	local cmd
+	for cmd in "$@"; do
+		if ! command -v "$cmd" >/dev/null 2>&1; then
+			missing+=("$cmd")
+		fi
+	done
+	if [ ${#missing[@]} -gt 0 ]; then
+		echo "sandbox image is missing required dev tools: ${missing[*]}" >&2
+		return 1
+	fi
+}
+
 require_project_create_cli() {
 	if HOME="$sandbox_home" "$builder_bin" project create --help >/dev/null 2>&1; then
 		return 0
@@ -50,6 +64,8 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+require_commands git jq yq rg fd fzf sqlite3 strace lsof ip dig nc tree rsync zip python3 python pip uv
 
 mkdir -p "$(dirname -- "$workspace_root")"
 mkdir -p "$workspace_root"
