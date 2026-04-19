@@ -3,6 +3,7 @@ package rpcwire
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
@@ -97,10 +98,7 @@ func dialUnixWebSocketContext(ctx context.Context, config *websocket.Config, raw
 	conn, err := websocket.NewClient(config, rawConn)
 	close(stopCancel)
 	if err != nil {
-		if cerr := ctx.Err(); cerr != nil {
-			return nil, cerr
-		}
-		return nil, err
+		return nil, normalizeHandshakeContextError(ctx, err)
 	}
 	if err := rawConn.SetDeadline(time.Time{}); err != nil {
 		_ = conn.Close()
@@ -111,6 +109,24 @@ func dialUnixWebSocketContext(ctx context.Context, config *websocket.Config, raw
 		return nil, err
 	}
 	return conn, nil
+}
+
+func normalizeHandshakeContextError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if deadline, ok := ctx.Deadline(); ok {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() && !deadline.After(time.Now()) {
+				return context.DeadlineExceeded
+			}
+		}
+	}
+	return err
 }
 
 func (WebSocketTransport) Handler(handler func(context.Context, Conn)) http.Handler {
