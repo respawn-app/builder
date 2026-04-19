@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -424,7 +425,8 @@ func TestDialRemoteURLForProjectValidatesAttachProject(t *testing.T) {
 	}
 }
 
-func TestRemoteProjectViewCallsDoNotAttachScopedProjectFirst(t *testing.T) {
+func TestRemoteProjectViewCallsReuseInitialProjectAttach(t *testing.T) {
+	var attachCount atomic.Int32
 	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
 		defer func() { _ = ws.Close() }()
 		var req protocol.Request
@@ -437,34 +439,43 @@ func TestRemoteProjectViewCallsDoNotAttachScopedProjectFirst(t *testing.T) {
 		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			t.Fatalf("send handshake response: %v", err)
 		}
-		if err := websocket.JSON.Receive(ws, &req); err != nil {
-			t.Fatalf("receive project view request: %v", err)
-		}
-		if req.Method == protocol.MethodAttachProject {
-			t.Fatal("did not expect attach-project before project-view RPC")
-		}
-		switch req.Method {
-		case protocol.MethodProjectResolvePath:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))
-		case protocol.MethodProjectCreate:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectCreateResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
-		case protocol.MethodProjectAttachWorkspace:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectAttachWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
-		case protocol.MethodProjectRebindWorkspace:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectRebindWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1", WorkspaceID: "workspace-1"}}))
-		case protocol.MethodProjectGetOverview:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectGetOverviewResponse{}))
-		case protocol.MethodSessionListByProject:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.SessionListByProjectResponse{}))
-		case protocol.MethodProjectList:
-			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))
-		default:
-			t.Fatalf("unexpected project view method %q", req.Method)
+		for {
+			if err := websocket.JSON.Receive(ws, &req); err != nil {
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				t.Fatalf("receive project view request: %v", err)
+			}
+			switch req.Method {
+			case protocol.MethodAttachProject:
+				attachCount.Add(1)
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: "project-1", WorkspaceRoot: "/tmp/attached"}))
+			case protocol.MethodProjectResolvePath:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))
+			case protocol.MethodProjectCreate:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectCreateResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
+			case protocol.MethodProjectAttachWorkspace:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectAttachWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
+			case protocol.MethodProjectRebindWorkspace:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectRebindWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1", WorkspaceID: "workspace-1"}}))
+			case protocol.MethodProjectGetOverview:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectGetOverviewResponse{}))
+			case protocol.MethodSessionListByProject:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.SessionListByProjectResponse{}))
+			case protocol.MethodProjectList:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))
+			default:
+				t.Fatalf("unexpected project view method %q", req.Method)
+			}
 		}
 	}))
 	defer server.Close()
 
-	remote := &Remote{rpcURL: "ws" + server.URL[len("http"):], projectID: "project-1", workspaceRoot: "/tmp/attached"}
+	remote, err := DialRemoteURLForProjectWorkspace(context.Background(), "ws"+server.URL[len("http"):], "project-1", "/tmp/attached")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProjectWorkspace: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
 	if _, err := remote.ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: "/tmp/workspace-a"}); err != nil {
 		t.Fatalf("ResolveProjectPath: %v", err)
 	}
@@ -485,6 +496,9 @@ func TestRemoteProjectViewCallsDoNotAttachScopedProjectFirst(t *testing.T) {
 	}
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
+	}
+	if got := attachCount.Load(); got != 1 {
+		t.Fatalf("attachCount = %d, want 1", got)
 	}
 }
 

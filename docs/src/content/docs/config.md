@@ -60,6 +60,8 @@ timeout_seconds = 60
 verbose_output = false # show in ongoing transcript
 ```
 
+`server_host` and `server_port` stay the durable TCP source of truth. On Unix platforms Builder may also derive a same-machine Unix domain socket for faster local RPC, but that socket is automatic local state only: there is no extra config knob, LAN/remote clients still use configured TCP, and health/readiness stay on configured HTTP/TCP.
+
 ## CLI Overrides
 
 These flags overlay settings at startup.
@@ -91,8 +93,8 @@ These flags overlay settings at startup.
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
 | `priority_request_mode` | bool | `false` |  |  | Enables fast-mode requests where the provider supports them. |
 | `debug` | bool | `false` | `BUILDER_DEBUG` |  | Enables global developer-oriented strictness and logging. Only use for development/debugging |
-| `server_host` | string | `127.0.0.1` | `BUILDER_SERVER_HOST` |  | Exact local app-server host Builder will dial or listen on. Builder does not use discovery files or silent port rebinding. |
-| `server_port` | int | `53082` | `BUILDER_SERVER_PORT` |  | Exact local app-server port Builder will dial or listen on. Must match across clients attached to the same persistence root. |
+| `server_host` | string | `127.0.0.1` | `BUILDER_SERVER_HOST` |  | Exact TCP app-server host Builder will dial or listen on. Builder does not use discovery files or silent port rebinding. Same-machine Unix socket optimization, when supported, is derived automatically and does not change this remote source of truth. |
+| `server_port` | int | `53082` | `BUILDER_SERVER_PORT` |  | Exact TCP app-server port Builder will dial or listen on. Must match across clients attached to the same persistence root. Same-machine Unix socket optimization, when supported, is additive only. |
 | `web_search` | string | `native` | `BUILDER_WEB_SEARCH` |  | Web search backend. Allowed: `off`, `native`. `custom` (e.g. Brave Search) is not implemented yet, on the roadmap. |
 | `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `--provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |
 | `openai_base_url` | string | `""` | `BUILDER_OPENAI_BASE_URL` | `--openai-base-url` | OpenAI-compatible base URL. Must be used with `provider_override=openai` or with no explicit provider override. Cannot be changed mid-session. |

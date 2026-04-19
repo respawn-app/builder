@@ -85,9 +85,9 @@ func (s *remoteAppServer) BindProjectWorkspace(ctx context.Context, projectID st
 	var nextRemote *client.Remote
 	var err error
 	if trimmedWorkspaceID != "" {
-		nextRemote, err = client.DialRemoteURLForProjectWorkspaceID(ctx, config.ServerRPCURL(s.cfg), trimmedProjectID, trimmedWorkspaceID)
+		nextRemote, err = client.DialConfiguredRemoteForProjectWorkspaceID(ctx, s.cfg, trimmedProjectID, trimmedWorkspaceID)
 	} else {
-		nextRemote, err = client.DialRemoteURLForProjectWorkspace(ctx, config.ServerRPCURL(s.cfg), trimmedProjectID, s.cfg.WorkspaceRoot)
+		nextRemote, err = client.DialConfiguredRemoteForProjectWorkspace(ctx, s.cfg, trimmedProjectID, s.cfg.WorkspaceRoot)
 	}
 	if err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/rootlock"
 	"builder/server/startup"
+	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
@@ -237,6 +239,162 @@ func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
 	}
+}
+
+func TestServeExposesDerivedLocalUnixSocketAndCleansStalePath(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	authHandler := envAuthHandler{}
+	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	socketPath, ok, err := config.ServerLocalRPCSocketPath(loadCfg)
+	if err != nil {
+		t.Fatalf("ServerLocalRPCSocketPath: %v", err)
+	}
+	if !ok {
+		t.Skip("local unix sockets unsupported on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll socket dir: %v", err)
+	}
+	staleListener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen stale unix socket: %v", err)
+	}
+	if err := staleListener.Close(); err != nil {
+		t.Fatalf("close stale unix socket: %v", err)
+	}
+
+	server, err := Start(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(ctx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unix socket path did not appear: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for {
+		conn, dialErr := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unix socket path did not become dialable: %v", dialErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var localRemote *client.Remote
+	for {
+		localRemote, err = client.DialConfiguredRemote(context.Background(), loadCfg)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("DialConfiguredRemote: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if localRemote.Identity().ServerID == "" {
+		t.Fatal("expected configured remote identity")
+	}
+	_ = localRemote.Close()
+
+	tcpRemote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(loadCfg))
+	if err != nil {
+		t.Fatalf("DialRemoteURL TCP: %v", err)
+	}
+	_ = tcpRemote.Close()
+}
+
+func TestServeDegradesToTCPWhenDerivedLocalSocketFails(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	authHandler := envAuthHandler{}
+	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
+
+	originalLocalSocketListener := localSocketListener
+	localSocketListener = func(config.App) (net.Listener, func(), bool, error) {
+		return nil, nil, false, errors.New("uds setup failed")
+	}
+	t.Cleanup(func() { localSocketListener = originalLocalSocketListener })
+
+	server, err := Start(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(ctx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET health: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tcpRemote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(loadCfg))
+	if err != nil {
+		t.Fatalf("DialRemoteURL TCP: %v", err)
+	}
+	_ = tcpRemote.Close()
 }
 
 func TestServeStartsUnauthenticatedAndReportsBootstrapReadiness(t *testing.T) {
