@@ -316,7 +316,7 @@ func (s *uiPathReferenceSearchService) buildCorpus(workspaceRoot string, generat
 }
 
 func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, workspaceRoot string) (uiPathReferenceCorpusSnapshot, error) {
-	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--files", "-0", "--hidden", "-g", "!.git")
+	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--no-config", "--files", "-0", "--hidden", "-g", "!.git")
 	if err != nil {
 		if isEmptyRipgrepFilesResult(err, output) {
 			return uiPathReferenceCorpusSnapshot{}, nil

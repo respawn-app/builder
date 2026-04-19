@@ -39,7 +39,7 @@ func TestLoadCorpusSnapshotIncludesDerivedDirectoriesAndExcludesGit(t *testing.T
 	if runner.dir != "/tmp/workspace" {
 		t.Fatalf("runner dir = %q, want /tmp/workspace", runner.dir)
 	}
-	if !reflect.DeepEqual(runner.args, []string{"--files", "-0", "--hidden", "-g", "!.git"}) {
+	if !reflect.DeepEqual(runner.args, []string{"--no-config", "--files", "-0", "--hidden", "-g", "!.git"}) {
 		t.Fatalf("runner args = %+v", runner.args)
 	}
 }
