@@ -2472,6 +2472,84 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 	}
 }
 
+func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	replacement := llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	})
+	if err := eng.replaceHistory("step-1", "local", compactionModeManual, replacement); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+	if err := eng.emitCompactionStatus("step-1", EventCompactionCompleted, compactionModeManual, "local", "", 2, 1, ""); err != nil {
+		t.Fatalf("emit compaction status: %v", err)
+	}
+
+	var projected []Event
+	var notice *Event
+	for idx := range events {
+		evt := events[idx]
+		if evt.Kind != EventLocalEntryAdded || evt.LocalEntry == nil {
+			continue
+		}
+		if evt.LocalEntry.Role == "compaction_notice" {
+			notice = &events[idx]
+			continue
+		}
+		projected = append(projected, evt)
+	}
+	if len(projected) != 2 {
+		t.Fatalf("expected 2 projected replacement entry events, got %+v", events)
+	}
+	if projected[0].LocalEntry.Role != string(transcript.EntryRoleDeveloperContext) || projected[0].LocalEntry.Text != "environment info" {
+		t.Fatalf("unexpected first projected event: %+v", projected[0])
+	}
+	if !projected[0].CommittedEntryStartSet || projected[0].CommittedEntryStart != 1 {
+		t.Fatalf("unexpected first projected committed start: %+v", projected[0])
+	}
+	if projected[1].LocalEntry.Role != string(transcript.EntryRoleCompactionSummary) || projected[1].LocalEntry.Text != "condensed summary" {
+		t.Fatalf("unexpected second projected event: %+v", projected[1])
+	}
+	if !projected[1].CommittedEntryStartSet || projected[1].CommittedEntryStart != 2 {
+		t.Fatalf("unexpected second projected committed start: %+v", projected[1])
+	}
+	if notice == nil {
+		t.Fatalf("expected compaction notice event, got %+v", events)
+	}
+	if !notice.CommittedEntryStartSet || notice.CommittedEntryStart != 3 {
+		t.Fatalf("unexpected compaction notice committed start: %+v", *notice)
+	}
+	conversationUpdatedCount := 0
+	for _, evt := range events {
+		if evt.Kind != EventConversationUpdated || evt.StepID != "step-1" {
+			continue
+		}
+		conversationUpdatedCount++
+	}
+	if conversationUpdatedCount != 1 {
+		t.Fatalf("expected one compaction conversation update, got %+v", events)
+	}
+}
+
 func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -2946,16 +3024,20 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 	}
 
 	finalAssistantContents := make([]string, 0)
+	noopFinalCount := 0
 	for _, persisted := range eng.snapshotMessages() {
 		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
 			finalAssistantContents = append(finalAssistantContents, persisted.Content)
 		}
-		if strings.Contains(persisted.Content, reviewerNoopToken) {
-			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		if isNoopFinalAnswer(persisted) {
+			noopFinalCount++
 		}
 	}
-	if len(finalAssistantContents) != 0 {
-		t.Fatalf("expected no persisted final assistant messages, got %q", finalAssistantContents)
+	if noopFinalCount != 1 {
+		t.Fatalf("noop final count = %d, want 1; messages=%+v", noopFinalCount, eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 1 || finalAssistantContents[0] != reviewerNoopToken {
+		t.Fatalf("expected hidden persisted noop final assistant message, got %q", finalAssistantContents)
 	}
 
 	snapshot := eng.ChatSnapshot()
@@ -3127,13 +3209,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if len(requestMessages(reviewerReq)) == 0 {
 		t.Fatalf("expected reviewer request to include transcript entry messages")
 	}
-	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(requestMessages(reviewerReq)[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", requestMessages(reviewerReq)[0])
+	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected reviewer message[0] to be environment meta developer message, got %+v", requestMessages(reviewerReq)[0])
 	}
+	agentsIdx := -1
 	environmentIdx := -1
 	boundaryIdx := -1
 	skillsMetaIdx := -1
 	for idx, message := range requestMessages(reviewerReq) {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD && strings.Contains(message.Content, "source: "+globalPath) {
+			agentsIdx = idx
+		}
 		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
 			environmentIdx = idx
 		}
@@ -3151,11 +3237,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if boundaryIdx < 0 {
 		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", requestMessages(reviewerReq))
 	}
+	if agentsIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include AGENTS context, got %+v", requestMessages(reviewerReq))
+	}
 	if environmentIdx >= boundaryIdx {
 		t.Fatalf("expected environment metadata before boundary, env=%d boundary=%d", environmentIdx, boundaryIdx)
 	}
-	if skillsMetaIdx >= 0 && (skillsMetaIdx <= 0 || skillsMetaIdx >= environmentIdx) {
-		t.Fatalf("expected skills metadata between AGENTS and environment when present, skills=%d env=%d", skillsMetaIdx, environmentIdx)
+	if agentsIdx <= environmentIdx {
+		t.Fatalf("expected AGENTS metadata after environment, agents=%d env=%d", agentsIdx, environmentIdx)
+	}
+	if skillsMetaIdx >= 0 && (skillsMetaIdx <= environmentIdx || skillsMetaIdx >= agentsIdx) {
+		t.Fatalf("expected skills metadata between environment and AGENTS when present, skills=%d env=%d agents=%d", skillsMetaIdx, environmentIdx, agentsIdx)
 	}
 	foundAgentLabel := false
 	foundToolCallEntry := false
@@ -3201,9 +3293,6 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	for _, entry := range snapshot.Entries {
 		if strings.Contains(entry.Text, reviewerNoopToken) {
 			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
-		}
-		if strings.Contains(entry.Text, "Supervisor agent gave you suggestions") {
-			t.Fatalf("reviewer control instruction leaked into chat snapshot: %+v", snapshot.Entries)
 		}
 		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran") {
 			foundReviewerStatus = true
@@ -4040,7 +4129,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 	}
 }
 
-func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
+func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -4088,47 +4177,56 @@ func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testi
 			t.Fatalf("restore engine: %v", result.err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("restore engine timed out; possible store-lock deadlock while replaying reviewer_rollback history replacement")
+		t.Fatal("restore engine timed out while ignoring legacy reviewer_rollback history replacement")
 	}
 	items := restored.snapshotItems()
-	if len(items) != len(legacyItems) {
-		t.Fatalf("expected %d restored items, got %+v", len(legacyItems), items)
-	}
-	if items[0].Role != llm.RoleUser || items[0].Content != "before" {
-		t.Fatalf("unexpected restored first item: %+v", items[0])
-	}
-	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != "call_1" {
-		t.Fatalf("unexpected restored function call item: %+v", items[1])
-	}
-	if string(items[1].ToolPresentation) != string(presentation) {
-		t.Fatalf("expected stored tool presentation preserved, got %+v", items[1])
+	if len(items) != 0 {
+		t.Fatalf("expected legacy reviewer rollback replacement to be ignored, got %+v", items)
 	}
 	snapshot := restored.ChatSnapshot()
-	if len(snapshot.Entries) != 2 {
-		t.Fatalf("expected restored user and tool call entries, got %+v", snapshot.Entries)
-	}
-	if snapshot.Entries[1].Role != "tool_call" || snapshot.Entries[1].ToolCall == nil || snapshot.Entries[1].ToolCall.Command != "pwd" {
-		t.Fatalf("expected restored tool call transcript entry, got %+v", snapshot.Entries[1])
+	if len(snapshot.Entries) != 0 {
+		t.Fatalf("expected ignored legacy reviewer rollback to produce no transcript entries, got %+v", snapshot.Entries)
 	}
 }
 
 func TestRestoreMessagesFailsOnMalformedHistoryReplacementPayload(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
-		StepID:  "legacy-step",
-		Kind:    "history_replaced",
-		Payload: json.RawMessage(`{"engine":"reviewer_rollback","items":"not-an-array"}`),
-	}}); err != nil {
-		t.Fatalf("append malformed replay event: %v", err)
-	}
+	t.Run("non-legacy payload still fails", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := session.Create(dir, "ws", dir)
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+		if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
+			StepID:  "legacy-step",
+			Kind:    "history_replaced",
+			Payload: json.RawMessage(`{"engine":"local","items":"not-an-array"}`),
+		}}); err != nil {
+			t.Fatalf("append malformed replay event: %v", err)
+		}
 
-	if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
-		t.Fatalf("expected malformed history replacement decode error, got %v", err)
-	}
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
+			t.Fatalf("expected malformed history replacement decode error, got %v", err)
+		}
+	})
+
+	t.Run("legacy reviewer rollback payload is ignored", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := session.Create(dir, "ws", dir)
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+		if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
+			StepID:  "legacy-step",
+			Kind:    "history_replaced",
+			Payload: json.RawMessage(`{"engine":"reviewer_rollback","items":"not-an-array"}`),
+		}}); err != nil {
+			t.Fatalf("append malformed replay event: %v", err)
+		}
+
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err != nil {
+			t.Fatalf("expected malformed legacy reviewer rollback payload to be ignored, got %v", err)
+		}
+	})
 }
 
 func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
@@ -4380,8 +4478,8 @@ func TestBuildReviewerTranscriptMessagesIncludesSupervisorControlDeveloperMessag
 	if !strings.Contains(reviewerMessages[0].Content, "Supervisor agent gave you suggestions:") {
 		t.Fatalf("expected supervisor control message to be included, got %q", reviewerMessages[0].Content)
 	}
-	if !strings.Contains(reviewerMessages[0].Content, "Developer:") {
-		t.Fatalf("expected developer label in reviewer message, got %q", reviewerMessages[0].Content)
+	if !strings.Contains(reviewerMessages[0].Content, "Developer context:") {
+		t.Fatalf("expected developer-context label in reviewer message, got %q", reviewerMessages[0].Content)
 	}
 }
 
@@ -4411,14 +4509,14 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	if len(got) != 4 {
 		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
 	}
-	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected first prepended global AGENTS developer message, got %+v", got[0])
+	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected prepended environment developer message first, got %+v", got[0])
 	}
-	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
-		t.Fatalf("expected second prepended workspace AGENTS developer message, got %+v", got[1])
+	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS developer message after environment, got %+v", got[1])
 	}
-	if got[2].Role != llm.RoleDeveloper || got[2].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[2].Content, environmentInjectedHeader) {
-		t.Fatalf("expected prepended environment developer message, got %+v", got[2])
+	if got[2].Role != llm.RoleDeveloper || got[2].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS developer message last in base context, got %+v", got[2])
 	}
 	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
 		t.Fatalf("expected original message at tail, got %+v", got[3])
@@ -4492,14 +4590,14 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || got[1].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected AGENTS metadata to remain first, got %+v %+v", got[0], got[1])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata first, got %+v", got[0])
 	}
-	if got[2].MessageType != llm.MessageTypeSkills {
-		t.Fatalf("expected skills metadata to be inserted after AGENTS, got %+v", got[2])
+	if got[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata after environment, got %+v", got[1])
 	}
-	if got[3].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment metadata after skills, got %+v", got[3])
+	if got[2].MessageType != llm.MessageTypeAgentsMD || got[3].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected AGENTS metadata after environment+skills, got %+v %+v", got[2], got[3])
 	}
 	if got[4].Role != llm.RoleUser || got[4].Content != "request" {
 		t.Fatalf("expected transcript content to stay at tail, got %+v", got[4])
@@ -4530,11 +4628,11 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeSkills {
-		t.Fatalf("expected skills metadata first when agents are absent, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata first when already present, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment metadata after skills, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata after environment, got %+v", got[1])
 	}
 	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
 		t.Fatalf("expected transcript content to stay at tail, got %+v", got[2])
@@ -4575,14 +4673,14 @@ func TestAppendMissingReviewerMetaContextBackfillsMissingWorkspaceAgentsSource(t
 	if len(got) != 4 {
 		t.Fatalf("expected global+workspace agents, environment, and transcript, got %d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected global AGENTS first, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment first, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
-		t.Fatalf("expected missing workspace AGENTS to be backfilled second, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after environment, got %+v", got[1])
 	}
-	if got[2].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected environment after AGENTS, got %+v", got[2])
+	if got[2].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected missing workspace AGENTS to be backfilled last in base context, got %+v", got[2])
 	}
 	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
 		t.Fatalf("expected transcript content at tail, got %+v", got[3])
@@ -4626,11 +4724,11 @@ func TestAppendMissingReviewerMetaContextLeavesUntypedLegacyMetaInTranscript(t *
 	if len(got) != 6 {
 		t.Fatalf("expected live metadata plus preserved legacy transcript entries, got %d", len(got))
 	}
-	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected live global AGENTS to be backfilled first, got %+v", got[0])
+	if got[0].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected live environment metadata first, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[1].Content, environmentInjectedHeader) {
-		t.Fatalf("expected live environment metadata second, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected live global AGENTS after environment, got %+v", got[1])
 	}
 	if got[2].Role != llm.RoleDeveloper || !strings.Contains(got[2].Content, legacyWorkspacePath) {
 		t.Fatalf("expected untyped legacy AGENTS text to remain transcript content, got %+v", got[2])
@@ -5233,6 +5331,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 
 	finalAssistantContents := make([]string, 0)
 	foundBackgroundNotice := false
+	noopFinalCount := 0
 	for _, persisted := range eng.snapshotMessages() {
 		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
 			finalAssistantContents = append(finalAssistantContents, persisted.Content)
@@ -5240,15 +5339,18 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 		if persisted.Role == llm.RoleDeveloper && persisted.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(persisted.Content, "Background shell 1000 completed.") {
 			foundBackgroundNotice = true
 		}
-		if strings.Contains(persisted.Content, reviewerNoopToken) {
-			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		if isNoopFinalAnswer(persisted) {
+			noopFinalCount++
 		}
 	}
 	if !foundBackgroundNotice {
 		t.Fatalf("expected persisted background notice, got %+v", eng.snapshotMessages())
 	}
-	if len(finalAssistantContents) != 0 {
-		t.Fatalf("expected no persisted final assistant message, got %q", finalAssistantContents)
+	if noopFinalCount != 1 {
+		t.Fatalf("noop final count = %d, want 1; messages=%+v", noopFinalCount, eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 1 || finalAssistantContents[0] != reviewerNoopToken {
+		t.Fatalf("expected hidden persisted noop final assistant message, got %q", finalAssistantContents)
 	}
 
 	mu.Lock()
@@ -6797,24 +6899,24 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	if requestMessages(firstReq)[0].Role != llm.RoleDeveloper || requestMessages(firstReq)[0].Content != "existing context" {
 		t.Fatalf("expected first message to be existing context, got %+v", requestMessages(firstReq)[0])
 	}
-	if requestMessages(firstReq)[1].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[1].Content, "source: "+globalPath) {
-		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[1])
-	}
-	if requestMessages(firstReq)[1].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[1])
-	}
-	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+workspacePath) {
-		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
-	}
-	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[2])
-	}
-	envMsg := requestMessages(firstReq)[3]
+	envMsg := requestMessages(firstReq)[1]
 	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
-		t.Fatalf("expected fourth message to be environment developer injection, got %+v", envMsg)
+		t.Fatalf("expected second message to be environment developer injection, got %+v", envMsg)
 	}
 	if envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected environment message type, got %+v", envMsg)
+	}
+	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+globalPath) {
+		t.Fatalf("expected third message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
+	}
+	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[2])
+	}
+	if requestMessages(firstReq)[3].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[3].Content, "source: "+workspacePath) {
+		t.Fatalf("expected fourth message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[3])
+	}
+	if requestMessages(firstReq)[3].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[3])
 	}
 	for _, required := range []string{
 		"\nYour model: gpt-5\n",
@@ -6958,8 +7060,8 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	if userIdx < 0 {
 		t.Fatalf("expected first user message in first request, messages=%+v", requestMessages(firstReq))
 	}
-	if !(skillsIdx < envIdx && envIdx < userIdx) {
-		t.Fatalf("expected skills -> environment -> user ordering, got skills=%d env=%d user=%d", skillsIdx, envIdx, userIdx)
+	if !(envIdx < skillsIdx && skillsIdx < userIdx) {
+		t.Fatalf("expected environment -> skills -> user ordering, got env=%d skills=%d user=%d", envIdx, skillsIdx, userIdx)
 	}
 
 	secondReq := client.calls[1]
@@ -7065,11 +7167,16 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	if !foundSkills {
 		t.Fatalf("expected skills developer message in first request, messages=%+v", requestMessages(client.calls[0]))
 	}
+	for _, msg := range requestMessages(client.calls[0]) {
+		if strings.Contains(msg.Content, "Skipped skill \"broken-skill\"") {
+			t.Fatalf("expected broken skill warning to stay out of model request, got %+v", requestMessages(client.calls[0]))
+		}
+	}
 
 	snapshot := eng.ChatSnapshot()
 	foundWarning := false
 	for _, entry := range snapshot.Entries {
-		if entry.Role != string(transcript.EntryRoleDeveloperFeedback) {
+		if entry.Role != "warning" || entry.Visibility != transcript.EntryVisibilityAll {
 			continue
 		}
 		if strings.Contains(entry.Text, "Skipped skill \"broken-skill\"") && strings.Contains(entry.Text, filepath.ToSlash(brokenLinkPath)) {
@@ -7210,6 +7317,89 @@ func TestHeadlessModeTransitionDecisionsFollowLatestMarker(t *testing.T) {
 	}
 	if shouldInjectHeadlessModeExitPrompt(exited) {
 		t.Fatal("did not expect exit prompt after exit marker")
+	}
+}
+
+func TestManualCompactionReinjectsHeadlessEnterOnlyWhileHeadlessRemainsActive(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless mode: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "continue"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	headlessCount := 0
+	exitCount := 0
+	for _, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeHeadlessMode:
+			headlessCount++
+		case llm.MessageTypeHeadlessModeExit:
+			exitCount++
+		}
+	}
+	if headlessCount != 1 {
+		t.Fatalf("expected exactly one reinjected headless enter after compaction, got %d messages=%+v", headlessCount, messages)
+	}
+	if exitCount != 0 {
+		t.Fatalf("did not expect headless exit after compaction while still headless, got %d messages=%+v", exitCount, messages)
+	}
+}
+
+func TestManualCompactionDoesNotReinjectHeadlessEnterAfterExit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless mode: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "interactive mode instructions"}); err != nil {
+		t.Fatalf("append headless exit: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "continue"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	for _, message := range messages {
+		if message.MessageType == llm.MessageTypeHeadlessMode {
+			t.Fatalf("did not expect headless enter reinjection after exit, got messages=%+v", messages)
+		}
+		if message.MessageType == llm.MessageTypeHeadlessModeExit {
+			t.Fatalf("did not expect historical headless exit to survive compaction, got messages=%+v", messages)
+		}
 	}
 }
 
@@ -8913,7 +9103,7 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	}
 }
 
-func TestReviewerRollbackClearsPersistedUsageStateAcrossReopen(t *testing.T) {
+func TestLegacyReviewerRollbackHistoryReplacementIsIgnoredAcrossReopen(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -8933,19 +9123,19 @@ func TestReviewerRollbackClearsPersistedUsageStateAcrossReopen(t *testing.T) {
 	if store.Meta().UsageState == nil {
 		t.Fatal("expected usage state persisted before rollback")
 	}
-	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
-		t.Fatalf("replace history: %v", err)
+	if _, err := store.AppendEvent("step-rollback", "history_replaced", historyReplacementPayload{Engine: "reviewer_rollback", Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})}); err != nil {
+		t.Fatalf("append legacy reviewer rollback history replacement: %v", err)
 	}
-	if store.Meta().UsageState != nil {
-		t.Fatalf("expected reviewer rollback to clear persisted usage state, got %+v", store.Meta().UsageState)
+	if store.Meta().UsageState == nil {
+		t.Fatal("expected ignored legacy reviewer rollback to leave persisted usage state intact")
 	}
 
 	reopenedStore, err := session.Open(store.Dir())
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	if reopenedStore.Meta().UsageState != nil {
-		t.Fatalf("expected reopened session to keep usage state cleared, got %+v", reopenedStore.Meta().UsageState)
+	if reopenedStore.Meta().UsageState == nil {
+		t.Fatal("expected reopened session to keep usage state intact after ignored legacy reviewer rollback")
 	}
 }
 
@@ -9031,8 +9221,8 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:                 "gpt-5",
-		ContextWindowTokens:   2_000,
-		AutoCompactTokenLimit: 1_000,
+		ContextWindowTokens:   20_000,
+		AutoCompactTokenLimit: 10_000,
 		MaxTokens:             20,
 		CompactionMode:        "native",
 	})
@@ -9042,7 +9232,7 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.setLastUsage(llm.Usage{InputTokens: 990, WindowTokens: 2_000})
+	eng.setLastUsage(llm.Usage{InputTokens: 9_990, WindowTokens: 20_000})
 
 	msg, err := eng.runStepLoop(context.Background(), "step-1")
 	if err != nil {
@@ -9950,8 +10140,8 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 	eng, err = New(store, client, registry, Config{
 		Model:                 "gpt-5",
 		CompactionMode:        "local",
-		ContextWindowTokens:   2_000,
-		AutoCompactTokenLimit: 1_000,
+		ContextWindowTokens:   20_000,
+		AutoCompactTokenLimit: 10_000,
 		EnabledTools:          []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
@@ -9960,7 +10150,7 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+	eng.setLastUsage(llm.Usage{InputTokens: 8_900, WindowTokens: 20_000})
 
 	msg, err := eng.runStepLoop(context.Background(), "step-1")
 	if err != nil {
@@ -10422,7 +10612,7 @@ func TestReopenedSessionAfterFailedTriggerHandoffDoesNotRequeuePendingHandoff(t 
 	}
 }
 
-func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(t *testing.T) {
+func TestReopenedSessionAfterLegacyReviewerRollbackStillRequeuesPendingTriggerHandoff(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -10455,8 +10645,8 @@ func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(
 	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: toolspec.ToolTriggerHandoff, Output: resultOutput}); err != nil {
 		t.Fatalf("persist tool completion: %v", err)
 	}
-	if err := eng.replaceHistory("step-1", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
-		t.Fatalf("append reviewer rollback history replacement: %v", err)
+	if _, err := store.AppendEvent("step-1", "history_replaced", historyReplacementPayload{Engine: "reviewer_rollback", Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})}); err != nil {
+		t.Fatalf("append legacy reviewer rollback history replacement: %v", err)
 	}
 
 	reopenedStore, err := session.Open(store.Dir())
@@ -10472,7 +10662,7 @@ func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(
 		t.Fatalf("restore engine: %v", err)
 	}
 	if restored.pendingHandoffRequest == nil {
-		t.Fatal("expected reviewer rollback to preserve pending handoff recovery")
+		t.Fatal("expected ignored legacy reviewer rollback to preserve pending handoff recovery")
 	}
 	if got, want := restored.pendingHandoffRequest.futureAgentMessage, "resume after rollback"; got != want {
 		t.Fatalf("pending future_agent_message = %q, want %q", got, want)
@@ -10686,11 +10876,11 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
-		t.Fatalf("append user message: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "older summary"}); err != nil {
 		t.Fatalf("append compaction summary: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
 	}
 
 	if err := eng.CompactContext(context.Background(), ""); err != nil {
@@ -10727,6 +10917,116 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	}
 }
 
+func TestManualLocalCompactionRebuildsCanonicalContextOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) < 6 {
+		t.Fatalf("expected canonical post-compaction messages, got %+v", messages)
+	}
+	if messages[0].MessageType != llm.MessageTypeCompactionSummary {
+		t.Fatalf("expected compaction summary first, got %+v", messages[0])
+	}
+	if messages[1].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment second, got %+v", messages[1])
+	}
+	if messages[2].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills third, got %+v", messages[2])
+	}
+	if messages[3].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[3].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after skills, got %+v", messages[3])
+	}
+	if messages[4].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[4].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS after global AGENTS, got %+v", messages[4])
+	}
+	if messages[5].MessageType != llm.MessageTypeManualCompactionCarryover || !strings.Contains(messages[5].Content, "please keep tests green") {
+		t.Fatalf("expected manual carryover after reinjected base context, got %+v", messages[5])
+	}
+}
+
+func TestHandoffCompactionAppendsFutureMessageBeforeHeadlessReentry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless enter: %v", err)
+	}
+	eng.queueHandoffRequest("", "resume with tests")
+
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("apply pending handoff: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	futureIdx := -1
+	headlessIdx := -1
+	for idx, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeHandoffFutureMessage:
+			futureIdx = idx
+		case llm.MessageTypeHeadlessMode:
+			if idx > 0 {
+				headlessIdx = idx
+			}
+		}
+	}
+	if futureIdx < 0 {
+		t.Fatalf("expected future-agent message after handoff compaction, got %+v", messages)
+	}
+	if headlessIdx < 0 {
+		t.Fatalf("expected headless enter reinjection after handoff compaction, got %+v", messages)
+	}
+	if futureIdx >= headlessIdx {
+		t.Fatalf("expected future-agent message before headless reinjection, future=%d headless=%d messages=%+v", futureIdx, headlessIdx, messages)
+	}
+}
+
 func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -10759,11 +11059,13 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 	}
 
 	summaryIndex := -1
+	summaryCount := 0
 	carryoverIndex := -1
 	for i, entry := range entries {
 		switch entry.Role {
 		case "compaction_summary":
 			summaryIndex = i
+			summaryCount++
 		case "manual_compaction_carryover":
 			carryoverIndex = i
 		}
@@ -10771,8 +11073,120 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 	if summaryIndex < 0 || carryoverIndex < 0 {
 		t.Fatalf("expected summary and carryover entries, got %+v", entries)
 	}
+	if summaryCount != 1 {
+		t.Fatalf("expected exactly one compaction summary entry, got %d entries=%+v", summaryCount, entries)
+	}
 	if summaryIndex >= carryoverIndex {
 		t.Fatalf("expected compaction summary before manual carryover, got %+v", entries)
+	}
+}
+
+func TestManualLocalCompactionOmitsCarryoverWithoutNewUserMessageSincePreviousCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "older user message"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "previous compaction summary"}); err != nil {
+		t.Fatalf("append previous compaction summary: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	for _, message := range eng.snapshotMessages() {
+		if message.MessageType == llm.MessageTypeManualCompactionCarryover {
+			t.Fatalf("did not expect manual carryover message when no user message followed prior compaction, got %+v", eng.snapshotMessages())
+		}
+	}
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if entry.Role == string(transcript.EntryRoleManualCompactionCarryover) {
+			t.Fatalf("did not expect manual carryover transcript entry when no user message followed prior compaction, got %+v", eng.ChatSnapshot().Entries)
+		}
+	}
+}
+
+func TestReopenedManualCompactionKeepsCarryoverAsSingleDetailTranscriptEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+
+	messages := restored.snapshotMessages()
+	carryoverMessages := 0
+	for _, message := range messages {
+		if message.MessageType != llm.MessageTypeManualCompactionCarryover {
+			continue
+		}
+		carryoverMessages++
+		if !strings.Contains(message.Content, "please keep tests green") {
+			t.Fatalf("expected reopened model carryover to preserve last user text, got %q", message.Content)
+		}
+	}
+	if carryoverMessages != 1 {
+		t.Fatalf("manual compaction carryover message count = %d, want 1; messages=%+v", carryoverMessages, messages)
+	}
+
+	entries := restored.ChatSnapshot().Entries
+	carryoverEntries := 0
+	for _, entry := range entries {
+		if entry.Role != string(transcript.EntryRoleManualCompactionCarryover) {
+			continue
+		}
+		carryoverEntries++
+		if !strings.Contains(entry.Text, "please keep tests green") {
+			t.Fatalf("expected reopened transcript carryover to preserve last user text, got %q", entry.Text)
+		}
+		if entry.Visibility != transcript.EntryVisibilityDetailOnly {
+			t.Fatalf("expected reopened transcript carryover to stay detail-only, got %+v", entry)
+		}
+	}
+	if carryoverEntries != 1 {
+		t.Fatalf("manual compaction carryover transcript entry count = %d, want 1; entries=%+v", carryoverEntries, entries)
 	}
 }
 
@@ -10954,8 +11368,8 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 		}
 	}
 
-	if !foundCanonical {
-		t.Fatalf("expected canonical developer context in local compaction request, got %+v", client.calls[0].Items)
+	if foundCanonical {
+		t.Fatalf("did not expect pre-compaction developer context in local compaction request, got %+v", client.calls[0].Items)
 	}
 	if !foundCheckpoint {
 		t.Fatalf("expected last compaction checkpoint item in local compaction request, got %+v", client.calls[0].Items)
@@ -11324,7 +11738,7 @@ func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.
 	}
 }
 
-func TestAutoCompactionRemoteCarriesCanonicalContextWithoutDuplication(t *testing.T) {
+func TestAutoCompactionRemoteDropsPreCompactionDeveloperContext(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".builder")
@@ -11408,13 +11822,85 @@ func TestAutoCompactionRemoteCarriesCanonicalContextWithoutDuplication(t *testin
 		}
 	}
 	if globalCount != 1 {
-		t.Fatalf("expected exactly one global AGENTS context item after compaction, got %d", globalCount)
+		t.Fatalf("expected remote compaction to reinject exactly one current global AGENTS context, got %d", globalCount)
 	}
 	if workspaceCount != 1 {
-		t.Fatalf("expected exactly one workspace AGENTS context item after compaction, got %d", workspaceCount)
+		t.Fatalf("expected remote compaction to reinject exactly one current workspace AGENTS context, got %d", workspaceCount)
 	}
 	if envCount != 1 {
-		t.Fatalf("expected exactly one environment context item after compaction, got %d", envCount)
+		t.Fatalf("expected remote compaction to reinject exactly one current environment context, got %d", envCount)
+	}
+}
+
+func TestManualRemoteCompactionRebuildsCanonicalPrefixOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeCompactionClient{compactionResponses: []llm.CompactionResponse{{
+		OutputItems: []llm.ResponseItem{
+			{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "remote summary"},
+			{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+		},
+		Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}); err != nil {
+		t.Fatalf("append headless mode: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	if _, err := eng.compactNow(context.Background(), "step-1", compactionModeManual, "", false); err != nil {
+		t.Fatalf("compactNow: %v", err)
+	}
+
+	items := eng.snapshotItems()
+	if len(items) < 7 {
+		t.Fatalf("expected canonical remote compaction prefix, got %+v", items)
+	}
+	if items[0].MessageType != llm.MessageTypeCompactionSummary || items[0].Content != "remote summary" {
+		t.Fatalf("expected provider summary first, got %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeCompaction || items[1].EncryptedContent != "enc_1" {
+		t.Fatalf("expected provider checkpoint second, got %+v", items[1])
+	}
+	if items[2].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment after provider output, got %+v", items[2])
+	}
+	if items[3].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills after environment, got %+v", items[3])
+	}
+	if items[4].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(items[4].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS after skills, got %+v", items[4])
+	}
+	if items[5].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(items[5].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS after global AGENTS, got %+v", items[5])
+	}
+	if items[6].MessageType != llm.MessageTypeHeadlessMode {
+		t.Fatalf("expected headless reinjection after canonical base context, got %+v", items[6])
 	}
 }
 

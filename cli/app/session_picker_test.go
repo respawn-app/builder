@@ -7,16 +7,16 @@ import (
 	"time"
 
 	"builder/cli/tui"
-	"builder/server/session"
+	"builder/shared/clientui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSessionPickerScrollsAndSelects(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	summaries := make([]session.Summary, 0, 20)
+	summaries := make([]clientui.SessionSummary, 0, 20)
 	for i := 0; i < 20; i++ {
-		summaries = append(summaries, session.Summary{
+		summaries = append(summaries, clientui.SessionSummary{
 			SessionID: fmt.Sprintf("s-%02d", i),
 			UpdatedAt: now.Add(-time.Duration(i) * time.Minute),
 		})
@@ -107,7 +107,7 @@ func TestSessionPickerHeaderUsesAppForeground(t *testing.T) {
 
 func TestSessionPickerPrefersSessionName(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{{
+	m := newSessionPickerModel([]clientui.SessionSummary{{
 		SessionID:          "abc123",
 		Name:               "Incident Triage",
 		FirstPromptPreview: "Investigate broken startup flow",
@@ -127,7 +127,7 @@ func TestSessionPickerPrefersSessionName(t *testing.T) {
 
 func TestSessionPickerUsesFirstPromptPreviewWhenUnnamed(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{{
+	m := newSessionPickerModel([]clientui.SessionSummary{{
 		SessionID:          "abc123",
 		FirstPromptPreview: "Investigate broken startup flow",
 		UpdatedAt:          now,
@@ -143,7 +143,7 @@ func TestSessionPickerUsesFirstPromptPreviewWhenUnnamed(t *testing.T) {
 
 func TestSessionPickerRendersPreviewOnSecondLine(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{{
+	m := newSessionPickerModel([]clientui.SessionSummary{{
 		SessionID:          "abc123",
 		Name:               "Incident Triage",
 		FirstPromptPreview: "Investigate broken startup flow",
@@ -168,7 +168,7 @@ func TestSessionPickerRendersPreviewOnSecondLine(t *testing.T) {
 
 func TestSessionPickerAddsBlankLineAfterPreview(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{
+	m := newSessionPickerModel([]clientui.SessionSummary{
 		{
 			SessionID:          "abc123",
 			Name:               "Incident Triage",
@@ -203,7 +203,7 @@ func TestSessionPickerAddsBlankLineAfterPreview(t *testing.T) {
 
 func TestSessionPickerAddsBlankLineAfterCreateNewSession(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{{
+	m := newSessionPickerModel([]clientui.SessionSummary{{
 		SessionID: "abc123",
 		Name:      "Incident Triage",
 		UpdatedAt: now,
@@ -230,7 +230,7 @@ func TestSessionPickerAddsBlankLineAfterCreateNewSession(t *testing.T) {
 
 func TestSessionPickerAddsBlankLineAfterSessionWithoutPreview(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{
+	m := newSessionPickerModel([]clientui.SessionSummary{
 		{
 			SessionID: "abc123",
 			Name:      "Incident Triage",
@@ -264,9 +264,9 @@ func TestSessionPickerAddsBlankLineAfterSessionWithoutPreview(t *testing.T) {
 
 func TestSessionPickerScrollsWithTwoLineEntries(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	summaries := make([]session.Summary, 0, 8)
+	summaries := make([]clientui.SessionSummary, 0, 8)
 	for i := 0; i < 8; i++ {
-		summaries = append(summaries, session.Summary{
+		summaries = append(summaries, clientui.SessionSummary{
 			SessionID:          fmt.Sprintf("s-%02d", i),
 			Name:               fmt.Sprintf("Session %d", i),
 			FirstPromptPreview: fmt.Sprintf("Prompt %d", i),
@@ -296,7 +296,7 @@ func TestSessionPickerScrollsWithTwoLineEntries(t *testing.T) {
 
 func TestSessionPickerScrollsWithSingleLineEntriesAndBlankSeparators(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{
+	m := newSessionPickerModel([]clientui.SessionSummary{
 		{
 			SessionID: "s-00",
 			Name:      "Session 0",
@@ -354,7 +354,7 @@ func TestSessionPickerScrollsWithSingleLineEntriesAndBlankSeparators(t *testing.
 
 func TestSessionPickerTightViewportShowsTitleWithoutOverflowingPreview(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{{
+	m := newSessionPickerModel([]clientui.SessionSummary{{
 		SessionID:          "abc123",
 		Name:               "Incident Triage",
 		FirstPromptPreview: "Investigate broken startup flow",
@@ -387,7 +387,7 @@ func TestSessionPickerTightViewportShowsTitleWithoutOverflowingPreview(t *testin
 
 func TestSessionPickerKeepsMixedPreviewViewportVisibleWithoutExtraScroll(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
-	m := newSessionPickerModel([]session.Summary{
+	m := newSessionPickerModel([]clientui.SessionSummary{
 		{
 			SessionID:          "s-00",
 			Name:               "Session 0",

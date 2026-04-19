@@ -84,9 +84,11 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					OutputItemTypes:  summarizeOutputItemTypes(resp.OutputItems),
 				},
 			})
-			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
-				return stepLoopResult{}, err
-			}
+		}
+		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
+			return stepLoopResult{}, err
+		}
+		if !noopFinalAnswer {
 			executableCallIDs := make(map[string]struct{}, len(localToolCalls))
 			for _, call := range localToolCalls {
 				if callID := strings.TrimSpace(call.ID); callID != "" {

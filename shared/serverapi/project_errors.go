@@ -1,4 +1,4 @@
-package metadata
+package serverapi
 
 import (
 	"errors"
@@ -8,8 +8,8 @@ import (
 	"builder/shared/clientui"
 )
 
+var ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
 var ErrProjectNotFound = errors.New("project not found")
-
 var ErrProjectUnavailable = errors.New("project is unavailable")
 
 type ProjectUnavailableError struct {

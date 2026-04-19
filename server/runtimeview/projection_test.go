@@ -153,6 +153,12 @@ func TestEventFromRuntimeLeavesCompactionStatusWithoutTranscriptEntriesUntilPers
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			view := EventFromRuntime(tc.evt)
+			if tc.evt.Compaction == nil || view.Compaction == nil {
+				t.Fatalf("expected compaction status projection, got %+v", view.Compaction)
+			}
+			if view.Compaction.Mode != tc.evt.Compaction.Mode || view.Compaction.Count != tc.evt.Compaction.Count || view.Compaction.Error != tc.evt.Compaction.Error {
+				t.Fatalf("projected compaction = %+v, want %+v", view.Compaction, tc.evt.Compaction)
+			}
 			if len(view.TranscriptEntries) != 0 {
 				t.Fatalf("expected no projected transcript entries before persisted local entry, got %+v", view.TranscriptEntries)
 			}

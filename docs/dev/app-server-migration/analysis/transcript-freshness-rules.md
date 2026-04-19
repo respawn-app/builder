@@ -87,8 +87,6 @@ If cached data is used, it must still obey the same overwrite rules as a fresh h
 - [x] ensure recovery tests cover stale-read vs newer-live-state cases explicitly
 - [x] ensure remote and loopback paths obey the same overwrite rules
 
-The remaining remote raw-stream commentary-entry gap does not change these overwrite rules. It is a separate event-shape defer.
-
 This document does not claim full raw event parity between loopback and remote paths. It only defines the overwrite/freshness contract that both paths must obey once transcript-visible state reaches the frontend.
 
 ## Exit Condition

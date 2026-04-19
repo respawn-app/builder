@@ -17,6 +17,7 @@ import (
 type Request struct {
 	WorkspaceRoot         string
 	WorkspaceRootExplicit bool
+	AllowUnauthenticated  bool
 	SessionID             string
 	Model                 string
 	ProviderOverride      string
@@ -75,8 +76,10 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 	if err != nil {
 		return nil, err
 	}
-	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, bootstrapReq.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, authHandler); err != nil {
-		return nil, err
+	if !req.AllowUnauthenticated {
+		if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, bootstrapReq.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, authHandler); err != nil {
+			return nil, err
+		}
 	}
 	if onboardingHandler != nil {
 		cfg, err = onboardingHandler.EnsureOnboardingReady(ctx, OnboardingRequest{

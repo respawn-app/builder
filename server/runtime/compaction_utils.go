@@ -36,24 +36,17 @@ func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabili
 
 func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, items []llm.ResponseItem) error {
 	payload := historyReplacementPayload{
-		Engine: strings.TrimSpace(engine),
+		Engine: normalizeHistoryReplacementEngine(engine),
 		Mode:   string(mode),
 		Items:  llm.CloneResponseItems(items),
 	}
 	reminderIssued := false
-	if payload.Engine == "reviewer_rollback" {
-		e.resetCurrentPreciseInputTracking()
-		e.resetLocalDiagnostics()
-		e.chat.restoreHistoryItems(payload.Items)
-		e.syncCompactionSoonReminderIssuedFromItems(payload.Items)
-		e.clearActivePromptCacheLineages()
-		reminderIssued = e.handoffToolEnabled()
-	} else {
-		e.resetCurrentPreciseInputTracking()
-		e.resetLocalDiagnostics()
-		e.chat.replaceHistory(payload.Items)
-		e.setCompactionSoonReminderIssued(false)
-	}
+	projectedStart := e.CommittedTranscriptEntryCount()
+	projectedEntries := transcriptEntriesFromHistoryReplacement(payload.Items)
+	e.resetCurrentPreciseInputTracking()
+	e.resetLocalDiagnostics()
+	e.chat.replaceHistory(payload.Items)
+	e.setCompactionSoonReminderIssued(false)
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
 		if persistErr := e.store.SetCompactionSoonReminderIssued(reminderIssued); persistErr != nil {
@@ -62,9 +55,33 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		if persistErr := e.store.SetUsageState(nil); persistErr != nil {
 			return persistErr
 		}
-		e.emitCommittedTranscriptAdvanced(stepID)
+		e.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
+		e.emitConversationUpdated(stepID)
 	}
 	return err
+}
+
+func (e *Engine) emitProjectedHistoryReplacementEntries(stepID string, start int, entries []ChatEntry) {
+	if e == nil || len(entries) == 0 {
+		return
+	}
+	// Live subscribers must observe the same committed transcript progression that
+	// restart hydration reconstructs from history_replaced. Emit projected
+	// compaction rows first, then the persisted compaction_notice/error local entry.
+	if start < 0 {
+		start = 0
+	}
+	for idx, entry := range entries {
+		copyEntry := clonePersistedChatEntry(entry)
+		e.emit(Event{
+			Kind:                       EventLocalEntryAdded,
+			StepID:                     stepID,
+			LocalEntry:                 &copyEntry,
+			CommittedTranscriptChanged: true,
+			CommittedEntryStart:        start + idx,
+			CommittedEntryStartSet:     true,
+		})
+	}
 }
 
 func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compactionMode, engine, provider string, trimmed, count int, errText string) error {
@@ -86,7 +103,7 @@ func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compac
 		})
 		return nil
 	case EventCompactionCompleted:
-		if err := e.appendPersistedLocalEntry(stepID, "compaction_notice", fmt.Sprintf("context compacted for the %s time", ordinal(status.Count))); err != nil {
+		if err := e.appendPersistedLocalEntry(stepID, "compaction_notice", CompactionNoticeText(status.Count)); err != nil {
 			e.emit(Event{
 				Kind:       kind,
 				StepID:     stepID,
@@ -122,6 +139,10 @@ func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compac
 	default:
 		return nil
 	}
+}
+
+func CompactionNoticeText(count int) string {
+	return fmt.Sprintf("context compacted for the %s time", ordinal(count))
 }
 
 func ordinal(v int) string {
@@ -504,24 +525,7 @@ func formatOutputTypeCounts(counts map[string]int) string {
 	return strings.Join(parts, ",")
 }
 
-func extractCanonicalContext(items []llm.ResponseItem) []llm.ResponseItem {
-	contextItems := make([]llm.ResponseItem, 0, 8)
-	for _, item := range items {
-		if item.Type != llm.ResponseItemTypeMessage {
-			continue
-		}
-		if item.Role == llm.RoleUser {
-			break
-		}
-		if item.Role == llm.RoleDeveloper || item.Role == llm.RoleSystem {
-			contextItems = append(contextItems, item)
-		}
-	}
-	return llm.CloneResponseItems(contextItems)
-}
-
 func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string, items []llm.ResponseItem, summary string, carryoverLimit int) []llm.ResponseItem {
-	contextItems := extractCanonicalContext(items)
 	userMessages := make([]llm.ResponseItem, 0, len(items))
 	for _, item := range items {
 		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType != llm.MessageTypeCompactionSummary && strings.TrimSpace(item.Content) != "" {
@@ -541,8 +545,7 @@ func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string
 		Content:     strings.TrimSpace(summary),
 	}
 
-	out := make([]llm.ResponseItem, 0, len(contextItems)+len(selected)+1)
-	out = append(out, contextItems...)
+	out := make([]llm.ResponseItem, 0, len(selected)+1)
 	out = append(out, selected...)
 	out = append(out, summaryMessage)
 	return out

@@ -107,6 +107,7 @@ func (s *Service) ResolveProjectPath(ctx context.Context, req serverapi.ProjectR
 		return serverapi.ProjectResolvePathResponse{}, err
 	}
 	resp := serverapi.ProjectResolvePathResponse{CanonicalRoot: canonicalRoot}
+	resp.PathAvailability = clientui.ProjectAvailability(availabilityForProjectPath(canonicalRoot))
 	if binding != nil {
 		mapped := projectBindingFromMetadata(*binding)
 		resp.Binding = &mapped
@@ -151,6 +152,23 @@ func (s *Service) AttachWorkspaceToProject(ctx context.Context, req serverapi.Pr
 	return serverapi.ProjectAttachWorkspaceResponse{Binding: projectBindingFromMetadata(binding)}, nil
 }
 
+func (s *Service) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("project service is required")
+	}
+	if s.metadata == nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("workspace rebind requires metadata service")
+	}
+	binding, err := s.metadata.RebindWorkspace(ctx, req.OldWorkspaceRoot, req.NewWorkspaceRoot)
+	if err != nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, err
+	}
+	return serverapi.ProjectRebindWorkspaceResponse{Binding: projectBindingFromMetadata(binding)}, nil
+}
+
 func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
@@ -181,7 +199,15 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 	}
 	project.SessionCount = len(sessionsResp.Sessions)
 	project.UpdatedAt = latestUpdatedAt(sessionsResp.Sessions)
-	return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Project: project, Sessions: sessionsResp.Sessions}}, nil
+	return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Project: project, Workspaces: []clientui.ProjectWorkspaceSummary{{
+		WorkspaceID:  "workspace-legacy",
+		DisplayName:  filepath.Base(project.RootPath),
+		RootPath:     project.RootPath,
+		Availability: project.Availability,
+		IsPrimary:    true,
+		SessionCount: project.SessionCount,
+		UpdatedAt:    project.UpdatedAt,
+	}}, Sessions: sessionsResp.Sessions}}, nil
 }
 
 func (s *Service) ListSessionsByProject(ctx context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
@@ -272,6 +298,16 @@ func latestUpdatedAt(summaries []clientui.SessionSummary) (latest time.Time) {
 		}
 	}
 	return latest
+}
+
+func availabilityForProjectPath(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return string(clientui.ProjectAvailabilityMissing)
+		}
+		return string(clientui.ProjectAvailabilityInaccessible)
+	}
+	return string(clientui.ProjectAvailabilityAvailable)
 }
 
 func projectBindingFromMetadata(binding metadata.Binding) serverapi.ProjectBinding {

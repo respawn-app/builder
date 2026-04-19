@@ -262,6 +262,37 @@ func (q *Queries) GetWorkspaceBindingByCanonicalRoot(ctx context.Context, canoni
 	return i, err
 }
 
+const getWorkspaceBindingByID = `-- name: GetWorkspaceBindingByID :one
+SELECT
+    p.id AS project_id,
+    p.display_name AS project_display_name,
+    w.id AS workspace_id,
+    w.canonical_root_path AS workspace_root
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+WHERE w.id = ?1
+LIMIT 1
+`
+
+type GetWorkspaceBindingByIDRow struct {
+	ProjectID          string
+	ProjectDisplayName string
+	WorkspaceID        string
+	WorkspaceRoot      string
+}
+
+func (q *Queries) GetWorkspaceBindingByID(ctx context.Context, workspaceID string) (GetWorkspaceBindingByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceBindingByID, workspaceID)
+	var i GetWorkspaceBindingByIDRow
+	err := row.Scan(
+		&i.ProjectID,
+		&i.ProjectDisplayName,
+		&i.WorkspaceID,
+		&i.WorkspaceRoot,
+	)
+	return i, err
+}
+
 const getWorkspaceByCanonicalRoot = `-- name: GetWorkspaceByCanonicalRoot :one
 SELECT
     id,
@@ -280,6 +311,39 @@ LIMIT 1
 
 func (q *Queries) GetWorkspaceByCanonicalRoot(ctx context.Context, canonicalRootPath string) (Workspace, error) {
 	row := q.db.QueryRowContext(ctx, getWorkspaceByCanonicalRoot, canonicalRootPath)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.CanonicalRootPath,
+		&i.DisplayName,
+		&i.Availability,
+		&i.IsPrimary,
+		&i.GitMetadataJson,
+		&i.CreatedAtUnixMs,
+		&i.UpdatedAtUnixMs,
+	)
+	return i, err
+}
+
+const getWorkspaceByID = `-- name: GetWorkspaceByID :one
+SELECT
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM workspaces
+WHERE id = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetWorkspaceByID(ctx context.Context, id string) (Workspace, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceByID, id)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,
@@ -403,6 +467,60 @@ func (q *Queries) InsertWorkspaceBinding(ctx context.Context, arg InsertWorkspac
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const listProjectWorkspaces = `-- name: ListProjectWorkspaces :many
+SELECT
+    w.id,
+    w.display_name,
+    w.canonical_root_path AS root_path,
+    w.is_primary,
+    CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
+    COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
+FROM workspaces w
+LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
+WHERE w.project_id = ?1
+GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
+ORDER BY w.is_primary DESC, latest_activity_unix_ms DESC, w.created_at_unix_ms ASC, w.rowid ASC
+`
+
+type ListProjectWorkspacesRow struct {
+	ID                   string
+	DisplayName          string
+	RootPath             string
+	IsPrimary            int64
+	SessionCount         int64
+	LatestActivityUnixMs int64
+}
+
+func (q *Queries) ListProjectWorkspaces(ctx context.Context, projectID string) ([]ListProjectWorkspacesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectWorkspaces, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectWorkspacesRow
+	for rows.Next() {
+		var i ListProjectWorkspacesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.RootPath,
+			&i.IsPrimary,
+			&i.SessionCount,
+			&i.LatestActivityUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listProjects = `-- name: ListProjects :many

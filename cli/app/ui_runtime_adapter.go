@@ -98,6 +98,19 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
 	awaitsHydration := false
+	if shouldAppendSyntheticOngoingEntry(m, update.SyntheticOngoingEntry) {
+		m.forwardToView(tui.AppendTranscriptMsg{
+			Visibility:  update.SyntheticOngoingEntry.Visibility,
+			Transient:   true,
+			Committed:   false,
+			Role:        update.SyntheticOngoingEntry.Role,
+			Text:        update.SyntheticOngoingEntry.Text,
+			OngoingText: update.SyntheticOngoingEntry.OngoingText,
+			Phase:       llm.MessagePhase(update.SyntheticOngoingEntry.Phase),
+			ToolCallID:  strings.TrimSpace(update.SyntheticOngoingEntry.ToolCallID),
+			ToolCall:    transcriptToolCallMeta(update.SyntheticOngoingEntry.ToolCall),
+		})
+	}
 	if evt.Kind == clientui.EventConversationUpdated && effectiveSyncSessionView {
 		m.invalidateTransientTranscriptState()
 	}
@@ -245,16 +258,6 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		})
 		return nil, false, false
 	}
-	if shouldDeferProjectedUserMessageFlushAppend(m, evt) {
-		deferProjectedCommittedTail(m, evt)
-		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
-			"path":           "live_event",
-			"incoming_count": strconv.Itoa(incomingCount),
-			"reason":         "defer_user_flush_until_assistant_catch_up",
-			"applied_count":  "0",
-		})
-		return nil, false, false
-	}
 	plan := planProjectedTranscriptEntries(m, evt)
 	m.logProjectedTranscriptPlanDiag(evt, plan, incomingCount)
 	switch plan.mode {
@@ -287,6 +290,16 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		}
 		return nil, false, false
 	}
+	if plan.mode == projectedTranscriptEntryPlanAppend && shouldDeferProjectedUserMessageFlushAppend(m, evt) {
+		deferProjectedCommittedTail(m, evt)
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "deferred_tail",
+			"applied_count":  "0",
+		})
+		return nil, false, false
+	}
 	entries = plan.entries
 	m.transcriptLiveDirty = true
 	startOffset := m.transcriptBaseOffset + plan.rangeStart
@@ -297,10 +310,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		convertedEntries = append(convertedEntries, transcriptEntryFromProjectedChatEntry(entry, projectedEntriesTransient, projectedEntriesCommitted))
 	}
 	showTransientInCurrentView := m.view.Mode() != tui.ModeDetail || !allTranscriptEntriesTransient(convertedEntries)
+	replaceLoadedSyntheticEntries := shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m, convertedEntries)
 	if plan.mode == projectedTranscriptEntryPlanAppend {
 		for _, transcriptEntry := range convertedEntries {
 			m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
-			if showTransientInCurrentView {
+			if showTransientInCurrentView && !replaceLoadedSyntheticEntries {
 				m.forwardToView(tui.AppendTranscriptMsg{
 					Visibility:  transcriptEntry.Visibility,
 					Transient:   transcriptEntry.Transient,
@@ -323,6 +337,15 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	m.transcriptRevision = max(m.transcriptRevision, evt.TranscriptRevision)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, max(evt.CommittedEntryCount, m.transcriptBaseOffset+len(m.transcriptEntries)))
 	m.refreshRollbackCandidates()
+	if plan.mode == projectedTranscriptEntryPlanAppend && replaceLoadedSyntheticEntries {
+		m.forwardToView(tui.SetConversationMsg{
+			BaseOffset:   m.transcriptBaseOffset,
+			TotalEntries: m.transcriptTotalEntries,
+			Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
+			Ongoing:      m.view.OngoingStreamingText(),
+			OngoingError: m.view.OngoingErrorText(),
+		})
+	}
 	if m.detailTranscript.loaded && !allTranscriptEntriesTransient(convertedEntries) {
 		page := clientui.TranscriptPage{
 			Revision:     m.transcriptRevision,
@@ -343,11 +366,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			OngoingError: m.view.OngoingErrorText(),
 		})
 	}
-	if plan.mode == projectedTranscriptEntryPlanAppend && m.view.Mode() == tui.ModeDetail && !allTranscriptEntriesTransient(convertedEntries) && m.view.TranscriptBaseOffset() == m.transcriptBaseOffset {
+	if plan.mode == projectedTranscriptEntryPlanAppend && m.view.Mode() == tui.ModeDetail && !allTranscriptEntriesTransient(convertedEntries) && m.detailTranscript.loaded && m.view.TranscriptBaseOffset() == m.detailTranscript.offset {
 		m.forwardToView(tui.SetConversationMsg{
-			BaseOffset:   m.transcriptBaseOffset,
-			TotalEntries: m.transcriptTotalEntries,
-			Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
+			BaseOffset:   m.detailTranscript.offset,
+			TotalEntries: m.detailTranscript.totalEntries,
+			Entries:      append([]tui.TranscriptEntry(nil), m.detailTranscript.entries...),
 			Ongoing:      m.view.OngoingStreamingText(),
 			OngoingError: m.view.OngoingErrorText(),
 		})
@@ -650,6 +673,43 @@ func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.Transcri
 	return false
 }
 
+func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.TranscriptPage) bool {
+	if m == nil {
+		return false
+	}
+	trimmedLiveOngoing := strings.TrimSpace(m.view.OngoingStreamingText())
+	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
+		return false
+	}
+	entries := page.Entries
+	if len(entries) == 0 {
+		return false
+	}
+	currentStart := m.transcriptBaseOffset
+	currentEnd := currentStart + len(m.transcriptEntries)
+	for idx := len(entries) - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
+			return false
+		}
+		absolute := page.Offset + idx
+		if absolute < currentStart || absolute >= currentEnd {
+			return true
+		}
+		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[absolute-currentStart], entry) {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 func committedTranscriptAlreadyMatchesAssistantOngoing(entries []tui.TranscriptEntry, liveOngoing string) bool {
 	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
 	if trimmedLiveOngoing == "" {
@@ -695,6 +755,9 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 		return "stale_total_entries"
 	}
 	if page.Revision == effectiveRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		if authoritativePageCommitsLiveAssistantOngoing(m, page) {
+			return ""
+		}
 		if authoritativePageDuplicatesCommittedAssistantOngoing(transcriptEntriesFromPage(page), page.Ongoing, m.view.OngoingStreamingText()) {
 			return ""
 		}
@@ -782,6 +845,47 @@ func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEnt
 
 func transcriptEntryCommittedForApp(entry tui.TranscriptEntry) bool {
 	return !entry.Transient || entry.Committed
+}
+
+func shouldAppendSyntheticOngoingEntry(m *uiModel, entry *clientui.ChatEntry) bool {
+	if m == nil || entry == nil || !m.hasRuntimeClient() || m.view.Mode() != tui.ModeOngoing {
+		return false
+	}
+	role := strings.TrimSpace(entry.Role)
+	text := strings.TrimSpace(entry.Text)
+	if role == "" || text == "" {
+		return false
+	}
+	for _, loaded := range m.view.LoadedTranscriptEntries() {
+		if strings.TrimSpace(loaded.Role) == role && strings.TrimSpace(loaded.Text) == text {
+			return false
+		}
+	}
+	return true
+}
+
+func shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m *uiModel, entries []tui.TranscriptEntry) bool {
+	if m == nil || m.view.Mode() != tui.ModeOngoing || len(entries) == 0 {
+		return false
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) == 0 {
+		return false
+	}
+	for _, loadedEntry := range loaded {
+		if !loadedEntry.Transient || loadedEntry.Committed {
+			continue
+		}
+		for _, committedEntry := range entries {
+			if committedEntry.Transient || !committedEntry.Committed {
+				continue
+			}
+			if strings.TrimSpace(loadedEntry.Role) == strings.TrimSpace(committedEntry.Role) && strings.TrimSpace(loadedEntry.Text) == strings.TrimSpace(committedEntry.Text) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func committedTranscriptEntriesForApp(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -1128,12 +1232,11 @@ func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) 
 			return false
 		}
 	}
-	committed := committedTranscriptEntriesForApp(m.transcriptEntries)
-	if len(committed) == 0 {
+	if !m.hasRuntimeClient() {
 		return true
 	}
-	lastCommittedRole := strings.TrimSpace(committed[len(committed)-1].Role)
-	return lastCommittedRole == "user"
+	committed := committedTranscriptEntriesForApp(m.transcriptEntries)
+	return len(committed) == 0
 }
 
 func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bool {
@@ -1348,6 +1451,9 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 					if runtimeEventCoversDeferredCommittedConversationUpdate(evt, next) {
 						return runtimeEventBatchMsg{events: []clientui.Event{next}}
 					}
+					if runtimeEventShouldBatchAfterCommittedConversationFence(evt, next) {
+						return runtimeEventBatchMsg{events: []clientui.Event{evt, next}}
+					}
 					if runtimeEventBatchFence(next) {
 						carry := next
 						return runtimeEventBatchMsg{events: events, carry: &carry}
@@ -1415,6 +1521,25 @@ func runtimeEventCoversDeferredCommittedConversationUpdate(update clientui.Event
 		return false
 	}
 	if next.CommittedEntryCount != update.CommittedEntryCount {
+		return false
+	}
+	return true
+}
+
+func runtimeEventShouldBatchAfterCommittedConversationFence(update clientui.Event, next clientui.Event) bool {
+	if !runtimeEventCanDeferCommittedConversationFence(update) {
+		return false
+	}
+	if !next.CommittedTranscriptChanged || len(next.TranscriptEntries) == 0 {
+		return false
+	}
+	if strings.TrimSpace(next.StepID) == "" || strings.TrimSpace(next.StepID) != strings.TrimSpace(update.StepID) {
+		return false
+	}
+	if update.TranscriptRevision > 0 && next.TranscriptRevision > 0 && next.TranscriptRevision < update.TranscriptRevision {
+		return false
+	}
+	if runtimeEventCoversDeferredCommittedConversationUpdate(update, next) {
 		return false
 	}
 	return true

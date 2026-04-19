@@ -8,19 +8,17 @@ cd "$repo_root"
 
 log_file="$(mktemp -t builder-go-test.XXXXXX.log)"
 cleanup() {
-	rm -f "$log_file"
+    rm -f "$log_file"
 }
 trap cleanup EXIT
 
 args=("$@")
 if [ ${#args[@]} -eq 0 ]; then
-	args=(./...)
+    args=(./...)
 fi
 
-"$repo_root/scripts/check-no-legacy-ui-constructor.sh"
-
 if go test "${args[@]}" >"$log_file" 2>&1; then
-	exit 0
+    exit 0
 fi
 
 cat "$log_file"

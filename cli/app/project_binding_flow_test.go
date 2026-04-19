@@ -14,6 +14,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -209,6 +210,125 @@ func TestEnsureInteractiveProjectBindingCreatesProjectForUnknownWorkspace(t *tes
 	}
 }
 
+func TestEnsureInteractiveProjectBindingUsesServerBrowsingForMissingServerPath(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	service := projectBindingFlowStubProjectViewService{
+		resolveResp: serverapi.ProjectResolvePathResponse{
+			CanonicalRoot:    cfg.WorkspaceRoot,
+			PathAvailability: clientui.ProjectAvailabilityMissing,
+		},
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{
+			ProjectID:   "project-1",
+			DisplayName: "Remote Project",
+			RootPath:    "/srv/project",
+		}}},
+		projectOverviewResp: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{
+			Project: clientui.ProjectSummary{ProjectID: "project-1", DisplayName: "Remote Project", RootPath: "/srv/project"},
+			Workspaces: []clientui.ProjectWorkspaceSummary{{
+				WorkspaceID: "workspace-1",
+				DisplayName: "Workspace 1",
+				RootPath:    "/srv/project",
+			}},
+		}},
+	}
+
+	originalLocalPicker := runProjectBindingPickerFlow
+	originalRemotePicker := runServerProjectPickerFlow
+	originalWorkspacePicker := runProjectWorkspacePickerFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalLocalPicker
+		runServerProjectPickerFlow = originalRemotePicker
+		runProjectWorkspacePickerFlow = originalWorkspacePicker
+	})
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		t.Fatal("did not expect local binding picker in server-browsing mode")
+		return projectBindingPickerResult{}, nil
+	}
+	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		if len(projects) != 1 || projects[0].ProjectID != "project-1" {
+			t.Fatalf("unexpected server projects: %+v", projects)
+		}
+		picked := projects[0]
+		return projectBindingPickerResult{Project: &picked}, nil
+	}
+	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string, config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+		t.Fatal("did not expect workspace picker for single workspace project")
+		return projectWorkspacePickerResult{}, nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	bound, err := ensureInteractiveProjectBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveProjectBinding: %v", err)
+	}
+	boundServer, ok := bound.(*testEmbeddedServer)
+	if !ok {
+		t.Fatalf("bound server type = %T, want *testEmbeddedServer", bound)
+	}
+	if got := boundServer.ProjectID(); got != "project-1" {
+		t.Fatalf("bound project id = %q, want project-1", got)
+	}
+	if got := boundServer.boundWorkspaceID; got != "workspace-1" {
+		t.Fatalf("bound workspace id = %q, want workspace-1", got)
+	}
+}
+
+func TestEnsureInteractiveProjectBindingRebindsSameProjectToResolvedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	service := projectBindingFlowStubProjectViewService{
+		resolveResp: serverapi.ProjectResolvePathResponse{
+			CanonicalRoot: cfg.WorkspaceRoot,
+			Binding: &serverapi.ProjectBinding{
+				ProjectID:     "project-1",
+				WorkspaceID:   "workspace-b",
+				CanonicalRoot: cfg.WorkspaceRoot,
+			},
+		},
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-1"),
+		projectID:         "project-1",
+		boundWorkspaceID:  "workspace-a",
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	bound, err := ensureInteractiveProjectBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveProjectBinding: %v", err)
+	}
+	boundServer, ok := bound.(*testEmbeddedServer)
+	if !ok {
+		t.Fatalf("bound server type = %T, want *testEmbeddedServer", bound)
+	}
+	if got := boundServer.ProjectID(); got != "project-1" {
+		t.Fatalf("bound project id = %q, want project-1", got)
+	}
+	if got := boundServer.boundWorkspaceID; got != "workspace-b" {
+		t.Fatalf("bound workspace id = %q, want workspace-b", got)
+	}
+}
+
 func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProject(t *testing.T) {
 	home := t.TempDir()
 	workspaceA := t.TempDir()
@@ -319,7 +439,7 @@ func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *te
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectNotFound) {
+	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "Restart Builder and choose another project") || !strings.Contains(got, "project-missing") {
@@ -369,7 +489,7 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing
 	if _, err := ensureInteractiveProjectBinding(context.Background(), server); err == nil || !strings.Contains(err.Error(), "startup canceled by user") {
 		t.Fatalf("expected startup canceled error, got %v", err)
 	}
-	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("ResolveBinding after picker cancel = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -415,20 +535,118 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *
 	if _, err := ensureInteractiveProjectBinding(context.Background(), server); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled from project name prompt, got %v", err)
 	}
-	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("ResolveBinding after naming cancel = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
 
 func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
-	picker := newProjectBindingPickerModel(nil, "dark")
+	picker := newProjectBindingPickerModel(nil, "dark", projectPickerOptions{
+		AllowCreate:    true,
+		HeaderMarkdown: projectBindingPickerHeaderMarkdown,
+		HeaderFallback: projectBindingPickerHeaderFallback,
+		NoticeText:     projectBindingPickerNoticeText,
+		GroupLabel:     projectBindingExistingLabel,
+	})
 	if got := xansi.Strip(picker.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("picker header has unexpected left padding: %q", got)
+	}
+
+	serverPicker := newProjectBindingPickerModel(nil, "dark", projectPickerOptions{
+		AllowCreate:    false,
+		HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+		HeaderFallback: serverProjectPickerHeaderFallback,
+		NoticeText:     serverProjectPickerNoticeText,
+		GroupLabel:     serverProjectExistingLabel,
+	})
+	if got := xansi.Strip(serverPicker.renderHeader()); strings.HasPrefix(got, "  ") {
+		t.Fatalf("server picker header has unexpected left padding: %q", got)
+	}
+	serverPicker.width = 240
+	serverPicker.height = 12
+	if got := xansi.Strip(serverPicker.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
+		t.Fatalf("server picker notice missing or padded unexpectedly: %q", got)
+	}
+	serverPicker.width = 32
+	serverPicker.height = 12
+	narrowView := xansi.Strip(serverPicker.View())
+	if !strings.Contains(narrowView, "Couldn") || !strings.Contains(narrowView, "…\n\n") {
+		t.Fatalf("server picker narrow notice should truncate cleanly with ellipsis, got %q", narrowView)
+	}
+	if strings.Contains(narrowView, "\n\n  ") {
+		t.Fatalf("server picker narrow notice has unexpected left padding: %q", narrowView)
 	}
 
 	prompt := newProjectNamePromptModel("demo", "dark")
 	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("project name header has unexpected left padding: %q", got)
+	}
+}
+
+func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	service := projectBindingFlowStubProjectViewService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{
+			ProjectID:   "project-1",
+			DisplayName: "Remote Project",
+			RootPath:    "/srv/project",
+		}}},
+		projectOverviewResp: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{
+			Project: clientui.ProjectSummary{ProjectID: "project-1", DisplayName: "Remote Project", RootPath: "/srv/project"},
+			Workspaces: []clientui.ProjectWorkspaceSummary{{
+				WorkspaceID: "workspace-1",
+				DisplayName: "Workspace 1",
+				RootPath:    "/srv/project",
+			}},
+		}},
+	}
+
+	originalRemotePicker := runServerProjectPickerFlow
+	originalWorkspacePicker := runProjectWorkspacePickerFlow
+	t.Cleanup(func() {
+		runServerProjectPickerFlow = originalRemotePicker
+		runProjectWorkspacePickerFlow = originalWorkspacePicker
+	})
+	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		model := newProjectBindingPickerModel(projects, theme, projectPickerOptions{
+			AllowCreate:    false,
+			HeaderMarkdown: serverProjectPickerHeaderMarkdown,
+			HeaderFallback: serverProjectPickerHeaderFallback,
+			NoticeText:     serverProjectPickerNoticeText,
+			GroupLabel:     serverProjectExistingLabel,
+		})
+		model.width = 240
+		model.height = 12
+		if got := xansi.Strip(model.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
+			t.Fatalf("server browsing picker notice missing or padded unexpectedly: %q", got)
+		}
+		picked := projects[0]
+		return projectBindingPickerResult{Project: &picked}, nil
+	}
+	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string, config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+		t.Fatal("did not expect workspace picker for single workspace project")
+		return projectWorkspacePickerResult{}, nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	bound, err := ensureInteractiveServerBrowsingBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveServerBrowsingBinding: %v", err)
+	}
+	if got := bound.ProjectID(); got != "project-1" {
+		t.Fatalf("bound project id = %q, want project-1", got)
 	}
 }
 
@@ -489,11 +707,11 @@ func TestEnsureInteractiveProjectBindingFormatsMissingBoundProjectError(t *testi
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: fmt.Errorf("bind project: %w", metadata.ErrProjectNotFound),
+		bindErr: fmt.Errorf("bind project: %w", serverapi.ErrProjectNotFound),
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectNotFound) {
+	if !errors.Is(err, serverapi.ErrProjectNotFound) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "attached to missing project") || !strings.Contains(got, binding.ProjectID) {
@@ -530,11 +748,11 @@ func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *t
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityMissing},
+		bindErr: serverapi.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityMissing},
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "builder rebind") || !strings.Contains(got, "missing") {
@@ -571,11 +789,11 @@ func TestEnsureInteractiveProjectBindingFormatsInaccessibleBoundProjectError(t *
 			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
 			projectViewClient: client.NewLoopbackProjectViewClient(service),
 		},
-		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityInaccessible},
+		bindErr: serverapi.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityInaccessible},
 	}
 
 	_, err = ensureInteractiveProjectBinding(context.Background(), server)
-	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "Restore access") || !strings.Contains(got, "inaccessible") || !strings.Contains(got, "builder rebind") {
@@ -588,6 +806,43 @@ type failingBindProjectServer struct {
 	bindErr error
 }
 
+type projectBindingFlowStubProjectViewService struct {
+	resolveResp         serverapi.ProjectResolvePathResponse
+	resolveErr          error
+	listProjectsResp    serverapi.ProjectListResponse
+	listProjectsErr     error
+	projectOverviewResp serverapi.ProjectGetOverviewResponse
+	projectOverviewErr  error
+}
+
+func (s projectBindingFlowStubProjectViewService) ListProjects(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	return s.listProjectsResp, s.listProjectsErr
+}
+
+func (s projectBindingFlowStubProjectViewService) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return s.resolveResp, s.resolveErr
+}
+
+func (projectBindingFlowStubProjectViewService) CreateProject(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+}
+
+func (projectBindingFlowStubProjectViewService) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (projectBindingFlowStubProjectViewService) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+}
+
+func (s projectBindingFlowStubProjectViewService) GetProjectOverview(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	return s.projectOverviewResp, s.projectOverviewErr
+}
+
+func (projectBindingFlowStubProjectViewService) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
+}
+
 func (s *failingBindProjectServer) ProjectID() string { return "" }
 
 func (s *failingBindProjectServer) BindProject(context.Context, string) (embeddedServer, error) {
@@ -595,4 +850,8 @@ func (s *failingBindProjectServer) BindProject(context.Context, string) (embedde
 		return nil, s.bindErr
 	}
 	return s.testEmbeddedServer, nil
+}
+
+func (s *failingBindProjectServer) BindProjectWorkspace(ctx context.Context, projectID string, _ string) (embeddedServer, error) {
+	return s.BindProject(ctx, projectID)
 }
