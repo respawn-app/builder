@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/rpcwire"
@@ -115,6 +116,59 @@ func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixHandshakeStalls(t *testi
 		t.Fatalf("ListProjects: %v", err)
 	}
 	requireNoHandlerError(t, handlerErrs)
+}
+
+func TestDialConfiguredRemoteHonorsExplicitTCPTargetOverDerivedLocalSocket(t *testing.T) {
+	tcpHandlerErrs := make(chan error, 8)
+	udsHandlerErrs := make(chan error, 8)
+	var tcpConnectionCount atomic.Int32
+	var udsConnectionCount atomic.Int32
+
+	tcpServer := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		serveProjectListRPCWithProjectID(ctx, conn, "tcp-project", tcpHandlerErrs, &tcpConnectionCount)
+	}))
+	defer tcpServer.Close()
+
+	cfg := testRemoteConfigFromServerURL(t, t.TempDir(), tcpServer.URL)
+	if cfg.Source.Sources == nil {
+		cfg.Source.Sources = map[string]string{}
+	}
+	cfg.Source.Sources["server_host"] = "file"
+	cfg.Source.Sources["server_port"] = "file"
+
+	socketPath, ok, err := config.ServerLocalRPCSocketPath(cfg)
+	if err != nil {
+		t.Fatalf("ServerLocalRPCSocketPath: %v", err)
+	}
+	if !ok {
+		t.Skip("local unix sockets unsupported on this platform")
+	}
+	shutdown := startUnixWebSocketServer(t, socketPath, func(ctx context.Context, conn rpcwire.Conn) {
+		serveProjectListRPCWithProjectID(ctx, conn, "uds-project", udsHandlerErrs, &udsConnectionCount)
+	})
+	defer shutdown()
+
+	remote, err := DialConfiguredRemote(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("DialConfiguredRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	resp, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(resp.Projects) != 1 || resp.Projects[0].ProjectID != "tcp-project" {
+		t.Fatalf("Projects = %+v, want tcp-project from configured TCP target", resp.Projects)
+	}
+	if got := tcpConnectionCount.Load(); got != 1 {
+		t.Fatalf("tcpConnectionCount = %d, want 1", got)
+	}
+	if got := udsConnectionCount.Load(); got != 0 {
+		t.Fatalf("udsConnectionCount = %d, want 0", got)
+	}
+	requireNoHandlerError(t, tcpHandlerErrs)
+	requireNoHandlerError(t, udsHandlerErrs)
 }
 
 func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T) {
@@ -487,6 +541,13 @@ func testRemoteConfigFromServerURL(t *testing.T, persistenceRoot string, serverU
 }
 
 func serveProjectListRPC(ctx context.Context, conn rpcwire.Conn, handlerErrs chan<- error) {
+	serveProjectListRPCWithProjectID(ctx, conn, "server-1-project", handlerErrs, nil)
+}
+
+func serveProjectListRPCWithProjectID(ctx context.Context, conn rpcwire.Conn, projectID string, handlerErrs chan<- error, connectionCount *atomic.Int32) {
+	if connectionCount != nil {
+		connectionCount.Add(1)
+	}
 	for event := range conn.Events() {
 		if event.Err != nil {
 			return
@@ -503,7 +564,8 @@ func serveProjectListRPC(ctx context.Context, conn rpcwire.Conn, handlerErrs cha
 			reportHandlerError(handlerErrs, "project list method = %q", req.Method)
 			return
 		}
-		if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))); err != nil {
+		response := serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: projectID}}}
+		if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, response))); err != nil {
 			reportHandlerError(handlerErrs, "send project list response: %w", err)
 			return
 		}
