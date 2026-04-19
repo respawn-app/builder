@@ -23,7 +23,17 @@ import (
 type submitDoneMsg struct {
 	message       string
 	submittedText string
+	silentFinal   bool
 	err           error
+}
+
+func newSubmitDoneMsg(message string, submittedText string, err error) submitDoneMsg {
+	return submitDoneMsg{
+		message:       message,
+		submittedText: submittedText,
+		silentFinal:   strings.TrimSpace(message) == uiNoopFinalToken,
+		err:           err,
+	}
 }
 
 type preSubmitCompactionCheckDoneMsg struct {

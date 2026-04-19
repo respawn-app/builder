@@ -6300,6 +6300,100 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	}
 }
 
+func TestSubmitDoneNoopFinalStaysInvisibleWithoutRuntimeClient(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+
+	next, _ := m.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	updated := next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected UI idle after NO_OP final")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, uiNoopFinalToken) {
+		t.Fatalf("expected NO_OP to stay invisible in local flow, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("expected no transcript entries after NO_OP final, got %+v", updated.transcriptEntries)
+	}
+}
+
+func TestRuntimeSubmitNoopFinalStaysSilent(t *testing.T) {
+	ringer := &countRinger{}
+	bells := newBellHooks(ringer, nil)
+	client := &runtimeControlFakeClient{submitResult: uiNoopFinalToken}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITurnQueueHook(bells))
+	m.startupCmds = nil
+	m.input = "hello"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected pre-submit command batch")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var preSubmit preSubmitCompactionCheckDoneMsg
+	preSubmitFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			preSubmit = typed
+			preSubmitFound = true
+		}
+	}
+	if !preSubmitFound {
+		t.Fatalf("expected pre-submit completion message, got %+v", msgs)
+	}
+	if preSubmit.shouldCompact {
+		t.Fatal("did not expect pre-submit compaction")
+	}
+
+	next, cmd = updated.Update(preSubmit)
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected submit command batch")
+	}
+	msgs = collectCmdMessages(t, cmd)
+	var done submitDoneMsg
+	doneFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(submitDoneMsg); ok {
+			done = typed
+			doneFound = true
+		}
+	}
+	if !doneFound {
+		t.Fatalf("expected submitDone message, got %+v", msgs)
+	}
+	if !done.silentFinal {
+		t.Fatalf("expected runtime NO_OP submit result to be marked silent, got %+v", done)
+	}
+
+	next, _ = updated.Update(done)
+	updated = next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected UI idle after runtime NO_OP final")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	if client.submitText != "hello" {
+		t.Fatalf("submit text = %q, want hello", client.submitText)
+	}
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after runtime NO_OP final, want 0", got)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, uiNoopFinalToken) {
+		t.Fatalf("expected runtime NO_OP to stay invisible, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("expected no transcript entries after runtime NO_OP final, got %+v", updated.transcriptEntries)
+	}
+}
+
 func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIStartupSubmit("run review"),
