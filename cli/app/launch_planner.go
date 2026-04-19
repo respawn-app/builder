@@ -58,6 +58,7 @@ type runtimeLaunchPlan struct {
 	Logger            *runLogger
 	Wiring            *runtimeWiring
 	ControllerLeaseID string
+	controllerLease   *controllerLeaseManager
 	close             func()
 }
 
@@ -66,6 +67,16 @@ func (p *runtimeLaunchPlan) Close() {
 		return
 	}
 	p.close()
+}
+
+func (p *runtimeLaunchPlan) CurrentControllerLeaseID() string {
+	if p == nil {
+		return ""
+	}
+	if p.controllerLease != nil {
+		return p.controllerLease.Value()
+	}
+	return strings.TrimSpace(p.ControllerLeaseID)
 }
 
 type sessionPickerRunner func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error)
