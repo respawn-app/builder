@@ -758,12 +758,15 @@ func TestTryDialMatchingConfiguredRunPromptRemoteUsesWorkspaceDiscoveryForAccept
 			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1", Availability: clientui.ProjectAvailabilityAvailable}}}}, nil
 		},
 	}
-	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
 		return projectViews, nil
 	}
-	dialConfiguredRemote = func(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+	dialConfiguredRemote = func(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if cfg.WorkspaceRoot != workspace {
+			t.Fatalf("unexpected config workspace root: %s", cfg.WorkspaceRoot)
 		}
 		if projectID != "project-1" || workspaceID != "workspace-1" {
 			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
@@ -799,7 +802,7 @@ func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapabili
 	projectViews := &configuredProjectViewRemoteStub{
 		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
 	}
-	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
 		return projectViews, nil
 	}
 
@@ -826,7 +829,7 @@ func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutProjectAttachCapabili
 	projectViews := &configuredProjectViewRemoteStub{
 		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
 	}
-	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
 		return projectViews, nil
 	}
 
