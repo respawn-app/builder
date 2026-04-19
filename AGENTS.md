@@ -66,6 +66,7 @@ The scope is intentionally narrow and quality-oriented.
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
 - Keep TUI fast, avoid flicker, stable scroll, follow best practices, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
+- When reviewer comments expose a repeatable bug family, stop hunk-by-hunk fixing. Audit the whole family, implement the family-wide fix, and add regression coverage for the family before returning to the review loop.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
 -  Breaking changes are allowed, but the UX of migration should be straightforward, e.g. a migration note for config entries or a clear error message. Ask user what migration strat they want.
 
