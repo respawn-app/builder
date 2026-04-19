@@ -30,7 +30,6 @@ type persistedTranscriptUserIndexResolver struct {
 	assistantToolCalls     map[string]struct{}
 	synthesizedToolResults map[string]struct{}
 	materializedToolCalls  map[string]struct{}
-	localEntries           []persistedTranscriptLocalOrdinalEntry
 }
 
 var errPersistedTranscriptTargetResolved = errors.New("persisted transcript target resolved")
@@ -42,7 +41,6 @@ func newPersistedTranscriptUserIndexResolver(targetIndex int) *persistedTranscri
 		assistantToolCalls:     map[string]struct{}{},
 		synthesizedToolResults: map[string]struct{}{},
 		materializedToolCalls:  map[string]struct{}{},
-		localEntries:           nil,
 	}
 }
 
@@ -106,26 +104,18 @@ func (r *persistedTranscriptUserIndexResolver) ApplyPersistedEvent(evt session.E
 		if chatEntry == nil {
 			return nil
 		}
-		r.localEntries = append(r.localEntries, persistedTranscriptLocalOrdinalEntry{afterMessageCount: r.messageCount, role: strings.TrimSpace(chatEntry.Role)})
-		if r.appendVisibleRole(chatEntry.Role) {
-			return errPersistedTranscriptTargetResolved
-		}
-		return nil
+		return r.appendVisibleEntries(*chatEntry)
 	case sessionEventCacheWarning:
-		r.localEntries = append(r.localEntries, persistedTranscriptLocalOrdinalEntry{afterMessageCount: r.messageCount, role: cacheWarningTranscriptRole})
-		if r.appendVisibleRole(cacheWarningTranscriptRole) {
-			return errPersistedTranscriptTargetResolved
-		}
-		return nil
+		return r.appendVisibleEntries(ChatEntry{Role: cacheWarningTranscriptRole})
 	case "history_replaced":
-		_, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+		payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
 		if err != nil {
 			return fmt.Errorf("decode history_replaced event: %w", err)
 		}
 		if ignoredLegacy {
 			return nil
 		}
-		return nil
+		return r.appendVisibleEntries(visibleChatEntriesFromResponseItems(payload.Items)...)
 	default:
 		return nil
 	}
@@ -151,22 +141,26 @@ func (r *persistedTranscriptUserIndexResolver) applyMessage(msg llm.Message) err
 	r.messageCount++
 	switch msg.Role {
 	case llm.RoleUser:
-		if entry, ok := visibleUserTranscriptEntry(msg); ok {
-			if r.appendVisibleRole(entry.Role) {
-				return errPersistedTranscriptTargetResolved
-			}
-		}
+		return r.appendVisibleEntries(VisibleChatEntriesFromMessage(msg)...)
 	case llm.RoleAssistant:
-		if strings.TrimSpace(msg.Content) != "" {
-			if r.appendVisibleRole("assistant") {
-				return errPersistedTranscriptTargetResolved
+		entries := VisibleChatEntriesFromMessage(msg)
+		assistantEntryCount := 0
+		for _, entry := range entries {
+			if strings.TrimSpace(entry.Role) == "tool_call" {
+				break
 			}
+			assistantEntryCount++
 		}
-		for _, call := range msg.ToolCalls {
-			callID := strings.TrimSpace(call.ID)
-			if r.appendVisibleRole("tool_call") {
-				return errPersistedTranscriptTargetResolved
+		if err := r.appendVisibleEntries(entries[:assistantEntryCount]...); err != nil {
+			return err
+		}
+		for idx, call := range msg.ToolCalls {
+			if assistantEntryCount+idx < len(entries) {
+				if err := r.appendVisibleEntries(entries[assistantEntryCount+idx]); err != nil {
+					return err
+				}
 			}
+			callID := strings.TrimSpace(call.ID)
 			if callID == "" {
 				continue
 			}
@@ -179,11 +173,12 @@ func (r *persistedTranscriptUserIndexResolver) applyMessage(msg llm.Message) err
 			}
 			if _, ok := r.toolCompletions[callID]; ok {
 				r.synthesizedToolResults[callID] = struct{}{}
-				if r.appendVisibleRole("tool_result_ok") {
-					return errPersistedTranscriptTargetResolved
+				if err := r.appendVisibleEntries(ChatEntry{Role: "tool_result_ok"}); err != nil {
+					return err
 				}
 			}
 		}
+		return nil
 	case llm.RoleTool:
 		callID := strings.TrimSpace(msg.ToolCallID)
 		if callID != "" {
@@ -193,14 +188,17 @@ func (r *persistedTranscriptUserIndexResolver) applyMessage(msg llm.Message) err
 				return nil
 			}
 		}
-		if r.appendVisibleRole("tool_result_ok") {
-			return errPersistedTranscriptTargetResolved
-		}
+		return r.appendVisibleEntries(VisibleChatEntriesFromMessage(msg)...)
 	case llm.RoleDeveloper:
-		if entry, ok := visibleDeveloperChatEntry(msg); ok {
-			if r.appendVisibleRole(entry.Role) {
-				return errPersistedTranscriptTargetResolved
-			}
+		return r.appendVisibleEntries(VisibleChatEntriesFromMessage(msg)...)
+	}
+	return nil
+}
+
+func (r *persistedTranscriptUserIndexResolver) appendVisibleEntries(entries ...ChatEntry) error {
+	for _, entry := range entries {
+		if r.appendVisibleRole(entry.Role) {
+			return errPersistedTranscriptTargetResolved
 		}
 	}
 	return nil
