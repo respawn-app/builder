@@ -57,14 +57,16 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		if appendCmd, appended := m.emitNativeSlidingWindowAppend(projection, previousProjection, m.transcriptBaseOffset, previousBaseOffset); appended {
 			return appendCmd
 		}
-		if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
+		if replayPermit == nativeHistoryReplayPermitContinuityRecovery {
 			return m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection)
 		}
+		if replayPermit == nativeHistoryReplayPermitModeRestore {
+			m.acceptNativeProjectionWithoutReplay(projection)
+			return nil
+		}
 		if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
-			return batchCmds(
-				m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError),
-				m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection),
-			)
+			m.acceptNativeProjectionWithoutReplay(projection)
+			return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
 		}
 		m.acceptNativeProjectionWithoutReplay(projection)
 		return m.reportNativeProjectionDivergence(projection, previousProjection)
@@ -222,14 +224,16 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 			return appendCmd
 		}
 		if rewriteRenderedHistory {
-			if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
+			if replayPermit == nativeHistoryReplayPermitContinuityRecovery {
 				return m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
 			}
+			if replayPermit == nativeHistoryReplayPermitModeRestore {
+				m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
+				return nil
+			}
 			if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
-				return batchCmds(
-					m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError),
-					m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection),
-				)
+				m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
+				return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
 			}
 			m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
 			return m.reportNativeProjectionDivergence(m.nativeProjection, m.nativeRenderedProjection)

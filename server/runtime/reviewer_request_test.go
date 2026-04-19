@@ -10,6 +10,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestBuildReviewerTranscriptMessagesSummarizesViewImagePayloads(t *testing.T) {
@@ -18,14 +19,14 @@ func TestBuildReviewerTranscriptMessagesSummarizesViewImagePayloads(t *testing.T
 			Role: llm.RoleAssistant,
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call-view-image-1",
-				Name:  string(tools.ToolViewImage),
+				Name:  string(toolspec.ToolViewImage),
 				Input: []byte(`{"path":"docs/page.pdf"}`),
 			}},
 		},
 		{
 			Role:       llm.RoleTool,
 			ToolCallID: "call-view-image-1",
-			Name:       string(tools.ToolViewImage),
+			Name:       string(toolspec.ToolViewImage),
 			Content:    `[{"type":"input_file","filename":"page.pdf","file_data":"data:application/pdf;base64,JVBERi0xLjQKJUVPRg=="}]`,
 		},
 	}

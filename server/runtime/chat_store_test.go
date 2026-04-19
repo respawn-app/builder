@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"encoding/json"
 	"reflect"
@@ -36,14 +37,14 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID:  "call_1",
-		Name:    tools.ToolShell,
+		Name:    toolspec.ToolShell,
 		IsError: false,
 		Output:  json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_1",
-		Name:       string(tools.ToolShell),
+		Name:       string(toolspec.ToolShell),
 		Content:    `{"output":"/tmp","exit_code":0,"truncated":false}`,
 	})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
@@ -130,7 +131,7 @@ func TestChatStoreSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *tes
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID: "call_b",
-		Name:   tools.ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 
@@ -213,7 +214,7 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID: "call_b",
-		Name:   tools.ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 
@@ -226,6 +227,93 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 	}
 	if page.Snapshot.Entries[2].Role != "tool_result_ok" || page.Snapshot.Entries[2].ToolCallID != "call_b" || strings.TrimSpace(page.Snapshot.Entries[2].Text) != "/tmp" {
 		t.Fatalf("expected synthesized completed tool result for call_b, got %+v", page.Snapshot.Entries[2])
+	}
+}
+
+func TestChatStoreTranscriptPageSnapshotPreservesHistoryAcrossCompaction(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
+	s.appendLocalEntry("error", "before replace")
+	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	}))
+	s.appendLocalEntry("compaction_notice", "after replace notice")
+
+	page := s.transcriptPageSnapshot(0, 0)
+	if got := len(page.Snapshot.Entries); got != 5 {
+		t.Fatalf("entry count = %d, want 5 (%+v)", got, page.Snapshot.Entries)
+	}
+	if got := page.Snapshot.Entries[0]; got.Role != "user" || got.Text != "before compaction" {
+		t.Fatalf("entry[0] = %+v, want preserved pre-compaction user entry", got)
+	}
+	if got := page.Snapshot.Entries[1]; got.Role != "error" || got.Text != "before replace" {
+		t.Fatalf("entry[1] = %+v, want preserved pre-compaction local entry", got)
+	}
+	if got := page.Snapshot.Entries[2]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
+		t.Fatalf("entry[2] = %+v, want compacted developer context", got)
+	}
+	if got := page.Snapshot.Entries[3]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" {
+		t.Fatalf("entry[3] = %+v, want compacted summary", got)
+	}
+	if got := page.Snapshot.Entries[4]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[4] = %+v, want post-compaction local entry", got)
+	}
+}
+
+func TestChatStoreOngoingTailUsesLatestCompactionBoundaryAsFloor(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before compaction"})
+	s.replaceHistory(llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	}))
+	s.appendLocalEntry("compaction_notice", "after replace notice")
+
+	window := s.ongoingTailSnapshot(1)
+	if got := len(window.Snapshot.Entries); got != 3 {
+		t.Fatalf("entry count = %d, want 3 (%+v)", got, window.Snapshot.Entries)
+	}
+	if got := window.TotalEntries; got != 4 {
+		t.Fatalf("total entries = %d, want 4", got)
+	}
+	if got := window.Offset; got != 1 {
+		t.Fatalf("offset = %d, want 1", got)
+	}
+	if got := window.Snapshot.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
+		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
+	}
+	if got := window.Snapshot.Entries[1]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" {
+		t.Fatalf("entry[1] = %+v, want compacted summary", got)
+	}
+	if got := window.Snapshot.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[2] = %+v, want post-compaction local entry", got)
+	}
+}
+
+func TestChatStoreOngoingTailUsesMostRecentCompactionBoundary(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-1"}})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "between"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-2"}})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
+
+	window := s.ongoingTailSnapshot(1)
+	if got := window.TotalEntries; got != 5 {
+		t.Fatalf("total entries = %d, want 5", got)
+	}
+	if got := window.Offset; got != 3 {
+		t.Fatalf("offset = %d, want 3", got)
+	}
+	if got := len(window.Snapshot.Entries); got != 2 {
+		t.Fatalf("entry count = %d, want 2 (%+v)", got, window.Snapshot.Entries)
+	}
+	if got := window.Snapshot.Entries[0].Text; got != "summary-2" {
+		t.Fatalf("entry[0] = %q, want summary-2", got)
+	}
+	if got := window.Snapshot.Entries[1].Text; got != "after" {
+		t.Fatalf("entry[1] = %q, want after", got)
 	}
 }
 
@@ -246,7 +334,7 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n line1\n-old\n+new\n*** Add File: b.go\n+hello\n*** End Patch\n"
 	call := llm.ToolCall{
 		ID:    "call_patch",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -286,7 +374,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n-old\n+new\n*** End Patch\n"
 	call := llm.ToolCall{
 		ID:    "call_patch_single",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -317,7 +405,7 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 	patchText := "not a structured patch payload"
 	call := llm.ToolCall{
 		ID:    "call_patch_raw",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -343,7 +431,7 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_shell",
-		Name:  string(tools.ToolShell),
+		Name:  string(toolspec.ToolShell),
 		Input: json.RawMessage(`{"command":"cat cli/tui/model.go"}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -376,7 +464,7 @@ func TestFormatToolCallShellCapturesUserInitiatedMarker(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_shell_user",
-		Name:  string(tools.ToolShell),
+		Name:  string(toolspec.ToolShell),
 		Input: json.RawMessage(`{"command":"pwd","user_initiated":true}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -394,7 +482,7 @@ func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_poll",
-		Name:  string(tools.ToolWriteStdin),
+		Name:  string(toolspec.ToolWriteStdin),
 		Input: json.RawMessage(`{"session_id":1149,"yield_time_ms":2000}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -427,7 +515,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["flat scan","Recursive scan"],"recommended_option_index":1}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -442,7 +530,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected ask_question metadata, got nil")
 	}
-	if rendered.ToolCall.ToolName != string(tools.ToolAskQuestion) {
+	if rendered.ToolCall.ToolName != string(toolspec.ToolAskQuestion) {
 		t.Fatalf("unexpected ask_question tool name: %+v", rendered.ToolCall)
 	}
 	if rendered.Text != "Choose scope?" {
@@ -474,14 +562,14 @@ func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
 		Role: llm.RoleAssistant,
 		ToolCalls: []llm.ToolCall{{
 			ID:    "call_ask",
-			Name:  string(tools.ToolAskQuestion),
+			Name:  string(toolspec.ToolAskQuestion),
 			Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["full","fast"]}`),
 		}},
 	})
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_ask",
-		Name:       string(tools.ToolAskQuestion),
+		Name:       string(toolspec.ToolAskQuestion),
 		Content:    `"ask result summary"`,
 	})
 
@@ -502,7 +590,7 @@ func TestFormatToolCallAskQuestionRejectsApprovalShapeAtToolLayer(t *testing.T) 
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -520,7 +608,7 @@ func TestFormatToolCallAskQuestionDropsImpossibleRecommendedMetadataAfterNormali
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["", "beta"],"recommended_option_index":2}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -541,7 +629,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_web",
-		Name:  string(tools.ToolWebSearch),
+		Name:  string(toolspec.ToolWebSearch),
 		Input: json.RawMessage(`{"query":"latest golang release"}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -561,7 +649,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 func TestFormatToolResultWebSearchUsesCompactJSON(t *testing.T) {
 	result := tools.Result{
 		CallID: "call_web",
-		Name:   tools.ToolWebSearch,
+		Name:   toolspec.ToolWebSearch,
 		Output: json.RawMessage(`{"type":"web_search_call","status":"completed","action":{"type":"search","query":"builder cli"}}`),
 	}
 
@@ -620,6 +708,22 @@ func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T)
 	}
 	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[1].Text != "Environment context" {
 		t.Fatalf("unexpected environment context entry: %+v", snap.Entries[1])
+	}
+	if snap.Entries[0].Visibility != transcript.EntryVisibilityDetailOnly || snap.Entries[1].Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("expected developer context visibility to be detail-only, got %+v", snap.Entries)
+	}
+}
+
+func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageType("custom_internal"), Content: "Internal developer note"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("unexpected unknown developer context entry: %+v", got)
 	}
 }
 
@@ -726,7 +830,7 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	}
 }
 
-func TestChatStoreSnapshotIncludesManualCompactionCarryoverAsDedicatedRole(t *testing.T) {
+func TestChatStoreSnapshotShowsManualCompactionCarryoverAsDetailOnlyMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{
 		Role:        llm.RoleDeveloper,
@@ -736,13 +840,10 @@ func TestChatStoreSnapshotIncludesManualCompactionCarryoverAsDedicatedRole(t *te
 
 	snap := s.snapshot()
 	if len(snap.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+		t.Fatalf("expected carryover message to project once into transcript, got %+v", snap.Entries)
 	}
-	if snap.Entries[0].Role != string(transcript.EntryRoleManualCompactionCarryover) {
-		t.Fatalf("expected manual compaction carryover role, got %+v", snap.Entries[0])
-	}
-	if snap.Entries[0].Text != "# Last user message before manual compaction\n\nplease keep tests green" {
-		t.Fatalf("unexpected carryover text: %+v", snap.Entries[0])
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleManualCompactionCarryover) || got.Text != "# Last user message before manual compaction\n\nplease keep tests green" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+		t.Fatalf("unexpected carryover transcript entry: %+v", got)
 	}
 }
 
@@ -792,7 +893,7 @@ func TestChatStoreSnapshotPlacesLocalEntriesAtInsertionPoint(t *testing.T) {
 	}
 }
 
-func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.T) {
+func TestChatStoreSnapshotKeepsHistoryAcrossHistoryReplace(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "a"})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "b"})
@@ -803,8 +904,8 @@ func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 4 {
-		t.Fatalf("expected 4 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected preserved history plus projected replacement, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
 	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "a" {
 		t.Fatalf("unexpected first entry after replace: %+v", snap.Entries[0])
@@ -813,10 +914,13 @@ func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.
 		t.Fatalf("unexpected second entry after replace: %+v", snap.Entries[1])
 	}
 	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "before replace" {
-		t.Fatalf("expected old local entry after visible history, got %+v", snap.Entries[2])
+		t.Fatalf("unexpected third entry after replace: %+v", snap.Entries[2])
 	}
-	if snap.Entries[3].Role != "compaction_notice" || snap.Entries[3].Text != "after replace notice" {
-		t.Fatalf("expected new local entry after old local entry, got %+v", snap.Entries[3])
+	if snap.Entries[3].Role != "user" || snap.Entries[3].Text != "after replace" {
+		t.Fatalf("unexpected projected replacement entry: %+v", snap.Entries[3])
+	}
+	if snap.Entries[4].Role != "compaction_notice" || snap.Entries[4].Text != "after replace notice" {
+		t.Fatalf("expected new local entry after projected replacement, got %+v", snap.Entries[4])
 	}
 }
 
@@ -827,7 +931,7 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 
 	replacement := []llm.ResponseItem{
 		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleDeveloper, Content: "ctx"},
-		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "compact-summary"},
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "compact-summary"},
 	}
 	s.replaceHistory(replacement)
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "after"})
@@ -847,8 +951,8 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 	}
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 3 {
-		t.Fatalf("expected full visible transcript to remain intact, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected full transcript history plus projected compaction entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
 	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "before-1" {
 		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
@@ -856,8 +960,31 @@ func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) 
 	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "before-2" {
 		t.Fatalf("unexpected visible entry[1]: %+v", snap.Entries[1])
 	}
-	if snap.Entries[2].Role != "user" || snap.Entries[2].Text != "after" {
-		t.Fatalf("unexpected visible entry[2]: %+v", snap.Entries[2])
+	if snap.Entries[2].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[2].Text != "ctx" {
+		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
+	}
+	if snap.Entries[3].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[3].Text != "compact-summary" {
+		t.Fatalf("unexpected visible entry[3]: %+v", snap.Entries[3])
+	}
+	if snap.Entries[4].Role != "user" || snap.Entries[4].Text != "after" {
+		t.Fatalf("unexpected visible entry[4]: %+v", snap.Entries[4])
+	}
+}
+
+func TestChatStoreSnapshotKeepsProjectedEntriesAcrossMultipleCompactions(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-1"}})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "between"})
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary-2"}})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected full transcript across compactions, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Text != "before" || snap.Entries[1].Text != "summary-1" || snap.Entries[2].Text != "between" || snap.Entries[3].Text != "summary-2" || snap.Entries[4].Text != "after" {
+		t.Fatalf("unexpected multi-compaction transcript: %+v", snap.Entries)
 	}
 }
 
@@ -882,11 +1009,11 @@ func TestChatStoreProviderHistoryUsesMostRecentCompactionCheckpoint(t *testing.T
 
 func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
 
 	items := s.snapshotItems()
 	if len(items) != 4 {
@@ -908,12 +1035,12 @@ func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
 
 func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
-	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`})
 
 	items := s.snapshotItems()
 	if len(items) != 4 {
@@ -935,12 +1062,12 @@ func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t
 
 func TestChatStoreSnapshotItemsMatchesItemsFromMessagesWhenFullyMaterialized(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	messages := []llm.Message{
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}},
-		{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`},
-		{Role: llm.RoleTool, ToolCallID: "call-2", Name: string(tools.ToolShell), Content: `{"output":"a.txt"}`},
+		{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`},
+		{Role: llm.RoleTool, ToolCallID: "call-2", Name: string(toolspec.ToolShell), Content: `{"output":"a.txt"}`},
 	}
 	for _, msg := range messages {
 		s.appendMessage(msg)
@@ -962,18 +1089,18 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("after user message committed entry count = %d, want 1", got)
 	}
 
-	call := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}})
 	if got := s.committedEntryCount(); got != 2 {
 		t.Fatalf("after assistant tool call committed entry count = %d, want 2", got)
 	}
 
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
 	if got := s.committedEntryCount(); got != 3 {
 		t.Fatalf("after synthesized tool result committed entry count = %d, want 3", got)
 	}
 
-	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`})
 	if got := s.committedEntryCount(); got != 3 {
 		t.Fatalf("materialized tool result should not double count, got %d want 3", got)
 	}
@@ -983,23 +1110,6 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("after local entry committed entry count = %d, want 4", got)
 	}
 
-	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
-		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
-	}
-}
-
-func TestChatStoreCommittedEntryCountRebuildsAfterRestoreHistoryItems(t *testing.T) {
-	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
-	s.appendLocalEntry("system", "local note")
-	s.restoreHistoryItems(llm.ItemsFromMessages([]llm.Message{
-		{Role: llm.RoleAssistant, Content: "after"},
-		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"},
-	}))
-
-	if got := s.committedEntryCount(); got != 3 {
-		t.Fatalf("committed entry count after restore = %d, want 3", got)
-	}
 	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
 		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
 	}

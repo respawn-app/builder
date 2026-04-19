@@ -8,6 +8,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type Controller interface {
@@ -32,8 +33,8 @@ func New(getController func() Controller) *Tool {
 	return &Tool{getController: getController}
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolTriggerHandoff
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolTriggerHandoff
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

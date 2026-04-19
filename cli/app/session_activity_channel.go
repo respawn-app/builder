@@ -45,7 +45,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				case <-pollCtx.Done():
 					_ = current.Close()
 					return
-				case out <- clientui.Event{Kind: clientui.EventConversationUpdated, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap}:
+				case out <- clientui.Event{Kind: clientui.EventConversationUpdated, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap, CommittedTranscriptChanged: true}:
 					if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
 						logDiag(transcriptdiag.FormatLine("transcript.diag.client.synthetic_conversation_updated", map[string]string{
 							"path":  "recovery",

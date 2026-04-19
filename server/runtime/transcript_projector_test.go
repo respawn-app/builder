@@ -6,7 +6,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestTranscriptProjectorReconstructsPersistedTranscript(t *testing.T) {
@@ -17,8 +17,8 @@ func TestTranscriptProjectorReconstructsPersistedTranscript(t *testing.T) {
 	}
 	events := []session.Event{
 		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "hello"}),
-		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
-		mustPersistedEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(tools.ToolShell), "output": json.RawMessage(toolOutput)}),
+		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
+		mustPersistedEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolShell), "output": json.RawMessage(toolOutput)}),
 		mustPersistedEvent(t, "local_entry", storedLocalEntry{Role: "system", Text: "persisted note"}),
 		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleAssistant, Content: "final answer", Phase: llm.MessagePhaseFinal}),
 	}

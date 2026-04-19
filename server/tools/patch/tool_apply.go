@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"builder/shared/textutil"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 func (t *Tool) outsideWorkspaceSessionAllowed() bool {
@@ -30,7 +31,7 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-func applyEdit(original []string, changes []ChangeLine) ([]string, error) {
+func applyEdit(original []string, changes []patchformat.ChangeLine) ([]string, error) {
 	hunks, err := parseEditHunks(changes)
 	if err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func applyEdit(original []string, changes []ChangeLine) ([]string, error) {
 	return current, nil
 }
 
-func parseEditHunks(changes []ChangeLine) ([]editHunk, error) {
+func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 	if len(changes) == 0 {
 		return nil, nil
 	}
@@ -158,7 +159,7 @@ func parseHunkHeader(line string) (hunkHeader, error) {
 	}, nil
 }
 
-func findHunkAnchor(lines []string, changes []ChangeLine, expected, floor int, anchored bool) (int, error) {
+func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, floor int, anchored bool) (int, error) {
 	if floor < 0 {
 		floor = 0
 	}
@@ -197,7 +198,7 @@ func findHunkAnchor(lines []string, changes []ChangeLine, expected, floor int, a
 	return -1, errors.New("hunk did not match file content")
 }
 
-func applyHunkAt(lines []string, changes []ChangeLine, start int) ([]string, int, int, error) {
+func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([]string, int, int, error) {
 	if start < 0 || start > len(lines) {
 		return nil, 0, 0, fmt.Errorf("invalid hunk start %d", start)
 	}

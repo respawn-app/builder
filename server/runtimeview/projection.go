@@ -6,10 +6,10 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 const runtimeNoopFinalToken = "NO_OP"
@@ -76,23 +76,31 @@ func ConversationFreshnessFromSession(freshness session.ConversationFreshness) c
 
 func EventFromRuntime(evt runtime.Event) clientui.Event {
 	view := clientui.Event{
-		Kind:                   clientui.EventKind(evt.Kind),
-		StepID:                 evt.StepID,
-		TranscriptRevision:     evt.TranscriptRevision,
-		CommittedEntryCount:    evt.CommittedEntryCount,
-		CommittedEntryStart:    evt.CommittedEntryStart,
-		CommittedEntryStartSet: evt.CommittedEntryStartSet,
-		Error:                  evt.Error,
-		AssistantDelta:         evt.AssistantDelta,
-		UserMessage:            evt.UserMessage,
-		UserMessageBatch:       append([]string(nil), evt.UserMessageBatch...),
-		TranscriptEntries:      chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
+		Kind:                       clientui.EventKind(evt.Kind),
+		StepID:                     evt.StepID,
+		CommittedTranscriptChanged: evt.CommittedTranscriptChanged,
+		TranscriptRevision:         evt.TranscriptRevision,
+		CommittedEntryCount:        evt.CommittedEntryCount,
+		CommittedEntryStart:        evt.CommittedEntryStart,
+		CommittedEntryStartSet:     evt.CommittedEntryStartSet,
+		Error:                      evt.Error,
+		AssistantDelta:             evt.AssistantDelta,
+		UserMessage:                evt.UserMessage,
+		UserMessageBatch:           append([]string(nil), evt.UserMessageBatch...),
+		TranscriptEntries:          chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
 	}
 	if evt.ReasoningDelta != nil {
 		view.ReasoningDelta = &clientui.ReasoningDelta{
 			Key:  evt.ReasoningDelta.Key,
 			Role: evt.ReasoningDelta.Role,
 			Text: evt.ReasoningDelta.Text,
+		}
+	}
+	if evt.Compaction != nil {
+		view.Compaction = &clientui.CompactionStatus{
+			Mode:  evt.Compaction.Mode,
+			Count: evt.Compaction.Count,
+			Error: evt.Compaction.Error,
 		}
 	}
 	if evt.CacheWarning != nil {

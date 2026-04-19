@@ -68,11 +68,11 @@ These are intentionally not classified as cleanup debt for this slice.
 
 ### Remote raw commentary-entry parity
 
-This is not a quick symptom patch candidate.
+This defer note is stale.
 
-The current gap exists because the runtime does not emit a committed assistant commentary event for tool-using turns on the live event contract. Remote raw stream parity therefore requires a deliberate runtime-event/projection contract change.
+The runtime now emits a committed assistant commentary event for tool-using turns, projection forwards it onto session activity, and gateway coverage proves the remote ordering `user -> assistant_progress -> commentary -> tool_call -> tool_result -> final`.
 
-That remains an explicit defer, not hidden cleanup debt.
+This is no longer cleanup debt and should not be tracked as an explicit defer.
 
 ### Release confidence and branch usability
 

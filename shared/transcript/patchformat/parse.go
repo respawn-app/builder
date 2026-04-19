@@ -1,4 +1,4 @@
-package format
+package patchformat
 
 import (
 	"bufio"
@@ -23,7 +23,7 @@ func Parse(src string) (Document, error) {
 		case line == "*** End Patch":
 			s.next()
 			if !s.done() {
-				return Document{}, errors.New("unexpected content after *** End Patch")
+				return doc, errors.New("unexpected content after *** End Patch")
 			}
 			return doc, nil
 		case strings.HasPrefix(line, "*** Add File: "):

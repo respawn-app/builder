@@ -6,12 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	"builder/server/auth"
-	"builder/server/authflow"
-	serverbootstrap "builder/server/bootstrap"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -25,9 +21,6 @@ type remoteAppServer struct {
 	closeFn   func() error
 	owns      bool
 	lookupEnv func(string) string
-	wrapStore func(auth.Store) auth.Store
-	authOnce  sync.Once
-	authMgr   *auth.Manager
 }
 
 func newRemoteAppServer(remote *client.Remote, cfg config.App) *remoteAppServer {
@@ -38,12 +31,10 @@ func newRemoteAppServerWithClose(remote *client.Remote, cfg config.App, closeFn 
 	return newRemoteAppServerWithAuth(remote, cfg, closeFn, nil, nil)
 }
 
-func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn func() error, lookupEnv func(string) string, wrapStore func(auth.Store) auth.Store) *remoteAppServer {
+func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn func() error, lookupEnv func(string) string, _ func(auth.Store) auth.Store) *remoteAppServer {
 	if remote == nil {
 		return nil
 	}
-	// A custom closer is only provided when this CLI launched the daemon itself.
-	// Directly attached configured remotes fall back to remote.Close() and are not owners.
 	ownsServer := closeFn != nil
 	if closeFn == nil {
 		closeFn = remote.Close
@@ -51,7 +42,7 @@ func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn f
 	if lookupEnv == nil {
 		lookupEnv = os.Getenv
 	}
-	return &remoteAppServer{remote: remote, identity: remote.Identity(), projectID: remote.ProjectID(), cfg: cfg, closeFn: closeFn, owns: ownsServer, lookupEnv: lookupEnv, wrapStore: wrapStore}
+	return &remoteAppServer{remote: remote, identity: remote.Identity(), projectID: remote.ProjectID(), cfg: cfg, closeFn: closeFn, owns: ownsServer, lookupEnv: lookupEnv}
 }
 
 func (s *remoteAppServer) Close() error {
@@ -79,6 +70,10 @@ func (s *remoteAppServer) Config() config.App {
 }
 
 func (s *remoteAppServer) BindProject(ctx context.Context, projectID string) (embeddedServer, error) {
+	return s.BindProjectWorkspace(ctx, projectID, "")
+}
+
+func (s *remoteAppServer) BindProjectWorkspace(ctx context.Context, projectID string, workspaceID string) (embeddedServer, error) {
 	if s == nil || s.remote == nil {
 		return nil, errors.New("remote server is required")
 	}
@@ -86,7 +81,14 @@ func (s *remoteAppServer) BindProject(ctx context.Context, projectID string) (em
 	if trimmedProjectID == "" {
 		return nil, errors.New("project id is required")
 	}
-	nextRemote, err := client.DialRemoteURLForProjectWorkspace(ctx, config.ServerRPCURL(s.cfg), trimmedProjectID, s.cfg.WorkspaceRoot)
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	var nextRemote *client.Remote
+	var err error
+	if trimmedWorkspaceID != "" {
+		nextRemote, err = client.DialConfiguredRemoteForProjectWorkspaceID(ctx, s.cfg, trimmedProjectID, trimmedWorkspaceID)
+	} else {
+		nextRemote, err = client.DialConfiguredRemoteForProjectWorkspace(ctx, s.cfg, trimmedProjectID, s.cfg.WorkspaceRoot)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -97,20 +99,11 @@ func (s *remoteAppServer) BindProject(ctx context.Context, projectID string) (em
 			return errors.Join(nextRemote.Close(), s.closeFn())
 		}
 	}
-	return newRemoteAppServerWithAuth(nextRemote, s.cfg, closeFn, s.lookupEnv, s.wrapStore), nil
+	return newRemoteAppServerWithAuth(nextRemote, s.cfg, closeFn, s.lookupEnv, nil), nil
 }
 
 func (s *remoteAppServer) AuthManager() *auth.Manager {
-	if s == nil {
-		return nil
-	}
-	s.authOnce.Do(func() {
-		authSupport, err := buildRemoteAuthSupport(s.cfg, s.lookupEnv, s.wrapStore)
-		if err == nil {
-			s.authMgr = authSupport.AuthManager
-		}
-	})
-	return s.authMgr
+	return nil
 }
 
 func (s *remoteAppServer) ProjectID() string {
@@ -119,96 +112,112 @@ func (s *remoteAppServer) ProjectID() string {
 	}
 	return strings.TrimSpace(s.projectID)
 }
+
 func (s *remoteAppServer) AskViewClient() client.AskViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) ApprovalViewClient() client.ApprovalViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) PromptControlClient() client.PromptControlClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) PromptActivityClient() client.PromptActivityClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) ProjectViewClient() client.ProjectViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) RunPromptClient() client.RunPromptClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) ProcessControlClient() client.ProcessControlClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) ProcessOutputClient() client.ProcessOutputClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) ProcessViewClient() client.ProcessViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) RuntimeControlClient() client.RuntimeControlClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) SessionActivityClient() client.SessionActivityClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) SessionLaunchClient() client.SessionLaunchClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) SessionRuntimeClient() client.SessionRuntimeClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) SessionViewClient() client.SessionViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
 }
+
 func (s *remoteAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s == nil || s.remote == nil {
 		return nil, errors.New("remote server is required")
@@ -217,25 +226,8 @@ func (s *remoteAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunch
 }
 
 func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
-	if s == nil {
+	if s == nil || s.remote == nil {
 		return errors.New("remote server is required")
 	}
-	if interactor == nil {
-		return errors.New("auth interactor is required")
-	}
-	authSupport, err := buildRemoteAuthSupport(s.cfg, interactor.LookupEnv, interactor.WrapStore)
-	if err != nil {
-		return err
-	}
-	return ensureAuthReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, s.cfg.Settings, interactor)
-}
-
-func buildRemoteAuthSupport(cfg config.App, lookupEnv func(string) string, wrapStore func(auth.Store) auth.Store) (serverbootstrap.AuthSupport, error) {
-	store := auth.Store(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
-	if wrapStore != nil {
-		store = wrapStore(store)
-	} else {
-		store = authflow.WrapStoreWithEnvAPIKeyOverride(store, lookupEnv)
-	}
-	return serverbootstrap.BuildAuthSupport(store, lookupEnv, time.Now)
+	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor)
 }

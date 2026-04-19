@@ -20,6 +20,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type stubTriggerHandoffController struct{}
@@ -34,7 +35,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *te
 	registry, _, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
+		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolWebSearch},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -51,7 +52,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *te
 	if len(defs) != 1 {
 		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != tools.ToolShell {
+	if defs[0].ID != toolspec.ToolShell {
 		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
 	}
 }
@@ -104,7 +105,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	registry, _, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
+		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolMultiToolUseParallel},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -121,7 +122,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	if len(defs) != 2 {
 		t.Fatalf("expected 2 local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != tools.ToolMultiToolUseParallel || defs[1].ID != tools.ToolShell {
+	if defs[0].ID != toolspec.ToolMultiToolUseParallel || defs[1].ID != toolspec.ToolShell {
 		t.Fatalf("unexpected runtime tool definitions: %+v", defs)
 	}
 }
@@ -132,7 +133,7 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 	registry, _, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolViewImage},
+		[]toolspec.ID{toolspec.ToolViewImage},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -149,7 +150,7 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 local runtime tool in registry, got %d", len(defs))
 	}
-	if defs[0].ID != tools.ToolViewImage {
+	if defs[0].ID != toolspec.ToolViewImage {
 		t.Fatalf("unexpected runtime tool definition: %+v", defs[0])
 	}
 }
@@ -171,7 +172,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	registry, broker, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolViewImage},
+		[]toolspec.ID{toolspec.ToolViewImage},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -190,7 +191,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
-	viewImageHandler, ok := registry.Get(tools.ToolViewImage)
+	viewImageHandler, ok := registry.Get(toolspec.ToolViewImage)
 	if !ok {
 		t.Fatal("expected view_image handler")
 	}
@@ -198,7 +199,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal view_image input: %v", err)
 	}
-	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("view_image call: %v", err)
 	}
@@ -254,7 +255,7 @@ func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePat
 	registry, broker, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolViewImage},
+		[]toolspec.ID{toolspec.ToolViewImage},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -273,7 +274,7 @@ func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePat
 		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
-	viewImageHandler, ok := registry.Get(tools.ToolViewImage)
+	viewImageHandler, ok := registry.Get(toolspec.ToolViewImage)
 	if !ok {
 		t.Fatal("expected view_image handler")
 	}
@@ -281,7 +282,7 @@ func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePat
 	if err != nil {
 		t.Fatalf("marshal view_image input: %v", err)
 	}
-	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-config-allow", Name: tools.ToolViewImage, Input: input})
+	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-config-allow", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("view_image call: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
 		t.Fatalf("close wiring: %v", err)
 	}
 
-	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []tools.ID{tools.ToolExecCommand}, 5*time.Second, 15*time.Second, 16_000, false, true, nil, manager); err != nil {
+	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []toolspec.ID{toolspec.ToolExecCommand}, 5*time.Second, 15*time.Second, 16_000, false, true, nil, manager); err != nil {
 		t.Fatalf("expected shared background manager to remain usable after wiring close: %v", err)
 	}
 }
@@ -663,7 +664,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 	registry, _, manager, err := buildToolRegistry(
 		workspace,
 		"session-owner-1",
-		[]tools.ID{tools.ToolExecCommand},
+		[]toolspec.ID{toolspec.ToolExecCommand},
 		5*time.Second,
 		250*time.Millisecond,
 		16_000,
@@ -677,7 +678,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
-	handler, ok := registry.Get(tools.ToolExecCommand)
+	handler, ok := registry.Get(toolspec.ToolExecCommand)
 	if !ok {
 		t.Fatal("expected exec_command handler")
 	}
@@ -688,7 +689,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal exec_command input: %v", err)
 	}
-	if _, err := handler.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolExecCommand, Input: input}); err != nil {
+	if _, err := handler.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolExecCommand, Input: input}); err != nil {
 		t.Fatalf("exec_command call: %v", err)
 	}
 	entries := manager.List()
