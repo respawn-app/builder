@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"builder/server/llm"
 	"builder/server/session"
@@ -68,7 +67,6 @@ func TestReviewerSuggestions_ReusesStableMetaForPromptCachePrefix(t *testing.T) 
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
 		t.Fatalf("first reviewer suggestions: %v", err)
 	}
-	time.Sleep(1100 * time.Millisecond)
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-2", reviewerClient); err != nil {
 		t.Fatalf("second reviewer suggestions: %v", err)
 	}
@@ -124,7 +122,6 @@ func TestReviewerSuggestions_ReopenKeepsPromptCachePrefixStable(t *testing.T) {
 		t.Fatalf("new reopened engine: %v", err)
 	}
 	t.Cleanup(func() { _ = reopenedEng.Close() })
-	time.Sleep(1100 * time.Millisecond)
 	if err := reopenedEng.appendUserMessage("prep-2", "second request"); err != nil {
 		t.Fatalf("append second message: %v", err)
 	}

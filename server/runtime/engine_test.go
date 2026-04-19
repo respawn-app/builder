@@ -4811,7 +4811,7 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 	if assistant.Content != "done" {
 		t.Fatalf("assistant content = %q, want done", assistant.Content)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCount := len(client.calls)
 	client.mu.Unlock()
@@ -4921,7 +4921,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	if !containsNotice(requests[1]) {
 		t.Fatalf("expected background notice in first available in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5321,7 +5321,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 	if !containsNotice(requests[1]) {
 		t.Fatalf("expected background notice in same-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5451,7 +5451,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 		t.Fatalf("expected both background notices in the same in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5480,7 +5480,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call_exec_1",
 				Name:  string(toolspec.ToolExecCommand),
-				Input: json.RawMessage(`{"cmd":"sleep 1; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
+				Input: json.RawMessage(`{"cmd":"sleep 0.3; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
 			}},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -5489,7 +5489,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call_poll_1",
 				Name:  string(toolspec.ToolWriteStdin),
-				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":2000}`),
+				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":800}`),
 			}},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -5538,7 +5538,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 	if assistant.Content != "done" {
 		t.Fatalf("assistant content = %q, want done", assistant.Content)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	client.mu.Lock()
 	callCount := len(client.calls)
@@ -6448,6 +6448,8 @@ func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T
 }
 
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
+	withGenerateRetryDelays(t, []time.Duration{time.Millisecond})
+
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

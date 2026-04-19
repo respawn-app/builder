@@ -20,6 +20,11 @@ type uiInputController struct {
 var pendingToolSpinner = bubblespinner.Dot
 var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 8 * time.Second
+var scheduleTransientStatusClear = func(token uint64) tea.Cmd {
+	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
+		return clearTransientStatusMsg{token: token}
+	})
+}
 var processListRefreshInterval = 1500 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond

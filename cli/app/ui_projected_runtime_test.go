@@ -486,6 +486,12 @@ func TestHydratingClientAndLiveClientConvergeWithoutDuplicateCommittedRows(t *te
 }
 
 func TestHydrationRetryErrorReleasesRuntimeEventFenceWhileRetryIsScheduled(t *testing.T) {
+	previousRetryDelay := uiRuntimeHydrationRetryDelay
+	uiRuntimeHydrationRetryDelay = time.Millisecond
+	t.Cleanup(func() {
+		uiRuntimeHydrationRetryDelay = previousRetryDelay
+	})
+
 	client := &refreshingRuntimeClient{}
 	runtimeEvents := make(chan clientui.Event, 1)
 	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "later"}

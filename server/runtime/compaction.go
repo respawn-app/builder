@@ -789,7 +789,7 @@ func (e *Engine) compactWithRetry(ctx context.Context, stepID string, client llm
 		return llm.CompactionResponse{}, err
 	}
 
-	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
+	delays := compactionRetryDelays
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		resp, err := client.Compact(ctx, request)
@@ -806,10 +806,8 @@ func (e *Engine) compactWithRetry(ctx context.Context, stepID string, client llm
 		if i == len(delays) {
 			break
 		}
-		select {
-		case <-ctx.Done():
-			return llm.CompactionResponse{}, ctx.Err()
-		case <-time.After(delays[i]):
+		if err := waitForRetryDelay(ctx, delays[i]); err != nil {
+			return llm.CompactionResponse{}, err
 		}
 	}
 	return llm.CompactionResponse{}, fmt.Errorf("compaction request failed after retries: %w", lastErr)
