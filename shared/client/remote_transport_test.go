@@ -16,8 +16,8 @@ import (
 
 	"builder/shared/config"
 	"builder/shared/protocol"
+	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
-	"golang.org/x/net/websocket"
 )
 
 func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
@@ -29,10 +29,8 @@ func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
 	if !ok {
 		t.Skip("local unix sockets unsupported on this platform")
 	}
-	shutdown := startUnixWebSocketServer(t, socketPath, func(ws *websocket.Conn) {
-		defer func() { _ = ws.Close() }()
-		handshakeRemoteConn(t, ws)
-		serveProjectListRPC(t, ws)
+	shutdown := startUnixWebSocketServer(t, socketPath, func(ctx context.Context, conn rpcwire.Conn) {
+		serveProjectListRPC(t, ctx, conn)
 	})
 	defer shutdown()
 
@@ -48,10 +46,8 @@ func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
 }
 
 func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixSocketMissing(t *testing.T) {
-	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
-		defer func() { _ = ws.Close() }()
-		handshakeRemoteConn(t, ws)
-		serveProjectListRPC(t, ws)
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		serveProjectListRPC(t, ctx, conn)
 	}))
 	defer server.Close()
 
@@ -76,10 +72,8 @@ func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixSocketMissing(t *testing
 }
 
 func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixHandshakeStalls(t *testing.T) {
-	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
-		defer func() { _ = ws.Close() }()
-		handshakeRemoteConn(t, ws)
-		serveProjectListRPC(t, ws)
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		serveProjectListRPC(t, ctx, conn)
 	}))
 	defer server.Close()
 
@@ -119,15 +113,19 @@ func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixHandshakeStalls(t *testi
 func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T) {
 	var connectionCount atomic.Int32
 	firstRequestSeen := make(chan string, 1)
-	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
 		connectionCount.Add(1)
-		defer func() { _ = ws.Close() }()
-		handshakeRemoteConn(t, ws)
 		firstRequestID := ""
-		for {
-			var req protocol.Request
-			if err := websocket.JSON.Receive(ws, &req); err != nil {
+		for event := range conn.Events() {
+			if event.Err != nil {
 				return
+			}
+			req := event.Frame.Request()
+			if req.Method == protocol.MethodHandshake {
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+					t.Fatalf("send handshake response: %v", err)
+				}
+				continue
 			}
 			switch req.Method {
 			case protocol.MethodProjectList:
@@ -137,10 +135,10 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 				if firstRequestID == "" {
 					t.Fatal("expected first request id before second call")
 				}
-				if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"})); err != nil {
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))); err != nil {
 					t.Fatalf("send second response: %v", err)
 				}
-				if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(firstRequestID, serverapi.ProjectListResponse{})); err != nil {
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(firstRequestID, serverapi.ProjectListResponse{}))); err != nil {
 					t.Fatalf("send late first response: %v", err)
 				}
 				return
@@ -188,32 +186,56 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 
 func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	var connectionCount atomic.Int32
-	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
 		connIndex := connectionCount.Add(1)
-		defer func() { _ = ws.Close() }()
-		handshakeRemoteConn(t, ws)
+		handshaken := false
 		if connIndex == 1 {
-			var req protocol.Request
-			if err := websocket.JSON.Receive(ws, &req); err != nil {
-				t.Fatalf("receive first request: %v", err)
+			for event := range conn.Events() {
+				if event.Err != nil {
+					return
+				}
+				req := event.Frame.Request()
+				if !handshaken {
+					if req.Method != protocol.MethodHandshake {
+						t.Fatalf("first method = %q, want handshake", req.Method)
+					}
+					if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+						t.Fatalf("send handshake response: %v", err)
+					}
+					handshaken = true
+					continue
+				}
+				if req.Method != protocol.MethodProjectList {
+					t.Fatalf("first method = %q, want %q", req.Method, protocol.MethodProjectList)
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))); err != nil {
+					t.Fatalf("send first response: %v", err)
+				}
+				return
 			}
-			if req.Method != protocol.MethodProjectList {
-				t.Fatalf("first method = %q, want %q", req.Method, protocol.MethodProjectList)
+		}
+		for event := range conn.Events() {
+			if event.Err != nil {
+				return
 			}
-			if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{})); err != nil {
-				t.Fatalf("send first response: %v", err)
+			req := event.Frame.Request()
+			if !handshaken {
+				if req.Method != protocol.MethodHandshake {
+					t.Fatalf("second method = %q, want handshake", req.Method)
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+					t.Fatalf("send handshake response: %v", err)
+				}
+				handshaken = true
+				continue
+			}
+			if req.Method != protocol.MethodProjectResolvePath {
+				t.Fatalf("second method = %q, want %q", req.Method, protocol.MethodProjectResolvePath)
+			}
+			if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/reconnected"}))); err != nil {
+				t.Fatalf("send second response: %v", err)
 			}
 			return
-		}
-		var req protocol.Request
-		if err := websocket.JSON.Receive(ws, &req); err != nil {
-			t.Fatalf("receive second request: %v", err)
-		}
-		if req.Method != protocol.MethodProjectResolvePath {
-			t.Fatalf("second method = %q, want %q", req.Method, protocol.MethodProjectResolvePath)
-		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/reconnected"})); err != nil {
-			t.Fatalf("send second response: %v", err)
 		}
 	}))
 	defer server.Close()
@@ -254,7 +276,7 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	}
 }
 
-func startUnixWebSocketServer(t *testing.T, socketPath string, handler func(*websocket.Conn)) func() {
+func startUnixWebSocketServer(t *testing.T, socketPath string, handler func(context.Context, rpcwire.Conn)) func() {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -264,7 +286,7 @@ func startUnixWebSocketServer(t *testing.T, socketPath string, handler func(*web
 	if err != nil {
 		t.Fatalf("Listen unix: %v", err)
 	}
-	httpServer := &http.Server{Handler: websocket.Handler(handler)}
+	httpServer := &http.Server{Handler: rpcwire.NewWebSocketTransport().Handler(handler)}
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(listener) }()
 	return func() {
@@ -326,31 +348,23 @@ func testRemoteConfigFromServerURL(t *testing.T, persistenceRoot string, serverU
 	return config.App{PersistenceRoot: persistenceRoot, Settings: config.Settings{ServerHost: host, ServerPort: port}}
 }
 
-func handshakeRemoteConn(t *testing.T, ws *websocket.Conn) {
+func serveProjectListRPC(t *testing.T, ctx context.Context, conn rpcwire.Conn) {
 	t.Helper()
-	var req protocol.Request
-	if err := websocket.JSON.Receive(ws, &req); err != nil {
-		t.Fatalf("receive handshake: %v", err)
-	}
-	if req.Method != protocol.MethodHandshake {
-		t.Fatalf("handshake method = %q", req.Method)
-	}
-	if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
-		t.Fatalf("send handshake response: %v", err)
-	}
-}
-
-func serveProjectListRPC(t *testing.T, ws *websocket.Conn) {
-	t.Helper()
-	for {
-		var req protocol.Request
-		if err := websocket.JSON.Receive(ws, &req); err != nil {
+	for event := range conn.Events() {
+		if event.Err != nil {
 			return
+		}
+		req := event.Frame.Request()
+		if req.Method == protocol.MethodHandshake {
+			if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+				t.Fatalf("send handshake response: %v", err)
+			}
+			continue
 		}
 		if req.Method != protocol.MethodProjectList {
 			t.Fatalf("project list method = %q", req.Method)
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{})); err != nil {
+		if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))); err != nil {
 			t.Fatalf("send project list response: %v", err)
 		}
 	}
