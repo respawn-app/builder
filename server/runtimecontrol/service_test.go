@@ -128,6 +128,49 @@ func TestServiceSubmitUserMessageDedupesSuccessfulRetry(t *testing.T) {
 	}
 }
 
+func TestServiceSubmitUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeControlFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSubmitUserMessageRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              "hello",
+	}
+
+	first, err := service.SubmitUserMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SubmitUserMessage first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	second, err := service.SubmitUserMessage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SubmitUserMessage replay: %v", err)
+	}
+	if first.Message != "done" || second.Message != "done" {
+		t.Fatalf("responses = (%q, %q), want both done", first.Message, second.Message)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if client.calls != 1 {
+		t.Fatalf("generate call count = %d, want 1", client.calls)
+	}
+}
+
 func TestServiceSubmitUserMessageRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {

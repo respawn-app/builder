@@ -182,15 +182,15 @@ func (s *Service) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSu
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeSubmitUserMessageResponse{}, err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return serverapi.RuntimeSubmitUserMessageResponse{}, err
-	}
 	memoReq := submitUserMessageMemoRequest{
 		SessionID:         strings.TrimSpace(req.SessionID),
 		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
 		Text:              req.Text,
 	}
 	return s.submits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSubmitUserMessageMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+		if err := s.requireControllerLease(ctx, memoReq.SessionID, memoReq.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeSubmitUserMessageResponse{}, err
+		}
 		lease, err := s.acquirePrimaryRun(memoReq.SessionID)
 		if err != nil {
 			return serverapi.RuntimeSubmitUserMessageResponse{}, err
