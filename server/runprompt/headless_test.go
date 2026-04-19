@@ -76,6 +76,48 @@ func TestGuardingPromptServiceRejectsConcurrentSelectedSessionRun(t *testing.T) 
 	}
 }
 
+func TestMemoizingPromptServiceDedupesSuccessfulRetry(t *testing.T) {
+	inner := &stubRunPromptService{run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
+	}}
+	service := newMemoizingPromptService(inner)
+	req := serverapi.RunPromptRequest{ClientRequestID: "req-1", SelectedSessionID: "session-1", Prompt: "hello"}
+
+	first, err := service.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt first: %v", err)
+	}
+	second, err := service.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt replay: %v", err)
+	}
+	if first.Result != "ok" || second.Result != "ok" {
+		t.Fatalf("responses = (%+v, %+v), want both ok", first, second)
+	}
+	if inner.CallCount() != 1 {
+		t.Fatalf("inner call count = %d, want 1", inner.CallCount())
+	}
+}
+
+func TestMemoizingPromptServiceRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	inner := &stubRunPromptService{run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
+	}}
+	service := newMemoizingPromptService(inner)
+	first := serverapi.RunPromptRequest{ClientRequestID: "req-1", SelectedSessionID: "session-1", Prompt: "hello"}
+	if _, err := service.RunPrompt(context.Background(), first, nil); err != nil {
+		t.Fatalf("RunPrompt first: %v", err)
+	}
+	second := first
+	second.Prompt = "different"
+	if _, err := service.RunPrompt(context.Background(), second, nil); err == nil || err.Error() != "client_request_id \"req-1\" was reused with different parameters" {
+		t.Fatalf("RunPrompt mismatch error = %v, want request id payload mismatch", err)
+	}
+	if inner.CallCount() != 1 {
+		t.Fatalf("inner call count = %d, want 1", inner.CallCount())
+	}
+}
+
 func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")

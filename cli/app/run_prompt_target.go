@@ -249,7 +249,7 @@ func dialConfiguredRemoteWorkspace(ctx context.Context, rpcURL string, projectID
 }
 
 func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
-	return flags.RunPrompt
+	return flags.RunPrompt && flags.AuthBootstrap
 }
 
 func configuredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
