@@ -162,6 +162,28 @@ func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *t
 	}
 }
 
+func TestReduceRuntimeEvent_CompactionCompletedProducesSyntheticOngoingNotice(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{Compacting: true},
+		PendingInputState{},
+		false,
+		Event{Kind: EventCompactionCompleted, Compaction: &CompactionStatus{Mode: "auto", Count: 2}},
+	)
+
+	if update.State.Compacting {
+		t.Fatal("expected compaction completed to clear compacting state")
+	}
+	if update.SyntheticOngoingEntry == nil {
+		t.Fatal("expected synthetic ongoing compaction notice")
+	}
+	if update.SyntheticOngoingEntry.Role != "compaction_notice" {
+		t.Fatalf("synthetic role = %q, want compaction_notice", update.SyntheticOngoingEntry.Role)
+	}
+	if update.SyntheticOngoingEntry.Text != "context compacted for the 2nd time" {
+		t.Fatalf("synthetic text = %q", update.SyntheticOngoingEntry.Text)
+	}
+}
+
 func TestExtractReasoningStatusHeaderAcceptsWhitespaceWrappedBoldOnly(t *testing.T) {
 	got := ExtractReasoningStatusHeader("  **Summarizing fix and investigation**  ")
 	if got != "Summarizing fix and investigation" {

@@ -98,6 +98,19 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
 	awaitsHydration := false
+	if shouldAppendSyntheticOngoingEntry(m, update.SyntheticOngoingEntry) {
+		m.forwardToView(tui.AppendTranscriptMsg{
+			Visibility:  update.SyntheticOngoingEntry.Visibility,
+			Transient:   true,
+			Committed:   false,
+			Role:        update.SyntheticOngoingEntry.Role,
+			Text:        update.SyntheticOngoingEntry.Text,
+			OngoingText: update.SyntheticOngoingEntry.OngoingText,
+			Phase:       llm.MessagePhase(update.SyntheticOngoingEntry.Phase),
+			ToolCallID:  strings.TrimSpace(update.SyntheticOngoingEntry.ToolCallID),
+			ToolCall:    transcriptToolCallMeta(update.SyntheticOngoingEntry.ToolCall),
+		})
+	}
 	if evt.Kind == clientui.EventConversationUpdated && effectiveSyncSessionView {
 		m.invalidateTransientTranscriptState()
 	}
@@ -297,10 +310,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		convertedEntries = append(convertedEntries, transcriptEntryFromProjectedChatEntry(entry, projectedEntriesTransient, projectedEntriesCommitted))
 	}
 	showTransientInCurrentView := m.view.Mode() != tui.ModeDetail || !allTranscriptEntriesTransient(convertedEntries)
+	replaceLoadedSyntheticEntries := shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m, convertedEntries)
 	if plan.mode == projectedTranscriptEntryPlanAppend {
 		for _, transcriptEntry := range convertedEntries {
 			m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
-			if showTransientInCurrentView {
+			if showTransientInCurrentView && !replaceLoadedSyntheticEntries {
 				m.forwardToView(tui.AppendTranscriptMsg{
 					Visibility:  transcriptEntry.Visibility,
 					Transient:   transcriptEntry.Transient,
@@ -323,6 +337,15 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	m.transcriptRevision = max(m.transcriptRevision, evt.TranscriptRevision)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, max(evt.CommittedEntryCount, m.transcriptBaseOffset+len(m.transcriptEntries)))
 	m.refreshRollbackCandidates()
+	if plan.mode == projectedTranscriptEntryPlanAppend && replaceLoadedSyntheticEntries {
+		m.forwardToView(tui.SetConversationMsg{
+			BaseOffset:   m.transcriptBaseOffset,
+			TotalEntries: m.transcriptTotalEntries,
+			Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
+			Ongoing:      m.view.OngoingStreamingText(),
+			OngoingError: m.view.OngoingErrorText(),
+		})
+	}
 	if m.detailTranscript.loaded && !allTranscriptEntriesTransient(convertedEntries) {
 		page := clientui.TranscriptPage{
 			Revision:     m.transcriptRevision,
@@ -822,6 +845,47 @@ func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEnt
 
 func transcriptEntryCommittedForApp(entry tui.TranscriptEntry) bool {
 	return !entry.Transient || entry.Committed
+}
+
+func shouldAppendSyntheticOngoingEntry(m *uiModel, entry *clientui.ChatEntry) bool {
+	if m == nil || entry == nil || !m.hasRuntimeClient() || m.view.Mode() != tui.ModeOngoing {
+		return false
+	}
+	role := strings.TrimSpace(entry.Role)
+	text := strings.TrimSpace(entry.Text)
+	if role == "" || text == "" {
+		return false
+	}
+	for _, loaded := range m.view.LoadedTranscriptEntries() {
+		if strings.TrimSpace(loaded.Role) == role && strings.TrimSpace(loaded.Text) == text {
+			return false
+		}
+	}
+	return true
+}
+
+func shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m *uiModel, entries []tui.TranscriptEntry) bool {
+	if m == nil || m.view.Mode() != tui.ModeOngoing || len(entries) == 0 {
+		return false
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) == 0 {
+		return false
+	}
+	for _, loadedEntry := range loaded {
+		if !loadedEntry.Transient || loadedEntry.Committed {
+			continue
+		}
+		for _, committedEntry := range entries {
+			if committedEntry.Transient || !committedEntry.Committed {
+				continue
+			}
+			if strings.TrimSpace(loadedEntry.Role) == strings.TrimSpace(committedEntry.Role) && strings.TrimSpace(loadedEntry.Text) == strings.TrimSpace(committedEntry.Text) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func committedTranscriptEntriesForApp(entries []tui.TranscriptEntry) []tui.TranscriptEntry {

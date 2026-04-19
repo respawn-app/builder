@@ -1164,6 +1164,135 @@ func TestHandleProjectedRuntimeEventDoesNotAppendPrePersistCompactionStatusEntry
 	}
 }
 
+func TestProjectedCompactionStatusAppendsSyntheticOngoingNoticeWithoutTranscriptMutation(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 1,
+		},
+	})))
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect synthetic compaction notice to trigger transcript hydration, got %+v", msgs)
+		}
+	}
+	if got, want := len(m.transcriptEntries), 1; got != want {
+		t.Fatalf("transcript entry count after synthetic compaction notice = %d, want %d", got, want)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if got, want := len(loaded), 2; got != want {
+		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
+	}
+	if got := loaded[1].Role; got != "compaction_notice" {
+		t.Fatalf("synthetic compaction role = %q, want compaction_notice", got)
+	}
+	if !loaded[1].Transient || loaded[1].Committed {
+		t.Fatalf("expected synthetic compaction notice to stay transient-only, got %+v", loaded[1])
+	}
+}
+
+func TestProjectedCompactionStatusSkipsSyntheticOngoingNoticeWhenCommittedNoticeAlreadyLoaded(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 1,
+		},
+	}))
+
+	loaded := m.view.LoadedTranscriptEntries()
+	if got, want := len(loaded), 2; got != want {
+		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
+	}
+	notices := 0
+	for _, entry := range loaded {
+		if entry.Role == "compaction_notice" && entry.Text == "context compacted for the 1st time" {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("expected exactly one loaded compaction notice, got %d (%+v)", notices, loaded)
+	}
+}
+
+func TestProjectedCompactionStatusSkipsSyntheticOngoingNoticeInDetailMode(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 1,
+		},
+	}))
+
+	loaded := m.view.LoadedTranscriptEntries()
+	if got, want := len(loaded), 1; got != want {
+		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
+	}
+	if strings.Contains(stripANSIAndTrimRight(m.View()), "context compacted for the 1st time") {
+		t.Fatalf("did not expect synthetic compaction notice in detail view, got %q", stripANSIAndTrimRight(m.View()))
+	}
+}
+
 func TestProjectedCompactionStatusUsesPersistedLocalEntryAsTranscriptSource(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

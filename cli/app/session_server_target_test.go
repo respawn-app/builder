@@ -899,6 +899,69 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	}
 }
 
+func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
+	defer fakeResponses.Close()
+
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+		JSONRPCWebSocket:        true,
+		ProjectAttach:           true,
+		SessionAttach:           true,
+		SessionPlan:             true,
+		SessionLifecycle:        true,
+		SessionTranscriptPaging: true,
+		SessionRuntime:          true,
+		RuntimeControl:          true,
+		PromptControl:           true,
+		PromptActivity:          true,
+		SessionActivity:         true,
+		ProcessOutput:           true,
+	})
+	defer cleanup()
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); ok {
+		t.Fatal("expected configured daemon without auth bootstrap capability to be rejected")
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after auth bootstrap fallback")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "embedded fallback reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "embedded fallback reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
+	}
+}
+
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapability(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

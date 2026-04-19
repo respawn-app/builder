@@ -53,10 +53,17 @@ type Event struct {
 	UserMessage                string
 	UserMessageBatch           []string
 	TranscriptEntries          []ChatEntry
+	Compaction                 *CompactionStatus
 	CacheWarning               *cachewarn.Warning
 	CacheWarningVisibility     EntryVisibility
 	RunState                   *RunState
 	Background                 *BackgroundShellEvent
+}
+
+type CompactionStatus struct {
+	Mode  string
+	Count int
+	Error string
 }
 
 type ReasoningDelta struct {

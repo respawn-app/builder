@@ -253,7 +253,8 @@ func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
 }
 
 func configuredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
-	return flags.SessionPlan &&
+	return flags.AuthBootstrap &&
+		flags.SessionPlan &&
 		flags.SessionLifecycle &&
 		flags.SessionTranscriptPaging &&
 		flags.SessionRuntime &&
