@@ -21,7 +21,13 @@ type Service struct {
 	authManager     *auth.Manager
 	controller      ControllerLeaseVerifier
 	storeOptions    []session.StoreOption
+	drafts          *requestmemo.Memo[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse]
 	transitions     *requestmemo.Memo[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]
+}
+
+type sessionDraftMemoRequest struct {
+	SessionID string
+	Input     string
 }
 
 type sessionTransitionMemoRequest struct {
@@ -38,11 +44,11 @@ type ControllerLeaseVerifier interface {
 }
 
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
 func NewGlobalService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
 func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) *Service {
@@ -79,17 +85,20 @@ func (s *Service) PersistInputDraft(ctx context.Context, req serverapi.SessionPe
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	store, err := s.openStore(req.SessionID)
-	if err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	return serverapi.SessionPersistInputDraftResponse{}, nil
+	memoReq := sessionDraftMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Input: req.Input}
+	return s.drafts.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionDraftMemoRequest, func(context.Context) (serverapi.SessionPersistInputDraftResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		store, err := s.openStore(req.SessionID)
+		if err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		return serverapi.SessionPersistInputDraftResponse{}, nil
+	})
 }
 
 func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
@@ -117,6 +126,10 @@ func sameSessionTransitionMemoRequest(a sessionTransitionMemoRequest, b sessionT
 		a.Transition.ForkUserMessageIndex == b.Transition.ForkUserMessageIndex &&
 		forkTranscriptEntryIndexEqual(a.Transition.ForkTranscriptEntryIndex, b.Transition.ForkTranscriptEntryIndex) &&
 		a.Transition.ParentSessionID == b.Transition.ParentSessionID
+}
+
+func sameSessionDraftMemoRequest(a sessionDraftMemoRequest, b sessionDraftMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Input == b.Input
 }
 
 func forkTranscriptEntryIndexEqual(a *int, b *int) bool {
