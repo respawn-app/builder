@@ -137,6 +137,9 @@ func TestServicePersistInputDraftRequiresControllerLease(t *testing.T) {
 		t.Fatalf("PersistInputDraft first: %v", err)
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
+	if _, err := service.PersistInputDraft(context.Background(), req); err != nil {
+		t.Fatalf("PersistInputDraft replay: %v", err)
+	}
 	deniedReq := req
 	deniedReq.ClientRequestID = "req-2"
 	deniedReq.Input = "should not persist"
@@ -145,6 +148,36 @@ func TestServicePersistInputDraftRequiresControllerLease(t *testing.T) {
 	}
 	if verifier.calls != 2 {
 		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen session store: %v", err)
+	}
+	if reopened.Meta().InputDraft != "saved by service" {
+		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
+func TestServicePersistInputDraftRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	if err := store.SetName("session name"); err != nil {
+		t.Fatalf("set session name: %v", err)
+	}
+	service := newTestSessionLifecycleService(containerDir, nil)
+	first := serverapi.SessionPersistInputDraftRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "saved by service",
+	}
+
+	if _, err := service.PersistInputDraft(context.Background(), first); err != nil {
+		t.Fatalf("PersistInputDraft first: %v", err)
+	}
+	second := first
+	second.Input = "different draft"
+	if _, err := service.PersistInputDraft(context.Background(), second); err == nil || err.Error() != "client_request_id \"req-1\" was reused with different parameters" {
+		t.Fatalf("PersistInputDraft mismatch error = %v, want request id payload mismatch", err)
 	}
 	reopened, err := session.Open(store.Dir())
 	if err != nil {
