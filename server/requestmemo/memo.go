@@ -43,44 +43,49 @@ func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, sam
 	if m == nil {
 		return run(ctx)
 	}
-	m.mu.Lock()
-	m.pruneLocked()
-	if existing := m.entries[requestID]; existing != nil {
-		if same != nil && !same(existing.req, req) {
+	for {
+		m.mu.Lock()
+		m.pruneLocked()
+		if existing := m.entries[requestID]; existing != nil {
+			if same != nil && !same(existing.req, req) {
+				m.mu.Unlock()
+				return zero, fmt.Errorf("client_request_id %q was reused with different parameters", requestID)
+			}
+			done := existing.done
 			m.mu.Unlock()
-			return zero, fmt.Errorf("client_request_id %q was reused with different parameters", requestID)
+			select {
+			case <-done:
+				if shouldMemoize(existing.err) {
+					return existing.resp, existing.err
+				}
+				continue
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			}
 		}
-		done := existing.done
-		m.mu.Unlock()
-		select {
-		case <-done:
-			return existing.resp, existing.err
-		case <-ctx.Done():
-			return zero, ctx.Err()
+		if !m.ensureCapacityForInsertLocked() {
+			m.mu.Unlock()
+			return run(ctx)
 		}
-	}
-	if !m.ensureCapacityForInsertLocked() {
+		now := m.now()
+		e := &entry[Req, Resp]{req: req, done: make(chan struct{}), createdAt: now}
+		m.entries[requestID] = e
 		m.mu.Unlock()
-		return run(ctx)
-	}
-	now := m.now()
-	e := &entry[Req, Resp]{req: req, done: make(chan struct{}), createdAt: now}
-	m.entries[requestID] = e
-	m.mu.Unlock()
 
-	resp, err := run(ctx)
+		resp, err := run(ctx)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	e.resp = resp
-	e.err = err
-	if shouldMemoize(err) {
-		e.completedAt = m.now()
-	} else {
-		delete(m.entries, requestID)
+		m.mu.Lock()
+		e.resp = resp
+		e.err = err
+		if shouldMemoize(err) {
+			e.completedAt = m.now()
+		} else {
+			delete(m.entries, requestID)
+		}
+		close(e.done)
+		m.mu.Unlock()
+		return resp, err
 	}
-	close(e.done)
-	return resp, err
 }
 
 func (m *Memo[Req, Resp]) pruneLocked() {
