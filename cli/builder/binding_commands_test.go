@@ -22,6 +22,57 @@ import (
 	"builder/shared/serverapi"
 )
 
+type bindingCommandTimeoutProjectViewStub struct {
+	resolveProjectPath func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error)
+	listProjects       func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error)
+	createProject      func(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error)
+	attachWorkspace    func(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error)
+	rebindWorkspace    func(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error)
+}
+
+func (s bindingCommandTimeoutProjectViewStub) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	if s.listProjects == nil {
+		return serverapi.ProjectListResponse{}, errors.New("unexpected ListProjects call")
+	}
+	return s.listProjects(ctx, req)
+}
+
+func (s bindingCommandTimeoutProjectViewStub) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	if s.resolveProjectPath == nil {
+		return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
+	}
+	return s.resolveProjectPath(ctx, req)
+}
+
+func (s bindingCommandTimeoutProjectViewStub) CreateProject(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	if s.createProject == nil {
+		return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+	}
+	return s.createProject(ctx, req)
+}
+
+func (s bindingCommandTimeoutProjectViewStub) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	if s.attachWorkspace == nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+	}
+	return s.attachWorkspace(ctx, req)
+}
+
+func (s bindingCommandTimeoutProjectViewStub) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	if s.rebindWorkspace == nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+	}
+	return s.rebindWorkspace(ctx, req)
+}
+
+func (bindingCommandTimeoutProjectViewStub) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
+}
+
+func (bindingCommandTimeoutProjectViewStub) GetProjectOverview(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	return serverapi.ProjectGetOverviewResponse{}, errors.New("unexpected GetProjectOverview call")
+}
+
 type bindingCommandMemoryAuthHandler struct {
 	state auth.State
 }
@@ -420,4 +471,66 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <old-path> and <new-path>")) {
 		t.Fatalf("stderr = %q, want usage guidance", got)
 	}
+}
+
+func TestResolveWorkspaceBindingAppliesRPCTimeout(t *testing.T) {
+	originalTimeout := bindingCommandRPCTimeout
+	bindingCommandRPCTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
+
+	stub := bindingCommandTimeoutProjectViewStub{
+		resolveProjectPath: func(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			<-ctx.Done()
+			return serverapi.ProjectResolvePathResponse{}, ctx.Err()
+		},
+	}
+	start := time.Now()
+	_, err := resolveWorkspaceBinding(context.Background(), stub, "/tmp/workspace")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("resolveWorkspaceBinding error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("resolveWorkspaceBinding timeout took too long: %v", elapsed)
+	}
+}
+
+func TestBindingCommandProjectRPCWrappersApplyTimeout(t *testing.T) {
+	originalTimeout := bindingCommandRPCTimeout
+	bindingCommandRPCTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
+
+	deadlineErrAfterCancel := func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	stub := bindingCommandTimeoutProjectViewStub{
+		listProjects: func(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+			return serverapi.ProjectListResponse{}, deadlineErrAfterCancel(ctx)
+		},
+		createProject: func(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+			return serverapi.ProjectCreateResponse{}, deadlineErrAfterCancel(ctx)
+		},
+		attachWorkspace: func(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+			return serverapi.ProjectAttachWorkspaceResponse{}, deadlineErrAfterCancel(ctx)
+		},
+		rebindWorkspace: func(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+			return serverapi.ProjectRebindWorkspaceResponse{}, deadlineErrAfterCancel(ctx)
+		},
+	}
+
+	assertDeadlineExceeded := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s error = %v, want deadline exceeded", name, err)
+		}
+	}
+
+	_, err := listProjectsWithTimeout(context.Background(), stub)
+	assertDeadlineExceeded("listProjectsWithTimeout", err)
+	_, err = createProjectWithTimeout(context.Background(), stub, "project", "/tmp/workspace")
+	assertDeadlineExceeded("createProjectWithTimeout", err)
+	_, err = attachWorkspaceToProject(context.Background(), stub, "project-1", "/tmp/workspace")
+	assertDeadlineExceeded("attachWorkspaceToProject", err)
+	_, err = rebindWorkspaceWithTimeout(context.Background(), stub, "/tmp/old", "/tmp/new")
+	assertDeadlineExceeded("rebindWorkspaceWithTimeout", err)
 }
