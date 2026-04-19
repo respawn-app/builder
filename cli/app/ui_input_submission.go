@@ -72,16 +72,16 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return submitDoneMsg{submittedText: text, err: errors.New("runtime engine is not configured")}
+			return newSubmitDoneMsg("", text, errors.New("runtime engine is not configured"))
 		}
 		message, err := m.submitRuntimeUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{submittedText: text, err: errSubmissionInterrupted}
+				return newSubmitDoneMsg("", text, errSubmissionInterrupted)
 			}
-			return submitDoneMsg{submittedText: text, err: err}
+			return newSubmitDoneMsg("", text, err)
 		}
-		return submitDoneMsg{message: message, submittedText: text}
+		return newSubmitDoneMsg(message, text, nil)
 	}
 }
 
@@ -89,16 +89,16 @@ func (c uiInputController) submitUserShellCmd(originalText, command string) tea.
 	m := c.model
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return submitDoneMsg{submittedText: originalText, err: errors.New("runtime engine is not configured")}
+			return newSubmitDoneMsg("", originalText, errors.New("runtime engine is not configured"))
 		}
 		err := m.submitRuntimeUserShellCommand(context.Background(), command)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{submittedText: originalText, err: errSubmissionInterrupted}
+				return newSubmitDoneMsg("", originalText, errSubmissionInterrupted)
 			}
-			return submitDoneMsg{submittedText: originalText, err: err}
+			return newSubmitDoneMsg("", originalText, err)
 		}
-		return submitDoneMsg{submittedText: originalText}
+		return newSubmitDoneMsg("", originalText, nil)
 	}
 }
 
@@ -197,7 +197,10 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 
 	m.activity = uiActivityIdle
-	if !m.hasRuntimeClient() {
+	if msg.silentFinal && m.turnQueueHook != nil {
+		m.turnQueueHook.OnTurnQueueAborted()
+	}
+	if !m.hasRuntimeClient() && !msg.silentFinal {
 		if !m.sawAssistantDelta && msg.message != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
 		}
