@@ -62,12 +62,25 @@ func configuredRemoteDialPlan(cfg config.App) (remoteDialPlan, error) {
 }
 
 func shouldPreferConfiguredLocalSocket(cfg config.App) bool {
+	// Explicit TCP target overrides must stay authoritative; the derived unix socket
+	// is only a default local optimization for the standard local attach target.
+	if hasExplicitTCPServerTarget(cfg) {
+		return false
+	}
 	host := strings.TrimSpace(cfg.Settings.ServerHost)
 	if host == "" || strings.EqualFold(host, "localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+func hasExplicitTCPServerTarget(cfg config.App) bool {
+	sources := cfg.Source.Sources
+	if len(sources) == 0 {
+		return false
+	}
+	return sources["server_host"] != "default" || sources["server_port"] != "default"
 }
 
 func dialRemoteWithPlan(ctx context.Context, plan remoteDialPlan, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
