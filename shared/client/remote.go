@@ -317,9 +317,6 @@ func (c *Remote) ensureOpen() error {
 	if c.closed.Load() {
 		return errors.New("remote client is closed")
 	}
-	if c.control == nil {
-		return errors.New("remote client connection is required")
-	}
 	return nil
 }
 
@@ -340,10 +337,12 @@ func (c *Remote) ensureControl(ctx context.Context) (*remoteControlConn, error) 
 		return nil, err
 	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed.Load() {
+		return nil, errors.New("remote client is closed")
+	}
 	if c.control != nil && !c.control.IsDone() {
-		control := c.control
-		c.mu.Unlock()
-		return control, nil
+		return c.control, nil
 	}
 	if c.control != nil {
 		_ = c.control.Close()
@@ -351,13 +350,15 @@ func (c *Remote) ensureControl(ctx context.Context) (*remoteControlConn, error) 
 	}
 	conn, identity, err := c.openControlRPCConn(ctx)
 	if err != nil {
-		c.mu.Unlock()
 		return nil, err
+	}
+	if c.closed.Load() {
+		_ = conn.Close()
+		return nil, errors.New("remote client is closed")
 	}
 	control := newRemoteControlConn(conn)
 	c.control = control
 	c.identity = identity
-	c.mu.Unlock()
 	return control, nil
 }
 

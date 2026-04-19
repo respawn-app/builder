@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 )
 
 func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
+	handlerErrs := make(chan error, 8)
 	cfg := config.App{PersistenceRoot: t.TempDir(), Settings: config.Settings{ServerHost: "127.0.0.1", ServerPort: 1}}
 	socketPath, ok, err := config.ServerLocalRPCSocketPath(cfg)
 	if err != nil {
@@ -30,7 +32,7 @@ func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
 		t.Skip("local unix sockets unsupported on this platform")
 	}
 	shutdown := startUnixWebSocketServer(t, socketPath, func(ctx context.Context, conn rpcwire.Conn) {
-		serveProjectListRPC(t, ctx, conn)
+		serveProjectListRPC(ctx, conn, handlerErrs)
 	})
 	defer shutdown()
 
@@ -43,11 +45,13 @@ func TestDialConfiguredRemotePrefersLocalUnixSocket(t *testing.T) {
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
+	requireNoHandlerError(t, handlerErrs)
 }
 
 func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixSocketMissing(t *testing.T) {
+	handlerErrs := make(chan error, 8)
 	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
-		serveProjectListRPC(t, ctx, conn)
+		serveProjectListRPC(ctx, conn, handlerErrs)
 	}))
 	defer server.Close()
 
@@ -69,11 +73,13 @@ func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixSocketMissing(t *testing
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
+	requireNoHandlerError(t, handlerErrs)
 }
 
 func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixHandshakeStalls(t *testing.T) {
+	handlerErrs := make(chan error, 8)
 	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
-		serveProjectListRPC(t, ctx, conn)
+		serveProjectListRPC(ctx, conn, handlerErrs)
 	}))
 	defer server.Close()
 
@@ -108,10 +114,12 @@ func TestDialConfiguredRemoteFallsBackToTCPWhenLocalUnixHandshakeStalls(t *testi
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
+	requireNoHandlerError(t, handlerErrs)
 }
 
 func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T) {
 	var connectionCount atomic.Int32
+	handlerErrs := make(chan error, 8)
 	firstRequestSeen := make(chan string, 1)
 	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
 		connectionCount.Add(1)
@@ -123,7 +131,8 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 			req := event.Frame.Request()
 			if req.Method == protocol.MethodHandshake {
 				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
-					t.Fatalf("send handshake response: %v", err)
+					reportHandlerError(handlerErrs, "send handshake response: %w", err)
+					return
 				}
 				continue
 			}
@@ -133,17 +142,21 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 				firstRequestSeen <- firstRequestID
 			case protocol.MethodProjectResolvePath:
 				if firstRequestID == "" {
-					t.Fatal("expected first request id before second call")
+					reportHandlerError(handlerErrs, "expected first request id before second call")
+					return
 				}
 				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))); err != nil {
-					t.Fatalf("send second response: %v", err)
+					reportHandlerError(handlerErrs, "send second response: %w", err)
+					return
 				}
 				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(firstRequestID, serverapi.ProjectListResponse{}))); err != nil {
-					t.Fatalf("send late first response: %v", err)
+					reportHandlerError(handlerErrs, "send late first response: %w", err)
+					return
 				}
 				return
 			default:
-				t.Fatalf("unexpected unary method %q", req.Method)
+				reportHandlerError(handlerErrs, "unexpected unary method %q", req.Method)
+				return
 			}
 		}
 	}))
@@ -164,9 +177,12 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 
 	select {
 	case <-firstRequestSeen:
+	case err := <-handlerErrs:
+		t.Fatal(err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for first unary request")
 	}
+	requireNoHandlerError(t, handlerErrs)
 	cancel()
 	if err := <-firstErr; !errors.Is(err, context.Canceled) {
 		t.Fatalf("ListProjects error = %v, want context canceled", err)
@@ -182,10 +198,12 @@ func TestRemoteCanceledUnaryRequestKeepsPersistentControlConnection(t *testing.T
 	if got := connectionCount.Load(); got != 1 {
 		t.Fatalf("connectionCount = %d, want 1", got)
 	}
+	requireNoHandlerError(t, handlerErrs)
 }
 
 func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	var connectionCount atomic.Int32
+	handlerErrs := make(chan error, 8)
 	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
 		connIndex := connectionCount.Add(1)
 		handshaken := false
@@ -197,19 +215,23 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 				req := event.Frame.Request()
 				if !handshaken {
 					if req.Method != protocol.MethodHandshake {
-						t.Fatalf("first method = %q, want handshake", req.Method)
+						reportHandlerError(handlerErrs, "first method = %q, want handshake", req.Method)
+						return
 					}
 					if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
-						t.Fatalf("send handshake response: %v", err)
+						reportHandlerError(handlerErrs, "send handshake response: %w", err)
+						return
 					}
 					handshaken = true
 					continue
 				}
 				if req.Method != protocol.MethodProjectList {
-					t.Fatalf("first method = %q, want %q", req.Method, protocol.MethodProjectList)
+					reportHandlerError(handlerErrs, "first method = %q, want %q", req.Method, protocol.MethodProjectList)
+					return
 				}
 				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))); err != nil {
-					t.Fatalf("send first response: %v", err)
+					reportHandlerError(handlerErrs, "send first response: %w", err)
+					return
 				}
 				return
 			}
@@ -221,19 +243,23 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 			req := event.Frame.Request()
 			if !handshaken {
 				if req.Method != protocol.MethodHandshake {
-					t.Fatalf("second method = %q, want handshake", req.Method)
+					reportHandlerError(handlerErrs, "second method = %q, want handshake", req.Method)
+					return
 				}
 				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
-					t.Fatalf("send handshake response: %v", err)
+					reportHandlerError(handlerErrs, "send handshake response: %w", err)
+					return
 				}
 				handshaken = true
 				continue
 			}
 			if req.Method != protocol.MethodProjectResolvePath {
-				t.Fatalf("second method = %q, want %q", req.Method, protocol.MethodProjectResolvePath)
+				reportHandlerError(handlerErrs, "second method = %q, want %q", req.Method, protocol.MethodProjectResolvePath)
+				return
 			}
 			if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/reconnected"}))); err != nil {
-				t.Fatalf("send second response: %v", err)
+				reportHandlerError(handlerErrs, "send second response: %w", err)
+				return
 			}
 			return
 		}
@@ -249,9 +275,11 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
+	requireNoHandlerError(t, handlerErrs)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
+		requireNoHandlerError(t, handlerErrs)
 		remote.mu.Lock()
 		controlDone := remote.control == nil || remote.control.IsDone()
 		remote.mu.Unlock()
@@ -274,6 +302,7 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	if got := connectionCount.Load(); got != 2 {
 		t.Fatalf("connectionCount = %d, want 2", got)
 	}
+	requireNoHandlerError(t, handlerErrs)
 }
 
 func startUnixWebSocketServer(t *testing.T, socketPath string, handler func(context.Context, rpcwire.Conn)) func() {
@@ -348,8 +377,7 @@ func testRemoteConfigFromServerURL(t *testing.T, persistenceRoot string, serverU
 	return config.App{PersistenceRoot: persistenceRoot, Settings: config.Settings{ServerHost: host, ServerPort: port}}
 }
 
-func serveProjectListRPC(t *testing.T, ctx context.Context, conn rpcwire.Conn) {
-	t.Helper()
+func serveProjectListRPC(ctx context.Context, conn rpcwire.Conn, handlerErrs chan<- error) {
 	for event := range conn.Events() {
 		if event.Err != nil {
 			return
@@ -357,15 +385,34 @@ func serveProjectListRPC(t *testing.T, ctx context.Context, conn rpcwire.Conn) {
 		req := event.Frame.Request()
 		if req.Method == protocol.MethodHandshake {
 			if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
-				t.Fatalf("send handshake response: %v", err)
+				reportHandlerError(handlerErrs, "send handshake response: %w", err)
+				return
 			}
 			continue
 		}
 		if req.Method != protocol.MethodProjectList {
-			t.Fatalf("project list method = %q", req.Method)
+			reportHandlerError(handlerErrs, "project list method = %q", req.Method)
+			return
 		}
 		if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))); err != nil {
-			t.Fatalf("send project list response: %v", err)
+			reportHandlerError(handlerErrs, "send project list response: %w", err)
+			return
 		}
+	}
+}
+
+func reportHandlerError(handlerErrs chan<- error, format string, args ...any) {
+	select {
+	case handlerErrs <- fmt.Errorf(format, args...):
+	default:
+	}
+}
+
+func requireNoHandlerError(t *testing.T, handlerErrs <-chan error) {
+	t.Helper()
+	select {
+	case err := <-handlerErrs:
+		t.Fatal(err)
+	default:
 	}
 }
