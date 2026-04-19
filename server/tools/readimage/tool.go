@@ -15,6 +15,7 @@ import (
 
 	"builder/server/tools"
 	patchtool "builder/server/tools/patch"
+	"builder/shared/toolspec"
 )
 
 const maxFileSizeBytes int64 = 500 << 10
@@ -102,8 +103,8 @@ func New(workspaceRoot string, supported bool, opts ...Option) (*Tool, error) {
 	return t, nil
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolViewImage
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolViewImage
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

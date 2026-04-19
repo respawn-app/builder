@@ -1,7 +1,6 @@
 package runtimewire
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -9,11 +8,11 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type RuntimeWiring struct {
@@ -37,11 +36,11 @@ type RuntimeWiringOptions struct {
 	FastMode *runtime.FastModeState
 }
 
-func NewRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
+func NewRuntimeWiring(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
 	return NewRuntimeWiringWithBackground(store, active, enabledTools, workspaceRoot, mgr, logger, nil, opts)
 }
 
-func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, background *shelltool.Manager, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
+func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, background *shelltool.Manager, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
 	promptHistory, err := store.ReadPromptHistory()
 	if err != nil {
 		return nil, err
@@ -65,7 +64,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		return nil, err
 	}
 
-	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
+	modelHTTPClient := llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second)
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
 		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 		Model:               active.Model,
@@ -81,7 +80,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	}
 
 	newReviewerClient := func() (llm.Client, error) {
-		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
+		reviewerHTTPClient := llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds) * time.Second)
 		return llm.NewProviderClient(llm.ProviderClientOptions{
 			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 			Model:               active.Reviewer.Model,

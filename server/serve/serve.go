@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"builder/server/auth"
 	"builder/server/core"
 	"builder/server/startup"
 	"builder/server/transport"
@@ -24,6 +25,8 @@ type Server struct {
 	*core.Core
 	ready atomic.Bool
 }
+
+var localSocketListener = listenLocalSocket
 
 var (
 	testListenReservationsMu sync.Mutex
@@ -92,11 +95,23 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	listenAddress := config.ServerListenAddress(s.Config())
 	ReleaseTestListenReservation(listenAddress)
-	listener, err := net.Listen("tcp", listenAddress)
+	tcpListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen local control endpoint: %w", err)
 	}
-	defer func() { _ = listener.Close() }()
+	cleanupFns := []func(){func() { _ = tcpListener.Close() }}
+	defer func() {
+		for _, cleanup := range cleanupFns {
+			cleanup()
+		}
+	}()
+	listeners := []net.Listener{tcpListener}
+	if localListener, localCleanup, ok, err := localSocketListener(s.Config()); err != nil {
+		// Derived same-machine UDS is additive only. Configured TCP stays authoritative.
+	} else if ok {
+		listeners = append(listeners, localListener)
+		cleanupFns = append(cleanupFns, localCleanup)
+	}
 
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
@@ -104,6 +119,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		PID:             os.Getpid(),
 		Capabilities: protocol.CapabilityFlags{
 			JSONRPCWebSocket:        true,
+			AuthBootstrap:           true,
 			ProjectAttach:           true,
 			SessionAttach:           true,
 			HealthEndpoint:          true,
@@ -126,48 +142,72 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		writeStatusJSON(w, http.StatusOK, map[string]any{
-			"status":    "ok",
-			"server_id": identity.ServerID,
-			"pid":       identity.PID,
+			"status":     "ok",
+			"server_id":  identity.ServerID,
+			"pid":        identity.PID,
+			"auth_ready": authReady,
 		})
 	})
 	s.ready.Store(true)
-	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		status := http.StatusServiceUnavailable
-		body := map[string]any{"ready": false}
-		if s.ready.Load() {
+		body := map[string]any{"ready": false, "auth_ready": authReady}
+		if s.ready.Load() && authReady {
 			status = http.StatusOK
 			body = map[string]any{
-				"ready":     true,
-				"server_id": identity.ServerID,
-				"pid":       identity.PID,
+				"ready":      true,
+				"server_id":  identity.ServerID,
+				"pid":        identity.PID,
+				"auth_ready": true,
 			}
+		} else if s.ready.Load() {
+			body["transport_ready"] = true
+			body["server_id"] = identity.ServerID
+			body["pid"] = identity.PID
 		}
 		writeStatusJSON(w, status, body)
 	})
 	mux.Handle(protocol.RPCPath, gateway.Handler())
 
-	httpServer := &http.Server{Handler: mux}
-	errCh := make(chan error, 1)
-	go func() {
-		serveErr := httpServer.Serve(listener)
-		if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
-			errCh <- nil
-			return
+	httpServers := make([]*http.Server, 0, len(listeners))
+	errCh := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		httpServer := &http.Server{Handler: mux}
+		httpServers = append(httpServers, httpServer)
+		go func(server *http.Server, frontend net.Listener) {
+			serveErr := server.Serve(frontend)
+			if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
+				errCh <- nil
+				return
+			}
+			errCh <- serveErr
+		}(httpServer, listener)
+	}
+	shutdownServers := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, httpServer := range httpServers {
+			_ = httpServer.Shutdown(shutdownCtx)
 		}
-		errCh <- serveErr
-	}()
+	}
+	waitServers := func(expect int) {
+		for i := 0; i < expect; i++ {
+			<-errCh
+		}
+	}
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
-		<-errCh
+		shutdownServers()
+		waitServers(len(listeners))
 		return ctx.Err()
 	case serveErr := <-errCh:
+		shutdownServers()
+		waitServers(len(listeners) - 1)
 		return serveErr
 	}
 }
@@ -176,4 +216,18 @@ func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func serverAuthReady(ctx context.Context, appCore *core.Core) bool {
+	if appCore == nil || appCore.AuthManager() == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state, err := appCore.AuthManager().Load(ctx)
+	if err != nil {
+		return false
+	}
+	return auth.EvaluateStartupGate(state).Ready
 }

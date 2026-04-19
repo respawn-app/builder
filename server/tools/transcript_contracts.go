@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	patchformat "builder/server/tools/patch/format"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -51,7 +52,7 @@ func hostedContract(request RequestExposure, presentation transcript.ToolPresent
 	}
 }
 
-func defaultToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func defaultToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
 		command = strings.TrimSpace(command)
@@ -67,7 +68,7 @@ func defaultToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) trans
 	}
 }
 
-func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func shellToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
 		command = strings.TrimSpace(command)
@@ -75,7 +76,7 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 			command = defaultToolCallFallback
 		}
 		renderHint := detectShellRenderHint(command)
-		if toolID == ToolWriteStdin {
+		if toolID == toolspec.ToolWriteStdin {
 			renderHint = nil
 		}
 		return transcript.ToolCallMeta{
@@ -91,7 +92,7 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 	}
 }
 
-func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func askQuestionToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		question, suggestions, recommendedOptionIndex, ok := parseAskQuestionToolCall(raw)
 		if !ok {
@@ -108,7 +109,7 @@ func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) t
 	}
 }
 
-func webSearchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func webSearchToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		query, ok := parseWebSearchToolCall(raw)
 		if !ok {
@@ -123,7 +124,7 @@ func webSearchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) tra
 	}
 }
 
-func triggerHandoffToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func triggerHandoffToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		summarizerPrompt, futureAgentMessage, ok := parseTriggerHandoffToolCall(raw)
 		if !ok {
@@ -144,7 +145,7 @@ func triggerHandoffToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage
 	}
 }
 
-func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+func patchToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		detail, compact, rendered, ok := parsePatchToolCall(raw, ctx.WorkingDir)
 		if !ok {
@@ -587,19 +588,19 @@ func decodeHostedWebSearchOutput(item HostedToolOutput) (HostedExecution, bool) 
 	return HostedExecution{
 		Call: HostedCall{
 			ID:    callID,
-			Name:  ToolWebSearch,
+			Name:  toolspec.ToolWebSearch,
 			Input: inputRaw,
 		},
 		Result: Result{
 			CallID:  callID,
-			Name:    ToolWebSearch,
+			Name:    toolspec.ToolWebSearch,
 			Output:  output,
 			IsError: isError,
 		},
 	}, true
 }
 
-func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (string, string) {
+func formatToolInput(toolID toolspec.ID, raw json.RawMessage, shellTimeoutSeconds int) (string, string) {
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return strings.TrimSpace(string(raw)), ""
@@ -608,7 +609,7 @@ func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (s
 	if !ok {
 		return renderPlain(payload), ""
 	}
-	if toolID == ToolWriteStdin {
+	if toolID == toolspec.ToolWriteStdin {
 		sessionID, _ := asInt(obj["session_id"])
 		chars, _ := asString(obj["chars"])
 		if strings.TrimSpace(chars) == "" {
@@ -619,14 +620,14 @@ func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (s
 		}
 		return fmt.Sprintf("write stdin session %d", sessionID), ""
 	}
-	if cmd, ok := asString(obj["cmd"]); ok && toolID == ToolExecCommand {
+	if cmd, ok := asString(obj["cmd"]); ok && toolID == toolspec.ToolExecCommand {
 		return cmd, ""
 	}
 	if cmd, ok := asString(obj["command"]); ok {
 		inlineMeta := ""
 		if secs, ok := asInt(obj["timeout_seconds"]); ok && secs > 0 {
 			inlineMeta = "timeout: " + formatDurationShort(time.Duration(secs)*time.Second)
-		} else if toolID == ToolShell {
+		} else if toolID == toolspec.ToolShell {
 			if shellTimeoutSeconds <= 0 {
 				shellTimeoutSeconds = DefaultShellTimeoutSeconds
 			}
@@ -634,18 +635,18 @@ func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (s
 		}
 		return cmd, inlineMeta
 	}
-	if toolID == ToolWebSearch {
+	if toolID == toolspec.ToolWebSearch {
 		if query, ok := asString(obj["query"]); ok {
 			return FormatWebSearchDisplayText(query), ""
 		}
 		return FormatWebSearchDisplayText(""), ""
 	}
-	if toolID == ToolAskQuestion {
+	if toolID == toolspec.ToolAskQuestion {
 		if question, ok := asString(obj["question"]); ok {
 			return question, ""
 		}
 	}
-	if toolID == ToolTriggerHandoff {
+	if toolID == toolspec.ToolTriggerHandoff {
 		summarizerPrompt, futureAgentMessage, ok := parseTriggerHandoffToolCall(raw)
 		if !ok {
 			return "trigger_handoff()", ""

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/transcriptdiag"
+	"github.com/google/uuid"
 )
 
 const uiRuntimeControlTimeout = 3 * time.Second
@@ -28,7 +28,9 @@ type sessionRuntimeClient struct {
 	reads                   client.SessionViewClient
 	controls                client.RuntimeControlClient
 	sessionID               string
+	controllerLeaseID       string
 	diagLogf                func(string)
+	transcriptDiagnostics   bool
 	connectionStateObserver func(error)
 
 	mu                        sync.RWMutex
@@ -77,13 +79,35 @@ func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClien
 		return nil
 	}
 	return &sessionRuntimeClient{
-		sessionID:       sessionID,
-		reads:           reads,
-		controls:        controls,
-		mainView:        clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
-		transcript:      clientui.TranscriptPage{SessionID: sessionID},
-		transcriptPages: make(map[string]cachedTranscriptPage),
+		sessionID:         sessionID,
+		controllerLeaseID: "local-ui-controller",
+		reads:             reads,
+		controls:          controls,
+		mainView:          clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
+		transcript:        clientui.TranscriptPage{SessionID: sessionID},
+		transcriptPages:   make(map[string]cachedTranscriptPage),
 	}
+}
+
+func (c *sessionRuntimeClient) SetControllerLeaseID(leaseID string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if strings.TrimSpace(leaseID) == "" {
+		return
+	}
+	c.controllerLeaseID = strings.TrimSpace(leaseID)
+}
+
+func (c *sessionRuntimeClient) controllerLeaseIDValue() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.controllerLeaseID
 }
 
 func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) {
@@ -93,6 +117,18 @@ func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.diagLogf = logf
+}
+
+func (c *sessionRuntimeClient) SetTranscriptDiagnosticsEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transcriptDiagnostics = enabled
+	if enabled {
+		return
+	}
 }
 
 func (c *sessionRuntimeClient) SetConnectionStateObserver(observer func(error)) {
@@ -304,15 +340,17 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
 	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{
-		SessionID: c.sessionID,
-		Offset:    req.Offset,
-		Limit:     req.Limit,
-		Page:      req.Page,
-		PageSize:  req.PageSize,
-		Window:    req.Window,
+		SessionID:                c.sessionID,
+		Offset:                   req.Offset,
+		Limit:                    req.Limit,
+		Page:                     req.Page,
+		PageSize:                 req.PageSize,
+		Window:                   req.Window,
+		KnownRevision:            req.KnownRevision,
+		KnownCommittedEntryCount: req.KnownCommittedEntryCount,
 	})
 	c.notifyConnectionState(err)
-	if transcriptdiag.EnabledFromEnv(os.Getenv) {
+	if c.transcriptDiagnosticsEnabled() {
 		fields := map[string]string{"session_id": c.sessionID, "path": "hydrate"}
 		for key, value := range transcriptdiag.RequestFields(req) {
 			fields[key] = value
@@ -332,6 +370,15 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		return page, err
 	}
 	return c.storeTranscriptForRequest(req, resp.Transcript), nil
+}
+
+func (c *sessionRuntimeClient) transcriptDiagnosticsEnabled() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.transcriptDiagnostics || transcriptdiag.EnabledForProcess(false)
 }
 
 func (c *sessionRuntimeClient) notifyConnectionState(err error) {
@@ -542,7 +589,7 @@ func cloneTranscriptEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
 func (c *sessionRuntimeClient) SetSessionName(name string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	if err := c.controls.SetSessionName(ctx, serverapi.RuntimeSetSessionNameRequest{SessionID: c.sessionID, Name: name}); err != nil {
+	if err := c.controls.SetSessionName(ctx, serverapi.RuntimeSetSessionNameRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Name: name}); err != nil {
 		return err
 	}
 	c.patchMainView(func(view *clientui.RuntimeMainView) {
@@ -553,7 +600,7 @@ func (c *sessionRuntimeClient) SetSessionName(name string) error {
 func (c *sessionRuntimeClient) SetThinkingLevel(level string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	if err := c.controls.SetThinkingLevel(ctx, serverapi.RuntimeSetThinkingLevelRequest{SessionID: c.sessionID, Level: level}); err != nil {
+	if err := c.controls.SetThinkingLevel(ctx, serverapi.RuntimeSetThinkingLevelRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Level: level}); err != nil {
 		return err
 	}
 	c.patchMainView(func(view *clientui.RuntimeMainView) {
@@ -564,7 +611,7 @@ func (c *sessionRuntimeClient) SetThinkingLevel(level string) error {
 func (c *sessionRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetFastModeEnabled(ctx, serverapi.RuntimeSetFastModeEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+	resp, err := c.controls.SetFastModeEnabled(ctx, serverapi.RuntimeSetFastModeEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
 	if err == nil {
 		c.patchMainView(func(view *clientui.RuntimeMainView) {
 			view.Status.FastModeEnabled = enabled
@@ -575,7 +622,7 @@ func (c *sessionRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 func (c *sessionRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetReviewerEnabled(ctx, serverapi.RuntimeSetReviewerEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+	resp, err := c.controls.SetReviewerEnabled(ctx, serverapi.RuntimeSetReviewerEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
 	if err == nil {
 		c.patchMainView(func(view *clientui.RuntimeMainView) {
 			view.Status.ReviewerFrequency = resp.Mode
@@ -587,7 +634,7 @@ func (c *sessionRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, e
 func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetAutoCompactionEnabled(ctx, serverapi.RuntimeSetAutoCompactionEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+	resp, err := c.controls.SetAutoCompactionEnabled(ctx, serverapi.RuntimeSetAutoCompactionEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
 	if err != nil {
 		return false, false, err
 	}
@@ -599,24 +646,24 @@ func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, boo
 func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{SessionID: c.sessionID, Role: role, Text: text})
+	return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Role: role, Text: text})
 }
 func (c *sessionRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	resp, err := c.controls.ShouldCompactBeforeUserMessage(ctx, serverapi.RuntimeShouldCompactBeforeUserMessageRequest{SessionID: c.sessionID, Text: text})
 	return resp.ShouldCompact, err
 }
 func (c *sessionRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
-	resp, err := c.controls.SubmitUserMessage(ctx, serverapi.RuntimeSubmitUserMessageRequest{SessionID: c.sessionID, Text: text})
+	resp, err := c.controls.SubmitUserMessage(ctx, serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
 	return resp.Message, err
 }
 func (c *sessionRuntimeClient) SubmitUserShellCommand(ctx context.Context, command string) error {
-	return c.controls.SubmitUserShellCommand(ctx, serverapi.RuntimeSubmitUserShellCommandRequest{SessionID: c.sessionID, Command: command})
+	return c.controls.SubmitUserShellCommand(ctx, serverapi.RuntimeSubmitUserShellCommandRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Command: command})
 }
 func (c *sessionRuntimeClient) CompactContext(ctx context.Context, args string) error {
-	return c.controls.CompactContext(ctx, serverapi.RuntimeCompactContextRequest{SessionID: c.sessionID, Args: args})
+	return c.controls.CompactContext(ctx, serverapi.RuntimeCompactContextRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Args: args})
 }
 func (c *sessionRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
-	return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{SessionID: c.sessionID})
+	return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
 }
 func (c *sessionRuntimeClient) HasQueuedUserWork() (bool, error) {
 	ctx, cancel := c.controlContext()
@@ -628,25 +675,27 @@ func (c *sessionRuntimeClient) HasQueuedUserWork() (bool, error) {
 	return resp.HasQueuedUserWork, nil
 }
 func (c *sessionRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
-	resp, err := c.controls.SubmitQueuedUserMessages(ctx, serverapi.RuntimeSubmitQueuedUserMessagesRequest{SessionID: c.sessionID})
+	resp, err := c.controls.SubmitQueuedUserMessages(ctx, serverapi.RuntimeSubmitQueuedUserMessagesRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
 	return resp.Message, err
 }
 func (c *sessionRuntimeClient) Interrupt() error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.Interrupt(ctx, serverapi.RuntimeInterruptRequest{SessionID: c.sessionID})
+	return c.controls.Interrupt(ctx, serverapi.RuntimeInterruptRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
 }
 
 func (c *sessionRuntimeClient) QueueUserMessage(text string) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	_ = c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{SessionID: c.sessionID, Text: text})
+	if err := c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text}); err != nil {
+		c.notifyConnectionState(err)
+	}
 }
 
 func (c *sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.DiscardQueuedUserMessagesMatching(ctx, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{SessionID: c.sessionID, Text: text})
+	resp, err := c.controls.DiscardQueuedUserMessagesMatching(ctx, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
 	if err != nil {
 		return 0
 	}
@@ -656,5 +705,5 @@ func (c *sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) in
 func (c *sessionRuntimeClient) RecordPromptHistory(text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.RecordPromptHistory(ctx, serverapi.RuntimeRecordPromptHistoryRequest{SessionID: c.sessionID, Text: text})
+	return c.controls.RecordPromptHistory(ctx, serverapi.RuntimeRecordPromptHistoryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
 }

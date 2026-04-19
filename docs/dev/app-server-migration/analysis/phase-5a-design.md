@@ -67,12 +67,12 @@ The session view itself moves through these states:
   - ongoing/detail transcript correctness must come only from the last committed cache plus recovery flow
 
 - `rehydrating_after_gap`
-  - client is fetching committed transcript pages and preparing the missing suffix or full rebuild
+  - client is fetching committed transcript pages and preparing the missing suffix or, for explicit external continuity loss only, a full ongoing-buffer re-issue
   - no transcript-affecting provisional state may be emitted into committed scrollback
 
-- `rebuild_required`
+- `continuity_recovery_required`
   - suffix continuity could not be proven
-  - production behavior: clear the affected session view and perform a fresh committed hydrate
+  - production behavior: invalidate transient live state and perform a fresh committed hydrate; same-session divergence is a bug, while external continuity loss may additionally re-issue the ongoing buffer
   - debug behavior: fail loudly when global debug mode is enabled
 
 Allowed transitions:
@@ -83,8 +83,8 @@ Allowed transitions:
 - `live_consistent -> live_invalidated`
 - `live_invalidated -> rehydrating_after_gap`
 - `rehydrating_after_gap -> live_consistent`
-- `rehydrating_after_gap -> rebuild_required`
-- `rebuild_required -> hydrating`
+- `rehydrating_after_gap -> continuity_recovery_required`
+- `continuity_recovery_required -> hydrating`
 
 Invalid transitions should be treated as implementation bugs in debug mode.
 
@@ -159,11 +159,11 @@ Every transcript-visible transition should be attributable to one of these cause
 - `session_activity_gap`
 - `live_projection_invalidated`
 - `committed_suffix_appended`
-- `committed_rebuild_required`
-- `committed_rebuild_started`
-- `committed_rebuild_succeeded`
+- `continuity_replay_required`
+- `continuity_replay_started`
+- `continuity_replay_succeeded`
 
-These should be sufficient to explain why a line appeared, why a line did not appear, and why recovery chose suffix append versus full rebuild.
+These should be sufficient to explain why a line appeared, why a line did not appear, and why recovery chose suffix append versus explicit continuity-loss replay.
 
 ## Acceptance Matrix
 
@@ -228,14 +228,15 @@ Gap to add:
 - `cli/app/ui_native_scrollback_integration_test.go`
   - add a rendered suffix-specific case proving recovery after reconnect appends only entries after `last_emitted_committed_revision`
 
-### 4. Non-contiguous recovery falls back to full rebuild in production mode
+### 4. Same-session divergence does not replay scrollback; continuity-loss recovery may re-issue the ongoing buffer
 
 Current proof surface:
 
 - `cli/app/ui_native_history_test.go`
-  - `TestNativeScrollbackRebuildsFromNonAppendMutation`
-  - `TestNativeScrollbackRebuildsWhenNoSharedPrefixExists`
-  - `TestNativeHistorySnapshotRebuildsFromNonAppendRewriteInOngoingMode`
+  - `TestNativeScrollbackDoesNotReplaySameSessionNonAppendMutation`
+  - `TestNativeScrollbackRebasesWhenNoSharedPrefixExists`
+  - `TestNativeHistorySnapshotDoesNotReplaySameSessionRewriteInOngoingMode`
+  - `TestNativeHistorySnapshotReplaysDuringContinuityRecovery`
   - `TestNativeScrollbackResumesAssistantFlushesAfterFullRebuild`
   - `TestNativeDetailExitRebuildsWholeTranscriptWhenCommittedRootDiverged`
 

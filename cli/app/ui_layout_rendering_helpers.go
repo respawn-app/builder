@@ -55,6 +55,27 @@ type uiEditableInputRenderSpec struct {
 	RenderCursor bool
 }
 
+func renderFramedEditableInputLines(width, maxContentLines int, spec uiEditableInputRenderSpec, lineStyle lipgloss.Style, borderStyle lipgloss.Style) []string {
+	if width < 1 {
+		return []string{padRight("", width)}
+	}
+	contentLines := visibleEditableInputLines(width, maxContentLines, spec)
+	rendered := make([]string, 0, len(contentLines))
+	for _, line := range contentLines {
+		rendered = append(rendered, lineStyle.Render(padANSIRight(line, width)))
+	}
+	return renderFramedLines(width, rendered, borderStyle)
+}
+
+func renderFramedLines(width int, lines []string, borderStyle lipgloss.Style) []string {
+	border := borderStyle.Render(strings.Repeat("─", width))
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, border)
+	out = append(out, lines...)
+	out = append(out, border)
+	return out
+}
+
 func wrappedEditableInputLines(width int, spec uiEditableInputRenderSpec) []string {
 	return wrapPlainLines(splitPlainLines(spec.Prefix+spec.Text), width)
 }

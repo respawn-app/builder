@@ -1,4 +1,4 @@
-package format
+package patchformat
 
 import (
 	"fmt"
@@ -80,25 +80,6 @@ func Format(doc Document, cwd string) RenderedPatch {
 		}
 	}
 	return rendered
-}
-
-func (r RenderedPatch) SummaryText() string {
-	return joinRenderedLines(r.SummaryLines)
-}
-
-func (r RenderedPatch) DetailText() string {
-	return joinRenderedLines(r.DetailLines)
-}
-
-func joinRenderedLines(lines []RenderedLine) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, line.Text)
-	}
-	return strings.Join(out, "\n")
 }
 
 func buildRenderedFiles(doc Document, cwd string) []RenderedFile {
@@ -202,6 +183,7 @@ func resolvePath(path, cwd string) (string, string) {
 	if p == "" {
 		return "", ""
 	}
+	requestedRel := normalizeRequestedRelativePath(p)
 	var abs string
 	if filepath.IsAbs(p) {
 		abs = filepath.Clean(p)
@@ -219,14 +201,32 @@ func resolvePath(path, cwd string) (string, string) {
 	}
 	rel, err := filepath.Rel(cwd, filepath.FromSlash(abs))
 	if err != nil {
-		return abs, filepath.ToSlash(p)
+		return abs, abs
 	}
 	rel = filepath.ToSlash(rel)
 	if rel == "." {
 		return abs, "./"
 	}
-	if strings.HasPrefix(rel, "../") || rel == ".." {
-		return abs, filepath.ToSlash(p)
+	if !strings.HasPrefix(rel, "../") && rel != ".." {
+		return abs, "./" + rel
 	}
-	return abs, "./" + rel
+	if requestedRel != "" {
+		return abs, requestedRel
+	}
+	return abs, abs
+}
+
+func normalizeRequestedRelativePath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || filepath.IsAbs(trimmed) {
+		return ""
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(trimmed))
+	if cleaned == "." {
+		return "./"
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return cleaned
+	}
+	return "./" + strings.TrimPrefix(cleaned, "./")
 }

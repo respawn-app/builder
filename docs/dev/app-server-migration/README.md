@@ -52,7 +52,9 @@ Files:
 
 `planning/`
 
-- `planning/plan.md`: phased migration plan derived from the current requirements set.
+- `planning/plan.md`: active forward-looking migration plan with only open work.
+- `planning/plan-completed.md`: archive of completed phases moved out of the active plan.
+- `planning/phase-9-multi-client-session-control.md`: explicit follow-up plan for lifting the temporary same-session single-controller restriction and returning to server-serialized multi-client control.
 - `planning/phase-4-backlog.md`: concrete Phase 4 storage implementation backlog for project/workspace/worktree, cwd resolution, runtime leases, and migration steps.
 - `planning/phase-0-checkpoint.md`: executable pre-refactor checklist for Phase 0.
 - `planning/boundary-map.md`: initial repo-grounded frontend/server cut analysis.

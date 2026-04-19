@@ -1,0 +1,235 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sync"
+
+	"builder/shared/clientui"
+	"builder/shared/protocol"
+	"builder/shared/rpcwire"
+	"builder/shared/serverapi"
+)
+
+type remoteSessionActivitySubscription struct {
+	conn rpcwire.Conn
+	once sync.Once
+}
+
+type remotePromptActivitySubscription struct {
+	conn rpcwire.Conn
+	once sync.Once
+}
+
+type remoteProcessOutputSubscription struct {
+	conn rpcwire.Conn
+	once sync.Once
+}
+
+func (c *Remote) SubscribePromptActivity(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
+	conn, cleanup, err := c.openSessionRPCConn(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	var ack protocol.SubscribeResponse
+	if err := callRPC(ctx, conn, "subscribe-prompt-activity", protocol.MethodPromptSubscribeActivity, req, &ack); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &remotePromptActivitySubscription{conn: conn}, nil
+}
+
+func (c *Remote) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+	conn, cleanup, err := c.openRPCConn(ctx)
+	if err != nil {
+		return serverapi.RunPromptResponse{}, err
+	}
+	defer cleanup()
+	params, err := json.Marshal(req)
+	if err != nil {
+		return serverapi.RunPromptResponse{}, err
+	}
+	const requestID = "run-prompt"
+	request := protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: requestID, Method: protocol.MethodRunPrompt, Params: params}
+	if err := conn.Send(ctx, rpcwire.FrameFromRequest(request)); err != nil {
+		return serverapi.RunPromptResponse{}, err
+	}
+	for {
+		frame, err := receiveFrame(ctx, conn)
+		if err != nil {
+			return serverapi.RunPromptResponse{}, err
+		}
+		if frame.Method == protocol.MethodRunPromptProgress {
+			if progress != nil {
+				var update serverapi.RunPromptProgress
+				if err := json.Unmarshal(frame.Params, &update); err != nil {
+					return serverapi.RunPromptResponse{}, err
+				}
+				progress.PublishRunPromptProgress(update)
+			}
+			continue
+		}
+		if frame.ID != requestID {
+			return serverapi.RunPromptResponse{}, fmt.Errorf("unexpected rpc frame id %q", frame.ID)
+		}
+		resp := frame.Response()
+		if resp.Error != nil {
+			return serverapi.RunPromptResponse{}, protocolError(resp.Error)
+		}
+		var result serverapi.RunPromptResponse
+		if len(resp.Result) > 0 {
+			if err := json.Unmarshal(resp.Result, &result); err != nil {
+				return serverapi.RunPromptResponse{}, err
+			}
+		}
+		return result, nil
+	}
+}
+
+func (c *Remote) SubscribeSessionActivity(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
+	conn, cleanup, err := c.openSessionRPCConn(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	var ack protocol.SubscribeResponse
+	if err := callRPC(ctx, conn, "subscribe-session-activity", protocol.MethodSessionSubscribeActivity, req, &ack); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &remoteSessionActivitySubscription{conn: conn}, nil
+}
+
+func (c *Remote) SubscribeProcessOutput(ctx context.Context, req serverapi.ProcessOutputSubscribeRequest) (serverapi.ProcessOutputSubscription, error) {
+	conn, cleanup, err := c.openRPCConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ack protocol.SubscribeResponse
+	if err := callRPC(ctx, conn, "subscribe-process-output", protocol.MethodProcessSubscribeOutput, req, &ack); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &remoteProcessOutputSubscription{conn: conn}, nil
+}
+
+func (c *Remote) openSessionRPCConn(ctx context.Context, sessionID string) (rpcwire.Conn, func(), error) {
+	conn, cleanup, err := c.openRPCConn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := callRPC(ctx, conn, "attach-session", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: sessionID}, nil); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return conn, cleanup, nil
+}
+
+func (s *remoteSessionActivitySubscription) Next(ctx context.Context) (clientui.Event, error) {
+	frame, err := receiveFrame(ctx, s.conn)
+	if err != nil {
+		return clientui.Event{}, serverapi.NormalizeStreamError(err)
+	}
+	switch frame.Method {
+	case protocol.MethodSessionActivityEvent:
+		var params protocol.SessionActivityEventParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		return params.Event, nil
+	case protocol.MethodSessionActivityComplete:
+		var params protocol.StreamCompleteParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		_ = s.Close()
+		return clientui.Event{}, streamCompleteError(params)
+	default:
+		return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", frame.Method))
+	}
+}
+
+func (s *remoteSessionActivitySubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+	return nil
+}
+
+func (s *remotePromptActivitySubscription) Next(ctx context.Context) (clientui.PendingPromptEvent, error) {
+	frame, err := receiveFrame(ctx, s.conn)
+	if err != nil {
+		return clientui.PendingPromptEvent{}, serverapi.NormalizeStreamError(err)
+	}
+	switch frame.Method {
+	case protocol.MethodPromptActivityEvent:
+		var params protocol.PromptActivityEventParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		return params.Event, nil
+	case protocol.MethodPromptActivityComplete:
+		var params protocol.StreamCompleteParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		_ = s.Close()
+		return clientui.PendingPromptEvent{}, streamCompleteError(params)
+	default:
+		return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", frame.Method))
+	}
+}
+
+func (s *remotePromptActivitySubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+	return nil
+}
+
+func (s *remoteProcessOutputSubscription) Next(ctx context.Context) (clientui.ProcessOutputChunk, error) {
+	frame, err := receiveFrame(ctx, s.conn)
+	if err != nil {
+		return clientui.ProcessOutputChunk{}, serverapi.NormalizeStreamError(err)
+	}
+	switch frame.Method {
+	case protocol.MethodProcessOutputEvent:
+		var params protocol.ProcessOutputEventParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		return params.Chunk, nil
+	case protocol.MethodProcessOutputComplete:
+		var params protocol.StreamCompleteParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		_ = s.Close()
+		return clientui.ProcessOutputChunk{}, streamCompleteError(params)
+	default:
+		return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", frame.Method))
+	}
+}
+
+func (s *remoteProcessOutputSubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+	return nil
+}

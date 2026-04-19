@@ -15,10 +15,27 @@ import (
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"github.com/google/uuid"
+	sqlitedriver "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
-var ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
+var statPathForAvailability = os.Stat
+
+// SetAvailabilityStatForTest overrides path availability probing and returns a restore function.
+// It exists to keep availability-driven tests deterministic across platforms.
+func SetAvailabilityStatForTest(fn func(string) (os.FileInfo, error)) func() {
+	previous := statPathForAvailability
+	if fn == nil {
+		statPathForAvailability = os.Stat
+	} else {
+		statPathForAvailability = fn
+	}
+	return func() {
+		statPathForAvailability = previous
+	}
+}
 
 type Binding struct {
 	ProjectID       string
@@ -59,6 +76,7 @@ type Store struct {
 
 var registerWorkspaceBindingAfterLookupMissHook func()
 var insertWorkspaceBindingAfterProjectUpsertHook func()
+var rebindWorkspaceBeforeUpdateHook func()
 
 func Open(persistenceRoot string) (*Store, error) {
 	trimmedRoot := strings.TrimSpace(persistenceRoot)
@@ -136,9 +154,59 @@ func (s *Store) EnsureWorkspaceBinding(ctx context.Context, workspaceRoot string
 		return binding, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return Binding{}, ErrWorkspaceNotRegistered
+		return Binding{}, serverapi.ErrWorkspaceNotRegistered
 	}
 	return Binding{}, err
+}
+
+func (s *Store) ResolveWorkspacePath(ctx context.Context, workspaceRoot string) (string, *Binding, error) {
+	if s == nil || s.queries == nil {
+		return "", nil, errors.New("metadata store is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return "", nil, err
+	}
+	binding, err := s.lookupWorkspaceBinding(ctx, canonicalRoot)
+	if err == nil {
+		return canonicalRoot, &binding, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return canonicalRoot, nil, nil
+	}
+	return "", nil, err
+}
+
+func (s *Store) LookupWorkspaceBindingByID(ctx context.Context, workspaceID string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetWorkspaceBindingByID(ctx, strings.TrimSpace(workspaceID))
+	if err == nil {
+		return Binding{
+			ProjectID:       row.ProjectID,
+			ProjectName:     row.ProjectDisplayName,
+			WorkspaceID:     row.WorkspaceID,
+			CanonicalRoot:   row.WorkspaceRoot,
+			WorkspaceName:   filepath.Base(row.WorkspaceRoot),
+			WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
+		}, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, serverapi.ErrWorkspaceNotRegistered
+	}
+	return Binding{}, fmt.Errorf("lookup workspace binding by id: %w", err)
+}
+
+func (s *Store) GetWorkspaceByID(ctx context.Context, workspaceID string) (sqlitegen.Workspace, error) {
+	if s == nil || s.queries == nil {
+		return sqlitegen.Workspace{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetWorkspaceByID(ctx, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return sqlitegen.Workspace{}, fmt.Errorf("get workspace by id: %w", err)
+	}
+	return row, nil
 }
 
 func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
@@ -163,6 +231,178 @@ func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string
 	return Binding{}, fmt.Errorf("lookup workspace binding: %w", err)
 }
 
+func (s *Store) CreateProjectForWorkspace(ctx context.Context, workspaceRoot string, projectName string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	trimmedProjectName := strings.TrimSpace(projectName)
+	if trimmedProjectName == "" {
+		return Binding{}, errors.New("project name is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	if binding, err := s.lookupWorkspaceBinding(ctx, canonicalRoot); err == nil {
+		return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, err
+	}
+	now := time.Now().UTC()
+	projectID := "project-" + uuid.NewString()
+	workspaceID := "workspace-" + uuid.NewString()
+	workspaceName := filepath.Base(canonicalRoot)
+	return s.insertWorkspaceBinding(ctx, canonicalRoot, trimmedProjectName, workspaceName, projectID, workspaceID, now, true)
+}
+
+func (s *Store) AttachWorkspaceToProject(ctx context.Context, projectID string, workspaceRoot string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return Binding{}, errors.New("project id is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	if binding, err := s.lookupWorkspaceBinding(ctx, canonicalRoot); err == nil {
+		if strings.TrimSpace(binding.ProjectID) == trimmedProjectID {
+			return binding, nil
+		}
+		return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, err
+	}
+	projectName, err := s.queries.GetProjectDisplayName(ctx, trimmedProjectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Binding{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
+		}
+		return Binding{}, fmt.Errorf("get project display name: %w", err)
+	}
+	workspaceCount, err := s.queries.CountProjectWorkspaces(ctx, trimmedProjectID)
+	if err != nil {
+		return Binding{}, fmt.Errorf("count project workspaces: %w", err)
+	}
+	now := time.Now().UTC()
+	workspaceID := "workspace-" + uuid.NewString()
+	binding, err := s.insertWorkspaceBinding(ctx, canonicalRoot, projectName, filepath.Base(canonicalRoot), trimmedProjectID, workspaceID, now, workspaceCount == 0)
+	if err != nil {
+		return Binding{}, err
+	}
+	if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
+		return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+	}
+	return binding, nil
+}
+
+func (s *Store) RebindWorkspace(ctx context.Context, oldWorkspaceRoot string, newWorkspaceRoot string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	oldCanonicalRoot, err := canonicalFilesystemPath(oldWorkspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	newCanonicalRoot, err := canonicalFilesystemPath(newWorkspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	if err := requireExistingDirectory(newCanonicalRoot); err != nil {
+		return Binding{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Binding{}, fmt.Errorf("begin workspace rebind tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+
+	oldWorkspace, err := q.GetWorkspaceByCanonicalRoot(ctx, oldCanonicalRoot)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Binding{}, serverapi.ErrWorkspaceNotRegistered
+		}
+		return Binding{}, fmt.Errorf("get old workspace binding: %w", err)
+	}
+	if newCanonicalRoot == oldWorkspace.CanonicalRootPath {
+		if err := tx.Commit(); err != nil {
+			return Binding{}, fmt.Errorf("commit workspace rebind noop tx: %w", err)
+		}
+		return s.lookupWorkspaceBinding(ctx, newCanonicalRoot)
+	}
+	if existing, err := q.GetWorkspaceByCanonicalRoot(ctx, newCanonicalRoot); err == nil {
+		if existing.ID == oldWorkspace.ID {
+			if err := tx.Commit(); err != nil {
+				return Binding{}, fmt.Errorf("commit workspace rebind noop tx: %w", err)
+			}
+			return s.lookupWorkspaceBinding(ctx, newCanonicalRoot)
+		}
+		return Binding{}, fmt.Errorf("workspace %q is already bound", newCanonicalRoot)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, fmt.Errorf("get new workspace binding: %w", err)
+	}
+	worktrees, err := q.ListWorktreesByWorkspaceID(ctx, oldWorkspace.ID)
+	if err != nil {
+		return Binding{}, fmt.Errorf("list workspace worktrees: %w", err)
+	}
+	if rebindWorkspaceBeforeUpdateHook != nil {
+		rebindWorkspaceBeforeUpdateHook()
+	}
+	now := time.Now().UTC().UnixMilli()
+	rows, err := q.UpdateWorkspaceBindingCanonicalRoot(ctx, sqlitegen.UpdateWorkspaceBindingCanonicalRootParams{
+		ID:                oldWorkspace.ID,
+		CanonicalRootPath: newCanonicalRoot,
+		DisplayName:       filepath.Base(newCanonicalRoot),
+		Availability:      availabilityForPath(newCanonicalRoot),
+		UpdatedAtUnixMs:   now,
+	})
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			return Binding{}, fmt.Errorf("rollback workspace rebind tx: %w", rollbackErr)
+		}
+		if binding, lookupErr := s.lookupWorkspaceBinding(ctx, newCanonicalRoot); lookupErr == nil && binding.WorkspaceID != oldWorkspace.ID {
+			return Binding{}, fmt.Errorf("workspace %q is already bound", newCanonicalRoot)
+		}
+		if isSQLiteUniqueConstraint(err) {
+			return Binding{}, fmt.Errorf("workspace %q is already bound", newCanonicalRoot)
+		}
+		return Binding{}, fmt.Errorf("update workspace binding canonical root: %w", err)
+	}
+	if rows == 0 {
+		return Binding{}, fmt.Errorf("update workspace binding canonical root: workspace %q was not updated", oldCanonicalRoot)
+	}
+	for _, worktree := range worktrees {
+		newWorktreeRoot, mapErr := rebindDescendantPath(oldCanonicalRoot, newCanonicalRoot, worktree.CanonicalRootPath)
+		if mapErr != nil {
+			return Binding{}, mapErr
+		}
+		updatedRows, updateErr := q.UpdateWorktreeCanonicalRoot(ctx, sqlitegen.UpdateWorktreeCanonicalRootParams{
+			ID:                worktree.ID,
+			CanonicalRootPath: newWorktreeRoot,
+			DisplayName:       filepath.Base(newWorktreeRoot),
+			Availability:      availabilityForPath(newWorktreeRoot),
+			UpdatedAtUnixMs:   now,
+		})
+		if updateErr != nil {
+			if isSQLiteUniqueConstraint(updateErr) {
+				return Binding{}, fmt.Errorf("worktree %q is already bound", newWorktreeRoot)
+			}
+			return Binding{}, fmt.Errorf("update worktree canonical root: %w", updateErr)
+		}
+		if updatedRows == 0 {
+			return Binding{}, fmt.Errorf("update worktree canonical root: worktree %q was not updated", worktree.CanonicalRootPath)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Binding{}, fmt.Errorf("commit workspace rebind tx: %w", err)
+	}
+	return s.lookupWorkspaceBinding(ctx, newCanonicalRoot)
+}
+
 func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
 	if s == nil || s.queries == nil {
 		return Binding{}, errors.New("metadata store is required")
@@ -179,14 +419,53 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	if registerWorkspaceBindingAfterLookupMissHook != nil {
 		registerWorkspaceBindingAfterLookupMissHook()
 	}
-	now := time.Now().UTC()
-	projectID := "project-" + uuid.NewString()
-	workspaceID := "workspace-" + uuid.NewString()
+	if binding, err := s.lookupWorkspaceBinding(ctx, canonicalRoot); err == nil {
+		return binding, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, err
+	}
 	displayName := filepath.Base(canonicalRoot)
-	return s.insertWorkspaceBinding(ctx, canonicalRoot, displayName, projectID, workspaceID, now)
+	return s.CreateProjectForWorkspace(ctx, canonicalRoot, displayName)
 }
 
-func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string, displayName string, projectID string, workspaceID string, now time.Time) (Binding, error) {
+func requireExistingDirectory(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("workspace path %q does not exist", path)
+		}
+		return fmt.Errorf("stat workspace path %q: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace path %q is not a directory", path)
+	}
+	return nil
+}
+
+func rebindDescendantPath(oldRoot string, newRoot string, descendant string) (string, error) {
+	if descendant == oldRoot {
+		return newRoot, nil
+	}
+	prefix := oldRoot + string(filepath.Separator)
+	if !strings.HasPrefix(descendant, prefix) {
+		return "", fmt.Errorf("worktree %q is outside workspace %q", descendant, oldRoot)
+	}
+	rel, err := filepath.Rel(oldRoot, descendant)
+	if err != nil {
+		return "", fmt.Errorf("rebind descendant path %q: %w", descendant, err)
+	}
+	return filepath.Clean(filepath.Join(newRoot, rel)), nil
+}
+
+func isSQLiteUniqueConstraint(err error) bool {
+	var sqliteErr *sqlitedriver.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	return sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+}
+
+func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string, projectDisplayName string, workspaceDisplayName string, projectID string, workspaceID string, now time.Time, isPrimary bool) (Binding, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Binding{}, fmt.Errorf("begin workspace binding tx: %w", err)
@@ -195,7 +474,7 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	q := s.queries.WithTx(tx)
 	if err := q.UpsertProject(ctx, sqlitegen.UpsertProjectParams{
 		ID:              projectID,
-		DisplayName:     displayName,
+		DisplayName:     projectDisplayName,
 		CreatedAtUnixMs: now.UnixMilli(),
 		UpdatedAtUnixMs: now.UnixMilli(),
 		MetadataJson:    "{}",
@@ -209,9 +488,9 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		ID:                workspaceID,
 		ProjectID:         projectID,
 		CanonicalRootPath: canonicalRoot,
-		DisplayName:       displayName,
+		DisplayName:       workspaceDisplayName,
 		Availability:      availabilityForPath(canonicalRoot),
-		IsPrimary:         1,
+		IsPrimary:         boolToInt64(isPrimary),
 		GitMetadataJson:   "{}",
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
@@ -236,10 +515,10 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	}
 	return Binding{
 		ProjectID:       projectID,
-		ProjectName:     displayName,
+		ProjectName:     projectDisplayName,
 		WorkspaceID:     workspaceID,
 		CanonicalRoot:   canonicalRoot,
-		WorkspaceName:   displayName,
+		WorkspaceName:   workspaceDisplayName,
 		WorkspaceStatus: availabilityForPath(canonicalRoot),
 	}, nil
 }
@@ -311,16 +590,39 @@ func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clien
 	}
 	project, err := s.queries.GetProjectSummary(ctx, strings.TrimSpace(projectID))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return clientui.ProjectOverview{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(projectID))
+		}
 		return clientui.ProjectOverview{}, fmt.Errorf("get project summary: %w", err)
 	}
 	sessions, err := s.ListSessionsByProject(ctx, projectID)
 	if err != nil {
 		return clientui.ProjectOverview{}, err
 	}
+	workspaces, err := s.ListProjectWorkspaces(ctx, projectID)
+	if err != nil {
+		return clientui.ProjectOverview{}, err
+	}
 	return clientui.ProjectOverview{
-		Project:  projectSummaryFromRow(project.ID, project.DisplayName, project.RootPath, project.SessionCount, project.LatestActivityUnixMs),
-		Sessions: sessions,
+		Project:    projectSummaryFromRow(project.ID, project.DisplayName, project.RootPath, project.SessionCount, project.LatestActivityUnixMs),
+		Workspaces: workspaces,
+		Sessions:   sessions,
 	}, nil
+}
+
+func (s *Store) ListProjectWorkspaces(ctx context.Context, projectID string) ([]clientui.ProjectWorkspaceSummary, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("metadata store is required")
+	}
+	rows, err := s.queries.ListProjectWorkspaces(ctx, strings.TrimSpace(projectID))
+	if err != nil {
+		return nil, fmt.Errorf("list project workspaces: %w", err)
+	}
+	out := make([]clientui.ProjectWorkspaceSummary, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.DisplayName, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
+	}
+	return out, nil
 }
 
 func (s *Store) ListSessionsByProject(ctx context.Context, projectID string) ([]clientui.SessionSummary, error) {
@@ -529,7 +831,7 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 }
 
 func availabilityForPath(path string) string {
-	if _, err := os.Stat(path); err != nil {
+	if _, err := statPathForAvailability(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "missing"
 		}
@@ -613,9 +915,11 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 	if *usageState == (session.UsageState{}) {
 		usageState = nil
 	}
-	workspaceRoot := row.WorkspaceRoot
-	if strings.TrimSpace(metadataPayload.WorkspaceRoot) != "" {
-		workspaceRoot = metadataPayload.WorkspaceRoot
+	// The joined workspace row is authoritative. The JSON payload may still
+	// contain a historical snapshot captured before an explicit rebind.
+	workspaceRoot := strings.TrimSpace(row.WorkspaceRoot)
+	if workspaceRoot == "" && strings.TrimSpace(metadataPayload.WorkspaceRoot) != "" {
+		workspaceRoot = strings.TrimSpace(metadataPayload.WorkspaceRoot)
 	}
 	workspaceContainer := strings.TrimSpace(metadataPayload.WorkspaceContainer)
 	if workspaceContainer == "" {
@@ -656,6 +960,18 @@ func projectSummaryFromRow(projectID string, displayName string, rootPath string
 		DisplayName:  displayName,
 		RootPath:     rootPath,
 		Availability: clientui.ProjectAvailability(availabilityForPath(rootPath)),
+		SessionCount: int(sessionCount),
+		UpdatedAt:    timeFromStoredTimestamp(latestActivityUnixMs),
+	}
+}
+
+func projectWorkspaceSummaryFromRow(workspaceID string, displayName string, rootPath string, isPrimary bool, sessionCount int64, latestActivityUnixMs int64) clientui.ProjectWorkspaceSummary {
+	return clientui.ProjectWorkspaceSummary{
+		WorkspaceID:  workspaceID,
+		DisplayName:  displayName,
+		RootPath:     rootPath,
+		Availability: clientui.ProjectAvailability(availabilityForPath(rootPath)),
+		IsPrimary:    isPrimary,
 		SessionCount: int(sessionCount),
 		UpdatedAt:    timeFromStoredTimestamp(latestActivityUnixMs),
 	}

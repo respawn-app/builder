@@ -66,6 +66,9 @@ func (m *uiModel) setRuntimeDisconnected(disconnected bool) {
 		return
 	}
 	m.runtimeDisconnected = disconnected
+	if disconnected {
+		m.clearDeferredCommittedTail("disconnect")
+	}
 }
 
 func (m *uiModel) runtimeDisconnectedState() bool {

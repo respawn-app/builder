@@ -120,7 +120,7 @@ Emit:
 Purpose:
 
 - distinguish bad read-model data from bad frontend-apply decisions
-- distinguish committed suffix-append recovery from full committed rebuild recovery
+- distinguish committed suffix-append recovery from explicit external-continuity replay recovery
 
 ### 4. Frontend apply logic
 
@@ -143,10 +143,12 @@ Emit:
 - `transcript.diag.client.append_committed_suffix`
 - `transcript.diag.client.commit_rebuild`
 
+These rebuild-labeled hook names refer only to explicit external continuity-loss recovery, not same-session divergence masking.
+
 Purpose:
 
 - explain whether visible transcript state changed because of live append, hydrate commit, or hydrate rejection
-- make full rebuild decisions obvious in logs instead of looking like ordinary suffix repair
+- make external-continuity replay decisions obvious in logs instead of looking like ordinary suffix repair or same-session divergence masking
 
 ## Required Reject Reasons
 

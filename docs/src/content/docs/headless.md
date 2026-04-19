@@ -21,8 +21,6 @@ Continue an existing headless session:
 builder run --continue <session-id> "follow-up"
 ```
 
-`--session` and `--continue` both target an existing session. `--continue` is the continuation-oriented form and is what Builder emits in follow-up hints and JSON metadata.
-
 ## Session Behavior
 
 - Headless runs use the normal Builder session store and persistence model.
@@ -30,18 +28,30 @@ builder run --continue <session-id> "follow-up"
 - Continuing a session reuses the saved session state.
 - `--workspace` and the usual model/config override flags still work in headless mode.
 
-For the full list of shared overrides, see [Configuration](/config/).
+## Workspace Binding
+
+Headless runs fail fast if the selected workspace is not already attached to a Builder project.
+
+Use these CLI helpers to inspect or repair workspace bindings:
+
+```bash
+builder project [path]
+builder attach [path]
+builder attach --project <project-id> [path]
+builder rebind <old-path> <new-path>
+```
+
+- `builder project` prints the project id for the bound workspace at `path` or `cwd`.
+- `builder attach [path]` attaches another workspace to the project already bound to `cwd`.
+- `builder attach --project <project-id> [path]` skips the `cwd` lookup and attaches explicitly.
+- `builder rebind` updates an existing workspace binding after the workspace moved on disk.
+
+For the full list of shared overrides, see [Configuration](../config/).
 
 ## Output Modes
 
 The default output mode is plain final text.
-In `final-text` mode, Builder writes the final assistant text to `stdout`. When continuation metadata is available, Builder may append a follow-up hint such as:
-
-```text
-To continue this run, execute `builder run --continue <session-id> "follow-up"`.
-```
-
-For scripting, use JSON mode:
+In `final-text` mode, Builder writes the final assistant text to `stdout`. For scripting, use JSON mode:
 
 ```bash
 builder run --output-mode=json "summarize the repo" | jq
@@ -77,9 +87,9 @@ Supported run-specific flags:
 
 ## Non-Interactive Constraint
 
-Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run.
+Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run or issue tool preambles.
 
-That makes them suitable for background execution and automation, but it also means a headless run should be treated as a single unattended turn.
+That makes them suitable for background execution and automation and saves tokens, but it also means a headless run should be treated as a single unattended turn. If you continue the headless session as an interactive one (e.g. from the UI), expect the model to be less talkative going forward.
 
 ## Subagents In Interactive Builder
 
@@ -89,4 +99,4 @@ When the interactive Builder session uses subagents, it does so by launching sep
 - subagents use the same `builder run` interface documented here,
 - and the same headless session/output rules apply.
 
-This keeps the subagent path transparent and scriptable: the feature Builder uses internally is also directly available to human users.
+This keeps the subagent path transparent and scriptable: the feature Builder uses internally is also directly available to human users & scripting.

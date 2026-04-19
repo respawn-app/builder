@@ -43,12 +43,20 @@ type stepLoopOptions struct {
 	RefreshReviewerConfigOnResolve bool
 }
 
+type stepLoopResult struct {
+	Message                    llm.Message
+	ExecutedToolCall           bool
+	NoopFinalAnswer            bool
+	AssistantCommittedStart    int
+	AssistantCommittedStartSet bool
+}
+
 type stepExecutor interface {
-	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, bool, error)
+	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (stepLoopResult, error)
 }
 
 type stepLoopRunner interface {
-	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, bool, error)
+	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (stepLoopResult, error)
 }
 
 type toolExecutor interface {
@@ -63,13 +71,15 @@ type messageLifecycle interface {
 
 type reviewerPipeline interface {
 	ShouldRunTurn(frequency string, reviewerClient llm.Client, patchEditsApplied bool) bool
-	RunFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (reviewerFollowUpResult, error)
+	RunFollowUp(ctx context.Context, stepID string, original llm.Message, originalCommittedStart int, originalCommittedStartSet bool, reviewerClient llm.Client) (reviewerFollowUpResult, error)
 	RunSuggestions(ctx context.Context, stepID string, reviewerClient llm.Client) (reviewerSuggestionsResult, error)
 }
 
 type reviewerFollowUpResult struct {
-	Message    llm.Message
-	Completion *ReviewerStatus
+	Message                    llm.Message
+	Completion                 *ReviewerStatus
+	AssistantCommittedStart    int
+	AssistantCommittedStartSet bool
 }
 
 type phaseProtocolTurn struct {

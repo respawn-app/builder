@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"sort"
 
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
 type CatalogEntry struct {
-	ID             ID
+	ID             toolspec.ID
 	Aliases        []string
 	Description    string
 	Schema         json.RawMessage
@@ -18,7 +19,7 @@ type CatalogEntry struct {
 
 var catalogEntries = []CatalogEntry{
 	{
-		ID:             ToolShell,
+		ID:             toolspec.ToolShell,
 		Aliases:        []string{"bash", "bash_command", "shell_command"},
 		Description:    "Execute a shell command in the user's environment and device.",
 		DefaultEnabled: true,
@@ -28,7 +29,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationShell,
 			transcript.ToolCallRenderBehaviorShell,
 			false,
-			shellToolCallMeta(ToolShell),
+			shellToolCallMeta(toolspec.ToolShell),
 			formatGenericToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -51,7 +52,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolExecCommand,
+		ID:             toolspec.ToolExecCommand,
 		Aliases:        nil,
 		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
 		DefaultEnabled: true,
@@ -61,7 +62,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationShell,
 			transcript.ToolCallRenderBehaviorShell,
 			false,
-			shellToolCallMeta(ToolExecCommand),
+			shellToolCallMeta(toolspec.ToolExecCommand),
 			formatGenericToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -95,13 +96,13 @@ var catalogEntries = []CatalogEntry{
     },
     "max_output_tokens": {
       "type": "integer",
-      "description": "Maximum amount of output to return. Excess output will be truncated, and the full clean log remains available on disk. Omit this unless you want an override."
+      "description": "Maximum amount of output to return. Excess output will be truncated, and the full log remains available on disk. Omit this unless you want an override."
     }
   }
 }`),
 	},
 	{
-		ID:             ToolWriteStdin,
+		ID:             toolspec.ToolWriteStdin,
 		Aliases:        nil,
 		Description:    "Writes characters to an existing exec_command session and returns recent output. Use empty chars to poll.",
 		DefaultEnabled: true,
@@ -111,7 +112,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationShell,
 			transcript.ToolCallRenderBehaviorShell,
 			false,
-			shellToolCallMeta(ToolWriteStdin),
+			shellToolCallMeta(toolspec.ToolWriteStdin),
 			formatGenericToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -139,7 +140,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolViewImage,
+		ID:             toolspec.ToolViewImage,
 		Aliases:        []string{"read_image"},
 		Description:    "View a local image or PDF file by path. You will see PDFs as images (not OCR/text).",
 		DefaultEnabled: true,
@@ -149,7 +150,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationDefault,
 			transcript.ToolCallRenderBehaviorDefault,
 			false,
-			defaultToolCallMeta(ToolViewImage),
+			defaultToolCallMeta(toolspec.ToolViewImage),
 			formatViewImageToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -165,7 +166,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolPatch,
+		ID:             toolspec.ToolPatch,
 		Aliases:        nil,
 		Description:    "Apply a freeform patch.",
 		DefaultEnabled: true,
@@ -175,7 +176,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationDefault,
 			transcript.ToolCallRenderBehaviorDefault,
 			true,
-			patchToolCallMeta(ToolPatch),
+			patchToolCallMeta(toolspec.ToolPatch),
 			formatPatchToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -191,7 +192,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolAskQuestion,
+		ID:             toolspec.ToolAskQuestion,
 		Aliases:        nil,
 		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like messaging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if applicable, and choosing one recommended option you deem best for user goals.",
 		DefaultEnabled: true,
@@ -201,7 +202,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationAskQuestion,
 			transcript.ToolCallRenderBehaviorAskQuestion,
 			false,
-			askQuestionToolCallMeta(ToolAskQuestion),
+			askQuestionToolCallMeta(toolspec.ToolAskQuestion),
 			formatAskQuestionToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -226,9 +227,9 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolTriggerHandoff,
+		ID:             toolspec.ToolTriggerHandoff,
 		Aliases:        nil,
-		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. This tool is private to the next agent, you can use 'analysis' channel content in its parameters.",
+		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. The tool is private to the agent, so you can use 'analysis' channel content in its parameters.",
 		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderTriggerHandoff,
@@ -236,7 +237,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationDefault,
 			transcript.ToolCallRenderBehaviorDefault,
 			false,
-			triggerHandoffToolCallMeta(ToolTriggerHandoff),
+			triggerHandoffToolCallMeta(toolspec.ToolTriggerHandoff),
 			formatTriggerHandoffToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -255,7 +256,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolWebSearch,
+		ID:             toolspec.ToolWebSearch,
 		Aliases:        nil,
 		Description:    "Search the web for up-to-date external information. Use this when local workspace context is insufficient or the fact could be stale, or for information beyond your model knowledge cutoff. Prefer primary and official sources.",
 		DefaultEnabled: true,
@@ -265,7 +266,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolCallRenderBehaviorDefault,
 			false,
 			true,
-			webSearchToolCallMeta(ToolWebSearch),
+			webSearchToolCallMeta(toolspec.ToolWebSearch),
 			formatWebSearchToolResult,
 			decodeHostedWebSearchOutput,
 		),
@@ -292,7 +293,7 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
-		ID:             ToolMultiToolUseParallel,
+		ID:             toolspec.ToolMultiToolUseParallel,
 		Aliases:        []string{"parallel"},
 		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
 		DefaultEnabled: false,
@@ -302,7 +303,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolPresentationDefault,
 			transcript.ToolCallRenderBehaviorDefault,
 			false,
-			defaultToolCallMeta(ToolMultiToolUseParallel),
+			defaultToolCallMeta(toolspec.ToolMultiToolUseParallel),
 			formatGenericToolResult,
 		),
 		Schema: json.RawMessage(`{
@@ -335,17 +336,17 @@ var catalogEntries = []CatalogEntry{
 }
 
 var (
-	definitions       map[ID]Definition
-	parseAliases      map[string]ID
-	catalogIDs        []ID
-	defaultEnabledIDs []ID
+	definitions       map[toolspec.ID]Definition
+	parseAliases      map[string]toolspec.ID
+	catalogIDs        []toolspec.ID
+	defaultEnabledIDs []toolspec.ID
 )
 
 func init() {
-	definitions = make(map[ID]Definition, len(catalogEntries))
-	parseAliases = make(map[string]ID, len(catalogEntries)*2)
-	catalogIDs = make([]ID, 0, len(catalogEntries))
-	defaultEnabledIDs = make([]ID, 0, len(catalogEntries))
+	definitions = make(map[toolspec.ID]Definition, len(catalogEntries))
+	parseAliases = make(map[string]toolspec.ID, len(catalogEntries)*2)
+	catalogIDs = make([]toolspec.ID, 0, len(catalogEntries))
+	defaultEnabledIDs = make([]toolspec.ID, 0, len(catalogEntries))
 
 	for _, entry := range catalogEntries {
 		validateCatalogEntry(entry)
@@ -376,24 +377,24 @@ func Catalog() []CatalogEntry {
 	return out
 }
 
-func CatalogIDs() []ID {
-	out := make([]ID, len(catalogIDs))
+func CatalogIDs() []toolspec.ID {
+	out := make([]toolspec.ID, len(catalogIDs))
 	copy(out, catalogIDs)
 	return out
 }
 
-func DefaultEnabledToolIDs() []ID {
-	out := make([]ID, len(defaultEnabledIDs))
+func DefaultEnabledToolIDs() []toolspec.ID {
+	out := make([]toolspec.ID, len(defaultEnabledIDs))
 	copy(out, defaultEnabledIDs)
 	return out
 }
 
-func parseCatalogID(v string) (ID, bool) {
+func parseCatalogID(v string) (toolspec.ID, bool) {
 	id, ok := parseAliases[v]
 	return id, ok
 }
 
-func definitionFor(id ID) (Definition, bool) {
+func definitionFor(id toolspec.ID) (Definition, bool) {
 	def, ok := definitions[id]
 	return def, ok
 }

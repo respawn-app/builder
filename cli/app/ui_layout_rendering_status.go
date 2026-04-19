@@ -28,9 +28,6 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	if label := processCountLabel(m.listProcesses()); label != "" {
 		segments = append(segments, style.meta.Render(label))
 	}
-	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
-		segments = append(segments, cacheSection)
-	}
 	if serverOwnershipSection := l.renderServerOwnershipSection(style); serverOwnershipSection != "" {
 		segments = append(segments, serverOwnershipSection)
 	}
@@ -177,17 +174,6 @@ func (m *uiModel) shouldShowModelLockedLabel() bool {
 		return false
 	}
 	return strings.TrimSpace(m.modelName) != strings.TrimSpace(m.configuredModelName)
-}
-
-func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {
-	usage := l.model.runtimeStatus().ContextUsage
-	if usage.WindowTokens <= 0 && !usage.HasCacheHitPercentage {
-		return ""
-	}
-	if !usage.HasCacheHitPercentage {
-		return style.meta.Render("cache --")
-	}
-	return style.meta.Render(fmt.Sprintf("cache %d%%", usage.CacheHitPercent))
 }
 
 func (l uiViewLayout) renderServerOwnershipSection(style uiStyles) string {
