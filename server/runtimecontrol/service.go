@@ -20,25 +20,25 @@ type ControllerLeaseVerifier interface {
 }
 
 type Service struct {
-	runtimes RuntimeResolver
-	gate     primaryrun.Gate
-	control  ControllerLeaseVerifier
+	runtimes       RuntimeResolver
+	gate           primaryrun.Gate
+	control        ControllerLeaseVerifier
 	sessionNames   *requestmemo.Memo[sessionStringMemoRequest, struct{}]
 	thinkingLevels *requestmemo.Memo[sessionStringMemoRequest, struct{}]
 	fastModes      *requestmemo.Memo[sessionBoolMemoRequest, serverapi.RuntimeSetFastModeEnabledResponse]
 	reviewers      *requestmemo.Memo[sessionBoolMemoRequest, serverapi.RuntimeSetReviewerEnabledResponse]
 	autoCompacts   *requestmemo.Memo[sessionBoolMemoRequest, serverapi.RuntimeSetAutoCompactionEnabledResponse]
-	submits  *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
-	queues   *requestmemo.Memo[sessionTextMemoRequest, struct{}]
-	shells   *requestmemo.Memo[sessionCommandMemoRequest, struct{}]
+	submits        *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
+	queues         *requestmemo.Memo[sessionTextMemoRequest, struct{}]
+	shells         *requestmemo.Memo[sessionCommandMemoRequest, struct{}]
 
-	localEntries   *requestmemo.Memo[localEntryMemoRequest, struct{}]
-	compactions    *requestmemo.Memo[sessionStringMemoRequest, struct{}]
+	localEntries         *requestmemo.Memo[localEntryMemoRequest, struct{}]
+	compactions          *requestmemo.Memo[sessionStringMemoRequest, struct{}]
 	preSubmitCompactions *requestmemo.Memo[sessionOnlyMemoRequest, struct{}]
-	queuedSubmits  *requestmemo.Memo[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse]
-	interrupts     *requestmemo.Memo[sessionOnlyMemoRequest, struct{}]
-	queuedDiscards *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse]
-	promptHistory  *requestmemo.Memo[sessionTextMemoRequest, struct{}]
+	queuedSubmits        *requestmemo.Memo[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse]
+	interrupts           *requestmemo.Memo[sessionOnlyMemoRequest, struct{}]
+	queuedDiscards       *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse]
+	promptHistory        *requestmemo.Memo[sessionTextMemoRequest, struct{}]
 }
 
 type sessionStringMemoRequest struct {
@@ -73,24 +73,24 @@ type localEntryMemoRequest struct {
 
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
 	return &Service{
-		runtimes: runtimes,
-		gate:     gate,
+		runtimes:       runtimes,
+		gate:           gate,
 		sessionNames:   requestmemo.New[sessionStringMemoRequest, struct{}](),
 		thinkingLevels: requestmemo.New[sessionStringMemoRequest, struct{}](),
 		fastModes:      requestmemo.New[sessionBoolMemoRequest, serverapi.RuntimeSetFastModeEnabledResponse](),
 		reviewers:      requestmemo.New[sessionBoolMemoRequest, serverapi.RuntimeSetReviewerEnabledResponse](),
 		autoCompacts:   requestmemo.New[sessionBoolMemoRequest, serverapi.RuntimeSetAutoCompactionEnabledResponse](),
-		submits:  requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
-		queues:   requestmemo.New[sessionTextMemoRequest, struct{}](),
-		shells:   requestmemo.New[sessionCommandMemoRequest, struct{}](),
+		submits:        requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
+		queues:         requestmemo.New[sessionTextMemoRequest, struct{}](),
+		shells:         requestmemo.New[sessionCommandMemoRequest, struct{}](),
 
-		localEntries:   requestmemo.New[localEntryMemoRequest, struct{}](),
-		compactions:    requestmemo.New[sessionStringMemoRequest, struct{}](),
+		localEntries:         requestmemo.New[localEntryMemoRequest, struct{}](),
+		compactions:          requestmemo.New[sessionStringMemoRequest, struct{}](),
 		preSubmitCompactions: requestmemo.New[sessionOnlyMemoRequest, struct{}](),
-		queuedSubmits:  requestmemo.New[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse](),
-		interrupts:     requestmemo.New[sessionOnlyMemoRequest, struct{}](),
-		queuedDiscards: requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse](),
-		promptHistory:  requestmemo.New[sessionTextMemoRequest, struct{}](),
+		queuedSubmits:        requestmemo.New[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse](),
+		interrupts:           requestmemo.New[sessionOnlyMemoRequest, struct{}](),
+		queuedDiscards:       requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse](),
+		promptHistory:        requestmemo.New[sessionTextMemoRequest, struct{}](),
 	}
 }
 
