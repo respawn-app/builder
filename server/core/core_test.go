@@ -235,6 +235,61 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsUnavailableProjectRoot(t *
 	}
 }
 
+func TestSessionLaunchClientForProjectWorkspaceReplaysForceNewSessionAcrossClientInstances(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupport.Background.Close() })
+
+	appCore, err := New(resolved.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = appCore.Close() })
+
+	firstClient, err := appCore.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, workspace)
+	if err != nil {
+		t.Fatalf("SessionLaunchClientForProjectWorkspace first: %v", err)
+	}
+	secondClient, err := appCore.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, workspace)
+	if err != nil {
+		t.Fatalf("SessionLaunchClientForProjectWorkspace second: %v", err)
+	}
+	req := serverapi.SessionPlanRequest{
+		ClientRequestID: "req-1",
+		Mode:            serverapi.SessionLaunchModeInteractive,
+		ForceNewSession: true,
+	}
+	firstPlan, err := firstClient.PlanSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanSession first: %v", err)
+	}
+	secondPlan, err := secondClient.PlanSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanSession second: %v", err)
+	}
+	if firstPlan.Plan.SessionID != secondPlan.Plan.SessionID {
+		t.Fatalf("session ids = %q and %q, want stable replay", firstPlan.Plan.SessionID, secondPlan.Plan.SessionID)
+	}
+}
+
 func TestSessionLaunchClientForProjectWorkspaceRejectsInaccessibleProjectRoot(t *testing.T) {
 	home := t.TempDir()
 	workspaceA := t.TempDir()
