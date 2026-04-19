@@ -1,11 +1,14 @@
 package tools
 
 import (
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"encoding/json"
 	"testing"
 )
 
 func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
+	ctx := ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "darwin"}
 	tests := []struct {
 		name    string
 		command string
@@ -21,7 +24,7 @@ func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			hint := detectShellRenderHint(tc.command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(tc.command), tc.command)
 			if hint == nil {
 				t.Fatalf("expected render hint for command %q", tc.command)
 			}
@@ -39,6 +42,7 @@ func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
 }
 
 func TestDetectShellRenderHintDefaultsToShellForGeneralCommands(t *testing.T) {
+	ctx := ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "darwin"}
 	commands := []string{
 		"./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1",
 		"git status --short",
@@ -46,18 +50,68 @@ func TestDetectShellRenderHintDefaultsToShellForGeneralCommands(t *testing.T) {
 
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(command), command)
 			if hint == nil {
 				t.Fatalf("expected shell render hint for command %q", command)
 			}
 			if hint.Kind != transcript.ToolRenderKindShell {
 				t.Fatalf("expected shell hint, got %+v", hint)
 			}
+			if hint.ShellDialect != transcript.ToolShellDialectPosix {
+				t.Fatalf("expected posix shell dialect, got %+v", hint)
+			}
 		})
 	}
 }
 
+func TestDetectShellRenderHintUsesExplicitWindowsExecShell(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		command string
+		want    transcript.ToolShellDialect
+	}{
+		{name: "pwsh.exe", raw: json.RawMessage(`{"cmd":"Get-ChildItem","shell":"pwsh.exe"}`), command: "Get-ChildItem", want: transcript.ToolShellDialectPowerShell},
+		{name: "powershell.exe", raw: json.RawMessage(`{"cmd":"Get-ChildItem","shell":"powershell.exe"}`), command: "Get-ChildItem", want: transcript.ToolShellDialectPowerShell},
+		{name: "cmd.exe", raw: json.RawMessage(`{"cmd":"dir","shell":"cmd.exe"}`), command: "dir", want: transcript.ToolShellDialectWindowsCommand},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hint := detectShellRenderHint(
+				ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "windows"},
+				toolspec.ToolExecCommand,
+				tc.raw,
+				tc.command,
+			)
+			if hint == nil || hint.Kind != transcript.ToolRenderKindShell {
+				t.Fatalf("expected shell render hint, got %+v", hint)
+			}
+			if hint.ShellDialect != tc.want {
+				t.Fatalf("expected %s dialect, got %+v", tc.want, hint)
+			}
+		})
+	}
+}
+
+func TestDetectShellRenderHintFallsBackToWindowsCommandDialect(t *testing.T) {
+	command := `copy /y C:\Users\nek\src.txt C:\Temp\dst.txt`
+	hint := detectShellRenderHint(
+		ToolCallContext{GOOS: "windows"},
+		toolspec.ToolShell,
+		shellCommandRaw(command),
+		command,
+	)
+	if hint == nil || hint.Kind != transcript.ToolRenderKindShell {
+		t.Fatalf("expected shell render hint, got %+v", hint)
+	}
+	if hint.ShellDialect != transcript.ToolShellDialectWindowsCommand {
+		t.Fatalf("expected windows command dialect, got %+v", hint)
+	}
+}
+
 func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
+	ctx := ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "darwin"}
 	tests := []string{
 		"cat",
 		"cat cli/tui/model.go | sed -n '1,10p'",
@@ -70,13 +124,25 @@ func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 
 	for _, command := range tests {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(command), command)
 			if hint == nil {
 				t.Fatalf("expected fallback shell hint for command %q", command)
 			}
 			if hint.Kind != transcript.ToolRenderKindShell {
 				t.Fatalf("expected shell fallback hint, got %+v", hint)
 			}
+			if hint.ShellDialect != transcript.ToolShellDialectPosix {
+				t.Fatalf("expected posix shell dialect, got %+v", hint)
+			}
 		})
 	}
+}
+
+func shellCommandRaw(command string) json.RawMessage {
+	return json.RawMessage(`{"command":` + jsonQuoted(command) + `}`)
+}
+
+func jsonQuoted(value string) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }

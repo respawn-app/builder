@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -211,7 +212,7 @@ func (r *codeRenderer) renderDiffLines(renderedPatch *patchformat.RenderedPatch,
 func (r *codeRenderer) resolveLexer(hint *transcript.ToolRenderHint, text string) chroma.Lexer {
 	switch hint.Kind {
 	case transcript.ToolRenderKindShell:
-		return lexers.Get("bash")
+		return r.resolveShellLexer(hint)
 	case transcript.ToolRenderKindDiff:
 		return lexers.Get("diff")
 	case transcript.ToolRenderKindSource:
@@ -223,6 +224,26 @@ func (r *codeRenderer) resolveLexer(hint *transcript.ToolRenderHint, text string
 		return lexers.Analyse(text)
 	default:
 		return nil
+	}
+}
+
+func (r *codeRenderer) resolveShellLexer(hint *transcript.ToolRenderHint) chroma.Lexer {
+	dialect := transcript.ToolShellDialectPosix
+	if hint != nil {
+		dialect = hint.ShellDialect
+	}
+	switch dialect {
+	case transcript.ToolShellDialectPowerShell:
+		return lexers.Get("powershell")
+	case transcript.ToolShellDialectWindowsCommand:
+		return lexers.Get("batch")
+	case transcript.ToolShellDialectPosix:
+		return lexers.Get("bash")
+	default:
+		if runtime.GOOS == "windows" {
+			return lexers.Get("batch")
+		}
+		return lexers.Get("bash")
 	}
 }
 

@@ -580,7 +580,7 @@ func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta)
 		return nil, false
 	}
 	if shouldFallbackToShellPreviewHint(role, text, toolMeta, hint) {
-		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}, true
+		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell, ShellDialect: hint.ShellDialect}, true
 	}
 	return hint, true
 }

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	goruntime "runtime"
 	"strings"
 
 	"builder/server/llm"
@@ -171,6 +172,8 @@ func persistedTranscriptToolCallMeta(call llm.ToolCall) *transcript.ToolCallMeta
 	}
 	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
 		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+		DefaultShellPath:           currentTranscriptDefaultShellPath(),
+		GOOS:                       goruntime.GOOS,
 	}, call.Input)
 	return &built
 }

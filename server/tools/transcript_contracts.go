@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -75,7 +76,7 @@ func shellToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage
 		if command == "" {
 			command = defaultToolCallFallback
 		}
-		renderHint := detectShellRenderHint(command)
+		renderHint := detectShellRenderHint(ctx, toolID, raw, command)
 		if toolID == toolspec.ToolWriteStdin {
 			renderHint = nil
 		}
@@ -362,8 +363,8 @@ func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact
 	return r.DetailText(), r.SummaryText(), &r, true
 }
 
-func detectShellRenderHint(command string) *transcript.ToolRenderHint {
-	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}
+func detectShellRenderHint(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage, command string) *transcript.ToolRenderHint {
+	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell, ShellDialect: detectToolShellDialect(ctx, toolID, raw)}
 	args, ok := parseSimpleShellCommand(command)
 	if !ok || len(args) == 0 {
 		return defaultHint
@@ -392,6 +393,66 @@ func detectShellRenderHint(command string) *transcript.ToolRenderHint {
 	default:
 		return defaultHint
 	}
+}
+
+func detectToolShellDialect(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage) transcript.ToolShellDialect {
+	if toolID == toolspec.ToolExecCommand {
+		if shellPath := parseRequestedExecShell(raw); shellPath != "" {
+			if dialect, ok := shellDialectForExecutable(shellPath); ok {
+				return dialect
+			}
+		}
+	}
+	if shellPath := strings.TrimSpace(ctx.DefaultShellPath); shellPath != "" {
+		if dialect, ok := shellDialectForExecutable(shellPath); ok {
+			return dialect
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(ctx.GOOS), "windows") {
+		return transcript.ToolShellDialectWindowsCommand
+	}
+	return transcript.ToolShellDialectPosix
+}
+
+func parseRequestedExecShell(raw json.RawMessage) string {
+	var in struct {
+		Shell string `json:"shell,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(in.Shell)
+}
+
+func shellDialectForExecutable(shellPath string) (transcript.ToolShellDialect, bool) {
+	name := shellExecutableName(shellPath)
+	switch name {
+	case "pwsh", "powershell":
+		return transcript.ToolShellDialectPowerShell, true
+	case "cmd", "command":
+		return transcript.ToolShellDialectWindowsCommand, true
+	case "sh", "bash", "zsh", "dash", "ash", "ksh", "mksh", "fish", "nu", "nushell":
+		return transcript.ToolShellDialectPosix, true
+	default:
+		return "", false
+	}
+}
+
+func shellExecutableName(shellPath string) string {
+	trimmed := strings.TrimSpace(shellPath)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := path.Base(trimmed)
+	if base == "." || base == "/" {
+		base = filepath.Base(trimmed)
+	}
+	base = strings.ToLower(strings.TrimSpace(base))
+	if ext := filepath.Ext(base); ext != "" {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return base
 }
 
 func parseSimpleShellCommand(command string) ([]string, bool) {
