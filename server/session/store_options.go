@@ -1,6 +1,9 @@
 package session
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 type EventLogFSyncPolicy string
 
@@ -15,12 +18,17 @@ const (
 	defaultEventLogFSyncIntervalWrites   = 16
 	defaultEventLogCompactionEveryWrites = 256
 	defaultEventLogCompactionMinBytes    = int64(4 * 1024 * 1024)
+	defaultPersistenceObserverTimeout    = 2 * time.Second
 )
 
 type StoreOption func(*storeOptions)
 
 type storeOptions struct {
-	eventLog eventLogOptions
+	eventLog        eventLogOptions
+	observer        PersistenceObserver
+	resolver        PersistedSessionResolver
+	filelessMeta    bool
+	observerTimeout time.Duration
 }
 
 type eventLogOptions struct {
@@ -49,6 +57,30 @@ func WithEventLogCompaction(everyWrites int, minBytes int64) StoreOption {
 	}
 }
 
+func WithPersistenceObserver(observer PersistenceObserver) StoreOption {
+	return func(options *storeOptions) {
+		options.observer = observer
+	}
+}
+
+func WithPersistenceObserverTimeout(timeout time.Duration) StoreOption {
+	return func(options *storeOptions) {
+		options.observerTimeout = timeout
+	}
+}
+
+func WithPersistedSessionResolver(resolver PersistedSessionResolver) StoreOption {
+	return func(options *storeOptions) {
+		options.resolver = resolver
+	}
+}
+
+func WithFilelessMetadataPersistence() StoreOption {
+	return func(options *storeOptions) {
+		options.filelessMeta = true
+	}
+}
+
 func normalizeStoreOptions(options ...StoreOption) storeOptions {
 	result := storeOptions{
 		eventLog: eventLogOptions{
@@ -57,6 +89,7 @@ func normalizeStoreOptions(options ...StoreOption) storeOptions {
 			compactionEveryWrites: defaultEventLogCompactionEveryWrites,
 			compactionMinBytes:    defaultEventLogCompactionMinBytes,
 		},
+		observerTimeout: defaultPersistenceObserverTimeout,
 	}
 	for _, option := range options {
 		if option == nil {
@@ -65,6 +98,9 @@ func normalizeStoreOptions(options ...StoreOption) storeOptions {
 		option(&result)
 	}
 	result.eventLog = normalizeEventLogOptions(result.eventLog)
+	if result.observerTimeout <= 0 {
+		result.observerTimeout = defaultPersistenceObserverTimeout
+	}
 	return result
 }
 

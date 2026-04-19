@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -13,14 +14,19 @@ import (
 	"sync"
 	"time"
 
+	"builder/server/serve"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
+	"builder/shared/serverapi"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
-var dialDiscoveredRemote = client.DialRemote
+var dialConfiguredRemote = client.DialConfiguredRemoteForProjectWorkspaceID
+var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) (configuredProjectViewRemote, error) {
+	return client.DialConfiguredRemote(ctx, cfg)
+}
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
@@ -41,14 +47,43 @@ var forceKillOwnedDaemonProcess = func(process *os.Process) error {
 
 const launchedDaemonShutdownTimeout = 5 * time.Second
 
+var configuredRemoteAttachTimeout = 500 * time.Millisecond
+var configuredRemoteWorkspaceDiscoveryTimeout = 5 * time.Second
+
+var errWorkspaceNotRegistered = serverapi.ErrWorkspaceNotRegistered
+
+type configuredProjectViewRemote interface {
+	client.ProjectViewClient
+	Close() error
+	Identity() protocol.ServerIdentity
+}
+
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
-	if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
+	cfg, err := loadRemoteAttachConfig(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	if remote, ok, err := tryDialConfiguredRunPromptRemote(ctx, opts); err != nil {
+		return nil, nil, err
+	} else if ok {
+		if err := ensureRemoteAuthReady(ctx, remote, cfg.Settings, newHeadlessAuthInteractor()); err != nil {
+			_ = remote.Close()
+			return nil, nil, err
+		}
 		return remote, remote.Close, nil
 	}
 	launchErr := error(nil)
 	if remote, closeFn, ok, err := launchRunPromptDaemon(ctx, opts); err != nil {
 		launchErr = err
 	} else if ok {
+		if err := ensureRemoteAuthReady(ctx, remote, cfg.Settings, newHeadlessAuthInteractor()); err != nil {
+			_ = closeFn()
+			return nil, nil, err
+		}
+		if strings.TrimSpace(remote.ProjectID()) == "" {
+			_ = closeFn()
+			return nil, nil, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
+		}
 		return remote, closeFn, nil
 	}
 	server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
@@ -58,65 +93,175 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 		}
 		return nil, nil, err
 	}
+	if strings.TrimSpace(server.ProjectID()) == "" {
+		_ = server.Close()
+		return nil, nil, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
+	}
 	return server.RunPromptClient(), server.Close, nil
 }
 
-func tryDialDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
-	return tryDialMatchingDiscoveredRemote(ctx, opts, supports, nil)
+func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {
+	return tryDialMatchingConfiguredRunPromptRemote(ctx, opts, nil)
 }
 
-func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.DiscoveryRecord) bool) (*client.Remote, bool) {
-	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
+func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
+	cfg, err := loadRemoteAttachConfig(opts)
+	if err != nil {
+		return nil, false, err
+	}
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, cfg)
+	if err != nil {
+		return nil, false, nil
+	}
+	if accept != nil && !accept(projectViews.Identity()) {
+		_ = projectViews.Close()
+		return nil, false, nil
+	}
+	if !configuredRemoteSupportsRunPrompt(projectViews.Identity().Capabilities) {
+		_ = projectViews.Close()
+		return nil, false, nil
+	}
+	bindingResp, err := projectViews.ResolveProjectPath(attachCtx, serverapi.ProjectResolvePathRequest{Path: cfg.WorkspaceRoot})
+	if err != nil {
+		_ = projectViews.Close()
+		return nil, true, err
+	}
+	if bindingResp.Binding != nil {
+		_ = projectViews.Close()
+		remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
+		if err != nil {
+			return nil, true, err
+		}
+		return remote, true, nil
+	}
+	if bindingResp.PathAvailability == clientui.ProjectAvailabilityAvailable {
+		_ = projectViews.Close()
+		return nil, true, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
+	}
+	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, configuredRemoteWorkspaceDiscoveryTimeout)
+	workspace, found, err := selectSingleRemoteWorkspaceForHeadless(discoveryCtx, projectViews)
+	discoveryCancel()
+	_ = projectViews.Close()
+	if err != nil {
+		return nil, true, err
+	}
+	if !found {
+		return nil, true, headlessRemoteWorkspaceSelectionError()
+	}
+	remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, workspace.ProjectID, workspace.WorkspaceID)
+	if err != nil {
+		return nil, true, err
+	}
+	return remote, true, nil
+}
+
+type remoteWorkspaceSelection struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func selectSingleRemoteWorkspaceForHeadless(ctx context.Context, projectViews client.ProjectViewClient) (remoteWorkspaceSelection, bool, error) {
+	projects, err := projectViews.ListProjects(ctx, serverapi.ProjectListRequest{})
+	if err != nil {
+		return remoteWorkspaceSelection{}, false, err
+	}
+	selection := remoteWorkspaceSelection{}
+	count := 0
+	for _, project := range projects.Projects {
+		overview, err := projectViews.GetProjectOverview(ctx, serverapi.ProjectGetOverviewRequest{ProjectID: project.ProjectID})
+		if err != nil {
+			return remoteWorkspaceSelection{}, false, err
+		}
+		for _, workspace := range overview.Overview.Workspaces {
+			availability := strings.TrimSpace(string(workspace.Availability))
+			if availability != "" && workspace.Availability != clientui.ProjectAvailabilityAvailable {
+				continue
+			}
+			count++
+			selection = remoteWorkspaceSelection{ProjectID: project.ProjectID, WorkspaceID: workspace.WorkspaceID}
+			if count > 1 {
+				return remoteWorkspaceSelection{}, false, nil
+			}
+		}
+	}
+	if count == 0 {
+		return remoteWorkspaceSelection{}, false, nil
+	}
+	return selection, true, nil
+}
+
+func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, nil, true)
+}
+
+func tryDialMatchingConfiguredRemoteAllowUnregistered(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, false)
+}
+
+func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, true)
+}
+
+func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool, requireRegistered bool) (*client.Remote, bool) {
+	cfg, err := loadRemoteAttachConfig(opts)
 	if err != nil {
 		return nil, false
 	}
-	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, cfg)
 	if err != nil {
 		return nil, false
 	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if accept != nil && !accept(projectViews.Identity()) {
+		_ = projectViews.Close()
+		return nil, false
+	}
+	if supports != nil && !supports(projectViews.Identity().Capabilities) {
+		_ = projectViews.Close()
+		return nil, false
+	}
+	binding, resolveErr := resolveRemoteWorkspaceBinding(attachCtx, projectViews, cfg.WorkspaceRoot)
+	if resolveErr != nil {
+		_ = projectViews.Close()
+		return nil, false
+	}
+	if binding == nil {
+		if requireRegistered {
+			_ = projectViews.Close()
+			return nil, false
+		}
+		remote, ok := projectViews.(*client.Remote)
+		if !ok {
+			_ = projectViews.Close()
+			return nil, false
+		}
+		return remote, true
+	}
+	_ = projectViews.Close()
+	remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, binding.ProjectID, binding.WorkspaceID)
 	if err != nil {
-		return nil, false
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		return nil, false
-	}
-	record, err := discovery.Read(discoveryPath)
-	if err != nil {
-		return nil, false
-	}
-	expectedProjectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
-	if err != nil {
-		return nil, false
-	}
-	if record.Identity.ProjectID != expectedProjectID {
-		return nil, false
-	}
-	if accept != nil && !accept(record) {
-		return nil, false
-	}
-	remote, err := dialDiscoveredRemote(ctx, record)
-	if err != nil {
-		return nil, false
-	}
-	if remote.Identity().ProjectID != expectedProjectID {
-		_ = remote.Close()
-		return nil, false
-	}
-	if supports != nil && !supports(remote.Identity().Capabilities) {
-		_ = remote.Close()
 		return nil, false
 	}
 	return remote, true
 }
 
-func discoveredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
-	return flags.RunPrompt
+func dialConfiguredRemoteWorkspace(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	return dialConfiguredRemote(attachCtx, cfg, projectID, workspaceID)
 }
 
-func discoveredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
-	return flags.SessionPlan &&
+func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
+	return flags.RunPrompt && flags.AuthBootstrap && flags.ProjectAttach
+}
+
+func configuredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
+	return flags.AuthBootstrap &&
+		flags.ProjectAttach &&
+		flags.SessionPlan &&
 		flags.SessionLifecycle &&
 		flags.SessionTranscriptPaging &&
 		flags.SessionRuntime &&
@@ -140,6 +285,10 @@ func resolveCLIWorkspaceRoot(opts Options) (string, error) {
 }
 
 func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
+	cfg, err := loadRemoteAttachConfig(opts)
+	if err != nil {
+		return nil, nil, false, err
+	}
 	execPath, ok := resolveDaemonExecutablePath()
 	if !ok {
 		return nil, nil, false, nil
@@ -148,6 +297,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	if err != nil {
 		return nil, nil, false, err
 	}
+	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
 	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
@@ -165,9 +315,12 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialMatchingDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
-			return record.Identity.PID == childPID
-		}); ok {
+		if remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(ctx, opts, func(identity protocol.ServerIdentity) bool {
+			return identity.PID == childPID
+		}); err != nil {
+			_ = failureClose()
+			return nil, nil, false, err
+		} else if ok {
 			return remote, newOwnedDaemonClose(remote, cmd, errCh), true, nil
 		}
 		select {
@@ -184,6 +337,38 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func loadRemoteAttachConfig(opts Options) (config.App, error) {
+	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
+	if err != nil {
+		return config.App{}, err
+	}
+	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
+	if err != nil {
+		return config.App{}, err
+	}
+	return cfg, nil
+}
+
+func resolveRemoteWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (*serverapi.ProjectBinding, error) {
+	resp, err := projectViews.ResolveProjectPath(ctx, serverapi.ProjectResolvePathRequest{Path: workspaceRoot})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Binding, nil
+}
+
+func headlessWorkspaceRegistrationError(workspaceRoot string) error {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedRoot == "" {
+		trimmedRoot = "current workspace"
+	}
+	return fmt.Errorf("%w: %s is not attached to a project. Run `builder project` in a workspace that already belongs to the target project, then run `builder attach <path>` from there or `builder attach --project <project-id> <path>`", errWorkspaceNotRegistered, trimmedRoot)
+}
+
+func headlessRemoteWorkspaceSelectionError() error {
+	return errors.New("remote server could not resolve the current workspace and no single server workspace could be chosen automatically. Run `builder project list`, `builder project create --path <server-path> --name <project-name>`, or `builder attach --project <project-id> <server-path>` against the configured server, or start interactive Builder to choose an existing server project/workspace")
 }
 
 func newOwnedDaemonClose(remote *client.Remote, cmd *exec.Cmd, errCh <-chan error) func() error {

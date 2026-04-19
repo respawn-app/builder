@@ -86,6 +86,14 @@ If short-name resolution is stale on a machine, use the fully qualified formula 
 brew install respawn-app/tap/builder-cli
 ```
 
+6. Clean up the Homebrew and direct installs to restore your local development build:
+
+```bash
+brew uninstall builder-cli 2>/dev/null || true
+sudo rm -f /usr/local/bin/builder
+which builder # should point to your local development bin directory, e.g. ./bin/builder
+```
+
 ## Notes
 
 - Installed binary name stays `builder`. Formula name is `builder-cli`.

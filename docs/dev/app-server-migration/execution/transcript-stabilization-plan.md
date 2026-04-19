@@ -21,7 +21,7 @@ Out of scope for this plan:
 - new product features
 - protocol redesign beyond what is needed for transcript correctness
 - unrelated performance work outside transcript/state handling
-- phase 4 and phase 5 feature execution
+- broader phase 4 work and phase 5B multi-client proof work
 
 ## Stabilization Rule
 
@@ -158,7 +158,7 @@ This plan is complete only when all of the following are true:
 
 Do not treat transcript stabilization as done just because individual bugs were fixed.
 
-- [ ] Keep phase-4/5 feature work blocked if transcript correctness is still drifting.
+- [ ] Keep broader phase-4 work and phase-5B multi-client proof work blocked if transcript correctness is still drifting.
 - [ ] Only resume broader migration execution once the completion criteria above are satisfied.
 
 ## Current Gaps
@@ -170,14 +170,14 @@ The current highest-value remaining gaps from the parallel audit are:
 - [x] explicit freshness/overwrite rule for live events vs transcript reads
 - [x] focused dormant-session reopen proof for committed transcript in both modes
 
-Known remaining caveat:
+Resolved since this plan was first written:
 
-- [ ] remote session-activity still preserves live assistant progress via `assistant_delta`, but does not yet surface the persisted commentary transcript entry for the assistant/tool-call turn
+- [x] remote session-activity still preserves live assistant progress via `assistant_delta`, and now also surfaces the persisted commentary transcript entry for the assistant/tool-call turn
 
-Deferred decision for this slice:
+Follow-up note for this slice:
 
-- [x] Defer raw remote commentary-entry parity for assistant/tool-call turns until a later runtime-event contract change.
-- [x] Treat the current requirement as convergence via hydrate, not event-for-event parity on the raw session-activity stream.
+- [x] Raw remote commentary-entry parity for assistant/tool-call turns landed via the runtime-event/projection contract.
+- [x] Hydrate remains recovery-only for disconnect/stream-gap repair, not the normal path for commentary/tool-call convergence.
 
 Cleanup proof for the checked regression-triage item lives in:
 
@@ -194,13 +194,14 @@ This is the running workflow checklist for stabilization triage. It is intention
 - [x] stale/same-revision hydrate cannot wipe newer live assistant output
 - [x] stale/same-revision hydrate cannot wipe newer live reasoning output
 - [x] dormant-session reopen preserves committed transcript
-- [ ] remote path carries the same assistant commentary transcript entry shape as loopback
+- [x] remote path carries the same assistant commentary transcript entry shape as loopback
 
 Authoritative proof for the checked items lives in:
 
 - `docs/dev/app-server-migration/analysis/transcript-workflow-proof.md`
 - `docs/dev/app-server-migration/analysis/transcript-observability-plan.md`
 - `docs/dev/app-server-migration/analysis/transcript-overlap-audit.md`
+- `server/transport/gateway_test.go`
 
 ## Remaining Execution Slices
 
@@ -211,7 +212,7 @@ No further mandatory code slices remain inside this stabilization execution plan
 What remains is explicit and non-hidden:
 
 - the remote commentary gap stays deferred until we deliberately change the runtime-event/projection contract
-- release-gate confidence remains a product decision rather than an implementation checklist item
+- release-gate confidence for entering phase 5A implementation remains a product decision rather than an implementation checklist item
 
 Ongoing maintenance while the branch evolves:
 

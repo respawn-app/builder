@@ -10,6 +10,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	"builder/shared/toolspec"
 )
 
 func TestTrimOldestEligibleItemsRemovesFunctionCallWithOutputsAtomically(t *testing.T) {
@@ -43,7 +44,7 @@ func TestCompactionCacheObservationRequestAppendsPromptToConversationReplica(t *
 
 	client := &fakeCompactionClient{}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model: "gpt-5",
 	})
 	if err != nil {
@@ -56,10 +57,10 @@ func TestCompactionCacheObservationRequestAppendsPromptToConversationReplica(t *
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
 		t.Fatalf("append assistant tool call: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
 		t.Fatalf("append tool output message: %v", err)
 	}
 
@@ -139,7 +140,7 @@ func TestRemoteCompactionOnlyTrimsAfterOverflowAndWarnsOnCacheBreak(t *testing.T
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:               "gpt-5",
 		ContextWindowTokens: 2500,
 	})
@@ -153,10 +154,10 @@ func TestRemoteCompactionOnlyTrimsAfterOverflowAndWarnsOnCacheBreak(t *testing.T
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
 		t.Fatalf("append assistant tool call: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
 		t.Fatalf("append tool output message: %v", err)
 	}
 
@@ -250,7 +251,7 @@ func TestCompactionTransientRetryObservesCacheLineageOnce(t *testing.T) {
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"encoding/json"
 	"testing"
 )
@@ -62,7 +63,7 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			name: "ordinary shell result",
 			result: tools.Result{
 				CallID: "call-shell-1",
-				Name:   tools.ToolShell,
+				Name:   toolspec.ToolShell,
 				Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 			},
 		},
@@ -70,7 +71,7 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			name: "trigger handoff synthetic success result",
 			result: tools.Result{
 				CallID: "call-handoff-1",
-				Name:   tools.ToolTriggerHandoff,
+				Name:   toolspec.ToolTriggerHandoff,
 				Output: json.RawMessage(`""`),
 			},
 		},
@@ -91,6 +92,42 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			}
 			if entry.ToolCallID != tc.result.CallID {
 				t.Fatalf("entry tool call id = %q, want %q", entry.ToolCallID, tc.result.CallID)
+			}
+		})
+	}
+}
+
+func TestTranscriptEntriesFromEventOmitsPrePersistCompactionStatusRows(t *testing.T) {
+	testCases := []struct {
+		name string
+		evt  Event
+	}{
+		{
+			name: "compaction completed",
+			evt: Event{
+				Kind: EventCompactionCompleted,
+				Compaction: &CompactionStatus{
+					Mode:  "auto",
+					Count: 1,
+				},
+			},
+		},
+		{
+			name: "compaction failed",
+			evt: Event{
+				Kind: EventCompactionFailed,
+				Compaction: &CompactionStatus{
+					Mode:  "manual",
+					Error: "quota exceeded",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if entries := TranscriptEntriesFromEvent(tc.evt); len(entries) != 0 {
+				t.Fatalf("expected no transcript entries for pre-persist compaction status, got %+v", entries)
 			}
 		})
 	}

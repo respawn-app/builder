@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"builder/server/auth"
-	"builder/server/tools"
+	"builder/shared/toolspec"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
@@ -386,7 +386,7 @@ func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
-			Name:   string(tools.ToolViewImage),
+			Name:   string(toolspec.ToolViewImage),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`),
 		},
 	})
@@ -440,7 +440,7 @@ func TestBuildResponsesInput_MessageToolOutputPromotesPDFToInputMessage(t *testi
 		{
 			Role:       RoleTool,
 			ToolCallID: "call_1",
-			Name:       string(tools.ToolViewImage),
+			Name:       string(toolspec.ToolViewImage),
 			Content:    `[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`,
 		},
 	}))
@@ -482,7 +482,7 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
-			Name:   string(tools.ToolShell),
+			Name:   string(toolspec.ToolShell),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
 		},
 	})
@@ -1367,7 +1367,7 @@ func TestInputTokenCountPayloadMatchesCompactPayloadInputShape(t *testing.T) {
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
-			Name:   string(tools.ToolViewImage),
+			Name:   string(toolspec.ToolViewImage),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`),
 		},
 		{Type: ResponseItemTypeReasoning, ID: "rs_1", EncryptedContent: "enc_reasoning"},

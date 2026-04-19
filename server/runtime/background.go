@@ -10,6 +10,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type defaultBackgroundNoticeScheduler struct {
@@ -163,7 +164,7 @@ type harvestedBackgroundCompletion struct {
 }
 
 func harvestedBackgroundCompletionSessionID(res tools.Result) (string, bool) {
-	if res.IsError || res.Name != tools.ToolWriteStdin {
+	if res.IsError || res.Name != toolspec.ToolWriteStdin {
 		return "", false
 	}
 	var out harvestedBackgroundCompletion

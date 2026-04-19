@@ -7,14 +7,15 @@ import (
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type fakeHandler struct {
-	id    tools.ID
+	id    toolspec.ID
 	delay time.Duration
 }
 
-func (f fakeHandler) Name() tools.ID { return f.id }
+func (f fakeHandler) Name() toolspec.ID { return f.id }
 
 func (f fakeHandler) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	if f.delay > 0 {
@@ -30,8 +31,8 @@ func (f fakeHandler) Call(_ context.Context, c tools.Call) (tools.Result, error)
 func TestCallExecutesSubtoolsInParallelAndPreservesDeclaredOrder(t *testing.T) {
 	var reg *tools.Registry
 	reg = tools.NewRegistry(
-		fakeHandler{id: tools.ToolShell, delay: 40 * time.Millisecond},
-		fakeHandler{id: tools.ToolPatch, delay: 1 * time.Millisecond},
+		fakeHandler{id: toolspec.ToolShell, delay: 40 * time.Millisecond},
+		fakeHandler{id: toolspec.ToolPatch, delay: 1 * time.Millisecond},
 		New(func() *tools.Registry { return reg }),
 	)
 	tool := New(func() *tools.Registry { return reg })
@@ -44,7 +45,7 @@ func TestCallExecutesSubtoolsInParallelAndPreservesDeclaredOrder(t *testing.T) {
 	}`)
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call_parallel_1",
-		Name:  tools.ToolMultiToolUseParallel,
+		Name:  toolspec.ToolMultiToolUseParallel,
 		Input: input,
 	})
 	if err != nil {
@@ -79,7 +80,7 @@ func TestCallExecutesSubtoolsInParallelAndPreservesDeclaredOrder(t *testing.T) {
 func TestCallRejectsInvalidRecipientNamespace(t *testing.T) {
 	var reg *tools.Registry
 	reg = tools.NewRegistry(
-		fakeHandler{id: tools.ToolShell},
+		fakeHandler{id: toolspec.ToolShell},
 		New(func() *tools.Registry { return reg }),
 	)
 	tool := New(func() *tools.Registry { return reg })
@@ -87,7 +88,7 @@ func TestCallRejectsInvalidRecipientNamespace(t *testing.T) {
 	input := json.RawMessage(`{"tool_uses":[{"recipient_name":"shell","parameters":{"command":"pwd"}}]}`)
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call_parallel_2",
-		Name:  tools.ToolMultiToolUseParallel,
+		Name:  toolspec.ToolMultiToolUseParallel,
 		Input: input,
 	})
 	if err != nil {
@@ -106,7 +107,7 @@ func TestCallRejectsRecursiveParallelInvocation(t *testing.T) {
 	input := json.RawMessage(`{"tool_uses":[{"recipient_name":"functions.multi_tool_use_parallel","parameters":{"tool_uses":[]}}]}`)
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call_parallel_3",
-		Name:  tools.ToolMultiToolUseParallel,
+		Name:  toolspec.ToolMultiToolUseParallel,
 		Input: input,
 	})
 	if err != nil {

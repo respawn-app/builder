@@ -1,8 +1,8 @@
 # Transcript Sync Reliability
 
-Status: active regression analysis and partial implementation
+Status: Phase 6A/6B transcript hardening landed; any further systemic reducer work is later follow-up
 
-Last updated: 2026-03-28
+Last updated: 2026-04-12
 
 ## Regression
 
@@ -96,6 +96,34 @@ Corollaries:
 - dirty committed transcript state must be repaired by authoritative rehydrate, not by replaying deltas
 - local terminal scrollback must only consume the repaired committed projection
 
+## Product Semantics Locked After Review
+
+Two earlier assumptions were incorrect and are now superseded by product decisions:
+
+- compaction is not a same-session transcript rewrite for frontend recovery purposes; it is ordinary same-session committed transcript progression surfaced through committed entries
+- rollback/fork is navigation or attachment to a different session target, not same-session transcript mutation
+
+That leaves two relevant recovery classes:
+
+- Category A: client-side logical divergence bugs such as bad deduplication, ordering, overlap, pagination, or live-vs-hydrate reconciliation
+- Category C: external continuity loss such as disconnect, stream gap, client restart, daemon restart, or subscription invalidation
+
+Category A must be fixed at root cause. Category C recovers through authoritative rehydrate; in TUI ongoing mode, re-issuing the ongoing buffer is acceptable for that recovery class.
+
+## Recovery Class Mapping
+
+| Case | Class | Required behavior |
+| --- | --- | --- |
+| missed user message commit during active attachment | Category A | fix root cause; do not normalize with redraw |
+| missed tool start/output/finalize during active attachment | Category A | fix root cause; do not normalize with redraw |
+| missed final assistant answer during active attachment | Category A | fix root cause; do not normalize with redraw |
+| stream gap / slow subscriber | Category C | authoritative rehydrate plus resubscribe; TUI ongoing may re-issue buffer |
+| client restart | Category C | authoritative rehydrate on attach; TUI ongoing may re-issue buffer |
+| daemon restart | Category C | authoritative rehydrate on reattach; TUI ongoing may re-issue buffer |
+| transport disconnect | Category C | authoritative rehydrate on recovery; TUI ongoing may re-issue buffer |
+
+The purpose of this split is to keep recovery semantics honest: external continuity loss is recoverable by redraw from authority, while same-session logical divergence is a correctness bug in our reconciliation logic.
+
 ## Proposed Model
 
 Split session communication into two explicit layers.
@@ -127,6 +155,9 @@ Implementation status:
   - `RuntimeClient.Transcript()` / `RefreshTranscript()`
   - transcript revision sourced from persisted session `last_sequence`
   - CLI transcript convergence through transcript reads rather than `MainView`
+  - synthetic stream-gap recovery now carries an explicit continuity-loss cause through hydrate and retry paths
+  - TUI normal-buffer replay is now restricted to explicit external continuity-loss recovery, not same-session transcript divergence
+  - same-session non-append divergence no longer clears/replays scrollback; debug mode panics and normal mode logs the fault while rebasing the local append baseline
 - not landed yet:
   - detail-mode pagination UX
   - revision-aware incremental fetch instead of full-page hydrate in the CLI
@@ -184,25 +215,32 @@ The current checkpoint implements items 1-4 on top of `session.getTranscriptPage
 
 ## Planned Follow-up Work
 
-## Phase 3 Stabilization
+- if further transcript consistency issues appear, treat them as post-Phase-6 follow-up rather than re-opening the shipped 6B scope
+- keep targeted logging for `session_activity` gap, hydrate failure, hydrate retry, successful transcript repair, and committed revision advance
+- keep treating authoritative transcript hydration as the repair primitive for Category C continuity loss
 
-- keep current stream-gap handling, but ensure every transcript-affecting gap schedules authoritative async refresh until it succeeds
-- add regression coverage for missed final answer / missed committed transcript after stream gap
-- add targeted logging for `session_activity` gap, refresh failure, refresh retry, and successful transcript repair
+Current proof surface:
 
-## Phase 4
+- `cli/app/session_server_target_test.go`
+  - `TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces`
+  - `TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorkspaces`
+  - `TestRemoteInteractiveRuntimeAskRaceFirstWinsAcrossWorkspaces`
+  - `TestRemoteInteractiveRuntimeApprovalRaceFirstWinsAcrossWorkspaces`
+  - `TestRemoteInteractiveRuntimeResolveTransitionForkRollbackDeduplicatesAcrossWorkspaces`
+  - `TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWorkspaces`
 
-- split committed transcript transport from ephemeral session activity semantically, not just by convention
-- introduce transcript paging as the standard reconnect and hydration path for large sessions
-- add committed transcript revision/version metadata
-- stop using whole-page transcript hydration as the only repair primitive once revision-aware paging is available
-- ensure multiple clients converge on the same committed transcript revision after reconnect, lag, or focus loss
+Supporting persistence regression coverage:
+
+- `server/session/fileless_metadata_test.go`
+  - `TestForkAtUserMessagePreservesPersistenceOptions`
 
 ## Non-Goals
 
 - no partial replay or cursor recovery for committed transcript correctness
 - no dependence on live-stream history to reconstruct transcript state
 - no second transcript source of truth in the frontend
+- no treating compaction or rollback/fork as acceptable same-session non-append mutation cases for transcript recovery
+- no normalizing Category A client-side divergence bugs into acceptable redraw behavior
 
 ## Acceptance Criteria For This Area
 
@@ -210,3 +248,4 @@ The current checkpoint implements items 1-4 on top of `session.getTranscriptPage
 - a missed stream event cannot permanently hide a committed assistant message, tool result, supervisor note, or compaction note
 - ongoing mode and detail mode derive committed transcript from the same frontend cache
 - reconnect correctness depends on typed hydration reads and transcript paging, not on replaying old live events
+- TUI may re-issue the ongoing buffer only for external continuity-loss recovery, not for same-session logical divergence bugs

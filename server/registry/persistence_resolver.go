@@ -10,10 +10,11 @@ import (
 
 type PersistenceSessionResolver struct {
 	containerDir string
+	storeOptions []session.StoreOption
 }
 
-func NewPersistenceSessionResolver(containerDir string) PersistenceSessionResolver {
-	return PersistenceSessionResolver{containerDir: strings.TrimSpace(containerDir)}
+func NewPersistenceSessionResolver(containerDir string, storeOptions ...session.StoreOption) PersistenceSessionResolver {
+	return PersistenceSessionResolver{containerDir: strings.TrimSpace(containerDir), storeOptions: append([]session.StoreOption(nil), storeOptions...)}
 }
 
 func (r PersistenceSessionResolver) ResolveSession(_ context.Context, sessionID string) (session.Snapshot, error) {
@@ -29,5 +30,5 @@ func (r PersistenceSessionResolver) ResolveSessionStore(_ context.Context, sessi
 	if err != nil {
 		return nil, err
 	}
-	return session.Open(realSessionDir)
+	return session.Open(realSessionDir, r.storeOptions...)
 }

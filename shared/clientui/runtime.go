@@ -67,10 +67,24 @@ type TranscriptMetadata struct {
 	CommittedEntryCount int
 }
 
+type SessionExecutionTarget struct {
+	WorkspaceID           string
+	WorkspaceName         string
+	WorkspaceRoot         string
+	WorkspaceAvailability string
+	WorktreeID            string
+	WorktreeName          string
+	WorktreeRoot          string
+	WorktreeAvailability  string
+	CwdRelpath            string
+	EffectiveWorkdir      string
+}
+
 type RuntimeSessionView struct {
 	SessionID             string
 	SessionName           string
 	ConversationFreshness ConversationFreshness
+	ExecutionTarget       SessionExecutionTarget
 	Transcript            TranscriptMetadata
 	Chat                  ChatSnapshot
 }

@@ -56,15 +56,14 @@ func (p *TranscriptProjector) ApplyPersistedEvent(evt session.Event) error {
 			return err
 		}
 	case "history_replaced":
-		var payload historyReplacementPayload
-		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+		payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+		if err != nil {
 			return fmt.Errorf("decode history_replaced event: %w", err)
 		}
-		if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-			p.chat.restoreHistoryItems(payload.Items)
-		} else {
-			p.chat.replaceHistory(payload.Items)
+		if ignoredLegacy {
+			return nil
 		}
+		p.chat.replaceHistory(payload.Items)
 	}
 	return nil
 }

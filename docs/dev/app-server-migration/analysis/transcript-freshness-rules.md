@@ -46,6 +46,12 @@ It means the frontend may need an authoritative transcript hydrate.
 
 It does not mean the frontend may clear or replace newer visible live activity first.
 
+If a `conversation_updated` event already carries transcript entries, those entries are part of the committed transcript delta and may advance committed frontend state directly.
+
+Corollary:
+
+- ordinary runtime transcript-bearing events stay transient until a later `conversation_updated` or hydrate establishes committed authority
+
 ## Rule 5: Recovery must invalidate transient live state deliberately, not accidentally
 
 If reconnect or stream-gap recovery requires transient live state to be discarded, that must happen as an explicit recovery decision.
@@ -80,8 +86,6 @@ If cached data is used, it must still obey the same overwrite rules as a fresh h
 - [x] make `conversation_updated` a hydrate trigger, not a blanket permission to reset the view
 - [x] ensure recovery tests cover stale-read vs newer-live-state cases explicitly
 - [x] ensure remote and loopback paths obey the same overwrite rules
-
-The remaining remote raw-stream commentary-entry gap does not change these overwrite rules. It is a separate event-shape defer.
 
 This document does not claim full raw event parity between loopback and remote paths. It only defines the overwrite/freshness contract that both paths must obey once transcript-visible state reaches the frontend.
 

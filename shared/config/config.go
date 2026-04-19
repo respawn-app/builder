@@ -1,15 +1,19 @@
 package config
 
 import (
+	"net"
 	"path/filepath"
+	"strconv"
 
-	"builder/server/tools"
+	"builder/shared/protocol"
+	"builder/shared/toolspec"
 )
 
 const (
 	DefaultAppName       = "builder"
 	DefaultPersistence   = "~/.builder"
 	sessionsDirName      = "sessions"
+	databaseDirName      = "db"
 	workspaceIndexName   = "workspaces.json"
 	globalAuthConfigName = "auth.json"
 )
@@ -69,6 +73,9 @@ type Settings struct {
 	NotificationMethod               string
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
+	Debug                            bool
+	ServerHost                       string
+	ServerPort                       int
 	WebSearch                        string
 	ProviderOverride                 string
 	OpenAIBaseURL                    string
@@ -80,7 +87,7 @@ type Settings struct {
 	PreSubmitCompactionLeadTokens    int
 	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
-	EnabledTools                     map[tools.ID]bool
+	EnabledTools                     map[toolspec.ID]bool
 	SkillToggles                     map[string]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
@@ -131,9 +138,9 @@ type App struct {
 
 type settingsFile map[string]any
 
-func EnabledToolIDs(v Settings) []tools.ID {
-	ids := make([]tools.ID, 0, len(v.EnabledTools))
-	for _, id := range tools.CatalogIDs() {
+func EnabledToolIDs(v Settings) []toolspec.ID {
+	ids := make([]toolspec.ID, 0, len(v.EnabledTools))
+	for _, id := range toolspec.CatalogIDs() {
 		if v.EnabledTools[id] {
 			ids = append(ids, id)
 		}
@@ -145,6 +152,50 @@ func SessionsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, sessionsDirName)
 }
 
+func ProjectsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "projects")
+}
+
+func ProjectRoot(cfg App, projectID string) string {
+	return filepath.Join(ProjectsRoot(cfg), projectID)
+}
+
+func ProjectSessionsRoot(cfg App, projectID string) string {
+	return filepath.Join(ProjectRoot(cfg, projectID), sessionsDirName)
+}
+
+func ProjectSessionDir(cfg App, projectID string, sessionID string) string {
+	return filepath.Join(ProjectSessionsRoot(cfg, projectID), sessionID)
+}
+
+func DatabaseRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, databaseDirName)
+}
+
+func MainDatabasePath(cfg App) string {
+	return filepath.Join(DatabaseRoot(cfg), "main.sqlite3")
+}
+
 func GlobalAuthConfigPath(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, globalAuthConfigName)
+}
+
+func MigrationBackupsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "migration-backups")
+}
+
+func MigrationsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "migrations")
+}
+
+func ServerListenAddress(cfg App) string {
+	return net.JoinHostPort(cfg.Settings.ServerHost, strconv.Itoa(cfg.Settings.ServerPort))
+}
+
+func ServerRPCURL(cfg App) string {
+	return "ws://" + ServerListenAddress(cfg) + protocol.RPCPath
+}
+
+func ServerHTTPBaseURL(cfg App) string {
+	return "http://" + ServerListenAddress(cfg)
 }

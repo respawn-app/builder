@@ -63,7 +63,7 @@ Current file-backed prompt-command discovery behavior:
 | Command / Behavior | Classification | Protocol Mapping | Notes On Idempotency / Concurrency |
 | --- | --- | --- | --- |
 | `/status` | Frontend view over server data | Compose from typed `session`, `run`, `process`, `approval`, `ask`, and policy reads. Do not create `status.*`. | Read-only, but not just a read RPC: current CLI also owns detail-overlay open/close, scrolling, progressive section loading, prompt-history recording, and the current `Ctrl+C` interrupt-vs-quit behavior while the overlay is open. |
-| `/ps` | Server-native capability, frontend-rendered | Current on-boundary subset: `process.list`, `process.get`, `process.kill`, `process.inlineOutput`. Future process output stream access remains later work. | Reads allowed while busy. `process.kill` is mutating and must carry `client_request_id`; current `inline` is a typed read-like control request and does not mutate server state. Current CLI also owns overlay lifecycle, periodic refresh, selection retention by process id, `inline` paste into the input buffer after reading output, and log-opening fallback to `$VISUAL`/`$EDITOR` using server-provided log paths. |
+| `/ps` | Server-native capability, frontend-rendered | Current on-boundary subset: `process.list`, `process.get`, `process.kill`, `process.inlineOutput`, and `process.subscribeOutput`. | Reads allowed while busy. `process.kill` is mutating and must carry `client_request_id`; current `inline` is a typed read-like control request and does not mutate server state. Current CLI also owns overlay lifecycle, periodic refresh, selection retention by process id, `inline` paste into the input buffer after reading output, stream-gap recovery by re-read/resubscribe, and log-opening fallback to `$VISUAL`/`$EDITOR` using server-provided log paths. |
 | `/new` | Frontend affordance over server operations | Project selection plus session creation or attach flow. | Session creation must be idempotent when retried. Current CLI exits through `UIActionNewSession`, forwards the current session id as parent lineage, and keeps already-running background processes alive across the handoff. |
 | `/resume` | Frontend affordance over server operations | Query project/session lists and attach to chosen session. | Read-heavy. No special concurrency concerns. Current CLI exits through `UIActionResume` and reopens the picker with no extra payload. |
 | `/logout` | Mixed | One or more of: detach from server, clear frontend-local auth/session selection, invalidate server-owned credentials. | Must distinguish frontend-local detach from server-global credential invalidation. Current CLI clears auth, reruns auth readiness, then reattaches the same session when one exists. |
@@ -128,14 +128,19 @@ These were already established and remain true:
 ## Project Boundary
 
 - `project` is the primary top-level container.
-- Each project permanently maps 1:1 to exactly one repository, one canonical workspace root, and one durable project/session container.
+- A project is a durable server-owned work container and may span multiple workspaces.
+- `workspace` is a child resource of project and maps 1:1 to one canonical execution root.
+- `worktree` belongs to a workspace, not to a project directly.
+- Sessions belong to projects and carry current workspace/worktree context as shared server state.
 - Project discovery and registration are server-native.
-- Reopening the same canonical root resolves to the same project.
-- Project protocol identity is an opaque `project_id`, not a filesystem path.
-- Canonical root path and repository metadata are server-owned project metadata.
-- Project registration requires the root path to exist and be accessible.
-- Project root is immutable after registration.
+- Reopening the same canonical workspace root resolves to the same workspace within the same project.
+- Project, workspace, and worktree protocol identity use opaque server ids rather than filesystem paths.
+- Canonical workspace root path and optional git metadata are server-owned workspace metadata.
+- Registering a new project is explicit; attaching to an unseen path must not implicitly create one.
+- Registering a workspace requires the root path to exist and be accessible.
+- Workspace root is immutable after registration unless explicitly rebound after relocation.
 - Project display names are server-stored and decoupled from filesystem folder names.
+- Git remains the source of truth for existing worktrees; Builder stores only additive metadata/links needed for product behavior.
 - Persistence layout remains implementation detail rather than protocol identity, even though each project still owns one durable project container internally.
 
 ## Compatibility Gaps To Close Before Coding

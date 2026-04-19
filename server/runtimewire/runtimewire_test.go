@@ -21,6 +21,7 @@ import (
 	patchtool "builder/server/tools/patch"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
@@ -29,7 +30,7 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 	registry, _, _, err := BuildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
+		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolWebSearch},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -47,7 +48,7 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 	if len(defs) != 1 {
 		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != tools.ToolShell {
+	if defs[0].ID != toolspec.ToolShell {
 		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
 	}
 }
@@ -64,7 +65,7 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	registry, broker, _, err := BuildToolRegistry(
 		workspace,
 		"",
-		[]tools.ID{tools.ToolViewImage},
+		[]toolspec.ID{toolspec.ToolViewImage},
 		5*time.Second,
 		15*time.Second,
 		16_000,
@@ -84,7 +85,7 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
-	viewImageHandler, ok := registry.Get(tools.ToolViewImage)
+	viewImageHandler, ok := registry.Get(toolspec.ToolViewImage)
 	if !ok {
 		t.Fatal("expected view_image handler")
 	}
@@ -92,7 +93,7 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal view_image input: %v", err)
 	}
-	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("view_image call: %v", err)
 	}
@@ -316,7 +317,7 @@ func TestNewRuntimeWiringRejectsEmptyModelAfterBypassingConfigDefaults(t *testin
 				ShellDefaultSeconds: 1,
 			},
 		},
-		[]tools.ID{tools.ToolShell},
+		[]toolspec.ID{toolspec.ToolShell},
 		root,
 		auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, nil),
 		nil,

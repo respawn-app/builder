@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 type applyState struct {
@@ -69,7 +71,7 @@ func (s *applyState) getState(path string) (*patchFileState, error) {
 	return fileState, nil
 }
 
-func (s *applyState) addFile(op AddFile) error {
+func (s *applyState) addFile(op patchformat.AddFile) error {
 	target, err := s.resolve(op.Path, false)
 	if err != nil {
 		return err
@@ -97,7 +99,7 @@ func (s *applyState) addFile(op AddFile) error {
 	return nil
 }
 
-func (s *applyState) deleteFile(op DeleteFile) error {
+func (s *applyState) deleteFile(op patchformat.DeleteFile) error {
 	target, err := s.resolve(op.Path, true)
 	if err != nil {
 		return err
@@ -116,7 +118,7 @@ func (s *applyState) deleteFile(op DeleteFile) error {
 	return nil
 }
 
-func (s *applyState) updateFile(op UpdateFile) error {
+func (s *applyState) updateFile(op patchformat.UpdateFile) error {
 	resolved, err := s.resolve(op.Path, false)
 	if err != nil {
 		return err

@@ -96,7 +96,33 @@
 - Sessions support stop/resume.
 - Persistence root is configurable; default `~/.builder`.
 - Storage layout is workspace-scoped containers (`<workspace-folder-name>-<random-uuid>`) with UUID session directories.
-- Session persistence format: split `session.json` + `events.jsonl`.
+- The server-driven migration target uses hybrid persistence: SQLite is authoritative for structured metadata and server-owned resources; large append-only session artifacts stay file-backed.
+- The durable domain model is `project > workspace > worktree`; legacy workspace-scoped containers are migration input, not future protocol identity.
+- Sessions remain project-scoped durable objects and carry a mutable current execution target `(workspace_id, worktree_id?, cwd_relpath)`.
+- The Phase 4 topology target is one app-global daemon per persistence root. Clients and daemon converge on the same configured `server_host` and `server_port`, connect directly to that address, and use handshake only for compatibility. Handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
+- The app-global daemon listen configuration is explicit and user-configurable via separate `server_host` and `server_port` settings. Builder uses a fixed built-in default port in the private/dynamic range, binds exactly that configured address, and fails startup if the port is occupied; it must not silently rebind, fall back, or use `:0` ephemeral assignment.
+- Same-machine transport optimization is local-first and additive. On Unix platforms the daemon also exposes a derived Unix domain socket under runtime-local ephemeral state keyed by the persistence root; this does not add a new config surface and does not replace configured TCP.
+- `server_host` and `server_port` remain the durable remote source of truth. Same-machine clients may prefer the derived Unix socket when it is clearly available, but LAN/remote clients continue to use configured TCP semantics and health/readiness remain bound to configured HTTP/TCP.
+- The default WebSocket transport uses `github.com/lxzan/gws` behind `shared/rpcwire`. The legacy `golang.org/x/net/websocket` adapter was removed after the transport boundary landed; higher layers stay bound to Builder-owned `rpcwire` contracts rather than a library-specific API. Remaining `golang.org/x/net/websocket` imports are test fixtures only and do not participate in runtime transport.
+- The Phase 4 topology cutover is hard. No discovery-file migration, bridge mode, or compatibility script is maintained for the old workspace-scoped daemon-discovery model.
+- Interactive startup remains workspace-first. When startup cwd is unregistered, Builder enters an explicit post-auth binding flow with a create-new-project action first and a clearly separated existing-project picker below it.
+- That bind/create startup flow is valid only when the client has a meaningful local path and the server can resolve that path.
+- If the client has no meaningful cwd/path for the server, or the server cannot resolve the client path, startup switches to server-browsing mode instead of trying to bind the client path.
+- In server-browsing mode, the client may open existing server projects/workspaces only; it must not offer "bind this workspace" or "create a project for this client path".
+- First setup for server-browsing mode is server-admin only for now. Remote filesystem traversal/browsing is out of scope for this slice.
+- Headless startup in an unregistered workspace fails fast; it must not auto-create hidden project/workspace state.
+- To support agent recovery in that fail-fast model, Builder will expose explicit workspace-binding CLI commands: `builder project [path]` to inspect the project bound to a path, `builder attach [path]` to bind a workspace to the project already bound to `cwd`, and `builder attach --project <project-id> [path]` as the explicit project-id override. All forms default `path` to `cwd`.
+- The minimum server-admin setup command surface is `builder project list`, `builder project create --path <server-path> --name <project-name>`, and `builder attach --project <project-id> <server-path>`.
+- Those server-admin commands must prefer RPC to the configured running daemon when one exists; they must not require shutting the server down or taking local ownership of the persistence root.
+- Explicit relocation recovery is `builder rebind <old-path> <new-path>`, which preserves the existing `workspace_id` while retargeting the canonical workspace root. Unknown-cwd startup does not infer relocation; it stays on the normal bind/create flow.
+- For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
+- The attempted SQLite-backed `client_request_id` dedup persistence expansion is being hard-cut before ship. Current shipping direction keeps `client_request_id` on the API surface, retains lease-specific semantics for `sessionruntime.activate` / `sessionruntime.release`, and defers any durable/shared dedup authority to later dedicated session-control work.
+- Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
+- Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.
+- The one-time storage migration is blocking at startup, stages the new database/layout before cutover, and keeps the old tree as a timestamped backup after success.
+- Workspace path rebinding after relocation is always explicit user action; Builder must not auto-rebind inferred matches.
+- Database access for the migration architecture is SQL-first and explicit. Prefer typed code generation from hand-written SQL (`sqlc`) plus Goose-managed SQL migrations over ORM-owned schema/runtime state.
+- Session persistence format today is split `session.json` + `events.jsonl`.
 - `events.jsonl` is append-only on normal writes; periodic compaction rewrites canonical JSONL to control long-session growth.
 - Session directory names are UUID-only.
 - Session start/setup becomes immutable at first model request dispatch.
@@ -194,6 +220,8 @@
 - `theme=light` and `theme=dark` select Builder's own fixed palettes. `theme=auto` or an omitted theme falls back to terminal background detection.
 - Unknown `config.toml` keys are rejected as configuration errors.
 - Configuration precedence: `CLI overrides > environment > settings file > built-in defaults`.
+- Global debug mode is configurable via `debug = true` in `config.toml` or `BUILDER_DEBUG=1` in the environment. Debug mode enables developer-oriented strictness such as hard-failing invariants that production mode recovers from.
+- Ongoing native-history recovery must distinguish true same-session divergence from sliding authoritative tail windows. When an authoritative ongoing-tail hydrate advances the page offset but overlaps the already-emitted tail, Builder appends only the new suffix and must not full-replay or re-emit overlapped committed rows.
 - Thinking level passes configured values through unchanged and applies only to OpenAI model families.
 - Context window is explicit setting: `model_context_window` (default `272000`).
 - Validation requires `context_compaction_threshold_tokens < model_context_window`.
@@ -229,7 +257,8 @@
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
 - Local compaction instructions are sent as `developer` messages, and local compaction summaries/checkpoints persist internally as `developer` messages with `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary. Native/remote compaction has no transcript-message prompt equivalent because it uses provider `Instructions` plus opaque provider output, which Builder replays unchanged.
-- UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
+- UI may surface a synthetic ongoing-only `context compacted for the Nth time` notice from compaction-completed runtime status. That live notice is not a durable transcript row and must not change detail-mode hydration or transcript authority.
+- Persisted compaction transcript rows still come only from server-owned transcript items/local entries. Ongoing suppresses detailed summary content; detail shows persisted compaction items in file order, including full local summary when available.
 
 ## Model Defaults
 
@@ -306,9 +335,18 @@
 - Ongoing mode uses native terminal scrollback by replaying committed transcript history into the normal buffer and appending only new committed transcript deltas.
 - Main UI startup stays in the normal buffer even when `tui_alternate_screen=always`, because ongoing-mode replay must remain visible in terminal scrollback.
 - Main UI startup clears the visible terminal viewport once before rendering (including `native` mode), so each session (including `/new`) starts from a clean visible slate.
-- After startup, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to reflect later state.
-- Non-append transcript mutations (compaction/rollback-style rewrites) rebase the internal formatter state without re-emitting prior history, to avoid duplicate scrollback output.
+- During continuous attachment, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to paper over same-session logical divergence.
+- For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite.
+- User-visible transcript history is never truncated by compaction or handoff. Compaction may replace model context, but detail/ongoing transcript reads must preserve all pre-compaction committed history across any number of compactions.
+- Any latest-compaction boundary or floor is tail/model metadata only. Detail transcript paging and rendering must ignore it and show the full append-only transcript in persisted order.
+- Legacy persisted `history_replaced` entries with `engine="reviewer_rollback"` are compatibility no-ops on replay. Builder must tolerate and ignore them rather than treating them as transcript-rewrite semantics.
+- Rollback/fork is navigation or attachment to a different session target, not a same-session transcript mutation.
 - Assistant streaming is rendered in the ongoing live viewport and is not appended to normal-buffer scrollback until commit.
+- Ongoing-mode normal-buffer scrollback is committed-transcript only. Tool-progress, assistant deltas, reasoning deltas, and any other provisional live activity are transient viewport state only and must never become immutable scrollback authority.
+- If connectivity or subscription continuity is lost, the transient ongoing live viewport is discarded immediately. Recovery happens by hydrating authoritative committed transcript state and resubscribing.
+- Transcript-affecting transport failures must not be swallowed or converted into fake empty/idle UI state. Correctness wins over continuity: the affected live view may stop, but it must not continue from stale transcript data.
+- For external continuity-loss recovery only, re-issuing the TUI ongoing buffer from authoritative committed state is acceptable.
+- Client-side transcript divergence caused by deduplication, ordering, overlap, or pagination bugs is not an acceptable redraw case; it must be fixed at the root cause. Global debug mode may hard-fail instead.
 - Pending tool-call activity in ongoing mode lives only in the volatile live region, not in committed normal-buffer scrollback.
 - Ongoing-mode glyphs reserve `@` for web search tool calls; reviewer status/suggestion entries use `§`.
 - Pending tool-call previews in the live region use the same rendering/layout as normal committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
@@ -316,7 +354,7 @@
 - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls remain in the live region until all earlier pending calls are ready, but they render in their final tool state immediately; only still-running calls show the spinner. Newly committable final lines append once in transcript order.
 - In ongoing main-input mode, `Up`/`Down` are reserved for prompt-history recall at whole-buffer boundaries and for normal multiline cursor movement otherwise; they do not scroll the ongoing transcript.
 - Ongoing transcript scrolling remains on `PgUp`/`PgDn`; failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
-- Main-input `@` path autocomplete uses a cached repo-relative path corpus built asynchronously from `rg --files --hidden -g '!.git'`; corpus prewarming starts eagerly in the background when the UI model is created for a workspace, but it must be scheduled through Bubble Tea startup commands (`startupCmds` / `Init`) rather than unmanaged constructor goroutines. Live matching never shells out per keystroke and runs only against the in-memory cache. Query tracking is cursor-local and accepts path-safe runes inside the tracked token: Unicode letters/digits plus `/`, `.`, `_`, and `-`, so nested and hidden path references can be continued after accepting a directory completion. Hidden paths are included, `.git` is explicitly excluded, and normal ignore-file handling remains enabled so `.gitignore` junk such as `node_modules`, `.gradle`, and `build` stays out by default. Non-empty directory candidates are derived from file paths, so empty directories are intentionally excluded in v1. Corpus-build failures are retryable on later queries in the same workspace; they do not permanently disable path autocomplete for the session.
+- Main-input `@` path autocomplete uses a cached repo-relative path corpus built asynchronously from `rg --no-config --files -0 --hidden -g '!.git'`; corpus prewarming starts eagerly in the background when the UI model is created for a workspace, but it must be scheduled through Bubble Tea startup commands (`startupCmds` / `Init`) rather than unmanaged constructor goroutines. Live matching never shells out per keystroke and runs only against the in-memory cache. Query tracking is cursor-local and accepts path-safe runes inside the tracked token: Unicode letters/digits plus `/`, `.`, `_`, and `-`, so nested and hidden path references can be continued after accepting a directory completion. Hidden paths are included, `.git` is explicitly excluded, and normal ignore-file handling remains enabled so `.gitignore` junk such as `node_modules`, `.gradle`, and `build` stays out by default. Non-empty directory candidates are derived from file paths, so empty directories are intentionally excluded in v1. Corpus-build failures are retryable on later queries in the same workspace; they do not permanently disable path autocomplete for the session.
 - Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
 - Ongoing mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
@@ -335,6 +373,7 @@
 - Startup shows recent sessions with pick-or-new flow.
 - Startup session list is scrollable with no cap.
 - If no sessions exist, startup goes directly to new-session setup.
+- In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or explicitly attach the current workspace to an existing project. Outside that flow, the CLI remains workspace-first.
 
 ## Slash Commands
 

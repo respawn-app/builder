@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"encoding/json"
 	"fmt"
@@ -61,6 +62,7 @@ type chatStore struct {
 	lastCommittedAssistantFinalAnswer string
 	messageCount                      int
 	transcriptEntryCount              int
+	headlessModeActive                bool
 
 	providerTokenEstimate      int
 	providerTokenEstimateDirty bool
@@ -69,11 +71,14 @@ type chatStore struct {
 type localChatEntry struct {
 	Entry             ChatEntry
 	AfterMessageCount int
+	MarksBoundary     bool
 }
 
 type compactionCheckpoint struct {
-	CutoffItemCount int
-	Items           []llm.ResponseItem
+	CutoffItemCount    int
+	CutoffMessageCount int
+	CutoffLocalCount   int
+	Items              []llm.ResponseItem
 }
 
 func newChatStore() *chatStore {
@@ -103,19 +108,17 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Non-reviewer compaction keeps user-visible transcript history append-only by
+	// materializing replacement items as synthetic local entries at the compaction
+	// boundary while provider/model history switches to the compacted checkpoint.
+	s.appendProjectedHistoryReplacementEntriesLocked(transcriptEntriesFromHistoryReplacement(items))
 	s.compact = &compactionCheckpoint{
-		CutoffItemCount: len(s.items),
-		Items:           llm.CloneResponseItems(items),
+		CutoffItemCount:    len(s.items),
+		CutoffMessageCount: s.messageCount,
+		CutoffLocalCount:   len(s.local),
+		Items:              llm.CloneResponseItems(items),
 	}
-	s.providerTokenEstimateDirty = true
-}
-
-func (s *chatStore) restoreHistoryItems(items []llm.ResponseItem) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.items = llm.CloneResponseItems(items)
-	s.compact = nil
-	s.rebuildTranscriptStatsLocked()
+	s.headlessModeActive = headlessModeActive(llm.MessagesFromItems(items))
 	s.providerTokenEstimateDirty = true
 }
 
@@ -147,7 +150,7 @@ func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
 	}
 	s.recordToolCompletion(tools.Result{
 		CallID:  completion.CallID,
-		Name:    tools.ID(completion.Name),
+		Name:    toolspec.ID(completion.Name),
 		IsError: completion.IsError,
 		Output:  completion.Output,
 	})
@@ -226,10 +229,55 @@ func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ong
 	s.transcriptEntryCount++
 }
 
+func (s *chatStore) appendProjectedEntry(entry ChatEntry) {
+	s.appendProjectedEntryWithMetadata(entry, false)
+}
+
+func (s *chatStore) appendProjectedEntryWithMetadata(entry ChatEntry, marksBoundary bool) {
+	if strings.TrimSpace(entry.Role) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendProjectedEntryLocked(entry, marksBoundary)
+}
+
+func (s *chatStore) appendProjectedHistoryReplacementEntries(entries []ChatEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendProjectedHistoryReplacementEntriesLocked(entries)
+}
+
+func (s *chatStore) appendProjectedHistoryReplacementEntriesLocked(entries []ChatEntry) {
+	for idx, entry := range entries {
+		s.appendProjectedEntryLocked(entry, idx == 0)
+	}
+}
+
+func (s *chatStore) appendProjectedEntryLocked(entry ChatEntry, marksBoundary bool) {
+	entry.Visibility = transcript.NormalizeEntryVisibility(entry.Visibility)
+	entry.ToolCallID = strings.TrimSpace(entry.ToolCallID)
+	s.local = append(s.local, localChatEntry{
+		Entry:             entry,
+		AfterMessageCount: s.messageCount,
+		MarksBoundary:     marksBoundary,
+	})
+	s.transcriptEntryCount++
+}
+
 func (s *chatStore) committedEntryCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.transcriptEntryCount
+}
+
+func (s *chatStore) headlessActive() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.headlessModeActive
 }
 
 func (s *chatStore) cachedLastCommittedAssistantFinalAnswer() string {
@@ -245,7 +293,7 @@ func (s *chatStore) snapshotMessages() []llm.Message {
 }
 
 func (s *chatStore) snapshotMessagesLocked() []llm.Message {
-	return llm.MessagesFromItems(llm.CloneResponseItems(s.items))
+	return llm.MessagesFromItems(s.snapshotProviderItemsLocked())
 }
 
 func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
@@ -334,6 +382,7 @@ func (s *chatStore) rebuildTranscriptStatsLocked() {
 	s.messageCount = 0
 	s.transcriptEntryCount = 0
 	s.lastCommittedAssistantFinalAnswer = ""
+	s.headlessModeActive = false
 	s.assistantToolCalls = make(map[string]struct{}, len(s.toolCompletions))
 	s.materializedToolResults = make(map[string]struct{}, len(s.toolCompletions))
 	s.synthesizedToolResults = make(map[string]struct{}, len(s.toolCompletions))
@@ -350,6 +399,7 @@ func (s *chatStore) rebuildTranscriptStatsLocked() {
 func (s *chatStore) applyMessageStatsLocked(msg llm.Message) {
 	s.messageCount++
 	s.applyLastCommittedAssistantFinalAnswerLocked(msg)
+	s.applyHeadlessStateLocked(msg)
 	delta := len(VisibleChatEntriesFromMessage(msg))
 	switch msg.Role {
 	case llm.RoleAssistant:
@@ -386,8 +436,23 @@ func (s *chatStore) applyMessageStatsLocked(msg llm.Message) {
 	}
 }
 
+func (s *chatStore) applyHeadlessStateLocked(msg llm.Message) {
+	if msg.Role != llm.RoleDeveloper {
+		return
+	}
+	switch msg.MessageType {
+	case llm.MessageTypeHeadlessMode:
+		s.headlessModeActive = true
+	case llm.MessageTypeHeadlessModeExit:
+		s.headlessModeActive = false
+	}
+}
+
 func (s *chatStore) applyLastCommittedAssistantFinalAnswerLocked(msg llm.Message) {
 	if shouldSkipTrailingAssistantHandoffMessage(msg) {
+		return
+	}
+	if isNoopFinalAnswer(msg) {
 		return
 	}
 	if msg.Role == llm.RoleAssistant && msg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(msg.Content) != "" {
@@ -405,38 +470,39 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	cutoff := -1
-	if s.compact != nil {
-		cutoff = s.compact.CutoffItemCount
-	}
-	materializedToolResults := collectMaterializedToolCalls(s.items)
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
 	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{
-		TrackOngoingTail:     true,
-		TailLimit:            maxEntries,
-		CompactionItemCutoff: cutoff,
+		TrackOngoingTail: true,
+		TailLimit:        maxEntries,
 	}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > messageCount {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > messageCount {
 				break
 			}
-			scan.appendEntry(s.local[localIndex].Entry)
+			if localEntries[localIndex].MarksBoundary {
+				scan.MarkCompactionBoundary()
+			}
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
 	appendLocalEntries(0)
+	if s.compact != nil && s.compact.CutoffMessageCount == 0 {
+		scan.MarkCompactionBoundary()
+	}
 	walker := newResponseItemMessageWalker(func(msg llm.Message) {
 		scan.ApplyMessage(msg)
 		processedMessages++
-		appendLocalEntries(processedMessages)
-	})
-	for idx, item := range s.items {
-		if cutoff >= 0 && idx >= cutoff && !scan.hasCompactionCheckpoint {
-			walker.Flush()
+		if s.compact != nil && processedMessages == s.compact.CutoffMessageCount {
 			scan.MarkCompactionBoundary()
 		}
+		appendLocalEntries(processedMessages)
+	})
+	for _, item := range items {
 		walker.Apply(item)
 	}
 	walker.Flush()
@@ -451,16 +517,17 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	materializedToolResults := collectMaterializedToolCalls(s.items)
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
 	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: offset, Limit: limit}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > messageCount {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > messageCount {
 				break
 			}
-			scan.appendEntry(s.local[localIndex].Entry)
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
@@ -470,7 +537,7 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 		processedMessages++
 		appendLocalEntries(processedMessages)
 	})
-	for _, item := range s.items {
+	for _, item := range items {
 		walker.Apply(item)
 	}
 	walker.Flush()
@@ -479,6 +546,10 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 	page.Snapshot.Ongoing = s.ongoing
 	page.Snapshot.OngoingError = s.ongoingError
 	return page
+}
+
+func (s *chatStore) detailTranscriptSourceLocked() ([]llm.ResponseItem, []localChatEntry) {
+	return llm.CloneResponseItems(s.items), append([]localChatEntry(nil), s.local...)
 }
 
 type materializedChatSnapshot struct {
@@ -490,96 +561,37 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	messages := s.snapshotMessagesLocked()
-	entries := make([]ChatEntry, 0, len(messages)+len(s.local))
-	compactionEntryStart := -1
-	compactionCutoff := -1
-	if s.compact != nil {
-		compactionCutoff = s.compact.CutoffItemCount
-	}
-	materializedToolResults := make(map[string]struct{})
-	for _, msg := range messages {
-		if msg.Role != llm.RoleTool {
-			continue
-		}
-		callID := strings.TrimSpace(msg.ToolCallID)
-		if callID == "" {
-			continue
-		}
-		materializedToolResults[callID] = struct{}{}
-	}
+	items, localEntries := s.detailTranscriptSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
+	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: 0, Limit: 0}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	appendLocalEntries := func(processedMessages int) {
-		for localIndex < len(s.local) {
-			if s.local[localIndex].AfterMessageCount > processedMessages {
+		for localIndex < len(localEntries) {
+			if localEntries[localIndex].AfterMessageCount > processedMessages {
 				break
 			}
-			entries = append(entries, s.local[localIndex].Entry)
+			scan.appendEntry(localEntries[localIndex].Entry)
 			localIndex++
 		}
 	}
 	appendLocalEntries(0)
 	processedMessages := 0
-	for _, msg := range messages {
-		if compactionCutoff >= 0 && compactionEntryStart < 0 && processedMessages >= compactionCutoff {
-			compactionEntryStart = len(entries)
-		}
-		switch msg.Role {
-		case llm.RoleUser:
-			if entry, ok := visibleUserTranscriptEntry(msg); ok {
-				entries = append(entries, entry)
-			}
-		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" {
-				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
-			}
-			if len(msg.ToolCalls) > 0 {
-				for _, call := range msg.ToolCalls {
-					entries = append(entries, s.formatToolCall(call))
-					if synthesized, ok := s.synthesizedToolResult(call, materializedToolResults); ok {
-						entries = append(entries, synthesized)
-					}
-				}
-			}
-		case llm.RoleTool:
-			callID := strings.TrimSpace(msg.ToolCallID)
-			result := tools.Result{
-				CallID: callID,
-				Name:   tools.ID(strings.TrimSpace(msg.Name)),
-				Output: json.RawMessage(msg.Content),
-			}
-			if completion, ok := s.toolCompletions[callID]; ok {
-				if result.Name == "" {
-					result.Name = completion.Name
-				}
-				if strings.TrimSpace(msg.Content) == "" && len(completion.Output) > 0 {
-					result.Output = completion.Output
-				}
-				result.IsError = completion.IsError
-			}
-			if result.Name == "" {
-				result.Name = tools.ID("tool")
-			}
-			entries = append(entries, toolResultChatEntry(result))
-		case llm.RoleDeveloper:
-			if entry, ok := visibleDeveloperChatEntry(msg); ok {
-				entries = append(entries, entry)
-			}
-		}
+	walker := newResponseItemMessageWalker(func(msg llm.Message) {
+		scan.ApplyMessage(msg)
 		processedMessages++
 		appendLocalEntries(processedMessages)
+	})
+	for _, item := range items {
+		walker.Apply(item)
 	}
-	appendLocalEntries(len(messages))
-	if compactionCutoff >= 0 && compactionEntryStart < 0 {
-		compactionEntryStart = len(entries)
-	}
+	walker.Flush()
+	appendLocalEntries(processedMessages)
+	snapshot := scan.PageSnapshot().Snapshot
+	snapshot.Ongoing = s.ongoing
+	snapshot.OngoingError = s.ongoingError
 	return materializedChatSnapshot{
-		Snapshot: ChatSnapshot{
-			Entries:      entries,
-			Ongoing:      s.ongoing,
-			OngoingError: s.ongoingError,
-		},
-		CompactionEntryStart: compactionEntryStart,
+		Snapshot:             snapshot,
+		CompactionEntryStart: -1,
 	}
 }
 

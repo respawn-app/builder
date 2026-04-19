@@ -42,7 +42,7 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 			if s.meta.LastSequence != 0 {
 				s.meta.LastSequence = 0
 				s.meta.UpdatedAt = time.Now().UTC()
-				if persistErr := s.persistMetaLocked(); persistErr != nil {
+				if _, persistErr := s.persistMetaLocked(); persistErr != nil {
 					return persistErr
 				}
 			}
@@ -57,7 +57,7 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 	if parsed.lastSequence != s.meta.LastSequence {
 		s.meta.LastSequence = parsed.lastSequence
 		s.meta.UpdatedAt = time.Now().UTC()
-		if err := s.persistMetaLocked(); err != nil {
+		if _, err := s.persistMetaLocked(); err != nil {
 			return err
 		}
 	}

@@ -2,13 +2,18 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"builder/server/approvalview"
 	"builder/server/askview"
 	"builder/server/auth"
+	"builder/server/authbootstrap"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/launch"
+	"builder/server/metadata"
 	"builder/server/primaryrun"
 	"builder/server/processoutput"
 	"builder/server/processview"
@@ -16,6 +21,7 @@ import (
 	"builder/server/promptactivity"
 	"builder/server/promptcontrol"
 	"builder/server/registry"
+	"builder/server/rootlock"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
@@ -26,10 +32,14 @@ import (
 	"builder/server/sessionlifecycle"
 	"builder/server/sessionruntime"
 	"builder/server/sessionview"
+	"builder/server/storagemigration"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/protocol"
+	"builder/shared/serverapi"
 )
 
 type Core struct {
@@ -39,10 +49,17 @@ type Core struct {
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
+	rootLock         *rootlock.Lease
+	metadataStore    *metadata.Store
 	runtimeRegistry  *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
+	sessionLaunchMu  sync.Mutex
+	sessionLaunchMap map[string]client.SessionLaunchClient
+	runPromptMu      sync.Mutex
+	runPromptMap     map[string]client.RunPromptClient
 	projectID        string
 	projectViews     client.ProjectViewClient
+	authBootstrap    client.AuthBootstrapClient
 	askViews         client.AskViewClient
 	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
@@ -59,41 +76,68 @@ type Core struct {
 	runPrompt        client.RunPromptClient
 }
 
+type unregisteredSessionLaunchClient struct{}
+
+func (unregisteredSessionLaunchClient) PlanSession(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
+	return serverapi.SessionPlanResponse{}, serverapi.ErrWorkspaceNotRegistered
+}
+
+type unregisteredRunPromptClient struct{}
+
+func (unregisteredRunPromptClient) RunPrompt(context.Context, serverapi.RunPromptRequest, serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+	return serverapi.RunPromptResponse{}, serverapi.ErrWorkspaceNotRegistered
+}
+
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	rootLease, err := rootlock.Acquire(cfg.PersistenceRoot)
 	if err != nil {
 		return nil, err
 	}
-	projectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, nil); err != nil {
+		_ = rootLease.Close()
+		return nil, err
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
 	if err != nil {
+		_ = rootLease.Close()
+		return nil, err
+	}
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		_ = rootLease.Close()
 		return nil, err
 	}
 	if authSupport.AuthManager == nil {
+		_ = rootLease.Close()
+		_ = metadataStore.Close()
 		return nil, fmt.Errorf("auth manager is required")
 	}
 	if runtimeSupport.Background == nil {
+		_ = rootLease.Close()
+		_ = metadataStore.Close()
 		return nil, fmt.Errorf("background manager is required")
 	}
+	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
-	projectService, err := projectview.NewService(projectID, cfg.WorkspaceRoot, containerDir)
+	projectService, err := projectview.NewMetadataService(metadataStore, "", "")
 	if err != nil {
+		_ = rootLease.Close()
+		_ = metadataStore.Close()
 		return nil, err
 	}
 	askService := askview.NewService(runtimeRegistry)
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
-	promptControlService := promptcontrol.NewService(runtimeRegistry)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
-	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir), runtimeRegistry)
-	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
-		sessionlaunch.ScopeID(cfg, containerDir),
-		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
-	)
-	sessionLifecycleService := sessionlifecycle.NewService(containerDir, sessionStoreRegistry, authSupport.AuthManager)
-	sessionRuntimeService := sessionruntime.NewService(containerDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry)
+	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
+	projectViews := client.NewLoopbackProjectViewClient(projectService)
+	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
+	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
+	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -102,10 +146,14 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		fastModeState:    runtimeSupport.FastModeState,
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
+		rootLock:         rootLease,
+		metadataStore:    metadataStore,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
-		projectID:        projectService.ProjectID(),
-		projectViews:     client.NewLoopbackProjectViewClient(projectService),
+		sessionLaunchMap: make(map[string]client.SessionLaunchClient),
+		runPromptMap:     make(map[string]client.RunPromptClient),
+		projectViews:     projectViews,
+		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
 		processControls:  client.NewLoopbackProcessControlClient(processService),
@@ -114,29 +162,259 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		promptControl:    client.NewLoopbackPromptControlClient(promptControlService),
 		promptActivity:   client.NewLoopbackPromptActivityClient(promptActivityService),
 		runtimeControls:  client.NewLoopbackRuntimeControlClient(runtimeControlService),
-		sessionLaunch:    client.NewLoopbackSessionLaunchClient(sessionLaunchService),
+		sessionLaunch:    unregisteredSessionLaunchClient{},
 		sessionRuntime:   client.NewLoopbackSessionRuntimeClient(sessionRuntimeService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
+		runPrompt:        unregisteredRunPromptClient{},
 	}
-	core.runPrompt = runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           cfg,
-		ContainerDir:     containerDir,
-		AuthManager:      authSupport.AuthManager,
-		FastModeState:    runtimeSupport.FastModeState,
-		Background:       runtimeSupport.Background,
-		RuntimeRegistry:  runtimeRegistry,
-		BackgroundRouter: runtimeSupport.BackgroundRouter,
-	})
+	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil && !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+		_ = rootLease.Close()
+		_ = metadataStore.Close()
+		return nil, err
+	}
+	if err == nil {
+		core.projectID = binding.ProjectID
+		core.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+		if err != nil {
+			_ = rootLease.Close()
+			_ = metadataStore.Close()
+			return nil, err
+		}
+		core.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+		if err != nil {
+			_ = rootLease.Close()
+			_ = metadataStore.Close()
+			return nil, err
+		}
+	}
 	return core, nil
 }
 
-func (s *Core) Close() error {
-	if s == nil || s.background == nil {
+type projectContext struct {
+	config         config.App
+	projectID      string
+	projectRoot    string
+	projectSession string
+}
+
+func (s *Core) ProjectExists(ctx context.Context, projectID string) error {
+	if s == nil || s.metadataStore == nil {
+		return errors.New("metadata store is required")
+	}
+	_, err := s.metadataStore.GetProjectOverview(ctx, strings.TrimSpace(projectID))
+	return err
+}
+
+func (s *Core) SessionBelongsToProject(ctx context.Context, sessionID string, projectID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return fmt.Errorf("project id is required")
+	}
+	if s == nil || s.metadataStore == nil {
+		return errors.New("metadata store is required")
+	}
+	belongs, err := s.metadataStore.SessionBelongsToProject(ctx, trimmedSessionID, trimmedProjectID)
+	if err != nil {
+		return err
+	}
+	if !belongs {
+		return fmt.Errorf("session %q not available", trimmedSessionID)
+	}
+	return nil
+}
+
+func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID string) (client.SessionLaunchClient, error) {
+	return s.SessionLaunchClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
+}
+
+func (s *Core) SessionLaunchClientForProjectWorkspaceID(ctx context.Context, projectID string, workspaceID string) (client.SessionLaunchClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceID, "")
+	if err != nil {
+		return nil, err
+	}
+	return s.sessionLaunchClientForProjectContext(projectCtx), nil
+}
+
+func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.SessionLaunchClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, "", workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	return s.sessionLaunchClientForProjectContext(projectCtx), nil
+}
+
+func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) (client.RunPromptClient, error) {
+	return s.RunPromptClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
+}
+
+func (s *Core) RunPromptClientForProjectWorkspaceID(ctx context.Context, projectID string, workspaceID string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceID, "")
+	if err != nil {
+		return nil, err
+	}
+	return s.runPromptClientForProjectContext(projectCtx), nil
+}
+
+func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, "", workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	return s.runPromptClientForProjectContext(projectCtx), nil
+}
+
+func (s *Core) resolveProjectContext(ctx context.Context, projectID string, workspaceID string, workspaceRoot string) (projectContext, error) {
+	if s == nil || s.metadataStore == nil {
+		return projectContext{}, errors.New("metadata store is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return projectContext{}, errors.New("project id is required")
+	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if trimmedWorkspaceID != "" {
+		binding, err := s.metadataStore.LookupWorkspaceBindingByID(ctx, trimmedWorkspaceID)
+		if err != nil {
+			return projectContext{}, err
+		}
+		if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
+			return projectContext{}, fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, trimmedProjectID)
+		}
+		availability := clientui.ProjectAvailability(binding.WorkspaceStatus)
+		switch availability {
+		case clientui.ProjectAvailabilityMissing, clientui.ProjectAvailabilityInaccessible:
+			return projectContext{}, serverapi.ProjectUnavailableError{
+				ProjectID:    trimmedProjectID,
+				RootPath:     binding.CanonicalRoot,
+				Availability: availability,
+			}
+		}
+		projectCfg := s.cfg
+		projectCfg.WorkspaceRoot = binding.CanonicalRoot
+		return projectContext{
+			config:         projectCfg,
+			projectID:      trimmedProjectID,
+			projectRoot:    binding.CanonicalRoot,
+			projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+		}, nil
+	}
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot != "" {
+		binding, err := s.metadataStore.EnsureWorkspaceBinding(ctx, trimmedWorkspaceRoot)
+		if err == nil {
+			if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
+				return projectContext{}, fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, trimmedProjectID)
+			}
+			projectCfg := s.cfg
+			projectCfg.WorkspaceRoot = binding.CanonicalRoot
+			return projectContext{
+				config:         projectCfg,
+				projectID:      trimmedProjectID,
+				projectRoot:    binding.CanonicalRoot,
+				projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+			}, nil
+		}
+		if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+			return projectContext{}, err
+		}
+	}
+	overview, err := s.metadataStore.GetProjectOverview(ctx, trimmedProjectID)
+	if err != nil {
+		return projectContext{}, err
+	}
+	if strings.TrimSpace(overview.Project.RootPath) == "" {
+		return projectContext{}, fmt.Errorf("project %q has no root path", trimmedProjectID)
+	}
+	switch overview.Project.Availability {
+	case clientui.ProjectAvailabilityMissing, clientui.ProjectAvailabilityInaccessible:
+		return projectContext{}, serverapi.ProjectUnavailableError{
+			ProjectID:    trimmedProjectID,
+			RootPath:     overview.Project.RootPath,
+			Availability: overview.Project.Availability,
+		}
+	}
+	projectCfg := s.cfg
+	projectCfg.WorkspaceRoot = overview.Project.RootPath
+	return projectContext{
+		config:         projectCfg,
+		projectID:      trimmedProjectID,
+		projectRoot:    overview.Project.RootPath,
+		projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+	}, nil
+}
+
+func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) client.SessionLaunchClient {
+	if s == nil {
 		return nil
 	}
-	return s.background.Close()
+	scopeKey := projectWorkspaceScopeKey(projectCtx)
+	s.sessionLaunchMu.Lock()
+	defer s.sessionLaunchMu.Unlock()
+	if cached := s.sessionLaunchMap[scopeKey]; cached != nil {
+		return cached
+	}
+	service := sessionlaunch.NewService(launch.Planner{
+		Config:       projectCtx.config,
+		ContainerDir: projectCtx.projectSession,
+		ProjectID:    projectCtx.projectID,
+		ProjectViews: s.projectViews,
+		StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions(),
+	}, s.sessionStores)
+	client := client.NewLoopbackSessionLaunchClient(service)
+	s.sessionLaunchMap[scopeKey] = client
+	return client
+}
+
+func (s *Core) runPromptClientForProjectContext(projectCtx projectContext) client.RunPromptClient {
+	if s == nil {
+		return nil
+	}
+	scopeKey := projectWorkspaceScopeKey(projectCtx)
+	s.runPromptMu.Lock()
+	defer s.runPromptMu.Unlock()
+	if cached := s.runPromptMap[scopeKey]; cached != nil {
+		return cached
+	}
+	client := runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
+		Config:           projectCtx.config,
+		ContainerDir:     projectCtx.projectSession,
+		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
+		AuthManager:      s.oauthOpts.AuthManager,
+		FastModeState:    s.fastModeState,
+		Background:       s.background,
+		RuntimeRegistry:  s.runtimeRegistry,
+		BackgroundRouter: s.backgroundRouter,
+	})
+	s.runPromptMap[scopeKey] = client
+	return client
+}
+
+func projectWorkspaceScopeKey(projectCtx projectContext) string {
+	return strings.TrimSpace(projectCtx.projectID) + "\n" + strings.TrimSpace(projectCtx.config.WorkspaceRoot)
+}
+
+func (s *Core) Close() error {
+	if s == nil {
+		return nil
+	}
+	var err error
+	if s.background != nil {
+		err = s.background.Close()
+	}
+	if s.metadataStore != nil {
+		err = errors.Join(err, s.metadataStore.Close())
+	}
+	if s.rootLock != nil {
+		err = errors.Join(err, s.rootLock.Close())
+	}
+	return err
 }
 
 func (s *Core) Config() config.App {
@@ -151,6 +429,13 @@ func (s *Core) ContainerDir() string {
 		return ""
 	}
 	return s.containerDir
+}
+
+func (s *Core) MetadataStore() *metadata.Store {
+	if s == nil {
+		return nil
+	}
+	return s.metadataStore
 }
 
 func (s *Core) OAuthOptions() auth.OpenAIOAuthOptions {
@@ -207,6 +492,13 @@ func (s *Core) ProjectViewClient() client.ProjectViewClient {
 		return nil
 	}
 	return s.projectViews
+}
+
+func (s *Core) AuthBootstrapClient() client.AuthBootstrapClient {
+	if s == nil {
+		return nil
+	}
+	return s.authBootstrap
 }
 
 func (s *Core) AskViewClient() client.AskViewClient {

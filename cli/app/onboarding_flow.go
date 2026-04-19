@@ -7,9 +7,9 @@ import (
 
 	"builder/server/auth"
 	"builder/server/llm"
-	"builder/server/tools"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
 )
 
 type onboardingScreenKind string
@@ -339,13 +339,13 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 			id: "ask_question",
 			build: func(state *onboardingFlowState) onboardingScreen {
 				defaultChoice := "no"
-				if state.settings.EnabledTools[tools.ToolAskQuestion] {
+				if state.settings.EnabledTools[toolspec.ToolAskQuestion] {
 					defaultChoice = "yes"
 				}
 				return onboardingScreen{ID: "ask_question", Kind: onboardingScreenChoice, Title: "Allow follow-up questions?", Body: "Allow Builder to ask follow-up questions when it needs clarification.", Options: []onboardingOption{{ID: "yes", Title: "Yes"}, {ID: "no", Title: "No"}}, DefaultOptionID: defaultChoice}
 			},
 			apply: func(state *onboardingFlowState, choiceID string) error {
-				state.settings.EnabledTools[tools.ToolAskQuestion] = choiceID == "yes"
+				state.settings.EnabledTools[toolspec.ToolAskQuestion] = choiceID == "yes"
 				return nil
 			},
 		},
@@ -624,7 +624,7 @@ func reviewSummaryLines(state *onboardingFlowState) []string {
 	lines = append(lines,
 		"- Thinking: `"+thinking+"`",
 		"- Verbosity: `"+valueOrFallback(string(state.settings.ModelVerbosity), "off")+"`",
-		"- Questions: `"+onOff(state.settings.EnabledTools[tools.ToolAskQuestion])+"`",
+		"- Questions: `"+onOff(state.settings.EnabledTools[toolspec.ToolAskQuestion])+"`",
 		"- Supervisor: `"+valueOrFallback(state.settings.Reviewer.Frequency, "off")+"`",
 		"- Compaction: `"+string(state.settings.CompactionMode)+"`",
 	)
