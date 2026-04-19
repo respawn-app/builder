@@ -310,6 +310,127 @@ func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *t
 	}
 }
 
+func TestServiceQueueUserMessageDedupesSuccessfulRetry(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeControlFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	req := serverapi.RuntimeQueueUserMessageRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              "hello",
+	}
+
+	if err := service.QueueUserMessage(context.Background(), req); err != nil {
+		t.Fatalf("QueueUserMessage first: %v", err)
+	}
+	if err := service.QueueUserMessage(context.Background(), req); err != nil {
+		t.Fatalf("QueueUserMessage replay: %v", err)
+	}
+	if _, err := engine.SubmitQueuedUserMessages(context.Background()); err != nil {
+		t.Fatalf("SubmitQueuedUserMessages: %v", err)
+	}
+	if got := countUserMessagesWithContent(t, store, "hello"); got != 1 {
+		t.Fatalf("queued user message count = %d, want 1", got)
+	}
+	if got := countUserMessagesWithContent(t, store, "hello\n\nhello"); got != 0 {
+		t.Fatalf("duplicate queued flush count = %d, want 0", got)
+	}
+}
+
+func TestServiceQueueUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeControlFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeQueueUserMessageRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              "hello",
+	}
+
+	if err := service.QueueUserMessage(context.Background(), req); err != nil {
+		t.Fatalf("QueueUserMessage first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.QueueUserMessage(context.Background(), req); err != nil {
+		t.Fatalf("QueueUserMessage replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if _, err := engine.SubmitQueuedUserMessages(context.Background()); err != nil {
+		t.Fatalf("SubmitQueuedUserMessages: %v", err)
+	}
+	if got := countUserMessagesWithContent(t, store, "hello"); got != 1 {
+		t.Fatalf("queued user message count = %d, want 1", got)
+	}
+}
+
+func TestServiceQueueUserMessageRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeControlFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	first := serverapi.RuntimeQueueUserMessageRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              "hello",
+	}
+	if err := service.QueueUserMessage(context.Background(), first); err != nil {
+		t.Fatalf("QueueUserMessage first: %v", err)
+	}
+	second := first
+	second.Text = "different"
+	if err := service.QueueUserMessage(context.Background(), second); err == nil || err.Error() != "client_request_id \"req-1\" was reused with different parameters" {
+		t.Fatalf("QueueUserMessage mismatch error = %v, want request id payload mismatch", err)
+	}
+	if _, err := engine.SubmitQueuedUserMessages(context.Background()); err != nil {
+		t.Fatalf("SubmitQueuedUserMessages: %v", err)
+	}
+	if got := countUserMessagesWithContent(t, store, "hello"); got != 1 {
+		t.Fatalf("queued user message count = %d, want 1", got)
+	}
+	if got := countUserMessagesWithContent(t, store, "different"); got != 0 {
+		t.Fatalf("mismatched queued user message count = %d, want 0", got)
+	}
+	if got := countUserMessagesWithContent(t, store, "hello\n\ndifferent"); got != 0 {
+		t.Fatalf("mixed queued flush count = %d, want 0", got)
+	}
+}
+
 func countDirectShellCommandMessages(t *testing.T, store *session.Store, command string) int {
 	t.Helper()
 	events, err := store.ReadEvents()
@@ -326,6 +447,28 @@ func countDirectShellCommandMessages(t *testing.T, store *session.Store, command
 			t.Fatalf("decode message event: %v", err)
 		}
 		if msg.Role == llm.RoleDeveloper && msg.Content == "User ran shell command directly:\n"+command {
+			count++
+		}
+	}
+	return count
+}
+
+func countUserMessagesWithContent(t *testing.T, store *session.Store, content string) int {
+	t.Helper()
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	count := 0
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg llm.Message
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if msg.Role == llm.RoleUser && msg.Content == content {
 			count++
 		}
 	}
