@@ -11,7 +11,9 @@ import (
 
 	"builder/server/auth"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/session"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
 )
@@ -49,6 +51,35 @@ func createPersistedSession(t *testing.T) (string, string, *session.Store) {
 		t.Fatalf("create session store: %v", err)
 	}
 	return persistenceRoot, containerDir, store
+}
+
+func createAuthoritativeSessionLifecycleSession(t *testing.T, workspaceRoot string) (config.App, *metadata.Store, metadata.Binding, *session.Store) {
+	t.Helper()
+	cfg := config.App{PersistenceRoot: t.TempDir(), WorkspaceRoot: workspaceRoot}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		_ = store.Close()
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.SetName("incident triage"); err != nil {
+		_ = store.Close()
+		t.Fatalf("SetName: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return cfg, store, binding, sess
 }
 
 func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
@@ -115,6 +146,51 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	}
 	if reopened.Meta().InputDraft != "saved by service" {
 		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
+func TestServiceRetargetSessionWorkspaceUpdatesBindingAndSession(t *testing.T) {
+	oldWorkspace := t.TempDir()
+	newWorkspace := t.TempDir()
+	cfg, metadataStore, binding, sess := createAuthoritativeSessionLifecycleSession(t, oldWorkspace)
+
+	service := NewGlobalService(cfg.PersistenceRoot, nil, nil)
+	resp, err := service.RetargetSessionWorkspace(context.Background(), serverapi.SessionRetargetWorkspaceRequest{
+		ClientRequestID: "req-1",
+		SessionID:       sess.Meta().SessionID,
+		WorkspaceRoot:   newWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("RetargetSessionWorkspace: %v", err)
+	}
+	if resp.Binding.ProjectID != binding.ProjectID {
+		t.Fatalf("binding project id = %q, want %q", resp.Binding.ProjectID, binding.ProjectID)
+	}
+	target, err := metadataStore.ResolveSessionExecutionTarget(context.Background(), sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorkspaceRoot != resp.Binding.CanonicalRoot {
+		t.Fatalf("target workspace root = %q, want %q", target.WorkspaceRoot, resp.Binding.CanonicalRoot)
+	}
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("OpenByID: %v", err)
+	}
+	if reopened.Meta().WorkspaceRoot != resp.Binding.CanonicalRoot {
+		t.Fatalf("session workspace root = %q, want %q", reopened.Meta().WorkspaceRoot, resp.Binding.CanonicalRoot)
+	}
+}
+
+func TestServiceRetargetSessionWorkspaceRequiresPersistenceRoot(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	_, err := service.RetargetSessionWorkspace(context.Background(), serverapi.SessionRetargetWorkspaceRequest{
+		ClientRequestID: "req-1",
+		SessionID:       "session-1",
+		WorkspaceRoot:   t.TempDir(),
+	})
+	if err == nil || err.Error() != "persistence root is required" {
+		t.Fatalf("RetargetSessionWorkspace error = %v, want persistence root is required", err)
 	}
 }
 
