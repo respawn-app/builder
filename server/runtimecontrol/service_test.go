@@ -2,6 +2,7 @@ package runtimecontrol
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 type stubRuntimeResolver struct {
@@ -37,6 +39,14 @@ type runtimeControlFakeClient struct {
 	calls     int
 }
 
+type fakeShellHandler struct{}
+
+func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolShell }
+
+func (fakeShellHandler) Call(context.Context, tools.Call) (tools.Result, error) {
+	return tools.Result{Output: json.RawMessage(`{"output":"ok","exit_code":0,"truncated":false}`)}, nil
+}
+
 func (c *runtimeControlFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,7 +67,7 @@ func TestServiceSetSessionNameRequiresControllerLease(t *testing.T) {
 	if err := store.SetName("before"); err != nil {
 		t.Fatalf("persist initial session name: %v", err)
 	}
-	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(fakeShellHandler{}), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("create runtime engine: %v", err)
 	}
@@ -202,4 +212,122 @@ func TestServiceSubmitUserMessageRejectsClientRequestIDPayloadMismatch(t *testin
 	if client.calls != 1 {
 		t.Fatalf("generate call count = %d, want 1", client.calls)
 	}
+}
+
+func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(fakeShellHandler{}), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	req := serverapi.RuntimeSubmitUserShellCommandRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Command:           "pwd",
+	}
+
+	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
+		t.Fatalf("SubmitUserShellCommand first: %v", err)
+	}
+	afterFirst := countDirectShellCommandMessages(t, store, "pwd")
+	if afterFirst != 1 {
+		t.Fatalf("direct shell message count after first call = %d, want 1", afterFirst)
+	}
+	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
+		t.Fatalf("SubmitUserShellCommand replay: %v", err)
+	}
+	afterReplay := countDirectShellCommandMessages(t, store, "pwd")
+	if afterReplay != 1 {
+		t.Fatalf("direct shell message count after replay = %d, want 1", afterReplay)
+	}
+}
+
+func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(fakeShellHandler{}), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSubmitUserShellCommandRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Command:           "pwd",
+	}
+
+	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
+		t.Fatalf("SubmitUserShellCommand first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
+		t.Fatalf("SubmitUserShellCommand replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if got := countDirectShellCommandMessages(t, store, "pwd"); got != 1 {
+		t.Fatalf("direct shell message count = %d, want 1", got)
+	}
+}
+
+func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(fakeShellHandler{}), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	first := serverapi.RuntimeSubmitUserShellCommandRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Command:           "pwd",
+	}
+	if err := service.SubmitUserShellCommand(context.Background(), first); err != nil {
+		t.Fatalf("SubmitUserShellCommand first: %v", err)
+	}
+	second := first
+	second.Command = "ls"
+	if err := service.SubmitUserShellCommand(context.Background(), second); err == nil || err.Error() != "client_request_id \"req-1\" was reused with different parameters" {
+		t.Fatalf("SubmitUserShellCommand mismatch error = %v, want request id payload mismatch", err)
+	}
+	if got := countDirectShellCommandMessages(t, store, "pwd"); got != 1 {
+		t.Fatalf("direct shell message count = %d, want 1", got)
+	}
+}
+
+func countDirectShellCommandMessages(t *testing.T, store *session.Store, command string) int {
+	t.Helper()
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	count := 0
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg llm.Message
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if msg.Role == llm.RoleDeveloper && msg.Content == "User ran shell command directly:\n"+command {
+			count++
+		}
+	}
+	return count
 }

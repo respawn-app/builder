@@ -687,7 +687,9 @@ func (c *sessionRuntimeClient) Interrupt() error {
 func (c *sessionRuntimeClient) QueueUserMessage(text string) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	_ = c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
+	if err := c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text}); err != nil {
+		c.notifyConnectionState(err)
+	}
 }
 
 func (c *sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {

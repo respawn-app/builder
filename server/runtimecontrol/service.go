@@ -24,6 +24,7 @@ type Service struct {
 	gate     primaryrun.Gate
 	control  ControllerLeaseVerifier
 	submits  *requestmemo.Memo[submitUserMessageMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
+	shells   *requestmemo.Memo[submitUserShellCommandMemoRequest, struct{}]
 }
 
 type submitUserMessageMemoRequest struct {
@@ -32,11 +33,18 @@ type submitUserMessageMemoRequest struct {
 	Text              string
 }
 
+type submitUserShellCommandMemoRequest struct {
+	SessionID         string
+	ControllerLeaseID string
+	Command           string
+}
+
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
 	return &Service{
 		runtimes: runtimes,
 		gate:     gate,
 		submits:  requestmemo.New[submitUserMessageMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
+		shells:   requestmemo.New[submitUserShellCommandMemoRequest, struct{}](),
 	}
 }
 
@@ -212,19 +220,27 @@ func (s *Service) SubmitUserShellCommand(ctx context.Context, req serverapi.Runt
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return err
+	memoReq := submitUserShellCommandMemoRequest{
+		SessionID:         strings.TrimSpace(req.SessionID),
+		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
+		Command:           req.Command,
 	}
-	lease, err := s.acquirePrimaryRun(req.SessionID)
-	if err != nil {
-		return err
-	}
-	defer lease.Release()
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return err
-	}
-	_, err = engine.SubmitUserShellCommand(ctx, req.Command)
+	_, err := s.shells.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSubmitUserShellCommandMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, memoReq.SessionID, memoReq.ControllerLeaseID); err != nil {
+			return struct{}{}, err
+		}
+		lease, err := s.acquirePrimaryRun(memoReq.SessionID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		defer lease.Release()
+		engine, err := s.resolve(ctx, memoReq.SessionID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		_, err = engine.SubmitUserShellCommand(ctx, memoReq.Command)
+		return struct{}{}, err
+	})
 	return err
 }
 
@@ -358,6 +374,12 @@ func sameSubmitUserMessageMemoRequest(a submitUserMessageMemoRequest, b submitUs
 	return a.SessionID == b.SessionID &&
 		a.ControllerLeaseID == b.ControllerLeaseID &&
 		a.Text == b.Text
+}
+
+func sameSubmitUserShellCommandMemoRequest(a submitUserShellCommandMemoRequest, b submitUserShellCommandMemoRequest) bool {
+	return a.SessionID == b.SessionID &&
+		a.ControllerLeaseID == b.ControllerLeaseID &&
+		a.Command == b.Command
 }
 
 var _ serverapi.RuntimeControlService = (*Service)(nil)
