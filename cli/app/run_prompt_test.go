@@ -812,6 +812,33 @@ func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapabili
 	}
 }
 
+func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutProjectAttachCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	t.Cleanup(func() { dialConfiguredProjectViewRemote = originalProjectViewsDial })
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if ok || remote != nil {
+		t.Fatalf("expected configured remote without project attach to be skipped, got remote=%v ok=%t", remote, ok)
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected incompatible project view remote to be closed")
+	}
+}
+
 func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
