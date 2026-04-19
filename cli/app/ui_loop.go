@@ -46,6 +46,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIThinkingLevel(active.ThinkingLevel),
 		WithUIModelContractLocked(modelContractLocked),
 		WithUITheme(active.Theme),
+		WithUIDebug(active.Debug),
 		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
 		WithUICommandRegistry(commandRegistry),
 		WithUIBackgroundManager(wiring.background),

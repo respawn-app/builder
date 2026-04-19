@@ -10,7 +10,8 @@ import (
 	"sync"
 
 	"builder/server/tools"
-	patchformat "builder/server/tools/patch/format"
+	"builder/shared/toolspec"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 type input struct {
@@ -50,8 +51,8 @@ func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error
 	return t, nil
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolPatch
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolPatch
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
@@ -78,19 +79,19 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
 }
 
-func (t *Tool) apply(ctx context.Context, doc Document) error {
+func (t *Tool) apply(ctx context.Context, doc patchformat.Document) error {
 	state := newApplyState(t, ctx)
 	for _, h := range doc.Hunks {
 		switch op := h.(type) {
-		case AddFile:
+		case patchformat.AddFile:
 			if err := state.addFile(op); err != nil {
 				return err
 			}
-		case DeleteFile:
+		case patchformat.DeleteFile:
 			if err := state.deleteFile(op); err != nil {
 				return err
 			}
-		case UpdateFile:
+		case patchformat.UpdateFile:
 			if err := state.updateFile(op); err != nil {
 				return err
 			}

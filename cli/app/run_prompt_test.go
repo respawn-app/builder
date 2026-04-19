@@ -15,25 +15,125 @@ import (
 	"testing"
 	"time"
 
-	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
-	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
 	serverstartup "builder/server/startup"
 	"builder/server/tools/askquestion"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 )
 
 type memoryAuthHandler struct {
 	state auth.State
+}
+
+type headlessProjectViewStubService struct {
+	listProjectsResp serverapi.ProjectListResponse
+	listProjectsErr  error
+	overviews        map[string]serverapi.ProjectGetOverviewResponse
+	overviewErr      error
+}
+
+type configuredProjectViewRemoteStub struct {
+	identity           protocol.ServerIdentity
+	resolveProjectPath func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error)
+	listProjects       func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error)
+	getProjectOverview func(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error)
+	closed             atomic.Bool
+}
+
+func (s *configuredProjectViewRemoteStub) Close() error {
+	if s != nil {
+		s.closed.Store(true)
+	}
+	return nil
+}
+
+func (s *configuredProjectViewRemoteStub) Identity() protocol.ServerIdentity {
+	if s == nil {
+		return protocol.ServerIdentity{}
+	}
+	return s.identity
+}
+
+func (s *configuredProjectViewRemoteStub) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	if s != nil && s.listProjects != nil {
+		return s.listProjects(ctx, req)
+	}
+	return serverapi.ProjectListResponse{}, errors.New("unexpected ListProjects call")
+}
+
+func (s *configuredProjectViewRemoteStub) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	if s != nil && s.resolveProjectPath != nil {
+		return s.resolveProjectPath(ctx, req)
+	}
+	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
+}
+
+func (*configuredProjectViewRemoteStub) CreateProject(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+}
+
+func (*configuredProjectViewRemoteStub) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (*configuredProjectViewRemoteStub) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+}
+
+func (s *configuredProjectViewRemoteStub) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	if s != nil && s.getProjectOverview != nil {
+		return s.getProjectOverview(ctx, req)
+	}
+	return serverapi.ProjectGetOverviewResponse{}, errors.New("unexpected GetProjectOverview call")
+}
+
+func (*configuredProjectViewRemoteStub) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
+}
+
+func (s headlessProjectViewStubService) ListProjects(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	return s.listProjectsResp, s.listProjectsErr
+}
+
+func (headlessProjectViewStubService) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
+}
+
+func (headlessProjectViewStubService) CreateProject(context.Context, serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
+}
+
+func (headlessProjectViewStubService) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (headlessProjectViewStubService) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("unexpected RebindWorkspace call")
+}
+
+func (s headlessProjectViewStubService) GetProjectOverview(_ context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	if s.overviewErr != nil {
+		return serverapi.ProjectGetOverviewResponse{}, s.overviewErr
+	}
+	resp, ok := s.overviews[req.ProjectID]
+	if !ok {
+		return serverapi.ProjectGetOverviewResponse{}, errors.New("missing overview")
+	}
+	return resp, nil
+}
+
+func (headlessProjectViewStubService) ListSessionsByProject(context.Context, serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return serverapi.SessionListByProjectResponse{}, nil
 }
 
 func (h memoryAuthHandler) WrapStore(auth.Store) auth.Store {
@@ -67,6 +167,30 @@ func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup
 	reloaded.Source.SettingsPath = path
 	reloaded.Source.SettingsFileExists = true
 	return reloaded, nil
+}
+
+func waitForConfiguredRunPromptDaemon(t *testing.T, workspace string) {
+	t.Helper()
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
+	deadline := time.Now().Add(5 * time.Second)
+	client := &http.Client{Timeout: 250 * time.Millisecond}
+	for {
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("configured daemon did not become healthy at %s", healthURL)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestEnsureSubagentSessionNameSetsDefault(t *testing.T) {
@@ -160,7 +284,7 @@ func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *t
 	}
 }
 
-func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
+func TestRunPromptUsesConfiguredDaemonWithoutLocalAuth(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -195,28 +319,7 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 		errCh <- srv.Serve(serveCtx)
 	}()
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForConfiguredRunPromptDaemon(t, workspace)
 
 	result, err := RunPrompt(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, "hello through daemon", 0, nil)
 	if err != nil {
@@ -235,7 +338,7 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	}
 }
 
-func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *testing.T) {
+func TestRunPromptRejectsIncompatibleConfiguredDaemonAndFallsBackToEmbedded(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -245,7 +348,7 @@ func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *t
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
 
-	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
 		JSONRPCWebSocket: true,
 		ProjectAttach:    true,
 		SessionAttach:    true,
@@ -367,7 +470,7 @@ func TestOwnedDaemonCloseFallsBackToKillWhenInterruptFails(t *testing.T) {
 	}
 }
 
-func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
+func TestRunPromptUsesInvocationOverridesWhenAttachingToConfiguredDaemon(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -404,28 +507,7 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 		errCh <- srv.Serve(serveCtx)
 	}()
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForConfiguredRunPromptDaemon(t, workspace)
 
 	result, err := RunPrompt(context.Background(), Options{
 		WorkspaceRoot:         workspace,
@@ -453,50 +535,313 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 	}
 }
 
-func TestTryDialMatchingDiscoveredRemoteSkipsRecordThatDoesNotMatchSpawnedPID(t *testing.T) {
+func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	binding, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("ResolveBinding: %v", err)
-	}
-	if err := discovery.Write(discoveryPath, protocol.DiscoveryRecord{
-		Identity: protocol.ServerIdentity{ProjectID: binding.ProjectID, PID: 111, Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
-		RPCURL:   "ws://127.0.0.1:1/rpc",
-	}); err != nil {
-		t.Fatalf("discovery.Write: %v", err)
-	}
-
-	originalDial := dialDiscoveredRemote
-	var dialCalls int
-	t.Cleanup(func() { dialDiscoveredRemote = originalDial })
-	dialDiscoveredRemote = func(context.Context, protocol.DiscoveryRecord) (*client.Remote, error) {
-		dialCalls++
-		return nil, errors.New("unexpected dial")
-	}
-
-	if remote, ok := tryDialMatchingDiscoveredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
-		return record.Identity.PID == 222
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
+	defer cleanup()
+	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+		return identity.PID == 111
 	}); ok || remote != nil {
-		t.Fatalf("expected mismatched pid record to be skipped, got remote=%v ok=%t", remote, ok)
+		t.Fatalf("expected mismatched pid server to be rejected, got remote=%v ok=%t", remote, ok)
 	}
-	if dialCalls != 0 {
-		t.Fatalf("expected mismatched pid record to be rejected before dialing, got %d dial calls", dialCalls)
+}
+
+func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
+	defer cleanup()
+	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, nil); ok || remote != nil {
+		t.Fatalf("expected unregistered workspace to skip configured remote attach, got remote=%v ok=%t", remote, ok)
+	}
+}
+
+func TestStartLocalRunPromptDaemonAttemptsLaunchWhenRegistrationMustBeResolvedByServer(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+
+	originalResolve := resolveDaemonExecutablePath
+	t.Cleanup(func() { resolveDaemonExecutablePath = originalResolve })
+
+	lookupCalls := 0
+	resolveDaemonExecutablePath = func() (string, bool) {
+		lookupCalls++
+		return "/bin/false", true
+	}
+
+	remote, closeFn, ok, err := startLocalRunPromptDaemon(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err == nil {
+		t.Fatal("expected daemon launch attempt to fail for unregistered workspace probe")
+	}
+	if ok {
+		t.Fatal("expected no connected daemon client after failed launch attempt")
+	}
+	if remote != nil {
+		t.Fatalf("expected no remote client, got %v", remote)
+	}
+	if closeFn != nil {
+		t.Fatal("expected no close function when launch is skipped")
+	}
+	if lookupCalls != 1 {
+		t.Fatalf("expected daemon executable lookup once, got %d calls", lookupCalls)
+	}
+}
+
+func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+		t.Fatalf("startRunPromptClient error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+	if runClient != nil {
+		t.Fatalf("expected no run client, got %v", runClient)
+	}
+	if closeFn != nil {
+		t.Fatal("expected no close function when startup fails")
+	}
+	if !strings.Contains(err.Error(), "builder project") || !strings.Contains(err.Error(), "builder attach") {
+		t.Fatalf("expected recovery guidance in error, got %q", err)
+	}
+}
+
+func TestSelectSingleRemoteWorkspaceForHeadlessChoosesOnlyWorkspace(t *testing.T) {
+	client := client.NewLoopbackProjectViewClient(headlessProjectViewStubService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}},
+		overviews: map[string]serverapi.ProjectGetOverviewResponse{
+			"project-1": {Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1"}}}},
+		},
+	})
+
+	selection, found, err := selectSingleRemoteWorkspaceForHeadless(context.Background(), client)
+	if err != nil {
+		t.Fatalf("selectSingleRemoteWorkspaceForHeadless: %v", err)
+	}
+	if !found {
+		t.Fatal("expected single workspace selection")
+	}
+	if selection.ProjectID != "project-1" || selection.WorkspaceID != "workspace-1" {
+		t.Fatalf("unexpected selection: %+v", selection)
+	}
+}
+
+func TestSelectSingleRemoteWorkspaceForHeadlessIgnoresUnavailableWorkspaces(t *testing.T) {
+	client := client.NewLoopbackProjectViewClient(headlessProjectViewStubService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}},
+		overviews: map[string]serverapi.ProjectGetOverviewResponse{
+			"project-1": {Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{
+				{WorkspaceID: "workspace-missing", Availability: clientui.ProjectAvailabilityMissing},
+				{WorkspaceID: "workspace-1", Availability: clientui.ProjectAvailabilityAvailable},
+				{WorkspaceID: "workspace-inaccessible", Availability: clientui.ProjectAvailabilityInaccessible},
+			}}},
+		},
+	})
+
+	selection, found, err := selectSingleRemoteWorkspaceForHeadless(context.Background(), client)
+	if err != nil {
+		t.Fatalf("selectSingleRemoteWorkspaceForHeadless: %v", err)
+	}
+	if !found {
+		t.Fatal("expected single available workspace selection")
+	}
+	if selection.ProjectID != "project-1" || selection.WorkspaceID != "workspace-1" {
+		t.Fatalf("unexpected selection: %+v", selection)
+	}
+}
+
+func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDiscovery(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	originalRemoteDial := dialConfiguredRemote
+	originalAttachTimeout := configuredRemoteAttachTimeout
+	originalDiscoveryTimeout := configuredRemoteWorkspaceDiscoveryTimeout
+	t.Cleanup(func() {
+		dialConfiguredProjectViewRemote = originalProjectViewsDial
+		dialConfiguredRemote = originalRemoteDial
+		configuredRemoteAttachTimeout = originalAttachTimeout
+		configuredRemoteWorkspaceDiscoveryTimeout = originalDiscoveryTimeout
+	})
+
+	configuredRemoteAttachTimeout = 20 * time.Millisecond
+	configuredRemoteWorkspaceDiscoveryTimeout = 120 * time.Millisecond
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true}},
+		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
+		},
+		listProjects: func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+			return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}}, nil
+		},
+		getProjectOverview: func(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+			time.Sleep(configuredRemoteAttachTimeout + 10*time.Millisecond)
+			if err := ctx.Err(); err != nil {
+				return serverapi.ProjectGetOverviewResponse{}, err
+			}
+			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1"}}}}, nil
+		},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+	var dialRemaining time.Duration
+	dialConfiguredRemote = func(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected dial context deadline")
+		}
+		dialRemaining = time.Until(deadline)
+		if cfg.WorkspaceRoot != workspace {
+			t.Fatalf("unexpected config workspace root: %s", cfg.WorkspaceRoot)
+		}
+		if projectID != "project-1" || workspaceID != "workspace-1" {
+			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
+		}
+		return new(client.Remote), nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected configured remote attach to succeed")
+	}
+	if remote == nil {
+		t.Fatal("expected remote client")
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected project view remote to close after workspace selection")
+	}
+	if dialRemaining <= configuredRemoteAttachTimeout/2 {
+		t.Fatalf("expected fresh attach timeout after workspace discovery, remaining=%v attach=%v", dialRemaining, configuredRemoteAttachTimeout)
+	}
+}
+
+func TestTryDialMatchingConfiguredRunPromptRemoteUsesWorkspaceDiscoveryForAcceptedDaemon(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	originalRemoteDial := dialConfiguredRemote
+	t.Cleanup(func() {
+		dialConfiguredProjectViewRemote = originalProjectViewsDial
+		dialConfiguredRemote = originalRemoteDial
+	})
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{PID: 777, Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true}},
+		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
+		},
+		listProjects: func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+			return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}}, nil
+		},
+		getProjectOverview: func(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1", Availability: clientui.ProjectAvailabilityAvailable}}}}, nil
+		},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+	dialConfiguredRemote = func(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if cfg.WorkspaceRoot != workspace {
+			t.Fatalf("unexpected config workspace root: %s", cfg.WorkspaceRoot)
+		}
+		if projectID != "project-1" || workspaceID != "workspace-1" {
+			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
+		}
+		return new(client.Remote), nil
+	}
+
+	remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, func(identity protocol.ServerIdentity) bool {
+		return identity.PID == 777
+	})
+	if err != nil {
+		t.Fatalf("tryDialMatchingConfiguredRunPromptRemote: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected launched daemon attach to succeed via workspace discovery")
+	}
+	if remote == nil {
+		t.Fatal("expected remote client")
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected project view remote to close after workspace discovery")
+	}
+}
+
+func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	t.Cleanup(func() { dialConfiguredProjectViewRemote = originalProjectViewsDial })
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if ok || remote != nil {
+		t.Fatalf("expected configured remote without auth bootstrap to be skipped, got remote=%v ok=%t", remote, ok)
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected incompatible project view remote to be closed")
+	}
+}
+
+func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutProjectAttachCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	t.Cleanup(func() { dialConfiguredProjectViewRemote = originalProjectViewsDial })
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if ok || remote != nil {
+		t.Fatalf("expected configured remote without project attach to be skipped, got remote=%v ok=%t", remote, ok)
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected incompatible project view remote to be closed")
 	}
 }
 
@@ -547,8 +892,12 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	}
 	store := openAuthoritativeAppSession(t, cfg.PersistenceRoot, result.SessionID)
 	meta := store.Meta()
-	if meta.WorkspaceRoot != cfg.WorkspaceRoot {
-		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, cfg.WorkspaceRoot)
+	wantWorkspaceRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if meta.WorkspaceRoot != wantWorkspaceRoot {
+		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, wantWorkspaceRoot)
 	}
 	if meta.FirstPromptPreview != "hello from user" {
 		t.Fatalf("first prompt preview = %q, want %q", meta.FirstPromptPreview, "hello from user")
@@ -706,130 +1055,6 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, created.SessionID)
 	if store.Meta().Continuation == nil || store.Meta().Continuation.OpenAIBaseURL != server.URL {
 		t.Fatalf("unexpected continuation context: %+v", store.Meta().Continuation)
-	}
-}
-
-func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
-
-	secondRelease := make(chan struct{})
-	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if testopenai.HandleInputTokenCount(w, r, 11) {
-			return
-		}
-		if r.URL.Path != "/responses" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
-			t.Fatal("expected authorization header")
-		}
-		index := int(hits.Add(1)) - 1
-		switch index {
-		case 0:
-		case 1:
-			<-secondRelease
-		default:
-			t.Fatalf("unexpected response request index %d", index)
-		}
-		reply := []string{"created", "deduped"}[index]
-		testopenai.WriteCompletedResponseStream(w, reply, 11, 7)
-	}))
-	defer server.Close()
-
-	created, err := RunPrompt(context.Background(), Options{
-		WorkspaceRoot:         workspace,
-		WorkspaceRootExplicit: true,
-		Model:                 "gpt-5",
-		OpenAIBaseURL:         server.URL,
-		OpenAIBaseURLExplicit: true,
-	}, "first prompt", 0, nil)
-	if err != nil {
-		t.Fatalf("initial RunPrompt: %v", err)
-	}
-
-	boot, err := startEmbeddedServer(context.Background(), Options{
-		WorkspaceRoot:         workspace,
-		WorkspaceRootExplicit: true,
-		SessionID:             created.SessionID,
-		Model:                 "gpt-5",
-		OpenAIBaseURL:         server.URL,
-		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("bootstrap app: %v", err)
-	}
-	defer func() { _ = boot.Close() }()
-
-	runClient := newHeadlessRunPromptClient(boot)
-	req := serverapi.RunPromptRequest{
-		ClientRequestID:   "dup-e2e-1",
-		SelectedSessionID: created.SessionID,
-		Prompt:            "second prompt",
-	}
-
-	type runResult struct {
-		response serverapi.RunPromptResponse
-		err      error
-	}
-	results := make(chan runResult, 2)
-	go func() {
-		response, err := runClient.RunPrompt(context.Background(), req, nil)
-		results <- runResult{response: response, err: err}
-	}()
-	go func() {
-		response, err := runClient.RunPrompt(context.Background(), req, nil)
-		results <- runResult{response: response, err: err}
-	}()
-
-	close(secondRelease)
-	first := <-results
-	second := <-results
-	if first.err != nil {
-		t.Fatalf("first duplicate run error: %v", first.err)
-	}
-	if second.err != nil {
-		t.Fatalf("second duplicate run error: %v", second.err)
-	}
-	if first.response != second.response {
-		t.Fatalf("duplicate run responses differ: first=%+v second=%+v", first.response, second.response)
-	}
-	if first.response.SessionID != created.SessionID {
-		t.Fatalf("duplicate run session id = %q, want %q", first.response.SessionID, created.SessionID)
-	}
-	if first.response.Result != "deduped" {
-		t.Fatalf("duplicate run result = %q, want deduped", first.response.Result)
-	}
-	if got := hits.Load(); got != 2 {
-		t.Fatalf("fake response server hit count = %d, want 2 total requests", got)
-	}
-
-	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, created.SessionID)
-	messages, err := readStoredMessages(store)
-	if err != nil {
-		t.Fatalf("read stored messages: %v", err)
-	}
-	assertMessagePresent(t, messages, llm.RoleUser, "first prompt")
-	assertMessagePresent(t, messages, llm.RoleAssistant, "created")
-	assertMessagePresent(t, messages, llm.RoleUser, "second prompt")
-	assertMessagePresent(t, messages, llm.RoleAssistant, "deduped")
-
-	secondPromptUsers := 0
-	secondPromptAssistants := 0
-	for _, msg := range messages {
-		if msg.Role == llm.RoleUser && msg.Content == "second prompt" {
-			secondPromptUsers++
-		}
-		if msg.Role == llm.RoleAssistant && msg.Content == "deduped" {
-			secondPromptAssistants++
-		}
-	}
-	if secondPromptUsers != 1 || secondPromptAssistants != 1 {
-		t.Fatalf("expected deduped transcript entries once, got users=%d assistants=%d messages=%+v", secondPromptUsers, secondPromptAssistants, messages)
 	}
 }
 

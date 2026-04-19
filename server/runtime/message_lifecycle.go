@@ -8,7 +8,8 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/server/tools"
+	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type defaultMessageLifecycle struct {
@@ -60,21 +61,18 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return err
 			}
 		case "history_replaced":
-			var payload historyReplacementPayload
-			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+			if err != nil {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
-			e.resetLocalDiagnostics()
-			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				e.chat.restoreHistoryItems(payload.Items)
-				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())
-				reminderIssued = itemsContainCompactionSoonReminder(payload.Items)
-			} else {
-				e.chat.replaceHistory(payload.Items)
-				e.compactionCount++
-				recoveredHandoff.ClearSatisfiedByCompaction()
-				reminderIssued = false
+			if ignoredLegacy {
+				return nil
 			}
+			e.resetLocalDiagnostics()
+			e.chat.replaceHistory(payload.Items)
+			e.compactionCount++
+			recoveredHandoff.ClearSatisfiedByCompaction()
+			reminderIssued = false
 		}
 		return nil
 	}); err != nil {
@@ -127,7 +125,7 @@ func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
 		return
 	}
 	for _, call := range msg.ToolCalls {
-		if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+		if toolspec.ID(strings.TrimSpace(call.Name)) != toolspec.ToolTriggerHandoff {
 			continue
 		}
 		callID := strings.TrimSpace(call.ID)
@@ -136,7 +134,7 @@ func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
 		}
 		r.toolCalls[callID] = llm.ToolCall{
 			ID:    callID,
-			Name:  string(tools.ToolTriggerHandoff),
+			Name:  string(toolspec.ToolTriggerHandoff),
 			Input: append(json.RawMessage(nil), call.Input...),
 		}
 	}
@@ -150,7 +148,7 @@ func (r *persistedHandoffRecovery) ApplyToolCompletion(payload []byte) error {
 	if err := json.Unmarshal(payload, &completion); err != nil {
 		return fmt.Errorf("decode tool_completed event: %w", err)
 	}
-	if tools.ID(strings.TrimSpace(completion.Name)) != tools.ToolTriggerHandoff || completion.IsError {
+	if toolspec.ID(strings.TrimSpace(completion.Name)) != toolspec.ToolTriggerHandoff || completion.IsError {
 		delete(r.toolCalls, strings.TrimSpace(completion.CallID))
 		return nil
 	}
@@ -200,7 +198,7 @@ func (r *persistedHandoffRecovery) PendingRequest() (*handoffRequest, bool) {
 }
 
 func handoffRequestFromToolCall(call llm.ToolCall) (*handoffRequest, bool) {
-	if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+	if toolspec.ID(strings.TrimSpace(call.Name)) != toolspec.ToolTriggerHandoff {
 		return nil, false
 	}
 	var input struct {
@@ -249,8 +247,7 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 			return flushed, err
 		}
 		flushed++
-		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages})
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages, CommittedTranscriptChanged: true})
 	}
 	for _, notice := range pendingNotices {
 		if err := e.appendMessage(stepID, notice); err != nil {
@@ -276,6 +273,15 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, warning := range metaResult.SkillWarnings {
+		if err := e.appendPersistedLocalEntryRecord(stepID, storedLocalEntry{
+			Visibility: transcript.EntryVisibilityAll,
+			Role:       "warning",
+			Text:       warning,
+		}); err != nil {
+			return err
+		}
 	}
 	for _, message := range metaResult.OrderedInjectionMessages() {
 		if err := e.appendMessage(stepID, message); err != nil {

@@ -3,7 +3,6 @@ package processview
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
@@ -31,7 +31,7 @@ func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
 	}
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:     "call-1",
-		Name:   tools.ToolExecCommand,
+		Name:   toolspec.ToolExecCommand,
 		Input:  input,
 		RunID:  "run-1",
 		StepID: "step-1",
@@ -102,7 +102,7 @@ func TestServiceListProcessesFiltersByOwnerRunID(t *testing.T) {
 		if marshalErr != nil {
 			t.Fatalf("marshal input: %v", marshalErr)
 		}
-		if _, err := tool.Call(context.Background(), tools.Call{ID: runID, Name: tools.ToolExecCommand, Input: input, RunID: runID, StepID: runID + "-step"}); err != nil {
+		if _, err := tool.Call(context.Background(), tools.Call{ID: runID, Name: toolspec.ToolExecCommand, Input: input, RunID: runID, StepID: runID + "-step"}); err != nil {
 			t.Fatalf("tool call for %s: %v", runID, err)
 		}
 	}
@@ -135,7 +135,7 @@ func TestServiceGetInlineOutputReturnsManagerPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-inline", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-inline", Name: toolspec.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
 	if err != nil {
 		t.Fatalf("tool call: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestServiceKillProcessSignalsManagerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-kill", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-kill", Name: toolspec.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
 	if err != nil {
 		t.Fatalf("tool call: %v", err)
 	}
@@ -202,50 +202,48 @@ func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
 	}
 }
 
-func TestServiceKillProcessDeduplicatesSuccessfulRetryByClientRequestID(t *testing.T) {
-	processes := &stubKillProcessSource{}
-	svc := NewService(processes)
-	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}
-	if _, err := svc.KillProcess(context.Background(), req); err != nil {
-		t.Fatalf("first KillProcess: %v", err)
-	}
-	processes.killErr = errors.New("unknown session_id proc-1")
-	if _, err := svc.KillProcess(context.Background(), req); err != nil {
-		t.Fatalf("second KillProcess retry: %v", err)
-	}
-	if processes.killCalls != 1 {
-		t.Fatalf("kill call count = %d, want 1", processes.killCalls)
-	}
-}
-
-func TestServiceKillProcessRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
-	processes := &stubKillProcessSource{}
-	svc := NewService(processes)
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); err != nil {
-		t.Fatalf("first KillProcess: %v", err)
-	}
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-2"}); err == nil || !strings.Contains(err.Error(), "reused with different payload") {
-		t.Fatalf("expected payload reuse error, got %v", err)
-	}
-}
-
-func TestServiceKillProcessReturnsContextCanceledWhileWaitingForDuplicateInFlight(t *testing.T) {
-	processes := &blockingKillProcessSource{started: make(chan struct{}), release: make(chan struct{})}
-	svc := NewService(processes)
-	done := make(chan error, 1)
-	go func() {
-		_, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"})
-		done <- err
-	}()
-	<-processes.started
+func TestServiceKillProcessHonorsCanceledContext(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := svc.KillProcess(ctx, serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context canceled while waiting for duplicate in-flight request, got %v", err)
+	if _, err := svc.KillProcess(ctx, serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}); err != context.Canceled {
+		t.Fatalf("KillProcess error = %v, want context canceled", err)
 	}
-	close(processes.release)
-	if err := <-done; err != nil {
-		t.Fatalf("first KillProcess: %v", err)
+	if source.killCalls != 0 {
+		t.Fatalf("kill call count = %d, want 0", source.killCalls)
+	}
+}
+
+func TestServiceKillProcessDedupesSuccessfulRetry(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
+	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}
+
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("KillProcess first: %v", err)
+	}
+	source.killErr = context.DeadlineExceeded
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("KillProcess replay: %v", err)
+	}
+	if source.killCalls != 1 {
+		t.Fatalf("kill call count = %d, want 1", source.killCalls)
+	}
+}
+
+func TestServiceKillProcessRejectsRequestIDPayloadMismatch(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
+
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}); err != nil {
+		t.Fatalf("KillProcess first: %v", err)
+	}
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "2000"}); err == nil || !strings.Contains(err.Error(), "reused with different parameters") {
+		t.Fatalf("KillProcess mismatch error = %v, want reused with different parameters", err)
+	}
+	if source.killCalls != 1 {
+		t.Fatalf("kill call count = %d, want 1", source.killCalls)
 	}
 }
 
@@ -266,27 +264,6 @@ func (s *stubKillProcessSource) Kill(string) error {
 }
 
 func (s *stubKillProcessSource) InlineOutput(string, int) (string, string, error) {
-	return "", "", nil
-}
-
-type blockingKillProcessSource struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (s *blockingKillProcessSource) List() []shelltool.Snapshot { return nil }
-
-func (s *blockingKillProcessSource) Snapshot(string) (shelltool.Snapshot, error) {
-	return shelltool.Snapshot{}, nil
-}
-
-func (s *blockingKillProcessSource) Kill(string) error {
-	close(s.started)
-	<-s.release
-	return nil
-}
-
-func (s *blockingKillProcessSource) InlineOutput(string, int) (string, string, error) {
 	return "", "", nil
 }
 

@@ -214,8 +214,7 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	}
 	if warning != nil {
 		e.applyPersistedCacheWarning(*warning)
-		e.emit(Event{Kind: EventCacheWarning, StepID: stepID, CacheWarning: copyCacheWarning(warning), CacheWarningVisibility: cacheWarningEntryVisibility(e.cfg.CacheWarningMode)})
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		e.emit(Event{Kind: EventCacheWarning, StepID: stepID, CacheWarning: copyCacheWarning(warning), CacheWarningVisibility: cacheWarningEntryVisibility(e.cfg.CacheWarningMode), CommittedTranscriptChanged: true})
 	}
 	e.requestCache.RecordResponse(response)
 	return nil

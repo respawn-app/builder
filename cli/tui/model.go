@@ -24,6 +24,8 @@ var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
 	Visibility  transcript.EntryVisibility
+	Transient   bool
+	Committed   bool
 	Role        string
 	Text        string
 	OngoingText string
@@ -69,6 +71,8 @@ type SetViewportSizeMsg struct {
 
 type AppendTranscriptMsg struct {
 	Visibility  transcript.EntryVisibility
+	Transient   bool
+	Committed   bool
 	Role        string
 	Text        string
 	OngoingText string

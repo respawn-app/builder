@@ -24,7 +24,7 @@ func TestPathForContainer(t *testing.T) {
 func TestWriteReadAndRemoveDiscoveryRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app-server.json")
 	record := protocol.DiscoveryRecord{
-		Identity:  protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1", WorkspaceRoot: "/tmp/workspace", PID: 123},
+		Identity:  protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", PID: 123},
 		HTTPURL:   "http://127.0.0.1:1234",
 		RPCURL:    "ws://127.0.0.1:1234/rpc",
 		StartedAt: time.Now().UTC(),

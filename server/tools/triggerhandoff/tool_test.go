@@ -9,6 +9,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type controllerStub struct {
@@ -37,7 +38,7 @@ func TestToolCallPassesArgumentsToController(t *testing.T) {
 	tool := New(func() Controller { return stub })
 	input := json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`)
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolTriggerHandoff, Input: input, StepID: "step-1"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolTriggerHandoff, Input: input, StepID: "step-1"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestToolCallPassesArgumentsToController(t *testing.T) {
 	if stub.stepID != "step-1" || stub.summarizerPrompt != "keep API details" || stub.futureAgentMessage != "resume with tests" {
 		t.Fatalf("unexpected controller args: %+v", stub)
 	}
-	if stub.activeCall.ID != "call-1" || stub.activeCall.Name != string(tools.ToolTriggerHandoff) {
+	if stub.activeCall.ID != "call-1" || stub.activeCall.Name != string(toolspec.ToolTriggerHandoff) {
 		t.Fatalf("unexpected active call: %+v", stub.activeCall)
 	}
 	if string(stub.activeCall.Input) != string(input) {
@@ -66,7 +67,7 @@ func TestToolCallTreatsArgsAsOptional(t *testing.T) {
 	stub := &controllerStub{summary: "Handoff triggered."}
 	tool := New(func() Controller { return stub })
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolTriggerHandoff, Input: json.RawMessage(`{}`), StepID: "step-2"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolTriggerHandoff, Input: json.RawMessage(`{}`), StepID: "step-2"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestToolCallTreatsArgsAsOptional(t *testing.T) {
 func TestToolCallReturnsControllerErrorsAsToolErrors(t *testing.T) {
 	tool := New(func() Controller { return &controllerStub{err: errors.New("too early")} })
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolTriggerHandoff, Input: json.RawMessage(`{}`), StepID: "step-3"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolTriggerHandoff, Input: json.RawMessage(`{}`), StepID: "step-3"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestToolCallReturnsControllerErrorsAsToolErrors(t *testing.T) {
 func TestToolCallReturnsGuidanceForInvalidInput(t *testing.T) {
 	tool := New(func() Controller { return &controllerStub{} })
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolTriggerHandoff, Input: json.RawMessage(`{"summarizer_prompt":123}`), StepID: "step-4"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolTriggerHandoff, Input: json.RawMessage(`{"summarizer_prompt":123}`), StepID: "step-4"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}

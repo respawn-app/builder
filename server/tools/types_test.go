@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
 	"strings"
@@ -8,58 +9,25 @@ import (
 )
 
 type stubHandler struct {
-	id ID
+	id toolspec.ID
 }
 
-func (s stubHandler) Name() ID { return s.id }
+func (s stubHandler) Name() toolspec.ID { return s.id }
 
 func (s stubHandler) Call(_ context.Context, c Call) (Result, error) {
 	return Result{CallID: c.ID, Name: c.Name, Output: json.RawMessage(`{}`)}, nil
 }
 
-func TestParseID(t *testing.T) {
-	tests := []struct {
-		in   string
-		want ID
-		ok   bool
-	}{
-		{in: "shell", want: ToolShell, ok: true},
-		{in: "bash", want: ToolShell, ok: true},
-		{in: "bash_command", want: ToolShell, ok: true},
-		{in: "shell_command", want: ToolShell, ok: true},
-		{in: "exec_command", want: ToolExecCommand, ok: true},
-		{in: "write_stdin", want: ToolWriteStdin, ok: true},
-		{in: "view_image", want: ToolViewImage, ok: true},
-		{in: "read_image", want: ToolViewImage, ok: true},
-		{in: "patch", want: ToolPatch, ok: true},
-		{in: "ask_question", want: ToolAskQuestion, ok: true},
-		{in: "trigger_handoff", want: ToolTriggerHandoff, ok: true},
-		{in: "web_search", want: ToolWebSearch, ok: true},
-		{in: "multi_tool_use_parallel", want: ToolMultiToolUseParallel, ok: true},
-		{in: "parallel", want: ToolMultiToolUseParallel, ok: true},
-		{in: "unknown", ok: false},
-	}
-	for _, tt := range tests {
-		got, ok := ParseID(tt.in)
-		if ok != tt.ok {
-			t.Fatalf("ParseID(%q) ok=%t want %t", tt.in, ok, tt.ok)
-		}
-		if ok && got != tt.want {
-			t.Fatalf("ParseID(%q)=%q want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestRegistryDefinitionsFollowCentralCatalog(t *testing.T) {
 	r := NewRegistry(
-		stubHandler{id: ToolPatch},
-		stubHandler{id: ToolShell},
+		stubHandler{id: toolspec.ToolPatch},
+		stubHandler{id: toolspec.ToolShell},
 	)
 	defs := r.Definitions()
 	if len(defs) != 2 {
 		t.Fatalf("definitions count=%d want 2", len(defs))
 	}
-	if defs[0].ID != ToolPatch || defs[1].ID != ToolShell {
+	if defs[0].ID != toolspec.ToolPatch || defs[1].ID != toolspec.ToolShell {
 		t.Fatalf("definition order mismatch: %+v", defs)
 	}
 	if len(defs[0].Schema) == 0 || len(defs[1].Schema) == 0 {
@@ -73,7 +41,7 @@ func TestRegistryRejectsUnknownToolDefinition(t *testing.T) {
 			t.Fatal("expected panic for unknown tool definition")
 		}
 	}()
-	_ = NewRegistry(stubHandler{id: ID("unknown_tool")})
+	_ = NewRegistry(stubHandler{id: toolspec.ID("unknown_tool")})
 }
 
 func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
@@ -90,98 +58,98 @@ func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
 }
 
 func TestDefaultEnabledToolIDsIncludesWebSearchAndViewImage(t *testing.T) {
-	enabled := map[ID]bool{}
+	enabled := map[toolspec.ID]bool{}
 	for _, id := range DefaultEnabledToolIDs() {
 		enabled[id] = true
 	}
-	if !enabled[ToolWebSearch] {
-		t.Fatalf("expected %s to be default-enabled", ToolWebSearch)
+	if !enabled[toolspec.ToolWebSearch] {
+		t.Fatalf("expected %s to be default-enabled", toolspec.ToolWebSearch)
 	}
-	if !enabled[ToolViewImage] {
-		t.Fatalf("expected %s to be default-enabled", ToolViewImage)
+	if !enabled[toolspec.ToolViewImage] {
+		t.Fatalf("expected %s to be default-enabled", toolspec.ToolViewImage)
 	}
-	if enabled[ToolTriggerHandoff] {
-		t.Fatalf("expected %s to remain default-disabled", ToolTriggerHandoff)
+	if enabled[toolspec.ToolTriggerHandoff] {
+		t.Fatalf("expected %s to remain default-disabled", toolspec.ToolTriggerHandoff)
 	}
 }
 
 func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
-	shell, ok := DefinitionFor(ToolShell)
+	shell, ok := DefinitionFor(toolspec.ToolShell)
 	if !ok {
-		t.Fatalf("expected %s definition", ToolShell)
+		t.Fatalf("expected %s definition", toolspec.ToolShell)
 	}
 	if !shell.AvailableInLocalRuntime() {
-		t.Fatalf("expected %s to be available in local runtime", ToolShell)
+		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolShell)
 	}
 	if shell.LocalRuntimeBuilder() != LocalRuntimeBuilderShell {
-		t.Fatalf("expected %s local runtime builder, got %q", ToolShell, shell.LocalRuntimeBuilder())
+		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolShell, shell.LocalRuntimeBuilder())
 	}
 	if !shell.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed without vision", ToolShell)
+		t.Fatalf("expected %s to be request-exposed without vision", toolspec.ToolShell)
 	}
 
-	viewImage, ok := DefinitionFor(ToolViewImage)
+	viewImage, ok := DefinitionFor(toolspec.ToolViewImage)
 	if !ok {
-		t.Fatalf("expected %s definition", ToolViewImage)
+		t.Fatalf("expected %s definition", toolspec.ToolViewImage)
 	}
 	if !viewImage.AvailableInLocalRuntime() {
-		t.Fatalf("expected %s to be available in local runtime", ToolViewImage)
+		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolViewImage)
 	}
 	if viewImage.LocalRuntimeBuilder() != LocalRuntimeBuilderViewImage {
-		t.Fatalf("expected %s local runtime builder, got %q", ToolViewImage, viewImage.LocalRuntimeBuilder())
+		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolViewImage, viewImage.LocalRuntimeBuilder())
 	}
 	if viewImage.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to remain hidden without vision support", ToolViewImage)
+		t.Fatalf("expected %s to remain hidden without vision support", toolspec.ToolViewImage)
 	}
 	if !viewImage.ExposedToModelRequest(RequestExposureContext{SupportsVision: true}) {
-		t.Fatalf("expected %s to be request-exposed with vision support", ToolViewImage)
+		t.Fatalf("expected %s to be request-exposed with vision support", toolspec.ToolViewImage)
 	}
 
-	parallel, ok := DefinitionFor(ToolMultiToolUseParallel)
+	parallel, ok := DefinitionFor(toolspec.ToolMultiToolUseParallel)
 	if !ok {
-		t.Fatalf("expected %s definition", ToolMultiToolUseParallel)
+		t.Fatalf("expected %s definition", toolspec.ToolMultiToolUseParallel)
 	}
 	if !parallel.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed when enabled", ToolMultiToolUseParallel)
+		t.Fatalf("expected %s to be request-exposed when enabled", toolspec.ToolMultiToolUseParallel)
 	}
 
-	triggerHandoff, ok := DefinitionFor(ToolTriggerHandoff)
+	triggerHandoff, ok := DefinitionFor(toolspec.ToolTriggerHandoff)
 	if !ok {
-		t.Fatalf("expected %s definition", ToolTriggerHandoff)
+		t.Fatalf("expected %s definition", toolspec.ToolTriggerHandoff)
 	}
 	if !triggerHandoff.AvailableInLocalRuntime() {
-		t.Fatalf("expected %s to be available in local runtime", ToolTriggerHandoff)
+		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolTriggerHandoff)
 	}
 	if triggerHandoff.LocalRuntimeBuilder() != LocalRuntimeBuilderTriggerHandoff {
-		t.Fatalf("expected %s local runtime builder, got %q", ToolTriggerHandoff, triggerHandoff.LocalRuntimeBuilder())
+		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolTriggerHandoff, triggerHandoff.LocalRuntimeBuilder())
 	}
 	if !triggerHandoff.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed when enabled", ToolTriggerHandoff)
+		t.Fatalf("expected %s to be request-exposed when enabled", toolspec.ToolTriggerHandoff)
 	}
 
-	webSearch, ok := DefinitionFor(ToolWebSearch)
+	webSearch, ok := DefinitionFor(toolspec.ToolWebSearch)
 	if !ok {
-		t.Fatalf("expected %s definition", ToolWebSearch)
+		t.Fatalf("expected %s definition", toolspec.ToolWebSearch)
 	}
 	if webSearch.AvailableInLocalRuntime() {
-		t.Fatalf("expected %s to remain hosted-only", ToolWebSearch)
+		t.Fatalf("expected %s to remain hosted-only", toolspec.ToolWebSearch)
 	}
 	if webSearch.LocalRuntimeBuilder() != "" {
-		t.Fatalf("expected %s to have no local runtime builder, got %q", ToolWebSearch, webSearch.LocalRuntimeBuilder())
+		t.Fatalf("expected %s to have no local runtime builder, got %q", toolspec.ToolWebSearch, webSearch.LocalRuntimeBuilder())
 	}
 	if webSearch.ExposedToModelRequest(RequestExposureContext{SupportsVision: true}) {
-		t.Fatalf("expected %s to stay hidden from request tool declarations", ToolWebSearch)
+		t.Fatalf("expected %s to stay hidden from request tool declarations", toolspec.ToolWebSearch)
 	}
 	if !webSearch.EnablesNativeWebSearch("native") {
-		t.Fatalf("expected %s to opt into native provider web search", ToolWebSearch)
+		t.Fatalf("expected %s to opt into native provider web search", toolspec.ToolWebSearch)
 	}
 	if webSearch.EnablesNativeWebSearch("off") {
-		t.Fatalf("expected %s native web search to honor disabled mode", ToolWebSearch)
+		t.Fatalf("expected %s native web search to honor disabled mode", toolspec.ToolWebSearch)
 	}
 }
 
 func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
-	shell, _ := DefinitionFor(ToolShell)
+	shell, _ := DefinitionFor(toolspec.ToolShell)
 	shellMeta := shell.BuildToolCallMeta(ToolCallContext{DefaultShellTimeoutSeconds: DefaultShellTimeoutSeconds}, json.RawMessage(`{"command":"pwd"}`))
 	if !shellMeta.IsShell || shellMeta.Presentation != "shell" {
 		t.Fatalf("expected shell contract to mark shell presentation, got %+v", shellMeta)
@@ -196,7 +164,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 		t.Fatalf("expected shell timeout metadata, got %+v", shellMeta)
 	}
 
-	patch, _ := DefinitionFor(ToolPatch)
+	patch, _ := DefinitionFor(toolspec.ToolPatch)
 	patchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch\n"}`))
 	if !patchMeta.OmitSuccessfulResult {
 		t.Fatalf("expected patch transcript to suppress success result append, got %+v", patchMeta)
@@ -211,7 +179,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 		t.Fatalf("expected patch aliases normalized, got %+v", patchMeta)
 	}
 
-	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)
 	askMeta := askQuestion.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"question":"Choose scope?","suggestions":["full"],"recommended_option_index":1}`))
 	if askMeta.Presentation != "ask_question" {
 		t.Fatalf("expected ask_question presentation, got %+v", askMeta)
@@ -226,7 +194,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 		t.Fatalf("unexpected ask_question recommended option index: %+v", askMeta)
 	}
 
-	triggerHandoff, _ := DefinitionFor(ToolTriggerHandoff)
+	triggerHandoff, _ := DefinitionFor(toolspec.ToolTriggerHandoff)
 	handoffMeta := triggerHandoff.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`))
 	if got, want := handoffMeta.CompactText, "Model requested compaction."; got != want {
 		t.Fatalf("trigger_handoff compact text = %q, want %q", got, want)
@@ -240,9 +208,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 }
 
 func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
-	shell, _ := DefinitionFor(ToolShell)
+	shell, _ := DefinitionFor(toolspec.ToolShell)
 	got := shell.FormatToolResult(Result{
-		Name:   ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: json.RawMessage(`{"output":" \n\t ","exit_code":0,"truncated":false}`),
 	})
 
@@ -252,9 +220,9 @@ func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
 }
 
 func TestDefinitionContractsFormatLegacyAskQuestionFreeformOnSingleLine(t *testing.T) {
-	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)
 	got := askQuestion.FormatToolResult(Result{
-		Name: ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Output: json.RawMessage(`{
 			"answer":"need extra context",
 			"freeform_answer":"need extra context"
@@ -267,9 +235,9 @@ func TestDefinitionContractsFormatLegacyAskQuestionFreeformOnSingleLine(t *testi
 }
 
 func TestDefinitionContractsFormatLegacyAskQuestionApprovalCommentaryUsesDecisionOnly(t *testing.T) {
-	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)
 	got := askQuestion.FormatToolResult(Result{
-		Name: ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Output: json.RawMessage(`{
 			"approval": {
 				"decision": "deny",

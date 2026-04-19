@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"builder/server/llm"
-	"builder/server/tools"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
+
 	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -808,7 +809,7 @@ func (m *onboardingModel) renderReviewSummary(width int) []string {
 		verbosityStyle = m.styles.valueOff
 	}
 	appendRow("Verbosity", verbosity, verbosityStyle)
-	if m.state.settings.EnabledTools[tools.ToolAskQuestion] {
+	if m.state.settings.EnabledTools[toolspec.ToolAskQuestion] {
 		appendRow("Questions", "on", m.styles.valueOn)
 	} else {
 		appendRow("Questions", "off", m.styles.valueOff)

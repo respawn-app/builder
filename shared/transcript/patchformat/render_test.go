@@ -1,4 +1,4 @@
-package format
+package patchformat
 
 import "testing"
 
@@ -55,5 +55,23 @@ func TestFormatUsesMoveTargetForRenderedPaths(t *testing.T) {
 	}
 	if got := rendered.DetailText(); got != "Edited: /workspace/dest.txt\n-old\n+new" {
 		t.Fatalf("unexpected moved detail: %q", got)
+	}
+}
+
+func TestFormatPreservesRelativeOutsideWorkspacePath(t *testing.T) {
+	doc, err := Parse("*** Begin Patch\n*** Add File: ../outside.go\n+package outside\n*** End Patch\n")
+	if err != nil {
+		t.Fatalf("parse patch: %v", err)
+	}
+
+	rendered := Format(doc, "/workspace/project")
+	if len(rendered.Files) != 1 {
+		t.Fatalf("expected one rendered file, got %+v", rendered.Files)
+	}
+	if rendered.Files[0].RelPath != "../outside.go" {
+		t.Fatalf("expected outside-workspace relative path preserved, got %+v", rendered.Files[0])
+	}
+	if got := rendered.SummaryText(); got != "Edited: ../outside.go +1" {
+		t.Fatalf("unexpected summary: %q", got)
 	}
 }

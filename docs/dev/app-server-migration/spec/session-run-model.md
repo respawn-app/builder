@@ -170,7 +170,8 @@ If the migration changes any of these semantics, the change must be deliberate a
 
 - Mutating operations serialize per session.
 - Ordering is authoritative on the server, not inferred by clients.
-- Idempotency is keyed by `client_request_id` within explicit server-defined scope and retention window.
+- Idempotency is keyed by `client_request_id` within explicit server-defined scope.
+- Current shipping direction after the rollback slice does not require durable/SQLite-backed dedup authority; shared/persisted dedup remains deferred to later multi-client session-control work.
 - Runtime lease acquisition and release use a separate explicit lease identity rather than overloading request-id idempotency keys.
 - Reconnect does not resume or reclaim a previous lease id; the client rehydrates, reattaches, and acquires a fresh lease if it still needs runtime residency.
 - A duplicated mutating request must not create duplicated prompt submission, approval outcome, or process-control effect.

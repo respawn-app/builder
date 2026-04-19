@@ -1,32 +1,15 @@
 package tools
 
 import (
+	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
 	"fmt"
 )
 
-type ID string
-
-const (
-	ToolShell                ID = "shell"
-	ToolExecCommand          ID = "exec_command"
-	ToolWriteStdin           ID = "write_stdin"
-	ToolViewImage            ID = "view_image"
-	ToolPatch                ID = "patch"
-	ToolAskQuestion          ID = "ask_question"
-	ToolTriggerHandoff       ID = "trigger_handoff"
-	ToolWebSearch            ID = "web_search"
-	ToolMultiToolUseParallel ID = "multi_tool_use_parallel"
-)
-
-func ParseID(v string) (ID, bool) {
-	return parseCatalogID(v)
-}
-
 type Call struct {
 	ID     string
-	Name   ID
+	Name   toolspec.ID
 	Input  json.RawMessage
 	RunID  string
 	StepID string
@@ -34,31 +17,31 @@ type Call struct {
 
 type Result struct {
 	CallID  string          `json:"call_id"`
-	Name    ID              `json:"name"`
+	Name    toolspec.ID     `json:"name"`
 	Output  json.RawMessage `json:"output"`
 	IsError bool            `json:"is_error"`
 }
 
 type Definition struct {
-	ID          ID
+	ID          toolspec.ID
 	Description string
 	Schema      json.RawMessage
 	contract    Contract
 }
 
 type Handler interface {
-	Name() ID
+	Name() toolspec.ID
 	Call(ctx context.Context, c Call) (Result, error)
 }
 
 type Registry struct {
-	byName map[ID]Handler
-	order  []ID
+	byName map[toolspec.ID]Handler
+	order  []toolspec.ID
 }
 
 func NewRegistry(handlers ...Handler) *Registry {
-	m := make(map[ID]Handler, len(handlers))
-	order := make([]ID, 0, len(handlers))
+	m := make(map[toolspec.ID]Handler, len(handlers))
+	order := make([]toolspec.ID, 0, len(handlers))
 	for _, h := range handlers {
 		id := h.Name()
 		if _, ok := definitionFor(id); !ok {
@@ -73,7 +56,7 @@ func NewRegistry(handlers ...Handler) *Registry {
 	return &Registry{byName: m, order: order}
 }
 
-func (r *Registry) Get(name ID) (Handler, bool) {
+func (r *Registry) Get(name toolspec.ID) (Handler, bool) {
 	h, ok := r.byName[name]
 	return h, ok
 }

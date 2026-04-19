@@ -8,11 +8,27 @@ func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width in
 	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Render(TranscriptDivider)
 }
 
+func RenderPendingOngoingSnapshot(entries []TranscriptEntry, theme string, width int, spinner string) string {
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinner).Render(TranscriptDivider)
+}
+
 func RenderPendingToolSnapshotLines(entries []TranscriptEntry, theme string, width int, spinner string) []TranscriptProjectionLine {
 	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Lines(TranscriptDivider)
 }
 
+func RenderPendingOngoingSnapshotLines(entries []TranscriptEntry, theme string, width int, spinner string) []TranscriptProjectionLine {
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinner).Lines(TranscriptDivider)
+}
+
 func renderPendingToolSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinner string) TranscriptProjection {
+	pending := PendingToolEntries(entries)
+	if len(pending) == 0 {
+		return TranscriptProjection{}
+	}
+	return renderPendingOngoingSnapshotProjection(pending, theme, width, spinner)
+}
+
+func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinner string) TranscriptProjection {
 	if len(entries) == 0 {
 		return TranscriptProjection{}
 	}

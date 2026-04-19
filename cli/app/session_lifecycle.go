@@ -7,12 +7,20 @@ import (
 	"strings"
 
 	"builder/cli/app/commands"
-	serverlifecycle "builder/server/lifecycle"
-	"builder/server/session"
 	"builder/shared/serverapi"
+	"github.com/google/uuid"
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
+	originalServer := server
+	boundServer, err := ensureInteractiveProjectBinding(ctx, server)
+	if err != nil {
+		return err
+	}
+	if shouldCloseReboundServer(originalServer, boundServer) {
+		defer func() { _ = boundServer.Close() }()
+	}
+	server = boundServer
 	planner := newSessionLaunchPlanner(server)
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	nextSessionInitialPrompt := ""
@@ -55,18 +63,20 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			plan.ConfiguredModelName,
 			plan.StatusConfig,
 		)
-		runtimePlan.Close()
 		nextSessionInitialPrompt = ""
 		nextSessionInitialInput = ""
 		if runErr != nil {
+			runtimePlan.Close()
 			return runErr
 		}
-		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, finalModel); err != nil {
+		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, runtimePlan.ControllerLeaseID, finalModel); err != nil {
+			runtimePlan.Close()
 			return err
 		}
 
 		transition := extractUITransition(finalModel)
-		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, transition)
+		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.ControllerLeaseID, transition)
+		runtimePlan.Close()
 		if err != nil {
 			return err
 		}
@@ -81,8 +91,16 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 	}
 }
 
-func sessionLaunchInitialInput(store *session.Store, transitionInput string) string {
-	return serverlifecycle.InitialInput(store, transitionInput)
+func shouldCloseReboundServer(original embeddedServer, rebound embeddedServer) bool {
+	if original == nil || rebound == nil || original == rebound {
+		return false
+	}
+	originalEmbedded, originalOK := original.(*embeddedAppServer)
+	reboundEmbedded, reboundOK := rebound.(*embeddedAppServer)
+	if originalOK && reboundOK {
+		return originalEmbedded.inner != reboundEmbedded.inner
+	}
+	return true
 }
 
 func sessionLaunchInitialInputFromServer(ctx context.Context, server embeddedServer, sessionID string, transitionInput string) string {
@@ -99,18 +117,7 @@ func sessionLaunchInitialInputFromServer(ctx context.Context, server embeddedSer
 	return resp.Input
 }
 
-func persistSessionDraft(store *session.Store, model any) error {
-	if store == nil {
-		return nil
-	}
-	ui, ok := model.(*uiModel)
-	if !ok || ui == nil {
-		return nil
-	}
-	return serverlifecycle.PersistInputDraft(store, ui.input)
-}
-
-func persistSessionDraftToServer(ctx context.Context, server embeddedServer, sessionID string, model any) error {
+func persistSessionDraftToServer(ctx context.Context, server embeddedServer, sessionID string, controllerLeaseID string, model any) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
@@ -121,7 +128,7 @@ func persistSessionDraftToServer(ctx context.Context, server embeddedServer, ses
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return nil
 	}
-	_, err := server.SessionLifecycleClient().PersistInputDraft(ctx, serverapi.SessionPersistInputDraftRequest{SessionID: strings.TrimSpace(sessionID), Input: ui.input})
+	_, err := server.SessionLifecycleClient().PersistInputDraft(ctx, serverapi.SessionPersistInputDraftRequest{ClientRequestID: uuid.NewString(), SessionID: strings.TrimSpace(sessionID), ControllerLeaseID: strings.TrimSpace(controllerLeaseID), Input: ui.input})
 	return err
 }
 
@@ -134,19 +141,27 @@ type resolvedSessionAction struct {
 	ShouldContinue  bool
 }
 
-func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, sessionID string, transition UITransition) (resolvedSessionAction, error) {
+func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, sessionID string, controllerLeaseID string, transition UITransition) (resolvedSessionAction, error) {
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return resolvedSessionAction{}, errors.New("session lifecycle client is required")
 	}
+	var forkTranscriptEntryIndex *int
+	if transition.Action == UIActionForkRollback && transition.ForkUserMessageIndex == 0 && transition.ForkTranscriptEntryIndex >= 0 {
+		value := transition.ForkTranscriptEntryIndex
+		forkTranscriptEntryIndex = &value
+	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(ctx, serverapi.SessionResolveTransitionRequest{
-		SessionID: strings.TrimSpace(sessionID),
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         strings.TrimSpace(sessionID),
+		ControllerLeaseID: strings.TrimSpace(controllerLeaseID),
 		Transition: serverapi.SessionTransition{
-			Action:               string(transition.Action),
-			InitialPrompt:        transition.InitialPrompt,
-			InitialInput:         transition.InitialInput,
-			TargetSessionID:      transition.TargetSessionID,
-			ForkUserMessageIndex: transition.ForkUserMessageIndex,
-			ParentSessionID:      transition.ParentSessionID,
+			Action:                   string(transition.Action),
+			InitialPrompt:            transition.InitialPrompt,
+			InitialInput:             transition.InitialInput,
+			TargetSessionID:          transition.TargetSessionID,
+			ForkUserMessageIndex:     transition.ForkUserMessageIndex,
+			ForkTranscriptEntryIndex: forkTranscriptEntryIndex,
+			ParentSessionID:          transition.ParentSessionID,
 		},
 	})
 	if err != nil {

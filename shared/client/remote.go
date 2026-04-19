@@ -2,44 +2,63 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"builder/shared/clientui"
+	"builder/shared/config"
 	"builder/shared/protocol"
+	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
-	"golang.org/x/net/websocket"
 )
 
 type Remote struct {
-	record   protocol.DiscoveryRecord
-	identity protocol.ServerIdentity
-	closed   atomic.Bool
+	plan          remoteDialPlan
+	transport     rpcwire.ClientTransport
+	mu            sync.Mutex
+	control       *remoteControlConn
+	identity      protocol.ServerIdentity
+	projectID     string
+	workspaceID   string
+	workspaceRoot string
+	closed        atomic.Bool
 }
 
 func DialRemote(ctx context.Context, record protocol.DiscoveryRecord) (*Remote, error) {
-	rpcURL := strings.TrimSpace(record.RPCURL)
-	if rpcURL == "" {
-		return nil, errors.New("rpc_url is required")
-	}
-	conn, cleanup, err := dialRPC(ctx, rpcURL)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-	identity, err := handshakeRPC(ctx, conn)
-	if err != nil {
-		return nil, err
-	}
-	return &Remote{record: record, identity: identity}, nil
+	return DialRemoteURL(ctx, record.RPCURL)
+}
+
+func DialRemoteURL(ctx context.Context, rpcURL string) (*Remote, error) {
+	return dialRemoteURL(ctx, rpcURL, "", "", "")
+}
+
+func DialRemoteURLForProject(ctx context.Context, rpcURL string, projectID string) (*Remote, error) {
+	return dialRemoteURL(ctx, rpcURL, projectID, "", "")
+}
+
+func DialRemoteURLForProjectWorkspace(ctx context.Context, rpcURL string, projectID string, workspaceRoot string) (*Remote, error) {
+	return dialRemoteURL(ctx, rpcURL, projectID, "", workspaceRoot)
+}
+
+func DialRemoteURLForProjectWorkspaceID(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*Remote, error) {
+	return dialRemoteURL(ctx, rpcURL, projectID, workspaceID, "")
+}
+
+func DialConfiguredRemote(ctx context.Context, cfg config.App) (*Remote, error) {
+	return dialConfiguredRemote(ctx, cfg, "", "", "")
+}
+
+func DialConfiguredRemoteForProject(ctx context.Context, cfg config.App, projectID string) (*Remote, error) {
+	return dialConfiguredRemote(ctx, cfg, projectID, "", "")
+}
+
+func DialConfiguredRemoteForProjectWorkspace(ctx context.Context, cfg config.App, projectID string, workspaceRoot string) (*Remote, error) {
+	return dialConfiguredRemote(ctx, cfg, projectID, "", workspaceRoot)
+}
+
+func DialConfiguredRemoteForProjectWorkspaceID(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*Remote, error) {
+	return dialConfiguredRemote(ctx, cfg, projectID, workspaceID, "")
 }
 
 func (c *Remote) Close() error {
@@ -47,29 +66,89 @@ func (c *Remote) Close() error {
 		return nil
 	}
 	c.closed.Store(true)
-	return nil
+	c.mu.Lock()
+	control := c.control
+	c.control = nil
+	c.mu.Unlock()
+	if control == nil {
+		return nil
+	}
+	return control.Close()
 }
 
 func (c *Remote) Identity() protocol.ServerIdentity {
 	if c == nil {
 		return protocol.ServerIdentity{}
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.identity
+}
+
+func (c *Remote) ProjectID() string {
+	if c == nil {
+		return ""
+	}
+	return c.projectID
+}
+
+func (c *Remote) WorkspaceRoot() string {
+	if c == nil {
+		return ""
+	}
+	return c.workspaceRoot
+}
+
+func (c *Remote) WorkspaceID() string {
+	if c == nil {
+		return ""
+	}
+	return c.workspaceID
+}
+
+func (c *Remote) GetAuthBootstrapStatus(ctx context.Context, req serverapi.AuthGetBootstrapStatusRequest) (serverapi.AuthGetBootstrapStatusResponse, error) {
+	var resp serverapi.AuthGetBootstrapStatusResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodAuthGetBootstrapStatus, req, &resp)
+}
+
+func (c *Remote) CompleteAuthBootstrap(ctx context.Context, req serverapi.AuthCompleteBootstrapRequest) (serverapi.AuthCompleteBootstrapResponse, error) {
+	var resp serverapi.AuthCompleteBootstrapResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodAuthCompleteBootstrap, req, &resp)
 }
 
 func (c *Remote) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	var resp serverapi.ProjectListResponse
-	return resp, c.call(ctx, protocol.MethodProjectList, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectList, req, &resp)
+}
+
+func (c *Remote) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	var resp serverapi.ProjectResolvePathResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectResolvePath, req, &resp)
+}
+
+func (c *Remote) CreateProject(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	var resp serverapi.ProjectCreateResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectCreate, req, &resp)
+}
+
+func (c *Remote) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	var resp serverapi.ProjectAttachWorkspaceResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectAttachWorkspace, req, &resp)
+}
+
+func (c *Remote) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	var resp serverapi.ProjectRebindWorkspaceResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectRebindWorkspace, req, &resp)
 }
 
 func (c *Remote) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	var resp serverapi.ProjectGetOverviewResponse
-	return resp, c.call(ctx, protocol.MethodProjectGetOverview, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectGetOverview, req, &resp)
 }
 
 func (c *Remote) ListSessionsByProject(ctx context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
 	var resp serverapi.SessionListByProjectResponse
-	return resp, c.call(ctx, protocol.MethodSessionListByProject, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodSessionListByProject, req, &resp)
 }
 
 func (c *Remote) PlanSession(ctx context.Context, req serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
@@ -151,19 +230,19 @@ func (c *Remote) ShouldCompactBeforeUserMessage(ctx context.Context, req servera
 
 func (c *Remote) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
 	var resp serverapi.RuntimeSubmitUserMessageResponse
-	return resp, c.call(ctx, protocol.MethodRuntimeSubmitUserMessage, req, &resp)
+	return resp, c.callDedicated(ctx, "runtime-submit-user-message", protocol.MethodRuntimeSubmitUserMessage, req, &resp)
 }
 
 func (c *Remote) SubmitUserShellCommand(ctx context.Context, req serverapi.RuntimeSubmitUserShellCommandRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
+	return c.callDedicated(ctx, "runtime-submit-user-shell-command", protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
 }
 
 func (c *Remote) CompactContext(ctx context.Context, req serverapi.RuntimeCompactContextRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeCompactContext, req, nil)
+	return c.callDedicated(ctx, "runtime-compact-context", protocol.MethodRuntimeCompactContext, req, nil)
 }
 
 func (c *Remote) CompactContextForPreSubmit(ctx context.Context, req serverapi.RuntimeCompactContextForPreSubmitRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
+	return c.callDedicated(ctx, "runtime-compact-context-pre-submit", protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
 }
 
 func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
@@ -173,11 +252,11 @@ func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHas
 
 func (c *Remote) SubmitQueuedUserMessages(ctx context.Context, req serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
 	var resp serverapi.RuntimeSubmitQueuedUserMessagesResponse
-	return resp, c.call(ctx, protocol.MethodRuntimeSubmitQueuedUserMessages, req, &resp)
+	return resp, c.callDedicated(ctx, "runtime-submit-queued-user-messages", protocol.MethodRuntimeSubmitQueuedUserMessages, req, &resp)
 }
 
 func (c *Remote) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeInterrupt, req, nil)
+	return c.callDedicated(ctx, "runtime-interrupt", protocol.MethodRuntimeInterrupt, req, nil)
 }
 
 func (c *Remote) QueueUserMessage(ctx context.Context, req serverapi.RuntimeQueueUserMessageRequest) error {
@@ -231,140 +310,6 @@ func (c *Remote) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnswe
 	return c.call(ctx, protocol.MethodApprovalAnswer, req, nil)
 }
 
-func (c *Remote) SubscribePromptActivity(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
-	if err := c.ensureOpen(); err != nil {
-		return nil, err
-	}
-	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := handshakeRPC(ctx, conn); err != nil {
-		cleanup()
-		return nil, err
-	}
-	if err := callRPC(ctx, conn, "attach-session", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: req.SessionID}, nil); err != nil {
-		cleanup()
-		return nil, err
-	}
-	var ack protocol.SubscribeResponse
-	if err := callRPC(ctx, conn, "subscribe-prompt-activity", protocol.MethodPromptSubscribeActivity, req, &ack); err != nil {
-		cleanup()
-		return nil, err
-	}
-	return &remotePromptActivitySubscription{conn: conn, close: cleanup}, nil
-}
-
-func (c *Remote) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
-	if err := c.ensureOpen(); err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
-	if err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	defer cleanup()
-	if _, err := handshakeRPC(ctx, conn); err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	params, err := json.Marshal(req)
-	if err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	const requestID = "run-prompt"
-	if err := sendWithContext(ctx, conn, protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: requestID, Method: protocol.MethodRunPrompt, Params: params}); err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	for {
-		frame, err := receiveFrame(ctx, conn)
-		if err != nil {
-			return serverapi.RunPromptResponse{}, err
-		}
-		if frame.Method == protocol.MethodRunPromptProgress {
-			if progress != nil {
-				var update serverapi.RunPromptProgress
-				if err := json.Unmarshal(frame.Params, &update); err != nil {
-					return serverapi.RunPromptResponse{}, err
-				}
-				progress.PublishRunPromptProgress(update)
-			}
-			continue
-		}
-		if frame.ID != requestID {
-			return serverapi.RunPromptResponse{}, fmt.Errorf("unexpected rpc frame id %q", frame.ID)
-		}
-		if frame.Error != nil {
-			return serverapi.RunPromptResponse{}, protocolError(frame.Error)
-		}
-		var resp serverapi.RunPromptResponse
-		if len(frame.Result) > 0 {
-			if err := json.Unmarshal(frame.Result, &resp); err != nil {
-				return serverapi.RunPromptResponse{}, err
-			}
-		}
-		return resp, nil
-	}
-}
-
-func (c *Remote) SubscribeSessionActivity(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
-	if err := c.ensureOpen(); err != nil {
-		return nil, err
-	}
-	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := handshakeRPC(ctx, conn); err != nil {
-		cleanup()
-		return nil, err
-	}
-	if err := callRPC(ctx, conn, "attach-session", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: req.SessionID}, nil); err != nil {
-		cleanup()
-		return nil, err
-	}
-	var ack protocol.SubscribeResponse
-	if err := callRPC(ctx, conn, "subscribe-session-activity", protocol.MethodSessionSubscribeActivity, req, &ack); err != nil {
-		cleanup()
-		return nil, err
-	}
-	return &remoteSessionActivitySubscription{conn: conn, close: cleanup}, nil
-}
-
-func (c *Remote) SubscribeProcessOutput(ctx context.Context, req serverapi.ProcessOutputSubscribeRequest) (serverapi.ProcessOutputSubscription, error) {
-	if err := c.ensureOpen(); err != nil {
-		return nil, err
-	}
-	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := handshakeRPC(ctx, conn); err != nil {
-		cleanup()
-		return nil, err
-	}
-	var ack protocol.SubscribeResponse
-	if err := callRPC(ctx, conn, "subscribe-process-output", protocol.MethodProcessSubscribeOutput, req, &ack); err != nil {
-		cleanup()
-		return nil, err
-	}
-	return &remoteProcessOutputSubscription{conn: conn, close: cleanup}, nil
-}
-
-func (c *Remote) call(ctx context.Context, method string, params any, out any) error {
-	if err := c.ensureOpen(); err != nil {
-		return err
-	}
-	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	if _, err := handshakeRPC(ctx, conn); err != nil {
-		return err
-	}
-	return callRPC(ctx, conn, method, method, params, out)
-}
-
 func (c *Remote) ensureOpen() error {
 	if c == nil {
 		return errors.New("remote client is required")
@@ -375,312 +320,80 @@ func (c *Remote) ensureOpen() error {
 	return nil
 }
 
-type remoteSessionActivitySubscription struct {
-	conn  *websocket.Conn
-	close func()
-	once  sync.Once
+func (c *Remote) call(ctx context.Context, method string, params any, out any) error {
+	return c.callUnscoped(ctx, method, params, out)
 }
 
-type remotePromptActivitySubscription struct {
-	conn  *websocket.Conn
-	close func()
-	once  sync.Once
-}
-
-func (s *remoteSessionActivitySubscription) Next(ctx context.Context) (clientui.Event, error) {
-	notif, err := receiveNotification(ctx, s.conn)
-	if err != nil {
-		return clientui.Event{}, serverapi.NormalizeStreamError(err)
-	}
-	switch notif.Method {
-	case protocol.MethodSessionActivityEvent:
-		var params protocol.SessionActivityEventParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		return params.Event, nil
-	case protocol.MethodSessionActivityComplete:
-		var params protocol.StreamCompleteParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		_ = s.Close()
-		return clientui.Event{}, streamCompleteError(params)
-	default:
-		return clientui.Event{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", notif.Method))
-	}
-}
-
-func (s *remoteSessionActivitySubscription) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.once.Do(func() {
-		if s.close != nil {
-			s.close()
-		}
-	})
-	return nil
-}
-
-func (s *remotePromptActivitySubscription) Next(ctx context.Context) (clientui.PendingPromptEvent, error) {
-	notif, err := receiveNotification(ctx, s.conn)
-	if err != nil {
-		return clientui.PendingPromptEvent{}, serverapi.NormalizeStreamError(err)
-	}
-	switch notif.Method {
-	case protocol.MethodPromptActivityEvent:
-		var params protocol.PromptActivityEventParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		return params.Event, nil
-	case protocol.MethodPromptActivityComplete:
-		var params protocol.StreamCompleteParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		_ = s.Close()
-		return clientui.PendingPromptEvent{}, streamCompleteError(params)
-	default:
-		return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", notif.Method))
-	}
-}
-
-func (s *remotePromptActivitySubscription) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.once.Do(func() {
-		if s.close != nil {
-			s.close()
-		}
-	})
-	return nil
-}
-
-type remoteProcessOutputSubscription struct {
-	conn  *websocket.Conn
-	close func()
-	once  sync.Once
-}
-
-func (s *remoteProcessOutputSubscription) Next(ctx context.Context) (clientui.ProcessOutputChunk, error) {
-	notif, err := receiveNotification(ctx, s.conn)
-	if err != nil {
-		return clientui.ProcessOutputChunk{}, serverapi.NormalizeStreamError(err)
-	}
-	switch notif.Method {
-	case protocol.MethodProcessOutputEvent:
-		var params protocol.ProcessOutputEventParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		return params.Chunk, nil
-	case protocol.MethodProcessOutputComplete:
-		var params protocol.StreamCompleteParams
-		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, err)
-		}
-		_ = s.Close()
-		return clientui.ProcessOutputChunk{}, streamCompleteError(params)
-	default:
-		return clientui.ProcessOutputChunk{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", notif.Method))
-	}
-}
-
-func (s *remoteProcessOutputSubscription) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.once.Do(func() {
-		if s.close != nil {
-			s.close()
-		}
-	})
-	return nil
-}
-
-func dialRPC(ctx context.Context, rpcURL string) (*websocket.Conn, func(), error) {
-	config, err := websocket.NewConfig(strings.TrimSpace(rpcURL), websocketOrigin(rpcURL))
-	if err != nil {
-		return nil, nil, err
-	}
-	conn, err := websocket.DialConfig(config)
-	if err != nil {
-		return nil, nil, err
-	}
-	var once sync.Once
-	stop := make(chan struct{})
-	cleanup := func() {
-		once.Do(func() {
-			close(stop)
-			_ = conn.Close()
-		})
-	}
-	go func() {
-		select {
-		case <-ctx.Done():
-			cleanup()
-		case <-stop:
-		}
-	}()
-	return conn, cleanup, nil
-}
-
-func websocketOrigin(rpcURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rpcURL))
-	if err != nil {
-		return "http://127.0.0.1"
-	}
-	scheme := "http"
-	if parsed.Scheme == "wss" {
-		scheme = "https"
-	}
-	return (&url.URL{Scheme: scheme, Host: parsed.Host}).String()
-}
-
-func handshakeRPC(ctx context.Context, conn *websocket.Conn) (protocol.ServerIdentity, error) {
-	var resp protocol.HandshakeResponse
-	if err := callRPC(ctx, conn, "handshake", protocol.MethodHandshake, protocol.HandshakeRequest{ProtocolVersion: protocol.Version}, &resp); err != nil {
-		return protocol.ServerIdentity{}, err
-	}
-	return resp.Identity, nil
-}
-
-func callRPC(ctx context.Context, conn *websocket.Conn, requestID string, method string, params any, out any) error {
-	data, err := json.Marshal(params)
+func (c *Remote) callUnscoped(ctx context.Context, method string, params any, out any) error {
+	control, err := c.ensureControl(ctx)
 	if err != nil {
 		return err
 	}
-	if err := sendWithContext(ctx, conn, protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: requestID, Method: method, Params: data}); err != nil {
-		return err
-	}
-	var resp protocol.Response
-	if err := receiveWithContext(ctx, conn, &resp); err != nil {
-		return err
-	}
-	if resp.Error != nil {
-		return protocolError(resp.Error)
-	}
-	if out == nil || len(resp.Result) == 0 {
-		return nil
-	}
-	return json.Unmarshal(resp.Result, out)
+	return control.call(ctx, method, params, out)
 }
 
-func receiveNotification(ctx context.Context, conn *websocket.Conn) (protocol.Request, error) {
-	var notif protocol.Request
-	if err := receiveWithContext(ctx, conn, &notif); err != nil {
-		return protocol.Request{}, err
+func (c *Remote) ensureControl(ctx context.Context) (*remoteControlConn, error) {
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(notif.JSONRPC) != protocol.JSONRPCVersion {
-		return protocol.Request{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected jsonrpc version %q", notif.JSONRPC))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed.Load() {
+		return nil, errors.New("remote client is closed")
 	}
-	return notif, nil
+	if c.control != nil && !c.control.IsDone() {
+		return c.control, nil
+	}
+	if c.control != nil {
+		_ = c.control.Close()
+		c.control = nil
+	}
+	conn, identity, err := c.openControlRPCConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if c.closed.Load() {
+		_ = conn.Close()
+		return nil, errors.New("remote client is closed")
+	}
+	control := newRemoteControlConn(conn)
+	c.control = control
+	c.identity = identity
+	return control, nil
 }
 
-type rpcFrame struct {
-	JSONRPC string                  `json:"jsonrpc"`
-	ID      string                  `json:"id,omitempty"`
-	Method  string                  `json:"method,omitempty"`
-	Params  json.RawMessage         `json:"params,omitempty"`
-	Result  json.RawMessage         `json:"result,omitempty"`
-	Error   *protocol.ResponseError `json:"error,omitempty"`
+func (c *Remote) openControlRPCConn(ctx context.Context) (rpcwire.Conn, protocol.ServerIdentity, error) {
+	conn, err := c.plan.dial(ctx, c.transport)
+	if err != nil {
+		return nil, protocol.ServerIdentity{}, err
+	}
+	cleanup := func() { _ = conn.Close() }
+	identity, err := handshakeRPC(ctx, conn)
+	if err != nil {
+		cleanup()
+		return nil, protocol.ServerIdentity{}, err
+	}
+	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceID, c.workspaceRoot); err != nil {
+		cleanup()
+		return nil, protocol.ServerIdentity{}, err
+	}
+	return conn, identity, nil
 }
 
-func receiveFrame(ctx context.Context, conn *websocket.Conn) (rpcFrame, error) {
-	var frame rpcFrame
-	if err := receiveWithContext(ctx, conn, &frame); err != nil {
-		return rpcFrame{}, err
+func dialRemoteURL(ctx context.Context, rpcURL string, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
+	endpoint, err := rpcwire.ParseWebSocketEndpoint(strings.TrimSpace(rpcURL))
+	if err != nil {
+		return nil, err
 	}
-	return frame, nil
+	return dialRemoteWithPlan(ctx, remoteDialPlan{endpoints: []rpcwire.Endpoint{endpoint}}, projectID, workspaceID, workspaceRoot)
 }
 
-func sendWithContext(ctx context.Context, conn *websocket.Conn, value any) error {
-	if err := ctx.Err(); err != nil {
-		return err
+func dialConfiguredRemote(ctx context.Context, cfg config.App, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
+	plan, err := configuredRemoteDialPlan(cfg)
+	if err != nil {
+		return nil, err
 	}
-	if err := websocket.JSON.Send(conn, value); err != nil {
-		if cerr := ctx.Err(); cerr != nil {
-			return cerr
-		}
-		return err
-	}
-	return nil
-}
-
-func receiveWithContext(ctx context.Context, conn *websocket.Conn, out any) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := conn.SetReadDeadline(nextReceiveDeadline(ctx)); err != nil {
-			return err
-		}
-		err := websocket.JSON.Receive(conn, out)
-		if clearErr := conn.SetReadDeadline(time.Time{}); clearErr != nil && err == nil {
-			return clearErr
-		}
-		if err == nil {
-			return nil
-		}
-		if cerr := ctx.Err(); cerr != nil {
-			return cerr
-		}
-		if isReceiveTimeout(err) {
-			continue
-		}
-		return err
-	}
-}
-
-const receivePollInterval = 200 * time.Millisecond
-
-func nextReceiveDeadline(ctx context.Context) time.Time {
-	deadline := time.Now().Add(receivePollInterval)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		return ctxDeadline
-	}
-	return deadline
-}
-
-func isReceiveTimeout(err error) bool {
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
-}
-
-func protocolError(resp *protocol.ResponseError) error {
-	if resp == nil {
-		return nil
-	}
-	message := strings.TrimSpace(resp.Message)
-	if message == "" {
-		message = "protocol request failed"
-	}
-	switch resp.Code {
-	case protocol.ErrCodeStreamGap:
-		return errors.Join(serverapi.ErrStreamGap, errors.New(message))
-	case protocol.ErrCodeStreamUnavailable:
-		return errors.Join(serverapi.ErrStreamUnavailable, errors.New(message))
-	case protocol.ErrCodeStreamFailed:
-		return errors.Join(serverapi.ErrStreamFailed, errors.New(message))
-	case protocol.ErrCodePromptNotFound:
-		return errors.Join(serverapi.ErrPromptNotFound, errors.New(message))
-	case protocol.ErrCodePromptResolved:
-		return errors.Join(serverapi.ErrPromptAlreadyResolved, errors.New(message))
-	case protocol.ErrCodePromptUnsupported:
-		return errors.Join(serverapi.ErrPromptUnsupported, errors.New(message))
-	default:
-		return errors.New(message)
-	}
-}
-
-func streamCompleteError(params protocol.StreamCompleteParams) error {
-	if params.Code == 0 && strings.TrimSpace(params.Message) == "" {
-		return io.EOF
-	}
-	return protocolError(&protocol.ResponseError{Code: params.Code, Message: params.Message})
+	return dialRemoteWithPlan(ctx, plan, projectID, workspaceID, workspaceRoot)
 }
 
 var _ ProjectViewClient = (*Remote)(nil)

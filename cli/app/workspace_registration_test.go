@@ -2,21 +2,38 @@ package app
 
 import (
 	"context"
+	"net"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"builder/server/metadata"
+	"builder/server/serve"
 	"builder/server/session"
 	"builder/shared/config"
 )
 
 func registerAppWorkspace(t *testing.T, workspace string) {
 	t.Helper()
+	configureAppTestServerPort(t)
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
 	_ = mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+}
+
+func configureAppTestServerPort(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve server port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	serve.ReserveTestListenReservation(listener)
+	t.Cleanup(func() { serve.ReleaseTestListenReservation(listener.Addr().String()) })
+	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
+	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
 
 func mustRegisterAppBinding(t *testing.T, persistenceRoot string, workspaceRoot string) metadata.Binding {
@@ -46,6 +63,10 @@ func createAuthoritativeAppSession(t *testing.T, persistenceRoot string, workspa
 	if err != nil {
 		_ = metadataStore.Close()
 		t.Fatalf("session.Create: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		_ = metadataStore.Close()
+		t.Fatalf("EnsureDurable: %v", err)
 	}
 	t.Cleanup(func() { _ = metadataStore.Close() })
 	return store

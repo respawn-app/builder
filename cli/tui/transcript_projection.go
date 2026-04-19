@@ -79,6 +79,24 @@ func (p TranscriptProjection) SharedPrefixBlockCount(other TranscriptProjection)
 	return limit
 }
 
+func (p TranscriptProjection) SharedSuffixPrefixBlockCount(previous TranscriptProjection) int {
+	limit := min(len(p.Blocks), len(previous.Blocks))
+	for overlap := limit; overlap > 0; overlap-- {
+		start := len(previous.Blocks) - overlap
+		matches := true
+		for idx := 0; idx < overlap; idx++ {
+			if !p.Blocks[idx].equal(previous.Blocks[start+idx]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return overlap
+		}
+	}
+	return 0
+}
+
 func (p TranscriptProjection) LinesFromBlock(start int, dividerText string) []TranscriptProjectionLine {
 	if start < 0 {
 		start = 0
@@ -284,6 +302,9 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 	consumedResults := make(map[int]struct{})
 	resultIndex := buildToolResultIndex(entries)
 	for idx, entry := range entries {
+		if entry.Transient {
+			return committedOngoingPrefixEndBefore(entries, idx, resultIndex)
+		}
 		if strings.TrimSpace(entry.Role) != "tool_call" {
 			continue
 		}
@@ -291,12 +312,31 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 			continue
 		}
 		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
-		if resultIdx < 0 {
+		if resultIdx < 0 || entries[resultIdx].Transient {
 			return idx
 		}
 		consumedResults[resultIdx] = struct{}{}
 	}
 	return len(entries)
+}
+
+func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, resultIndex toolResultIndex) int {
+	consumedResults := make(map[int]struct{})
+	for idx := boundary - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Role) != "tool_call" {
+			continue
+		}
+		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+			continue
+		}
+		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
+		if resultIdx < 0 || resultIdx >= boundary || entries[resultIdx].Transient {
+			return idx
+		}
+		consumedResults[resultIdx] = struct{}{}
+	}
+	return boundary
 }
 
 func ongoingTranscriptText(entry TranscriptEntry) string {

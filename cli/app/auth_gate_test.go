@@ -134,6 +134,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root, Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
 		interactor,
 		store.Meta().SessionID,
+		"lease-test-controller",
 		UITransition{Action: UIActionLogout},
 	)
 	if err != nil {
@@ -183,6 +184,7 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 		ctx,
 		&testEmbeddedServer{authManager: mgr},
 		interactor,
+		"",
 		"",
 		UITransition{Action: UIActionLogout},
 	)
@@ -372,6 +374,7 @@ func TestResolveSessionActionLoginSkipClearsStoredAuthOnOptionalAuthSetup(t *tes
 		ctx,
 		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5", OpenAIBaseURL: "http://127.0.0.1:8080/v1"}}, authManager: mgr},
 		interactor,
+		"",
 		"",
 		UITransition{Action: UIActionLogout},
 	)

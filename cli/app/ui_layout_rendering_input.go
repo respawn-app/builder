@@ -27,16 +27,11 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		return l.renderAskInputLines(width, style)
 	}
 
-	wrapped := l.visibleMainInputLines(width)
 	lineStyle := style.input
 	if m.isInputLocked() {
 		lineStyle = style.inputDisabled
 	}
-	rendered := make([]string, 0, len(wrapped))
-	for _, line := range wrapped {
-		rendered = append(rendered, lineStyle.Render(padANSIRight(line, width)))
-	}
-	return l.renderInputFrame(width, rendered)
+	return renderFramedEditableInputLines(width, inputContentLineLimit(l.effectiveHeight()), l.mainInputRenderSpec(), lineStyle, l.inputBorderStyle())
 }
 
 func (l uiViewLayout) renderAskInputLines(width int, style uiStyles) []string {
@@ -194,13 +189,7 @@ func (l uiViewLayout) inputPanelLineCount(width, height int) int {
 }
 
 func (l uiViewLayout) renderInputFrame(width int, lines []string) []string {
-	borderStyle := l.inputBorderStyle()
-	border := borderStyle.Render(strings.Repeat("─", width))
-	out := make([]string, 0, len(lines)+2)
-	out = append(out, border)
-	out = append(out, lines...)
-	out = append(out, border)
-	return out
+	return renderFramedLines(width, lines, l.inputBorderStyle())
 }
 
 func (l uiViewLayout) inputBorderStyle() lipgloss.Style {
