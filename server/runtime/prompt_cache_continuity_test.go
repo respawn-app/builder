@@ -12,6 +12,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 // This regression test guards prompt-cache continuity across restarts.
@@ -108,11 +109,11 @@ func newPromptCacheContinuityFixture(t *testing.T) *promptCacheContinuityFixture
 	}
 	client := &fakeClient{caps: clientCaps}
 	reviewerClient := &fakeClient{caps: clientCaps}
-	registry := tools.NewRegistry(fakeTool{name: tools.ToolShell}, fakeTool{name: tools.ToolAskQuestion})
+	registry := tools.NewRegistry(fakeTool{name: toolspec.ToolShell}, fakeTool{name: toolspec.ToolAskQuestion})
 	cfg := Config{
 		Model:         "gpt-5",
 		ThinkingLevel: "medium",
-		EnabledTools:  []tools.ID{tools.ToolShell, tools.ToolAskQuestion},
+		EnabledTools:  []toolspec.ID{toolspec.ToolShell, toolspec.ToolAskQuestion},
 		Reviewer: ReviewerConfig{
 			Model:         "gpt-5",
 			ThinkingLevel: "medium",
@@ -180,7 +181,7 @@ func seedPromptCacheContinuityConversation(t *testing.T, engine *Engine) {
 	}
 	toolCall := llm.ToolCall{
 		ID:   "call-shell-1",
-		Name: string(tools.ToolShell),
+		Name: string(toolspec.ToolShell),
 		Input: mustJSON(map[string]any{
 			"command": "git status --short",
 			"workdir": ".",
@@ -191,7 +192,7 @@ func seedPromptCacheContinuityConversation(t *testing.T, engine *Engine) {
 	}
 	toolResult := tools.Result{
 		CallID: toolCall.ID,
-		Name:   tools.ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: mustJSON(map[string]any{
 			"stdout":    " M server/runtime/request_cache_lineage.go\n M server/runtime/reviewer_pipeline.go",
 			"exit_code": 0,

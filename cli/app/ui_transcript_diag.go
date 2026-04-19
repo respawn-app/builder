@@ -88,6 +88,7 @@ func (m *uiModel) logProjectedTranscriptPlanDiag(evt clientui.Event, plan projec
 		"mode":                  m.transcriptModeLabel(),
 		"kind":                  string(evt.Kind),
 		"plan":                  plan.mode.label(),
+		"divergence":            plan.divergence,
 		"range_start":           strconv.Itoa(plan.rangeStart),
 		"range_end":             strconv.Itoa(plan.rangeEnd),
 		"incoming_count":        strconv.Itoa(incomingCount),

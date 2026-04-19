@@ -12,6 +12,7 @@ const (
 
 type CapabilityFlags struct {
 	JSONRPCWebSocket        bool `json:"jsonrpc_websocket"`
+	AuthBootstrap           bool `json:"auth_bootstrap"`
 	ProjectAttach           bool `json:"project_attach"`
 	SessionAttach           bool `json:"session_attach"`
 	HealthEndpoint          bool `json:"health_endpoint"`

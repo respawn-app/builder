@@ -18,7 +18,6 @@ import (
 	"builder/server/auth"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -26,6 +25,8 @@ import (
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
+
 	"github.com/google/uuid"
 	"golang.org/x/net/websocket"
 )
@@ -158,21 +159,6 @@ func TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces
 		t.Fatalf("expected one daemon-backed llm call, got %d", hits.Load())
 	}
 
-	assistantEvt := waitForRemoteRuntimeEvent(t, fixture.runtimePlanB.Wiring.runtimeEvents, "assistant message on second client", func(evt clientui.Event) bool {
-		if evt.Kind != clientui.EventAssistantMessage {
-			return false
-		}
-		for _, entry := range evt.TranscriptEntries {
-			if entry.Role == "assistant" && entry.Text == "shared daemon reply" {
-				return true
-			}
-		}
-		return false
-	})
-	if assistantEvt.StepID == "" {
-		t.Fatalf("expected assistant event step id on second client, got %+v", assistantEvt)
-	}
-
 	pageA := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
 		return transcriptPageContainsAssistantText(page, "shared daemon reply")
 	})
@@ -191,13 +177,10 @@ func TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces
 	}
 }
 
-func TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorkspaces(t *testing.T) {
+func TestRemoteReadOnlyClientHydratesCommittedTranscriptAcrossWorkspaces(t *testing.T) {
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"reply while client B disconnected", "reply after client B reconnects"})
 	defer fakeResponses.Close()
 	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
-
-	fixture.runtimePlanB.Close()
-	fixture.runtimePlanB = nil
 
 	firstMessage, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message while client B is disconnected")
 	if err != nil {
@@ -213,23 +196,9 @@ func TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorks
 		return transcriptPageContainsAssistantText(page, "reply while client B disconnected")
 	})
 
-	plannerB := newSessionLaunchPlanner(fixture.serverB)
-	reconnectPlan, err := plannerB.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: fixture.planA.SessionID})
-	if err != nil {
-		t.Fatalf("PlanSession reconnect B: %v", err)
-	}
-	if reconnectPlan.SessionID != fixture.planA.SessionID {
-		t.Fatalf("expected reconnect to attach original session, got %q want %q", reconnectPlan.SessionID, fixture.planA.SessionID)
-	}
-	fixture.runtimePlanB, err = plannerB.PrepareRuntime(context.Background(), reconnectPlan, io.Discard, "test remote multi-client runtime B reconnect")
-	if err != nil {
-		t.Fatalf("PrepareRuntime reconnect B: %v", err)
-	}
-
-	hydratedB, err := fixture.runtimePlanB.Wiring.runtimeClient.RefreshTranscript()
-	if err != nil {
-		t.Fatalf("RefreshTranscript reconnect B: %v", err)
-	}
+	hydratedB := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply while client B disconnected")
+	})
 	if !transcriptPageContainsAssistantText(hydratedB, "reply while client B disconnected") {
 		t.Fatalf("expected reconnecting client to hydrate missed committed reply, got %+v", hydratedB)
 	}
@@ -248,21 +217,6 @@ func TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorks
 		t.Fatalf("expected two daemon-backed llm calls after reconnect flow, got %d", hits.Load())
 	}
 
-	assistantEvt := waitForRemoteRuntimeEvent(t, fixture.runtimePlanB.Wiring.runtimeEvents, "assistant message after reconnect", func(evt clientui.Event) bool {
-		if evt.Kind != clientui.EventAssistantMessage {
-			return false
-		}
-		for _, entry := range evt.TranscriptEntries {
-			if entry.Role == "assistant" && entry.Text == "reply after client B reconnects" {
-				return true
-			}
-		}
-		return false
-	})
-	if assistantEvt.StepID == "" {
-		t.Fatalf("expected assistant event step id on reconnected client, got %+v", assistantEvt)
-	}
-
 	pageA2 := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
 		return transcriptPageContainsAssistantText(page, "reply after client B reconnects")
 	})
@@ -270,11 +224,11 @@ func TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorks
 		return transcriptPageContainsAssistantText(page, "reply after client B reconnects")
 	})
 	if pageA2.Revision != pageB2.Revision || pageA2.TotalEntries != pageB2.TotalEntries {
-		t.Fatalf("expected both clients to converge after reconnect, a=%+v b=%+v", pageA2, pageB2)
+		t.Fatalf("expected both clients to converge after read-only hydrate, a=%+v b=%+v", pageA2, pageB2)
 	}
 }
 
-func TestRemoteInteractiveRuntimeAskRaceFirstWinsAcrossWorkspaces(t *testing.T) {
+func TestRemoteInteractiveRuntimeAskAnswersRequireControllerLeaseAcrossWorkspaces(t *testing.T) {
 	fixture := startRemoteMultiClientRuntimeFixture(t, "")
 
 	askDone := make(chan struct {
@@ -293,58 +247,46 @@ func TestRemoteInteractiveRuntimeAskRaceFirstWinsAcrossWorkspaces(t *testing.T) 
 	}()
 
 	askEvtA := waitForRemoteAskEvent(t, fixture.runtimePlanA.Wiring.askEvents)
-	askEvtB := waitForRemoteAskEvent(t, fixture.runtimePlanB.Wiring.askEvents)
-	for _, evt := range []askEvent{askEvtA, askEvtB} {
-		if evt.req.ID != "ask-race-1" || evt.req.Question != "Who answers first?" || evt.req.Approval {
-			t.Fatalf("unexpected ask event: %+v", evt.req)
-		}
+	if askEvtA.req.ID != "ask-race-1" || askEvtA.req.Question != "Who answers first?" || askEvtA.req.Approval {
+		t.Fatalf("unexpected ask event: %+v", askEvtA.req)
 	}
+	waitForPendingAskResources(t, fixture.serverB.AskViewClient(), fixture.planA.SessionID, 1)
 
-	results := make(chan promptAnswerResult, 2)
-	go func() {
-		results <- promptAnswerResult{client: "A", err: fixture.serverA.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
-			ClientRequestID: uuid.NewString(),
-			SessionID:       fixture.planA.SessionID,
-			AskID:           "ask-race-1",
-			Answer:          "answer from client A",
-		})}
-	}()
-	go func() {
-		results <- promptAnswerResult{client: "B", err: fixture.serverB.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
-			ClientRequestID: uuid.NewString(),
-			SessionID:       fixture.planA.SessionID,
-			AskID:           "ask-race-1",
-			Answer:          "answer from client B",
-		})}
-	}()
-
-	first := waitForPromptAnswerResult(t, results)
-	second := waitForPromptAnswerResult(t, results)
-	winner, loser := requireExactlyOnePromptWinner(t, first, second)
+	if err := fixture.serverB.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         fixture.planA.SessionID,
+		ControllerLeaseID: "invalid-lease",
+		AskID:             "ask-race-1",
+		Answer:            "answer from client B",
+	}); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("expected invalid controller lease for read-only client, got %v", err)
+	}
+	if err := fixture.serverA.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         fixture.planA.SessionID,
+		ControllerLeaseID: fixture.runtimePlanA.ControllerLeaseID,
+		AskID:             "ask-race-1",
+		Answer:            "answer from client A",
+	}); err != nil {
+		t.Fatalf("AnswerAsk controller: %v", err)
+	}
 
 	select {
 	case result := <-askDone:
 		if result.err != nil {
-			t.Fatalf("AwaitPromptResponse ask race: %v", result.err)
+			t.Fatalf("AwaitPromptResponse ask: %v", result.err)
 		}
-		wantAnswer := "answer from client A"
-		if winner.client == "B" {
-			wantAnswer = "answer from client B"
-		}
-		if result.resp.RequestID != "ask-race-1" || result.resp.Answer != wantAnswer {
-			t.Fatalf("unexpected winning ask response: winner=%s resp=%+v", winner.client, result.resp)
+		if result.resp.RequestID != "ask-race-1" || result.resp.Answer != "answer from client A" {
+			t.Fatalf("unexpected ask response: %+v", result.resp)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ask race winner")
-	}
-	if !isTerminalPromptAnswerError(loser.err) {
-		t.Fatalf("expected loser to get terminal prompt error, got %v", loser.err)
+		t.Fatal("timed out waiting for ask response")
 	}
 	waitForPendingAskResources(t, fixture.serverA.AskViewClient(), fixture.planA.SessionID, 0)
 	waitForPendingAskResources(t, fixture.serverB.AskViewClient(), fixture.planA.SessionID, 0)
 }
 
-func TestRemoteInteractiveRuntimeApprovalRaceFirstWinsAcrossWorkspaces(t *testing.T) {
+func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWorkspaces(t *testing.T) {
 	fixture := startRemoteMultiClientRuntimeFixture(t, "")
 
 	approvalDone := make(chan struct {
@@ -365,142 +307,48 @@ func TestRemoteInteractiveRuntimeApprovalRaceFirstWinsAcrossWorkspaces(t *testin
 	}()
 
 	approvalEvtA := waitForRemoteAskEvent(t, fixture.runtimePlanA.Wiring.askEvents)
-	approvalEvtB := waitForRemoteAskEvent(t, fixture.runtimePlanB.Wiring.askEvents)
-	for _, evt := range []askEvent{approvalEvtA, approvalEvtB} {
-		if evt.req.ID != "approval-race-1" || evt.req.Question != "Allow the command?" || !evt.req.Approval {
-			t.Fatalf("unexpected approval event: %+v", evt.req)
-		}
+	if approvalEvtA.req.ID != "approval-race-1" || approvalEvtA.req.Question != "Allow the command?" || !approvalEvtA.req.Approval {
+		t.Fatalf("unexpected approval event: %+v", approvalEvtA.req)
 	}
+	waitForPendingApprovalResources(t, fixture.serverB.ApprovalViewClient(), fixture.planA.SessionID, 1)
 
-	results := make(chan promptAnswerResult, 2)
-	go func() {
-		results <- promptAnswerResult{client: "A", err: fixture.serverA.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
-			ClientRequestID: uuid.NewString(),
-			SessionID:       fixture.planA.SessionID,
-			ApprovalID:      "approval-race-1",
-			Decision:        clientui.ApprovalDecisionAllowOnce,
-			Commentary:      "approved by client A",
-		})}
-	}()
-	go func() {
-		results <- promptAnswerResult{client: "B", err: fixture.serverB.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
-			ClientRequestID: uuid.NewString(),
-			SessionID:       fixture.planA.SessionID,
-			ApprovalID:      "approval-race-1",
-			Decision:        clientui.ApprovalDecisionDeny,
-			Commentary:      "denied by client B",
-		})}
-	}()
-
-	first := waitForPromptAnswerResult(t, results)
-	second := waitForPromptAnswerResult(t, results)
-	winner, loser := requireExactlyOnePromptWinner(t, first, second)
+	if err := fixture.serverB.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         fixture.planA.SessionID,
+		ControllerLeaseID: "invalid-lease",
+		ApprovalID:        "approval-race-1",
+		Decision:          clientui.ApprovalDecisionDeny,
+		Commentary:        "denied by client B",
+	}); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("expected invalid controller lease for read-only client, got %v", err)
+	}
+	if err := fixture.serverA.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         fixture.planA.SessionID,
+		ControllerLeaseID: fixture.runtimePlanA.ControllerLeaseID,
+		ApprovalID:        "approval-race-1",
+		Decision:          clientui.ApprovalDecisionAllowOnce,
+		Commentary:        "approved by client A",
+	}); err != nil {
+		t.Fatalf("AnswerApproval controller: %v", err)
+	}
 
 	select {
 	case result := <-approvalDone:
 		if result.err != nil {
-			t.Fatalf("AwaitPromptResponse approval race: %v", result.err)
+			t.Fatalf("AwaitPromptResponse approval: %v", result.err)
 		}
 		if result.resp.RequestID != "approval-race-1" || result.resp.Approval == nil {
-			t.Fatalf("unexpected approval race response: %+v", result.resp)
+			t.Fatalf("unexpected approval response: %+v", result.resp)
 		}
-		wantDecision := askquestion.ApprovalDecisionAllowOnce
-		wantCommentary := "approved by client A"
-		if winner.client == "B" {
-			wantDecision = askquestion.ApprovalDecisionDeny
-			wantCommentary = "denied by client B"
-		}
-		if result.resp.Approval.Decision != wantDecision || result.resp.Approval.Commentary != wantCommentary {
-			t.Fatalf("unexpected winning approval response: winner=%s resp=%+v", winner.client, result.resp)
+		if result.resp.Approval.Decision != askquestion.ApprovalDecisionAllowOnce || result.resp.Approval.Commentary != "approved by client A" {
+			t.Fatalf("unexpected approval response: %+v", result.resp)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for approval race winner")
-	}
-	if !isTerminalPromptAnswerError(loser.err) {
-		t.Fatalf("expected loser to get terminal prompt error, got %v", loser.err)
+		t.Fatal("timed out waiting for approval response")
 	}
 	waitForPendingApprovalResources(t, fixture.serverA.ApprovalViewClient(), fixture.planA.SessionID, 0)
 	waitForPendingApprovalResources(t, fixture.serverB.ApprovalViewClient(), fixture.planA.SessionID, 0)
-}
-
-func TestRemoteInteractiveRuntimeResolveTransitionForkRollbackDeduplicatesAcrossWorkspaces(t *testing.T) {
-	fakeResponses, hits := newFakeResponsesServer(t, []string{"reply before rollback fork"})
-	defer fakeResponses.Close()
-	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
-
-	projectID := fixture.serverA.ProjectID()
-
-	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message before rollback fork")
-	if err != nil {
-		t.Fatalf("SubmitUserMessage: %v", err)
-	}
-	if message != "reply before rollback fork" {
-		t.Fatalf("assistant message = %q, want %q", message, "reply before rollback fork")
-	}
-	if hits.Load() != 1 {
-		t.Fatalf("expected one daemon-backed llm call before rollback fork, got %d", hits.Load())
-	}
-	waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
-		return transcriptPageContainsAssistantText(page, "reply before rollback fork")
-	})
-	visibleBeforeA := waitForRemoteProjectSessions(t, fixture.serverA.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
-		return len(sessions) == 1 && sessionSummariesContainID(sessions, fixture.planA.SessionID)
-	})
-	visibleBeforeB := waitForRemoteProjectSessions(t, fixture.serverB.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
-		return len(sessions) == 1 && sessionSummariesContainID(sessions, fixture.planA.SessionID)
-	})
-	if len(visibleBeforeA) != 1 || len(visibleBeforeB) != 1 {
-		t.Fatalf("expected both clients to converge on one visible parent session before fork, a=%+v b=%+v", visibleBeforeA, visibleBeforeB)
-	}
-
-	req := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "dedupe-fork-rollback-1",
-		SessionID:       fixture.planA.SessionID,
-		Transition: serverapi.SessionTransition{
-			Action:               "fork_rollback",
-			ForkUserMessageIndex: 1,
-			InitialPrompt:        "edited prompt after rollback",
-		},
-	}
-	first, err := fixture.serverB.SessionLifecycleClient().ResolveTransition(context.Background(), req)
-	if err != nil {
-		t.Fatalf("ResolveTransition first: %v", err)
-	}
-	second, err := fixture.serverB.SessionLifecycleClient().ResolveTransition(context.Background(), req)
-	if err != nil {
-		t.Fatalf("ResolveTransition second: %v", err)
-	}
-	if first != second {
-		t.Fatalf("expected duplicate resolve transition to replay identical response, first=%+v second=%+v", first, second)
-	}
-	if first.NextSessionID == "" || first.NextSessionID == fixture.planA.SessionID {
-		t.Fatalf("expected rollback fork to create a distinct child session, got %+v", first)
-	}
-	if !first.ShouldContinue || first.InitialPrompt != "edited prompt after rollback" {
-		t.Fatalf("unexpected rollback fork response: %+v", first)
-	}
-
-	afterA := waitForRemoteProjectSessions(t, fixture.serverA.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
-		return len(sessions) == 2 && sessionSummariesContainID(sessions, fixture.planA.SessionID) && sessionSummariesContainID(sessions, first.NextSessionID)
-	})
-	afterB := waitForRemoteProjectSessions(t, fixture.serverB.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
-		return len(sessions) == 2 && sessionSummariesContainID(sessions, fixture.planA.SessionID) && sessionSummariesContainID(sessions, first.NextSessionID)
-	})
-	if len(afterA) != 2 || len(afterB) != 2 {
-		t.Fatalf("expected both clients to converge on exactly two sessions after deduped fork, a=%+v b=%+v", afterA, afterB)
-	}
-
-	childViewA, err := fixture.serverA.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: first.NextSessionID})
-	if err != nil {
-		t.Fatalf("GetSessionMainView child A: %v", err)
-	}
-	childViewB, err := fixture.serverB.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: first.NextSessionID})
-	if err != nil {
-		t.Fatalf("GetSessionMainView child B: %v", err)
-	}
-	if childViewA.MainView.Session.SessionID != first.NextSessionID || childViewB.MainView.Session.SessionID != first.NextSessionID {
-		t.Fatalf("expected both clients to open the deduped fork session, childA=%+v childB=%+v", childViewA.MainView.Session, childViewB.MainView.Session)
-	}
 }
 
 func TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWorkspaces(t *testing.T) {
@@ -716,10 +564,6 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 	}
 	if fixture.planB.SessionID != fixture.planA.SessionID {
 		t.Fatalf("expected second client to attach same session, a=%q b=%q", fixture.planA.SessionID, fixture.planB.SessionID)
-	}
-	fixture.runtimePlanB, err = plannerB.PrepareRuntime(context.Background(), fixture.planB, io.Discard, "test remote multi-client runtime B")
-	if err != nil {
-		t.Fatalf("PrepareRuntime B: %v", err)
 	}
 
 	return fixture
@@ -1055,6 +899,132 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	}
 }
 
+func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
+	defer fakeResponses.Close()
+
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+		JSONRPCWebSocket:        true,
+		ProjectAttach:           true,
+		SessionAttach:           true,
+		SessionPlan:             true,
+		SessionLifecycle:        true,
+		SessionTranscriptPaging: true,
+		SessionRuntime:          true,
+		RuntimeControl:          true,
+		PromptControl:           true,
+		PromptActivity:          true,
+		SessionActivity:         true,
+		ProcessOutput:           true,
+	})
+	defer cleanup()
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); ok {
+		t.Fatal("expected configured daemon without auth bootstrap capability to be rejected")
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after auth bootstrap fallback")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "embedded fallback reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "embedded fallback reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
+	}
+}
+
+func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
+	defer fakeResponses.Close()
+
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+		JSONRPCWebSocket:        true,
+		AuthBootstrap:           true,
+		SessionAttach:           true,
+		SessionPlan:             true,
+		SessionLifecycle:        true,
+		SessionTranscriptPaging: true,
+		SessionRuntime:          true,
+		RuntimeControl:          true,
+		PromptControl:           true,
+		PromptActivity:          true,
+		SessionActivity:         true,
+		ProcessOutput:           true,
+	})
+	defer cleanup()
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); ok {
+		t.Fatal("expected configured daemon without project attach capability to be rejected")
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test project attach fallback runtime")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after project attach fallback")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "embedded fallback reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "embedded fallback reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
+	}
+}
+
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapability(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -1117,7 +1087,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 	}
 }
 
-func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
+func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1176,13 +1146,9 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 
 	originalFetcher := statusUsagePayloadFetcher
 	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	called := false
 	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
-		if baseURL != statusUsageBaseURL {
-			t.Fatalf("base URL = %q", baseURL)
-		}
-		if state.Method.OAuth == nil || state.Method.OAuth.Email != "user@example.com" || state.Method.OAuth.AccountID != "acct-123" {
-			t.Fatalf("unexpected auth state: %+v", state.Method.OAuth)
-		}
+		called = true
 		return statusUsagePayload{PlanType: "pro"}, nil
 	}
 
@@ -1200,8 +1166,11 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	if plan.StatusConfig.AuthManager == nil {
-		t.Fatal("expected status auth manager for remote session")
+	if plan.StatusConfig.AuthManager != nil {
+		t.Fatal("expected remote session status to avoid local auth manager")
+	}
+	if plan.StatusConfig.AuthStatePath != "" {
+		t.Fatalf("expected empty remote auth state path, got %q", plan.StatusConfig.AuthStatePath)
 	}
 
 	collector := defaultUIStatusCollector{}
@@ -1217,11 +1186,14 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect status: %v", err)
 	}
-	if got := snapshot.Auth.Summary; got != "user@example.com" {
+	if got := snapshot.Auth.Summary; got != "Not configured" {
 		t.Fatalf("auth summary = %q", got)
 	}
-	if got := snapshot.Subscription.Summary; got != "Pro subscription" {
-		t.Fatalf("subscription summary = %q", got)
+	if snapshot.Subscription.Applicable {
+		t.Fatalf("expected remote status subscription to remain unavailable, got %+v", snapshot.Subscription)
+	}
+	if called {
+		t.Fatal("expected remote session status to avoid local subscription lookup")
 	}
 }
 
@@ -1231,13 +1203,57 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
 
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
 	called := false
 	originalLaunch := launchSessionServerDaemon
+	originalDial := dialInteractiveRemoteSessionServer
 	t.Cleanup(func() { launchSessionServerDaemon = originalLaunch })
+	t.Cleanup(func() { dialInteractiveRemoteSessionServer = originalDial })
+	dialInteractiveRemoteSessionServer = func(context.Context, Options, authInteractor) (*remoteAppServer, bool, error) {
+		return nil, false, nil
+	}
 	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
-		return &client.Remote{}, func() error {
+		remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(loadCfg))
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return remote, func() error {
 			called = true
-			return nil
+			return remote.Close()
 		}, true, nil
 	}
 
@@ -1437,7 +1453,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	if plan.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", plan.ActiveSettings.Model)
 	}
-	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != tools.ToolShell {
+	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("enabled tools = %+v, want only shell", plan.EnabledTools)
 	}
 
@@ -1613,15 +1629,21 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: plan.SessionID, Input: "saved draft"}); err != nil {
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "session lifecycle draft persistence")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID, ControllerLeaseID: runtimePlan.ControllerLeaseID, Input: "saved draft"}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
 	if got := sessionLaunchInitialInputFromServer(context.Background(), server, plan.SessionID, "transition draft"); got != "saved draft" {
 		t.Fatalf("sessionLaunchInitialInputFromServer = %q, want saved draft", got)
 	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: uuid.NewString(),
-		SessionID:       plan.SessionID,
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         plan.SessionID,
+		ControllerLeaseID: runtimePlan.ControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:          "open_session",
 			TargetSessionID: plan.SessionID,
@@ -2162,7 +2184,7 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if message != wantReply {
 		t.Fatalf("assistant message = %q, want %q", message, wantReply)
 	}
-	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: plan.SessionID, Input: "workflow draft"}); err != nil {
+	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID, ControllerLeaseID: runtimePlan.ControllerLeaseID, Input: "workflow draft"}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
 	if got := sessionLaunchInitialInputFromServer(context.Background(), server, plan.SessionID, "transition draft"); got != "workflow draft" {

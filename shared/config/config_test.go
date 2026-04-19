@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestMain(m *testing.M) {
@@ -64,22 +64,22 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
 		t.Fatalf("expected sessions root to exist: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolViewImage] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolShell] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
-		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
+	if cfg.Settings.EnabledTools[toolspec.ToolMultiToolUseParallel] {
+		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", toolspec.ToolMultiToolUseParallel)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
-		t.Fatalf("expected %s disabled in static defaults", tools.ToolTriggerHandoff)
+	if cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
+		t.Fatalf("expected %s disabled in static defaults", toolspec.ToolTriggerHandoff)
 	}
 	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolMultiToolUseParallel, got)
+		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolMultiToolUseParallel, got)
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolTriggerHandoff, got)
+		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolTriggerHandoff, got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
 	}
 	if cfg.Settings.ContextCompactionThresholdTokens != defaultCompactionThreshold {
@@ -1039,7 +1039,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "file" {
 		t.Fatalf("expected web_search source file, got %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool to remain enabled by default")
 	}
 
@@ -1054,7 +1054,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "env" {
 		t.Fatalf("expected web_search source env, got %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool to stay enabled when only web_search mode is off")
 	}
 
@@ -1081,7 +1081,7 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected explicit tools.web_search=false to stay disabled")
 	}
 	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
@@ -1106,7 +1106,7 @@ func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
 		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "file" {
@@ -1374,7 +1374,7 @@ shell_default_seconds = 50
 	if cfg.Settings.ThinkingLevel != "xhigh" {
 		t.Fatalf("expected cli thinking_level, got %q", cfg.Settings.ThinkingLevel)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolPatch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolPatch] {
 		t.Fatalf("expected env tool override to enable patch")
 	}
 	if got := cfg.Source.Sources["model"]; got != "cli" {

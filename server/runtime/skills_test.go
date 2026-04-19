@@ -193,11 +193,11 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	if len(got) != 3 {
 		t.Fatalf("expected skills+environment prepended plus original, got %d", len(got))
 	}
-	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeSkills || !strings.Contains(got[0].Content, skillsAvailableHeader) {
-		t.Fatalf("expected first prepended message to be skills context, got %+v", got[0])
+	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected first prepended message to be environment context, got %+v", got[0])
 	}
-	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[1].Content, environmentInjectedHeader) {
-		t.Fatalf("expected second prepended message to be environment context, got %+v", got[1])
+	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeSkills || !strings.Contains(got[1].Content, skillsAvailableHeader) {
+		t.Fatalf("expected second prepended message to be skills context, got %+v", got[1])
 	}
 	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
 		t.Fatalf("expected original message at tail, got %+v", got[2])
@@ -264,8 +264,8 @@ func TestSplitMetaContextMessagesSeparatesMetaContextWithoutDeduplication(t *tes
 	if len(rebuilt) != 3 {
 		t.Fatalf("expected builder to canonicalize duplicate meta messages, got %d", len(rebuilt))
 	}
-	if rebuilt[0].MessageType != llm.MessageTypeSkills || rebuilt[1].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected canonical skills -> environment ordering, got %+v", rebuilt)
+	if rebuilt[0].MessageType != llm.MessageTypeEnvironment || rebuilt[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected canonical environment -> skills ordering, got %+v", rebuilt)
 	}
 }
 

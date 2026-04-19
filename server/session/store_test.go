@@ -620,7 +620,7 @@ func TestForkAtUserMessageDerivesReminderIssuedFromReplayedHistory(t *testing.T)
 		t.Fatal("expected fork after reminder to preserve reminder-issued state")
 	}
 
-	t.Run("reviewer rollback derives from replaced items", func(t *testing.T) {
+	t.Run("legacy reviewer rollback history replacement is ignored", func(t *testing.T) {
 		parent, err := Create(t.TempDir(), "ws", t.TempDir())
 		if err != nil {
 			t.Fatalf("create parent: %v", err)
@@ -643,12 +643,12 @@ func TestForkAtUserMessageDerivesReminderIssuedFromReplayedHistory(t *testing.T)
 			t.Fatalf("append second user: %v", err)
 		}
 
-		forked, err := ForkAtUserMessage(parent, 2, "after reviewer rollback")
+		forked, err := ForkAtUserMessage(parent, 2, "after legacy reviewer rollback")
 		if err != nil {
 			t.Fatalf("fork: %v", err)
 		}
-		if !forked.Meta().CompactionSoonReminderIssued {
-			t.Fatal("expected reminder-issued state to remain true after reviewer rollback history replacement")
+		if forked.Meta().CompactionSoonReminderIssued {
+			t.Fatal("expected legacy reviewer rollback history replacement to be ignored for reminder-issued state")
 		}
 	})
 

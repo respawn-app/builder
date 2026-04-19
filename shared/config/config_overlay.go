@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func inheritReviewerDefaults(settings *Settings) {
@@ -34,16 +34,16 @@ func NormalizeSettingsForPersistence(settings Settings) (Settings, error) {
 	return normalized, nil
 }
 
-func parseEnabledToolsCSV(raw string) ([]tools.ID, error) {
+func parseEnabledToolsCSV(raw string) ([]toolspec.ID, error) {
 	parts := strings.Split(raw, ",")
-	seen := map[tools.ID]bool{}
-	out := make([]tools.ID, 0, len(parts))
+	seen := map[toolspec.ID]bool{}
+	out := make([]toolspec.ID, 0, len(parts))
 	for _, part := range parts {
 		name := strings.TrimSpace(part)
 		if name == "" {
 			continue
 		}
-		id, ok := tools.ParseID(name)
+		id, ok := toolspec.ParseID(name)
 		if !ok {
 			return nil, fmt.Errorf("unknown tool %q", name)
 		}
@@ -56,9 +56,9 @@ func parseEnabledToolsCSV(raw string) ([]tools.ID, error) {
 	return out, nil
 }
 
-func resetEnabledToolMap(enabled []tools.ID) map[tools.ID]bool {
-	out := make(map[tools.ID]bool, len(tools.CatalogIDs()))
-	for _, id := range tools.CatalogIDs() {
+func resetEnabledToolMap(enabled []toolspec.ID) map[toolspec.ID]bool {
+	out := make(map[toolspec.ID]bool, len(toolspec.CatalogIDs()))
+	for _, id := range toolspec.CatalogIDs() {
 		out[id] = false
 	}
 	for _, id := range enabled {

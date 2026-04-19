@@ -269,3 +269,53 @@ func TestGenerateStream_RepairsMissingAssistantOutputItemAtNonZeroOutputIndex(t 
 		t.Fatalf("expected synthesized assistant item inserted at output_index=2, got %+v", resp.OutputItems[2])
 	}
 }
+
+func TestGenerateStream_PreservesHostedWebSearchOutputItemFromStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"query\":\"builder cli\"}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5},\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuthHeader{})
+	transport.BaseURL = server.URL
+	transport.Client = server.Client()
+
+	resp, err := transport.GenerateStreamWithEvents(context.Background(), OpenAIRequest{Model: "gpt-5"}, StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("GenerateStream failed: %v", err)
+	}
+	if resp.AssistantText != "Done" {
+		t.Fatalf("assistant text = %q, want Done", resp.AssistantText)
+	}
+	if len(resp.OutputItems) != 2 {
+		t.Fatalf("expected hosted passthrough output item + assistant message, got %+v", resp.OutputItems)
+	}
+	foundAssistant := false
+	foundHosted := false
+	for _, item := range resp.OutputItems {
+		if item.Type == ResponseItemTypeMessage && item.Content == "Done" {
+			foundAssistant = true
+		}
+		if item.Type != ResponseItemTypeOther {
+			continue
+		}
+		if !strings.Contains(string(item.Raw), "\"type\":\"web_search_call\"") {
+			t.Fatalf("unexpected passthrough raw item: %+v", item)
+		}
+		foundHosted = true
+	}
+	if !foundHosted {
+		t.Fatalf("expected passthrough web_search_call in output items, got %+v", resp.OutputItems)
+	}
+	if !foundAssistant {
+		t.Fatalf("expected assistant message in output items, got %+v", resp.OutputItems)
+	}
+}

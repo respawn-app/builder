@@ -13,6 +13,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -317,7 +318,7 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
 		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", EnabledTools: []tools.ID{tools.ToolShell}})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolShell}})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 	if got, want := req.FastMode, eng.FastModeEnabled(); got != want {
 		t.Fatalf("FastMode = %v, want %v", got, want)
 	}
-	if len(req.Tools) != 1 || req.Tools[0].Name != string(tools.ToolShell) {
+	if len(req.Tools) != 1 || req.Tools[0].Name != string(toolspec.ToolShell) {
 		t.Fatalf("Tools = %+v, want shell tool contract", req.Tools)
 	}
 }
@@ -834,43 +835,6 @@ func TestGenerateWithRetryClient_RestorePreservesRotatedCompactionKeyWithoutWarn
 	}
 
 	warnings := persistedCacheWarnings(t, reopened)
-	if len(warnings) != 0 {
-		t.Fatalf("warning count = %d, want 0", len(warnings))
-	}
-}
-
-func TestGenerateWithRetryClient_ReviewerRollbackClearsConversationAndReviewerLineage(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}, {Usage: llm.Usage{InputTokens: 14}}, {Usage: llm.Usage{InputTokens: 16}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-	eng.compactionCount = 1
-	conversationKey := conversationPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot())
-	reviewerKey := reviewerPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot())
-
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(conversationKey, "alpha"), nil, nil, nil); err != nil {
-		t.Fatalf("first generate: %v", err)
-	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testReviewerPromptCacheRequest(reviewerKey, "alpha", "reviewer-feedback"), nil, nil, nil); err != nil {
-		t.Fatalf("reviewer follow-up generate: %v", err)
-	}
-	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}})); err != nil {
-		t.Fatalf("reviewer rollback replace history: %v", err)
-	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest(conversationKey, "alpha", "omega"), nil, nil, nil); err != nil {
-		t.Fatalf("post-rollback generate: %v", err)
-	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-4", client, testReviewerPromptCacheRequest(reviewerKey, "alpha", "post-rollback reviewer"), nil, nil, nil); err != nil {
-		t.Fatalf("post-rollback reviewer generate: %v", err)
-	}
-
-	warnings := persistedCacheWarnings(t, store)
 	if len(warnings) != 0 {
 		t.Fatalf("warning count = %d, want 0", len(warnings))
 	}

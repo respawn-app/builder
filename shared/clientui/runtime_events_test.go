@@ -82,6 +82,48 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 	}
 }
 
+func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceOrRecovery(t *testing.T) {
+	plain := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated},
+	)
+	if plain.SyncSessionView {
+		t.Fatal("did not expect plain conversation_updated to request transcript sync")
+	}
+	committed := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated, CommittedTranscriptChanged: true},
+	)
+	if !committed.SyncSessionView {
+		t.Fatal("expected committed conversation_updated to request transcript sync")
+	}
+	recovery := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated, RecoveryCause: TranscriptRecoveryCauseStreamGap},
+	)
+	if !recovery.SyncSessionView {
+		t.Fatal("expected recovery conversation_updated to request transcript sync")
+	}
+}
+
+func TestReduceRuntimeEvent_OngoingErrorUpdatedRequestsSessionSync(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventOngoingErrorUpdated},
+	)
+	if !update.SyncSessionView {
+		t.Fatal("expected ongoing_error_updated to request transcript sync")
+	}
+}
+
 func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{},
@@ -117,6 +159,28 @@ func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *t
 	}
 	if update.BackgroundNotice.Message != "background shell 1000 completed" {
 		t.Fatalf("notice message = %q", update.BackgroundNotice.Message)
+	}
+}
+
+func TestReduceRuntimeEvent_CompactionCompletedProducesSyntheticOngoingNotice(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{Compacting: true},
+		PendingInputState{},
+		false,
+		Event{Kind: EventCompactionCompleted, Compaction: &CompactionStatus{Mode: "auto", Count: 2}},
+	)
+
+	if update.State.Compacting {
+		t.Fatal("expected compaction completed to clear compacting state")
+	}
+	if update.SyntheticOngoingEntry == nil {
+		t.Fatal("expected synthetic ongoing compaction notice")
+	}
+	if update.SyntheticOngoingEntry.Role != "compaction_notice" {
+		t.Fatalf("synthetic role = %q, want compaction_notice", update.SyntheticOngoingEntry.Role)
+	}
+	if update.SyntheticOngoingEntry.Text != "context compacted for the 2nd time" {
+		t.Fatalf("synthetic text = %q", update.SyntheticOngoingEntry.Text)
 	}
 }
 

@@ -11,10 +11,10 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 type projectionFastClient struct{}
@@ -49,11 +49,12 @@ func (c projectionPreciseClient) ProviderCapabilities(context.Context) (llm.Prov
 func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	exitCode := 17
 	view := EventFromRuntime(runtime.Event{
-		Kind:           runtime.EventBackgroundUpdated,
-		StepID:         "step-1",
-		AssistantDelta: "delta",
-		ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "k", Role: "reasoning", Text: "thinking"},
-		RunState:       &runtime.RunState{Busy: true, RunID: "run-1", Status: runtime.RunStatusRunning},
+		Kind:                       runtime.EventBackgroundUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		AssistantDelta:             "delta",
+		ReasoningDelta:             &llm.ReasoningSummaryDelta{Key: "k", Role: "reasoning", Text: "thinking"},
+		RunState:                   &runtime.RunState{Busy: true, RunID: "run-1", Status: runtime.RunStatusRunning},
 		Background: &runtime.BackgroundShellEvent{
 			Type:              "completed",
 			ID:                "123",
@@ -72,6 +73,9 @@ func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	})
 	if view.Kind != "background_updated" || view.StepID != "step-1" || view.AssistantDelta != "delta" {
 		t.Fatalf("unexpected projected event: %+v", view)
+	}
+	if !view.CommittedTranscriptChanged {
+		t.Fatalf("expected committed transcript change flag projected, got %+v", view)
 	}
 	if view.ReasoningDelta == nil || view.ReasoningDelta.Text != "thinking" {
 		t.Fatalf("expected reasoning delta projection, got %+v", view.ReasoningDelta)
@@ -114,6 +118,64 @@ func TestEventFromRuntimeProjectsLocalEntry(t *testing.T) {
 	}
 	if entry.Visibility != clientui.EntryVisibilityAll {
 		t.Fatalf("local entry visibility = %q, want all", entry.Visibility)
+	}
+}
+
+func TestEventFromRuntimeLeavesCompactionStatusWithoutTranscriptEntriesUntilPersistedLocalEntry(t *testing.T) {
+	testCases := []struct {
+		name string
+		evt  runtime.Event
+	}{
+		{
+			name: "compaction completed",
+			evt: runtime.Event{
+				Kind:   runtime.EventCompactionCompleted,
+				StepID: "step-1",
+				Compaction: &runtime.CompactionStatus{
+					Mode:  "auto",
+					Count: 1,
+				},
+			},
+		},
+		{
+			name: "compaction failed",
+			evt: runtime.Event{
+				Kind:   runtime.EventCompactionFailed,
+				StepID: "step-1",
+				Compaction: &runtime.CompactionStatus{
+					Mode:  "manual",
+					Error: "quota exceeded",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := EventFromRuntime(tc.evt)
+			if tc.evt.Compaction == nil || view.Compaction == nil {
+				t.Fatalf("expected compaction status projection, got %+v", view.Compaction)
+			}
+			if view.Compaction.Mode != tc.evt.Compaction.Mode || view.Compaction.Count != tc.evt.Compaction.Count || view.Compaction.Error != tc.evt.Compaction.Error {
+				t.Fatalf("projected compaction = %+v, want %+v", view.Compaction, tc.evt.Compaction)
+			}
+			if len(view.TranscriptEntries) != 0 {
+				t.Fatalf("expected no projected transcript entries before persisted local entry, got %+v", view.TranscriptEntries)
+			}
+		})
+	}
+
+	local := EventFromRuntime(runtime.Event{
+		Kind:                       runtime.EventLocalEntryAdded,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		LocalEntry:                 &runtime.ChatEntry{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+	})
+	if len(local.TranscriptEntries) != 1 {
+		t.Fatalf("expected persisted local entry to remain the transcript source, got %+v", local.TranscriptEntries)
+	}
+	if got := local.TranscriptEntries[0].Role; got != "compaction_notice" {
+		t.Fatalf("projected local entry role = %q, want compaction_notice", got)
 	}
 }
 
@@ -440,6 +502,41 @@ func TestTranscriptPageFromRuntimeUsesOngoingTailWindowByDefault(t *testing.T) {
 	}
 	if len(page.Entries) != 500 {
 		t.Fatalf("entries = %d, want 500", len(page.Entries))
+	}
+}
+
+func TestTranscriptPageFromRuntimeUsesIncrementalOngoingTailWhenClientKnowsRecentRevision(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("reply-%03d", i), Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	page := TranscriptPageFromRuntime(eng, clientui.TranscriptPageRequest{
+		Window:                   clientui.TranscriptWindowOngoingTail,
+		KnownRevision:            599,
+		KnownCommittedEntryCount: 590,
+	})
+	if page.TotalEntries != 600 {
+		t.Fatalf("total entries = %d, want 600", page.TotalEntries)
+	}
+	if page.Offset != 558 {
+		t.Fatalf("offset = %d, want 558", page.Offset)
+	}
+	if len(page.Entries) != 42 {
+		t.Fatalf("entries = %d, want 42", len(page.Entries))
+	}
+	if got := page.Entries[0].Text; got != "reply-558" {
+		t.Fatalf("first entry = %q, want reply-558", got)
 	}
 }
 

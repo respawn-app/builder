@@ -69,7 +69,7 @@ func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup boo
 	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay)
 	detailLoadCmd := m.detailLoadCmdForModeTransition(prevMode, nextMode)
 	if clearCmd == nil && transitionCmd == nil && nativeReplayCmd == nil && detailLoadCmd == nil {
-		return tea.ClearScreen
+		return nil
 	}
 	return sequenceCmds(clearCmd, transitionCmd, nativeReplayCmd, detailLoadCmd)
 }
@@ -104,8 +104,8 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 	if prev != tui.ModeDetail || next != tui.ModeOngoing {
 		return nil
 	}
-	// Detail-mode transcript changes must restore the committed normal-buffer view
-	// when we return to ongoing, but only via the dedicated mode-restore path.
+	// Detail-mode transcript changes may append newly committed suffix rows on return,
+	// but non-contiguous changes must only rebase internal state, never rewrite scrollback.
 	m.armNativeHistoryReplayPermit(nativeHistoryReplayPermitModeRestore)
 	return m.emitCurrentNativeScrollbackState(false)
 }

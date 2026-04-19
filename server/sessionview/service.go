@@ -107,7 +107,7 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
 	}
-	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window}
+	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window, KnownRevision: req.KnownRevision, KnownCommittedEntryCount: req.KnownCommittedEntryCount}
 	pageReq = runtimeview.NormalizeDefaultTranscriptRequest(pageReq)
 	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
@@ -218,7 +218,7 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 		return clientui.TranscriptPage{}, err
 	}
 	if req.Window == clientui.TranscriptWindowOngoingTail {
-		return entry.transcriptPageFromTail(meta, freshness), nil
+		return entry.transcriptPageFromTail(meta, freshness, req), nil
 	}
 	offset := req.Offset
 	limit := req.Limit

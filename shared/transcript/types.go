@@ -3,7 +3,7 @@ package transcript
 import (
 	"strings"
 
-	patchformat "builder/server/tools/patch/format"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 type ToolPresentationKind string

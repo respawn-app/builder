@@ -3,6 +3,7 @@ package tui
 import (
 	"builder/server/tools"
 	"builder/shared/textutil"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"fmt"
 	"strings"
@@ -241,7 +242,7 @@ func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 }
 
 func isWebSearchToolCall(meta *transcript.ToolCallMeta) bool {
-	return meta != nil && strings.TrimSpace(meta.ToolName) == string(tools.ToolWebSearch)
+	return meta != nil && strings.TrimSpace(meta.ToolName) == string(toolspec.ToolWebSearch)
 }
 
 func isToolHeadlineRole(role string) bool {

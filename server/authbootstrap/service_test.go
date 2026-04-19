@@ -1,0 +1,74 @@
+package authbootstrap
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"builder/server/auth"
+	"builder/shared/serverapi"
+)
+
+func TestCompleteBootstrapConfiguresAPIKeyWhenAuthNotReady(t *testing.T) {
+	service, store := newTestAuthBootstrapService(auth.EmptyState())
+
+	resp, err := service.CompleteBootstrap(context.Background(), serverapi.AuthCompleteBootstrapRequest{
+		Mode:   serverapi.AuthBootstrapModeAPIKey,
+		APIKey: "server-key",
+	})
+	if err != nil {
+		t.Fatalf("CompleteBootstrap: %v", err)
+	}
+	if !resp.AuthReady {
+		t.Fatal("expected auth ready after bootstrap completion")
+	}
+	if resp.MethodType != string(auth.MethodAPIKey) {
+		t.Fatalf("method type = %q, want %q", resp.MethodType, auth.MethodAPIKey)
+	}
+	state, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "server-key" {
+		t.Fatalf("stored method = %+v, want server-key", state.Method)
+	}
+}
+
+func TestCompleteBootstrapReturnsSuccessWithoutOverwriteWhenAuthAlreadyReady(t *testing.T) {
+	service, store := newTestAuthBootstrapService(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "server-key"},
+		},
+	})
+
+	resp, err := service.CompleteBootstrap(context.Background(), serverapi.AuthCompleteBootstrapRequest{
+		Mode:   serverapi.AuthBootstrapModeAPIKey,
+		APIKey: "server-key-2",
+	})
+	if err != nil {
+		t.Fatalf("CompleteBootstrap: %v", err)
+	}
+	if !resp.AuthReady {
+		t.Fatal("expected ready auth to return successful no-op")
+	}
+	if resp.MethodType != string(auth.MethodAPIKey) {
+		t.Fatalf("method type = %q, want %q", resp.MethodType, auth.MethodAPIKey)
+	}
+	state, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "server-key" {
+		t.Fatalf("stored method = %+v, want original server-key", state.Method)
+	}
+}
+
+func newTestAuthBootstrapService(initial auth.State) (*Service, *auth.MemoryStore) {
+	store := auth.NewMemoryStore(initial)
+	manager := auth.NewManager(store, nil, func() time.Time {
+		return time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	})
+	return NewService(manager, auth.OpenAIOAuthOptions{}, nil), store
+}

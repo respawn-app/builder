@@ -8,6 +8,8 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
+
 	"github.com/google/uuid"
 )
 
@@ -27,7 +29,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		if call.ID == "" {
 			call.ID = uuid.NewString()
 		}
-		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))}
+		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true}
 		if start, ok := e.pendingToolCallStart(call.ID); ok {
 			started.CommittedEntryStart = start
 			started.CommittedEntryStartSet = true
@@ -40,24 +42,24 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 			defer e.forgetPendingToolCallStart(tc.ID)
 			var callErr error
 
-			toolID, ok := tools.ParseID(tc.Name)
+			toolID, ok := toolspec.ParseID(tc.Name)
 			if !ok {
-				results[idx] = tools.Result{CallID: tc.ID, Name: tools.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+				results[idx] = tools.Result{CallID: tc.ID, Name: toolspec.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
 					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
 				} else {
-					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx])})
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx]), CommittedTranscriptChanged: true})
 				}
 				return
 			}
 			h, ok := e.registry.Get(toolID)
-			if toolID == tools.ToolWebSearch {
+			if toolID == toolspec.ToolWebSearch {
 				if err := tools.ValidateWebSearchInput(tc.Input); err != nil {
 					results[idx] = tools.ErrorResult(tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, RunID: runID, StepID: stepID}, tools.InvalidWebSearchQueryMessage)
 					if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
 						callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
 					} else {
-						e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx])})
+						e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx]), CommittedTranscriptChanged: true})
 					}
 					return
 				}
@@ -67,7 +69,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
 					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
 				} else {
-					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx])})
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx]), CommittedTranscriptChanged: true})
 				}
 				return
 			}
@@ -85,7 +87,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 				callErrs[idx] = errors.Join(callErr, persistErr)
 				return
 			}
-			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(res)})
+			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(res), CommittedTranscriptChanged: true})
 			callErrs[idx] = callErr
 		}(call)
 	}

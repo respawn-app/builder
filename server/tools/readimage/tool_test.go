@@ -13,6 +13,7 @@ import (
 
 	"builder/server/tools"
 	patchtool "builder/server/tools/patch"
+	"builder/shared/toolspec"
 )
 
 var tinyPNG = []byte{
@@ -35,7 +36,7 @@ func TestCall_ImagePathReturnsInputImageContentItem(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"img.png"}`),
 	})
 	if err != nil {
@@ -87,7 +88,7 @@ func TestCall_PDFPathReturnsInputFileContentItem(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"doc.pdf"}`),
 	})
 	if err != nil {
@@ -141,7 +142,7 @@ func TestCall_UnsupportedFileReturnsToolError(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"note.txt"}`),
 	})
 	if err != nil {
@@ -162,7 +163,7 @@ func TestCall_DirectoryPathReturnsToolError(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"."}`),
 	})
 	if err != nil {
@@ -194,7 +195,7 @@ func TestCall_OversizedFileReturnsCompressionGuidance(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			result, callErr := tool.Call(context.Background(), tools.Call{
 				ID:    "call-oversized",
-				Name:  tools.ToolViewImage,
+				Name:  toolspec.ToolViewImage,
 				Input: json.RawMessage(`{"path":"` + name + `"}`),
 			})
 			if callErr != nil {
@@ -233,7 +234,7 @@ func TestCall_FileSizeBoundary(t *testing.T) {
 
 	exactResult, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-exact-size",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"exact.png"}`),
 	})
 	if err != nil {
@@ -245,7 +246,7 @@ func TestCall_FileSizeBoundary(t *testing.T) {
 
 	oversizedResult, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-oversized-size",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"oversized.png"}`),
 	})
 	if err != nil {
@@ -265,7 +266,7 @@ func TestCall_UnsupportedModelReturnsToolError(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"img.png"}`),
 	})
 	if err != nil {
@@ -294,7 +295,7 @@ func TestCall_PathTraversalOutsideWorkspaceRejectedByDefault(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-traversal",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"../outside.png"}`),
 	})
 	if err != nil {
@@ -326,7 +327,7 @@ func TestCall_SymlinkEscapeOutsideWorkspaceRejectedByDefault(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-symlink",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"symlink.png"}`),
 	})
 	if err != nil {
@@ -361,7 +362,7 @@ func TestCall_OutsideWorkspaceTempDirAllowedWithoutApproval(t *testing.T) {
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-temp-allow", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-temp-allow", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -400,7 +401,7 @@ func TestCall_OutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"` + strings.ReplaceAll(outside1, `\`, `\\`) + `"}`),
 	})
 	if err != nil {
@@ -412,7 +413,7 @@ func TestCall_OutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
 
 	result, err = tool.Call(context.Background(), tools.Call{
 		ID:    "call-2",
-		Name:  tools.ToolViewImage,
+		Name:  toolspec.ToolViewImage,
 		Input: json.RawMessage(`{"path":"` + strings.ReplaceAll(outside2, `\`, `\\`) + `"}`),
 	})
 	if err != nil {
@@ -448,7 +449,7 @@ func TestCall_OutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -456,7 +457,7 @@ func TestCall_OutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
 		t.Fatalf("expected first call success, got %s", string(result.Output))
 	}
 
-	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: tools.ToolViewImage, Input: input})
+	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -492,7 +493,7 @@ func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -500,7 +501,7 @@ func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
 		t.Fatalf("expected first call success, got %s", string(result.Output))
 	}
 
-	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: tools.ToolViewImage, Input: input})
+	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -545,7 +546,7 @@ func TestCall_OutsideWorkspaceApprovalFailureUsesReadSpecificWording(t *testing.
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-approval-error", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-approval-error", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -580,7 +581,7 @@ func TestCall_OutsideWorkspaceRejectionIncludesReadSpecificGuidance(t *testing.T
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-deny-guidance", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-deny-guidance", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -621,7 +622,7 @@ func TestCall_CaseVariantAbsolutePathInsideWorkspaceDoesNotTriggerOutsideApprova
 	}
 
 	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(variantImagePath, `\`, `\\`) + `"}`)
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-case-variant", Name: tools.ToolViewImage, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-case-variant", Name: toolspec.ToolViewImage, Input: input})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
