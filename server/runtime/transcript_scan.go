@@ -91,7 +91,7 @@ func (s *inMemoryTranscriptScan) OngoingTailSnapshot() TranscriptWindowSnapshot 
 }
 
 func (s *inMemoryTranscriptScan) MarkCompactionBoundary() {
-	if s == nil || s.hasCompactionCheckpoint {
+	if s == nil {
 		return
 	}
 	s.hasCompactionCheckpoint = true
@@ -99,9 +99,15 @@ func (s *inMemoryTranscriptScan) MarkCompactionBoundary() {
 	if !s.request.TrackOngoingTail || s.request.TailLimit <= 0 {
 		return
 	}
-	if s.compactionEntryStart < s.tailStart {
-		s.tailStart = s.compactionEntryStart
+	if s.compactionEntryStart > s.tailStart {
+		drop := s.compactionEntryStart - s.tailStart
+		if drop >= len(s.tailEntries) {
+			s.tailEntries = nil
+		} else {
+			s.tailEntries = append([]ChatEntry(nil), s.tailEntries[drop:]...)
+		}
 	}
+	s.tailStart = s.compactionEntryStart
 }
 
 func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []ChatEntry {
@@ -112,7 +118,7 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 			entries = append(entries, entry)
 		}
 	case llm.RoleAssistant:
-		if strings.TrimSpace(msg.Content) != "" {
+		if strings.TrimSpace(msg.Content) != "" && !isNoopFinalAnswer(msg) {
 			entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 		}
 		for _, call := range msg.ToolCalls {
@@ -179,7 +185,7 @@ func (s *inMemoryTranscriptScan) appendEntry(entry ChatEntry) {
 			startLastN = 0
 		}
 		start := startLastN
-		if s.hasCompactionCheckpoint && s.compactionEntryStart >= 0 && s.compactionEntryStart < start {
+		if s.hasCompactionCheckpoint && s.compactionEntryStart >= 0 {
 			start = s.compactionEntryStart
 		}
 		if start > s.tailStart {

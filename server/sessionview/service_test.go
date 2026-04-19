@@ -348,7 +348,7 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testi
 	}
 }
 
-func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t *testing.T) {
+func TestServiceDormantReviewerRollbackIsIgnoredOnRead(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -380,14 +380,20 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 	if err != nil {
 		t.Fatalf("get session transcript page: %v", err)
 	}
-	if transcriptResp.Transcript.TotalEntries != 1 {
-		t.Fatalf("total entries = %d, want 1", transcriptResp.Transcript.TotalEntries)
+	if transcriptResp.Transcript.TotalEntries != 3 {
+		t.Fatalf("total entries = %d, want 3", transcriptResp.Transcript.TotalEntries)
 	}
-	if len(transcriptResp.Transcript.Entries) != 1 {
-		t.Fatalf("entry count = %d, want 1", len(transcriptResp.Transcript.Entries))
+	if len(transcriptResp.Transcript.Entries) != 3 {
+		t.Fatalf("entry count = %d, want 3", len(transcriptResp.Transcript.Entries))
 	}
 	if got := transcriptResp.Transcript.Entries[0].Text; got != "u1" {
-		t.Fatalf("visible transcript entries = %+v, want only u1", transcriptResp.Transcript.Entries)
+		t.Fatalf("first visible transcript entry = %+v, want u1", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[1].Text; got != "rolled back final" {
+		t.Fatalf("second visible transcript entry = %+v, want rolled back final", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[2].Text; got != "u2" {
+		t.Fatalf("third visible transcript entry = %+v, want u2", transcriptResp.Transcript.Entries)
 	}
 
 	mainViewResp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
@@ -395,10 +401,10 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 		t.Fatalf("get session main view: %v", err)
 	}
 	if got := mainViewResp.MainView.Status.LastCommittedAssistantFinalAnswer; got != "" {
-		t.Fatalf("last committed assistant final answer = %q, want empty after rollback", got)
+		t.Fatalf("last committed assistant final answer = %q, want empty because later user message supersedes it", got)
 	}
-	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 1 {
-		t.Fatalf("committed entry count = %d, want 1", got)
+	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 3 {
+		t.Fatalf("committed entry count = %d, want 3", got)
 	}
 }
 
@@ -433,11 +439,108 @@ func TestServiceGetSessionTranscriptPageKeepsDormantCompactionSummaryAndCarryove
 	if len(resp.Transcript.Entries) != 3 {
 		t.Fatalf("entries = %d, want 3 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
 	}
+	if resp.Transcript.Entries[0].Role != "compaction_summary" || resp.Transcript.Entries[0].Text != "condensed provider summary" {
+		t.Fatalf("expected projected provider compaction summary entry, got %+v", resp.Transcript.Entries[0])
+	}
 	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed summary" {
-		t.Fatalf("expected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+		t.Fatalf("expected persisted compaction summary entry, got %+v", resp.Transcript.Entries[1])
 	}
 	if resp.Transcript.Entries[2].Role != "manual_compaction_carryover" {
 		t.Fatalf("expected manual carryover entry, got %+v", resp.Transcript.Entries[2])
+	}
+}
+
+func TestServiceGetSessionTranscriptPagePreservesHistoryAcrossActiveCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "local",
+		"mode":   "manual",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}}),
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "compaction_notice", "text": "after replace notice"}); err != nil {
+		t.Fatalf("append compaction notice entry: %v", err)
+	}
+	eng, err := runtime.New(store, &serviceFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("assistant", "live local")
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 10})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if len(resp.Transcript.Entries) != 4 {
+		t.Fatalf("entries = %d, want 4 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	}
+	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before compaction" {
+		t.Fatalf("expected preserved pre-compaction entry, got %+v", resp.Transcript.Entries[0])
+	}
+	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" {
+		t.Fatalf("expected projected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+	}
+	if resp.Transcript.Entries[2].Role != "compaction_notice" || resp.Transcript.Entries[2].Text != "after replace notice" {
+		t.Fatalf("expected persisted post-compaction local entry, got %+v", resp.Transcript.Entries[2])
+	}
+	if resp.Transcript.Entries[3].Role != "assistant" || resp.Transcript.Entries[3].Text != "live local" {
+		t.Fatalf("expected live local entry after compaction, got %+v", resp.Transcript.Entries[3])
+	}
+}
+
+func TestServiceGetSessionTranscriptPagePaginatesBeforeActiveCompactionBoundary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "before-1"}); err != nil {
+		t.Fatalf("append first user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "before-2", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "local",
+		"mode":   "manual",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}}),
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "compaction_notice", "text": "after replace notice"}); err != nil {
+		t.Fatalf("append compaction notice entry: %v", err)
+	}
+	eng, err := runtime.New(store, &serviceFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("assistant", "live local")
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 2})
+	if err != nil {
+		t.Fatalf("get paginated session transcript page: %v", err)
+	}
+	if resp.Transcript.TotalEntries != 5 {
+		t.Fatalf("total entries = %d, want 5", resp.Transcript.TotalEntries)
+	}
+	if len(resp.Transcript.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	}
+	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before-1" {
+		t.Fatalf("expected first pre-compaction entry, got %+v", resp.Transcript.Entries[0])
+	}
+	if resp.Transcript.Entries[1].Role != "assistant" || resp.Transcript.Entries[1].Text != "before-2" {
+		t.Fatalf("expected second pre-compaction entry, got %+v", resp.Transcript.Entries[1])
 	}
 }
 

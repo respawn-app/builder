@@ -1,0 +1,10 @@
+.DS_Store
+.git
+.github
+.idea
+.vscode
+bin/*
+docs/.astro
+docs/dist
+docs/node_modules
+docs/src/.generated

@@ -28,8 +28,9 @@ type ProjectResolvePathRequest struct {
 }
 
 type ProjectResolvePathResponse struct {
-	CanonicalRoot string          `json:"canonical_root"`
-	Binding       *ProjectBinding `json:"binding,omitempty"`
+	CanonicalRoot    string                       `json:"canonical_root"`
+	PathAvailability clientui.ProjectAvailability `json:"path_availability"`
+	Binding          *ProjectBinding              `json:"binding,omitempty"`
 }
 
 type ProjectCreateRequest struct {
@@ -47,6 +48,15 @@ type ProjectAttachWorkspaceRequest struct {
 }
 
 type ProjectAttachWorkspaceResponse struct {
+	Binding ProjectBinding `json:"binding"`
+}
+
+type ProjectRebindWorkspaceRequest struct {
+	OldWorkspaceRoot string `json:"old_workspace_root"`
+	NewWorkspaceRoot string `json:"new_workspace_root"`
+}
+
+type ProjectRebindWorkspaceResponse struct {
 	Binding ProjectBinding `json:"binding"`
 }
 
@@ -71,6 +81,7 @@ type ProjectViewService interface {
 	ResolveProjectPath(ctx context.Context, req ProjectResolvePathRequest) (ProjectResolvePathResponse, error)
 	CreateProject(ctx context.Context, req ProjectCreateRequest) (ProjectCreateResponse, error)
 	AttachWorkspaceToProject(ctx context.Context, req ProjectAttachWorkspaceRequest) (ProjectAttachWorkspaceResponse, error)
+	RebindWorkspace(ctx context.Context, req ProjectRebindWorkspaceRequest) (ProjectRebindWorkspaceResponse, error)
 	GetProjectOverview(ctx context.Context, req ProjectGetOverviewRequest) (ProjectGetOverviewResponse, error)
 	ListSessionsByProject(ctx context.Context, req SessionListByProjectRequest) (SessionListByProjectResponse, error)
 }
@@ -98,6 +109,16 @@ func (r ProjectAttachWorkspaceRequest) Validate() error {
 	}
 	if strings.TrimSpace(r.WorkspaceRoot) == "" {
 		return errors.New("workspace_root is required")
+	}
+	return nil
+}
+
+func (r ProjectRebindWorkspaceRequest) Validate() error {
+	if strings.TrimSpace(r.OldWorkspaceRoot) == "" {
+		return errors.New("old_workspace_root is required")
+	}
+	if strings.TrimSpace(r.NewWorkspaceRoot) == "" {
+		return errors.New("new_workspace_root is required")
 	}
 	return nil
 }

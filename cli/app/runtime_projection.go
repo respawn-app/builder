@@ -34,7 +34,7 @@ func projectRuntimeEventChannel(src <-chan runtime.Event, gaps <-chan struct{}, 
 					gaps = nil
 					continue
 				}
-				if !publishProjectedRuntimeEvent(stop, out, clientui.Event{Kind: clientui.EventConversationUpdated, CommittedTranscriptChanged: true}) {
+				if !publishProjectedRuntimeEvent(stop, out, clientui.Event{Kind: clientui.EventConversationUpdated, CommittedTranscriptChanged: true, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap}) {
 					return
 				}
 			case evt, ok := <-src:

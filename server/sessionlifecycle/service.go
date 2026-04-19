@@ -3,13 +3,11 @@ package sessionlifecycle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
-	"sync"
-	"time"
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/requestmemo"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessionpath"
@@ -21,58 +19,55 @@ type Service struct {
 	containerDir    string
 	stores          sessionStoreResolver
 	authManager     *auth.Manager
+	controller      ControllerLeaseVerifier
 	storeOptions    []session.StoreOption
-	resolveMu       sync.Mutex
-	resolves        map[string]*resolveTransitionEntry
+	drafts          *requestmemo.Memo[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse]
+	transitions     *requestmemo.Memo[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]
 }
 
-type resolveTransitionFingerprint struct {
-	sessionID                string
-	action                   string
-	initialPrompt            string
-	initialInput             string
-	targetSessionID          string
-	forkUserMessageIndex     int
-	forkTranscriptEntryIndex int
-	hasForkTranscriptEntry   bool
-	parentSessionID          string
+type sessionDraftMemoRequest struct {
+	SessionID string
+	Input     string
 }
 
-type resolveTransitionEntry struct {
-	fingerprint resolveTransitionFingerprint
-	response    serverapi.SessionResolveTransitionResponse
-	err         error
-	done        bool
-	cacheable   bool
-	completedAt time.Time
-	ready       chan struct{}
+type sessionTransitionMemoRequest struct {
+	SessionID  string
+	Transition serverapi.SessionTransition
 }
-
-const resolveTransitionDedupeRetention = 10 * time.Minute
-
-var resolveTransitionDedupeNow = time.Now
 
 type sessionStoreResolver interface {
 	ResolveStore(ctx context.Context, sessionID string) (*session.Store, error)
 }
 
+type ControllerLeaseVerifier interface {
+	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
+}
+
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), resolves: map[string]*resolveTransitionEntry{}}
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
 func NewGlobalService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), resolves: map[string]*resolveTransitionEntry{}}
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
-func (s *Service) sweepExpiredResolveEntriesLocked(now time.Time) {
-	for key, entry := range s.resolves {
-		if entry == nil || !entry.done || entry.completedAt.IsZero() {
-			continue
-		}
-		if now.Sub(entry.completedAt) >= resolveTransitionDedupeRetention {
-			delete(s.resolves, key)
-		}
+func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) *Service {
+	if s == nil {
+		return nil
 	}
+	s.controller = verifier
+	return s
+}
+
+func (s *Service) requireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return nil
+	}
+	if s == nil || s.controller == nil {
+		return serverapi.ErrInvalidControllerLease
+	}
+	return s.controller.RequireControllerLease(ctx, trimmedSessionID, strings.TrimSpace(leaseID))
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
@@ -86,88 +81,62 @@ func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitia
 	return serverapi.SessionInitialInputResponse{Input: serverlifecycle.InitialInput(store, req.TransitionInput)}, nil
 }
 
-func (s *Service) PersistInputDraft(_ context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+func (s *Service) PersistInputDraft(ctx context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	store, err := s.openStore(req.SessionID)
-	if err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	return serverapi.SessionPersistInputDraftResponse{}, nil
+	memoReq := sessionDraftMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Input: req.Input}
+	return s.drafts.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionDraftMemoRequest, func(context.Context) (serverapi.SessionPersistInputDraftResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		store, err := s.openStore(req.SessionID)
+		if err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		return serverapi.SessionPersistInputDraftResponse{}, nil
+	})
 }
 
 func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
-	for {
-		key := strings.TrimSpace(req.ClientRequestID)
-		fp := resolveTransitionFingerprint{
-			sessionID:              strings.TrimSpace(req.SessionID),
-			action:                 strings.TrimSpace(req.Transition.Action),
-			initialPrompt:          req.Transition.InitialPrompt,
-			initialInput:           req.Transition.InitialInput,
-			targetSessionID:        strings.TrimSpace(req.Transition.TargetSessionID),
-			forkUserMessageIndex:   req.Transition.ForkUserMessageIndex,
-			hasForkTranscriptEntry: req.Transition.ForkTranscriptEntryIndex != nil,
-			parentSessionID:        strings.TrimSpace(req.Transition.ParentSessionID),
-		}
-		if req.Transition.ForkTranscriptEntryIndex != nil {
-			fp.forkTranscriptEntryIndex = *req.Transition.ForkTranscriptEntryIndex
-		}
-
-		s.resolveMu.Lock()
-		s.sweepExpiredResolveEntriesLocked(resolveTransitionDedupeNow())
-		entry, exists := s.resolves[key]
-		if exists {
-			if entry.fingerprint != fp {
-				s.resolveMu.Unlock()
-				return serverapi.SessionResolveTransitionResponse{}, fmt.Errorf("client_request_id %q reused with different payload", req.ClientRequestID)
-			}
-			if entry.done {
-				if entry.cacheable {
-					response, err := entry.response, entry.err
-					s.resolveMu.Unlock()
-					return response, err
-				}
-				delete(s.resolves, key)
-				s.resolveMu.Unlock()
-				continue
-			}
-			ready := entry.ready
-			s.resolveMu.Unlock()
-			select {
-			case <-ready:
-				continue
-			case <-ctx.Done():
-				return serverapi.SessionResolveTransitionResponse{}, ctx.Err()
-			}
-		}
-
-		entry = &resolveTransitionEntry{fingerprint: fp, ready: make(chan struct{})}
-		s.resolves[key] = entry
-		s.resolveMu.Unlock()
-
-		response, err := s.resolveTransitionOnce(ctx, req)
-		cacheable := !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
-
-		s.resolveMu.Lock()
-		entry.response = response
-		entry.err = err
-		entry.done = true
-		entry.cacheable = cacheable
-		entry.completedAt = resolveTransitionDedupeNow()
-		close(entry.ready)
-		if !cacheable {
-			delete(s.resolves, key)
-		}
-		s.resolveMu.Unlock()
-		return response, err
+	memoReq := sessionTransitionMemoRequest{
+		SessionID:  strings.TrimSpace(req.SessionID),
+		Transition: req.Transition,
 	}
+	return s.transitions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTransitionMemoRequest, func(context.Context) (serverapi.SessionResolveTransitionResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionResolveTransitionResponse{}, err
+		}
+		return s.resolveTransitionOnce(ctx, req)
+	})
+}
+
+func sameSessionTransitionMemoRequest(a sessionTransitionMemoRequest, b sessionTransitionMemoRequest) bool {
+	return a.SessionID == b.SessionID &&
+		a.Transition.Action == b.Transition.Action &&
+		a.Transition.InitialPrompt == b.Transition.InitialPrompt &&
+		a.Transition.InitialInput == b.Transition.InitialInput &&
+		a.Transition.TargetSessionID == b.Transition.TargetSessionID &&
+		a.Transition.ForkUserMessageIndex == b.Transition.ForkUserMessageIndex &&
+		forkTranscriptEntryIndexEqual(a.Transition.ForkTranscriptEntryIndex, b.Transition.ForkTranscriptEntryIndex) &&
+		a.Transition.ParentSessionID == b.Transition.ParentSessionID
+}
+
+func sameSessionDraftMemoRequest(a sessionDraftMemoRequest, b sessionDraftMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Input == b.Input
+}
+
+func forkTranscriptEntryIndexEqual(a *int, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {

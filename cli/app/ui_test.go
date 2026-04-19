@@ -4987,7 +4987,7 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	}
 }
 
-func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testing.T) {
+func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.T) {
 	client := &refreshingRuntimeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
@@ -5015,8 +5015,8 @@ func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testi
 		UserMessage:                "steered message",
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
 	})
-	if got := len(m.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected deferred committed user tail before hydration, got %d", got)
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush to stop using deferred committed tail, got %d", got)
 	}
 
 	m.busy = false
@@ -5039,8 +5039,8 @@ func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testi
 		},
 	})
 	updated := next.(*uiModel)
-	if got := len(updated.deferredCommittedTail); got != 1 {
-		t.Fatalf("expected stale hydrate + queued drain path to preserve deferred committed tail, got %d", got)
+	if got := len(updated.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected stale hydrate + queued drain path to keep deferred committed tail empty, got %d", got)
 	}
 	if updated.pendingPreSubmitText != "follow up" {
 		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got pending=%q", updated.pendingPreSubmitText)
@@ -6441,9 +6441,6 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	m := newProjectedEngineUIModel(eng)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(line, "cache --") {
-		t.Fatalf("expected cache placeholder in status line, got %q", line)
-	}
 	if !strings.Contains(line, "0%") {
 		t.Fatalf("expected context usage label in status line, got %q", line)
 	}
@@ -6452,7 +6449,7 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestStatusLineShowsServerOwnershipAfterCacheSectionWhenCLIStartsServer(t *testing.T) {
+func TestStatusLineShowsServerOwnershipBeforeContextUsageWhenCLIStartsServer(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -6465,11 +6462,32 @@ func TestStatusLineShowsServerOwnershipAfterCacheSectionWhenCLIStartsServer(t *t
 	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: true}))
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(line, "cache --", "server owned") {
-		t.Fatalf("expected server ownership marker immediately after cache section, got %q", line)
-	}
 	if !containsInOrder(line, "server owned", "0%") {
 		t.Fatalf("expected server ownership marker to stay left of context usage, got %q", line)
+	}
+}
+
+func TestStatusLineKeepsServerOwnershipAndContextUsageVisibleAtNarrowWidth(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: true}))
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(70, uiThemeStyles("dark")))
+	if !containsInOrder(line, "server owned", "0%") {
+		t.Fatalf("expected narrow status line to keep server ownership left of context usage, got %q", line)
+	}
+	if !strings.Contains(line, "▯") {
+		t.Fatalf("expected narrow status line to keep context progress bar visible, got %q", line)
+	}
+	if strings.Contains(line, "cache") {
+		t.Fatalf("did not expect removed cache section to reappear at narrow width, got %q", line)
 	}
 }
 

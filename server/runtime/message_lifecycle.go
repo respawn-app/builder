@@ -9,6 +9,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 type defaultMessageLifecycle struct {
@@ -60,21 +61,18 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return err
 			}
 		case "history_replaced":
-			var payload historyReplacementPayload
-			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			payload, ignoredLegacy, err := decodePersistedHistoryReplacementPayload(evt.Payload)
+			if err != nil {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
-			e.resetLocalDiagnostics()
-			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				e.chat.restoreHistoryItems(payload.Items)
-				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())
-				reminderIssued = itemsContainCompactionSoonReminder(payload.Items)
-			} else {
-				e.chat.replaceHistory(payload.Items)
-				e.compactionCount++
-				recoveredHandoff.ClearSatisfiedByCompaction()
-				reminderIssued = false
+			if ignoredLegacy {
+				return nil
 			}
+			e.resetLocalDiagnostics()
+			e.chat.replaceHistory(payload.Items)
+			e.compactionCount++
+			recoveredHandoff.ClearSatisfiedByCompaction()
+			reminderIssued = false
 		}
 		return nil
 	}); err != nil {
@@ -275,6 +273,15 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, warning := range metaResult.SkillWarnings {
+		if err := e.appendPersistedLocalEntryRecord(stepID, storedLocalEntry{
+			Visibility: transcript.EntryVisibilityAll,
+			Role:       "warning",
+			Text:       warning,
+		}); err != nil {
+			return err
+		}
 	}
 	for _, message := range metaResult.OrderedInjectionMessages() {
 		if err := e.appendMessage(stepID, message); err != nil {

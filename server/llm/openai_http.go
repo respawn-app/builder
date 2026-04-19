@@ -63,7 +63,7 @@ func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 	}
 	return &HTTPTransport{
 		BaseURL:             defaultOpenAIBaseURL,
-		Client:              &http.Client{Timeout: 120 * time.Second},
+		Client:              NewHTTPClient(120 * time.Second),
 		Auth:                auth,
 		Provider:            ProviderOpenAI,
 		ContextWindowTokens: window,
@@ -73,7 +73,7 @@ func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 
 func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (OpenAIResponse, error) {
 	if t.Client == nil {
-		t.Client = &http.Client{Timeout: 120 * time.Second}
+		t.Client = NewHTTPClient(120 * time.Second)
 	}
 	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
@@ -122,7 +122,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request OpenAIRequest, callbacks StreamCallbacks) (OpenAIResponse, error) {
 	if t.Client == nil {
-		t.Client = &http.Client{Timeout: 120 * time.Second}
+		t.Client = NewHTTPClient(120 * time.Second)
 	}
 	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
@@ -160,7 +160,7 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 
 func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionRequest) (OpenAICompactionResponse, error) {
 	if t.Client == nil {
-		t.Client = &http.Client{Timeout: 120 * time.Second}
+		t.Client = NewHTTPClient(120 * time.Second)
 	}
 	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
@@ -212,7 +212,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 
 func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request OpenAIRequest) (int, error) {
 	if t.Client == nil {
-		t.Client = &http.Client{Timeout: 120 * time.Second}
+		t.Client = NewHTTPClient(120 * time.Second)
 	}
 
 	authHeader, mode, err := t.resolveAuth(ctx)
@@ -270,7 +270,7 @@ func (t *HTTPTransport) SupportsRequestInputTokenCount(ctx context.Context) (boo
 
 func (t *HTTPTransport) ResolveModelContextWindow(ctx context.Context, model string) (int, error) {
 	if t.Client == nil {
-		t.Client = &http.Client{Timeout: 120 * time.Second}
+		t.Client = NewHTTPClient(120 * time.Second)
 	}
 	if t.ContextWindowTokens > 0 {
 		return t.ContextWindowTokens, nil

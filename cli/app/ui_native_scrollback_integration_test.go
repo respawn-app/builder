@@ -115,6 +115,16 @@ type gatedRefreshRuntimeClient struct {
 	refreshOnce    sync.Once
 }
 
+type countingRuntimeClient struct {
+	inner        clientui.RuntimeClient
+	loadCalls    atomic.Int32
+	refreshCalls atomic.Int32
+}
+
+type localCompactionSummaryClient struct {
+	summary string
+}
+
 func (c *staleTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
 	if c.sessionView.SessionID == "" {
 		c.sessionView.SessionID = "session-1"
@@ -162,6 +172,85 @@ func (c *gatedRefreshRuntimeClient) RefreshTranscriptPage(req clientui.Transcrip
 	})
 	<-c.releaseRefresh
 	return c.LoadTranscriptPage(req)
+}
+
+func (c *countingRuntimeClient) MainView() clientui.RuntimeMainView { return c.inner.MainView() }
+func (c *countingRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	return c.inner.RefreshMainView()
+}
+func (c *countingRuntimeClient) Transcript() clientui.TranscriptPage { return c.inner.Transcript() }
+func (c *countingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	return c.inner.RefreshTranscript()
+}
+func (c *countingRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.refreshCalls.Add(1)
+	return c.inner.RefreshTranscriptPage(req)
+}
+func (c *countingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.loadCalls.Add(1)
+	return c.inner.LoadTranscriptPage(req)
+}
+func (c *countingRuntimeClient) Status() clientui.RuntimeStatus { return c.inner.Status() }
+func (c *countingRuntimeClient) SessionView() clientui.RuntimeSessionView {
+	return c.inner.SessionView()
+}
+func (c *countingRuntimeClient) SetSessionName(name string) error {
+	return c.inner.SetSessionName(name)
+}
+func (c *countingRuntimeClient) SetThinkingLevel(level string) error {
+	return c.inner.SetThinkingLevel(level)
+}
+func (c *countingRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
+	return c.inner.SetFastModeEnabled(enabled)
+}
+func (c *countingRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
+	return c.inner.SetReviewerEnabled(enabled)
+}
+func (c *countingRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
+	return c.inner.SetAutoCompactionEnabled(enabled)
+}
+func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
+	return c.inner.AppendLocalEntry(role, text)
+}
+func (c *countingRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
+	return c.inner.ShouldCompactBeforeUserMessage(ctx, text)
+}
+func (c *countingRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
+	return c.inner.SubmitUserMessage(ctx, text)
+}
+func (c *countingRuntimeClient) SubmitUserShellCommand(ctx context.Context, command string) error {
+	return c.inner.SubmitUserShellCommand(ctx, command)
+}
+func (c *countingRuntimeClient) CompactContext(ctx context.Context, args string) error {
+	return c.inner.CompactContext(ctx, args)
+}
+func (c *countingRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
+	return c.inner.CompactContextForPreSubmit(ctx)
+}
+func (c *countingRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }
+func (c *countingRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
+	return c.inner.SubmitQueuedUserMessages(ctx)
+}
+func (c *countingRuntimeClient) Interrupt() error             { return c.inner.Interrupt() }
+func (c *countingRuntimeClient) QueueUserMessage(text string) { c.inner.QueueUserMessage(text) }
+func (c *countingRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
+	return c.inner.DiscardQueuedUserMessagesMatching(text)
+}
+func (c *countingRuntimeClient) RecordPromptHistory(text string) error {
+	return c.inner.RecordPromptHistory(text)
+}
+func (c *countingRuntimeClient) LoadCalls() int    { return int(c.loadCalls.Load()) }
+func (c *countingRuntimeClient) RefreshCalls() int { return int(c.refreshCalls.Load()) }
+
+func (c localCompactionSummaryClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.summary, Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c localCompactionSummaryClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "test-local", SupportsResponsesAPI: false}, nil
 }
 
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
@@ -1241,6 +1330,96 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 	}
 }
 
+func TestNativePreSubmitCompactionNoticeAppendsWithoutContinuityRecovery(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	appendTranscriptMessage(t, store, llm.RoleUser, "before compaction")
+	appendTranscriptMessage(t, store, llm.RoleAssistant, "existing answer")
+
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		localCompactionSummaryClient{summary: "condensed summary"},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model:          "gpt-5",
+			CompactionMode: "local",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	logger := &testUILogger{}
+	client := &countingRuntimeClient{inner: newUIRuntimeClient(eng)}
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(
+		client,
+		projectRuntimeEventChannel(runtimeEvents, nil, nil),
+		closedAskEvents(),
+		WithUILogger(logger),
+		WithUITranscriptDiagnostics(true),
+	)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "startup ongoing transcript visible", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "before compaction") && strings.Contains(normalized, "existing answer")
+	})
+	compactDone := make(chan error, 1)
+	go func() {
+		compactDone <- eng.CompactContextForPreSubmit(context.Background())
+	}()
+	waitForSubmitResult(t, 2*time.Second, compactDone)
+	waitForTestCondition(t, 2*time.Second, "compaction notice visible in ongoing output", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "context compacted for the 1st time")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "before compaction", "existing answer", "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice appended in ongoing scrollback, got %q", normalized)
+	}
+	joined := strings.Join(logger.lines, "\n")
+	for _, forbidden := range []string{
+		"transcript.diag.client.begin_continuity_recovery",
+		"reason=requires_hydration",
+		"transcript.diag.client.apply_page_reject",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("did not expect continuity-recovery diagnostics after compaction, found %q in %q", forbidden, joined)
+		}
+	}
+}
+
 func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 	out := &bytes.Buffer{}
 	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -2097,13 +2276,23 @@ func TestNativeProgramCommittedToolStartReplacesMatchingTransientToolRowWithoutH
 	}
 }
 
-func TestNativeProgramDeferredCommittedUserFlushMergesIntoAssistantFinalWithoutHydration(t *testing.T) {
+func TestNativeProgramUserFlushHydratesCommittedGapWhileAssistantStreamIsLive(t *testing.T) {
 	out := &bytes.Buffer{}
 	runtimeEvents := make(chan clientui.Event, 16)
 	client := &staleTranscriptRuntimeClient{
+		runtimeControlFakeClient: runtimeControlFakeClient{
+			transcript: clientui.TranscriptPage{
+				SessionID:    "session-1",
+				Revision:     1,
+				Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+				TotalEntries: 1,
+			},
+		},
 		page: clientui.TranscriptPage{
-			SessionID: "session-1",
-			Entries:   []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+			SessionID:    "session-1",
+			Revision:     1,
+			Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+			TotalEntries: 1,
 		},
 	}
 	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
@@ -2126,6 +2315,12 @@ func TestNativeProgramDeferredCommittedUserFlushMergesIntoAssistantFinalWithoutH
 	waitForTestCondition(t, 2*time.Second, "assistant delta visible", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "foreground done")
 	})
+	client.page = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}, {Role: "user", Text: "steered message"}},
+		TotalEntries: 2,
+	}
 
 	runtimeEvents <- clientui.Event{
 		Kind:                       clientui.EventUserMessageFlushed,
@@ -2136,14 +2331,24 @@ func TestNativeProgramDeferredCommittedUserFlushMergesIntoAssistantFinalWithoutH
 		UserMessage:                "steered message",
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
 	}
-	waitForTestCondition(t, 2*time.Second, "user flush deferred locally", func() bool {
-		return len(model.deferredCommittedTail) == 1
-	})
-	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); strings.Contains(committed, "steered message") {
-		t.Fatalf("expected deferred committed user flush to stay out of committed ongoing surface until assistant catch-up, got %q", committed)
+	userFlushDeadline := time.Now().Add(2 * time.Second)
+	userFlushVisible := false
+	for time.Now().Before(userFlushDeadline) {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		if containsInOrder(committed, "seed", "steered message") {
+			userFlushVisible = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !userFlushVisible {
+		t.Fatalf("expected user flush visible after hydrate, committed=%q load_calls=%d output=%q", stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()), client.LoadCalls(), normalizedOutput(out.String()))
+	}
+	if got := len(model.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush path to avoid deferred committed tail, got %d", got)
 	}
 	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
-		t.Fatalf("expected deferred committed user flush to avoid transcript hydrate before assistant catch-up, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+		t.Fatalf("expected contiguous user flush append to avoid transcript hydrate, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	runtimeEvents <- clientui.Event{
@@ -2154,17 +2359,17 @@ func TestNativeProgramDeferredCommittedUserFlushMergesIntoAssistantFinalWithoutH
 		CommittedEntryCount:        3,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
-			Text:  "foreground done",
+			Text:  "after follow-up",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
 	}
 
-	waitForTestCondition(t, 2*time.Second, "deferred user flush merged after assistant catch-up", func() bool {
+	waitForTestCondition(t, 2*time.Second, "assistant response appends after hydrated user row", func() bool {
 		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
-		return containsInOrder(committed, "seed", "steered message", "foreground done")
+		return containsInOrder(committed, "seed", "steered message", "after follow-up")
 	})
 	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
-		t.Fatalf("expected assistant catch-up to merge deferred committed user flush without transcript hydrate, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+		t.Fatalf("expected assistant response append to keep avoiding transcript hydrate, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	program.Quit()
@@ -2176,8 +2381,8 @@ func TestNativeProgramDeferredCommittedUserFlushMergesIntoAssistantFinalWithoutH
 	case <-time.After(2 * time.Second):
 		t.Fatal("program did not terminate")
 	}
-	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !containsInOrder(committed, "seed", "steered message", "foreground done") {
-		t.Fatalf("expected merged committed user flush in ongoing committed surface, got %q", committed)
+	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !containsInOrder(committed, "seed", "steered message", "after follow-up") {
+		t.Fatalf("expected hydrated committed user flush to remain visible in ongoing committed surface, got %q", committed)
 	}
 }
 

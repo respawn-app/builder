@@ -1,7 +1,6 @@
 package runtimewire
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -65,7 +64,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		return nil, err
 	}
 
-	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
+	modelHTTPClient := llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second)
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
 		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 		Model:               active.Model,
@@ -81,7 +80,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	}
 
 	newReviewerClient := func() (llm.Client, error) {
-		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
+		reviewerHTTPClient := llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds) * time.Second)
 		return llm.NewProviderClient(llm.ProviderClientOptions{
 			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 			Model:               active.Reviewer.Model,

@@ -802,6 +802,26 @@ func TestRuntimeClientRefreshTranscriptPagePreservesLastKnownPageOnReadError(t *
 	}
 }
 
+func TestRuntimeClientQueueUserMessageNotifiesConnectionObserverOnFailure(t *testing.T) {
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		&countingSessionViewClient{},
+		sharedclient.NewLoopbackRuntimeControlClient(nil),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	var observedErr error
+	concrete.SetConnectionStateObserver(func(err error) { observedErr = err })
+
+	concrete.QueueUserMessage("queued input")
+
+	if observedErr == nil || observedErr.Error() != "runtime control service is required" {
+		t.Fatalf("observed connection state error = %v, want runtime control service is required", observedErr)
+	}
+}
+
 func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *testing.T) {
 	reads := &countingSessionViewClient{}
 	runtimeClient := newUIRuntimeClientWithReads(

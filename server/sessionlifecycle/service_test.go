@@ -18,6 +18,28 @@ import (
 
 func testIntPtr(v int) *int { return &v }
 
+const testControllerLeaseID = "lease-test-controller"
+
+type stubSessionLifecycleLeaseVerifier struct {
+	calls int
+	err   error
+}
+
+type noopSessionLifecycleLeaseVerifier struct{}
+
+func (s *stubSessionLifecycleLeaseVerifier) RequireControllerLease(context.Context, string, string) error {
+	s.calls++
+	return s.err
+}
+
+func (noopSessionLifecycleLeaseVerifier) RequireControllerLease(context.Context, string, string) error {
+	return nil
+}
+
+func newTestSessionLifecycleService(containerDir string, authManager *auth.Manager) *Service {
+	return NewService(containerDir, nil, authManager).WithControllerLeaseVerifier(noopSessionLifecycleLeaseVerifier{})
+}
+
 func createPersistedSession(t *testing.T) (string, string, *session.Store) {
 	t.Helper()
 	persistenceRoot := t.TempDir()
@@ -35,7 +57,7 @@ func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
 		t.Fatalf("set input draft: %v", err)
 	}
 
-	service := NewService(containerDir, nil, nil)
+	service := newTestSessionLifecycleService(containerDir, nil)
 	resp, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		SessionID:       store.Meta().SessionID,
 		TransitionInput: "transition input",
@@ -49,7 +71,7 @@ func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
 }
 
 func TestServiceGetInitialInputAllowsEmptySessionID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := newTestSessionLifecycleService(t.TempDir(), nil)
 	resp, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		TransitionInput: "transition input",
 	})
@@ -62,7 +84,7 @@ func TestServiceGetInitialInputAllowsEmptySessionID(t *testing.T) {
 }
 
 func TestServiceGetInitialInputRejectsPathLikeSessionID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := newTestSessionLifecycleService(t.TempDir(), nil)
 	_, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		SessionID: "../session-1",
 	})
@@ -77,10 +99,12 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 		t.Fatalf("set session name: %v", err)
 	}
 
-	service := NewService(containerDir, nil, nil)
+	service := newTestSessionLifecycleService(containerDir, nil)
 	if _, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: store.Meta().SessionID,
-		Input:     "saved by service",
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "saved by service",
 	}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
@@ -94,11 +118,83 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	}
 }
 
+func TestServicePersistInputDraftRequiresControllerLease(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	if err := store.SetName("session name"); err != nil {
+		t.Fatalf("set session name: %v", err)
+	}
+	verifier := &stubSessionLifecycleLeaseVerifier{}
+	service := NewService(containerDir, nil, nil).
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.SessionPersistInputDraftRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Input:             "saved by service",
+	}
+
+	if _, err := service.PersistInputDraft(context.Background(), req); err != nil {
+		t.Fatalf("PersistInputDraft first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if _, err := service.PersistInputDraft(context.Background(), req); err != nil {
+		t.Fatalf("PersistInputDraft replay: %v", err)
+	}
+	deniedReq := req
+	deniedReq.ClientRequestID = "req-2"
+	deniedReq.Input = "should not persist"
+	if _, err := service.PersistInputDraft(context.Background(), deniedReq); err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("PersistInputDraft second = %v, want ErrInvalidControllerLease", err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen session store: %v", err)
+	}
+	if reopened.Meta().InputDraft != "saved by service" {
+		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
+func TestServicePersistInputDraftRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	if err := store.SetName("session name"); err != nil {
+		t.Fatalf("set session name: %v", err)
+	}
+	service := newTestSessionLifecycleService(containerDir, nil)
+	first := serverapi.SessionPersistInputDraftRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "saved by service",
+	}
+
+	if _, err := service.PersistInputDraft(context.Background(), first); err != nil {
+		t.Fatalf("PersistInputDraft first: %v", err)
+	}
+	second := first
+	second.Input = "different draft"
+	if _, err := service.PersistInputDraft(context.Background(), second); err == nil || err.Error() != "client_request_id \"req-1\" was reused with different parameters" {
+		t.Fatalf("PersistInputDraft mismatch error = %v, want request id payload mismatch", err)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen session store: %v", err)
+	}
+	if reopened.Meta().InputDraft != "saved by service" {
+		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
 func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := newTestSessionLifecycleService(t.TempDir(), nil)
 	_, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: "sessions/workspace-x/session-1",
-		Input:     "draft",
+		ClientRequestID:   "req-1",
+		SessionID:         "sessions/workspace-x/session-1",
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "draft",
 	})
 	if err == nil || !strings.Contains(err.Error(), "single session id") {
 		t.Fatalf("expected path-like session id rejection, got %v", err)
@@ -106,16 +202,31 @@ func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
 }
 
 func TestServiceResolveTransitionRejectsPathLikeSessionID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := newTestSessionLifecycleService(t.TempDir(), nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       "../session-1",
+		ClientRequestID:   "req-1",
+		SessionID:         "../session-1",
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action: "continue",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "single session id") {
 		t.Fatalf("expected path-like session id rejection, got %v", err)
+	}
+}
+
+func TestServicePersistInputDraftFailsClosedWithoutControllerVerifier(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	service := NewService(containerDir, nil, nil)
+	_, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "draft",
+	})
+	if err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("PersistInputDraft error = %v, want ErrInvalidControllerLease", err)
 	}
 }
 
@@ -134,10 +245,11 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 		t.Fatalf("append second assistant message: %v", err)
 	}
 
-	service := NewService(containerDir, nil, nil)
+	service := newTestSessionLifecycleService(containerDir, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:               "fork_rollback",
 			InitialPrompt:        "edited prompt",
@@ -176,10 +288,11 @@ func TestServiceResolveTransitionForkRollbackResolvesTranscriptEntryIndex(t *tes
 		t.Fatalf("append second assistant message: %v", err)
 	}
 
-	service := NewService(containerDir, nil, nil)
+	service := newTestSessionLifecycleService(containerDir, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:                   "fork_rollback",
 			InitialPrompt:            "edited prompt",
@@ -236,10 +349,11 @@ func TestServiceResolveTransitionForkRollbackRejectsNonUserTranscriptEntryIndex(
 		t.Fatalf("append assistant message: %v", err)
 	}
 
-	service := NewService(containerDir, nil, nil)
+	service := newTestSessionLifecycleService(containerDir, nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:                   "fork_rollback",
 			ForkTranscriptEntryIndex: testIntPtr(1),
@@ -307,7 +421,7 @@ func TestServiceGetInitialInputRejectsSessionOutsideContainer(t *testing.T) {
 		t.Fatalf("set foreign input draft: %v", err)
 	}
 
-	service := NewService(containerA, nil, nil)
+	service := newTestSessionLifecycleService(containerA, nil)
 	_, err = service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{SessionID: store.Meta().SessionID})
 	if err == nil {
 		t.Fatal("expected foreign session lookup rejection")
@@ -332,10 +446,12 @@ func TestServicePersistInputDraftRejectsSessionOutsideContainer(t *testing.T) {
 		t.Fatalf("persist foreign session meta: %v", err)
 	}
 
-	service := NewService(containerA, nil, nil)
+	service := newTestSessionLifecycleService(containerA, nil)
 	_, err = service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: store.Meta().SessionID,
-		Input:     "should fail",
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "should fail",
 	})
 	if err == nil {
 		t.Fatal("expected foreign session mutation rejection")
@@ -353,11 +469,12 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
 		},
 	}), nil, time.Now)
-	service := NewService(t.TempDir(), nil, mgr)
+	service := newTestSessionLifecycleService(t.TempDir(), mgr)
 
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       "session-42",
+		ClientRequestID:   "req-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action: "logout",
 		},
@@ -381,7 +498,7 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 }
 
 func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := newTestSessionLifecycleService(t.TempDir(), nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		Transition: serverapi.SessionTransition{Action: "continue"},
 	})
@@ -390,7 +507,7 @@ func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
 	}
 }
 
-func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.T) {
+func TestServiceResolveTransitionRequiresControllerLease(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
 		Scope: auth.ScopeGlobal,
 		Method: auth.Method{
@@ -398,40 +515,72 @@ func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.
 			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
 		},
 	}), nil, time.Now)
-	service := NewService(t.TempDir(), nil, mgr)
+	verifier := &stubSessionLifecycleLeaseVerifier{}
+	service := NewService(t.TempDir(), nil, mgr).
+		WithControllerLeaseVerifier(verifier)
 	req := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "dup-1",
-		SessionID:       "session-42",
-		Transition:      serverapi.SessionTransition{Action: "logout"},
+		ClientRequestID:   "dup-lease",
+		SessionID:         "session-42",
+		ControllerLeaseID: "lease-1",
+		Transition:        serverapi.SessionTransition{Action: "logout"},
 	}
 
-	first, err := service.ResolveTransition(context.Background(), req)
+	firstResp, err := service.ResolveTransition(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ResolveTransition first: %v", err)
 	}
-	second, err := service.ResolveTransition(context.Background(), req)
+	verifier.err = serverapi.ErrInvalidControllerLease
+	secondResp, err := service.ResolveTransition(context.Background(), req)
 	if err != nil {
-		t.Fatalf("ResolveTransition second: %v", err)
+		t.Fatalf("ResolveTransition second replay: %v", err)
 	}
-	if first != second {
-		t.Fatalf("expected duplicate logout response replay, first=%+v second=%+v", first, second)
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if !firstResp.ShouldContinue || !firstResp.RequiresReauth {
+		t.Fatalf("unexpected first logout response: %+v", firstResp)
+	}
+	if secondResp != firstResp {
+		t.Fatalf("expected duplicate transition replay response %+v, got %+v", firstResp, secondResp)
+	}
+
+	newReq := req
+	newReq.ClientRequestID = "dup-lease-2"
+	if _, err := service.ResolveTransition(context.Background(), newReq); err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("ResolveTransition third = %v, want ErrInvalidControllerLease", err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count after new request = %d, want 2", verifier.calls)
 	}
 }
 
-func TestServiceResolveTransitionRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+func TestServiceResolveTransitionReplaysSuccessfulRetryAfterLeaseRotation(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	service := newTestSessionLifecycleService(t.TempDir(), mgr)
 	first := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "dup-1",
-		SessionID:       "session-42",
-		Transition:      serverapi.SessionTransition{Action: "continue"},
+		ClientRequestID:   "req-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: "lease-1",
+		Transition:        serverapi.SessionTransition{Action: "logout"},
 	}
-	second := first
-	second.Transition.Action = "logout"
 
-	if _, err := service.ResolveTransition(context.Background(), first); err != nil {
+	firstResp, err := service.ResolveTransition(context.Background(), first)
+	if err != nil {
 		t.Fatalf("ResolveTransition first: %v", err)
 	}
-	if _, err := service.ResolveTransition(context.Background(), second); err == nil || err.Error() != "client_request_id \"dup-1\" reused with different payload" {
-		t.Fatalf("expected payload reuse rejection, got %v", err)
+	second := first
+	second.ControllerLeaseID = "lease-2"
+	secondResp, err := service.ResolveTransition(context.Background(), second)
+	if err != nil {
+		t.Fatalf("ResolveTransition replay after lease rotation: %v", err)
+	}
+	if secondResp != firstResp {
+		t.Fatalf("expected replay response %+v, got %+v", firstResp, secondResp)
 	}
 }
