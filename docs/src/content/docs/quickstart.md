@@ -56,6 +56,8 @@ Builder reads settings from `~/.builder/config.toml` and will auto-create it thr
 
 ## Skills And Custom Commands
 
+On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout. Runtime discovery still reads Builder directories only.
+
 Builder discovers skills from:
 
 - `<workspace>/.builder/skills`

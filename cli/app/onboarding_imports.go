@@ -17,12 +17,15 @@ type onboardingImportProviderID string
 const (
 	onboardingImportProviderClaudeCode onboardingImportProviderID = "claude_code"
 	onboardingImportProviderCodex      onboardingImportProviderID = "codex"
+	onboardingImportProviderAgents     onboardingImportProviderID = "agents"
 )
 
 type onboardingImportProvider struct {
-	ID        onboardingImportProviderID
-	Label     string
-	HomeEntry string
+	ID                    onboardingImportProviderID
+	Label                 string
+	HomeEntry             string
+	SkillSourceCandidates []string
+	SupportsCommandImport bool
 }
 
 type onboardingImportDiscovery struct {
@@ -63,7 +66,61 @@ type onboardingImportDiscoveryDoneMsg struct {
 }
 
 func supportedOnboardingImportProviders() []onboardingImportProvider {
-	return []onboardingImportProvider{{ID: onboardingImportProviderClaudeCode, Label: "Claude Code", HomeEntry: ".claude"}, {ID: onboardingImportProviderCodex, Label: "Codex", HomeEntry: ".codex"}}
+	return []onboardingImportProvider{
+		{ID: onboardingImportProviderClaudeCode, Label: "Claude Code", HomeEntry: ".claude", SkillSourceCandidates: []string{"skills"}, SupportsCommandImport: true},
+		{ID: onboardingImportProviderCodex, Label: "Codex", HomeEntry: ".codex", SkillSourceCandidates: []string{filepath.Join("skills", "local"), "skills"}, SupportsCommandImport: true},
+		{ID: onboardingImportProviderAgents, Label: "Agents", HomeEntry: ".agents", SkillSourceCandidates: []string{"skills"}, SupportsCommandImport: true},
+	}
+}
+
+func supportedOnboardingSkillImportProviders() []onboardingImportProvider {
+	providers := supportedOnboardingImportProviders()
+	filtered := make([]onboardingImportProvider, 0, len(providers))
+	for _, provider := range providers {
+		if len(provider.SkillSourceCandidates) == 0 {
+			continue
+		}
+		filtered = append(filtered, provider)
+	}
+	return filtered
+}
+
+func supportedOnboardingCommandImportProviders() []onboardingImportProvider {
+	providers := supportedOnboardingImportProviders()
+	filtered := make([]onboardingImportProvider, 0, len(providers))
+	for _, provider := range providers {
+		if !provider.SupportsCommandImport {
+			continue
+		}
+		filtered = append(filtered, provider)
+	}
+	return filtered
+}
+
+func onboardingImportProviderByID(providerID onboardingImportProviderID) (onboardingImportProvider, bool) {
+	for _, provider := range supportedOnboardingImportProviders() {
+		if provider.ID == providerID {
+			return provider, true
+		}
+	}
+	return onboardingImportProvider{}, false
+}
+
+func onboardingImportProviderOrder(providerID onboardingImportProviderID) int {
+	for index, provider := range supportedOnboardingImportProviders() {
+		if provider.ID == providerID {
+			return index
+		}
+	}
+	return len(supportedOnboardingImportProviders())
+}
+
+func onboardingImportProviderLabels(providers []onboardingImportProvider) string {
+	labels := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		labels = append(labels, provider.Label)
+	}
+	return strings.Join(labels, ", ")
 }
 
 func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
@@ -89,7 +146,7 @@ func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
 		discovery.err = fmt.Errorf("resolve home dir: %w", err)
 		return discovery
 	}
-	for _, provider := range supportedOnboardingImportProviders() {
+	for _, provider := range supportedOnboardingSkillImportProviders() {
 		base := filepath.Join(home, provider.HomeEntry)
 		if !discovery.skipSkills {
 			skillRoot, symlinkSkills, symlinkSkillsErr := discoverProviderSkillSymlinkItems(provider, base)
@@ -102,6 +159,9 @@ func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
 				discovery.skillSymlinkItems[provider.ID] = symlinkSkills
 			}
 		}
+	}
+	for _, provider := range supportedOnboardingCommandImportProviders() {
+		base := filepath.Join(home, provider.HomeEntry)
 		if !discovery.skipCommands {
 			commandRoot, symlinkItems, symlinkErr := discoverProviderCommandSymlinkItems(provider, base)
 			if symlinkErr != nil {
@@ -243,10 +303,8 @@ func hasImportProviderItems[T any](byProvider map[onboardingImportProviderID][]T
 }
 
 func providerLabel(provider onboardingImportProviderID) string {
-	for _, supported := range supportedOnboardingImportProviders() {
-		if supported.ID == provider {
-			return supported.Label
-		}
+	if supported, ok := onboardingImportProviderByID(provider); ok {
+		return supported.Label
 	}
 	return string(provider)
 }
@@ -305,7 +363,7 @@ func importSkillsBody(discovery onboardingImportDiscovery) string {
 
 func buildCommandImportScreen(state *onboardingFlowState) onboardingScreen {
 	if state.imports.pending {
-		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenLoading, Title: "Import slash commands?", LoadingText: "Scanning Claude Code and Codex slash commands..."}
+		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenLoading, Title: "Import slash commands?", LoadingText: "Scanning " + onboardingImportProviderLabels(supportedOnboardingCommandImportProviders()) + " slash commands..."}
 	}
 	if state.imports.err != nil {
 		return onboardingScreen{ID: "commands_import", Kind: onboardingScreenChoice, Title: "Import slash commands?", Body: "Builder could not inspect importable slash commands on this machine.", ErrorText: state.imports.err.Error(), Options: []onboardingOption{{ID: "none", Title: "Do not import"}}, DefaultOptionID: "none"}
@@ -353,7 +411,7 @@ func providerWithMostItems[T any](byProvider map[onboardingImportProviderID][]T)
 		if count == 0 {
 			continue
 		}
-		if !found || count > bestCount || (count == bestCount && provider < bestProvider) {
+		if !found || count > bestCount || (count == bestCount && onboardingImportProviderOrder(provider) < onboardingImportProviderOrder(bestProvider)) || (count == bestCount && onboardingImportProviderOrder(provider) == onboardingImportProviderOrder(bestProvider) && provider < bestProvider) {
 			bestProvider = provider
 			bestCount = count
 			found = true
@@ -629,29 +687,21 @@ func providerSkillSymlinkSource(providerID onboardingImportProviderID) (string, 
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	for _, provider := range supportedOnboardingImportProviders() {
-		if provider.ID != providerID {
-			continue
-		}
-		return providerSkillSymlinkSourceAtBase(provider, filepath.Join(home, provider.HomeEntry))
+	provider, ok := onboardingImportProviderByID(providerID)
+	if !ok {
+		return "", fmt.Errorf("unknown skills import provider %q", providerID)
 	}
-	return "", fmt.Errorf("unknown skills import provider %q", providerID)
+	return providerSkillSymlinkSourceAtBase(provider, filepath.Join(home, provider.HomeEntry))
 }
 
 func providerSkillSymlinkSourceAtBase(provider onboardingImportProvider, base string) (string, error) {
-	if provider.ID == onboardingImportProviderCodex {
-		preferredLocal := filepath.Join(base, "skills", "local")
-		if ok, err := pathExists(preferredLocal); err == nil && ok {
-			return preferredLocal, nil
+	for _, candidate := range provider.SkillSourceCandidates {
+		preferred := filepath.Join(base, candidate)
+		if ok, err := pathExists(preferred); err == nil && ok {
+			return preferred, nil
 		} else if err != nil {
 			return "", err
 		}
-	}
-	preferred := filepath.Join(base, "skills")
-	if ok, err := pathExists(preferred); err == nil && ok {
-		return preferred, nil
-	} else if err != nil {
-		return "", err
 	}
 	return "", fmt.Errorf("%w: no skills directory found for %s", os.ErrNotExist, provider.Label)
 }
@@ -661,21 +711,19 @@ func providerCommandSymlinkSource(providerID onboardingImportProviderID) (string
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	for _, provider := range supportedOnboardingImportProviders() {
-		if provider.ID != providerID {
-			continue
-		}
-		base := filepath.Join(home, provider.HomeEntry)
-		root, items, candidateErr := providerCommandSymlinkSourceAtBase(provider, base)
-		if candidateErr != nil {
-			return "", candidateErr
-		}
-		if strings.TrimSpace(root) != "" && len(items) > 0 {
-			return root, nil
-		}
-		return "", fmt.Errorf("no slash command directory found for %s", provider.Label)
+	provider, ok := onboardingImportProviderByID(providerID)
+	if !ok || !provider.SupportsCommandImport {
+		return "", fmt.Errorf("unknown slash command import provider %q", providerID)
 	}
-	return "", fmt.Errorf("unknown slash command import provider %q", providerID)
+	base := filepath.Join(home, provider.HomeEntry)
+	root, items, candidateErr := providerCommandSymlinkSourceAtBase(provider, base)
+	if candidateErr != nil {
+		return "", candidateErr
+	}
+	if strings.TrimSpace(root) != "" && len(items) > 0 {
+		return root, nil
+	}
+	return "", fmt.Errorf("no slash command directory found for %s", provider.Label)
 }
 
 func shouldSkipOnboardingImport(path string) (bool, error) {
