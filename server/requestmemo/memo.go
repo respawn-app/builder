@@ -1,0 +1,113 @@
+package requestmemo
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+)
+
+const (
+	defaultTTL        = 15 * time.Minute
+	defaultMaxEntries = 1024
+)
+
+type Memo[Req any, Resp any] struct {
+	mu         sync.Mutex
+	entries    map[string]*entry[Req, Resp]
+	ttl        time.Duration
+	maxEntries int
+	now        func() time.Time
+}
+
+type entry[Req any, Resp any] struct {
+	req         Req
+	resp        Resp
+	err         error
+	done        chan struct{}
+	completedAt time.Time
+	createdAt   time.Time
+}
+
+func New[Req any, Resp any]() *Memo[Req, Resp] {
+	return &Memo[Req, Resp]{
+		entries:    make(map[string]*entry[Req, Resp]),
+		ttl:        defaultTTL,
+		maxEntries: defaultMaxEntries,
+		now:        time.Now,
+	}
+}
+
+func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, same func(Req, Req) bool, run func(context.Context) (Resp, error)) (Resp, error) {
+	var zero Resp
+	if m == nil {
+		return run(ctx)
+	}
+	m.mu.Lock()
+	m.pruneLocked()
+	if existing := m.entries[requestID]; existing != nil {
+		if same != nil && !same(existing.req, req) {
+			m.mu.Unlock()
+			return zero, fmt.Errorf("client_request_id %q was reused with different parameters", requestID)
+		}
+		done := existing.done
+		m.mu.Unlock()
+		select {
+		case <-done:
+			return existing.resp, existing.err
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		}
+	}
+	now := m.now()
+	e := &entry[Req, Resp]{req: req, done: make(chan struct{}), createdAt: now}
+	m.entries[requestID] = e
+	m.mu.Unlock()
+
+	resp, err := run(ctx)
+
+	m.mu.Lock()
+	e.resp = resp
+	e.err = err
+	e.completedAt = m.now()
+	close(e.done)
+	m.mu.Unlock()
+	return resp, err
+}
+
+func (m *Memo[Req, Resp]) pruneLocked() {
+	if m == nil || len(m.entries) < m.maxEntries {
+		return
+	}
+	now := m.now()
+	oldestKey := ""
+	var oldestTime time.Time
+	for key, item := range m.entries {
+		if item == nil {
+			delete(m.entries, key)
+			continue
+		}
+		if !item.completedAt.IsZero() && now.Sub(item.completedAt) >= m.ttl {
+			delete(m.entries, key)
+			continue
+		}
+		if oldestKey == "" || item.createdAt.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = item.createdAt
+		}
+	}
+	for len(m.entries) >= m.maxEntries && oldestKey != "" {
+		delete(m.entries, oldestKey)
+		oldestKey = ""
+		for key, item := range m.entries {
+			if item == nil {
+				delete(m.entries, key)
+				continue
+			}
+			if oldestKey == "" || item.createdAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = item.createdAt
+			}
+		}
+	}
+}

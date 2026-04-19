@@ -52,3 +52,33 @@ func TestServicePlanSessionRegistersStoreAndReturnsPlan(t *testing.T) {
 		t.Fatalf("parent session id = %q, want parent-1", store.Meta().ParentSessionID)
 	}
 }
+
+func TestServicePlanSessionDedupesForceNewSessionRequestID(t *testing.T) {
+	persistenceRoot := t.TempDir()
+	containerDir := t.TempDir()
+	stores := registry.NewSessionStoreRegistry()
+	service := NewService(launch.Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: persistenceRoot,
+			Settings:        config.Settings{Model: "gpt-5"},
+		},
+		ContainerDir: containerDir,
+	}, stores)
+	req := serverapi.SessionPlanRequest{
+		ClientRequestID: "req-1",
+		Mode:            serverapi.SessionLaunchModeInteractive,
+		ForceNewSession: true,
+	}
+	first, err := service.PlanSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanSession first: %v", err)
+	}
+	second, err := service.PlanSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanSession second: %v", err)
+	}
+	if first.Plan.SessionID != second.Plan.SessionID {
+		t.Fatalf("session ids = %q and %q, want stable replay", first.Plan.SessionID, second.Plan.SessionID)
+	}
+}

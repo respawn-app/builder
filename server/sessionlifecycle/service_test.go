@@ -498,16 +498,25 @@ func TestServiceResolveTransitionRequiresControllerLease(t *testing.T) {
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
 	secondResp, err := service.ResolveTransition(context.Background(), req)
-	if err != serverapi.ErrInvalidControllerLease {
-		t.Fatalf("ResolveTransition second = %v, want ErrInvalidControllerLease", err)
+	if err != nil {
+		t.Fatalf("ResolveTransition second replay: %v", err)
 	}
-	if verifier.calls != 2 {
-		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
 	}
 	if !firstResp.ShouldContinue || !firstResp.RequiresReauth {
 		t.Fatalf("unexpected first logout response: %+v", firstResp)
 	}
-	if secondResp != (serverapi.SessionResolveTransitionResponse{}) {
-		t.Fatalf("unexpected second response on lease failure: %+v", secondResp)
+	if secondResp != firstResp {
+		t.Fatalf("expected duplicate transition replay response %+v, got %+v", firstResp, secondResp)
+	}
+
+	newReq := req
+	newReq.ClientRequestID = "dup-lease-2"
+	if _, err := service.ResolveTransition(context.Background(), newReq); err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("ResolveTransition third = %v, want ErrInvalidControllerLease", err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count after new request = %d, want 2", verifier.calls)
 	}
 }
