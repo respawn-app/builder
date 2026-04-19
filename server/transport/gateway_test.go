@@ -233,7 +233,7 @@ func TestGatewayPreAuthMethodPolicy(t *testing.T) {
 		{name: "bootstrap status", method: protocol.MethodAuthGetBootstrapStatus, requiresAuth: false},
 		{name: "bootstrap complete", method: protocol.MethodAuthCompleteBootstrap, requiresAuth: false},
 		{name: "project list", method: protocol.MethodProjectList, requiresAuth: false},
-		{name: "project attach workspace", method: protocol.MethodProjectAttachWorkspace, requiresAuth: false},
+		{name: "project attach workspace", method: protocol.MethodProjectAttachWorkspace, requiresAuth: true},
 		{name: "attach project", method: protocol.MethodAttachProject, requiresAuth: false},
 		{name: "attach session", method: protocol.MethodAttachSession, requiresAuth: false},
 		{name: "session transcript page", method: protocol.MethodSessionGetTranscriptPage, requiresAuth: false},
@@ -362,6 +362,62 @@ func TestGatewayAuthBootstrapAPIKeyCompletionEnablesAuthRequiredMethods(t *testi
 	}
 	if state.Method.APIKey == nil || state.Method.APIKey.Key != "server-key" {
 		t.Fatalf("unexpected stored auth method: %+v", state.Method)
+	}
+
+	if err := websocket.JSON.Send(conn, protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: "complete-2", Method: protocol.MethodAuthCompleteBootstrap, Params: mustJSON(t, serverapi.AuthCompleteBootstrapRequest{Mode: serverapi.AuthBootstrapModeAPIKey, APIKey: "server-key-2"})}); err != nil {
+		t.Fatalf("send second auth.completeBootstrap: %v", err)
+	}
+	var secondCompleteResp protocol.Response
+	if err := websocket.JSON.Receive(conn, &secondCompleteResp); err != nil {
+		t.Fatalf("receive second auth.completeBootstrap: %v", err)
+	}
+	if secondCompleteResp.Error == nil || secondCompleteResp.Error.Code != protocol.ErrCodeAuthRequired {
+		t.Fatalf("second auth.completeBootstrap error = %+v, want auth required", secondCompleteResp.Error)
+	}
+}
+
+func TestGatewayRejectsProjectWorkspaceMutationBeforeServerAuthReady(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerGatewayWorkspace(t, workspace)
+
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	authSupport := newGatewayTestAuthSupport(t, false)
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupport.Background.Close() })
+	appCore, err := core.New(resolved.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer server.Close()
+
+	conn := dialGateway(t, server)
+	defer func() { _ = conn.Close() }()
+	handshakeGateway(t, conn)
+	callGateway(t, conn, "attach-project", protocol.MethodAttachProject, protocol.AttachProjectRequest{ProjectID: appCore.ProjectID()}, nil)
+
+	if err := websocket.JSON.Send(conn, protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: "attach-workspace", Method: protocol.MethodProjectAttachWorkspace, Params: mustJSON(t, serverapi.ProjectAttachWorkspaceRequest{ProjectID: appCore.ProjectID(), WorkspaceRoot: "/tmp/workspace"})}); err != nil {
+		t.Fatalf("send project.attachWorkspace: %v", err)
+	}
+	var resp protocol.Response
+	if err := websocket.JSON.Receive(conn, &resp); err != nil {
+		t.Fatalf("receive project.attachWorkspace: %v", err)
+	}
+	if resp.Error == nil || resp.Error.Code != protocol.ErrCodeAuthRequired {
+		t.Fatalf("project.attachWorkspace error = %+v, want auth required", resp.Error)
 	}
 }
 

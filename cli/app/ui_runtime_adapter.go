@@ -664,9 +664,16 @@ func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.Tran
 	}
 	currentStart := m.transcriptBaseOffset
 	currentEnd := currentStart + len(m.transcriptEntries)
-	for idx, entry := range entries {
-		if strings.TrimSpace(entry.Role) != "assistant" || strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
+	for idx := len(entries) - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
+		}
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
+			return false
 		}
 		absolute := page.Offset + idx
 		if absolute < currentStart || absolute >= currentEnd {
@@ -675,6 +682,7 @@ func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.Tran
 		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[absolute-currentStart], entry) {
 			return true
 		}
+		return false
 	}
 	return false
 }

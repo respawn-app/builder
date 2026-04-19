@@ -134,10 +134,13 @@ func CollectOpenAIDeviceAuthorizationGrant(ctx context.Context, opts OpenAIOAuth
 }
 
 func CompleteOpenAIDeviceAuthorizationGrant(ctx context.Context, opts OpenAIOAuthOptions, authorizationCode string, codeVerifier string) (Method, error) {
-	if strings.TrimSpace(authorizationCode) == "" {
+	opts = normalizeOpenAIOAuthOptions(opts)
+	authorizationCode = strings.TrimSpace(authorizationCode)
+	codeVerifier = strings.TrimSpace(codeVerifier)
+	if authorizationCode == "" {
 		return Method{}, errors.New("device authorization code is required")
 	}
-	if strings.TrimSpace(codeVerifier) == "" {
+	if codeVerifier == "" {
 		return Method{}, errors.New("device code verifier is required")
 	}
 	return exchangeOpenAIAuthorizationCode(ctx, opts, authorizationCode, codeVerifier, issuerRedirectURI(opts))

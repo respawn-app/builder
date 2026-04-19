@@ -15,7 +15,7 @@ ARG SANDBOX_SNAPSHOT_REF=local
 ARG SANDBOX_UV_VERSION=0.11.7
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HOME=/root
+ENV HOME=/home/builder
 ENV SHELL=/bin/bash
 ENV GOPATH=/go
 ENV SANDBOX_SEED_ROOT=/opt/builder-sandbox-seed
@@ -57,7 +57,8 @@ RUN apt-get update \
 		zip \
 		zsh \
 	&& python3 -m pip install --break-system-packages --no-cache-dir "uv==${SANDBOX_UV_VERSION}" \
-	&& mkdir -p /go/bin /go/pkg /opt/builder-sandbox-seed \
+	&& useradd --create-home --shell /bin/bash builder \
+	&& mkdir -p /go/bin /go/pkg /opt/builder-sandbox-seed /workspace \
 	&& ln -sf /usr/bin/fdfind /usr/local/bin/fd \
 	&& ln -sf /usr/bin/pip3 /usr/local/bin/pip \
 	&& ln -sf /usr/bin/python3 /usr/local/bin/python \
@@ -76,6 +77,9 @@ RUN chmod +x /usr/local/bin/builder /usr/local/bin/builder-sandbox-entrypoint \
 	&& git -C /opt/builder-sandbox-seed config user.name "Builder Sandbox" \
 	&& git -C /opt/builder-sandbox-seed config user.email "builder-sandbox@local" \
 	&& git -C /opt/builder-sandbox-seed add -A \
-	&& git -C /opt/builder-sandbox-seed commit -qm "chore: sandbox seed ${SANDBOX_SNAPSHOT_REF}"
+	&& git -C /opt/builder-sandbox-seed commit -qm "chore: sandbox seed ${SANDBOX_SNAPSHOT_REF}" \
+	&& chown -R builder:builder /go /home/builder /opt/builder-sandbox-seed /workspace
+
+USER builder
 
 ENTRYPOINT ["tini", "--", "/usr/local/bin/builder-sandbox-entrypoint"]

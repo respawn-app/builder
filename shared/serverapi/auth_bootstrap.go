@@ -69,6 +69,9 @@ func (r AuthCompleteBootstrapRequest) Validate() error {
 		if strings.TrimSpace(r.RedirectURI) == "" {
 			return errors.New("redirect_uri is required")
 		}
+		if strings.TrimSpace(r.OAuthState) == "" {
+			return errors.New("oauth_state is required")
+		}
 		if strings.TrimSpace(r.OAuthCodeVerifier) == "" {
 			return errors.New("oauth_code_verifier is required")
 		}

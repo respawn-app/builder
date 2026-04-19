@@ -636,6 +636,30 @@ func TestSelectSingleRemoteWorkspaceForHeadlessChoosesOnlyWorkspace(t *testing.T
 	}
 }
 
+func TestSelectSingleRemoteWorkspaceForHeadlessIgnoresUnavailableWorkspaces(t *testing.T) {
+	client := client.NewLoopbackProjectViewClient(headlessProjectViewStubService{
+		listProjectsResp: serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}},
+		overviews: map[string]serverapi.ProjectGetOverviewResponse{
+			"project-1": {Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{
+				{WorkspaceID: "workspace-missing", Availability: clientui.ProjectAvailabilityMissing},
+				{WorkspaceID: "workspace-1", Availability: clientui.ProjectAvailabilityAvailable},
+				{WorkspaceID: "workspace-inaccessible", Availability: clientui.ProjectAvailabilityInaccessible},
+			}}},
+		},
+	})
+
+	selection, found, err := selectSingleRemoteWorkspaceForHeadless(context.Background(), client)
+	if err != nil {
+		t.Fatalf("selectSingleRemoteWorkspaceForHeadless: %v", err)
+	}
+	if !found {
+		t.Fatal("expected single available workspace selection")
+	}
+	if selection.ProjectID != "project-1" || selection.WorkspaceID != "workspace-1" {
+		t.Fatalf("unexpected selection: %+v", selection)
+	}
+}
+
 func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDiscovery(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

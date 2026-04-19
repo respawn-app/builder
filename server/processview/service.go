@@ -60,12 +60,15 @@ func (s *Service) GetProcess(_ context.Context, req serverapi.ProcessGetRequest)
 	return serverapi.ProcessGetResponse{Process: &process}, nil
 }
 
-func (s *Service) KillProcess(_ context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+func (s *Service) KillProcess(ctx context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProcessKillResponse{}, err
 	}
 	if s == nil || s.processes == nil {
 		return serverapi.ProcessKillResponse{}, fmt.Errorf("process source is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return serverapi.ProcessKillResponse{}, err
 	}
 	return serverapi.ProcessKillResponse{}, s.processes.Kill(strings.TrimSpace(req.ProcessID))
 }

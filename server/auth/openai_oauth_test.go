@@ -165,6 +165,39 @@ func TestRequestOpenAIDeviceCodeUnsupported(t *testing.T) {
 	}
 }
 
+func TestCompleteOpenAIDeviceAuthorizationGrantNormalizesIssuerBeforeRedirectURI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if got := r.Form.Get("redirect_uri"); got != DefaultOpenAIIssuer+"/deviceauth/callback" {
+			t.Fatalf("redirect_uri = %q, want %q", got, DefaultOpenAIIssuer+"/deviceauth/callback")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "access-1",
+			"refresh_token": "refresh-1",
+			"token_type":    "Bearer",
+			"expires_in":    1800,
+		})
+	}))
+	defer server.Close()
+
+	method, err := CompleteOpenAIDeviceAuthorizationGrant(context.Background(), OpenAIOAuthOptions{
+		ClientID:   "client-1",
+		HTTPClient: rewriteOAuthIssuerClient(server),
+	}, "auth-code-1", "verifier-1")
+	if err != nil {
+		t.Fatalf("CompleteOpenAIDeviceAuthorizationGrant: %v", err)
+	}
+	if method.Type != MethodOAuth || method.OAuth == nil {
+		t.Fatalf("unexpected method returned: %+v", method)
+	}
+}
+
 func TestRefreshOpenAIAuthToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/token" {
