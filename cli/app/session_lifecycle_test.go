@@ -7,15 +7,79 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 	"context"
+	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *testing.T) {
+	missingWorkspace := filepath.Join(t.TempDir(), "workspace-removed")
+	containerDir := t.TempDir()
+	newWorkspace := t.TempDir()
+	t.Chdir(newWorkspace)
+	server := &testEmbeddedServer{
+		cfg: config.App{
+			WorkspaceRoot:   missingWorkspace,
+			PersistenceRoot: t.TempDir(),
+			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+		},
+		containerDir: containerDir,
+		projectID:    "project-1",
+		projectViewClient: client.NewLoopbackProjectViewClient(projectBindingFlowStubProjectViewService{
+			resolveResp: serverapi.ProjectResolvePathResponse{
+				CanonicalRoot: missingWorkspace,
+				Binding: &serverapi.ProjectBinding{
+					ProjectID:       "project-1",
+					WorkspaceID:     "workspace-1",
+					CanonicalRoot:   missingWorkspace,
+					WorkspaceStatus: string(clientui.ProjectAvailabilityAvailable),
+				},
+			},
+		}),
+		prepareRuntime: func(_ context.Context, plan sessionLaunchPlan, _ io.Writer, _ string) (*runtimeLaunchPlan, error) {
+			_, _, _, err := buildToolRegistry(
+				plan.WorkspaceRoot,
+				plan.SessionID,
+				[]toolspec.ID{toolspec.ToolPatch},
+				5*time.Second,
+				15*time.Second,
+				16_000,
+				false,
+				true,
+				nil,
+				nil,
+			)
+			return nil, err
+		},
+	}
+
+	err := runSessionLifecycle(context.Background(), server, nil, "")
+	if err == nil {
+		t.Fatal("expected startup error for missing workspace")
+	}
+	summaries, listErr := session.ListSessions(containerDir)
+	if listErr != nil {
+		t.Fatalf("ListSessions: %v", listErr)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("session count = %d, want 1", len(summaries))
+	}
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`builder rebind " + strconv.Quote(summaries[0].SessionID) + " " + strconv.Quote(newWorkspace) + "`"
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
 
 func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 	resolved, err := resolveSessionAction(

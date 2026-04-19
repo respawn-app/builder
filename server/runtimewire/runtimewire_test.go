@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -105,6 +106,49 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	}
 	if !strings.Contains(logger.String(), "reason=allow_once") {
 		t.Fatalf("expected allow_once reason in audit line, got %q", logger.String())
+	}
+}
+
+func TestBuildToolRegistryMissingWorkspaceRootSuggestsRebind(t *testing.T) {
+	tests := []struct {
+		name string
+		tool toolspec.ID
+	}{
+		{name: "patch", tool: toolspec.ToolPatch},
+		{name: "view_image", tool: toolspec.ToolViewImage},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			missingWorkspace := filepath.Join(t.TempDir(), "workspace-removed")
+			newWorkspace := t.TempDir()
+			t.Chdir(newWorkspace)
+			sessionID := "session-1"
+
+			_, _, _, err := BuildToolRegistry(
+				missingWorkspace,
+				sessionID,
+				[]toolspec.ID{tt.tool},
+				5*time.Second,
+				15*time.Second,
+				16_000,
+				false,
+				true,
+				nil,
+				nil,
+				nil,
+			)
+			if err == nil {
+				t.Fatal("expected build tool registry error for missing workspace root")
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("expected os.ErrNotExist, got %v", err)
+			}
+			want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing; run ` + "`builder rebind " + strconv.Quote(sessionID) + " " + strconv.Quote(newWorkspace) + "`"
+			if got := err.Error(); got != want {
+				t.Fatalf("error = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

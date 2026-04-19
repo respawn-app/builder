@@ -16,6 +16,7 @@ import (
 	"builder/server/authflow"
 	"builder/server/metadata"
 	"builder/server/serve"
+	"builder/server/session"
 	serverstartup "builder/server/startup"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -413,45 +414,65 @@ func TestAttachSubcommandRejectsUnknownExplicitProjectIDCleanly(t *testing.T) {
 	}
 }
 
-func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
+func TestRebindSubcommandRetargetsSessionWorkspace(t *testing.T) {
 	home := t.TempDir()
 	oldWorkspace := t.TempDir()
-	newParent := t.TempDir()
-	newWorkspace := filepath.Join(newParent, "workspace-moved")
+	newWorkspace := t.TempDir()
 	t.Setenv("HOME", home)
-	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load oldWorkspace: %v", err)
 	}
-	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("RegisterBinding oldWorkspace: %v", err)
 	}
-	if err := os.Rename(oldWorkspace, newWorkspace); err != nil {
-		t.Fatalf("Rename workspace: %v", err)
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
 	}
-	cleanup := startBindingCommandServer(t, newWorkspace)
-	defer cleanup()
+	if err := sess.SetName("incident triage"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	if err := sess.SetName("incident triage"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if code := rebindSubcommand([]string{oldWorkspace, newWorkspace}, &stdout, &stderr); code != 0 {
+	if code := rebindSubcommand([]string{sess.Meta().SessionID, newWorkspace}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0 stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); got != binding.WorkspaceID+"\n" {
-		t.Fatalf("stdout = %q, want %q", got, binding.WorkspaceID+"\n")
-	}
-	newProjectID, err := projectIDForPath(context.Background(), newWorkspace)
+	resolvedBinding, err := store.EnsureWorkspaceBinding(context.Background(), newWorkspace)
 	if err != nil {
-		t.Fatalf("projectIDForPath newWorkspace: %v", err)
+		t.Fatalf("EnsureWorkspaceBinding newWorkspace: %v", err)
 	}
-	if newProjectID != binding.ProjectID {
-		t.Fatalf("new project id = %q, want %q", newProjectID, binding.ProjectID)
+	if got := stdout.String(); got != resolvedBinding.WorkspaceID+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, resolvedBinding.WorkspaceID+"\n")
 	}
-	if _, err := projectIDForPath(context.Background(), oldWorkspace); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
-		t.Fatalf("projectIDForPath oldWorkspace error = %v, want ErrWorkspaceNotRegistered", err)
+	if resolvedBinding.ProjectID != binding.ProjectID {
+		t.Fatalf("new workspace project id = %q, want %q", resolvedBinding.ProjectID, binding.ProjectID)
+	}
+	target, err := store.ResolveSessionExecutionTarget(context.Background(), sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorkspaceID != resolvedBinding.WorkspaceID {
+		t.Fatalf("target workspace id = %q, want %q", target.WorkspaceID, resolvedBinding.WorkspaceID)
+	}
+	if target.WorkspaceRoot != resolvedBinding.CanonicalRoot {
+		t.Fatalf("target workspace root = %q, want %q", target.WorkspaceRoot, resolvedBinding.CanonicalRoot)
 	}
 }
 
@@ -459,28 +480,43 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	home := t.TempDir()
 	oldWorkspace := t.TempDir()
 	otherWorkspace := t.TempDir()
+	targetWorkspace := t.TempDir()
 	missingWorkspace := filepath.Join(t.TempDir(), "missing")
 	t.Setenv("HOME", home)
-	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load oldWorkspace: %v", err)
 	}
-	_, err = metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("RegisterBinding oldWorkspace: %v", err)
+	}
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.SetName("incident triage"); err != nil {
+		t.Fatalf("SetName: %v", err)
 	}
 	otherCfg, err := config.Load(otherWorkspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load otherWorkspace: %v", err)
 	}
-	_, err = metadata.RegisterBinding(context.Background(), otherCfg.PersistenceRoot, otherCfg.WorkspaceRoot)
+	_, err = store.RegisterWorkspaceBinding(context.Background(), otherCfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("RegisterBinding otherWorkspace: %v", err)
 	}
-	cleanup := startBindingCommandServer(t, oldWorkspace)
-	defer cleanup()
 
 	assertRebindError := func(args []string, want string) {
 		t.Helper()
@@ -497,16 +533,16 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 		}
 	}
 
-	assertRebindError([]string{filepath.Join(t.TempDir(), "unknown-old"), otherWorkspace}, "workspace is not registered")
-	assertRebindError([]string{oldWorkspace, missingWorkspace}, "does not exist")
-	assertRebindError([]string{oldWorkspace, otherWorkspace}, "already bound")
+	assertRebindError([]string{"session-missing", targetWorkspace}, session.ErrSessionNotFound.Error())
+	assertRebindError([]string{sess.Meta().SessionID, missingWorkspace}, "does not exist")
+	assertRebindError([]string{sess.Meta().SessionID, otherWorkspace}, "already bound")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if code := rebindSubcommand([]string{oldWorkspace}, &stdout, &stderr); code != 2 {
+	if code := rebindSubcommand([]string{sess.Meta().SessionID}, &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2 stderr=%q", code, stderr.String())
 	}
-	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <old-path> and <new-path>")) {
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <session-id> and <new-path>")) {
 		t.Fatalf("stderr = %q, want usage guidance", got)
 	}
 }

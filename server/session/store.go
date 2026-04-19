@@ -290,6 +290,19 @@ func (s *Store) SetParentSessionID(parentSessionID string) error {
 	})
 }
 
+func (s *Store) SetWorkspaceRoot(workspaceRoot string) error {
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot == "" {
+		return errors.New("workspace root is required")
+	}
+	return s.mutateAndPersist(func() error {
+		s.meta.WorkspaceRoot = trimmedWorkspaceRoot
+		s.meta.WorkspaceContainer = filepath.Base(filepath.Clean(trimmedWorkspaceRoot))
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
+}
+
 func (s *Store) SetInputDraft(inputDraft string) error {
 	s.mu.Lock()
 

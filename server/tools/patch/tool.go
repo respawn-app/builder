@@ -36,11 +36,11 @@ func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return nil, fmt.Errorf("resolve workspace real path: %w", err)
+		return nil, tools.WrapMissingWorkspaceRootError(abs, fmt.Errorf("resolve workspace real path: %w", err))
 	}
 	rootInfo, err := os.Stat(real)
 	if err != nil {
-		return nil, fmt.Errorf("stat workspace root: %w", err)
+		return nil, tools.WrapMissingWorkspaceRootError(abs, fmt.Errorf("stat workspace root: %w", err))
 	}
 	t := &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceRootInfo: rootInfo, workspaceOnly: workspaceOnly}
 	for _, opt := range opts {

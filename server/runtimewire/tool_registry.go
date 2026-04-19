@@ -9,7 +9,12 @@ import (
 	shelltool "builder/server/tools/shell"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/toolspec"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -145,7 +150,7 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		}
 		handler, err := BuildLocalRuntimeHandler(def, ctx)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, wrapSessionWorkspaceRetargetHint(ctx.OwnerSessionID, ctx.WorkspaceRoot, err)
 		}
 		handlers = append(handlers, handler)
 		registry = tools.NewRegistry(handlers...)
@@ -154,4 +159,44 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		registry = tools.NewRegistry()
 	}
 	return registry, broker, background, nil
+}
+
+func wrapSessionWorkspaceRetargetHint(sessionID string, workspaceRoot string, err error) error {
+	if strings.TrimSpace(sessionID) == "" || err == nil || !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot == "" {
+		return err
+	}
+	newWorkspaceRoot := "."
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		newWorkspaceRoot = filepath.Clean(cwd)
+	}
+	return sessionWorkspaceRetargetError{
+		sessionID:     strings.TrimSpace(sessionID),
+		workspaceRoot: trimmedWorkspaceRoot,
+		newRoot:       newWorkspaceRoot,
+		cause:         err,
+	}
+}
+
+type sessionWorkspaceRetargetError struct {
+	sessionID     string
+	workspaceRoot string
+	newRoot       string
+	cause         error
+}
+
+func (e sessionWorkspaceRetargetError) Error() string {
+	return fmt.Sprintf(
+		"workspace root %q is missing; run `builder rebind %s %s`",
+		e.workspaceRoot,
+		strconv.Quote(e.sessionID),
+		strconv.Quote(e.newRoot),
+	)
+}
+
+func (e sessionWorkspaceRetargetError) Unwrap() error {
+	return e.cause
 }

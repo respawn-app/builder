@@ -337,6 +337,83 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 	}
 }
 
+func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspaceA, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspaceA: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	bindingA, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding workspaceA: %v", err)
+	}
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, bindingA.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.SetName("incident triage"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	retargeted, err := store.RetargetSessionWorkspace(ctx, sess.Meta().SessionID, workspaceB)
+	if err != nil {
+		t.Fatalf("RetargetSessionWorkspace: %v", err)
+	}
+	canonicalWorkspaceB, err := config.CanonicalWorkspaceRoot(workspaceB)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot workspaceB: %v", err)
+	}
+	if retargeted.ProjectID != bindingA.ProjectID {
+		t.Fatalf("retargeted project id = %q, want %q", retargeted.ProjectID, bindingA.ProjectID)
+	}
+	if retargeted.CanonicalRoot != canonicalWorkspaceB {
+		t.Fatalf("retargeted canonical root = %q, want %q", retargeted.CanonicalRoot, canonicalWorkspaceB)
+	}
+
+	resolvedBinding, err := store.EnsureWorkspaceBinding(ctx, workspaceB)
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceBinding workspaceB: %v", err)
+	}
+	if resolvedBinding.ProjectID != bindingA.ProjectID {
+		t.Fatalf("workspaceB project id = %q, want %q", resolvedBinding.ProjectID, bindingA.ProjectID)
+	}
+
+	target, err := store.ResolveSessionExecutionTarget(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorkspaceID != retargeted.WorkspaceID {
+		t.Fatalf("target workspace id = %q, want %q", target.WorkspaceID, retargeted.WorkspaceID)
+	}
+	if target.WorkspaceRoot != canonicalWorkspaceB {
+		t.Fatalf("target workspace root = %q, want %q", target.WorkspaceRoot, canonicalWorkspaceB)
+	}
+
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	if reopened.Meta().WorkspaceRoot != canonicalWorkspaceB {
+		t.Fatalf("reopened workspace root = %q, want %q", reopened.Meta().WorkspaceRoot, canonicalWorkspaceB)
+	}
+}
+
 func TestRebindWorkspaceRetargetsDescendantWorktrees(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()

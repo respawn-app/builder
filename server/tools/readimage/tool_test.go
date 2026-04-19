@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -70,6 +71,22 @@ func TestCall_ImagePathReturnsInputImageContentItem(t *testing.T) {
 	}
 	if string(decoded) != string(tinyPNG) {
 		t.Fatalf("decoded image bytes mismatch")
+	}
+}
+
+func TestNewMissingWorkspaceSuggestsRebind(t *testing.T) {
+	missingWorkspace := filepath.Join(t.TempDir(), "workspace-removed")
+
+	_, err := New(missingWorkspace, true)
+	if err == nil {
+		t.Fatal("expected error for missing workspace")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist, got %v", err)
+	}
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing`
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 }
 

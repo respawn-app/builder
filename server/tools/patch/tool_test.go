@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -38,6 +39,22 @@ func TestDeleteFile(t *testing.T) {
 
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("expected file deleted, stat err=%v", err)
+	}
+}
+
+func TestNewMissingWorkspaceSuggestsRebind(t *testing.T) {
+	missingWorkspace := filepath.Join(t.TempDir(), "workspace-removed")
+
+	_, err := New(missingWorkspace, true)
+	if err == nil {
+		t.Fatal("expected error for missing workspace")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist, got %v", err)
+	}
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing`
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 }
 
