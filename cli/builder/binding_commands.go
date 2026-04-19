@@ -273,7 +273,7 @@ func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serve
 	}
 	dialCtx, cancel := bindingCommandRPCContext(ctx)
 	defer cancel()
-	remote, err := client.DialRemoteURL(dialCtx, config.ServerRPCURL(newCfg))
+	remote, err := client.DialConfiguredRemote(dialCtx, newCfg)
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
@@ -292,7 +292,7 @@ func openBindingCommandRemote(ctx context.Context, path string) (config.App, *cl
 	}
 	ctx, cancel := bindingCommandRPCContext(ctx)
 	defer cancel()
-	remote, err := client.DialRemoteURL(ctx, config.ServerRPCURL(cfg))
+	remote, err := client.DialConfiguredRemote(ctx, cfg)
 	if err != nil {
 		return config.App{}, nil, err
 	}

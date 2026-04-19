@@ -14,8 +14,8 @@ import (
 	"builder/server/core"
 	"builder/shared/clientui"
 	"builder/shared/protocol"
+	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
-	"golang.org/x/net/websocket"
 )
 
 type Gateway struct {
@@ -53,52 +53,51 @@ func NewGateway(appCore *core.Core, identity protocol.ServerIdentity) (*Gateway,
 }
 
 func (g *Gateway) Handler() http.Handler {
-	return websocket.Handler(g.handleConn)
+	return rpcwire.NewWebSocketTransport().Handler(g.handleConn)
 }
 
-func (g *Gateway) handleConn(ws *websocket.Conn) {
-	defer func() { _ = ws.Close() }()
+func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
+	defer func() { _ = conn.Close() }()
 	state := &connectionState{}
-	ctx := ws.Request().Context()
 	for {
-		var req protocol.Request
-		if err := websocket.JSON.Receive(ws, &req); err != nil {
+		req, err := receiveRequest(ctx, conn)
+		if err != nil {
 			return
 		}
 		if req.Method == protocol.MethodRunPrompt {
-			if !g.serveRunPrompt(ws, ctx, state, req) {
+			if !g.serveRunPrompt(conn, ctx, state, req) {
 				return
 			}
 			continue
 		}
 		if isSubscriptionMethod(req.Method) {
-			g.serveSubscription(ws, ctx, state, req)
+			g.serveSubscription(conn, ctx, state, req)
 			return
 		}
 		resp := g.dispatch(ctx, state, req)
-		if err := websocket.JSON.Send(ws, resp); err != nil {
+		if !sendResponse(ctx, conn, resp) {
 			return
 		}
 	}
 }
 
-func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state *connectionState, req protocol.Request) bool {
+func (g *Gateway) serveRunPrompt(conn rpcwire.Conn, ctx context.Context, state *connectionState, req protocol.Request) bool {
 	if err := req.Validate(); err != nil {
-		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, err.Error()))
+		return sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, err.Error()))
 	}
 	if !state.handshakeDone {
-		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
+		return sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
 	}
 	ready, err := g.serverAuthReady(ctx)
 	if err != nil {
-		return sendResponse(ws, responseForError(req.ID, err))
+		return sendResponse(ctx, conn, responseForError(req.ID, err))
 	}
 	if !ready {
-		return sendResponse(ws, responseForError(req.ID, serverapi.ErrServerAuthRequired))
+		return sendResponse(ctx, conn, responseForError(req.ID, serverapi.ErrServerAuthRequired))
 	}
 	params, err := decodeParams[serverapi.RunPromptRequest](req.Params)
 	if err != nil {
-		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+		return sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -107,7 +106,7 @@ func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state 
 		if progressBroken.Load() {
 			return
 		}
-		if err := sendNotification(ws, protocol.MethodRunPromptProgress, update); err != nil {
+		if err := sendNotification(runCtx, conn, protocol.MethodRunPromptProgress, update); err != nil {
 			if progressBroken.CompareAndSwap(false, true) {
 				cancel()
 			}
@@ -115,13 +114,13 @@ func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state 
 	})
 	runClient, err := g.runPromptClientForState(runCtx, state)
 	if err != nil {
-		return sendResponse(ws, responseForError(req.ID, err))
+		return sendResponse(ctx, conn, responseForError(req.ID, err))
 	}
 	resp, err := runClient.RunPrompt(runCtx, params, progress)
 	if err != nil {
-		return sendResponse(ws, responseForError(req.ID, err))
+		return sendResponse(ctx, conn, responseForError(req.ID, err))
 	}
-	return sendResponse(ws, protocol.NewSuccessResponse(req.ID, resp))
+	return sendResponse(ctx, conn, protocol.NewSuccessResponse(req.ID, resp))
 }
 
 func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
@@ -628,23 +627,23 @@ func (g *Gateway) filterProcessesForActiveProject(ctx context.Context, state *co
 	return filtered, nil
 }
 
-func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, state *connectionState, req protocol.Request) {
+func (g *Gateway) serveSubscription(conn rpcwire.Conn, ctx context.Context, state *connectionState, req protocol.Request) {
 	if err := req.Validate(); err != nil {
-		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, err.Error()))
+		_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, err.Error()))
 		return
 	}
 	if !state.handshakeDone {
-		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
+		_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake is required before other methods"))
 		return
 	}
 	if g.methodRequiresServerAuth(req.Method) {
 		ready, err := g.serverAuthReady(ctx)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, err))
 			return
 		}
 		if !ready {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, serverapi.ErrServerAuthRequired))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, serverapi.ErrServerAuthRequired))
 			return
 		}
 	}
@@ -652,104 +651,104 @@ func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, sta
 	case protocol.MethodSessionSubscribeActivity:
 		params, err := decodeParams[serverapi.SessionActivitySubscribeRequest](req.Params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if err := params.Validate(); err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if state.attachedSession != params.SessionID {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "session attach is required before subscribing"))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "session attach is required before subscribing"))
 			return
 		}
 		sub, err := g.core.SessionActivityClient().SubscribeSessionActivity(ctx, params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, err))
 			return
 		}
 		defer func() { _ = sub.Close() }()
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodSessionActivityEvent})); err != nil {
+		if !sendResponse(ctx, conn, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodSessionActivityEvent})) {
 			return
 		}
 		for {
 			evt, err := sub.Next(ctx)
 			if err != nil {
-				_ = sendNotification(ws, protocol.MethodSessionActivityComplete, streamCompleteParams(err))
+				_ = sendNotification(ctx, conn, protocol.MethodSessionActivityComplete, streamCompleteParams(err))
 				return
 			}
-			if err := sendNotification(ws, protocol.MethodSessionActivityEvent, protocol.SessionActivityEventParams{Event: evt}); err != nil {
+			if err := sendNotification(ctx, conn, protocol.MethodSessionActivityEvent, protocol.SessionActivityEventParams{Event: evt}); err != nil {
 				return
 			}
 		}
 	case protocol.MethodProcessSubscribeOutput:
 		params, err := decodeParams[serverapi.ProcessOutputSubscribeRequest](req.Params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if err := params.Validate(); err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if _, err := g.processInActiveProject(ctx, state, params.ProcessID); err != nil {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, err))
 			return
 		}
 		sub, err := g.core.ProcessOutputClient().SubscribeProcessOutput(ctx, params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, err))
 			return
 		}
 		defer func() { _ = sub.Close() }()
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodProcessOutputEvent})); err != nil {
+		if !sendResponse(ctx, conn, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodProcessOutputEvent})) {
 			return
 		}
 		for {
 			chunk, err := sub.Next(ctx)
 			if err != nil {
-				_ = sendNotification(ws, protocol.MethodProcessOutputComplete, streamCompleteParams(err))
+				_ = sendNotification(ctx, conn, protocol.MethodProcessOutputComplete, streamCompleteParams(err))
 				return
 			}
-			if err := sendNotification(ws, protocol.MethodProcessOutputEvent, protocol.ProcessOutputEventParams{Chunk: chunk}); err != nil {
+			if err := sendNotification(ctx, conn, protocol.MethodProcessOutputEvent, protocol.ProcessOutputEventParams{Chunk: chunk}); err != nil {
 				return
 			}
 		}
 	case protocol.MethodPromptSubscribeActivity:
 		params, err := decodeParams[serverapi.PromptActivitySubscribeRequest](req.Params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if err := params.Validate(); err != nil {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 			return
 		}
 		if state.attachedSession != params.SessionID {
-			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "session attach is required before subscribing"))
+			_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "session attach is required before subscribing"))
 			return
 		}
 		sub, err := g.core.PromptActivityClient().SubscribePromptActivity(ctx, params)
 		if err != nil {
-			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			_ = sendResponse(ctx, conn, responseForError(req.ID, err))
 			return
 		}
 		defer func() { _ = sub.Close() }()
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodPromptActivityEvent})); err != nil {
+		if !sendResponse(ctx, conn, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodPromptActivityEvent})) {
 			return
 		}
 		for {
 			evt, err := sub.Next(ctx)
 			if err != nil {
-				_ = sendNotification(ws, protocol.MethodPromptActivityComplete, streamCompleteParams(err))
+				_ = sendNotification(ctx, conn, protocol.MethodPromptActivityComplete, streamCompleteParams(err))
 				return
 			}
-			if err := sendNotification(ws, protocol.MethodPromptActivityEvent, protocol.PromptActivityEventParams{Event: evt}); err != nil {
+			if err := sendNotification(ctx, conn, protocol.MethodPromptActivityEvent, protocol.PromptActivityEventParams{Event: evt}); err != nil {
 				return
 			}
 		}
 	default:
-		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method)))
+		_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method)))
 	}
 }
 
@@ -774,16 +773,33 @@ func isSubscriptionMethod(method string) bool {
 	}
 }
 
-func sendNotification(ws *websocket.Conn, method string, params any) error {
+func receiveRequest(ctx context.Context, conn rpcwire.Conn) (protocol.Request, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return protocol.Request{}, ctx.Err()
+		case event, ok := <-conn.Events():
+			if !ok {
+				return protocol.Request{}, io.EOF
+			}
+			if event.Err != nil {
+				return protocol.Request{}, event.Err
+			}
+			return event.Frame.Request(), nil
+		}
+	}
+}
+
+func sendNotification(ctx context.Context, conn rpcwire.Conn, method string, params any) error {
 	data, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
-	return websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: method, Params: data})
+	return conn.Send(ctx, rpcwire.FrameFromRequest(protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: method, Params: data}))
 }
 
-func sendResponse(ws *websocket.Conn, resp protocol.Response) bool {
-	return websocket.JSON.Send(ws, resp) == nil
+func sendResponse(ctx context.Context, conn rpcwire.Conn, resp protocol.Response) bool {
+	return conn.Send(ctx, rpcwire.FrameFromResponse(resp)) == nil
 }
 
 func responseForError(id string, err error) protocol.Response {

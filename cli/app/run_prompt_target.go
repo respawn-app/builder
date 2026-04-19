@@ -23,9 +23,9 @@ import (
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
-var dialConfiguredRemote = client.DialRemoteURLForProjectWorkspaceID
-var dialConfiguredProjectViewRemote = func(ctx context.Context, rpcURL string) (configuredProjectViewRemote, error) {
-	return client.DialRemoteURL(ctx, rpcURL)
+var dialConfiguredRemote = client.DialConfiguredRemoteForProjectWorkspaceID
+var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) (configuredProjectViewRemote, error) {
+	return client.DialConfiguredRemote(ctx, cfg)
 }
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
@@ -109,10 +109,9 @@ func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options,
 	if err != nil {
 		return nil, false, err
 	}
-	rpcURL := config.ServerRPCURL(cfg)
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, rpcURL)
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, cfg)
 	if err != nil {
 		return nil, false, nil
 	}
@@ -131,7 +130,7 @@ func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options,
 	}
 	if bindingResp.Binding != nil {
 		_ = projectViews.Close()
-		remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
+		remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, bindingResp.Binding.ProjectID, bindingResp.Binding.WorkspaceID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -151,7 +150,7 @@ func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options,
 	if !found {
 		return nil, true, headlessRemoteWorkspaceSelectionError()
 	}
-	remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, workspace.ProjectID, workspace.WorkspaceID)
+	remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, workspace.ProjectID, workspace.WorkspaceID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -210,10 +209,9 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 	if err != nil {
 		return nil, false
 	}
-	rpcURL := config.ServerRPCURL(cfg)
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, rpcURL)
+	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, cfg)
 	if err != nil {
 		return nil, false
 	}
@@ -243,17 +241,17 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 		return remote, true
 	}
 	_ = projectViews.Close()
-	remote, err := dialConfiguredRemoteWorkspace(ctx, rpcURL, binding.ProjectID, binding.WorkspaceID)
+	remote, err := dialConfiguredRemoteWorkspace(ctx, cfg, binding.ProjectID, binding.WorkspaceID)
 	if err != nil {
 		return nil, false
 	}
 	return remote, true
 }
 
-func dialConfiguredRemoteWorkspace(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+func dialConfiguredRemoteWorkspace(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	return dialConfiguredRemote(attachCtx, rpcURL, projectID, workspaceID)
+	return dialConfiguredRemote(attachCtx, cfg, projectID, workspaceID)
 }
 
 func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
