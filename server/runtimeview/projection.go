@@ -96,6 +96,13 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 			Text: evt.ReasoningDelta.Text,
 		}
 	}
+	if evt.Compaction != nil {
+		view.Compaction = &clientui.CompactionStatus{
+			Mode:  evt.Compaction.Mode,
+			Count: evt.Compaction.Count,
+			Error: evt.Compaction.Error,
+		}
+	}
 	if evt.CacheWarning != nil {
 		view.CacheWarning = copyCacheWarningView(evt.CacheWarning)
 	}

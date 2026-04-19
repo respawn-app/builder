@@ -254,7 +254,8 @@
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
 - Local compaction instructions are sent as `developer` messages, and local compaction summaries/checkpoints persist internally as `developer` messages with `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary. Native/remote compaction has no transcript-message prompt equivalent because it uses provider `Instructions` plus opaque provider output, which Builder replays unchanged.
-- UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
+- UI may surface a synthetic ongoing-only `context compacted for the Nth time` notice from compaction-completed runtime status. That live notice is not a durable transcript row and must not change detail-mode hydration or transcript authority.
+- Persisted compaction transcript rows still come only from server-owned transcript items/local entries. Ongoing suppresses detailed summary content; detail shows persisted compaction items in file order, including full local summary when available.
 
 ## Model Defaults
 

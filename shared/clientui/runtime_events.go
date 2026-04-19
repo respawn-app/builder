@@ -1,6 +1,9 @@
 package clientui
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type RuntimeEventState struct {
 	Busy                  bool
@@ -35,6 +38,7 @@ type RuntimeEventUpdate struct {
 	Input                 PendingInputState
 	AssistantDelta        string
 	ReasoningDelta        *ReasoningDelta
+	SyntheticOngoingEntry *ChatEntry
 	SyncSessionView       bool
 	RecordPromptHistory   bool
 	SetActivityRunning    bool
@@ -69,7 +73,15 @@ func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activi
 		update.ClearReasoningStream = true
 	case EventCompactionStarted:
 		update.State.Compacting = true
-	case EventCompactionCompleted, EventCompactionFailed:
+	case EventCompactionCompleted:
+		update.State.Compacting = false
+		if evt.Compaction != nil && evt.Compaction.Count > 0 {
+			update.SyntheticOngoingEntry = &ChatEntry{
+				Role: "compaction_notice",
+				Text: compactionNoticeText(evt.Compaction.Count),
+			}
+		}
+	case EventCompactionFailed:
 		update.State.Compacting = false
 	case EventReviewerStarted:
 		update.State.ReviewerRunning = true
@@ -121,6 +133,29 @@ func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activi
 		}
 	}
 	return update
+}
+
+func compactionNoticeText(count int) string {
+	return fmt.Sprintf("context compacted for the %s time", ordinal(count))
+}
+
+func ordinal(v int) string {
+	if v <= 0 {
+		return "0th"
+	}
+	if v%100 >= 11 && v%100 <= 13 {
+		return fmt.Sprintf("%dth", v)
+	}
+	switch v % 10 {
+	case 1:
+		return fmt.Sprintf("%dst", v)
+	case 2:
+		return fmt.Sprintf("%dnd", v)
+	case 3:
+		return fmt.Sprintf("%drd", v)
+	default:
+		return fmt.Sprintf("%dth", v)
+	}
 }
 
 func ExtractReasoningStatusHeader(text string) string {
