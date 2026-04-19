@@ -192,11 +192,15 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	leaseID := strings.TrimSpace(req.LeaseID)
+	leaseErr := error(nil)
+	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
+		leaseErr = err
+	}
 	s.mu.Lock()
 	handle := s.handles[sessionID]
 	if handle == nil {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", sessionID))
+		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
 	s.mu.Unlock()
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
@@ -211,10 +215,6 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	delete(s.handles, sessionID)
 	closeFn := current.close
 	s.mu.Unlock()
-	leaseErr := error(nil)
-	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
-		leaseErr = err
-	}
 	if closeFn != nil {
 		closeFn()
 	}
