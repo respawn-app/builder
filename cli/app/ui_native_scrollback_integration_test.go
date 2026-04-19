@@ -1143,6 +1143,183 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 	}
 }
 
+func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			Reviewer: runtime.ReviewerConfig{
+				Frequency:     "all",
+				Model:         "gpt-5",
+				ThinkingLevel: "low",
+				Client:        reviewerNoSuggestionsClient{},
+			},
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.QueueUserMessage("steer now")
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
+		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "detail mode active", func() bool {
+		return model.view.Mode() == tui.ModeDetail
+	})
+
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "detail mode keeps deferred final visible", func() bool {
+		detail := stripANSIAndTrimRight(model.View())
+		return strings.Contains(detail, "foreground done")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "ongoing mode active", func() bool {
+		return model.view.Mode() == tui.ModeOngoing
+	})
+	waitForTestCondition(t, 2*time.Second, "ongoing view keeps deferred final visible after detail exit", func() bool {
+		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+		return strings.Contains(ongoing, "foreground done")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !strings.Contains(normalized, "foreground done") {
+		t.Fatalf("expected final answer to survive detail round-trip, got %q", normalized)
+	}
+}
+
+func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeCommit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			Reviewer: runtime.ReviewerConfig{
+				Frequency:     "all",
+				Model:         "gpt-5",
+				ThinkingLevel: "low",
+				Client:        reviewerNoSuggestionsClient{},
+			},
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.QueueUserMessage("steer now")
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
+		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "detail mode active", func() bool {
+		return model.view.Mode() == tui.ModeDetail
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "ongoing mode active before final commit", func() bool {
+		return model.view.Mode() == tui.ModeOngoing
+	})
+
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "ongoing view keeps deferred final visible after early detail exit", func() bool {
+		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+		return strings.Contains(ongoing, "foreground done")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !strings.Contains(normalized, "foreground done") {
+		t.Fatalf("expected final answer to survive early detail round-trip, got %q", normalized)
+	}
+}
+
 func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -1560,7 +1737,7 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 	pendingPlain := xansi.Strip(pendingDelta)
 	hasDotFrame := false
 	for _, frame := range pendingToolSpinner.Frames {
-		if strings.Contains(pendingPlain, strings.TrimSpace(frame)+" pwd") {
+		if strings.Contains(pendingPlain, frame+"pwd") {
 			hasDotFrame = true
 			break
 		}
