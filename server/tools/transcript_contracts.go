@@ -237,6 +237,79 @@ func formatPatchToolResult(result Result) string {
 	if !result.IsError {
 		return ""
 	}
+	var payload struct {
+		Error      string `json:"error"`
+		Kind       string `json:"kind,omitempty"`
+		Path       string `json:"path,omitempty"`
+		Line       int    `json:"line,omitempty"`
+		NearLine   bool   `json:"near_line,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+		Commentary string `json:"commentary,omitempty"`
+	}
+	if err := json.Unmarshal(result.Output, &payload); err == nil && strings.TrimSpace(payload.Kind) != "" {
+		suffix := func() string {
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return " in " + path
+			}
+			return ""
+		}
+		withReason := func(base string) string {
+			if reason := strings.TrimSpace(payload.Reason); reason != "" {
+				return base + "\nReason: " + reason
+			}
+			return base
+		}
+		switch payload.Kind {
+		case "malformed_syntax":
+			return withReason("Patch failed: malformed patch syntax.")
+		case "content_mismatch":
+			lineRef := ""
+			if payload.Line > 0 {
+				if payload.NearLine {
+					lineRef = fmt.Sprintf(" near line %d", payload.Line)
+				} else {
+					lineRef = fmt.Sprintf(" at line %d", payload.Line)
+				}
+			}
+			return withReason("Patch failed: mismatch between file content and model-provided patch" + suffix() + lineRef + ".")
+		case "out_of_bounds":
+			lineRef := ""
+			if payload.Line > 0 {
+				lineRef = fmt.Sprintf(" at line %d", payload.Line)
+			}
+			return withReason("Patch failed: model tried to change lines outside file bounds" + suffix() + lineRef + ".")
+		case "no_permission":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: no file edit permission for " + path + ".")
+			}
+			return withReason("Patch failed: no file edit permission.")
+		case "user_denied":
+			message := "Patch failed: user denied the edit"
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				message += " for " + path
+			}
+			message += "."
+			if commentary := strings.TrimSpace(payload.Commentary); commentary != "" {
+				message += "\nUser said: " + commentary
+			}
+			return message
+		case "approval_failed":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: file edit approval failed for " + path + ".")
+			}
+			return withReason("Patch failed: file edit approval failed.")
+		case "target_missing":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: target file does not exist: " + path + ".")
+			}
+			return withReason("Patch failed: target file does not exist.")
+		case "target_exists":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: target file already exists: " + path + ".")
+			}
+			return withReason("Patch failed: target file already exists.")
+		}
+	}
 	return formatGenericToolResult(result)
 }
 

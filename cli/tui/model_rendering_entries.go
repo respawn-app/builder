@@ -31,6 +31,10 @@ func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, t
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
 	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
+	return m.flattenEntryContent(role, content, renderWidth, muteText, symbolOverride)
+}
+
+func (m Model) flattenEntryContent(role string, content transcriptRenderContent, renderWidth int, muteText bool, symbolOverride string) []string {
 	content = m.applyEntrySemanticTransformStage(content)
 	if muteText && isShellPreviewRole(role) {
 		return m.flattenSingleLineShellPreview(role, content, renderWidth, symbolOverride)
@@ -361,6 +365,37 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 		out = append(out, transcriptRenderLine{Text: line.Text, Intents: intents})
 	}
 	return out, true
+}
+
+func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallMeta, resultText string) []string {
+	if toolMeta == nil || toolMeta.PatchRender == nil {
+		return m.flattenEntryWithMeta(role, resultText, false, toolMeta)
+	}
+	renderWidth := m.viewportWidth
+	if rolePrefix(role) != "" {
+		renderWidth -= 2
+	}
+	content := transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved}
+	if diffLines, ok := m.renderDiffToolLines(toolMeta.PatchDetail, renderWidth, toolMeta); ok {
+		content.Lines = append(content.Lines, diffLines...)
+	}
+	trimmedResult := strings.TrimSpace(resultText)
+	if trimmedResult != "" {
+		if len(content.Lines) > 0 {
+			content.Lines = append(content.Lines, transcriptRenderLine{})
+		}
+		intents := ThemeForeground
+		if strings.TrimSpace(role) == "tool_error" {
+			intents = ErrorForeground
+		}
+		for _, chunk := range splitLines(wrapTextForViewport(trimmedResult, max(1, renderWidth))) {
+			content.Lines = append(content.Lines, transcriptRenderLine{Text: chunk, Intents: intents})
+		}
+	}
+	if len(content.Lines) == 0 {
+		return m.flattenEntryWithMeta(role, toolMeta.PatchDetail, false, toolMeta)
+	}
+	return m.flattenEntryContent(role, content, renderWidth, false, "")
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {

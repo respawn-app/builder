@@ -240,6 +240,35 @@ func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 	}
 }
 
+func TestDetailPatchErrorAppearsAfterDiffWithBlankSeparator(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	detail := "Edited: ./main.go +1 -1\n+package main\n-old"
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: detail,
+		ToolCall: &transcript.ToolCallMeta{
+			PatchDetail: detail,
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+			),
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_error", ToolCallID: "", Text: "Patch failed: mismatch between file content and model-provided patch in main.go at line 3."})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "+package main\n  -old\n\n  Patch failed: mismatch between file content and model-provided patch") {
+		t.Fatalf("expected detail patch block to keep diff and render separated error text, got %q", view)
+	}
+	if !strings.Contains(view, "at line 3") {
+		t.Fatalf("expected detail patch block to keep diff and render separated error text, got %q", view)
+	}
+}
+
 func TestShellToolPreviewUsesShellHighlightingForWrappedHyphenatedPath(t *testing.T) {
 	m := NewModel()
 	out := m.renderEntryText("tool_shell", "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1", 56, &transcript.ToolCallMeta{

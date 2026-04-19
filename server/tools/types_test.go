@@ -223,6 +223,25 @@ func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
 	}
 }
 
+func TestDefinitionContractsFormatStructuredPatchFailure(t *testing.T) {
+	patch, _ := DefinitionFor(toolspec.ToolPatch)
+	got := patch.FormatToolResult(Result{
+		Name: toolspec.ToolPatch,
+		Output: json.RawMessage(`{
+			"kind":"content_mismatch",
+			"path":"main.go",
+			"line":17,
+			"error":"ignored"
+		}`),
+		IsError: true,
+	})
+
+	want := "Patch failed: mismatch between file content and model-provided patch in main.go at line 17."
+	if got != want {
+		t.Fatalf("patch failure summary = %q, want %q", got, want)
+	}
+}
+
 func TestDefinitionContractsFormatLegacyAskQuestionFreeformOnSingleLine(t *testing.T) {
 	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)
 	got := askQuestion.FormatToolResult(Result{

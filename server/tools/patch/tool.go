@@ -66,10 +66,10 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 
 	doc, err := patchformat.Parse(in.Patch)
 	if err != nil {
-		return tools.ErrorResult(c, err.Error()), nil
+		return patchErrorResult(c, malformedFailure(err.Error())), nil
 	}
 	if err := t.apply(ctx, doc); err != nil {
-		return tools.ErrorResult(c, err.Error()), nil
+		return patchErrorResult(c, err), nil
 	}
 
 	body, _ := json.Marshal(map[string]any{

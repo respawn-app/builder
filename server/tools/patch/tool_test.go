@@ -379,6 +379,16 @@ func TestUpdateAnchoredHeaderFailsOutsideFuzz(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("expected patch failure outside fuzz window")
 	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "out_of_bounds" {
+		t.Fatalf("expected out_of_bounds failure, got %+v", payload)
+	}
+	if payload.Line != 30 {
+		t.Fatalf("expected line 30 in failure payload, got %+v", payload)
+	}
+	if !strings.Contains(payload.Error, "outside file bounds") {
+		t.Fatalf("expected friendly out-of-bounds error, got %+v", payload)
+	}
 
 	got, err := os.ReadFile(target)
 	if err != nil {
@@ -386,6 +396,79 @@ func TestUpdateAnchoredHeaderFailsOutsideFuzz(t *testing.T) {
 	}
 	if string(got) != seed {
 		t.Fatalf("file changed despite failed patch:\n%s", string(got))
+	}
+}
+
+func TestMalformedPatchReturnsStructuredFailure(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "malformed", "*** Begin Patch\n*** Update File: a.txt\n-invalid\n")
+	if !result.IsError {
+		t.Fatal("expected malformed patch failure")
+	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "malformed_syntax" {
+		t.Fatalf("expected malformed_syntax payload, got %+v", payload)
+	}
+	if !strings.Contains(payload.Error, "Patch failed: malformed patch syntax.") {
+		t.Fatalf("expected friendly malformed syntax error, got %+v", payload)
+	}
+	if payload.Reason == "" {
+		t.Fatalf("expected detailed syntax reason, got %+v", payload)
+	}
+}
+
+func TestUpdateMissingTargetReturnsStructuredFailure(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "missing-target", "*** Begin Patch\n*** Update File: missing.txt\n-old\n+new\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatal("expected missing target failure")
+	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "target_missing" {
+		t.Fatalf("expected target_missing payload, got %+v", payload)
+	}
+	if payload.Path != "missing.txt" {
+		t.Fatalf("expected missing path in payload, got %+v", payload)
+	}
+	if got, want := payload.Error, "Patch failed: target file does not exist: missing.txt.\nReason: cannot update a file that does not exist"; got != want {
+		t.Fatalf("unexpected missing target error = %q, want %q", got, want)
+	}
+}
+
+func TestAddExistingTargetReturnsStructuredFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "exists.txt")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "existing-target", "*** Begin Patch\n*** Add File: exists.txt\n+new\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatal("expected existing target failure")
+	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "target_exists" {
+		t.Fatalf("expected target_exists payload, got %+v", payload)
+	}
+	if payload.Path != "exists.txt" {
+		t.Fatalf("expected existing path in payload, got %+v", payload)
+	}
+	if got, want := payload.Error, "Patch failed: target file already exists: exists.txt.\nReason: cannot add a file over an existing path"; got != want {
+		t.Fatalf("unexpected existing target error = %q, want %q", got, want)
 	}
 }
 
@@ -575,7 +658,7 @@ func TestOutsideWorkspaceEditRejectionContainsSteeringMessage(t *testing.T) {
 		t.Fatalf("expected one approval call, got %d", approveCalls)
 	}
 	errMessage := toolError(t, result)
-	want := "patch target outside workspace rejected by user: " + target + ". User rejected the approval request for this tool call. Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative. If it's essential to the task, ask the user to make the edit manually at the end of the task."
+	want := "Patch failed: user denied the edit for " + target + "."
 	if errMessage != want {
 		t.Fatalf("unexpected steering guidance in error, got %q want %q", errMessage, want)
 	}
@@ -673,7 +756,7 @@ func TestOutsideWorkspaceRejectionIncludesUserCommentary(t *testing.T) {
 		t.Fatalf("expected error result")
 	}
 	errMessage := toolError(t, result)
-	want := `patch target outside workspace rejected by user: ` + target + `. User rejected the approval request for this tool call, and said: "not allowed by policy". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative. If it's essential to the task, ask the user to make the edit manually at the end of the task.`
+	want := "Patch failed: user denied the edit for " + target + ".\nUser said: not allowed by policy"
 	if errMessage != want {
 		t.Fatalf("unexpected rejection error, got %q want %q", errMessage, want)
 	}
@@ -699,7 +782,7 @@ func TestOutsideWorkspaceApprovalFailureUsesPatchSpecificWording(t *testing.T) {
 		t.Fatalf("expected error result")
 	}
 	errMessage := toolError(t, result)
-	if !strings.Contains(errMessage, "outside-workspace edit approval failed") {
+	if !strings.Contains(errMessage, "Patch failed: file edit approval failed") {
 		t.Fatalf("expected patch approval failure wording, got %q", errMessage)
 	}
 	if strings.Contains(errMessage, "read approval failed") || strings.Contains(errMessage, "view_image path outside workspace") {
@@ -946,9 +1029,30 @@ func callPatch(t *testing.T, tool *Tool, id, patchText string) tools.Result {
 
 func toolError(t *testing.T, result tools.Result) string {
 	t.Helper()
-	payload := map[string]string{}
+	var payload struct {
+		Error string `json:"error"`
+	}
 	if err := json.Unmarshal(result.Output, &payload); err != nil {
 		t.Fatalf("decode tool error output: %v", err)
 	}
-	return payload["error"]
+	return payload.Error
+}
+
+type toolFailureErrorPayload struct {
+	Error      string `json:"error"`
+	Kind       string `json:"kind,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	NearLine   bool   `json:"near_line,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Commentary string `json:"commentary,omitempty"`
+}
+
+func toolFailurePayload(t *testing.T, result tools.Result) toolFailureErrorPayload {
+	t.Helper()
+	var payload toolFailureErrorPayload
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool failure output: %v", err)
+	}
+	return payload
 }
