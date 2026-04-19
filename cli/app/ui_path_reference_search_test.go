@@ -162,6 +162,7 @@ func TestLoadPathReferenceCorpusSnapshotHonorsIgnorePolicyAndExcludesEmptyDirs(t
 	}
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = root
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
