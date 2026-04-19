@@ -17,7 +17,7 @@ import (
 	"builder/shared/serverapi"
 )
 
-const bindingCommandRPCTimeout = 5 * time.Second
+var bindingCommandRPCTimeout = 5 * time.Second
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 {
@@ -188,11 +188,39 @@ func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath s
 	if err != nil {
 		return "", err
 	}
-	resp, err := remote.AttachWorkspaceToProject(ctx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: normalizedTargetPath})
+	resp, err := attachWorkspaceToProject(ctx, remote, projectID, normalizedTargetPath)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(resp.Binding.ProjectID), nil
+}
+
+func bindingCommandRPCContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, bindingCommandRPCTimeout)
+}
+
+func attachWorkspaceToProject(ctx context.Context, remote client.ProjectViewClient, projectID string, workspaceRoot string) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	return remote.AttachWorkspaceToProject(rpcCtx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: projectID, WorkspaceRoot: workspaceRoot})
+}
+
+func listProjectsWithTimeout(ctx context.Context, remote client.ProjectViewClient) (serverapi.ProjectListResponse, error) {
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	return remote.ListProjects(rpcCtx, serverapi.ProjectListRequest{})
+}
+
+func createProjectWithTimeout(ctx context.Context, remote client.ProjectViewClient, displayName string, workspaceRoot string) (serverapi.ProjectCreateResponse, error) {
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	return remote.CreateProject(rpcCtx, serverapi.ProjectCreateRequest{DisplayName: displayName, WorkspaceRoot: workspaceRoot})
+}
+
+func rebindWorkspaceWithTimeout(ctx context.Context, remote client.ProjectViewClient, oldWorkspaceRoot string, newWorkspaceRoot string) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	return remote.RebindWorkspace(rpcCtx, serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: oldWorkspaceRoot, NewWorkspaceRoot: newWorkspaceRoot})
 }
 
 func listProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
@@ -201,7 +229,7 @@ func listProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
 		return nil, err
 	}
 	defer func() { _ = remote.Close() }()
-	resp, err := remote.ListProjects(ctx, serverapi.ProjectListRequest{})
+	resp, err := listProjectsWithTimeout(ctx, remote)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +250,7 @@ func createProject(ctx context.Context, displayName string, workspaceRoot string
 		return serverapi.ProjectBinding{}, err
 	}
 	defer func() { _ = remote.Close() }()
-	resp, err := remote.CreateProject(ctx, serverapi.ProjectCreateRequest{DisplayName: trimmedDisplayName, WorkspaceRoot: normalizedWorkspaceRoot})
+	resp, err := createProjectWithTimeout(ctx, remote, trimmedDisplayName, normalizedWorkspaceRoot)
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
@@ -241,14 +269,14 @@ func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serve
 	if config.ServerRPCURL(oldCfg) != config.ServerRPCURL(newCfg) {
 		return serverapi.ProjectBinding{}, errors.New("rebind requires old and new workspaces to share the same configured server")
 	}
-	ctx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
+	dialCtx, cancel := bindingCommandRPCContext(ctx)
 	defer cancel()
-	remote, err := client.DialRemoteURL(ctx, config.ServerRPCURL(newCfg))
+	remote, err := client.DialRemoteURL(dialCtx, config.ServerRPCURL(newCfg))
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
 	defer func() { _ = remote.Close() }()
-	resp, err := remote.RebindWorkspace(ctx, serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: oldCfg.WorkspaceRoot, NewWorkspaceRoot: newCfg.WorkspaceRoot})
+	resp, err := rebindWorkspaceWithTimeout(ctx, remote, oldCfg.WorkspaceRoot, newCfg.WorkspaceRoot)
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
@@ -260,7 +288,7 @@ func openBindingCommandRemote(ctx context.Context, path string) (config.App, *cl
 	if err != nil {
 		return config.App{}, nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, bindingCommandRPCTimeout)
+	ctx, cancel := bindingCommandRPCContext(ctx)
 	defer cancel()
 	remote, err := client.DialRemoteURL(ctx, config.ServerRPCURL(cfg))
 	if err != nil {
@@ -281,7 +309,9 @@ func normalizeBindingCommandPath(path string) (string, error) {
 }
 
 func resolveWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (serverapi.ProjectBinding, error) {
-	resp, err := projectViews.ResolveProjectPath(ctx, serverapi.ProjectResolvePathRequest{Path: workspaceRoot})
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	resp, err := projectViews.ResolveProjectPath(rpcCtx, serverapi.ProjectResolvePathRequest{Path: workspaceRoot})
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
