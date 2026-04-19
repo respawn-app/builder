@@ -67,6 +67,29 @@ const (
 	MethodProcessOutputComplete                    = "process.output.complete"
 )
 
+var allowedPreAuthMethods = []string{
+	MethodAuthGetBootstrapStatus,
+	MethodAuthCompleteBootstrap,
+	MethodAttachProject,
+	MethodAttachSession,
+	MethodProjectList,
+	MethodProjectResolvePath,
+	MethodProjectGetOverview,
+	MethodSessionListByProject,
+	MethodSessionGetMainView,
+	MethodSessionGetTranscriptPage,
+	MethodSessionGetInitialInput,
+	MethodProcessList,
+	MethodProcessGet,
+	MethodAskListPending,
+	MethodApprovalListPending,
+	MethodRunGet,
+}
+
+func AllowedPreAuthMethods() []string {
+	return append([]string(nil), allowedPreAuthMethods...)
+}
+
 type HandshakeRequest struct {
 	ProtocolVersion string `json:"protocol_version"`
 }

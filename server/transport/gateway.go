@@ -23,23 +23,15 @@ type Gateway struct {
 	identity protocol.ServerIdentity
 }
 
-var gatewayAllowedPreAuthMethods = map[string]struct{}{
-	protocol.MethodAuthGetBootstrapStatus:   {},
-	protocol.MethodAuthCompleteBootstrap:    {},
-	protocol.MethodAttachProject:            {},
-	protocol.MethodAttachSession:            {},
-	protocol.MethodProjectList:              {},
-	protocol.MethodProjectResolvePath:       {},
-	protocol.MethodProjectGetOverview:       {},
-	protocol.MethodSessionListByProject:     {},
-	protocol.MethodSessionGetMainView:       {},
-	protocol.MethodSessionGetTranscriptPage: {},
-	protocol.MethodSessionGetInitialInput:   {},
-	protocol.MethodProcessList:              {},
-	protocol.MethodProcessGet:               {},
-	protocol.MethodAskListPending:           {},
-	protocol.MethodApprovalListPending:      {},
-	protocol.MethodRunGet:                   {},
+var gatewayAllowedPreAuthMethods = protocolAllowedPreAuthMethodSet()
+
+func protocolAllowedPreAuthMethodSet() map[string]struct{} {
+	allowed := protocol.AllowedPreAuthMethods()
+	set := make(map[string]struct{}, len(allowed))
+	for _, method := range allowed {
+		set[strings.TrimSpace(method)] = struct{}{}
+	}
+	return set
 }
 
 type connectionState struct {

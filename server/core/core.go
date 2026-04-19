@@ -130,14 +130,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
-	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, []string{
-		protocol.MethodAuthGetBootstrapStatus,
-		protocol.MethodAuthCompleteBootstrap,
-		protocol.MethodProjectList,
-		protocol.MethodProjectResolvePath,
-		protocol.MethodProjectGetOverview,
-		protocol.MethodSessionListByProject,
-	})
+	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
