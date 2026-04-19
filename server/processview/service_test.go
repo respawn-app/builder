@@ -215,6 +215,38 @@ func TestServiceKillProcessHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestServiceKillProcessDedupesSuccessfulRetry(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
+	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}
+
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("KillProcess first: %v", err)
+	}
+	source.killErr = context.DeadlineExceeded
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("KillProcess replay: %v", err)
+	}
+	if source.killCalls != 1 {
+		t.Fatalf("kill call count = %d, want 1", source.killCalls)
+	}
+}
+
+func TestServiceKillProcessRejectsRequestIDPayloadMismatch(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
+
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}); err != nil {
+		t.Fatalf("KillProcess first: %v", err)
+	}
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "2000"}); err == nil || !strings.Contains(err.Error(), "reused with different parameters") {
+		t.Fatalf("KillProcess mismatch error = %v, want reused with different parameters", err)
+	}
+	if source.killCalls != 1 {
+		t.Fatalf("kill call count = %d, want 1", source.killCalls)
+	}
+}
+
 type stubKillProcessSource struct {
 	killCalls int
 	killErr   error
