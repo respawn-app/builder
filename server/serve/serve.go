@@ -26,6 +26,8 @@ type Server struct {
 	ready atomic.Bool
 }
 
+var localSocketListener = listenLocalSocket
+
 var (
 	testListenReservationsMu sync.Mutex
 	testListenReservations   = map[string]net.Listener{}
@@ -93,11 +95,23 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	listenAddress := config.ServerListenAddress(s.Config())
 	ReleaseTestListenReservation(listenAddress)
-	listener, err := net.Listen("tcp", listenAddress)
+	tcpListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen local control endpoint: %w", err)
 	}
-	defer func() { _ = listener.Close() }()
+	cleanupFns := []func(){func() { _ = tcpListener.Close() }}
+	defer func() {
+		for _, cleanup := range cleanupFns {
+			cleanup()
+		}
+	}()
+	listeners := []net.Listener{tcpListener}
+	if localListener, localCleanup, ok, err := localSocketListener(s.Config()); err != nil {
+		// Derived same-machine UDS is additive only. Configured TCP stays authoritative.
+	} else if ok {
+		listeners = append(listeners, localListener)
+		cleanupFns = append(cleanupFns, localCleanup)
+	}
 
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
@@ -159,25 +173,41 @@ func (s *Server) Serve(ctx context.Context) error {
 	})
 	mux.Handle(protocol.RPCPath, gateway.Handler())
 
-	httpServer := &http.Server{Handler: mux}
-	errCh := make(chan error, 1)
-	go func() {
-		serveErr := httpServer.Serve(listener)
-		if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
-			errCh <- nil
-			return
+	httpServers := make([]*http.Server, 0, len(listeners))
+	errCh := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		httpServer := &http.Server{Handler: mux}
+		httpServers = append(httpServers, httpServer)
+		go func(server *http.Server, frontend net.Listener) {
+			serveErr := server.Serve(frontend)
+			if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
+				errCh <- nil
+				return
+			}
+			errCh <- serveErr
+		}(httpServer, listener)
+	}
+	shutdownServers := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, httpServer := range httpServers {
+			_ = httpServer.Shutdown(shutdownCtx)
 		}
-		errCh <- serveErr
-	}()
+	}
+	waitServers := func(expect int) {
+		for i := 0; i < expect; i++ {
+			<-errCh
+		}
+	}
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
-		<-errCh
+		shutdownServers()
+		waitServers(len(listeners))
 		return ctx.Err()
 	case serveErr := <-errCh:
+		shutdownServers()
+		waitServers(len(listeners) - 1)
 		return serveErr
 	}
 }

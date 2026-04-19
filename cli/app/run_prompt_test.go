@@ -694,11 +694,11 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1"}}}}, nil
 		},
 	}
-	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
 		return projectViews, nil
 	}
 	var dialRemaining time.Duration
-	dialConfiguredRemote = func(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+	dialConfiguredRemote = func(ctx context.Context, cfg config.App, projectID string, workspaceID string) (*client.Remote, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -707,6 +707,9 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 			t.Fatal("expected dial context deadline")
 		}
 		dialRemaining = time.Until(deadline)
+		if cfg.WorkspaceRoot != workspace {
+			t.Fatalf("unexpected config workspace root: %s", cfg.WorkspaceRoot)
+		}
 		if projectID != "project-1" || workspaceID != "workspace-1" {
 			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
 		}
