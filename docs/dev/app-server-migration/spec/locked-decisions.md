@@ -170,7 +170,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 
 - CLI local server attach should use the explicitly configured `server_host` and `server_port` with compatibility handshake; persisted discovery artifacts are not part of the target architecture.
 - On Unix platforms the daemon also exposes a derived same-machine Unix domain socket in runtime-local ephemeral state keyed by the persistence root. This socket is additive only; it does not introduce new user-facing config and does not replace configured TCP.
-- Same-machine clients may prefer that derived Unix socket when it is clearly available, but `server_host` and `server_port` remain the source of truth for remote-capable transport semantics and for the daemon's HTTP health/readiness surface.
+- Same-machine clients may prefer that derived Unix socket when the TCP target is still the default local attach target, but explicit `server_host` or `server_port` overrides remain authoritative. `server_host` and `server_port` stay the source of truth for remote-capable transport semantics and for the daemon's HTTP health/readiness surface.
 - The default WebSocket adapter uses `github.com/lxzan/gws` behind `shared/rpcwire`. Frontend/server code stays bound to the Builder-owned transport boundary instead of a WebSocket-library-specific API. Remaining `golang.org/x/net/websocket` imports are test fixtures only, not runtime transport code.
 - Compatibility should be established through a dedicated initial handshake method before attach or query calls.
 - Session attachment and event subscription should be separate explicit protocol steps.
