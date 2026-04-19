@@ -95,6 +95,40 @@ func TestMemoDoesNotReplayActivePrimaryRunOutcome(t *testing.T) {
 	}
 }
 
+func TestMemoDoesNotReplayGenericErrorOutcome(t *testing.T) {
+	memo := New[string, string]()
+	calls := 0
+
+	first, err := memo.Do(context.Background(), "req-1", "same", func(a string, b string) bool {
+		return a == b
+	}, func(context.Context) (string, error) {
+		calls++
+		return "", errors.New("boom")
+	})
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("first error = %v, want boom", err)
+	}
+	if first != "" {
+		t.Fatalf("first response = %q, want empty", first)
+	}
+
+	second, err := memo.Do(context.Background(), "req-1", "same", func(a string, b string) bool {
+		return a == b
+	}, func(context.Context) (string, error) {
+		calls++
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("second error = %v", err)
+	}
+	if second != "ok" {
+		t.Fatalf("second response = %q, want ok", second)
+	}
+	if calls != 2 {
+		t.Fatalf("run calls = %d, want 2", calls)
+	}
+}
+
 func TestMemoPrunesExpiredEntriesBelowCapacity(t *testing.T) {
 	memo := New[string, string]()
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)

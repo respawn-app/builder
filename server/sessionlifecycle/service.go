@@ -25,9 +25,8 @@ type Service struct {
 }
 
 type sessionTransitionMemoRequest struct {
-	SessionID         string
-	ControllerLeaseID string
-	Transition        serverapi.SessionTransition
+	SessionID  string
+	Transition serverapi.SessionTransition
 }
 
 type sessionStoreResolver interface {
@@ -98,9 +97,8 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
 	memoReq := sessionTransitionMemoRequest{
-		SessionID:         strings.TrimSpace(req.SessionID),
-		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
-		Transition:        req.Transition,
+		SessionID:  strings.TrimSpace(req.SessionID),
+		Transition: req.Transition,
 	}
 	return s.transitions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTransitionMemoRequest, func(context.Context) (serverapi.SessionResolveTransitionResponse, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
@@ -112,7 +110,6 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 
 func sameSessionTransitionMemoRequest(a sessionTransitionMemoRequest, b sessionTransitionMemoRequest) bool {
 	return a.SessionID == b.SessionID &&
-		a.ControllerLeaseID == b.ControllerLeaseID &&
 		a.Transition.Action == b.Transition.Action &&
 		a.Transition.InitialPrompt == b.Transition.InitialPrompt &&
 		a.Transition.InitialInput == b.Transition.InitialInput &&
