@@ -5,6 +5,7 @@ import (
 
 	"builder/shared/theme"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -290,6 +291,53 @@ func padANSIRight(line string, width int) string {
 		return line
 	}
 	return line + strings.Repeat(" ", width-current)
+}
+
+func truncateANSIRight(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if line == "" || lipgloss.Width(line) <= width {
+		return line
+	}
+	if width == 1 {
+		return "…"
+	}
+	parser := xansi.GetParser()
+	defer xansi.PutParser(parser)
+
+	visibleLimit := width - 1
+	if visibleLimit < 0 {
+		visibleLimit = 0
+	}
+	hasANSI := strings.Contains(line, "\x1b[")
+	state := byte(0)
+	input := line
+	consumedWidth := 0
+	var out strings.Builder
+	for len(input) > 0 {
+		seq, seqWidth, n, newState := xansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
+		if n <= 0 {
+			break
+		}
+		state = newState
+		if seqWidth == 0 {
+			out.WriteString(seq)
+			input = input[n:]
+			continue
+		}
+		if consumedWidth+seqWidth > visibleLimit {
+			break
+		}
+		out.WriteString(seq)
+		consumedWidth += seqWidth
+		input = input[n:]
+	}
+	out.WriteString("…")
+	if hasANSI {
+		out.WriteString("\x1b[0m")
+	}
+	return out.String()
 }
 
 type uiStyles struct {

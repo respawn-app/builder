@@ -3884,8 +3884,8 @@ func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
 	selected := renderProcessListEntry(clientui.BackgroundProcess{ID: "1003", State: "running", Running: true, Command: "echo selected"}, true, 120, "dark", 0, style)
 
 	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
-	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
-	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render(statusStateCircleGlyph)
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(statusStateCircleGlyph)
 
 	if !strings.Contains(running[0], runningIndicator) {
 		t.Fatalf("expected running entry to use primary spinner indicator, got %q", running[0])
@@ -3961,8 +3961,8 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 	palette := uiPalette("dark")
 	styles := uiThemeStyles("dark")
 	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
-	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
-	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render(statusStateCircleGlyph)
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(statusStateCircleGlyph)
 	dollarStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 
 	if !strings.Contains(raw, runningIndicator) {
@@ -6869,9 +6869,6 @@ func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
 			m.busy = true
 			m.activity = uiActivityRunning
 		}},
-		{name: "queued", apply: func(m *uiModel) {
-			m.activity = uiActivityQueued
-		}},
 		{name: "question", apply: func(m *uiModel) {
 			m.activity = uiActivityQuestion
 		}},
@@ -6980,9 +6977,14 @@ func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionStarted}))
 	started := next.(*uiModel)
-	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	rawLine := started.renderStatusLine(120, uiThemeStyles("dark"))
+	line := stripANSIAndTrimRight(rawLine)
 	if !strings.Contains(strings.ToLower(line), "compacting") {
 		t.Fatalf("expected compaction warning in status line, got %q", line)
+	}
+	yellowSpinner := lipgloss.NewStyle().Foreground(statusAmberColor()).Render(pendingToolSpinnerFrame(0))
+	if !strings.Contains(rawLine, yellowSpinner) {
+		t.Fatalf("expected compaction status line to render yellow spinner %q, got %q", yellowSpinner, rawLine)
 	}
 
 	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionCompleted}))
@@ -6998,9 +7000,14 @@ func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
-	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	rawLine := started.renderStatusLine(120, uiThemeStyles("dark"))
+	line := stripANSIAndTrimRight(rawLine)
 	if !strings.Contains(strings.ToLower(line), "review") {
 		t.Fatalf("expected reviewer warning in status line, got %q", line)
+	}
+	greenSpinner := lipgloss.NewStyle().Foreground(statusGreenColor()).Render(pendingToolSpinnerFrame(0))
+	if !strings.Contains(rawLine, greenSpinner) {
+		t.Fatalf("expected reviewer status line to render green spinner %q, got %q", greenSpinner, rawLine)
 	}
 
 	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerCompleted}))

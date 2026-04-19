@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
@@ -293,9 +294,17 @@ func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea
 	if frameCount <= 0 {
 		frameCount = 1
 	}
-	m.spinnerFrame = (m.spinnerFrame + 1) % frameCount
+	tickAt := msg.at
+	if tickAt.IsZero() {
+		tickAt = m.spinnerClock.anchor
+		if tickAt.IsZero() {
+			tickAt = uiAnimationNow()
+		}
+		tickAt = tickAt.Add(time.Duration(m.spinnerFrame+1) * spinnerTickInterval)
+	}
+	m.spinnerFrame = m.spinnerClock.Frame(tickAt, frameCount, spinnerTickInterval)
 	m.syncViewport()
-	return m, tickSpinner(msg.token)
+	return m, tickSpinner(msg.token, m.spinnerClock.NextDelay(tickAt, spinnerTickInterval))
 }
 
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {

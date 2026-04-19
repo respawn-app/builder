@@ -2,7 +2,6 @@ package tui
 
 import (
 	"builder/shared/transcript"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -21,12 +20,36 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	return m.flattenEntryWithMetaAndSymbol(role, text, muteText, toolMeta, "")
 }
 
+func (m Model) entryPrefix(role, symbolOverride string) string {
+	if symbolOverride != "" {
+		return symbolOverride
+	}
+	symbol := m.roleSymbol(role)
+	if symbol == "" {
+		return ""
+	}
+	return symbol + " "
+}
+
+func (m Model) entryPrefixWidth(role, symbolOverride string) int {
+	return lipgloss.Width(m.entryPrefix(role, symbolOverride))
+}
+
+func (m Model) entryContinuationPrefix(role, symbolOverride string) string {
+	return strings.Repeat(" ", max(0, m.entryPrefixWidth(role, symbolOverride)))
+}
+
+func (m Model) entryRenderWidth(role, symbolOverride string) int {
+	renderWidth := m.viewportWidth - m.entryPrefixWidth(role, symbolOverride)
+	if renderWidth < 1 {
+		return 1
+	}
+	return renderWidth
+}
+
 func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
 	text = transcriptDisplayText(role, text)
-	renderWidth := m.viewportWidth
-	if rolePrefix(role) != "" {
-		renderWidth -= 2
-	}
+	renderWidth := m.entryRenderWidth(role, symbolOverride)
 	if isThinkingRole(role) {
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
@@ -45,7 +68,7 @@ func (m Model) flattenEntryContent(role string, content transcriptRenderContent,
 		plainLines = append(plainLines, line.Text)
 	}
 	isEditedBlock := isEditedToolBlock(plainLines)
-	laidOut := m.layoutEntryContentStage(role, content)
+	laidOut := m.layoutEntryContentStage(role, content, symbolOverride)
 	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, muteText, isEditedBlock)
 	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
 	return m.attachRoleSymbolStage(role, decorated, symbolOverride)
@@ -55,7 +78,7 @@ func (m Model) flattenSingleLineShellPreview(role string, content transcriptRend
 	first, forceEllipsis := firstShellPreviewRenderLine(content)
 	plainLines := []string{first.Text}
 	isEditedBlock := isEditedToolBlock(plainLines)
-	laidOut := m.layoutEntryContentStage(role, transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: []transcriptRenderLine{first}})
+	laidOut := m.layoutEntryContentStage(role, transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: []transcriptRenderLine{first}}, symbolOverride)
 	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, true, isEditedBlock)
 	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
 	out := m.attachRoleSymbolStage(role, decorated, symbolOverride)
@@ -195,15 +218,16 @@ func (m Model) wrapEntryContentStage(content transcriptRenderContent, width int)
 	return out
 }
 
-func (m Model) layoutEntryContentStage(role string, content transcriptRenderContent) []transcriptLayoutLine {
+func (m Model) layoutEntryContentStage(role string, content transcriptRenderContent, symbolOverride string) []transcriptLayoutLine {
 	hasRoleSymbol := rolePrefix(role) != ""
+	continuationPrefix := m.entryContinuationPrefix(role, symbolOverride)
 	out := make([]transcriptLayoutLine, 0, len(content.Lines))
 	for idx, line := range content.Lines {
 		layoutLine := transcriptLayoutLine{Text: line.Text, Intents: line.Intents}
 		if idx == 0 {
 			layoutLine.ShowRoleSymbol = hasRoleSymbol
 		} else {
-			layoutLine.Prefix = "  "
+			layoutLine.Prefix = continuationPrefix
 		}
 		out = append(out, layoutLine)
 	}
@@ -285,14 +309,11 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 
 func (m Model) attachRoleSymbolStage(role string, lines []transcriptLayoutLine, symbolOverride string) []string {
 	out := make([]string, 0, len(lines))
+	prefix := m.entryPrefix(role, symbolOverride)
 	for idx, line := range lines {
 		formatted := line.Text
 		if idx == 0 && line.ShowRoleSymbol {
-			symbol := symbolOverride
-			if symbol == "" {
-				symbol = m.roleSymbol(role)
-			}
-			formatted = symbol + " " + formatted
+			formatted = prefix + formatted
 		}
 		out = append(out, formatted)
 	}
@@ -371,10 +392,7 @@ func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallM
 	if toolMeta == nil || toolMeta.PatchRender == nil {
 		return m.flattenEntryWithMeta(role, resultText, false, toolMeta)
 	}
-	renderWidth := m.viewportWidth
-	if rolePrefix(role) != "" {
-		renderWidth -= 2
-	}
+	renderWidth := m.entryRenderWidth(role, "")
 	content := transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved}
 	if diffLines, ok := m.renderDiffToolLines(toolMeta.PatchDetail, renderWidth, toolMeta); ok {
 		content.Lines = append(content.Lines, diffLines...)
@@ -400,30 +418,28 @@ func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallM
 
 func (m Model) flattenEntryPlain(role, text string) []string {
 	text = transcriptDisplayText(role, text)
-	renderWidth := m.viewportWidth
-	if rolePrefix(role) != "" {
-		renderWidth -= 2
-	}
+	renderWidth := m.entryRenderWidth(role, "")
 	chunks := splitLines(wrapTextForViewport(text, renderWidth))
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
-	symbol := m.roleSymbol(role)
+	prefix := m.entryPrefix(role, "")
+	continuationPrefix := m.entryContinuationPrefix(role, "")
 	out := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		if i == 0 {
-			if symbol == "" {
+			if prefix == "" {
 				out = append(out, chunk)
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s %s", symbol, chunk))
+			out = append(out, prefix+chunk)
 			continue
 		}
 		if strings.TrimSpace(chunk) == "" {
 			out = append(out, "")
 			continue
 		}
-		out = append(out, "  "+chunk)
+		out = append(out, continuationPrefix+chunk)
 	}
 	return out
 }

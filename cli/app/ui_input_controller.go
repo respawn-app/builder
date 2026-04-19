@@ -8,6 +8,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/llm"
+	"builder/shared/serverapi"
 
 	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,7 +18,10 @@ type uiInputController struct {
 	model *uiModel
 }
 
-var pendingToolSpinner = bubblespinner.Dot
+var pendingToolSpinner = bubblespinner.Spinner{
+	Frames: []string{"⢎ ", "⠎⠁", "⠊⠑", "⠈⠱", " ⡱", "⢀⡰", "⢄⡠", "⢆⡀"},
+	FPS:    80 * time.Millisecond,
+}
 var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 8 * time.Second
 var scheduleTransientStatusClear = func(token uint64) tea.Cmd {
@@ -36,9 +40,12 @@ func waitProcessListRefresh() tea.Cmd {
 	})
 }
 
-func tickSpinner(token uint64) tea.Cmd {
-	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
-		return spinnerTickMsg{token: token}
+func tickSpinner(token uint64, delay time.Duration) tea.Cmd {
+	if delay <= 0 {
+		delay = spinnerTickInterval
+	}
+	return tea.Tick(delay, func(now time.Time) tea.Msg {
+		return spinnerTickMsg{token: token, at: now}
 	})
 }
 
@@ -46,7 +53,7 @@ func (m *uiModel) shouldAnimateSpinner() bool {
 	if m == nil {
 		return false
 	}
-	return m.busy || m.processListHasRunningEntries()
+	return m.busy || m.reviewerRunning || m.processListHasRunningEntries()
 }
 
 func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
@@ -60,13 +67,16 @@ func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
 	if m.spinnerTickToken != 0 {
 		return nil
 	}
+	now := uiAnimationNow()
+	m.spinnerClock.Start(now)
+	m.spinnerFrame = 0
 	m.spinnerGeneration++
 	m.spinnerTickToken = m.spinnerGeneration
 	if m.spinnerTickToken == 0 {
 		m.spinnerGeneration++
 		m.spinnerTickToken = m.spinnerGeneration
 	}
-	return tickSpinner(m.spinnerTickToken)
+	return tickSpinner(m.spinnerTickToken, m.spinnerClock.NextDelay(now, spinnerTickInterval))
 }
 
 func (m *uiModel) stopSpinnerTicking() {
@@ -74,11 +84,18 @@ func (m *uiModel) stopSpinnerTicking() {
 		return
 	}
 	m.spinnerTickToken = 0
+	m.spinnerClock.Stop()
 }
 
 func formatSubmissionError(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		return "session is controlled by another client; retry to take over"
+	}
+	if errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return "lost control of this session; retry to reclaim it"
 	}
 	if formatted := llm.UserFacingError(err); strings.TrimSpace(formatted) != "" {
 		return formatted

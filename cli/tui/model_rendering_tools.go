@@ -5,7 +5,6 @@ import (
 	"builder/shared/textutil"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -113,13 +112,8 @@ func (m Model) flattenAskQuestionEntry(role, question string, suggestions []stri
 }
 
 func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool, symbolOverride string) []string {
-	renderWidth := m.viewportWidth
-	if rolePrefix(role) != "" {
-		renderWidth -= 2
-	}
-	if renderWidth < 1 {
-		renderWidth = 1
-	}
+	renderWidth := m.entryRenderWidth(role, symbolOverride)
+	continuationPrefix := m.entryContinuationPrefix(role, symbolOverride)
 
 	type askQuestionLine struct {
 		text string
@@ -169,10 +163,7 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggesti
 		lines = append(lines, askQuestionLine{text: "", kind: "question"})
 	}
 
-	symbol := symbolOverride
-	if symbol == "" {
-		symbol = m.roleSymbol(role)
-	}
+	prefix := m.entryPrefix(role, symbolOverride)
 	out := make([]string, 0, len(lines))
 	for idx, line := range lines {
 		display := line.text
@@ -189,18 +180,18 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggesti
 			}
 		}
 		if idx == 0 {
-			if symbol == "" {
+			if prefix == "" {
 				out = append(out, display)
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s %s", symbol, display))
+			out = append(out, prefix+display)
 			continue
 		}
 		if strings.TrimSpace(display) == "" {
 			out = append(out, "")
 			continue
 		}
-		out = append(out, "  "+display)
+		out = append(out, continuationPrefix+display)
 	}
 	return out
 }
