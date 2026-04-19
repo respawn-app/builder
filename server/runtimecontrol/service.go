@@ -23,30 +23,48 @@ type Service struct {
 	runtimes RuntimeResolver
 	gate     primaryrun.Gate
 	control  ControllerLeaseVerifier
-	submits  *requestmemo.Memo[userTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
-	queues   *requestmemo.Memo[userTextMemoRequest, struct{}]
-	shells   *requestmemo.Memo[submitUserShellCommandMemoRequest, struct{}]
+	submits  *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
+	queues   *requestmemo.Memo[sessionTextMemoRequest, struct{}]
+	shells   *requestmemo.Memo[sessionCommandMemoRequest, struct{}]
+
+	localEntries   *requestmemo.Memo[localEntryMemoRequest, struct{}]
+	queuedSubmits  *requestmemo.Memo[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse]
+	queuedDiscards *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse]
+	promptHistory  *requestmemo.Memo[sessionTextMemoRequest, struct{}]
 }
 
-type userTextMemoRequest struct {
-	SessionID         string
-	ControllerLeaseID string
-	Text              string
+type sessionTextMemoRequest struct {
+	SessionID string
+	Text      string
 }
 
-type submitUserShellCommandMemoRequest struct {
-	SessionID         string
-	ControllerLeaseID string
-	Command           string
+type sessionCommandMemoRequest struct {
+	SessionID string
+	Command   string
+}
+
+type sessionOnlyMemoRequest struct {
+	SessionID string
+}
+
+type localEntryMemoRequest struct {
+	SessionID string
+	Role      string
+	Text      string
 }
 
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
 	return &Service{
 		runtimes: runtimes,
 		gate:     gate,
-		submits:  requestmemo.New[userTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
-		queues:   requestmemo.New[userTextMemoRequest, struct{}](),
-		shells:   requestmemo.New[submitUserShellCommandMemoRequest, struct{}](),
+		submits:  requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
+		queues:   requestmemo.New[sessionTextMemoRequest, struct{}](),
+		shells:   requestmemo.New[sessionCommandMemoRequest, struct{}](),
+
+		localEntries:   requestmemo.New[localEntryMemoRequest, struct{}](),
+		queuedSubmits:  requestmemo.New[sessionOnlyMemoRequest, serverapi.RuntimeSubmitQueuedUserMessagesResponse](),
+		queuedDiscards: requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse](),
+		promptHistory:  requestmemo.New[sessionTextMemoRequest, struct{}](),
 	}
 }
 
@@ -162,15 +180,19 @@ func (s *Service) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeApp
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return err
-	}
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return err
-	}
-	engine.AppendLocalEntry(req.Role, req.Text)
-	return nil
+	memoReq := localEntryMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Role: strings.TrimSpace(req.Role), Text: req.Text}
+	_, err := s.localEntries.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameLocalEntryMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return struct{}{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		engine.AppendLocalEntry(req.Role, req.Text)
+		return struct{}{}, nil
+	})
+	return err
 }
 
 func (s *Service) ShouldCompactBeforeUserMessage(ctx context.Context, req serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
@@ -192,13 +214,9 @@ func (s *Service) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSu
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeSubmitUserMessageResponse{}, err
 	}
-	memoReq := userTextMemoRequest{
-		SessionID:         strings.TrimSpace(req.SessionID),
-		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
-		Text:              req.Text,
-	}
-	return s.submits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameUserTextMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitUserMessageResponse, error) {
-		if err := s.requireControllerLease(ctx, memoReq.SessionID, memoReq.ControllerLeaseID); err != nil {
+	memoReq := sessionTextMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Text: req.Text}
+	return s.submits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTextMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return serverapi.RuntimeSubmitUserMessageResponse{}, err
 		}
 		lease, err := s.acquirePrimaryRun(memoReq.SessionID)
@@ -206,7 +224,7 @@ func (s *Service) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSu
 			return serverapi.RuntimeSubmitUserMessageResponse{}, err
 		}
 		defer lease.Release()
-		engine, err := s.resolve(ctx, memoReq.SessionID)
+		engine, err := s.resolve(ctx, req.SessionID)
 		if err != nil {
 			return serverapi.RuntimeSubmitUserMessageResponse{}, err
 		}
@@ -222,13 +240,9 @@ func (s *Service) SubmitUserShellCommand(ctx context.Context, req serverapi.Runt
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	memoReq := submitUserShellCommandMemoRequest{
-		SessionID:         strings.TrimSpace(req.SessionID),
-		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
-		Command:           req.Command,
-	}
-	_, err := s.shells.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSubmitUserShellCommandMemoRequest, func(ctx context.Context) (struct{}, error) {
-		if err := s.requireControllerLease(ctx, memoReq.SessionID, memoReq.ControllerLeaseID); err != nil {
+	memoReq := sessionCommandMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Command: req.Command}
+	_, err := s.shells.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionCommandMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return struct{}{}, err
 		}
 		lease, err := s.acquirePrimaryRun(memoReq.SessionID)
@@ -236,7 +250,7 @@ func (s *Service) SubmitUserShellCommand(ctx context.Context, req serverapi.Runt
 			return struct{}{}, err
 		}
 		defer lease.Release()
-		engine, err := s.resolve(ctx, memoReq.SessionID)
+		engine, err := s.resolve(ctx, req.SessionID)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -289,23 +303,26 @@ func (s *Service) SubmitQueuedUserMessages(ctx context.Context, req serverapi.Ru
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
-	}
-	lease, err := s.acquirePrimaryRun(req.SessionID)
-	if err != nil {
-		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
-	}
-	defer lease.Release()
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
-	}
-	msg, err := engine.SubmitQueuedUserMessages(ctx)
-	if err != nil {
-		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
-	}
-	return serverapi.RuntimeSubmitQueuedUserMessagesResponse{Message: msg.Content}, nil
+	memoReq := sessionOnlyMemoRequest{SessionID: strings.TrimSpace(req.SessionID)}
+	return s.queuedSubmits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionOnlyMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
+		}
+		lease, err := s.acquirePrimaryRun(req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
+		}
+		defer lease.Release()
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
+		}
+		msg, err := engine.SubmitQueuedUserMessages(ctx)
+		if err != nil {
+			return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
+		}
+		return serverapi.RuntimeSubmitQueuedUserMessagesResponse{Message: msg.Content}, nil
+	})
 }
 
 func (s *Service) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptRequest) error {
@@ -326,16 +343,12 @@ func (s *Service) QueueUserMessage(ctx context.Context, req serverapi.RuntimeQue
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	memoReq := userTextMemoRequest{
-		SessionID:         strings.TrimSpace(req.SessionID),
-		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
-		Text:              req.Text,
-	}
-	_, err := s.queues.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameUserTextMemoRequest, func(ctx context.Context) (struct{}, error) {
-		if err := s.requireControllerLease(ctx, memoReq.SessionID, memoReq.ControllerLeaseID); err != nil {
+	memoReq := sessionTextMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Text: req.Text}
+	_, err := s.queues.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTextMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return struct{}{}, err
 		}
-		engine, err := s.resolve(ctx, memoReq.SessionID)
+		engine, err := s.resolve(ctx, req.SessionID)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -349,28 +362,35 @@ func (s *Service) DiscardQueuedUserMessagesMatching(ctx context.Context, req ser
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
-	}
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
-	}
-	return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{Discarded: engine.DiscardQueuedUserMessagesMatching(req.Text)}, nil
+	memoReq := sessionTextMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Text: req.Text}
+	return s.queuedDiscards.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTextMemoRequest, func(ctx context.Context) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
+		}
+		return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{Discarded: engine.DiscardQueuedUserMessagesMatching(req.Text)}, nil
+	})
 }
 
 func (s *Service) RecordPromptHistory(ctx context.Context, req serverapi.RuntimeRecordPromptHistoryRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return err
-	}
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return err
-	}
-	return engine.RecordPromptHistory(req.Text)
+	memoReq := sessionTextMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Text: req.Text}
+	_, err := s.promptHistory.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTextMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return struct{}{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, engine.RecordPromptHistory(req.Text)
+	})
+	return err
 }
 
 func (s *Service) acquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
@@ -380,16 +400,20 @@ func (s *Service) acquirePrimaryRun(sessionID string) (primaryrun.Lease, error) 
 	return s.gate.AcquirePrimaryRun(strings.TrimSpace(sessionID))
 }
 
-func sameUserTextMemoRequest(a userTextMemoRequest, b userTextMemoRequest) bool {
-	return a.SessionID == b.SessionID &&
-		a.ControllerLeaseID == b.ControllerLeaseID &&
-		a.Text == b.Text
+func sameSessionTextMemoRequest(a sessionTextMemoRequest, b sessionTextMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Text == b.Text
 }
 
-func sameSubmitUserShellCommandMemoRequest(a submitUserShellCommandMemoRequest, b submitUserShellCommandMemoRequest) bool {
-	return a.SessionID == b.SessionID &&
-		a.ControllerLeaseID == b.ControllerLeaseID &&
-		a.Command == b.Command
+func sameSessionCommandMemoRequest(a sessionCommandMemoRequest, b sessionCommandMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Command == b.Command
+}
+
+func sameSessionOnlyMemoRequest(a sessionOnlyMemoRequest, b sessionOnlyMemoRequest) bool {
+	return a.SessionID == b.SessionID
+}
+
+func sameLocalEntryMemoRequest(a localEntryMemoRequest, b localEntryMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Role == b.Role && a.Text == b.Text
 }
 
 var _ serverapi.RuntimeControlService = (*Service)(nil)

@@ -520,3 +520,34 @@ func TestServiceResolveTransitionRequiresControllerLease(t *testing.T) {
 		t.Fatalf("lease verifier call count after new request = %d, want 2", verifier.calls)
 	}
 }
+
+func TestServiceResolveTransitionReplaysSuccessfulRetryAfterLeaseRotation(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	service := newTestSessionLifecycleService(t.TempDir(), mgr)
+	first := serverapi.SessionResolveTransitionRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: "lease-1",
+		Transition:        serverapi.SessionTransition{Action: "logout"},
+	}
+
+	firstResp, err := service.ResolveTransition(context.Background(), first)
+	if err != nil {
+		t.Fatalf("ResolveTransition first: %v", err)
+	}
+	second := first
+	second.ControllerLeaseID = "lease-2"
+	secondResp, err := service.ResolveTransition(context.Background(), second)
+	if err != nil {
+		t.Fatalf("ResolveTransition replay after lease rotation: %v", err)
+	}
+	if secondResp != firstResp {
+		t.Fatalf("expected replay response %+v, got %+v", firstResp, secondResp)
+	}
+}

@@ -133,6 +133,30 @@ func TestServiceAnswerAskReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing
 	}
 }
 
+func TestServiceAnswerAskReplaysSuccessfulRetryAfterLeaseRotation(t *testing.T) {
+	responder := &stubPromptResponder{}
+	service := NewService(responder)
+	first := serverapi.AskAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		AskID:             "ask-1",
+		Answer:            "hello",
+	}
+
+	if err := service.AnswerAsk(context.Background(), first); err != nil {
+		t.Fatalf("AnswerAsk first: %v", err)
+	}
+	second := first
+	second.ControllerLeaseID = "lease-2"
+	if err := service.AnswerAsk(context.Background(), second); err != nil {
+		t.Fatalf("AnswerAsk replay after lease rotation: %v", err)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
 func TestServiceAnswerAskRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	responder := &stubPromptResponder{}
 	service := NewService(responder)
@@ -237,6 +261,31 @@ func TestServiceAnswerApprovalReplaysSuccessfulRetryAfterLeaseInvalidation(t *te
 	}
 	if verifier.calls != 1 {
 		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
+func TestServiceAnswerApprovalReplaysSuccessfulRetryAfterLeaseRotation(t *testing.T) {
+	responder := &stubPromptResponder{}
+	service := NewService(responder)
+	first := serverapi.ApprovalAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		ApprovalID:        "approval-1",
+		Decision:          clientui.ApprovalDecisionAllowOnce,
+		Commentary:        "looks good",
+	}
+
+	if err := service.AnswerApproval(context.Background(), first); err != nil {
+		t.Fatalf("AnswerApproval first: %v", err)
+	}
+	second := first
+	second.ControllerLeaseID = "lease-2"
+	if err := service.AnswerApproval(context.Background(), second); err != nil {
+		t.Fatalf("AnswerApproval replay after lease rotation: %v", err)
 	}
 	if responder.calls != 1 {
 		t.Fatalf("responder call count = %d, want 1", responder.calls)

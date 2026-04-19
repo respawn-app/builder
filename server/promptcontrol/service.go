@@ -27,7 +27,6 @@ type Service struct {
 
 type askAnswerMemoRequest struct {
 	SessionID            string
-	ControllerLeaseID    string
 	AskID                string
 	ErrorMessage         string
 	Answer               string
@@ -36,12 +35,11 @@ type askAnswerMemoRequest struct {
 }
 
 type approvalAnswerMemoRequest struct {
-	SessionID         string
-	ControllerLeaseID string
-	ApprovalID        string
-	ErrorMessage      string
-	Decision          clientui.ApprovalDecision
-	Commentary        string
+	SessionID    string
+	ApprovalID   string
+	ErrorMessage string
+	Decision     clientui.ApprovalDecision
+	Commentary   string
 }
 
 func NewService(prompts PendingPromptResponder) *Service {
@@ -76,7 +74,6 @@ func (s *Service) AnswerAsk(ctx context.Context, req serverapi.AskAnswerRequest)
 	}
 	memoReq := askAnswerMemoRequest{
 		SessionID:            req.SessionID,
-		ControllerLeaseID:    req.ControllerLeaseID,
 		AskID:                req.AskID,
 		ErrorMessage:         req.ErrorMessage,
 		Answer:               req.Answer,
@@ -108,12 +105,11 @@ func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnsw
 		return errors.New("prompt responder is required")
 	}
 	memoReq := approvalAnswerMemoRequest{
-		SessionID:         req.SessionID,
-		ControllerLeaseID: req.ControllerLeaseID,
-		ApprovalID:        req.ApprovalID,
-		ErrorMessage:      req.ErrorMessage,
-		Decision:          req.Decision,
-		Commentary:        req.Commentary,
+		SessionID:    req.SessionID,
+		ApprovalID:   req.ApprovalID,
+		ErrorMessage: req.ErrorMessage,
+		Decision:     req.Decision,
+		Commentary:   req.Commentary,
 	}
 	_, err := s.approvals.Do(ctx, req.ClientRequestID, memoReq, sameApprovalAnswerMemoRequest, func(ctx context.Context) (struct{}, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
@@ -135,7 +131,6 @@ func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnsw
 
 func sameAskAnswerMemoRequest(a askAnswerMemoRequest, b askAnswerMemoRequest) bool {
 	return a.SessionID == b.SessionID &&
-		a.ControllerLeaseID == b.ControllerLeaseID &&
 		a.AskID == b.AskID &&
 		a.ErrorMessage == b.ErrorMessage &&
 		a.Answer == b.Answer &&
@@ -145,7 +140,6 @@ func sameAskAnswerMemoRequest(a askAnswerMemoRequest, b askAnswerMemoRequest) bo
 
 func sameApprovalAnswerMemoRequest(a approvalAnswerMemoRequest, b approvalAnswerMemoRequest) bool {
 	return a.SessionID == b.SessionID &&
-		a.ControllerLeaseID == b.ControllerLeaseID &&
 		a.ApprovalID == b.ApprovalID &&
 		a.ErrorMessage == b.ErrorMessage &&
 		a.Decision == b.Decision &&
