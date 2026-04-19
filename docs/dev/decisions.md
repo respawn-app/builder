@@ -7,6 +7,7 @@
 - Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, mirrors the root `README.md` as the initial docs home, and uses Algolia DocSearch for site search.
 - v1 excludes MCP, plugins, and native subagent orchestration.
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
+- First-run onboarding may optionally symlink skills and slash-command roots from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout; normal runtime discovery still reads only Builder-owned directories.
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
