@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"builder/server/metadata"
 	"builder/server/registry"
@@ -245,6 +246,43 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	case <-closed:
 	default:
 		t.Fatal("expected close after ready handle release")
+	}
+}
+
+func TestReleaseSessionRuntimeClosesHandleWhenLeaseAlreadyReleasedAndWaitCanceled(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ReleaseRuntimeLease setup: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err = fixture.service.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ReleaseSessionRuntime error = %v, want context deadline exceeded", err)
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("expected closeFn to run exactly once, got %d", closed.Load())
+	}
+	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
+		t.Fatal("expected runtime handle removed after canceled wait with released lease")
 	}
 }
 

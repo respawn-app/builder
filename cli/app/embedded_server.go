@@ -325,7 +325,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
-	}, server.PromptControlClient(), leaseID)
+	}, server.PromptControlClient(), runtimeClient.controllerLeaseIDValue)
 	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {

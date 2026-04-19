@@ -219,6 +219,9 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	}
 	s.mu.Unlock()
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		if leaseErr == nil {
+			s.closeReleasedRuntimeHandle(sessionID, handle)
+		}
 		return serverapi.SessionRuntimeReleaseResponse{}, err
 	}
 	s.mu.Lock()
@@ -234,6 +237,25 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 		closeFn()
 	}
 	return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
+}
+
+func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHandle) {
+	if handle == nil {
+		return
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.handles, trimmedSessionID)
+	closeFn := current.close
+	s.mu.Unlock()
+	if closeFn != nil {
+		closeFn()
+	}
 }
 
 func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
