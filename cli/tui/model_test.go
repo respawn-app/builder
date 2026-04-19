@@ -4,10 +4,11 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/tools"
-	patchformat "builder/server/tools/patch/format"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -1175,7 +1176,7 @@ func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
 }
 
 func TestDetailExecCommandEmptyOutputRendersNoOutput(t *testing.T) {
-	def, ok := tools.DefinitionFor(tools.ToolExecCommand)
+	def, ok := tools.DefinitionFor(toolspec.ToolExecCommand)
 	if !ok {
 		t.Fatal("expected exec_command definition")
 	}
@@ -1183,7 +1184,7 @@ func TestDetailExecCommandEmptyOutputRendersNoOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal exec result: %v", err)
 	}
-	formatted := def.FormatToolResult(tools.Result{Name: tools.ToolExecCommand, Output: raw})
+	formatted := def.FormatToolResult(tools.Result{Name: toolspec.ToolExecCommand, Output: raw})
 
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
@@ -1482,7 +1483,7 @@ func TestTriggerHandoffRuntimeProjectedMetadataUsesCompactOngoingAndDetailedView
 		Kind: runtime.EventToolCallStarted,
 		ToolCall: &llm.ToolCall{
 			ID:    "call_handoff_runtime_1",
-			Name:  string(tools.ToolTriggerHandoff),
+			Name:  string(toolspec.ToolTriggerHandoff),
 			Input: json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`),
 		},
 	})
@@ -1500,7 +1501,7 @@ func TestTriggerHandoffRuntimeProjectedMetadataUsesCompactOngoingAndDetailedView
 		Kind: runtime.EventToolCallCompleted,
 		ToolResult: &tools.Result{
 			CallID: "call_handoff_runtime_1",
-			Name:   tools.ToolTriggerHandoff,
+			Name:   toolspec.ToolTriggerHandoff,
 			Output: resultBody,
 		},
 	})

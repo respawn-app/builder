@@ -53,63 +53,32 @@ func TestServicePlanSessionRegistersStoreAndReturnsPlan(t *testing.T) {
 	}
 }
 
-func TestDeduplicatingServiceReturnsSameSessionForDuplicateNewSession(t *testing.T) {
-	dedupeRegistry.entries = map[string]*dedupeEntry{}
-	stores := registry.NewSessionStoreRegistry()
+func TestServicePlanSessionDedupesForceNewSessionRequestID(t *testing.T) {
 	persistenceRoot := t.TempDir()
 	containerDir := t.TempDir()
-	inner := NewService(launch.Planner{
-		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
+	stores := registry.NewSessionStoreRegistry()
+	service := NewService(launch.Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: persistenceRoot,
+			Settings:        config.Settings{Model: "gpt-5"},
+		},
 		ContainerDir: containerDir,
 	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), inner)
 	req := serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-1",
+		ClientRequestID: "req-1",
 		Mode:            serverapi.SessionLaunchModeInteractive,
 		ForceNewSession: true,
 	}
-
 	first, err := service.PlanSession(context.Background(), req)
 	if err != nil {
-		t.Fatalf("first PlanSession: %v", err)
+		t.Fatalf("PlanSession first: %v", err)
 	}
 	second, err := service.PlanSession(context.Background(), req)
 	if err != nil {
-		t.Fatalf("second PlanSession: %v", err)
+		t.Fatalf("PlanSession second: %v", err)
 	}
 	if first.Plan.SessionID != second.Plan.SessionID {
-		t.Fatalf("duplicate session ids differ: first=%q second=%q", first.Plan.SessionID, second.Plan.SessionID)
-	}
-}
-
-func TestDeduplicatingServiceRejectsReusedRequestIDWithDifferentPayload(t *testing.T) {
-	dedupeRegistry.entries = map[string]*dedupeEntry{}
-	stores := registry.NewSessionStoreRegistry()
-	persistenceRoot := t.TempDir()
-	containerDir := t.TempDir()
-	inner := NewService(launch.Planner{
-		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
-		ContainerDir: containerDir,
-	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), inner)
-
-	_, err := service.PlanSession(context.Background(), serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-2",
-		Mode:            serverapi.SessionLaunchModeInteractive,
-		ForceNewSession: true,
-		ParentSessionID: "parent-1",
-	})
-	if err != nil {
-		t.Fatalf("first PlanSession: %v", err)
-	}
-
-	_, err = service.PlanSession(context.Background(), serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-2",
-		Mode:            serverapi.SessionLaunchModeInteractive,
-		ForceNewSession: true,
-		ParentSessionID: "parent-2",
-	})
-	if err == nil || err.Error() != "client_request_id \"dup-2\" reused with different payload" {
-		t.Fatalf("expected reused request id error, got %v", err)
+		t.Fatalf("session ids = %q and %q, want stable replay", first.Plan.SessionID, second.Plan.SessionID)
 	}
 }

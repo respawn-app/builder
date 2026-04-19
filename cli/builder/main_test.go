@@ -59,8 +59,9 @@ func TestRootCommandHelpReturnsZero(t *testing.T) {
 	if code := rootCommand([]string{"--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr.String(), "Usage of builder:") {
-		t.Fatalf("stderr = %q, want usage", stderr.String())
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder:") || !strings.Contains(got, "builder project [path]") || !strings.Contains(got, "builder project create --path <server-path> --name <project-name>") || !strings.Contains(got, "builder attach --project <project-id> <server-path>") || !strings.Contains(got, "builder rebind <old-path> <new-path>") {
+		t.Fatalf("stderr = %q, want root usage with binding commands", got)
 	}
 }
 
@@ -223,7 +224,7 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
 		t.Fatalf("unexpected base url mapping: %+v", got)
 	}
-	if !strings.Contains(stderr.String(), "Builder server ready for workspace") {
+	if !strings.Contains(stderr.String(), "Builder server started for workspace") {
 		t.Fatalf("stderr = %q, want serve startup message", stderr.String())
 	}
 	if stdout.Len() != 0 {

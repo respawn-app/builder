@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 func TestRenderSnapshots(t *testing.T) {

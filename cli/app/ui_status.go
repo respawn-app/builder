@@ -17,11 +17,11 @@ import (
 	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/llm"
-	"builder/server/metadata"
 	"builder/server/runtime"
-	"builder/server/session"
+	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"builder/shared/tokenutil"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -38,6 +38,7 @@ var statusUsagePayloadFetcher = fetchStatusUsagePayload
 type uiStatusConfig struct {
 	WorkspaceRoot   string
 	PersistenceRoot string
+	SessionViews    client.SessionViewClient
 	Settings        config.Settings
 	Source          config.SourceReport
 	AuthManager     *auth.Manager
@@ -69,6 +70,7 @@ type uiStatusRequest struct {
 	Runtime               clientui.RuntimeClient
 	WorkspaceRoot         string
 	PersistenceRoot       string
+	SessionViews          client.SessionViewClient
 	Settings              config.Settings
 	Source                config.SourceReport
 	AuthManager           *auth.Manager
@@ -233,6 +235,7 @@ func WithUIStatusConfig(statusConfig uiStatusConfig) UIOption {
 		if statusConfig.Settings.Debug {
 			m.debugMode = true
 		}
+		m.updateTranscriptDiagnosticsMode()
 		if m.statusCollector == nil {
 			m.statusCollector = defaultUIStatusCollector{}
 		}
@@ -260,6 +263,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 		Runtime:               m.engine,
 		WorkspaceRoot:         strings.TrimSpace(m.statusConfig.WorkspaceRoot),
 		PersistenceRoot:       strings.TrimSpace(m.statusConfig.PersistenceRoot),
+		SessionViews:          m.statusConfig.SessionViews,
 		Settings:              m.statusConfig.Settings,
 		Source:                m.statusConfig.Source,
 		AuthManager:           m.statusConfig.AuthManager,
@@ -280,7 +284,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 }
 
 func (c defaultUIStatusCollector) Collect(ctx context.Context, req uiStatusRequest) (uiStatusSnapshot, error) {
-	snapshot := c.CollectBase(req)
+	snapshot := enrichStatusBaseSnapshot(ctx, req, c.CollectBase(req))
 	authResult := c.CollectAuth(ctx, req, snapshot)
 	gitResult := c.CollectGit(ctx, req, snapshot)
 	envResult := c.CollectEnvironment(ctx, req, snapshot)
@@ -314,7 +318,6 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	workdir := statusWorkdir(req.WorkspaceRoot, target)
 	contextInfo := uiStatusContextInfo{ThresholdTokens: req.Settings.ContextCompactionThresholdTokens}
 	parentSessionID := ""
-	parentSessionName := ""
 	compactionCount := 0
 	if req.Runtime != nil {
 		status := req.Runtime.Status()
@@ -326,19 +329,17 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 			contextInfo.AvailableTokens = 0
 		}
 		parentSessionID = strings.TrimSpace(status.ParentSessionID)
-		parentSessionName = statusParentSessionName(req.PersistenceRoot, parentSessionID)
 		compactionCount = status.CompactionCount
 	}
 	return uiStatusSnapshot{
-		CollectedAt:       collectedAt,
-		Workdir:           filepath.ToSlash(strings.TrimSpace(workdir)),
-		SessionName:       strings.TrimSpace(req.SessionName),
-		SessionID:         strings.TrimSpace(req.SessionID),
-		ParentSessionID:   parentSessionID,
-		ParentSessionName: parentSessionName,
-		OwnsServer:        req.OwnsServer,
-		Context:           contextInfo,
-		Model:             uiStatusModelInfo{Summary: statusModelSummary(req)},
+		CollectedAt:     collectedAt,
+		Workdir:         filepath.ToSlash(strings.TrimSpace(workdir)),
+		SessionName:     strings.TrimSpace(req.SessionName),
+		SessionID:       strings.TrimSpace(req.SessionID),
+		ParentSessionID: parentSessionID,
+		OwnsServer:      req.OwnsServer,
+		Context:         contextInfo,
+		Model:           uiStatusModelInfo{Summary: statusModelSummary(req)},
 		Config: uiStatusConfigInfo{
 			SettingsPath:    filepath.ToSlash(strings.TrimSpace(req.Source.SettingsPath)),
 			OverrideSources: statusConfigOverrideSources(req.Source),
@@ -350,24 +351,40 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	}
 }
 
-func statusParentSessionName(persistenceRoot, parentSessionID string) string {
-	root := strings.TrimSpace(persistenceRoot)
-	parentID := strings.TrimSpace(parentSessionID)
-	if root == "" || parentID == "" {
-		return ""
-	}
-	store, err := session.OpenByID(root, parentID)
-	if err != nil {
-		metadataStore, metadataErr := metadata.Open(root)
-		if metadataErr == nil {
-			defer func() { _ = metadataStore.Close() }()
-			store, err = session.OpenByID(root, parentID, metadataStore.AuthoritativeSessionStoreOptions()...)
+func enrichStatusBaseSnapshot(ctx context.Context, req uiStatusRequest, snapshot uiStatusSnapshot) uiStatusSnapshot {
+	if parentSessionID := strings.TrimSpace(snapshot.ParentSessionID); parentSessionID != "" {
+		if parentSessionName, warning := statusParentSessionName(ctx, req.SessionViews, parentSessionID); strings.TrimSpace(parentSessionName) != "" {
+			snapshot.ParentSessionName = parentSessionName
+		} else if strings.TrimSpace(warning) != "" {
+			snapshot.CollectorWarning = joinStatusWarnings(snapshot.CollectorWarning, warning)
 		}
 	}
-	if err != nil {
-		return ""
+	return snapshot
+}
+
+func joinStatusWarnings(existing string, warning string) string {
+	parts := make([]string, 0, 2)
+	if trimmed := strings.TrimSpace(existing); trimmed != "" {
+		parts = append(parts, trimmed)
 	}
-	return strings.TrimSpace(store.Meta().Name)
+	if trimmed := strings.TrimSpace(warning); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func statusParentSessionName(ctx context.Context, sessionViews client.SessionViewClient, parentSessionID string) (string, string) {
+	parentID := strings.TrimSpace(parentSessionID)
+	if sessionViews == nil || parentID == "" {
+		return "", ""
+	}
+	readCtx, cancel := context.WithTimeout(ctx, uiRuntimeReadTimeout)
+	defer cancel()
+	resp, err := sessionViews.GetSessionMainView(readCtx, serverapi.SessionMainViewRequest{SessionID: parentID})
+	if err != nil {
+		return "", "parent session: " + err.Error()
+	}
+	return strings.TrimSpace(resp.MainView.Session.SessionName), ""
 }
 
 func (defaultUIStatusCollector) CollectAuth(ctx context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusAuthStageResult {
@@ -1038,8 +1055,9 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 		m.status.error = ""
 		m.status.pendingSections = nil
 		m.status.sectionWarnings = seed.Warnings
-		m.startStatusSectionRefresh(seed.PendingSections...)
-		cmds := make([]tea.Cmd, 0, len(seed.PendingSections))
+		m.startStatusSectionRefresh(append([]uiStatusSection{uiStatusSectionBase}, seed.PendingSections...)...)
+		cmds := make([]tea.Cmd, 0, len(seed.PendingSections)+1)
+		cmds = append(cmds, m.statusBaseRefreshCmd(token, request, base))
 		for _, section := range seed.PendingSections {
 			switch section {
 			case uiStatusSectionAuth:
@@ -1065,9 +1083,11 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 	}
 }
 
-func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, collector uiStatusProgressiveCollector) tea.Cmd {
+func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
-		return statusBaseRefreshDoneMsg{token: token, snapshot: collector.CollectBase(request)}
+		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
+		defer cancel()
+		return statusBaseRefreshDoneMsg{token: token, snapshot: enrichStatusBaseSnapshot(ctx, request, base)}
 	}
 }
 

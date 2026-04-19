@@ -97,23 +97,23 @@ func testRollbackEditing(m *uiModel) bool {
 	return m.rollback.isEditing()
 }
 
-func testSetRollbackSelecting(m *uiModel, selection int, selectedUserMessageIndex int) {
+func testSetRollbackSelecting(m *uiModel, selection int, selectedTranscriptEntry int) {
 	if m == nil {
 		return
 	}
 	m.rollback.phase = uiRollbackPhaseSelection
 	m.rollback.selection = selection
-	m.rollback.selectedUserMessageIndex = selectedUserMessageIndex
+	m.rollback.selectedTranscriptEntry = selectedTranscriptEntry
 	m.setInputMode(uiInputModeRollbackSelection)
 }
 
-func testSetRollbackEditing(m *uiModel, selection int, selectedUserMessageIndex int) {
+func testSetRollbackEditing(m *uiModel, selection int, selectedTranscriptEntry int) {
 	if m == nil {
 		return
 	}
 	m.rollback.phase = uiRollbackPhaseEditing
 	m.rollback.selection = selection
-	m.rollback.selectedUserMessageIndex = selectedUserMessageIndex
+	m.rollback.selectedTranscriptEntry = selectedTranscriptEntry
 	m.setInputMode(uiInputModeRollbackEdit)
 }
 

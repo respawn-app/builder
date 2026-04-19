@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/transcriptdiag"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -83,21 +85,54 @@ type runtimeMainViewRefreshedMsg struct {
 }
 
 type runtimeTranscriptRefreshedMsg struct {
-	token      uint64
-	req        clientui.TranscriptPageRequest
-	transcript clientui.TranscriptPage
-	err        error
+	token         uint64
+	req           clientui.TranscriptPageRequest
+	syncCause     runtimeTranscriptSyncCause
+	transcript    clientui.TranscriptPage
+	recoveryCause clientui.TranscriptRecoveryCause
+	err           error
 }
 
 type runtimeTranscriptRetryMsg struct {
-	token uint64
+	syncCause     runtimeTranscriptSyncCause
+	token         uint64
+	recoveryCause clientui.TranscriptRecoveryCause
 }
+
+type runtimeTranscriptSyncCause string
+
+const (
+	runtimeTranscriptSyncCauseBootstrap               runtimeTranscriptSyncCause = "bootstrap"
+	runtimeTranscriptSyncCauseCommittedConversation   runtimeTranscriptSyncCause = "committed_conversation_updated"
+	runtimeTranscriptSyncCauseCommittedGap            runtimeTranscriptSyncCause = "committed_gap"
+	runtimeTranscriptSyncCauseQueuedDrain             runtimeTranscriptSyncCause = "queued_drain"
+	runtimeTranscriptSyncCauseDirtyFollowUp           runtimeTranscriptSyncCause = "dirty_follow_up"
+	runtimeTranscriptSyncCauseContinuityRecovery      runtimeTranscriptSyncCause = "continuity_recovery"
+	runtimeTranscriptSyncCauseManualTranscriptRefresh runtimeTranscriptSyncCause = "manual_transcript_refresh"
+)
 
 type detailTranscriptLoadMsg struct{}
 
 type renderDiagnosticMsg struct {
 	diagnostic tui.RenderDiagnostic
 }
+
+type deferredProjectedTranscriptTail struct {
+	rangeStart int
+	rangeEnd   int
+	revision   int64
+	entries    []clientui.ChatEntry
+	pending    []string
+}
+
+type nativeHistoryReplayPermit uint8
+
+const (
+	nativeHistoryReplayPermitNone nativeHistoryReplayPermit = iota
+	nativeHistoryReplayPermitContinuityRecovery
+	nativeHistoryReplayPermitAuthoritativeHydrate
+	nativeHistoryReplayPermitModeRestore
+)
 
 type runLoggerDiagnosticMsg struct {
 	diagnostic runLoggerDiagnostic
@@ -174,12 +209,13 @@ type UITranscriptEntry struct {
 }
 
 type UITransition struct {
-	Action               UIAction
-	InitialPrompt        string
-	InitialInput         string
-	TargetSessionID      string
-	ForkUserMessageIndex int
-	ParentSessionID      string
+	Action                   UIAction
+	InitialPrompt            string
+	InitialInput             string
+	TargetSessionID          string
+	ForkUserMessageIndex     int
+	ForkTranscriptEntryIndex int
+	ParentSessionID          string
 }
 
 const (
@@ -211,12 +247,14 @@ func WithUILogger(logger uiLogger) UIOption {
 func WithUITranscriptDiagnostics(enabled bool) UIOption {
 	return func(m *uiModel) {
 		m.transcriptDiagnostics = enabled
+		m.updateTranscriptDiagnosticsMode()
 	}
 }
 
 func WithUIDebug(enabled bool) UIOption {
 	return func(m *uiModel) {
 		m.debugMode = enabled
+		m.updateTranscriptDiagnosticsMode()
 	}
 }
 
@@ -447,23 +485,24 @@ type uiModel struct {
 	initialTranscript []UITranscriptEntry
 	startupSubmit     string
 
-	nextSessionInitialPrompt string
-	nextSessionInitialInput  string
-	nextSessionID            string
-	nextForkUserMessageIndex int
-	nextParentSessionID      string
-	sessionName              string
-	sessionID                string
-	processList              uiProcessListState
-	helpVisible              bool
-	reasoningStatusHeader    string
-	turnQueueHook            turnQueueHook
-	statusConfig             uiStatusConfig
-	statusCollector          uiStatusCollector
-	statusRepository         uiStatusRepository
-	status                   uiStatusOverlayState
-	clipboardImagePaster     uiClipboardImagePaster
-	clipboardTextCopier      uiClipboardTextCopier
+	nextSessionInitialPrompt     string
+	nextSessionInitialInput      string
+	nextSessionID                string
+	nextForkUserMessageIndex     int
+	nextForkTranscriptEntryIndex int
+	nextParentSessionID          string
+	sessionName                  string
+	sessionID                    string
+	processList                  uiProcessListState
+	helpVisible                  bool
+	reasoningStatusHeader        string
+	turnQueueHook                turnQueueHook
+	statusConfig                 uiStatusConfig
+	statusCollector              uiStatusCollector
+	statusRepository             uiStatusRepository
+	status                       uiStatusOverlayState
+	clipboardImagePaster         uiClipboardImagePaster
+	clipboardTextCopier          uiClipboardTextCopier
 
 	transientStatus       string
 	transientStatusKind   uiStatusNoticeKind
@@ -472,39 +511,44 @@ type uiModel struct {
 	debugMode             bool
 	transcriptDiagnostics bool
 
-	transcriptEntries                  []tui.TranscriptEntry
-	transcriptBaseOffset               int
-	transcriptTotalEntries             int
-	transcriptRevision                 int64
-	runtimeDisconnected                bool
-	transcriptLiveDirty                bool
-	reasoningLiveDirty                 bool
-	detailTranscript                   uiDetailTranscriptWindow
-	runtimeMainViewToken               uint64
-	runtimeTranscriptToken             uint64
-	runtimeTranscriptRetry             uint64
-	runtimeTranscriptBusy              bool
-	runtimeTranscriptDirty             bool
-	pendingQueuedDrainAfterHydration   bool
-	queuedDrainReadyAfterHydration     bool
-	waitRuntimeEventAfterHydration     bool
-	nativeFlushedEntryCount            int
-	nativeHistoryReplayed              bool
-	nativeReplayWidth                  int
-	nativeFormatterWidth               int
-	nativeProjection                   tui.TranscriptProjection
-	nativeRenderedProjection           tui.TranscriptProjection
-	nativeRenderedSnapshot             string
-	nativeFlushSequence                uint64
-	nativeFlushedSequence              uint64
-	nativePendingFlushes               map[uint64]nativeHistoryFlushMsg
-	waitRuntimeEventAfterFlushSequence uint64
-	startupCmds                        []tea.Cmd
-	nativeLiveRegionLines              int
-	nativeLiveRegionPad                int
-	nativeStreamingActive              bool
-	nativeResizeReplayToken            uint64
-	nativeResizeReplayAt               time.Time
+	transcriptEntries                   []tui.TranscriptEntry
+	transcriptBaseOffset                int
+	transcriptTotalEntries              int
+	transcriptRevision                  int64
+	deferredCommittedTail               []deferredProjectedTranscriptTail
+	runtimeDisconnected                 bool
+	transcriptLiveDirty                 bool
+	reasoningLiveDirty                  bool
+	detailTranscript                    uiDetailTranscriptWindow
+	runtimeMainViewToken                uint64
+	runtimeTranscriptToken              uint64
+	runtimeTranscriptRetry              uint64
+	runtimeTranscriptBusy               bool
+	runtimeTranscriptDirty              bool
+	runtimeTranscriptDirtyRecoveryCause clientui.TranscriptRecoveryCause
+	pendingQueuedDrainAfterHydration    bool
+	queuedDrainReadyAfterHydration      bool
+	waitRuntimeEventAfterHydration      bool
+	nativeFlushedEntryCount             int
+	nativeHistoryReplayed               bool
+	nativeReplayWidth                   int
+	nativeFormatterWidth                int
+	nativeProjection                    tui.TranscriptProjection
+	nativeProjectionBaseOffset          int
+	nativeRenderedProjection            tui.TranscriptProjection
+	nativeRenderedBaseOffset            int
+	nativeRenderedSnapshot              string
+	nativeHistoryReplayPermit           nativeHistoryReplayPermit
+	nativeFlushSequence                 uint64
+	nativeFlushedSequence               uint64
+	nativePendingFlushes                map[uint64]nativeHistoryFlushMsg
+	waitRuntimeEventAfterFlushSequence  uint64
+	startupCmds                         []tea.Cmd
+	nativeLiveRegionLines               int
+	nativeLiveRegionPad                 int
+	nativeStreamingActive               bool
+	nativeResizeReplayToken             uint64
+	nativeResizeReplayAt                time.Time
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
@@ -527,38 +571,38 @@ func (m *uiModel) invalidateNativeResizeReplay() {
 }
 
 type rollbackCandidate struct {
-	TranscriptIndex  int
-	UserMessageIndex int
-	Text             string
+	TranscriptIndex int
+	Text            string
 }
 
 func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                   runtimeClient,
-		view:                     tui.NewModel(),
-		activity:                 uiActivityIdle,
-		runtimeEvents:            runtimeEvents,
-		askEvents:                askEvents,
-		inputCursor:              -1,
-		mainInputDraftToken:      1,
-		promptHistorySelection:   -1,
-		promptHistoryDraftCursor: -1,
-		commandRegistry:          commands.NewDefaultRegistry(),
-		exitAction:               UIActionNone,
-		theme:                    theme.Auto,
-		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
-		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		debugMode:                envFlagEnabled("BUILDER_DEBUG"),
-		transcriptDiagnostics:    envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
-		reviewerMode:             "off",
-		autoCompactionEnabled:    true,
-		conversationFreshness:    clientui.ConversationFreshnessFresh,
-		interaction:              uiInteractionState{Mode: uiInputModeMain},
-		ask:                      uiAskState{inputCursor: -1},
-		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},
-		statusRepository:         newMemoryUIStatusRepository(),
-		clipboardImagePaster:     newSystemClipboardImagePaster(),
-		clipboardTextCopier:      newSystemClipboardTextCopier(),
+		engine:                       runtimeClient,
+		view:                         tui.NewModel(),
+		activity:                     uiActivityIdle,
+		runtimeEvents:                runtimeEvents,
+		askEvents:                    askEvents,
+		inputCursor:                  -1,
+		mainInputDraftToken:          1,
+		promptHistorySelection:       -1,
+		promptHistoryDraftCursor:     -1,
+		commandRegistry:              commands.NewDefaultRegistry(),
+		exitAction:                   UIActionNone,
+		theme:                        theme.Auto,
+		tuiAlternateScreen:           config.TUIAlternateScreenAuto,
+		debugKeys:                    envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugMode:                    envFlagEnabled("BUILDER_DEBUG"),
+		transcriptDiagnostics:        envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+		nextForkTranscriptEntryIndex: -1,
+		reviewerMode:                 "off",
+		autoCompactionEnabled:        true,
+		conversationFreshness:        clientui.ConversationFreshnessFresh,
+		interaction:                  uiInteractionState{Mode: uiInputModeMain},
+		ask:                          uiAskState{inputCursor: -1},
+		rollback:                     uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
+		statusRepository:             newMemoryUIStatusRepository(),
+		clipboardImagePaster:         newSystemClipboardImagePaster(),
+		clipboardTextCopier:          newSystemClipboardTextCopier(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -567,6 +611,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		m.pathReferenceSearch = newUIPathReferenceSearch()
 		m.pathReferenceEvents = m.pathReferenceSearch.Events()
 	}
+	m.updateTranscriptDiagnosticsMode()
 	m.refreshAutocompleteFromInput()
 	if configurable, ok := m.engine.(interface{ SetConnectionStateObserver(func(error)) }); ok {
 		runtimeConnectionEvents := make(chan runtimeConnectionStateChangedMsg, 1)
@@ -591,7 +636,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		seedView := m.runtimeMainView().Session
 		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
 		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.runtimeTranscript())
-		startupNativeHistoryCmd = m.requestRuntimeTranscriptSync()
+		startupNativeHistoryCmd = m.requestRuntimeBootstrapTranscriptSync()
 		m.runtimeTranscriptBusy = false
 	} else {
 		for _, entry := range m.initialTranscript {
@@ -669,6 +714,14 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
 	flushSequenceBefore := m.nativeFlushSequence
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch", map[string]string{
+		"session_id":             strings.TrimSpace(m.sessionID),
+		"mode":                   string(m.view.Mode()),
+		"event_count":            strconv.Itoa(len(events)),
+		"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+		"wait_after_flush":       strconv.FormatUint(m.waitRuntimeEventAfterFlushSequence, 10),
+		"wait_after_hydration":   strconv.FormatBool(m.waitRuntimeEventAfterHydration),
+	}))
 	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
 	cmd := result.cmd
 	if !result.awaitsHydration {
@@ -676,10 +729,22 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	}
 	m.syncViewport()
 	if result.awaitsHydration {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_pause", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"native_flush_sequence":  strconv.FormatUint(m.nativeFlushSequence, 10),
+		}))
 		m.waitRuntimeEventAfterHydration = true
 	}
 	if m.nativeFlushSequence != flushSequenceBefore {
 		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_wait_flush", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"native_flush_sequence":  strconv.FormatUint(m.nativeFlushSequence, 10),
+		}))
 		return m, cmd
 	}
 	if result.awaitsHydration {
@@ -693,6 +758,13 @@ func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
 		return nil
 	}
 	if m.waitRuntimeEventAfterFlushSequence != 0 || m.waitRuntimeEventAfterHydration {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.wait_runtime_event_blocked", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"wait_after_flush":       strconv.FormatUint(m.waitRuntimeEventAfterFlushSequence, 10),
+			"wait_after_hydration":   strconv.FormatBool(m.waitRuntimeEventAfterHydration),
+		}))
 		return nil
 	}
 	if len(m.pendingRuntimeEvents) == 0 {
@@ -700,6 +772,12 @@ func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
 	}
 	evt := m.pendingRuntimeEvents[0]
 	m.pendingRuntimeEvents = append([]clientui.Event(nil), m.pendingRuntimeEvents[1:]...)
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.wait_runtime_event_resume_pending", map[string]string{
+		"session_id":             strings.TrimSpace(m.sessionID),
+		"mode":                   string(m.view.Mode()),
+		"kind":                   string(evt.Kind),
+		"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+	}))
 	return func() tea.Msg {
 		return runtimeEventBatchMsg{events: []clientui.Event{evt}}
 	}
@@ -775,12 +853,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowSizeKnown = true
 		m.syncViewport()
 		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
-			committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
+			committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
 			if len(committedEntries) == 0 {
 				m.resetNativeHistoryState()
 				m.nativeHistoryReplayed = true
 			} else {
-				m.rebaseNativeProjection(m.view.CommittedOngoingProjection(), len(committedEntries))
+				m.rebaseNativeProjection(committedTranscriptProjectionForApp(m.view, m.transcriptEntries), m.transcriptBaseOffset, len(committedEntries))
 			}
 		}
 		if !m.nativeHistoryReplayed {
@@ -827,6 +905,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
 	case runtimeEventBatchMsg:
 		if msg.carry != nil {
+			m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_carry", map[string]string{
+				"session_id":             strings.TrimSpace(m.sessionID),
+				"mode":                   string(m.view.Mode()),
+				"kind":                   string(msg.carry.Kind),
+				"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents) + 1),
+			}))
 			m.pendingRuntimeEvents = append([]clientui.Event{*msg.carry}, m.pendingRuntimeEvents...)
 		}
 		return m.handleRuntimeEventBatch(msg.events)
@@ -847,7 +931,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
-		cmd := m.requestRuntimeTranscriptSync()
+		cmd := m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, msg.syncCause, msg.recoveryCause)
 		m.syncViewport()
 		return m, cmd
 	case detailTranscriptLoadMsg:
@@ -1093,12 +1177,13 @@ func (m *uiModel) Close() {
 
 func (m *uiModel) Transition() UITransition {
 	return UITransition{
-		Action:               m.exitAction,
-		InitialPrompt:        m.nextSessionInitialPrompt,
-		InitialInput:         m.nextSessionInitialInput,
-		TargetSessionID:      strings.TrimSpace(m.nextSessionID),
-		ForkUserMessageIndex: m.nextForkUserMessageIndex,
-		ParentSessionID:      strings.TrimSpace(m.nextParentSessionID),
+		Action:                   m.exitAction,
+		InitialPrompt:            m.nextSessionInitialPrompt,
+		InitialInput:             m.nextSessionInitialInput,
+		TargetSessionID:          strings.TrimSpace(m.nextSessionID),
+		ForkUserMessageIndex:     m.nextForkUserMessageIndex,
+		ForkTranscriptEntryIndex: m.nextForkTranscriptEntryIndex,
+		ParentSessionID:          strings.TrimSpace(m.nextParentSessionID),
 	}
 }
 
@@ -1113,10 +1198,26 @@ func (m *uiModel) logf(format string, args ...any) {
 }
 
 func (m *uiModel) logTranscriptDiag(line string) {
-	if m == nil || !m.transcriptDiagnostics {
+	if m == nil || !m.transcriptDiagnosticsEnabled() {
 		return
 	}
 	m.logf("%s", strings.TrimSpace(line))
+}
+
+func (m *uiModel) transcriptDiagnosticsEnabled() bool {
+	if m == nil {
+		return false
+	}
+	return m.transcriptDiagnostics || transcriptdiag.EnabledForProcess(m.debugMode)
+}
+
+func (m *uiModel) updateTranscriptDiagnosticsMode() {
+	if m == nil {
+		return
+	}
+	if configurable, ok := m.engine.(interface{ SetTranscriptDiagnosticsEnabled(bool) }); ok {
+		configurable.SetTranscriptDiagnosticsEnabled(m.transcriptDiagnosticsEnabled())
+	}
 }
 
 func (m *uiModel) inputController() uiInputController {

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"builder/server/tools"
 	"builder/shared/protocol"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -87,7 +87,7 @@ type Settings struct {
 	PreSubmitCompactionLeadTokens    int
 	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
-	EnabledTools                     map[tools.ID]bool
+	EnabledTools                     map[toolspec.ID]bool
 	SkillToggles                     map[string]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
@@ -138,9 +138,9 @@ type App struct {
 
 type settingsFile map[string]any
 
-func EnabledToolIDs(v Settings) []tools.ID {
-	ids := make([]tools.ID, 0, len(v.EnabledTools))
-	for _, id := range tools.CatalogIDs() {
+func EnabledToolIDs(v Settings) []toolspec.ID {
+	ids := make([]toolspec.ID, 0, len(v.EnabledTools))
+	for _, id := range toolspec.CatalogIDs() {
 		if v.EnabledTools[id] {
 			ids = append(ids, id)
 		}

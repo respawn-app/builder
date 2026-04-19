@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"builder/server/tools"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
 )
 
 type settingsState struct {
@@ -657,7 +657,7 @@ func (toolsSetting) applyDefault(state *settingsState) {
 }
 
 func (toolsSetting) initSources(sources map[string]string) {
-	for _, id := range tools.CatalogIDs() {
+	for _, id := range toolspec.CatalogIDs() {
 		sources[toolSourceKey(id)] = "default"
 	}
 }
@@ -668,7 +668,7 @@ func (toolsSetting) applyFile(raw settingsFile, settingsPath string, state *sett
 		return err
 	}
 	for key, rawValue := range table {
-		id, valid := tools.ParseID(strings.TrimSpace(key))
+		id, valid := toolspec.ParseID(strings.TrimSpace(key))
 		if !valid {
 			return fmt.Errorf("invalid tools key in %s: %q", settingsPath, key)
 		}
@@ -692,7 +692,7 @@ func (toolsSetting) applyEnv(lookup envLookup, state *settingsState, sources map
 		return fmt.Errorf("invalid BUILDER_TOOLS: %w", err)
 	}
 	state.Settings.EnabledTools = resetEnabledToolMap(enabled)
-	for _, id := range tools.CatalogIDs() {
+	for _, id := range toolspec.CatalogIDs() {
 		sources[toolSourceKey(id)] = "env"
 	}
 	return nil
@@ -708,7 +708,7 @@ func (toolsSetting) applyCLI(opts LoadOptions, state *settingsState, sources map
 		return fmt.Errorf("invalid tools flag: %w", err)
 	}
 	state.Settings.EnabledTools = resetEnabledToolMap(enabled)
-	for _, id := range tools.CatalogIDs() {
+	for _, id := range toolspec.CatalogIDs() {
 		sources[toolSourceKey(id)] = "cli"
 	}
 	return nil
@@ -716,21 +716,21 @@ func (toolsSetting) applyCLI(opts LoadOptions, state *settingsState, sources map
 
 func (toolsSetting) registerFileKeys(tree *fileKeyTree) {
 	tree.allowDynamicChildren([]string{"tools"}, func(key string) bool {
-		_, ok := tools.ParseID(strings.TrimSpace(key))
+		_, ok := toolspec.ParseID(strings.TrimSpace(key))
 		return ok
 	})
 }
 
 func (toolsSetting) appendDefaultPayload(payload map[string]any, state settingsState) {
 	toolDefaults := map[string]bool{}
-	for _, id := range tools.CatalogIDs() {
+	for _, id := range toolspec.CatalogIDs() {
 		toolDefaults[string(id)] = state.Settings.EnabledTools[id]
 	}
 	payload["tools"] = toolDefaults
 }
 
 func (toolsSetting) appendDefaultLines(lines *[]defaultConfigLine, state settingsState) {
-	for _, id := range tools.CatalogIDs() {
+	for _, id := range toolspec.CatalogIDs() {
 		*lines = append(*lines, defaultConfigLine{
 			Path:  []string{"tools", string(id)},
 			Value: state.Settings.EnabledTools[id],
@@ -976,7 +976,7 @@ func splitSettingKey(key string) []string {
 	return strings.Split(key, ".")
 }
 
-func toolSourceKey(id tools.ID) string {
+func toolSourceKey(id toolspec.ID) string {
 	return "tools." + string(id)
 }
 
@@ -988,12 +988,12 @@ func normalizeSkillToggleKey(raw string) string {
 	return strings.ToLower(strings.Join(strings.Fields(raw), " "))
 }
 
-func defaultEnabledToolMap() map[tools.ID]bool {
-	enabled := map[tools.ID]bool{}
-	for _, id := range tools.CatalogIDs() {
+func defaultEnabledToolMap() map[toolspec.ID]bool {
+	enabled := map[toolspec.ID]bool{}
+	for _, id := range toolspec.CatalogIDs() {
 		enabled[id] = false
 	}
-	for _, id := range tools.DefaultEnabledToolIDs() {
+	for _, id := range toolspec.DefaultEnabledToolIDs() {
 		enabled[id] = true
 	}
 	return enabled

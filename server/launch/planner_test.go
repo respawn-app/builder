@@ -10,11 +10,11 @@ import (
 	"testing"
 
 	"builder/server/session"
-	"builder/server/tools"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
@@ -172,12 +172,12 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 			Model:         "base-model",
 			ThinkingLevel: "low",
 			Theme:         "dark",
-			EnabledTools: map[tools.ID]bool{
-				tools.ToolShell: true,
+			EnabledTools: map[toolspec.ID]bool{
+				toolspec.ToolShell: true,
 			},
 			Timeouts: config.Timeouts{ModelRequestSeconds: 100, ShellDefaultSeconds: 200},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "base-model",
 		WorkspaceRoot:       workspace,
 	}
@@ -209,7 +209,7 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 12 || updated.ActiveSettings.Timeouts.ShellDefaultSeconds != 34 {
 		t.Fatalf("timeouts = %+v, want 12/34", updated.ActiveSettings.Timeouts)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != tools.ToolPatch || updated.EnabledTools[1] != tools.ToolShell {
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolPatch || updated.EnabledTools[1] != toolspec.ToolShell {
 		t.Fatalf("enabled tools = %+v, want patch+shell", updated.EnabledTools)
 	}
 	if updated.ActiveSettings.OpenAIBaseURL != "http://override.local/v1" {
@@ -235,11 +235,11 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 		Store: store,
 		ActiveSettings: config.Settings{
 			Model: "gpt-5.4",
-			EnabledTools: map[tools.ID]bool{
-				tools.ToolShell: true,
+			EnabledTools: map[toolspec.ID]bool{
+				toolspec.ToolShell: true,
 			},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "gpt-5.4",
 		WorkspaceRoot:       workspace,
 	}
@@ -251,7 +251,7 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != tools.ToolMultiToolUseParallel || updated.EnabledTools[1] != tools.ToolShell {
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolMultiToolUseParallel || updated.EnabledTools[1] != toolspec.ToolShell {
 		t.Fatalf("enabled tools = %+v, want multi_tool_use_parallel+shell", updated.EnabledTools)
 	}
 }
@@ -268,11 +268,11 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 		Store: store,
 		ActiveSettings: config.Settings{
 			Model: "gpt-5.4",
-			EnabledTools: map[tools.ID]bool{
-				tools.ToolShell: true,
+			EnabledTools: map[toolspec.ID]bool{
+				toolspec.ToolShell: true,
 			},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "gpt-5.4",
 		WorkspaceRoot:       workspace,
 		Source: config.SourceReport{Sources: map[string]string{
@@ -289,7 +289,7 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("enabled tools = %+v, want shell only", updated.EnabledTools)
 	}
 	if updated.Source.Sources["tools.multi_tool_use_parallel"] != "cli" {
@@ -436,6 +436,22 @@ type stubLaunchProjectViewService struct {
 
 func (s *stubLaunchProjectViewService) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	return serverapi.ProjectListResponse{}, nil
+}
+
+func (s *stubLaunchProjectViewService) ResolveProjectPath(_ context.Context, _ serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("ResolveProjectPath should not be called in planner tests")
+}
+
+func (s *stubLaunchProjectViewService) CreateProject(_ context.Context, _ serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("CreateProject should not be called in planner tests")
+}
+
+func (s *stubLaunchProjectViewService) AttachWorkspaceToProject(_ context.Context, _ serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("AttachWorkspaceToProject should not be called in planner tests")
+}
+
+func (s *stubLaunchProjectViewService) RebindWorkspace(_ context.Context, _ serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("RebindWorkspace should not be called in planner tests")
 }
 
 func (s *stubLaunchProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {

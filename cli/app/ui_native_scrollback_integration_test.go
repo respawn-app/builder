@@ -19,6 +19,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 
@@ -114,6 +115,16 @@ type gatedRefreshRuntimeClient struct {
 	refreshOnce    sync.Once
 }
 
+type countingRuntimeClient struct {
+	inner        clientui.RuntimeClient
+	loadCalls    atomic.Int32
+	refreshCalls atomic.Int32
+}
+
+type localCompactionSummaryClient struct {
+	summary string
+}
+
 func (c *staleTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
 	if c.sessionView.SessionID == "" {
 		c.sessionView.SessionID = "session-1"
@@ -161,6 +172,85 @@ func (c *gatedRefreshRuntimeClient) RefreshTranscriptPage(req clientui.Transcrip
 	})
 	<-c.releaseRefresh
 	return c.LoadTranscriptPage(req)
+}
+
+func (c *countingRuntimeClient) MainView() clientui.RuntimeMainView { return c.inner.MainView() }
+func (c *countingRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	return c.inner.RefreshMainView()
+}
+func (c *countingRuntimeClient) Transcript() clientui.TranscriptPage { return c.inner.Transcript() }
+func (c *countingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	return c.inner.RefreshTranscript()
+}
+func (c *countingRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.refreshCalls.Add(1)
+	return c.inner.RefreshTranscriptPage(req)
+}
+func (c *countingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.loadCalls.Add(1)
+	return c.inner.LoadTranscriptPage(req)
+}
+func (c *countingRuntimeClient) Status() clientui.RuntimeStatus { return c.inner.Status() }
+func (c *countingRuntimeClient) SessionView() clientui.RuntimeSessionView {
+	return c.inner.SessionView()
+}
+func (c *countingRuntimeClient) SetSessionName(name string) error {
+	return c.inner.SetSessionName(name)
+}
+func (c *countingRuntimeClient) SetThinkingLevel(level string) error {
+	return c.inner.SetThinkingLevel(level)
+}
+func (c *countingRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
+	return c.inner.SetFastModeEnabled(enabled)
+}
+func (c *countingRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
+	return c.inner.SetReviewerEnabled(enabled)
+}
+func (c *countingRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
+	return c.inner.SetAutoCompactionEnabled(enabled)
+}
+func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
+	return c.inner.AppendLocalEntry(role, text)
+}
+func (c *countingRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
+	return c.inner.ShouldCompactBeforeUserMessage(ctx, text)
+}
+func (c *countingRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
+	return c.inner.SubmitUserMessage(ctx, text)
+}
+func (c *countingRuntimeClient) SubmitUserShellCommand(ctx context.Context, command string) error {
+	return c.inner.SubmitUserShellCommand(ctx, command)
+}
+func (c *countingRuntimeClient) CompactContext(ctx context.Context, args string) error {
+	return c.inner.CompactContext(ctx, args)
+}
+func (c *countingRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
+	return c.inner.CompactContextForPreSubmit(ctx)
+}
+func (c *countingRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }
+func (c *countingRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
+	return c.inner.SubmitQueuedUserMessages(ctx)
+}
+func (c *countingRuntimeClient) Interrupt() error             { return c.inner.Interrupt() }
+func (c *countingRuntimeClient) QueueUserMessage(text string) { c.inner.QueueUserMessage(text) }
+func (c *countingRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
+	return c.inner.DiscardQueuedUserMessagesMatching(text)
+}
+func (c *countingRuntimeClient) RecordPromptHistory(text string) error {
+	return c.inner.RecordPromptHistory(text)
+}
+func (c *countingRuntimeClient) LoadCalls() int    { return int(c.loadCalls.Load()) }
+func (c *countingRuntimeClient) RefreshCalls() int { return int(c.refreshCalls.Load()) }
+
+func (c localCompactionSummaryClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.summary, Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c localCompactionSummaryClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "test-local", SupportsResponsesAPI: false}, nil
 }
 
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
@@ -278,7 +368,7 @@ func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, 
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call-1",
-				Name:  string(tools.ToolShell),
+				Name:  string(toolspec.ToolShell),
 				Input: json.RawMessage(`{"command":"sleep 1"}`),
 				Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
 					ToolName:    "shell",
@@ -299,8 +389,8 @@ func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, 
 	}, nil
 }
 
-func (t *blockingShellTool) Name() tools.ID {
-	return tools.ToolShell
+func (t *blockingShellTool) Name() toolspec.ID {
+	return toolspec.ToolShell
 }
 
 func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
@@ -310,9 +400,9 @@ func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Resul
 	select {
 	case <-t.release:
 	case <-ctx.Done():
-		return tools.Result{CallID: c.ID, Name: tools.ToolShell, IsError: true, Output: []byte(`{"error":"context canceled"}`)}, ctx.Err()
+		return tools.Result{CallID: c.ID, Name: toolspec.ToolShell, IsError: true, Output: []byte(`{"error":"context canceled"}`)}, ctx.Err()
 	}
-	return tools.Result{CallID: c.ID, Name: tools.ToolShell, Output: []byte(`"/tmp"`)}, nil
+	return tools.Result{CallID: c.ID, Name: toolspec.ToolShell, Output: []byte(`"/tmp"`)}, nil
 }
 
 func (reviewerNoSuggestionsClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
@@ -1240,6 +1330,96 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 	}
 }
 
+func TestNativePreSubmitCompactionNoticeAppendsWithoutContinuityRecovery(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	appendTranscriptMessage(t, store, llm.RoleUser, "before compaction")
+	appendTranscriptMessage(t, store, llm.RoleAssistant, "existing answer")
+
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		localCompactionSummaryClient{summary: "condensed summary"},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model:          "gpt-5",
+			CompactionMode: "local",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	logger := &testUILogger{}
+	client := &countingRuntimeClient{inner: newUIRuntimeClient(eng)}
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(
+		client,
+		projectRuntimeEventChannel(runtimeEvents, nil, nil),
+		closedAskEvents(),
+		WithUILogger(logger),
+		WithUITranscriptDiagnostics(true),
+	)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "startup ongoing transcript visible", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "before compaction") && strings.Contains(normalized, "existing answer")
+	})
+	compactDone := make(chan error, 1)
+	go func() {
+		compactDone <- eng.CompactContextForPreSubmit(context.Background())
+	}()
+	waitForSubmitResult(t, 2*time.Second, compactDone)
+	waitForTestCondition(t, 2*time.Second, "compaction notice visible in ongoing output", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "context compacted for the 1st time")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "before compaction", "existing answer", "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice appended in ongoing scrollback, got %q", normalized)
+	}
+	joined := strings.Join(logger.lines, "\n")
+	for _, forbidden := range []string{
+		"transcript.diag.client.begin_continuity_recovery",
+		"reason=requires_hydration",
+		"transcript.diag.client.apply_page_reject",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("did not expect continuity-recovery diagnostics after compaction, found %q in %q", forbidden, joined)
+		}
+	}
+}
+
 func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 	out := &bytes.Buffer{}
 	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -1449,9 +1629,10 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}})
-	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}})
 
 	lastTranscript := ""
 	lastNormalized := ""
@@ -1491,7 +1672,7 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 		)
 	}
 
-	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call_1", Name: tools.ToolShell, Output: []byte("/tmp")}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call_1", Name: toolspec.ToolShell, Output: []byte("/tmp")}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: false}})
 
@@ -1564,13 +1745,12 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "seed")
 	})
-	baselineLoadCalls := client.LoadCalls()
-
 	runtimeEvents <- clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		StepID:              "step-1",
-		TranscriptRevision:  2,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "follow-up final unique",
@@ -1578,26 +1758,29 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 		}},
 	}
 	runtimeEvents <- clientui.Event{
-		Kind:                clientui.EventReviewerCompleted,
-		StepID:              "step-1",
-		TranscriptRevision:  3,
-		CommittedEntryCount: 3,
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran: 2 suggestions, applied.",
 		}},
 	}
 	runtimeEvents <- clientui.Event{
-		Kind:                clientui.EventConversationUpdated,
-		StepID:              "step-1",
-		TranscriptRevision:  3,
-		CommittedEntryCount: 3,
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
 	}
 
-	waitForTestCondition(t, 2*time.Second, "hydrated supervisor follow-up remains single and ordered", func() bool {
+	waitForTestCondition(t, 2*time.Second, "supervisor follow-up remains single and ordered", func() bool {
 		normalized := normalizedOutput(out.String())
-		return client.LoadCalls() > baselineLoadCalls &&
-			containsInOrder(normalized, "seed", "follow-up final unique", "Supervisor ran: 2 suggestions, applied.") &&
+		return containsInOrder(normalized, "seed", "follow-up final unique", "Supervisor ran: 2 suggestions, applied.") &&
 			strings.Count(normalized, "follow-up final unique") == 1 &&
 			strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") == 1
 	})
@@ -1623,6 +1806,75 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 	}
 	if normalized := normalizedOutput(out.String()); strings.Count(normalized, "follow-up final unique") != 1 || strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") != 1 {
 		t.Fatalf("expected follow-up assistant and reviewer status exactly once in terminal output, got %q", normalized)
+	}
+}
+
+func TestNativeProgramDoesNotReemitOverlappedTailRowsWhenAuthoritativeTailSlides(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := newProjectedStaticUIModel()
+	model.startupCmds = nil
+	model.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed"},
+		{Role: "cache_warning", Visibility: transcript.EntryVisibilityAll, Text: "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"},
+		{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. Add verification notes.", OngoingText: "Supervisor suggested:\n1. Add verification notes."},
+		{Role: "assistant", Text: "previous answer"},
+	}
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries})
+	model.runtimeTranscriptBusy = true
+	model.runtimeTranscriptToken = 1
+	model.transcriptRevision = 1
+	model.transcriptBaseOffset = 0
+	model.transcriptTotalEntries = 4
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "previous answer")
+	})
+
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		Offset:       1,
+		TotalEntries: 5,
+		Entries: []clientui.ChatEntry{
+			{Role: "cache_warning", Visibility: clientui.EntryVisibilityAll, Text: "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"},
+			{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. Add verification notes.", OngoingText: "Supervisor suggested:\n1. Add verification notes."},
+			{Role: "assistant", Text: "previous answer"},
+			{Role: "user", Text: "did you fix the actual transcript bugs, or only reporting/observability?"},
+		},
+	}})
+	waitForTestCondition(t, 2*time.Second, "sliding authoritative tail appends only newest suffix", func() bool {
+		normalized := normalizedOutput(out.String())
+		return containsInOrder(normalized, "previous answer", "did you fix the actual transcript bugs, or only reporting/observability?")
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if strings.Count(normalized, "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens") != 1 {
+		t.Fatalf("expected overlapped cache warning exactly once after sliding tail hydrate, got %q", normalized)
+	}
+	if strings.Count(normalized, "Supervisor suggested:") != 1 {
+		t.Fatalf("expected overlapped reviewer suggestions exactly once after sliding tail hydrate, got %q", normalized)
+	}
+	if strings.Count(normalized, "did you fix the actual transcript bugs, or only reporting/observability?") != 1 {
+		t.Fatalf("expected newest suffix exactly once after sliding tail hydrate, got %q", normalized)
 	}
 }
 
@@ -1881,10 +2133,11 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	runtimeEvents <- clientui.Event{
-		Kind:              clientui.EventUserMessageFlushed,
-		StepID:            "step-1",
-		UserMessage:       "say hi",
-		TranscriptEntries: []clientui.ChatEntry{{Role: "user", Text: "say hi"}},
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		UserMessage:                "say hi",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "say hi"}},
 	}
 	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"}
 
@@ -1892,6 +2145,9 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		normalized := normalizedOutput(out.String())
 		return containsInOrder(normalized, "seed", "say hi", "working")
 	})
+	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !strings.Contains(committed, "say hi") {
+		t.Fatalf("expected committed ongoing surface to retain flushed user row before later runtime events, got %q", committed)
+	}
 	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
 		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
@@ -1919,6 +2175,274 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 	}
 	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "seed", "say hi", "pwd", "done") {
 		t.Fatalf("expected realtime terminal sequence after user flush, got %q", normalized)
+	}
+}
+
+func TestNativeProgramCommittedToolStartReplacesMatchingTransientToolRowWithoutHydration(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &staleTranscriptRuntimeClient{
+		page: clientui.TranscriptPage{
+			SessionID: "session-1",
+			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+	baselineLoadCalls := client.LoadCalls()
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	runtimeEvents <- clientui.Event{
+		Kind:               clientui.EventToolCallStarted,
+		StepID:             "step-1",
+		TranscriptRevision: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call_1",
+			ToolCall:   transcriptToolCallMetaClient(&callMeta),
+		}},
+	}
+	waitForTestCondition(t, 2*time.Second, "transient tool row buffered locally", func() bool {
+		return len(model.transcriptEntries) == 2 && model.transcriptEntries[1].Transient
+	})
+	if strings.Contains(stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()), "pwd") {
+		t.Fatalf("expected transient tool row to stay out of committed ongoing surface, got %q", stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()))
+	}
+
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventToolCallStarted,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call_1",
+			ToolCall:   transcriptToolCallMetaClient(&callMeta),
+		}},
+	}
+	waitForTestCondition(t, 2*time.Second, "committed tool start upgrades transient row in transcript", func() bool {
+		return len(model.transcriptEntries) == 2 && model.transcriptEntries[1].Committed && !model.transcriptEntries[1].Transient
+	})
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventToolCallCompleted,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_result_ok",
+			Text:       "$ pwd\n/tmp",
+			ToolCallID: "call_1",
+		}},
+	}
+
+	waitForTestCondition(t, 2*time.Second, "committed tool pair visible without hydrate", func() bool {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		return strings.Contains(committed, "pwd")
+	})
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected committed tool start to avoid transcript hydrate when only replacing a matching transient row, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+	}
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !strings.Contains(committed, "pwd") {
+		t.Fatalf("expected committed tool pair in ongoing committed surface after replacement, got %q", committed)
+	}
+}
+
+func TestNativeProgramUserFlushHydratesCommittedGapWhileAssistantStreamIsLive(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &staleTranscriptRuntimeClient{
+		runtimeControlFakeClient: runtimeControlFakeClient{
+			transcript: clientui.TranscriptPage{
+				SessionID:    "session-1",
+				Revision:     1,
+				Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+				TotalEntries: 1,
+			},
+		},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     1,
+			Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+			TotalEntries: 1,
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+	baselineLoadCalls := client.LoadCalls()
+
+	runtimeEvents <- clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}
+	waitForTestCondition(t, 2*time.Second, "assistant delta visible", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "foreground done")
+	})
+	client.page = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}, {Role: "user", Text: "steered message"}},
+		TotalEntries: 2,
+	}
+
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	}
+	userFlushDeadline := time.Now().Add(2 * time.Second)
+	userFlushVisible := false
+	for time.Now().Before(userFlushDeadline) {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		if containsInOrder(committed, "seed", "steered message") {
+			userFlushVisible = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !userFlushVisible {
+		t.Fatalf("expected user flush visible after hydrate, committed=%q load_calls=%d output=%q", stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()), client.LoadCalls(), normalizedOutput(out.String()))
+	}
+	if got := len(model.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush path to avoid deferred committed tail, got %d", got)
+	}
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected contiguous user flush append to avoid transcript hydrate, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+	}
+
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "after follow-up",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}
+
+	waitForTestCondition(t, 2*time.Second, "assistant response appends after hydrated user row", func() bool {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		return containsInOrder(committed, "seed", "steered message", "after follow-up")
+	})
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected assistant response append to keep avoiding transcript hydrate, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+	}
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !containsInOrder(committed, "seed", "steered message", "after follow-up") {
+		t.Fatalf("expected hydrated committed user flush to remain visible in ongoing committed surface, got %q", committed)
+	}
+}
+
+func TestNativeProgramReviewerTerminalMessageRemainsVisibleWithoutHydration(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &staleTranscriptRuntimeClient{
+		page: clientui.TranscriptPage{
+			SessionID: "session-1",
+			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+	baselineLoadCalls := client.LoadCalls()
+
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran: no changes.",
+		}},
+	}
+
+	waitForTestCondition(t, 2*time.Second, "reviewer terminal message visible without hydrate", func() bool {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		return containsInOrder(committed, "seed", "Supervisor ran: no changes.")
+	})
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected reviewer terminal message to avoid transcript hydrate when rich committed entries already cover the tail, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
+	}
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()); !containsInOrder(committed, "seed", "Supervisor ran: no changes.") {
+		t.Fatalf("expected reviewer terminal message in ongoing committed surface, got %q", committed)
 	}
 }
 
@@ -1963,7 +2487,7 @@ func TestNativeProgramConversationRefreshHydratesCommittedTranscriptWithoutRepla
 		},
 	}
 
-	runtimeEvents <- clientui.Event{Kind: clientui.EventConversationUpdated}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventConversationUpdated, CommittedTranscriptChanged: true}
 	waitForTestCondition(t, 2*time.Second, "recovered committed transcript", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "restored after reconnect")
 	})
@@ -2108,9 +2632,10 @@ func TestQueuedFollowUpWaitsForFinalTranscriptCatchUpBeforeNativeScrollbackAppen
 	}
 
 	program.Send(runtimeEventMsg{event: clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		StepID:      "step-2",
-		UserMessage: "follow up",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-2",
+		UserMessage:                "follow up",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "follow up",
@@ -2139,7 +2664,99 @@ func TestQueuedFollowUpWaitsForFinalTranscriptCatchUpBeforeNativeScrollbackAppen
 	}
 }
 
-func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend(t *testing.T) {
+func TestQueuedFollowUpRemainsHiddenUntilFinalCatchUpThenAppendsOnceInRenderedOngoing(t *testing.T) {
+	out := &bytes.Buffer{}
+	client := &gatedRefreshRuntimeClient{
+		runtimeControlFakeClient: runtimeControlFakeClient{
+			sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries: []clientui.ChatEntry{{
+				Role:  "assistant",
+				Text:  "final answer",
+				Phase: string(llm.MessagePhaseFinal),
+			}},
+		},
+		refreshStarted: make(chan struct{}),
+		releaseRefresh: make(chan struct{}),
+	}
+	model := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	model.startupCmds = nil
+	model.busy = true
+	model.activity = uiActivityRunning
+	model.queued = []string{"follow up"}
+	model.sawAssistantDelta = true
+	model.forwardToView(tui.SetConversationMsg{Ongoing: "working"})
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "initial live assistant visible", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "working")
+	})
+
+	program.Send(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	select {
+	case <-client.refreshStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for transcript catch-up refresh to start")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if strings.Contains(stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()), "follow up") {
+		t.Fatalf("expected queued follow-up to stay out of committed ongoing transcript before final catch-up, got %q", stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot()))
+	}
+
+	close(client.releaseRefresh)
+	waitForTestCondition(t, 2*time.Second, "final answer visible before queued follow-up", func() bool {
+		committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+		return strings.Contains(committed, "final answer") && !strings.Contains(committed, "follow up")
+	})
+
+	program.Send(runtimeEventMsg{event: clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-2",
+		UserMessage:                "follow up",
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "follow up",
+		}},
+	}})
+	waitForTestCondition(t, 2*time.Second, "queued follow-up appended after final catch-up", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "final answer", "follow up")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	committed := stripANSIAndTrimRight(model.view.OngoingCommittedSnapshot())
+	if strings.Count(committed, "final answer") != 1 {
+		t.Fatalf("expected final answer exactly once in committed ongoing transcript, got %d in %q", strings.Count(committed, "final answer"), committed)
+	}
+	if strings.Count(committed, "follow up") != 1 {
+		t.Fatalf("expected queued follow-up exactly once in committed ongoing transcript, got %d in %q", strings.Count(committed, "follow up"), committed)
+	}
+	if !containsInOrder(committed, "final answer", "follow up") {
+		t.Fatalf("expected final answer before queued follow-up in rendered committed ongoing transcript, got %q", committed)
+	}
+}
+
+func TestRuntimeContinuityRecoveryReplaysOngoingScrollbackAndLaterAssistantAppend(t *testing.T) {
 	out := &bytes.Buffer{}
 	runtimeEvents := make(chan clientui.Event, 16)
 	client := &runtimeControlFakeClient{
@@ -2181,7 +2798,7 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 		return strings.Contains(normalized, "before") && strings.Contains(normalized, "working")
 	})
 
-	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, recoveryCause: clientui.TranscriptRecoveryCauseStreamGap, transcript: clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     2,
 		TotalEntries: 2,
@@ -2193,32 +2810,33 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(normalizedOutput(out.String()), "after") {
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for authoritative rewrite appended to ongoing scrollback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q busy=%t runtime_busy=%t token=%d ongoing=%q", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, model.busy, model.runtimeTranscriptBusy, model.runtimeTranscriptToken, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+			t.Fatalf("timed out waiting for continuity recovery replay appended to ongoing scrollback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q busy=%t runtime_busy=%t token=%d ongoing=%q", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, model.busy, model.runtimeTranscriptBusy, model.runtimeTranscriptToken, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if got := len(model.transcriptEntries); got != 2 {
-		t.Fatalf("expected hydration rewrite to replace transcript tail, got %d entries", got)
+		t.Fatalf("expected continuity recovery hydrate to replace transcript tail, got %d entries", got)
 	}
 	if got := model.transcriptEntries[1].Text; got != "after" {
-		t.Fatalf("expected authoritative assistant rewrite after hydration, got %q", got)
+		t.Fatalf("expected authoritative assistant tail after continuity recovery, got %q", got)
 	}
 	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
-		t.Fatalf("expected hydration rewrite to clear stale streaming text, got %q", model.view.OngoingStreamingText())
+		t.Fatalf("expected continuity recovery hydrate to clear stale streaming text, got %q", model.view.OngoingStreamingText())
 	}
 
 	program.Send(runtimeEventMsg{event: clientui.Event{
-		Kind:                clientui.EventConversationUpdated,
-		StepID:              "step-2",
-		TranscriptRevision:  3,
-		CommittedEntryCount: 3,
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-2",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "next answer",
 			Phase: string(llm.MessagePhaseFinal),
 		}},
 	}})
-	waitForTestCondition(t, 2*time.Second, "later assistant append resumes after hydration rewrite", func() bool {
+	waitForTestCondition(t, 2*time.Second, "later assistant append resumes after continuity recovery", func() bool {
 		return containsInOrder(normalizedOutput(out.String()), "after", "next answer")
 	})
 
@@ -2251,7 +2869,83 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 		t.Fatalf("expected detail mode to reflect authoritative transcript tail, got %q", detail)
 	}
 	if strings.Contains(detail, "before") {
-		t.Fatalf("expected detail mode to exclude stale assistant tail after hydration rewrite, got %q", detail)
+		t.Fatalf("expected detail mode to exclude stale assistant tail after continuity recovery, got %q", detail)
+	}
+}
+
+func TestRuntimeAuthoritativeHydrateRepairsOngoingScrollbackWithoutContinuityLoss(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &runtimeControlFakeClient{
+		sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		transcript: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     1,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "user", Text: "commit/push"},
+				{Role: "assistant", Text: "before"},
+			},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	model.startupCmds = nil
+	model.runtimeTranscriptBusy = true
+	model.runtimeTranscriptToken = 1
+	model.busy = true
+	model.activity = uiActivityRunning
+	model.sawAssistantDelta = true
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries, Ongoing: "working"})
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "initial ongoing output visible", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "before") && strings.Contains(normalized, "working")
+	})
+
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "commit/push"},
+			{Role: "assistant", Text: "after"},
+		},
+	}})
+	baselineLen := out.Len()
+	waitForTestCondition(t, 2*time.Second, "authoritative hydrate divergence status visible", func() bool {
+		return strings.Contains(stripANSIAndTrimRight(model.View()), nativeHistoryDivergenceStatusMessage)
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if strings.Contains(out.String()[baselineLen:], "\x1b[2J") {
+		t.Fatalf("did not expect ordinary authoritative hydrate divergence to clear/replay ongoing scrollback, got %q", out.String()[baselineLen:])
+	}
+	if got := stripANSIAndTrimRight(model.nativeRenderedSnapshot); !strings.Contains(got, "after") || strings.Contains(got, "before") {
+		t.Fatalf("expected authoritative hydrate divergence to rebase internal rendered snapshot, got %q", got)
+	}
+	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, "before") {
+		t.Fatalf("expected previously emitted ongoing scrollback to remain intact, got %q", normalized)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(model.View()), nativeHistoryDivergenceStatusMessage) {
+		t.Fatalf("expected authoritative hydrate divergence to surface status, got %q", stripANSIAndTrimRight(model.View()))
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func decodeStringToolOutput(t *testing.T, result tools.Result) string {
@@ -93,7 +94,7 @@ func TestShellRunsAndMergesOutput(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "echo out && echo err 1>&2"})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: tools.ToolShell, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: toolspec.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestShellAcceptsCmdAlias(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"cmd": "echo from-cmd"})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "cmd-alias", Name: tools.ToolShell, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "cmd-alias", Name: toolspec.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestShellOutputJSONDoesNotEscapeOperators(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "printf 'a => b < c & d\\n'"})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "operators", Name: tools.ToolShell, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "operators", Name: toolspec.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestShellTimeout(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "sleep 2", "timeout_seconds": 1})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: tools.ToolShell, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: toolspec.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}
@@ -409,7 +410,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -432,7 +433,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		"session_id":    1000,
 		"yield_time_ms": 2_000,
 	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: tools.ToolWriteStdin, Input: pollInput})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
 	}
@@ -470,7 +471,7 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -547,7 +548,7 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "poll-duration-exec", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "poll-duration-exec", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -561,7 +562,7 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 		"max_output_tokens": 32,
 	})
 	start := time.Now()
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "poll-duration-poll", Name: tools.ToolWriteStdin, Input: pollInput})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "poll-duration-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
@@ -601,7 +602,7 @@ func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
 		"yield_time_ms":     2_000,
 		"max_output_tokens": 10,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "fg-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "fg-trunc-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -639,7 +640,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 		"yield_time_ms":     250,
 		"max_output_tokens": 10,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-trunc-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -665,7 +666,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 		"session_id":    1000,
 		"yield_time_ms": 2_000,
 	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-trunc-2", Name: tools.ToolWriteStdin, Input: pollInput})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-trunc-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
 	}
@@ -688,7 +689,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		"tty":           true,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -709,7 +710,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		"chars":         "hello builder\n",
 		"yield_time_ms": 2_000,
 	})
-	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-2", Name: tools.ToolWriteStdin, Input: stdinInput})
+	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-2", Name: toolspec.ToolWriteStdin, Input: stdinInput})
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
 	}
@@ -745,7 +746,7 @@ func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
 		"tty":           true,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-trunc-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -759,7 +760,7 @@ func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
 		"yield_time_ms":     2_000,
 		"max_output_tokens": 10,
 	})
-	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-trunc-2", Name: tools.ToolWriteStdin, Input: stdinInput})
+	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-trunc-2", Name: toolspec.ToolWriteStdin, Input: stdinInput})
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
 	}
@@ -803,7 +804,7 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}
@@ -815,7 +816,7 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 		"session_id":    1000,
 		"yield_time_ms": 2_000,
 	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: tools.ToolWriteStdin, Input: pollInput})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
 		t.Fatalf("write_stdin call error: %v", err)
 	}
@@ -852,7 +853,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 		"login":         false,
 		"yield_time_ms": 1_500,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "eof-1", Name: tools.ToolExecCommand, Input: execInput})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "eof-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
 		t.Fatalf("exec_command call error: %v", err)
 	}

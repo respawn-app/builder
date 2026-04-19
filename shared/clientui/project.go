@@ -19,9 +19,20 @@ type ProjectSummary struct {
 	UpdatedAt    time.Time
 }
 
+type ProjectWorkspaceSummary struct {
+	WorkspaceID  string
+	DisplayName  string
+	RootPath     string
+	Availability ProjectAvailability
+	IsPrimary    bool
+	SessionCount int
+	UpdatedAt    time.Time
+}
+
 type ProjectOverview struct {
-	Project  ProjectSummary
-	Sessions []SessionSummary
+	Project    ProjectSummary
+	Workspaces []ProjectWorkspaceSummary
+	Sessions   []SessionSummary
 }
 
 type SessionSummary struct {

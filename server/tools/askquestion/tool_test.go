@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestBrokerFIFOQueue(t *testing.T) {
@@ -412,7 +413,7 @@ func TestToolCallBlocksUntilQueuedAnswerSubmitted(t *testing.T) {
 	go func() {
 		result, err := tl.Call(context.Background(), tools.Call{
 			ID:   "call-queued",
-			Name: tools.ToolAskQuestion,
+			Name: toolspec.ToolAskQuestion,
 			Input: json.RawMessage(`{
 				"question":"Pick one",
 				"suggestions":["alpha","beta"]
@@ -562,7 +563,7 @@ func TestToolCallRejectsActionField(t *testing.T) {
 	tl := NewTool(NewBroker())
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:    "call-1",
-		Name:  tools.ToolAskQuestion,
+		Name:  toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{"question":"pick one","action":{"id":"unsafe"}}`),
 	})
 	if err != nil {
@@ -589,7 +590,7 @@ func TestToolCallSerializesSelectedOptionWithFreeformAsPlainText(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-structured",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"Pick one",
 			"suggestions":["alpha","beta"],
@@ -620,7 +621,7 @@ func TestToolCallSerializesPureFreeformAsPlainText(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-freeform",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"What else?",
 			"suggestions":["alpha","beta"],
@@ -654,7 +655,7 @@ func TestToolCallAllowsFreeformOnlyWithoutRecommendedOptionIndex(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:    "call-freeform-only",
-		Name:  tools.ToolAskQuestion,
+		Name:  toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{"question":"What else?"}`),
 	})
 	if err != nil {
@@ -677,7 +678,7 @@ func TestToolCallAllowsSuggestionAskWithoutRecommendedOptionIndex(t *testing.T) 
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-missing-recommended",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"Pick one",
 			"suggestions":["alpha","beta"]
@@ -703,7 +704,7 @@ func TestToolCallIgnoresOutOfRangeRecommendedOptionIndex(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-bad-recommended",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"Pick one",
 			"suggestions":["alpha","beta"],
@@ -733,7 +734,7 @@ func TestToolCallIgnoresRecommendedIndexAfterBlankSuggestionsAreDropped(t *testi
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-bad-normalized-recommended",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"Pick one",
 			"suggestions":["", "beta"],
@@ -754,7 +755,7 @@ func TestToolCallRejectsApprovalField(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:    "call-approval",
-		Name:  tools.ToolAskQuestion,
+		Name:  toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
 	})
 	if err != nil {
@@ -778,7 +779,7 @@ func TestToolCallRejectsApprovalOptionsField(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:   "call-approval-options",
-		Name: tools.ToolAskQuestion,
+		Name: toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{
 			"question":"Approve?",
 			"approval_options":[{"decision":"allow_once","label":"Allow once"}]
@@ -808,7 +809,7 @@ func TestToolCallRejectsApprovalPayloadReturnedByHandler(t *testing.T) {
 
 	result, err := tl.Call(context.Background(), tools.Call{
 		ID:    "call-approval-payload",
-		Name:  tools.ToolAskQuestion,
+		Name:  toolspec.ToolAskQuestion,
 		Input: json.RawMessage(`{"question":"What should I do?"}`),
 	})
 	if err != nil {

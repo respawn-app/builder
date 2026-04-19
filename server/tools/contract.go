@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -47,7 +48,7 @@ type HostedToolOutput struct {
 
 type HostedCall struct {
 	ID    string
-	Name  ID
+	Name  toolspec.ID
 	Input json.RawMessage
 }
 
@@ -154,12 +155,12 @@ func (d Definition) EnablesNativeWebSearch(mode string) bool {
 	return d.contract.Runtime.NativeWebSearch && strings.EqualFold(strings.TrimSpace(mode), "native")
 }
 
-func DefinitionFor(id ID) (Definition, bool) {
+func DefinitionFor(id toolspec.ID) (Definition, bool) {
 	return definitionFor(id)
 }
 
 func definitionForToolName(toolName string) (Definition, bool) {
-	id, ok := ParseID(strings.TrimSpace(toolName))
+	id, ok := parseCatalogID(strings.TrimSpace(toolName))
 	if !ok {
 		return Definition{}, false
 	}
@@ -212,9 +213,9 @@ func FormatToolResultByName(toolName string, raw json.RawMessage, isError bool) 
 	return output
 }
 
-func DefinitionsFor(ids []ID) []Definition {
+func DefinitionsFor(ids []toolspec.ID) []Definition {
 	defs := make([]Definition, 0, len(ids))
-	seen := make(map[ID]struct{}, len(ids))
+	seen := make(map[toolspec.ID]struct{}, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
 			continue
@@ -239,18 +240,18 @@ func FilterRequestExposedDefinitions(defs []Definition, ctx RequestExposureConte
 	return out
 }
 
-func RequestExposedDefinitions(ids []ID, ctx RequestExposureContext) []Definition {
+func RequestExposedDefinitions(ids []toolspec.ID, ctx RequestExposureContext) []Definition {
 	return FilterRequestExposedDefinitions(DefinitionsFor(ids), ctx)
 }
 
-func RequestExposedDefinitionsForSession(enabled []ID, registered []Definition, ctx RequestExposureContext) []Definition {
+func RequestExposedDefinitionsForSession(enabled []toolspec.ID, registered []Definition, ctx RequestExposureContext) []Definition {
 	if len(enabled) > 0 {
 		return RequestExposedDefinitions(enabled, ctx)
 	}
 	return FilterRequestExposedDefinitions(registered, ctx)
 }
 
-func NeedsNativeWebSearch(ids []ID, mode string) bool {
+func NeedsNativeWebSearch(ids []toolspec.ID, mode string) bool {
 	for _, def := range DefinitionsFor(ids) {
 		if def.EnablesNativeWebSearch(mode) {
 			return true

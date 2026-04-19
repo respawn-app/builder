@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type writeStdinInput struct {
@@ -37,8 +38,8 @@ func NewWriteStdinTool(outputLimit int, background *Manager) *WriteStdinTool {
 	return &WriteStdinTool{outputLimit: outputLimit, background: background}
 }
 
-func (t *WriteStdinTool) Name() tools.ID {
-	return tools.ToolWriteStdin
+func (t *WriteStdinTool) Name() toolspec.ID {
+	return toolspec.ToolWriteStdin
 }
 
 func (t *WriteStdinTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

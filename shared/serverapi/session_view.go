@@ -17,12 +17,14 @@ type SessionMainViewResponse struct {
 }
 
 type SessionTranscriptPageRequest struct {
-	SessionID string                    `json:"session_id"`
-	Offset    int                       `json:"offset,omitempty"`
-	Limit     int                       `json:"limit,omitempty"`
-	Page      int                       `json:"page,omitempty"`
-	PageSize  int                       `json:"page_size,omitempty"`
-	Window    clientui.TranscriptWindow `json:"window,omitempty"`
+	SessionID                string                    `json:"session_id"`
+	Offset                   int                       `json:"offset,omitempty"`
+	Limit                    int                       `json:"limit,omitempty"`
+	Page                     int                       `json:"page,omitempty"`
+	PageSize                 int                       `json:"page_size,omitempty"`
+	Window                   clientui.TranscriptWindow `json:"window,omitempty"`
+	KnownRevision            int64                     `json:"known_revision,omitempty"`
+	KnownCommittedEntryCount int                       `json:"known_committed_entry_count,omitempty"`
 }
 
 type SessionTranscriptPageResponse struct {
@@ -73,6 +75,9 @@ func (r SessionTranscriptPageRequest) Validate() error {
 	}
 	if r.PageSize < 0 {
 		return errors.New("page_size must be >= 0")
+	}
+	if r.KnownCommittedEntryCount < 0 {
+		return errors.New("known_committed_entry_count must be >= 0")
 	}
 	return nil
 }

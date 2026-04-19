@@ -9,6 +9,47 @@ JOIN projects p ON p.id = w.project_id
 WHERE w.canonical_root_path = sqlc.arg(canonical_root_path)
 LIMIT 1;
 
+-- name: GetWorkspaceByCanonicalRoot :one
+SELECT
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM workspaces
+WHERE canonical_root_path = sqlc.arg(canonical_root_path)
+LIMIT 1;
+
+-- name: GetWorkspaceByID :one
+SELECT
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM workspaces
+WHERE id = sqlc.arg(id)
+LIMIT 1;
+
+-- name: GetWorkspaceBindingByID :one
+SELECT
+    p.id AS project_id,
+    p.display_name AS project_display_name,
+    w.id AS workspace_id,
+    w.canonical_root_path AS workspace_root
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+WHERE w.id = sqlc.arg(workspace_id)
+LIMIT 1;
+
 -- name: UpsertProject :exec
 INSERT INTO projects (
     id,
@@ -83,6 +124,39 @@ INSERT INTO workspaces (
 )
 ON CONFLICT(canonical_root_path) DO NOTHING;
 
+-- name: UpdateWorkspaceBindingCanonicalRoot :execrows
+UPDATE workspaces
+SET
+    canonical_root_path = sqlc.arg(canonical_root_path),
+    display_name = sqlc.arg(display_name),
+    availability = sqlc.arg(availability),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(id);
+
+-- name: ListWorktreesByWorkspaceID :many
+SELECT
+    id,
+    workspace_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_main,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM worktrees
+WHERE workspace_id = sqlc.arg(workspace_id)
+ORDER BY created_at_unix_ms ASC, rowid ASC;
+
+-- name: UpdateWorktreeCanonicalRoot :execrows
+UPDATE worktrees
+SET
+    canonical_root_path = sqlc.arg(canonical_root_path),
+    display_name = sqlc.arg(display_name),
+    availability = sqlc.arg(availability),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(id);
+
 -- name: UpsertSession :exec
 INSERT INTO sessions (
     id,
@@ -153,6 +227,17 @@ ON CONFLICT(id) DO UPDATE SET
     usage_state_json = excluded.usage_state_json,
     metadata_json = excluded.metadata_json;
 
+-- name: GetProjectDisplayName :one
+SELECT display_name
+FROM projects
+WHERE id = sqlc.arg(project_id)
+LIMIT 1;
+
+-- name: CountProjectWorkspaces :one
+SELECT CAST(COUNT(*) AS INTEGER) AS workspace_count
+FROM workspaces
+WHERE project_id = sqlc.arg(project_id);
+
 -- name: ListProjects :many
 SELECT
     p.id,
@@ -179,6 +264,20 @@ LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 WHERE p.id = sqlc.arg(project_id)
 GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
 LIMIT 1;
+
+-- name: ListProjectWorkspaces :many
+SELECT
+    w.id,
+    w.display_name,
+    w.canonical_root_path AS root_path,
+    w.is_primary,
+    CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
+    COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
+FROM workspaces w
+LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
+WHERE w.project_id = sqlc.arg(project_id)
+GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
+ORDER BY w.is_primary DESC, latest_activity_unix_ms DESC, w.created_at_unix_ms ASC, w.rowid ASC;
 
 -- name: ListSessionsByProject :many
 SELECT

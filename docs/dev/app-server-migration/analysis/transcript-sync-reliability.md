@@ -1,6 +1,6 @@
 # Transcript Sync Reliability
 
-Status: Phase 5 implementation checkpoint; committed-transcript recovery architecture and multi-client proof are landed
+Status: Phase 6A/6B transcript hardening landed; any further systemic reducer work is later follow-up
 
 Last updated: 2026-04-12
 
@@ -155,6 +155,9 @@ Implementation status:
   - `RuntimeClient.Transcript()` / `RefreshTranscript()`
   - transcript revision sourced from persisted session `last_sequence`
   - CLI transcript convergence through transcript reads rather than `MainView`
+  - synthetic stream-gap recovery now carries an explicit continuity-loss cause through hydrate and retry paths
+  - TUI normal-buffer replay is now restricted to explicit external continuity-loss recovery, not same-session transcript divergence
+  - same-session non-append divergence no longer clears/replays scrollback; debug mode panics and normal mode logs the fault while rebasing the local append baseline
 - not landed yet:
   - detail-mode pagination UX
   - revision-aware incremental fetch instead of full-page hydrate in the CLI
@@ -212,8 +215,7 @@ The current checkpoint implements items 1-4 on top of `session.getTranscriptPage
 
 ## Planned Follow-up Work
 
-- Phase 6A: remove remaining code/docs/tests that still describe compaction or rollback as same-session transcript rewrite behavior
-- Phase 6B: eliminate Category A root-cause bugs in transcript reconciliation instead of normalizing them with redraw/rebuild behavior
+- if further transcript consistency issues appear, treat them as post-Phase-6 follow-up rather than re-opening the shipped 6B scope
 - keep targeted logging for `session_activity` gap, hydrate failure, hydrate retry, successful transcript repair, and committed revision advance
 - keep treating authoritative transcript hydration as the repair primitive for Category C continuity loss
 

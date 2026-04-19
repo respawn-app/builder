@@ -7,6 +7,7 @@ import (
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	"builder/shared/toolspec"
 )
 
 func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
@@ -17,7 +18,7 @@ func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
 			entries = append(entries, entry)
 		}
 	case llm.RoleAssistant:
-		if strings.TrimSpace(msg.Content) != "" {
+		if strings.TrimSpace(msg.Content) != "" && !isNoopFinalAnswer(msg) {
 			entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 		}
 		for _, call := range msg.ToolCalls {
@@ -27,11 +28,11 @@ func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
 		callID := strings.TrimSpace(msg.ToolCallID)
 		result := tools.Result{
 			CallID: callID,
-			Name:   tools.ID(strings.TrimSpace(msg.Name)),
+			Name:   toolspec.ID(strings.TrimSpace(msg.Name)),
 			Output: []byte(msg.Content),
 		}
 		if result.Name == "" {
-			result.Name = tools.ID("tool")
+			result.Name = toolspec.ID("tool")
 		}
 		entries = append(entries, toolResultChatEntry(result))
 	case llm.RoleDeveloper:
@@ -63,24 +64,14 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 		}
 		return []ChatEntry{toolResultChatEntry(*evt.ToolResult)}
 	case EventReviewerCompleted:
-		if evt.Reviewer == nil {
-			return nil
-		}
-		return []ChatEntry{{Role: "reviewer_status", Text: reviewerStatusText(*evt.Reviewer, nil)}}
+		// Reviewer completion remains a runtime-status event only.
+		// Persisted reviewer terminal rows must arrive through local_entry_added
+		// so the client has exactly one committed transcript source.
+		return nil
 	case EventCompactionCompleted:
-		if evt.Compaction == nil {
-			return nil
-		}
-		return []ChatEntry{{Role: "compaction_notice", Text: fmt.Sprintf("context compacted for the %s time", ordinal(evt.Compaction.Count))}}
+		return nil
 	case EventCompactionFailed:
-		if evt.Compaction == nil {
-			return nil
-		}
-		message := fmt.Sprintf("Context compaction failed (%s): %s", evt.Compaction.Mode, evt.Compaction.Error)
-		if strings.TrimSpace(evt.Compaction.Error) == "" {
-			message = fmt.Sprintf("Context compaction failed (%s).", evt.Compaction.Mode)
-		}
-		return []ChatEntry{{Role: "error", Text: message}}
+		return nil
 	case EventInFlightClearFailed:
 		if strings.TrimSpace(evt.Error) == "" {
 			return nil
