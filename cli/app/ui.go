@@ -332,6 +332,13 @@ func WithUICommandRegistry(registry *commands.Registry) UIOption {
 	}
 }
 
+func WithUIHasOtherSessions(known bool, available bool) UIOption {
+	return func(m *uiModel) {
+		m.hasOtherSessionsKnown = known
+		m.hasOtherSessions = available
+	}
+}
+
 func WithUIStartupSubmit(text string) UIOption {
 	return func(m *uiModel) {
 		m.startupSubmit = text
@@ -461,6 +468,8 @@ type uiModel struct {
 	spinnerGeneration     uint64
 	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry
+	hasOtherSessions      bool
+	hasOtherSessionsKnown bool
 	slashCommandFilter    string
 	slashCommandFilterSet bool
 	slashCommandSelection int
@@ -1241,9 +1250,7 @@ func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNotice
 	token := m.transientStatusToken
 	m.transientStatus = strings.TrimSpace(message)
 	m.transientStatusKind = kind
-	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
-		return clearTransientStatusMsg{token: token}
-	})
+	return scheduleTransientStatusClear(token)
 }
 
 func batchCmds(cmds ...tea.Cmd) tea.Cmd {

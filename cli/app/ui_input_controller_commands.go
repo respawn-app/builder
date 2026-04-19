@@ -38,8 +38,7 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		m.exitAction = UIActionNewSession
 		return m, tea.Quit
 	case commands.ActionResume:
-		m.exitAction = UIActionResume
-		return m, tea.Quit
+		return c.handleResumeCommand()
 	case commands.ActionBack:
 		return c.handleBackCommand()
 	case commands.ActionLogout:
@@ -74,6 +73,18 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		return c.handleCopyCommand()
 	}
 	return m, nil
+}
+
+const resumeCommandUnavailableMessage = "No other sessions available"
+
+func (c uiInputController) handleResumeCommand() (tea.Model, tea.Cmd) {
+	m := c.model
+	if !m.resumeCommandAvailable() {
+		m.appendLocalEntry("error", resumeCommandUnavailableMessage)
+		return m, c.showErrorStatus(resumeCommandUnavailableMessage)
+	}
+	m.exitAction = UIActionResume
+	return m, tea.Quit
 }
 
 func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {

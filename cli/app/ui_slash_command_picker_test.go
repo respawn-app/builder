@@ -118,6 +118,41 @@ func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerHidesResumeWithoutOtherSessions(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIHasOtherSessions(true, false))
+	m.input = "/re"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if slashPickerContainsCommand(state, "resume") {
+		t.Fatalf("did not expect /resume without other sessions, got %+v", slashPickerCommandNames(state))
+	}
+}
+
+func TestResumeSlashCommandShowsErrorWithoutOtherSessions(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIHasOtherSessions(true, false))
+	m.input = "/resume"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status cmd for unavailable /resume")
+	}
+	if updated.Action() != UIActionNone {
+		t.Fatalf("did not expect session transition action, got %q", updated.Action())
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared for unavailable /resume, got %q", updated.input)
+	}
+	if !strings.Contains(updated.transientStatus, resumeCommandUnavailableMessage) {
+		t.Fatalf("expected unavailable /resume status, got %q", updated.transientStatus)
+	}
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, resumeCommandUnavailableMessage) {
+		t.Fatalf("expected unavailable /resume status line, got %q", status)
+	}
+}
+
 func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T) {
 	hidden := newProjectedStaticUIModel()
 	hidden.input = "/co"

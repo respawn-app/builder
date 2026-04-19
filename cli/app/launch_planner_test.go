@@ -148,8 +148,48 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	if !plan.SelectedViaPicker {
 		t.Fatal("expected picker-selected session to be marked as selected via picker")
 	}
+	if !plan.HasOtherSessionsKnown {
+		t.Fatal("expected other-session availability to be known")
+	}
+	if !plan.HasOtherSessions {
+		t.Fatal("expected selected session to report other sessions available")
+	}
 	if comparableWorkspaceChangeRoot(plan.SelectedSessionWorkspaceRoot) != comparableWorkspaceChangeRoot(cfg.WorkspaceRoot) {
 		t.Fatalf("expected selected session workspace root %q, got %q", comparableWorkspaceChangeRoot(cfg.WorkspaceRoot), comparableWorkspaceChangeRoot(plan.SelectedSessionWorkspaceRoot))
+	}
+}
+
+func TestSessionLaunchPlannerMarksNoOtherSessionsForDirectSingleSessionResume(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	binding := mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	single := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	planner := newSessionLaunchPlanner(&testEmbeddedServer{
+		cfg: config.App{
+			WorkspaceRoot:   cfg.WorkspaceRoot,
+			PersistenceRoot: cfg.PersistenceRoot,
+			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+		},
+		containerDir: containerDir,
+	})
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: single.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if !plan.HasOtherSessionsKnown {
+		t.Fatal("expected other-session availability to be known")
+	}
+	if plan.HasOtherSessions {
+		t.Fatal("did not expect other sessions for single-session project")
 	}
 }
 
