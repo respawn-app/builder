@@ -168,6 +168,10 @@ func selectSingleRemoteWorkspaceForHeadless(ctx context.Context, projectViews cl
 			return remoteWorkspaceSelection{}, false, err
 		}
 		for _, workspace := range overview.Overview.Workspaces {
+			availability := strings.TrimSpace(string(workspace.Availability))
+			if availability != "" && workspace.Availability != clientui.ProjectAvailabilityAvailable {
+				continue
+			}
 			count++
 			selection = remoteWorkspaceSelection{ProjectID: project.ProjectID, WorkspaceID: workspace.WorkspaceID}
 			if count > 1 {

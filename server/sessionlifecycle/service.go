@@ -47,10 +47,14 @@ func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) 
 }
 
 func (s *Service) requireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
-	if s == nil || s.controller == nil || strings.TrimSpace(sessionID) == "" {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
 		return nil
 	}
-	return s.controller.RequireControllerLease(ctx, sessionID, leaseID)
+	if s == nil || s.controller == nil {
+		return serverapi.ErrInvalidControllerLease
+	}
+	return s.controller.RequireControllerLease(ctx, trimmedSessionID, strings.TrimSpace(leaseID))
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {

@@ -53,26 +53,33 @@ func (s *Service) CompleteBootstrap(ctx context.Context, req serverapi.AuthCompl
 	if s == nil || s.manager == nil {
 		return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
 	}
+	ready, err := s.authReady(ctx)
+	if err != nil {
+		return serverapi.AuthCompleteBootstrapResponse{}, err
+	}
+	if ready {
+		return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
+	}
 	var (
-		method auth.Method
-		err    error
+		method      auth.Method
+		completeErr error
 	)
 	switch req.Mode {
 	case serverapi.AuthBootstrapModeAPIKey:
 		method = auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: strings.TrimSpace(req.APIKey)}}
 	case serverapi.AuthBootstrapModeBrowserCallbackURL, serverapi.AuthBootstrapModeBrowserCallbackCode:
-		method, err = auth.CompleteOpenAIBrowserFlow(ctx, s.oauthOptions, auth.BrowserAuthSession{
+		method, completeErr = auth.CompleteOpenAIBrowserFlow(ctx, s.oauthOptions, auth.BrowserAuthSession{
 			RedirectURI:  strings.TrimSpace(req.RedirectURI),
 			State:        strings.TrimSpace(req.OAuthState),
 			CodeVerifier: strings.TrimSpace(req.OAuthCodeVerifier),
 		}, req.CallbackInput)
 	case serverapi.AuthBootstrapModeDeviceCode:
-		method, err = auth.CompleteOpenAIDeviceAuthorizationGrant(ctx, s.oauthOptions, strings.TrimSpace(req.DeviceAuthorizationCode), strings.TrimSpace(req.DeviceCodeVerifier))
+		method, completeErr = auth.CompleteOpenAIDeviceAuthorizationGrant(ctx, s.oauthOptions, strings.TrimSpace(req.DeviceAuthorizationCode), strings.TrimSpace(req.DeviceCodeVerifier))
 	default:
 		return serverapi.AuthCompleteBootstrapResponse{}, req.Validate()
 	}
-	if err != nil {
-		return serverapi.AuthCompleteBootstrapResponse{}, err
+	if completeErr != nil {
+		return serverapi.AuthCompleteBootstrapResponse{}, completeErr
 	}
 	state, err := s.manager.SwitchMethodAndSetEnvAPIKeyPreference(ctx, method, auth.EnvAPIKeyPreferencePreferSaved, true, true)
 	if err != nil {

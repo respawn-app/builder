@@ -67,6 +67,12 @@ type testEmbeddedServer struct {
 	reauthenticate       func(ctx context.Context, interactor authInteractor) error
 }
 
+type noopEmbeddedSessionLifecycleLeaseVerifier struct{}
+
+func (noopEmbeddedSessionLifecycleLeaseVerifier) RequireControllerLease(context.Context, string, string) error {
+	return nil
+}
+
 type noOpSessionActivitySubscription struct{}
 
 func (noOpSessionActivitySubscription) Next(context.Context) (clientui.Event, error) {
@@ -303,12 +309,13 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 		return s.sessionLifecycle
 	}
 	if metadataStore, binding, ok := s.metadataBinding(); ok {
-		return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(
+		service := sessionlifecycle.NewService(
 			config.ProjectSessionsRoot(s.cfg, binding.ProjectID),
 			s.sessionStoreRegistry(),
 			s.authManager,
 			metadataStore.AuthoritativeSessionStoreOptions()...,
-		))
+		).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
+		return client.NewLoopbackSessionLifecycleClient(service)
 	}
 	containerDir := strings.TrimSpace(s.containerDir)
 	if containerDir == "" {
@@ -318,7 +325,8 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 		}
 		containerDir = resolvedContainerDir
 	}
-	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager))
+	service := sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
+	return client.NewLoopbackSessionLifecycleClient(service)
 }
 func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient {
 	return s.sessionRuntime

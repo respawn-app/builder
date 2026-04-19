@@ -18,6 +18,8 @@ import (
 )
 
 var bindingCommandRPCTimeout = 5 * time.Second
+var bindingCommandRemoteOpener = openBindingCommandRemote
+var bindingCommandWorkspaceResolver = resolveWorkspaceBinding
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 {
@@ -154,16 +156,16 @@ func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func projectIDForPath(ctx context.Context, path string) (string, error) {
-	_, remote, err := openBindingCommandRemote(ctx, ".")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = remote.Close() }()
 	targetPath, err := normalizeBindingCommandPath(path)
 	if err != nil {
 		return "", err
 	}
-	binding, err := resolveWorkspaceBinding(ctx, remote, targetPath)
+	_, remote, err := bindingCommandRemoteOpener(ctx, targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = remote.Close() }()
+	binding, err := bindingCommandWorkspaceResolver(ctx, remote, targetPath)
 	if err != nil {
 		return "", err
 	}
@@ -171,14 +173,14 @@ func projectIDForPath(ctx context.Context, path string) (string, error) {
 }
 
 func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath string) (string, error) {
-	sourceCfg, remote, err := openBindingCommandRemote(ctx, ".")
+	sourceCfg, remote, err := bindingCommandRemoteOpener(ctx, ".")
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = remote.Close() }()
 	projectID := strings.TrimSpace(explicitProjectID)
 	if projectID == "" {
-		sourceBinding, err := resolveWorkspaceBinding(ctx, remote, sourceCfg.WorkspaceRoot)
+		sourceBinding, err := bindingCommandWorkspaceResolver(ctx, remote, sourceCfg.WorkspaceRoot)
 		if err != nil {
 			return "", fmt.Errorf("%w: current workspace is not attached to a project; run `builder project` in a workspace that already belongs to the target project or pass --project <project-id>", err)
 		}
@@ -224,7 +226,7 @@ func rebindWorkspaceWithTimeout(ctx context.Context, remote client.ProjectViewCl
 }
 
 func listProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
-	_, remote, err := openBindingCommandRemote(ctx, ".")
+	_, remote, err := bindingCommandRemoteOpener(ctx, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +247,7 @@ func createProject(ctx context.Context, displayName string, workspaceRoot string
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}
-	_, remote, err := openBindingCommandRemote(ctx, ".")
+	_, remote, err := bindingCommandRemoteOpener(ctx, ".")
 	if err != nil {
 		return serverapi.ProjectBinding{}, err
 	}

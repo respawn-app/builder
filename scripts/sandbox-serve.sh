@@ -39,9 +39,9 @@ Options:
   --workspace-root PATH   Absolute container workspace path.
                           Default: /workspace/builder
   --project-name NAME     Server-side project display name. Default: builder
-  --config-seed PATH      Host config.toml copied once into sandbox /root/.builder/
+  --config-seed PATH      Host config.toml copied once into sandbox /home/builder/.builder/
                           Default: $HOME/.builder/config.toml
-  --auth-seed PATH        Host auth.json copied once into sandbox /root/.builder/
+  --auth-seed PATH        Host auth.json copied once into sandbox /home/builder/.builder/
                           Default: $HOME/.builder/auth.json
   --workspace-volume VOL  Named volume for sandbox workspace.
                           Default: <name>-workspace
@@ -193,7 +193,7 @@ collect_container_env() {
 	for key in OPENAI_API_KEY BUILDER_OAUTH_CLIENT_ID BUILDER_PROVIDER_OVERRIDE BUILDER_OPENAI_BASE_URL; do
 		value="${!key:-}"
 		if [ -n "$value" ]; then
-			container_env+=("-e" "${key}=${value}")
+			container_env+=("-e" "${key}")
 		fi
 	done
 }
@@ -245,11 +245,11 @@ run_up() {
 		-e "SANDBOX_WORKSPACE_ROOT=${workspace_root}" \
 		-e "SANDBOX_SEED_ROOT=/opt/builder-sandbox-seed" \
 		-e "SANDBOX_PROJECT_NAME=${project_name}" \
-		-e "HOME=/root" \
+		-e "HOME=/home/builder" \
 		"${container_env[@]}" \
 		"${seed_mounts[@]}" \
 		-v "${workspace_volume}:${workspace_root}" \
-		-v "${home_volume}:/root" \
+		-v "${home_volume}:/home/builder" \
 		"$image_tag" \
 		"${serve_args[@]}"
 	wait_for_ready

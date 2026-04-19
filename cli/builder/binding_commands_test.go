@@ -17,6 +17,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
+	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
@@ -233,6 +234,43 @@ func TestProjectSubcommandTreatsNestedDirectoryAsUnregistered(t *testing.T) {
 	}
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("workspace is not registered")) {
 		t.Fatalf("stderr = %q, want unregistered error", got)
+	}
+}
+
+func TestProjectIDForPathUsesTargetPathServerConfig(t *testing.T) {
+	originalOpener := bindingCommandRemoteOpener
+	originalResolver := bindingCommandWorkspaceResolver
+	t.Cleanup(func() {
+		bindingCommandRemoteOpener = originalOpener
+		bindingCommandWorkspaceResolver = originalResolver
+	})
+
+	target := t.TempDir()
+	normalizedTarget, err := normalizeBindingCommandPath(target)
+	if err != nil {
+		t.Fatalf("normalizeBindingCommandPath: %v", err)
+	}
+	calledPath := ""
+	bindingCommandRemoteOpener = func(ctx context.Context, path string) (config.App, *client.Remote, error) {
+		calledPath = path
+		return config.App{}, &client.Remote{}, nil
+	}
+	bindingCommandWorkspaceResolver = func(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (serverapi.ProjectBinding, error) {
+		if workspaceRoot != normalizedTarget {
+			t.Fatalf("workspace root = %q, want %q", workspaceRoot, normalizedTarget)
+		}
+		return serverapi.ProjectBinding{ProjectID: "project-target"}, nil
+	}
+
+	projectID, err := projectIDForPath(context.Background(), target)
+	if err != nil {
+		t.Fatalf("projectIDForPath target: %v", err)
+	}
+	if calledPath != normalizedTarget {
+		t.Fatalf("openBindingCommandRemote path = %q, want %q", calledPath, normalizedTarget)
+	}
+	if projectID != "project-target" {
+		t.Fatalf("project id = %q, want project-target", projectID)
 	}
 }
 

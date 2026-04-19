@@ -1823,6 +1823,41 @@ func TestApplyRuntimeTranscriptPageAcceptsSameRevisionEmptyOngoingWhenPageCommit
 	}
 }
 
+func TestApplyRuntimeTranscriptPageRejectsSameRevisionEmptyOngoingWhenOnlyOlderAssistantMatchesLiveText(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done"}, {Role: "assistant", Text: "different"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "done"})
+	m.sawAssistantDelta = true
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "done", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "assistant", Text: "different", Phase: string(llm.MessagePhaseFinal)},
+		},
+		Ongoing: "",
+	}
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+	if got := m.view.OngoingStreamingText(); got != "done" {
+		t.Fatalf("expected same-revision authoritative page to preserve live ongoing when only older assistant matches, got %q", got)
+	}
+	if !m.sawAssistantDelta {
+		t.Fatal("expected stale page rejection to preserve assistant delta flag")
+	}
+	if cmd != nil {
+		t.Fatalf("expected no native sync command on stale ongoing clear rejection, got %T", cmd)
+	}
+}
+
 func TestInvalidateTransientTranscriptStateClearsDeferredCommittedTail(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{rangeStart: 1, rangeEnd: 2, revision: 7, entries: []clientui.ChatEntry{{Role: "user", Text: "queued"}}}}

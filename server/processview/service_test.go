@@ -202,6 +202,19 @@ func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
 	}
 }
 
+func TestServiceKillProcessHonorsCanceledContext(t *testing.T) {
+	source := &stubKillProcessSource{}
+	svc := NewService(source)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := svc.KillProcess(ctx, serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}); err != context.Canceled {
+		t.Fatalf("KillProcess error = %v, want context canceled", err)
+	}
+	if source.killCalls != 0 {
+		t.Fatalf("kill call count = %d, want 0", source.killCalls)
+	}
+}
+
 type stubKillProcessSource struct {
 	killCalls int
 	killErr   error

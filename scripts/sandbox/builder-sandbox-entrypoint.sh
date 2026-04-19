@@ -8,7 +8,7 @@ config_seed_path="${SANDBOX_CONFIG_SEED_PATH:-}"
 auth_seed_path="${SANDBOX_AUTH_SEED_PATH:-}"
 project_name="${SANDBOX_PROJECT_NAME:-builder}"
 server_port="${BUILDER_SERVER_PORT:-53082}"
-sandbox_home="${SANDBOX_HOME:-/root}"
+sandbox_home="${SANDBOX_HOME:-/home/builder}"
 builder_bin="${BUILDER_SANDBOX_BUILDER_BIN:-/usr/local/bin/builder}"
 
 require_commands() {
