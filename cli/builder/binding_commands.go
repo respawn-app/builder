@@ -23,6 +23,10 @@ import (
 var bindingCommandRPCTimeout = 5 * time.Second
 var bindingCommandRemoteOpener = openBindingCommandRemote
 var bindingCommandWorkspaceResolver = resolveWorkspaceBinding
+var bindingCommandSessionRetargeter = retargetSessionWorkspaceWithTimeout
+var bindingCommandLocalSessionLifecycleClient = func(cfg config.App) client.SessionLifecycleClient {
+	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, nil, nil))
+}
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 {
@@ -304,11 +308,10 @@ func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath str
 		return serverapi.ProjectBinding{}, err
 	}
 	defer func() { _ = remote.Close() }()
-	resp, err := retargetSessionWorkspaceWithTimeout(ctx, remote, sessionID, newCfg.WorkspaceRoot)
+	resp, err := bindingCommandSessionRetargeter(ctx, remote, sessionID, newCfg.WorkspaceRoot)
 	if err != nil {
 		if shouldFallbackToLocalSessionRetarget(newCfg, err) {
-			fallback := client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewGlobalService(newCfg.PersistenceRoot, nil, nil))
-			resp, err = retargetSessionWorkspaceWithTimeout(ctx, fallback, sessionID, newCfg.WorkspaceRoot)
+			resp, err = bindingCommandSessionRetargeter(ctx, bindingCommandLocalSessionLifecycleClient(newCfg), sessionID, newCfg.WorkspaceRoot)
 		}
 	}
 	if err != nil {

@@ -32,6 +32,10 @@ type bindingCommandTimeoutProjectViewStub struct {
 	rebindWorkspace    func(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error)
 }
 
+type bindingCommandTimeoutSessionLifecycleStub struct {
+	retargetSessionWorkspace func(context.Context, serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error)
+}
+
 func (s bindingCommandTimeoutProjectViewStub) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	if s.listProjects == nil {
 		return serverapi.ProjectListResponse{}, errors.New("unexpected ListProjects call")
@@ -73,6 +77,25 @@ func (bindingCommandTimeoutProjectViewStub) ListSessionsByProject(context.Contex
 
 func (bindingCommandTimeoutProjectViewStub) GetProjectOverview(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	return serverapi.ProjectGetOverviewResponse{}, errors.New("unexpected GetProjectOverview call")
+}
+
+func (bindingCommandTimeoutSessionLifecycleStub) GetInitialInput(context.Context, serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
+	return serverapi.SessionInitialInputResponse{}, errors.New("unexpected GetInitialInput call")
+}
+
+func (bindingCommandTimeoutSessionLifecycleStub) PersistInputDraft(context.Context, serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+	return serverapi.SessionPersistInputDraftResponse{}, errors.New("unexpected PersistInputDraft call")
+}
+
+func (s bindingCommandTimeoutSessionLifecycleStub) RetargetSessionWorkspace(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+	if s.retargetSessionWorkspace == nil {
+		return serverapi.SessionRetargetWorkspaceResponse{}, errors.New("unexpected RetargetSessionWorkspace call")
+	}
+	return s.retargetSessionWorkspace(ctx, req)
+}
+
+func (bindingCommandTimeoutSessionLifecycleStub) ResolveTransition(context.Context, serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
+	return serverapi.SessionResolveTransitionResponse{}, errors.New("unexpected ResolveTransition call")
 }
 
 type bindingCommandMemoryAuthHandler struct {
@@ -547,6 +570,108 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestRetargetSessionWorkspaceFallsBackToLocalLifecycleClientForLoopbackMethodNotFound(t *testing.T) {
+	originalOpener := bindingCommandRemoteOpener
+	originalRetargeter := bindingCommandSessionRetargeter
+	originalLocalClient := bindingCommandLocalSessionLifecycleClient
+	t.Cleanup(func() {
+		bindingCommandRemoteOpener = originalOpener
+		bindingCommandSessionRetargeter = originalRetargeter
+		bindingCommandLocalSessionLifecycleClient = originalLocalClient
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	newWorkspace := t.TempDir()
+	newCfg, err := config.Load(newWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
+		return newCfg, &client.Remote{}, nil
+	}
+	remoteCalls := 0
+	localCalls := 0
+	const sessionID = "session-123"
+	bindingCommandSessionRetargeter = func(ctx context.Context, lifecycle client.SessionLifecycleClient, gotSessionID string, workspaceRoot string) (serverapi.SessionRetargetWorkspaceResponse, error) {
+		if gotSessionID != sessionID {
+			t.Fatalf("session id = %q, want %q", gotSessionID, sessionID)
+		}
+		if workspaceRoot != newCfg.WorkspaceRoot {
+			t.Fatalf("workspace root = %q, want %q", workspaceRoot, newCfg.WorkspaceRoot)
+		}
+		switch lifecycle.(type) {
+		case *client.Remote:
+			remoteCalls++
+			return serverapi.SessionRetargetWorkspaceResponse{}, serverapi.ErrMethodNotFound
+		default:
+			localCalls++
+			return serverapi.SessionRetargetWorkspaceResponse{Binding: serverapi.ProjectBinding{WorkspaceID: "workspace-local"}}, nil
+		}
+	}
+	bindingCommandLocalSessionLifecycleClient = func(cfg config.App) client.SessionLifecycleClient {
+		if cfg.WorkspaceRoot != newCfg.WorkspaceRoot {
+			t.Fatalf("local client cfg workspace = %q, want %q", cfg.WorkspaceRoot, newCfg.WorkspaceRoot)
+		}
+		return bindingCommandTimeoutSessionLifecycleStub{}
+	}
+
+	binding, err := retargetSessionWorkspace(context.Background(), sessionID, newWorkspace)
+	if err != nil {
+		t.Fatalf("retargetSessionWorkspace: %v", err)
+	}
+	if binding.WorkspaceID != "workspace-local" {
+		t.Fatalf("binding workspace id = %q, want %q", binding.WorkspaceID, "workspace-local")
+	}
+	if remoteCalls != 1 || localCalls != 1 {
+		t.Fatalf("remote calls = %d local calls = %d, want 1 each", remoteCalls, localCalls)
+	}
+}
+
+func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackMethodNotFound(t *testing.T) {
+	originalOpener := bindingCommandRemoteOpener
+	originalRetargeter := bindingCommandSessionRetargeter
+	originalLocalClient := bindingCommandLocalSessionLifecycleClient
+	t.Cleanup(func() {
+		bindingCommandRemoteOpener = originalOpener
+		bindingCommandSessionRetargeter = originalRetargeter
+		bindingCommandLocalSessionLifecycleClient = originalLocalClient
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_SERVER_HOST", "192.0.2.10")
+	newWorkspace := t.TempDir()
+	newCfg, err := config.Load(newWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
+		return newCfg, &client.Remote{}, nil
+	}
+	remoteCalls := 0
+	localCalls := 0
+	bindingCommandSessionRetargeter = func(context.Context, client.SessionLifecycleClient, string, string) (serverapi.SessionRetargetWorkspaceResponse, error) {
+		remoteCalls++
+		return serverapi.SessionRetargetWorkspaceResponse{}, serverapi.ErrMethodNotFound
+	}
+	bindingCommandLocalSessionLifecycleClient = func(config.App) client.SessionLifecycleClient {
+		localCalls++
+		return bindingCommandTimeoutSessionLifecycleStub{}
+	}
+
+	_, err = retargetSessionWorkspace(context.Background(), "session-123", newWorkspace)
+	if !errors.Is(err, serverapi.ErrMethodNotFound) {
+		t.Fatalf("retargetSessionWorkspace error = %v, want ErrMethodNotFound", err)
+	}
+	if remoteCalls != 1 {
+		t.Fatalf("remote calls = %d, want 1", remoteCalls)
+	}
+	if localCalls != 0 {
+		t.Fatalf("local calls = %d, want 0", localCalls)
+	}
+}
+
 func TestResolveWorkspaceBindingAppliesRPCTimeout(t *testing.T) {
 	originalTimeout := bindingCommandRPCTimeout
 	bindingCommandRPCTimeout = 20 * time.Millisecond
@@ -607,4 +732,24 @@ func TestBindingCommandProjectRPCWrappersApplyTimeout(t *testing.T) {
 	assertDeadlineExceeded("attachWorkspaceToProject", err)
 	_, err = rebindWorkspaceWithTimeout(context.Background(), stub, "/tmp/old", "/tmp/new")
 	assertDeadlineExceeded("rebindWorkspaceWithTimeout", err)
+}
+
+func TestRetargetSessionWorkspaceWithTimeoutAppliesTimeout(t *testing.T) {
+	originalTimeout := bindingCommandRPCTimeout
+	bindingCommandRPCTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
+
+	stub := bindingCommandTimeoutSessionLifecycleStub{retargetSessionWorkspace: func(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+		<-ctx.Done()
+		return serverapi.SessionRetargetWorkspaceResponse{}, ctx.Err()
+	}}
+
+	start := time.Now()
+	_, err := retargetSessionWorkspaceWithTimeout(context.Background(), stub, "session-1", "/tmp/workspace")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("retargetSessionWorkspaceWithTimeout error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("retargetSessionWorkspaceWithTimeout took too long: %v", elapsed)
+	}
 }
