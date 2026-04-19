@@ -36,7 +36,10 @@ func (s *stubRuntimeLeaseVerifier) RequireControllerLease(context.Context, strin
 type runtimeControlFakeClient struct {
 	mu        sync.Mutex
 	responses []llm.Response
+	compactionResponses []llm.CompactionResponse
+	capabilities        llm.ProviderCapabilities
 	calls     int
+	compactionCalls int
 }
 
 type fakeShellHandler struct{}
@@ -59,7 +62,23 @@ func (c *runtimeControlFakeClient) Generate(context.Context, llm.Request) (llm.R
 	return resp, nil
 }
 
-func TestServiceSetSessionNameRequiresControllerLease(t *testing.T) {
+func (c *runtimeControlFakeClient) Compact(context.Context, llm.CompactionRequest) (llm.CompactionResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.compactionCalls++
+	if len(c.compactionResponses) == 0 {
+		return llm.CompactionResponse{}, nil
+	}
+	resp := c.compactionResponses[0]
+	c.compactionResponses = c.compactionResponses[1:]
+	return resp, nil
+}
+
+func (c *runtimeControlFakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return c.capabilities, nil
+}
+
+func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
@@ -85,8 +104,14 @@ func TestServiceSetSessionNameRequiresControllerLease(t *testing.T) {
 		t.Fatalf("SetSessionName first: %v", err)
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
-	if err := service.SetSessionName(context.Background(), req); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
-		t.Fatalf("SetSessionName second = %v, want ErrInvalidControllerLease", err)
+	if err := service.SetSessionName(context.Background(), req); err != nil {
+		t.Fatalf("SetSessionName replay: %v", err)
+	}
+	fresh := req
+	fresh.ClientRequestID = "req-2"
+	fresh.Name = "new name"
+	if err := service.SetSessionName(context.Background(), fresh); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("SetSessionName fresh request = %v, want ErrInvalidControllerLease", err)
 	}
 	if verifier.calls != 2 {
 		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
