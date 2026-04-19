@@ -731,6 +731,60 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 	}
 }
 
+func TestTryDialMatchingConfiguredRunPromptRemoteUsesWorkspaceDiscoveryForAcceptedDaemon(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	originalRemoteDial := dialConfiguredRemote
+	t.Cleanup(func() {
+		dialConfiguredProjectViewRemote = originalProjectViewsDial
+		dialConfiguredRemote = originalRemoteDial
+	})
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{PID: 777, Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
+		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
+		},
+		listProjects: func(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+			return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{{ProjectID: "project-1"}}}, nil
+		},
+		getProjectOverview: func(context.Context, serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+			return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Workspaces: []clientui.ProjectWorkspaceSummary{{WorkspaceID: "workspace-1", Availability: clientui.ProjectAvailabilityAvailable}}}}, nil
+		},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+	dialConfiguredRemote = func(ctx context.Context, rpcURL string, projectID string, workspaceID string) (*client.Remote, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if projectID != "project-1" || workspaceID != "workspace-1" {
+			t.Fatalf("unexpected workspace dial target: %s/%s", projectID, workspaceID)
+		}
+		return new(client.Remote), nil
+	}
+
+	remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, func(identity protocol.ServerIdentity) bool {
+		return identity.PID == 777
+	})
+	if err != nil {
+		t.Fatalf("tryDialMatchingConfiguredRunPromptRemote: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected launched daemon attach to succeed via workspace discovery")
+	}
+	if remote == nil {
+		t.Fatal("expected remote client")
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected project view remote to close after workspace discovery")
+	}
+}
+
 func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapability(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

@@ -101,6 +101,10 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 }
 
 func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {
+	return tryDialMatchingConfiguredRunPromptRemote(ctx, opts, nil)
+}
+
+func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
 	cfg, err := loadRemoteAttachConfig(opts)
 	if err != nil {
 		return nil, false, err
@@ -110,6 +114,10 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 	defer cancel()
 	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, rpcURL)
 	if err != nil {
+		return nil, false, nil
+	}
+	if accept != nil && !accept(projectViews.Identity()) {
+		_ = projectViews.Close()
 		return nil, false, nil
 	}
 	if !configuredRemoteSupportsRunPrompt(projectViews.Identity().Capabilities) {
@@ -308,9 +316,12 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+		if remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(ctx, opts, func(identity protocol.ServerIdentity) bool {
 			return identity.PID == childPID
-		}, false); ok {
+		}); err != nil {
+			_ = failureClose()
+			return nil, nil, false, err
+		} else if ok {
 			return remote, newOwnedDaemonClose(remote, cmd, errCh), true, nil
 		}
 		select {
