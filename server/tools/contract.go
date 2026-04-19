@@ -60,6 +60,8 @@ type HostedExecution struct {
 type ToolCallContext struct {
 	WorkingDir                 string
 	DefaultShellTimeoutSeconds int
+	DefaultShellPath           string
+	GOOS                       string
 }
 
 type TranscriptContract struct {

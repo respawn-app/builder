@@ -1618,9 +1618,10 @@ func transcriptToolCallMeta(meta *clientui.ToolCallMeta) *transcript.ToolCallMet
 	}
 	if meta.RenderHint != nil {
 		out.RenderHint = &transcript.ToolRenderHint{
-			Kind:       transcript.ToolRenderKind(meta.RenderHint.Kind),
-			Path:       meta.RenderHint.Path,
-			ResultOnly: meta.RenderHint.ResultOnly,
+			Kind:         transcript.ToolRenderKind(meta.RenderHint.Kind),
+			Path:         meta.RenderHint.Path,
+			ResultOnly:   meta.RenderHint.ResultOnly,
+			ShellDialect: transcript.ToolShellDialect(meta.RenderHint.ShellDialect),
 		}
 	}
 	if meta.PatchRender != nil {
@@ -1654,9 +1655,10 @@ func transcriptToolCallMetaClient(meta *transcript.ToolCallMeta) *clientui.ToolC
 	}
 	if meta.RenderHint != nil {
 		out.RenderHint = &clientui.ToolRenderHint{
-			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
-			Path:       meta.RenderHint.Path,
-			ResultOnly: meta.RenderHint.ResultOnly,
+			Kind:         clientui.ToolRenderKind(meta.RenderHint.Kind),
+			Path:         meta.RenderHint.Path,
+			ResultOnly:   meta.RenderHint.ResultOnly,
+			ShellDialect: clientui.ToolShellDialect(meta.RenderHint.ShellDialect),
 		}
 	}
 	if meta.PatchRender != nil {
