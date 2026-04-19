@@ -302,6 +302,17 @@ func TestServeExposesDerivedLocalUnixSocketAndCleansStalePath(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	for {
+		conn, dialErr := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unix socket path did not become dialable: %v", dialErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	var localRemote *client.Remote
 	for {

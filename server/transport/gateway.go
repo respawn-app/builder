@@ -58,24 +58,33 @@ func (g *Gateway) Handler() http.Handler {
 
 func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
 	defer func() { _ = conn.Close() }()
+	connCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-conn.Closed():
+		}
+		cancel()
+	}()
 	state := &connectionState{}
 	for {
-		req, err := receiveRequest(ctx, conn)
+		req, err := receiveRequest(connCtx, conn)
 		if err != nil {
 			return
 		}
 		if req.Method == protocol.MethodRunPrompt {
-			if !g.serveRunPrompt(conn, ctx, state, req) {
+			if !g.serveRunPrompt(conn, connCtx, state, req) {
 				return
 			}
 			continue
 		}
 		if isSubscriptionMethod(req.Method) {
-			g.serveSubscription(conn, ctx, state, req)
+			g.serveSubscription(conn, connCtx, state, req)
 			return
 		}
-		resp := g.dispatch(ctx, state, req)
-		if !sendResponse(ctx, conn, resp) {
+		resp := g.dispatch(connCtx, state, req)
+		if !sendResponse(connCtx, conn, resp) {
 			return
 		}
 	}

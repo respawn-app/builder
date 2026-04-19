@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -425,7 +426,7 @@ func TestDialRemoteURLForProjectValidatesAttachProject(t *testing.T) {
 }
 
 func TestRemoteProjectViewCallsReuseInitialProjectAttach(t *testing.T) {
-	attachCount := 0
+	var attachCount atomic.Int32
 	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
 		defer func() { _ = ws.Close() }()
 		var req protocol.Request
@@ -447,7 +448,7 @@ func TestRemoteProjectViewCallsReuseInitialProjectAttach(t *testing.T) {
 			}
 			switch req.Method {
 			case protocol.MethodAttachProject:
-				attachCount++
+				attachCount.Add(1)
 				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: "project-1", WorkspaceRoot: "/tmp/attached"}))
 			case protocol.MethodProjectResolvePath:
 				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))
@@ -496,8 +497,8 @@ func TestRemoteProjectViewCallsReuseInitialProjectAttach(t *testing.T) {
 	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
-	if attachCount != 1 {
-		t.Fatalf("attachCount = %d, want 1", attachCount)
+	if got := attachCount.Load(); got != 1 {
+		t.Fatalf("attachCount = %d, want 1", got)
 	}
 }
 

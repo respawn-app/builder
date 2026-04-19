@@ -32,6 +32,7 @@ type Event struct {
 type Conn interface {
 	Send(context.Context, Frame) error
 	Events() <-chan Event
+	Closed() <-chan struct{}
 	Close() error
 }
 
@@ -57,13 +58,13 @@ func (WebSocketTransport) Dial(ctx context.Context, endpoint Endpoint) (Conn, er
 		return nil, err
 	}
 	adapter := newWebSocketConn()
-	socket, _, err := dialWebSocketClientContext(ctx, rawConn, endpoint, adapter)
+	socket, err := dialWebSocketClientContext(ctx, rawConn, endpoint, adapter)
 	if err != nil {
 		_ = rawConn.Close()
 		return nil, err
 	}
 	adapter.attach(socket)
-	go socket.ReadLoop()
+	adapter.startReadLoop(socket)
 	return adapter, nil
 }
 
@@ -77,7 +78,7 @@ func (WebSocketTransport) Handler(handler func(context.Context, Conn)) http.Hand
 		}
 		adapter.attach(socket)
 		defer func() { _ = adapter.Close() }()
-		go socket.ReadLoop()
+		adapter.startReadLoop(socket)
 		handler(r.Context(), adapter)
 	})
 }
@@ -135,6 +136,10 @@ func (c *webSocketConn) Events() <-chan Event {
 	return c.events
 }
 
+func (c *webSocketConn) Closed() <-chan struct{} {
+	return c.closed
+}
+
 func (c *webSocketConn) Close() error {
 	if c == nil {
 		return nil
@@ -145,10 +150,18 @@ func (c *webSocketConn) Close() error {
 		close(c.closed)
 		if c.socket != nil {
 			err = c.socket.NetConn().Close()
+		} else {
+			c.closeEvents()
 		}
-		c.closeEvents()
 	})
 	return err
+}
+
+func (c *webSocketConn) startReadLoop(socket *gws.Conn) {
+	go func() {
+		defer c.closeEvents()
+		socket.ReadLoop()
+	}()
 }
 
 func (c *webSocketConn) OnOpen(_ *gws.Conn) {}
@@ -209,7 +222,7 @@ func dialWebSocketEndpoint(ctx context.Context, endpoint Endpoint) (net.Conn, er
 	return (&net.Dialer{}).DialContext(ctx, network, endpoint.Address)
 }
 
-func dialWebSocketClientContext(ctx context.Context, rawConn net.Conn, endpoint Endpoint, adapter *webSocketConn) (*gws.Conn, *http.Response, error) {
+func dialWebSocketClientContext(ctx context.Context, rawConn net.Conn, endpoint Endpoint, adapter *webSocketConn) (*gws.Conn, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -232,18 +245,26 @@ func dialWebSocketClientContext(ctx context.Context, rawConn net.Conn, endpoint 
 	case <-ctx.Done():
 		_ = rawConn.Close()
 		result := <-resultCh
+		closeHandshakeResponse(result.resp)
 		if result.socket != nil {
 			_ = result.socket.NetConn().Close()
 		}
-		return nil, nil, ctx.Err()
+		return nil, ctx.Err()
 	case result := <-resultCh:
+		closeHandshakeResponse(result.resp)
 		if err := ctx.Err(); err != nil {
 			if result.socket != nil {
 				_ = result.socket.NetConn().Close()
 			}
-			return nil, nil, err
+			return nil, err
 		}
-		return result.socket, result.resp, result.err
+		return result.socket, result.err
+	}
+}
+
+func closeHandshakeResponse(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 }
 

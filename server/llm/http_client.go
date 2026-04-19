@@ -24,10 +24,10 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 
 func newSharedHTTPTransport() *http.Transport {
 	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Transport{ForceAttemptHTTP2: true}
+	transport := &http.Transport{}
+	if ok {
+		transport = base.Clone()
 	}
-	transport := base.Clone()
 	transport.ForceAttemptHTTP2 = true
 	if transport.MaxIdleConns < sharedHTTPTransportMaxIdleConns {
 		transport.MaxIdleConns = sharedHTTPTransportMaxIdleConns

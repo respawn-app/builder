@@ -18,8 +18,12 @@ func listenLocalSocket(cfg config.App) (net.Listener, func(), bool, error) {
 	if err != nil || !ok {
 		return nil, nil, ok, err
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+	socketDir := filepath.Dir(socketPath)
+	if err := os.MkdirAll(socketDir, 0o700); err != nil {
 		return nil, nil, false, fmt.Errorf("create local unix socket dir: %w", err)
+	}
+	if err := os.Chmod(socketDir, 0o700); err != nil {
+		return nil, nil, false, fmt.Errorf("restrict local unix socket dir: %w", err)
 	}
 	if err := removeStaleSocket(socketPath); err != nil {
 		return nil, nil, false, err
@@ -27,6 +31,11 @@ func listenLocalSocket(cfg config.App) (net.Listener, func(), bool, error) {
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("listen local unix control endpoint: %w", err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+		return nil, nil, false, fmt.Errorf("restrict local unix control endpoint: %w", err)
 	}
 	cleanup := func() {
 		_ = listener.Close()
