@@ -55,6 +55,8 @@ type Core struct {
 	sessionStores    *registry.SessionStoreRegistry
 	sessionLaunchMu  sync.Mutex
 	sessionLaunchMap map[string]client.SessionLaunchClient
+	runPromptMu      sync.Mutex
+	runPromptMap     map[string]client.RunPromptClient
 	projectID        string
 	projectViews     client.ProjectViewClient
 	authBootstrap    client.AuthBootstrapClient
@@ -149,6 +151,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		sessionLaunchMap: make(map[string]client.SessionLaunchClient),
+		runPromptMap:     make(map[string]client.RunPromptClient),
 		projectViews:     projectViews,
 		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
@@ -256,16 +259,7 @@ func (s *Core) RunPromptClientForProjectWorkspaceID(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	return runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           projectCtx.config,
-		ContainerDir:     projectCtx.projectSession,
-		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
-		AuthManager:      s.oauthOpts.AuthManager,
-		FastModeState:    s.fastModeState,
-		Background:       s.background,
-		RuntimeRegistry:  s.runtimeRegistry,
-		BackgroundRouter: s.backgroundRouter,
-	}), nil
+	return s.runPromptClientForProjectContext(projectCtx), nil
 }
 
 func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.RunPromptClient, error) {
@@ -273,16 +267,7 @@ func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID
 	if err != nil {
 		return nil, err
 	}
-	return runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           projectCtx.config,
-		ContainerDir:     projectCtx.projectSession,
-		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
-		AuthManager:      s.oauthOpts.AuthManager,
-		FastModeState:    s.fastModeState,
-		Background:       s.background,
-		RuntimeRegistry:  s.runtimeRegistry,
-		BackgroundRouter: s.backgroundRouter,
-	}), nil
+	return s.runPromptClientForProjectContext(projectCtx), nil
 }
 
 func (s *Core) resolveProjectContext(ctx context.Context, projectID string, workspaceID string, workspaceRoot string) (projectContext, error) {
@@ -369,7 +354,7 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 	if s == nil {
 		return nil
 	}
-	scopeKey := sessionLaunchScopeKey(projectCtx)
+	scopeKey := projectWorkspaceScopeKey(projectCtx)
 	s.sessionLaunchMu.Lock()
 	defer s.sessionLaunchMu.Unlock()
 	if cached := s.sessionLaunchMap[scopeKey]; cached != nil {
@@ -387,7 +372,31 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 	return client
 }
 
-func sessionLaunchScopeKey(projectCtx projectContext) string {
+func (s *Core) runPromptClientForProjectContext(projectCtx projectContext) client.RunPromptClient {
+	if s == nil {
+		return nil
+	}
+	scopeKey := projectWorkspaceScopeKey(projectCtx)
+	s.runPromptMu.Lock()
+	defer s.runPromptMu.Unlock()
+	if cached := s.runPromptMap[scopeKey]; cached != nil {
+		return cached
+	}
+	client := runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
+		Config:           projectCtx.config,
+		ContainerDir:     projectCtx.projectSession,
+		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
+		AuthManager:      s.oauthOpts.AuthManager,
+		FastModeState:    s.fastModeState,
+		Background:       s.background,
+		RuntimeRegistry:  s.runtimeRegistry,
+		BackgroundRouter: s.backgroundRouter,
+	})
+	s.runPromptMap[scopeKey] = client
+	return client
+}
+
+func projectWorkspaceScopeKey(projectCtx projectContext) string {
 	return strings.TrimSpace(projectCtx.projectID) + "\n" + strings.TrimSpace(projectCtx.config.WorkspaceRoot)
 }
 
