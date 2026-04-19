@@ -540,7 +540,7 @@ func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true})
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
 	defer cleanup()
 	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
 		return identity.PID == 111
@@ -554,7 +554,7 @@ func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T)
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
-	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true})
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true})
 	defer cleanup()
 	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, nil); ok || remote != nil {
 		t.Fatalf("expected unregistered workspace to skip configured remote attach, got remote=%v ok=%t", remote, ok)
@@ -679,7 +679,7 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 	configuredRemoteAttachTimeout = 20 * time.Millisecond
 	configuredRemoteWorkspaceDiscoveryTimeout = 120 * time.Millisecond
 	projectViews := &configuredProjectViewRemoteStub{
-		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true}},
 		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
 		},
@@ -744,7 +744,7 @@ func TestTryDialMatchingConfiguredRunPromptRemoteUsesWorkspaceDiscoveryForAccept
 	})
 
 	projectViews := &configuredProjectViewRemoteStub{
-		identity: protocol.ServerIdentity{PID: 777, Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
+		identity: protocol.ServerIdentity{PID: 777, Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true, ProjectAttach: true}},
 		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
 		},
