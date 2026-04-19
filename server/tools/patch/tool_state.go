@@ -65,7 +65,7 @@ func (s *applyState) getState(path string) (*patchFileState, error) {
 		fileState.Exists = true
 		fileState.Content = splitLines(string(data))
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read file %q: %w", path, err)
+		return nil, internalFailure(path, fmt.Sprintf("read file failed: %v", err))
 	}
 	s.state[resolved] = fileState
 	return fileState, nil
@@ -77,17 +77,17 @@ func (s *applyState) addFile(op patchformat.AddFile) error {
 		return err
 	}
 	if _, exists := s.state[target]; exists {
-		return fmt.Errorf("add file target already referenced: %s", op.Path)
+		return targetExistsFailure(op.Path, "patch already referenced this path earlier in the same patch")
 	}
 	allowReplacement := s.hasDeleteTarget(target)
 	allowBlockedAncestor := s.hasDeletedAncestor(target)
 	if _, err := os.Stat(target); err == nil {
 		if !allowReplacement {
-			return fmt.Errorf("add file target already exists: %s", op.Path)
+			return targetExistsFailure(op.Path, "cannot add a file over an existing path")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		if !allowReplacement && !allowBlockedAncestor {
-			return fmt.Errorf("stat add target: %w", err)
+			return internalFailure(op.Path, fmt.Sprintf("stat add target failed: %v", err))
 		}
 	}
 	s.state[target] = &patchFileState{
@@ -105,14 +105,14 @@ func (s *applyState) deleteFile(op patchformat.DeleteFile) error {
 		return err
 	}
 	if _, exists := s.state[target]; exists {
-		return fmt.Errorf("delete target already referenced: %s", op.Path)
+		return malformedFailure(fmt.Sprintf("delete target already referenced: %s", op.Path))
 	}
 	snapshot, err := captureSnapshot(target)
 	if err != nil {
-		return fmt.Errorf("stat delete target %q: %w", op.Path, err)
+		return internalFailure(op.Path, fmt.Sprintf("stat delete target failed: %v", err))
 	}
 	if !snapshot.Exists {
-		return fmt.Errorf("delete target does not exist: %s", op.Path)
+		return targetMissingFailure(op.Path, "cannot delete a file that does not exist")
 	}
 	s.deleteTargets[target] = struct{}{}
 	return nil
@@ -124,18 +124,18 @@ func (s *applyState) updateFile(op patchformat.UpdateFile) error {
 		return err
 	}
 	if s.hasDeleteTarget(resolved) {
-		return fmt.Errorf("update target already marked for deletion: %s", op.Path)
+		return malformedFailure(fmt.Sprintf("update target already marked for deletion: %s", op.Path))
 	}
 	fileState, err := s.getState(op.Path)
 	if err != nil {
 		return err
 	}
 	if !fileState.Exists {
-		return fmt.Errorf("update target does not exist: %s", op.Path)
+		return targetMissingFailure(op.Path, "cannot update a file that does not exist")
 	}
 	updated, err := applyEdit(fileState.Content, op.Changes)
 	if err != nil {
-		return fmt.Errorf("apply update %s: %w", op.Path, err)
+		return attachFailurePath(err, op.Path)
 	}
 	fileState.Content = updated
 	if strings.TrimSpace(op.MoveTo) == "" {
@@ -149,17 +149,17 @@ func (s *applyState) updateFile(op patchformat.UpdateFile) error {
 		return nil
 	}
 	if _, ok := s.state[moveTarget]; ok {
-		return fmt.Errorf("move target already referenced: %s", op.MoveTo)
+		return targetExistsFailure(op.MoveTo, "patch already referenced the move destination earlier in the same patch")
 	}
 	allowReplacement := s.hasDeleteTarget(moveTarget)
 	allowBlockedAncestor := s.hasDeletedAncestor(moveTarget)
 	if _, err := os.Stat(moveTarget); err == nil {
 		if !allowReplacement {
-			return fmt.Errorf("move target already exists: %s", op.MoveTo)
+			return targetExistsFailure(op.MoveTo, "cannot move onto an existing path")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		if !allowReplacement && !allowBlockedAncestor {
-			return fmt.Errorf("stat move target: %w", err)
+			return internalFailure(op.MoveTo, fmt.Sprintf("stat move target failed: %v", err))
 		}
 	}
 	delete(s.state, fileState.NewPath)
@@ -177,7 +177,7 @@ func (s *applyState) prepareCommitStates() ([]*patchFileState, error) {
 		}
 		staged, err := createStagedFile(fileState.NewPath, []byte(text))
 		if err != nil {
-			return nil, fmt.Errorf("stage write %s: %w", fileState.NewPath, err)
+			return nil, internalFailure(fileState.NewPath, fmt.Sprintf("stage write failed: %v", err))
 		}
 		fileState.StagedPath = staged
 	}

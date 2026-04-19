@@ -208,12 +208,14 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	}
 	combined := toolCallDisplayText(entry.ToolCall, entry.Text)
 	entryEnd := entryIndex
+	resultText := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcript[resultIdx]
 		resultRole := strings.TrimSpace(resultEntry.Role)
 		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != "tool_result_error"
-		if resultText := strings.TrimSpace(resultEntry.Text); resultText != "" && !omitSuccessfulResult {
+		if trimmedResultText := strings.TrimSpace(resultEntry.Text); trimmedResultText != "" && !omitSuccessfulResult {
 			combined += "\n" + resultEntry.Text
+			resultText = resultEntry.Text
 		}
 		if isToolResultRole(resultRole) {
 			blockRole = toolBlockRoleFromResult(resultRole, blockRole)
@@ -229,6 +231,9 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteEnd,
 		render: func(model Model) []string {
+			if meta != nil && meta.PatchRender != nil {
+				return model.flattenPatchToolBlock(blockRole, meta, resultText)
+			}
 			return model.flattenEntryWithMeta(blockRole, combined, false, meta)
 		},
 	}

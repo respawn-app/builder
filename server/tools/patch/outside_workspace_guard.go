@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -82,11 +81,11 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		return resolvedPath, nil
 	}
 	if g.approver == nil {
-		return "", fmt.Errorf("%s: %s", g.errorLabels.OutsidePath, requestedPath)
+		return "", noPermissionFailure(requestedPath, g.errorLabels.OutsidePath)
 	}
 	approval, approveErr := g.approver(ctx, req)
 	if approveErr != nil {
-		return "", fmt.Errorf("%s for %s: %w", g.errorLabels.ApprovalFailed, requestedPath, approveErr)
+		return "", approvalFailedFailure(requestedPath, approveErr.Error())
 	}
 	switch approval.Decision {
 	case OutsideWorkspaceDecisionAllowOnce:
@@ -105,25 +104,8 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		g.logApproved(req, "allow_session")
 		return resolvedPath, nil
 	default:
-		return "", errors.New(g.rejectedByUserError(requestedPath, approval.Commentary))
+		return "", userDeniedFailure(requestedPath, approval.Commentary)
 	}
-}
-
-func (g OutsideWorkspaceGuard) rejectedByUserError(requestedPath string, commentary string) string {
-	var parts []string
-	if prefix := strings.TrimSpace(g.errorLabels.RejectedByUserPrefix); prefix != "" {
-		parts = append(parts, fmt.Sprintf("%s: %s", prefix, requestedPath))
-	}
-	errMessage := "User rejected the approval request for this tool call"
-	if trimmedCommentary := strings.TrimSpace(commentary); trimmedCommentary != "" {
-		errMessage += fmt.Sprintf(", and said: %s", strconv.Quote(trimmedCommentary))
-	}
-	errMessage += ". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative."
-	if instruction := strings.TrimSpace(g.rejectionInstruction); instruction != "" {
-		errMessage += " " + instruction
-	}
-	parts = append(parts, errMessage)
-	return strings.Join(parts, ". ")
 }
 
 func (g OutsideWorkspaceGuard) isWithinWorkspace(real string) (bool, error) {
