@@ -35,6 +35,8 @@ type sessionLaunchPlan struct {
 	SelectedViaPicker                    bool
 	SelectedSessionWorkspaceRoot         string
 	SelectedSessionWorkspaceLookupFailed bool
+	HasOtherSessions                     bool
+	HasOtherSessionsKnown                bool
 	ActiveSettings                       config.Settings
 	EnabledTools                         []toolspec.ID
 	ConfiguredModelName                  string
@@ -46,8 +48,10 @@ type sessionLaunchPlan struct {
 }
 
 type resolvedSessionPlanRequest struct {
-	request           serverapi.SessionPlanRequest
-	selectedViaPicker bool
+	request             serverapi.SessionPlanRequest
+	selectedViaPicker   bool
+	sessionSummaries    []clientui.SessionSummary
+	hasSessionSummaries bool
 }
 
 type runtimeLaunchPlan struct {
@@ -116,12 +120,15 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 			selectedSessionWorkspaceLookupFailed = true
 		}
 	}
+	hasOtherSessions, hasOtherSessionsKnown := p.resolveHasOtherSessions(ctx, resolved, resp.Plan.SessionID)
 	plan := sessionLaunchPlan{
 		Mode:                                 req.Mode,
 		SessionID:                            resp.Plan.SessionID,
 		SelectedViaPicker:                    resolved.selectedViaPicker,
 		SelectedSessionWorkspaceRoot:         selectedSessionWorkspaceRoot,
 		SelectedSessionWorkspaceLookupFailed: selectedSessionWorkspaceLookupFailed,
+		HasOtherSessions:                     hasOtherSessions,
+		HasOtherSessionsKnown:                hasOtherSessionsKnown,
 		ActiveSettings:                       resp.Plan.ActiveSettings,
 		EnabledTools:                         enabledTools,
 		ConfiguredModelName:                  resp.Plan.ConfiguredModelName,
@@ -180,6 +187,8 @@ func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunc
 	if err != nil {
 		return resolvedSessionPlanRequest{}, err
 	}
+	resolved.sessionSummaries = append([]clientui.SessionSummary(nil), summaries...)
+	resolved.hasSessionSummaries = true
 	if len(summaries) == 0 {
 		resolved.request.ForceNewSession = true
 		return resolved, nil
@@ -223,6 +232,27 @@ func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]clientui.Se
 		return nil, err
 	}
 	return append([]clientui.SessionSummary(nil), resp.Overview.Sessions...), nil
+}
+
+func (p *launchPlanner) resolveHasOtherSessions(ctx context.Context, resolved resolvedSessionPlanRequest, sessionID string) (bool, bool) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, false
+	}
+	summaries := resolved.sessionSummaries
+	if !resolved.hasSessionSummaries {
+		var err error
+		summaries, err = p.listSessionSummaries(ctx)
+		if err != nil {
+			return false, false
+		}
+	}
+	for _, summary := range summaries {
+		if strings.TrimSpace(summary.SessionID) == strings.TrimSpace(sessionID) {
+			continue
+		}
+		return true, true
+	}
+	return false, true
 }
 
 func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {

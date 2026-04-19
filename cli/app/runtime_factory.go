@@ -22,25 +22,27 @@ import (
 )
 
 type runtimeWiring struct {
-	engine          *runtime.Engine
-	askBroker       *askquestion.Broker
-	askBridge       *askBridge
-	eventBridge     *runtimeEventBridge
-	turnQueueHook   turnQueueHook
-	runtimeEvents   <-chan clientui.Event
-	askEvents       <-chan askEvent
-	background      *shelltool.Manager
-	runtimeClient   clientui.RuntimeClient
-	promptControl   client.PromptControlClient
-	runtimeControls client.RuntimeControlClient
-	processControls client.ProcessControlClient
-	processOutput   client.ProcessOutputClient
-	processViews    client.ProcessViewClient
-	approvalViews   client.ApprovalViewClient
-	askViews        client.AskViewClient
-	sessionActivity client.SessionActivityClient
-	sessionViews    client.SessionViewClient
-	promptHistory   []string
+	engine                *runtime.Engine
+	askBroker             *askquestion.Broker
+	askBridge             *askBridge
+	eventBridge           *runtimeEventBridge
+	turnQueueHook         turnQueueHook
+	runtimeEvents         <-chan clientui.Event
+	askEvents             <-chan askEvent
+	background            *shelltool.Manager
+	runtimeClient         clientui.RuntimeClient
+	promptControl         client.PromptControlClient
+	runtimeControls       client.RuntimeControlClient
+	processControls       client.ProcessControlClient
+	processOutput         client.ProcessOutputClient
+	processViews          client.ProcessViewClient
+	approvalViews         client.ApprovalViewClient
+	askViews              client.AskViewClient
+	sessionActivity       client.SessionActivityClient
+	sessionViews          client.SessionViewClient
+	hasOtherSessions      bool
+	hasOtherSessionsKnown bool
+	promptHistory         []string
 }
 
 type backgroundEventRouter struct {

@@ -69,6 +69,10 @@ func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool)
 		return "", false
 	}
 	switch commandResult.Action {
+	case commands.ActionResume:
+		if !m.resumeCommandAvailable() {
+			return resumeCommandUnavailableMessage, true
+		}
 	case commands.ActionBack:
 		if !m.hasParentSession() {
 			return "No parent session available", true
