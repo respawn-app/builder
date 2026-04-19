@@ -206,6 +206,49 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.
 	}
 }
 
+func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseReleased(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	}
+
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime retry: %v", err)
+	}
+}
+
+func TestReleaseSessionRuntimeReleasesPersistedLeaseWhenHandleAlreadyMissing(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+
+	released, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease verification: %v", err)
+	}
+	if released.Active() {
+		t.Fatalf("expected lease to stay released after missing-handle cleanup, got %+v", released)
+	}
+}
+
 func TestReleaseSessionRuntimeRejectsMismatchedControllerLeaseWithoutClosingHandle(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
