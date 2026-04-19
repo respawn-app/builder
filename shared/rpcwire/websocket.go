@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"builder/shared/protocol"
-	"golang.org/x/net/websocket"
+	"github.com/lxzan/gws"
 )
 
 type Frame struct {
@@ -42,6 +43,8 @@ type ServerTransport interface {
 	Handler(func(context.Context, Conn)) http.Handler
 }
 
+const defaultWebSocketHandshakeTimeout = 5 * time.Second
+
 type WebSocketTransport struct{}
 
 func NewWebSocketTransport() WebSocketTransport {
@@ -49,120 +52,77 @@ func NewWebSocketTransport() WebSocketTransport {
 }
 
 func (WebSocketTransport) Dial(ctx context.Context, endpoint Endpoint) (Conn, error) {
-	config, err := websocket.NewConfig(endpoint.ServerURL, endpoint.OriginURL)
+	rawConn, err := dialWebSocketEndpoint(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	var wsConn *websocket.Conn
-	switch endpoint.Transport {
-	case TransportUnix:
-		rawConn, err := (&net.Dialer{}).DialContext(ctx, "unix", endpoint.Address)
-		if err != nil {
-			return nil, err
-		}
-		wsConn, err = dialUnixWebSocketContext(ctx, config, rawConn)
-		if err != nil {
-			_ = rawConn.Close()
-			return nil, err
-		}
-	default:
-		wsConn, err = config.DialContext(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return newWebSocketConn(wsConn), nil
-}
-
-func dialUnixWebSocketContext(ctx context.Context, config *websocket.Config, rawConn net.Conn) (*websocket.Conn, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := rawConn.SetDeadline(deadline); err != nil {
-			return nil, err
-		}
-	}
-	stopCancel := make(chan struct{})
-	var cancelOnce sync.Once
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancelOnce.Do(func() {
-				_ = rawConn.SetDeadline(time.Now())
-				_ = rawConn.Close()
-			})
-		case <-stopCancel:
-		}
-	}()
-	conn, err := websocket.NewClient(config, rawConn)
-	close(stopCancel)
+	adapter := newWebSocketConn()
+	socket, _, err := dialWebSocketClientContext(ctx, rawConn, endpoint, adapter)
 	if err != nil {
-		return nil, normalizeHandshakeContextError(ctx, err)
-	}
-	if err := rawConn.SetDeadline(time.Time{}); err != nil {
-		_ = conn.Close()
+		_ = rawConn.Close()
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	return conn, nil
-}
-
-func normalizeHandshakeContextError(ctx context.Context, err error) error {
-	if err == nil {
-		return nil
-	}
-	if ctx != nil {
-		if cerr := ctx.Err(); cerr != nil {
-			return cerr
-		}
-		if deadline, ok := ctx.Deadline(); ok {
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() && !deadline.After(time.Now()) {
-				return context.DeadlineExceeded
-			}
-		}
-	}
-	return err
+	adapter.attach(socket)
+	go socket.ReadLoop()
+	return adapter, nil
 }
 
 func (WebSocketTransport) Handler(handler func(context.Context, Conn)) http.Handler {
-	return websocket.Handler(func(ws *websocket.Conn) {
-		conn := newWebSocketConn(ws)
-		defer func() { _ = conn.Close() }()
-		handler(ws.Request().Context(), conn)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		adapter := newWebSocketConn()
+		upgrader := gws.NewUpgrader(adapter, &gws.ServerOption{HandshakeTimeout: webSocketHandshakeTimeout(r.Context())})
+		socket, err := upgrader.Upgrade(w, r)
+		if err != nil {
+			return
+		}
+		adapter.attach(socket)
+		defer func() { _ = adapter.Close() }()
+		go socket.ReadLoop()
+		handler(r.Context(), adapter)
 	})
 }
 
-type websocketConn struct {
-	ws             *websocket.Conn
-	events         chan Event
-	closed         chan struct{}
-	closeRequested atomic.Bool
-	closeOnce      sync.Once
-	writeMu        sync.Mutex
+type webSocketConn struct {
+	socket          *gws.Conn
+	events          chan Event
+	closed          chan struct{}
+	closeRequested  atomic.Bool
+	closeOnce       sync.Once
+	closeEventsOnce sync.Once
+	writeMu         sync.Mutex
 }
 
-func newWebSocketConn(ws *websocket.Conn) *websocketConn {
-	conn := &websocketConn{
-		ws:     ws,
+func newWebSocketConn() *webSocketConn {
+	return &webSocketConn{
 		events: make(chan Event, 16),
 		closed: make(chan struct{}),
 	}
-	go conn.readLoop()
-	return conn
 }
 
-func (c *websocketConn) Send(ctx context.Context, frame Frame) error {
+func (c *webSocketConn) attach(socket *gws.Conn) {
+	c.socket = socket
+}
+
+func (c *webSocketConn) Send(ctx context.Context, frame Frame) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.socket == nil {
+		return errors.New("websocket connection is required")
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
 		return err
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if err := websocket.JSON.Send(c.ws, frame); err != nil {
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.socket.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+		defer func() { _ = c.socket.SetWriteDeadline(time.Time{}) }()
+	}
+	if err := c.socket.WriteMessage(gws.OpcodeText, data); err != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
@@ -171,11 +131,11 @@ func (c *websocketConn) Send(ctx context.Context, frame Frame) error {
 	return nil
 }
 
-func (c *websocketConn) Events() <-chan Event {
+func (c *webSocketConn) Events() <-chan Event {
 	return c.events
 }
 
-func (c *websocketConn) Close() error {
+func (c *webSocketConn) Close() error {
 	if c == nil {
 		return nil
 	}
@@ -183,65 +143,136 @@ func (c *websocketConn) Close() error {
 	c.closeOnce.Do(func() {
 		c.closeRequested.Store(true)
 		close(c.closed)
-		err = c.ws.Close()
+		if c.socket != nil {
+			err = c.socket.NetConn().Close()
+		}
+		c.closeEvents()
 	})
 	return err
 }
 
-func (c *websocketConn) readLoop() {
-	defer close(c.events)
-	for {
-		var frame Frame
-		err := websocket.JSON.Receive(c.ws, &frame)
-		if err != nil {
-			if !c.closeRequested.Load() {
-				select {
-				case c.events <- Event{Err: err}:
-				case <-c.closed:
-				}
-			}
-			return
-		}
-		select {
-		case c.events <- Event{Frame: frame}:
-		case <-c.closed:
-			return
-		}
+func (c *webSocketConn) OnOpen(_ *gws.Conn) {}
+
+func (c *webSocketConn) OnClose(_ *gws.Conn, err error) {
+	if c.closeRequested.Load() {
+		return
 	}
+	if err == nil {
+		err = io.EOF
+	}
+	c.publishError(err)
+	_ = c.Close()
+}
+
+func (c *webSocketConn) OnPing(_ *gws.Conn, _ []byte) {}
+
+func (c *webSocketConn) OnPong(_ *gws.Conn, _ []byte) {}
+
+func (c *webSocketConn) OnMessage(_ *gws.Conn, message *gws.Message) {
+	defer func() { _ = message.Close() }()
+	var frame Frame
+	if err := json.Unmarshal(message.Bytes(), &frame); err != nil {
+		c.publishError(err)
+		_ = c.Close()
+		return
+	}
+	select {
+	case c.events <- Event{Frame: frame}:
+	case <-c.closed:
+	}
+}
+
+func (c *webSocketConn) publishError(err error) {
+	if err == nil {
+		return
+	}
+	select {
+	case c.events <- Event{Err: err}:
+	case <-c.closed:
+	}
+}
+
+func (c *webSocketConn) closeEvents() {
+	c.closeEventsOnce.Do(func() {
+		close(c.events)
+	})
+}
+
+func dialWebSocketEndpoint(ctx context.Context, endpoint Endpoint) (net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	network := "tcp"
+	if endpoint.Transport == TransportUnix {
+		network = "unix"
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, endpoint.Address)
+}
+
+func dialWebSocketClientContext(ctx context.Context, rawConn net.Conn, endpoint Endpoint, adapter *webSocketConn) (*gws.Conn, *http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	option := &gws.ClientOption{
+		Addr:             endpoint.ServerURL,
+		RequestHeader:    http.Header{"Origin": []string{endpoint.OriginURL}},
+		HandshakeTimeout: webSocketHandshakeTimeout(ctx),
+	}
+	type result struct {
+		socket *gws.Conn
+		resp   *http.Response
+		err    error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		socket, resp, err := gws.NewClientFromConn(adapter, option, rawConn)
+		resultCh <- result{socket: socket, resp: resp, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		_ = rawConn.Close()
+		result := <-resultCh
+		if result.socket != nil {
+			_ = result.socket.NetConn().Close()
+		}
+		return nil, nil, ctx.Err()
+	case result := <-resultCh:
+		if err := ctx.Err(); err != nil {
+			if result.socket != nil {
+				_ = result.socket.NetConn().Close()
+			}
+			return nil, nil, err
+		}
+		return result.socket, result.resp, result.err
+	}
+}
+
+func webSocketHandshakeTimeout(ctx context.Context) time.Duration {
+	if ctx == nil {
+		return defaultWebSocketHandshakeTimeout
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 0 {
+			return remaining
+		}
+		return time.Millisecond
+	}
+	return defaultWebSocketHandshakeTimeout
 }
 
 func FrameFromRequest(req protocol.Request) Frame {
-	return Frame{
-		JSONRPC: req.JSONRPC,
-		ID:      req.ID,
-		Method:  req.Method,
-		Params:  req.Params,
-	}
+	return Frame{JSONRPC: req.JSONRPC, ID: req.ID, Method: req.Method, Params: req.Params}
 }
 
 func FrameFromResponse(resp protocol.Response) Frame {
-	return Frame{
-		JSONRPC: resp.JSONRPC,
-		ID:      resp.ID,
-		Result:  resp.Result,
-		Error:   resp.Error,
-	}
+	return Frame{JSONRPC: resp.JSONRPC, ID: resp.ID, Result: resp.Result, Error: resp.Error}
 }
 
 func (f Frame) Request() protocol.Request {
-	return protocol.Request{
-		JSONRPC: f.JSONRPC,
-		ID:      f.ID,
-		Method:  f.Method,
-		Params:  f.Params,
-	}
+	return protocol.Request{JSONRPC: f.JSONRPC, ID: f.ID, Method: f.Method, Params: f.Params}
 }
 
 func (f Frame) Response() protocol.Response {
-	return protocol.Response{
-		JSONRPC: f.JSONRPC,
-		ID:      f.ID,
-		Result:  f.Result,
-		Error:   f.Error,
-	}
+	return protocol.Response{JSONRPC: f.JSONRPC, ID: f.ID, Result: f.Result, Error: f.Error}
 }

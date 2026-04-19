@@ -16,8 +16,8 @@ import (
 	"builder/shared/protocol"
 )
 
-func TestGWSTransportUnixRoundTrip(t *testing.T) {
-	transport := NewGWSTransport()
+func TestWebSocketTransportUnixRoundTrip(t *testing.T) {
+	transport := NewWebSocketTransport()
 	serverErr := make(chan error, 1)
 	socketPath := shortUnixSocketPath("gws-roundtrip")
 	defer func() { _ = os.Remove(socketPath) }()
@@ -98,7 +98,7 @@ func TestGWSTransportUnixRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGWSUnixDialHonorsContextDuringWebSocketHandshake(t *testing.T) {
+func TestWebSocketUnixDialHonorsContextDuringWebSocketHandshake(t *testing.T) {
 	socketPath := shortUnixSocketPath("gws-stall")
 	defer func() { _ = os.Remove(socketPath) }()
 	listener, err := net.Listen("unix", socketPath)
@@ -123,7 +123,7 @@ func TestGWSUnixDialHonorsContextDuringWebSocketHandshake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err = NewGWSTransport().Dial(ctx, endpoint)
+	_, err = NewWebSocketTransport().Dial(ctx, endpoint)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Dial error = %v, want context deadline exceeded", err)
 	}
