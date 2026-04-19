@@ -3,6 +3,7 @@ package promptcontrol
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	askquestion "builder/server/tools/askquestion"
@@ -82,6 +83,56 @@ func TestServiceAnswerAskRequiresControllerLease(t *testing.T) {
 	}
 }
 
+func TestServiceAnswerAskDedupesSuccessfulRetry(t *testing.T) {
+	responder := &stubPromptResponder{}
+	service := NewService(responder)
+	req := serverapi.AskAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		AskID:             "ask-1",
+		Answer:            "hello",
+	}
+
+	if err := service.AnswerAsk(context.Background(), req); err != nil {
+		t.Fatalf("AnswerAsk first: %v", err)
+	}
+	responder.submitErr = serverapi.ErrPromptAlreadyResolved
+	if err := service.AnswerAsk(context.Background(), req); err != nil {
+		t.Fatalf("AnswerAsk replay: %v", err)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
+func TestServiceAnswerAskRejectsClientRequestIDPayloadMismatch(t *testing.T) {
+	responder := &stubPromptResponder{}
+	service := NewService(responder)
+	if err := service.AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		AskID:             "ask-1",
+		Answer:            "hello",
+	}); err != nil {
+		t.Fatalf("AnswerAsk first: %v", err)
+	}
+	err := service.AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		AskID:             "ask-1",
+		Answer:            "different",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reused with different parameters") {
+		t.Fatalf("AnswerAsk mismatch error = %v, want reused with different parameters", err)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
 func TestServiceAnswerApprovalSubmitsPromptError(t *testing.T) {
 	responder := &stubPromptResponder{submitErr: serverapi.ErrPromptAlreadyResolved}
 	service := NewService(responder)
@@ -110,5 +161,29 @@ func TestServiceAnswerApprovalSubmitsPromptError(t *testing.T) {
 	}
 	if responder.response.Approval != nil {
 		t.Fatalf("unexpected approval payload for prompt error: %+v", responder.response.Approval)
+	}
+}
+
+func TestServiceAnswerApprovalDedupesSuccessfulRetry(t *testing.T) {
+	responder := &stubPromptResponder{}
+	service := NewService(responder)
+	req := serverapi.ApprovalAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		ApprovalID:        "approval-1",
+		Decision:          clientui.ApprovalDecisionAllowOnce,
+		Commentary:        "looks good",
+	}
+
+	if err := service.AnswerApproval(context.Background(), req); err != nil {
+		t.Fatalf("AnswerApproval first: %v", err)
+	}
+	responder.submitErr = serverapi.ErrPromptAlreadyResolved
+	if err := service.AnswerApproval(context.Background(), req); err != nil {
+		t.Fatalf("AnswerApproval replay: %v", err)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
 	}
 }
