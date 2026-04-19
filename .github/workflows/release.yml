@@ -274,7 +274,7 @@ jobs:
         run: bash scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap" --formula "$BREW_FORMULA_NAME"
 
       - name: Ensure pr-pull label exists
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.RESPAWN_BREW_TAP_TOKEN }}
           script: |
