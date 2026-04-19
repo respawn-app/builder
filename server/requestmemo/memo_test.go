@@ -129,6 +129,56 @@ func TestMemoDoesNotReplayGenericErrorOutcome(t *testing.T) {
 	}
 }
 
+func TestMemoRerunsWaitingRetryAfterNonMemoizedInflightCompletion(t *testing.T) {
+	memo := New[string, string]()
+	started := make(chan struct{})
+	allowCancel := make(chan struct{})
+	firstDone := make(chan error, 1)
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	defer cancelFirst()
+	go func() {
+		_, err := memo.Do(firstCtx, "req-1", "same", func(a string, b string) bool {
+			return a == b
+		}, func(ctx context.Context) (string, error) {
+			close(started)
+			<-allowCancel
+			return "", ctx.Err()
+		})
+		firstDone <- err
+	}()
+
+	<-started
+	secondDone := make(chan struct {
+		resp string
+		err  error
+	}, 1)
+	go func() {
+		resp, err := memo.Do(context.Background(), "req-1", "same", func(a string, b string) bool {
+			return a == b
+		}, func(context.Context) (string, error) {
+			return "ok", nil
+		})
+		secondDone <- struct {
+			resp string
+			err  error
+		}{resp: resp, err: err}
+	}()
+
+	close(allowCancel)
+	cancelFirst()
+	if err := <-firstDone; err != context.Canceled {
+		t.Fatalf("first error = %v, want canceled", err)
+	}
+	second := <-secondDone
+	if second.err != nil {
+		t.Fatalf("second error = %v", second.err)
+	}
+	if second.resp != "ok" {
+		t.Fatalf("second response = %q, want ok", second.resp)
+	}
+}
+
 func TestMemoPrunesExpiredEntriesBelowCapacity(t *testing.T) {
 	memo := New[string, string]()
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
