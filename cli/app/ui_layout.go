@@ -144,7 +144,7 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 		padToHeight: false,
 	}
 	frame.helpPane = l.renderHelpPane(width, helpPaneMaxLines(height, len(frame.inputPane), len(frame.queuePane), len(frame.pickerPane)), style)
-	availableStreamingLines := height - len(frame.pickerPane) - len(frame.queuePane) - len(frame.inputPane) - len(frame.helpPane) - 1
+	availableStreamingLines := l.nativeStreamingViewportLineBudget(width, style)
 	if availableStreamingLines < 0 {
 		availableStreamingLines = 0
 	}
@@ -171,12 +171,28 @@ func (l uiViewLayout) nativeOngoingLineCount() int {
 	pickerLines := l.model.activePickerPresentation().lineCount
 	height := l.effectiveHeight()
 	helpLines := l.renderHelpPane(width, helpPaneMaxLines(height, len(inputLines), len(queuedLines), pickerLines), style)
-	availableStreamingLines := height - pickerLines - len(queuedLines) - len(inputLines) - len(helpLines) - 1
+	availableStreamingLines := l.nativeStreamingViewportLineBudget(width, style)
 	if availableStreamingLines < 0 {
 		availableStreamingLines = 0
 	}
 	streamingLines := l.renderNativeStreamingLines(width, availableStreamingLines, style)
 	return len(inputLines) + len(queuedLines) + pickerLines + len(helpLines) + len(streamingLines) + 1
+}
+
+func (l uiViewLayout) nativeStreamingViewportLineBudget(width int, style uiStyles) int {
+	if width <= 0 {
+		return 0
+	}
+	inputLines := l.renderInputLines(width, style)
+	queuedLines := l.renderQueuedMessagesPane(width)
+	pickerLines := l.model.activePickerPresentation().lineCount
+	height := l.effectiveHeight()
+	helpLines := l.renderHelpPane(width, helpPaneMaxLines(height, len(inputLines), len(queuedLines), pickerLines), style)
+	budget := height - pickerLines - len(queuedLines) - len(inputLines) - len(helpLines) - 1
+	if budget < 0 {
+		return 0
+	}
+	return budget
 }
 
 func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiStyles) []string {
@@ -197,13 +213,13 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 		return nil
 	}
 	lines := make([]string, 0, maxLines)
-	includeDivider := len(nativeCommittedEntries(l.model.transcriptEntries)) > 0
+	includeDivider := len(nativeCommittedEntries(l.model.transcriptEntries)) > 0 && !l.model.nativeStreamingDividerFlushed
 	if includeDivider {
 		lines = append(lines, style.meta.Render(strings.Repeat("─", width)))
 	}
 	lines = append(lines, pendingLines...)
 	if strings.TrimSpace(streamText) != "" {
-		lines = append(lines, renderNativeStreamingAssistantLines(streamText, l.model.theme, width)...)
+		lines = append(lines, l.visibleNativeStreamingAssistantLines(streamText, width)...)
 	}
 	if strings.TrimSpace(errText) != "" {
 		for _, line := range splitPlainLines(errText) {
@@ -233,6 +249,24 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 		return result
 	}
 	return lines[len(lines)-maxLines:]
+}
+
+func (l uiViewLayout) visibleNativeStreamingAssistantLines(streamText string, width int) []string {
+	assistantLines := renderNativeStreamingAssistantLines(streamText, l.model.theme, width)
+	if len(assistantLines) == 0 {
+		return nil
+	}
+	if width != l.model.nativeStreamingWidth || streamText != l.model.nativeStreamingText {
+		return assistantLines
+	}
+	start := l.model.nativeStreamingFlushedLineCount
+	if start <= 0 {
+		return assistantLines
+	}
+	if start >= len(assistantLines) {
+		return nil
+	}
+	return assistantLines[start:]
 }
 
 func renderNativeStreamingAssistantLines(streamText, theme string, width int) []string {
