@@ -25,9 +25,12 @@ func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, claim, err := svc.claimActivation("session-1", "req-1")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-1")
 	if err != nil {
 		t.Fatalf("claimActivation: %v", err)
+	}
+	if takeover != nil {
+		t.Fatalf("claimActivation takeover = %+v, want nil", takeover)
 	}
 	if claim != activationClaimReuse {
 		t.Fatal("expected duplicate activation to reuse existing controller")
@@ -47,15 +50,83 @@ func TestClaimActivationAllowsTakeoverAfterReady(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, claim, err := svc.claimActivation("session-1", "req-2")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
 	if err != nil {
 		t.Fatalf("claimActivation: %v", err)
+	}
+	if takeover == nil {
+		t.Fatal("expected takeover activation to allocate pending takeover state")
 	}
 	if claim != activationClaimTakeover {
 		t.Fatalf("claimActivation claim = %v, want takeover", claim)
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected takeover activation to return existing handle")
+	}
+}
+
+func TestClaimActivationReusesPendingTakeoverRequest(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
+	}
+	reusedHandle, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation pending retry: %v", err)
+	}
+	if reusedClaim != activationClaimTakeoverReuse {
+		t.Fatalf("pending retry claim = %v, want takeover reuse", reusedClaim)
+	}
+	if reusedHandle != handle {
+		t.Fatal("expected pending retry to return same handle")
+	}
+	if reusedTakeover != takeover {
+		t.Fatal("expected pending retry to return same takeover state")
+	}
+	if !svc.completeTakeover("session-1", handle, takeover, "req-2", "lease-2") {
+		t.Fatal("expected completeTakeover to succeed")
+	}
+	resp, err := activationResponseForTakeover(reusedTakeover)
+	if err != nil {
+		t.Fatalf("activationResponseForTakeover: %v", err)
+	}
+	if resp.LeaseID != "lease-2" {
+		t.Fatalf("takeover lease id = %q, want lease-2", resp.LeaseID)
+	}
+}
+
+func TestClaimActivationRejectsConcurrentDifferentTakeoverRequest(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+
+	_, _, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
+	}
+	_, _, _, err = svc.claimActivation("session-1", "req-3")
+	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		t.Fatalf("claimActivation competing takeover error = %v, want session already controlled", err)
 	}
 }
 
