@@ -12,6 +12,258 @@ import (
 	"builder/shared/serverapi"
 )
 
+var runtimeControlOpenAICapabilities = llm.ProviderCapabilities{
+	ProviderID:               "openai",
+	SupportsResponsesAPI:     true,
+	SupportsResponsesCompact: true,
+	IsOpenAIFirstParty:       true,
+}
+
+func TestServiceSetThinkingLevelReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSetThinkingLevelRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Level: "high"}
+
+	if err := service.SetThinkingLevel(context.Background(), req); err != nil {
+		t.Fatalf("SetThinkingLevel first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.SetThinkingLevel(context.Background(), req); err != nil {
+		t.Fatalf("SetThinkingLevel replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if got := engine.ThinkingLevel(); got != "high" {
+		t.Fatalf("thinking level = %q, want high", got)
+	}
+}
+
+func TestServiceSetFastModeEnabledReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ProviderCapabilitiesOverride: &runtimeControlOpenAICapabilities})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSetFastModeEnabledRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Enabled: true}
+
+	first, err := service.SetFastModeEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetFastModeEnabled first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	second, err := service.SetFastModeEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetFastModeEnabled replay: %v", err)
+	}
+	if first != second {
+		t.Fatalf("responses = (%+v, %+v), want identical replay", first, second)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if !engine.FastModeEnabled() {
+		t.Fatal("expected fast mode to remain enabled")
+	}
+}
+
+func TestServiceSetReviewerEnabledReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", Reviewer: runtime.ReviewerConfig{Model: "gpt-5", ClientFactory: func() (llm.Client, error) { return &runtimeControlFakeClient{}, nil }}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSetReviewerEnabledRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Enabled: true}
+
+	first, err := service.SetReviewerEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetReviewerEnabled first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	second, err := service.SetReviewerEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetReviewerEnabled replay: %v", err)
+	}
+	if first != second {
+		t.Fatalf("responses = (%+v, %+v), want identical replay", first, second)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if got := engine.ReviewerFrequency(); got != "edits" {
+		t.Fatalf("reviewer frequency = %q, want edits", got)
+	}
+}
+
+func TestServiceSetAutoCompactionEnabledReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSetAutoCompactionEnabledRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Enabled: false}
+
+	first, err := service.SetAutoCompactionEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetAutoCompactionEnabled first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	second, err := service.SetAutoCompactionEnabled(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetAutoCompactionEnabled replay: %v", err)
+	}
+	if first != second {
+		t.Fatalf("responses = (%+v, %+v), want identical replay", first, second)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if engine.AutoCompactionEnabled() {
+		t.Fatal("expected auto compaction to remain disabled")
+	}
+}
+
+func TestServiceCompactContextReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, engine, client := newRuntimeControlCompactionFixture(t)
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeCompactContextRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Args: "compact now"}
+
+	if err := service.CompactContext(context.Background(), req); err != nil {
+		t.Fatalf("CompactContext first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.CompactContext(context.Background(), req); err != nil {
+		t.Fatalf("CompactContext replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if client.compactionCalls != 1 {
+		t.Fatalf("compaction call count = %d, want 1", client.compactionCalls)
+	}
+	if got := countEventsByKind(t, store, "history_replaced"); got != 1 {
+		t.Fatalf("history_replaced event count = %d, want 1", got)
+	}
+}
+
+func TestServiceCompactContextForPreSubmitReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, engine, client := newRuntimeControlCompactionFixture(t)
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeCompactContextForPreSubmitRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1"}
+
+	if err := service.CompactContextForPreSubmit(context.Background(), req); err != nil {
+		t.Fatalf("CompactContextForPreSubmit first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.CompactContextForPreSubmit(context.Background(), req); err != nil {
+		t.Fatalf("CompactContextForPreSubmit replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if client.compactionCalls != 1 {
+		t.Fatalf("compaction call count = %d, want 1", client.compactionCalls)
+	}
+	if got := countEventsByKind(t, store, "history_replaced"); got != 1 {
+		t.Fatalf("history_replaced event count = %d, want 1", got)
+	}
+}
+
+func TestServiceInterruptReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeInterruptRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1"}
+
+	if err := service.Interrupt(context.Background(), req); err != nil {
+		t.Fatalf("Interrupt first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.Interrupt(context.Background(), req); err != nil {
+		t.Fatalf("Interrupt replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+}
+
+func newRuntimeControlCompactionFixture(t *testing.T) (*session.Store, *runtime.Engine, *runtimeControlFakeClient) {
+	t.Helper()
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeControlFakeClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}},
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"},
+				{Type: llm.ResponseItemTypeCompaction, EncryptedContent: "checkpoint"},
+			},
+			Usage:             llm.Usage{WindowTokens: 200000},
+			TrimmedItemsCount: 1,
+		}},
+	}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ProviderCapabilitiesOverride: &runtimeControlOpenAICapabilities})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	if _, err := engine.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("seed runtime transcript: %v", err)
+	}
+	return store, engine, client
+}
+
+func countEventsByKind(t *testing.T, store *session.Store, kind string) int {
+	t.Helper()
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	count := 0
+	for _, evt := range events {
+		if evt.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
+
 func TestServiceSubmitUserMessageReplaysSuccessfulRetryAfterLeaseRotation(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {
