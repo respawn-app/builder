@@ -18,7 +18,6 @@ const promptActivityResubscribeDelay = 250 * time.Millisecond
 
 type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
 type pendingPromptSnapshotProvider func(context.Context) (map[string]struct{}, error)
-type controllerLeaseProvider func() string
 
 type promptEventEmitter struct {
 	mu     sync.RWMutex
@@ -67,7 +66,7 @@ func (e *promptEventEmitter) close() {
 	close(e.out)
 }
 
-func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient, leaseProvider controllerLeaseProvider) (<-chan askEvent, func()) {
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient, leaseManager *controllerLeaseManager) (<-chan askEvent, func()) {
 	emitter := newPromptEventEmitter(16)
 	out := emitter.channel()
 	if sub == nil || subscribe == nil || control == nil {
@@ -88,7 +87,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 		if !isPromptPending(item.PromptID) {
 			return
 		}
-		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, leaseProvider, control, requeue))
+		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, leaseManager, control, requeue))
 	}
 	go func() {
 		defer emitter.close()
@@ -142,7 +141,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 			default:
 				continue
 			}
-			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, leaseProvider, control, requeue)) {
+			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, leaseManager, control, requeue)) {
 				_ = current.Close()
 				return
 			}
@@ -206,7 +205,7 @@ func waitPromptActivityRetry(ctx context.Context) bool {
 	}
 }
 
-func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, leaseProvider controllerLeaseProvider, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
+func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, leaseManager *controllerLeaseManager, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
 	req := askquestion.Request{
 		ID:                     item.PromptID,
 		Question:               item.Question,
@@ -236,7 +235,7 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, l
 			}
 		}
 		if item.Approval {
-			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: currentControllerLeaseID(leaseProvider), ApprovalID: item.PromptID}
+			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: currentControllerLeaseID(leaseManager), ApprovalID: item.PromptID}
 			if result.err != nil {
 				answerReq.ErrorMessage = result.err.Error()
 			} else if result.response.Approval != nil {
@@ -245,14 +244,14 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, l
 			} else {
 				answerReq.ErrorMessage = errors.New("approval response is required").Error()
 			}
-			if err := control.AnswerApproval(promptCtx, answerReq); err != nil {
+			if err := answerPromptApproval(promptCtx, control, leaseManager, answerReq); err != nil {
 				if retry != nil && shouldRetryPromptAnswerError(err) {
 					retry(item)
 				}
 			}
 			return
 		}
-		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: currentControllerLeaseID(leaseProvider), AskID: item.PromptID}
+		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: currentControllerLeaseID(leaseManager), AskID: item.PromptID}
 		if result.err != nil {
 			answerReq.ErrorMessage = result.err.Error()
 		} else {
@@ -260,13 +259,45 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, l
 			answerReq.SelectedOptionNumber = result.response.SelectedOptionNumber
 			answerReq.FreeformAnswer = result.response.FreeformAnswer
 		}
-		if err := control.AnswerAsk(promptCtx, answerReq); err != nil {
+		if err := answerPromptAsk(promptCtx, control, leaseManager, answerReq); err != nil {
 			if retry != nil && shouldRetryPromptAnswerError(err) {
 				retry(item)
 			}
 		}
 	}()
 	return askEvent{req: req, reply: reply, cancel: cancelPrompt}
+}
+
+func answerPromptAsk(ctx context.Context, control client.PromptControlClient, leaseManager *controllerLeaseManager, req serverapi.AskAnswerRequest) error {
+	err := control.AnswerAsk(ctx, req)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return err
+	}
+	if leaseManager == nil {
+		return err
+	}
+	if _, recoverErr := leaseManager.Recover(ctx); recoverErr != nil {
+		return recoverErr
+	}
+	req.ClientRequestID = uuid.NewString()
+	req.ControllerLeaseID = currentControllerLeaseID(leaseManager)
+	return control.AnswerAsk(ctx, req)
+}
+
+func answerPromptApproval(ctx context.Context, control client.PromptControlClient, leaseManager *controllerLeaseManager, req serverapi.ApprovalAnswerRequest) error {
+	err := control.AnswerApproval(ctx, req)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return err
+	}
+	if leaseManager == nil {
+		return err
+	}
+	if _, recoverErr := leaseManager.Recover(ctx); recoverErr != nil {
+		return recoverErr
+	}
+	req.ClientRequestID = uuid.NewString()
+	req.ControllerLeaseID = currentControllerLeaseID(leaseManager)
+	return control.AnswerApproval(ctx, req)
 }
 
 func resolvedPromptEvent(promptID string) askEvent {
@@ -283,9 +314,9 @@ func shouldRetryPromptAnswerError(err error) bool {
 	return true
 }
 
-func currentControllerLeaseID(provider controllerLeaseProvider) string {
-	if provider == nil {
+func currentControllerLeaseID(manager *controllerLeaseManager) string {
+	if manager == nil {
 		return ""
 	}
-	return strings.TrimSpace(provider())
+	return manager.Value()
 }

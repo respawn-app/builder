@@ -81,13 +81,13 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			runtimePlan.Close()
 			return runErr
 		}
-		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, runtimePlan.ControllerLeaseID, finalModel); err != nil {
+		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), finalModel); err != nil {
 			runtimePlan.Close()
 			return err
 		}
 
 		transition := extractUITransition(finalModel)
-		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.ControllerLeaseID, transition)
+		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), transition)
 		runtimePlan.Close()
 		if err != nil {
 			return err
