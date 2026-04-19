@@ -425,7 +425,14 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 		return Binding{}, err
 	}
 	displayName := filepath.Base(canonicalRoot)
-	return s.CreateProjectForWorkspace(ctx, canonicalRoot, displayName)
+	binding, err := s.CreateProjectForWorkspace(ctx, canonicalRoot, displayName)
+	if err == nil {
+		return binding, nil
+	}
+	if binding, lookupErr := s.lookupWorkspaceBinding(ctx, canonicalRoot); lookupErr == nil {
+		return binding, nil
+	}
+	return Binding{}, err
 }
 
 func requireExistingDirectory(path string) error {
