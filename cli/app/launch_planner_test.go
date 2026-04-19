@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,14 +13,35 @@ import (
 	"builder/server/metadata"
 	"builder/server/session"
 	"builder/server/storagemigration"
+	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"builder/shared/toolspec"
 )
 
 type plannerOwnershipServer struct {
 	*testEmbeddedServer
 	owns bool
+}
+
+type stubSessionViewClient struct {
+	getSessionMainView func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error)
+}
+
+func (s stubSessionViewClient) GetSessionMainView(ctx context.Context, req serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	if s.getSessionMainView == nil {
+		return serverapi.SessionMainViewResponse{}, errors.New("session view stub is required")
+	}
+	return s.getSessionMainView(ctx, req)
+}
+
+func (stubSessionViewClient) GetSessionTranscriptPage(context.Context, serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	return serverapi.SessionTranscriptPageResponse{}, errors.New("unexpected GetSessionTranscriptPage call")
+}
+
+func (stubSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, errors.New("unexpected GetRun call")
 }
 
 func (s *plannerOwnershipServer) OwnsServer() bool {
@@ -94,6 +116,9 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
 			},
 			containerDir: containerDir,
+			sessionViewClient: stubSessionViewClient{getSessionMainView: func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+				return serverapi.SessionMainViewResponse{MainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{ExecutionTarget: clientui.SessionExecutionTarget{WorkspaceRoot: cfg.WorkspaceRoot}}}}, nil
+			}},
 		},
 		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			if len(summaries) != 2 {
@@ -119,6 +144,55 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	}
 	if plan.SessionID == first.Meta().SessionID {
 		t.Fatalf("did not expect first session %q", first.Meta().SessionID)
+	}
+	if !plan.SelectedViaPicker {
+		t.Fatal("expected picker-selected session to be marked as selected via picker")
+	}
+	if comparableWorkspaceChangeRoot(plan.SelectedSessionWorkspaceRoot) != comparableWorkspaceChangeRoot(cfg.WorkspaceRoot) {
+		t.Fatalf("expected selected session workspace root %q, got %q", comparableWorkspaceChangeRoot(cfg.WorkspaceRoot), comparableWorkspaceChangeRoot(plan.SelectedSessionWorkspaceRoot))
+	}
+}
+
+func TestSessionLaunchPlannerPickerSelectionMissingMetadataMarksRecoveryInsteadOfFailing(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := "/tmp/workspace-a"
+	binding := mustRegisterAppBinding(t, root, workspaceRoot)
+	planner := &launchPlanner{
+		server: &testEmbeddedServer{
+			cfg: config.App{
+				WorkspaceRoot:   workspaceRoot,
+				PersistenceRoot: root,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			},
+			projectID: binding.ProjectID,
+			projectViewClient: client.NewLoopbackProjectViewClient(projectBindingFlowStubProjectViewService{
+				projectOverviewResp: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Sessions: []clientui.SessionSummary{{SessionID: "missing-session", UpdatedAt: time.Now().UTC()}}}},
+			}),
+			sessionViewClient: stubSessionViewClient{getSessionMainView: func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+				return serverapi.SessionMainViewResponse{}, errors.New("missing selected session")
+			}},
+			sessionLaunch: stubSessionLaunchClient{planSession: func(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
+				return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{SessionID: "missing-session", WorkspaceRoot: workspaceRoot, ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto}}}, nil
+			}},
+		},
+		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+			picked := summaries[0]
+			return sessionPickerResult{Session: &picked}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if !plan.SelectedViaPicker {
+		t.Fatal("expected picker-selected session to be marked as selected via picker")
+	}
+	if !plan.SelectedSessionWorkspaceLookupFailed {
+		t.Fatal("expected missing selected-session metadata to mark picker recovery")
+	}
+	if plan.SelectedSessionWorkspaceRoot != "" {
+		t.Fatalf("expected empty selected session workspace root after lookup failure, got %q", plan.SelectedSessionWorkspaceRoot)
 	}
 }
 
@@ -252,6 +326,10 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto, OpenAIBaseURL: "http://config.local/v1"},
 			},
 			containerDir: containerDir,
+			sessionViewClient: stubSessionViewClient{getSessionMainView: func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+				t.Fatal("did not expect session view lookup for explicit session id")
+				return serverapi.SessionMainViewResponse{}, nil
+			}},
 		},
 		pickSession: func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			t.Fatal("did not expect picker for explicit session id")
@@ -265,6 +343,9 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	}
 	if plan.SessionID != store.Meta().SessionID {
 		t.Fatalf("expected explicit session %q, got %q", store.Meta().SessionID, plan.SessionID)
+	}
+	if plan.SelectedViaPicker {
+		t.Fatal("did not expect explicit session selection to be marked as picker-selected")
 	}
 	if plan.ActiveSettings.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected session continuation base url, got %q", plan.ActiveSettings.OpenAIBaseURL)

@@ -7,6 +7,7 @@ import (
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/metadata"
 	"builder/server/requestmemo"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -59,6 +60,14 @@ func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) 
 	return s
 }
 
+func (s *Service) WithPersistenceRoot(root string) *Service {
+	if s == nil {
+		return nil
+	}
+	s.persistenceRoot = strings.TrimSpace(root)
+	return s
+}
+
 func (s *Service) requireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
 	trimmedSessionID := strings.TrimSpace(sessionID)
 	if trimmedSessionID == "" {
@@ -99,6 +108,32 @@ func (s *Service) PersistInputDraft(ctx context.Context, req serverapi.SessionPe
 		}
 		return serverapi.SessionPersistInputDraftResponse{}, nil
 	})
+}
+
+func (s *Service) RetargetSessionWorkspace(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.SessionRetargetWorkspaceResponse{}, err
+	}
+	if strings.TrimSpace(s.persistenceRoot) == "" {
+		return serverapi.SessionRetargetWorkspaceResponse{}, errors.New("persistence root is required")
+	}
+	metadataStore, err := metadata.Open(s.persistenceRoot)
+	if err != nil {
+		return serverapi.SessionRetargetWorkspaceResponse{}, err
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RetargetSessionWorkspace(ctx, req.SessionID, req.WorkspaceRoot)
+	if err != nil {
+		return serverapi.SessionRetargetWorkspaceResponse{}, err
+	}
+	return serverapi.SessionRetargetWorkspaceResponse{Binding: serverapi.ProjectBinding{
+		ProjectID:       binding.ProjectID,
+		ProjectName:     binding.ProjectName,
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   binding.CanonicalRoot,
+		WorkspaceName:   binding.WorkspaceName,
+		WorkspaceStatus: binding.WorkspaceStatus,
+	}}, nil
 }
 
 func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {

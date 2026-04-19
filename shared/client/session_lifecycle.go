@@ -10,6 +10,7 @@ import (
 type SessionLifecycleClient interface {
 	GetInitialInput(ctx context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error)
 	PersistInputDraft(ctx context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error)
+	RetargetSessionWorkspace(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error)
 	ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error)
 }
 
@@ -33,6 +34,13 @@ func (c *loopbackSessionLifecycleClient) PersistInputDraft(ctx context.Context, 
 		return serverapi.SessionPersistInputDraftResponse{}, errors.New("session lifecycle service is required")
 	}
 	return c.service.PersistInputDraft(ctx, req)
+}
+
+func (c *loopbackSessionLifecycleClient) RetargetSessionWorkspace(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.SessionRetargetWorkspaceResponse{}, errors.New("session lifecycle service is required")
+	}
+	return c.service.RetargetSessionWorkspace(ctx, req)
 }
 
 func (c *loopbackSessionLifecycleClient) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {

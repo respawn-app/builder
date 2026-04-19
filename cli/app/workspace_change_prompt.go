@@ -1,0 +1,232 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"builder/shared/config"
+	"builder/shared/serverapi"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
+)
+
+const (
+	workspaceChangePromptHeaderFallback = "Workspace changed"
+)
+
+var runWorkspaceChangePromptFlow = runWorkspaceChangePrompt
+
+type sessionWorkspaceChangeAction int
+
+const (
+	sessionWorkspaceChangeProceed sessionWorkspaceChangeAction = iota
+	sessionWorkspaceChangePickAgain
+	sessionWorkspaceChangeReplanSelected
+)
+
+type workspaceChangePromptResult struct {
+	Rebind bool
+}
+
+type workspaceChangePromptModel struct {
+	width        int
+	height       int
+	theme        string
+	selectedRoot string
+	currentRoot  string
+	cursor       int
+	result       workspaceChangePromptResult
+}
+
+func maybeHandlePickedSessionWorkspaceChange(ctx context.Context, server embeddedServer, plan sessionLaunchPlan) (sessionWorkspaceChangeAction, error) {
+	if server == nil {
+		return sessionWorkspaceChangeProceed, errors.New("embedded server is required")
+	}
+	if !plan.SelectedViaPicker || strings.TrimSpace(plan.SessionID) == "" {
+		return sessionWorkspaceChangeProceed, nil
+	}
+	if plan.SelectedSessionWorkspaceLookupFailed {
+		return sessionWorkspaceChangePickAgain, nil
+	}
+	currentRoot := normalizeWorkspaceChangeDisplayRoot(server.Config().WorkspaceRoot)
+	selectedRoot := normalizeWorkspaceChangeDisplayRoot(plan.SelectedSessionWorkspaceRoot)
+	if comparableWorkspaceChangeRoot(currentRoot) == "" || comparableWorkspaceChangeRoot(selectedRoot) == "" || comparableWorkspaceChangeRoot(currentRoot) == comparableWorkspaceChangeRoot(selectedRoot) {
+		return sessionWorkspaceChangeProceed, nil
+	}
+	result, err := runWorkspaceChangePromptFlow(selectedRoot, currentRoot, server.Config().Settings.Theme, server.Config().Settings.TUIAlternateScreen)
+	if err != nil {
+		return sessionWorkspaceChangeProceed, err
+	}
+	if !result.Rebind {
+		return sessionWorkspaceChangePickAgain, nil
+	}
+	if err := retargetInteractiveSessionWorkspace(ctx, server, plan.SessionID); err != nil {
+		return sessionWorkspaceChangeProceed, err
+	}
+	return sessionWorkspaceChangeReplanSelected, nil
+}
+
+func retargetInteractiveSessionWorkspace(ctx context.Context, server embeddedServer, sessionID string) error {
+	if server == nil || server.SessionLifecycleClient() == nil {
+		return errors.New("session lifecycle client is required")
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return errors.New("session id is required")
+	}
+	workspaceRoot := strings.TrimSpace(server.Config().WorkspaceRoot)
+	if workspaceRoot == "" {
+		return errors.New("workspace root is required")
+	}
+	_, err := server.SessionLifecycleClient().RetargetSessionWorkspace(ctx, serverapi.SessionRetargetWorkspaceRequest{ClientRequestID: uuid.NewString(), SessionID: trimmedSessionID, WorkspaceRoot: workspaceRoot})
+	return err
+}
+
+func normalizeWorkspaceChangeDisplayRoot(root string) string {
+	trimmed := strings.TrimSpace(root)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(trimmed)
+}
+
+func comparableWorkspaceChangeRoot(root string) string {
+	trimmed := strings.TrimSpace(root)
+	if trimmed == "" {
+		return ""
+	}
+	absRoot := trimmed
+	if !filepath.IsAbs(absRoot) {
+		if resolved, err := filepath.Abs(absRoot); err == nil {
+			absRoot = resolved
+		}
+	}
+	if canonical, err := filepath.EvalSymlinks(absRoot); err == nil {
+		return filepath.Clean(canonical)
+	}
+	return filepath.Clean(absRoot)
+}
+
+func newWorkspaceChangePromptModel(selectedRoot string, currentRoot string, theme string) *workspaceChangePromptModel {
+	return &workspaceChangePromptModel{
+		width:        defaultPickerWidth,
+		height:       defaultPickerHeight,
+		theme:        theme,
+		selectedRoot: strings.TrimSpace(selectedRoot),
+		currentRoot:  strings.TrimSpace(currentRoot),
+		cursor:       1,
+	}
+}
+
+func (m *workspaceChangePromptModel) Init() tea.Cmd { return nil }
+
+func (m *workspaceChangePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch typed := msg.(type) {
+	case tea.WindowSizeMsg:
+		if typed.Width > 0 {
+			m.width = typed.Width
+		}
+		if typed.Height > 0 {
+			m.height = typed.Height
+		}
+		return m, nil
+	case tea.KeyMsg:
+		switch typed.Type {
+		case tea.KeyUp:
+			m.moveCursor(-1)
+		case tea.KeyDown:
+			m.moveCursor(1)
+		case tea.KeyRunes:
+			filtered, _ := stripMouseSGRRunes(typed.Runes)
+			if len(filtered) == 1 {
+				switch filtered[0] {
+				case 'k':
+					m.moveCursor(-1)
+				case 'j':
+					m.moveCursor(1)
+				case 'y':
+					m.result = workspaceChangePromptResult{Rebind: true}
+					return m, tea.Quit
+				case 'n', 'q':
+					m.result = workspaceChangePromptResult{}
+					return m, tea.Quit
+				}
+			}
+		case tea.KeyEnter:
+			m.result = workspaceChangePromptResult{Rebind: m.cursor == 0}
+			return m, tea.Quit
+		case tea.KeyEsc, tea.KeyCtrlC:
+			m.result = workspaceChangePromptResult{}
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m *workspaceChangePromptModel) View() string {
+	return renderStartupFullScreenPrompt(startupFullScreenPromptSpec{
+		Width:           m.width,
+		Height:          m.height,
+		Title:           m.renderHeader(),
+		Theme:           m.theme,
+		Lines:           m.promptLines(),
+		Footer:          m.footerText(),
+		MinContentLines: 3,
+	})
+}
+
+func (m *workspaceChangePromptModel) moveCursor(delta int) {
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor > 1 {
+		m.cursor = 1
+	}
+}
+
+func (m *workspaceChangePromptModel) renderHeader() string {
+	return renderStartupPlainTitle(workspaceChangePromptHeaderFallback, m.theme)
+}
+
+func (m *workspaceChangePromptModel) promptLines() []askPromptLine {
+	return []askPromptLine{
+		{Text: m.description(), Kind: askPromptLineKindQuestion},
+		{Text: "", Kind: askPromptLineKindQuestion},
+		{Text: m.optionLine(0, "Yes"), Kind: askPromptLineKindOption, Selected: m.cursor == 0},
+		{Text: m.optionLine(1, "No"), Kind: askPromptLineKindOption, Selected: m.cursor == 1},
+	}
+}
+
+func (m *workspaceChangePromptModel) footerText() string {
+	return "↑/↓ pick | enter confirm | esc return to picker"
+}
+
+func (m *workspaceChangePromptModel) description() string {
+	return fmt.Sprintf("This session started in %q but Builder's current is %q. Continue in new location?", m.selectedRoot, m.currentRoot)
+}
+
+func (m *workspaceChangePromptModel) optionLine(index int, label string) string {
+	return fmt.Sprintf("%d. %s", index+1, label)
+}
+
+func runWorkspaceChangePrompt(selectedRoot string, currentRoot string, theme string, alternateScreen config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	model := newWorkspaceChangePromptModel(selectedRoot, currentRoot, theme)
+	options := []tea.ProgramOption{}
+	if shouldUseStartupPickerAltScreen(alternateScreen) {
+		options = append(options, tea.WithAltScreen())
+	}
+	program := tea.NewProgram(model, options...)
+	finalModel, err := program.Run()
+	if err != nil {
+		return workspaceChangePromptResult{}, err
+	}
+	finalized, ok := finalModel.(*workspaceChangePromptModel)
+	if !ok {
+		return workspaceChangePromptResult{}, fmt.Errorf("unexpected workspace change prompt model type %T", finalModel)
+	}
+	return finalized.result, nil
+}

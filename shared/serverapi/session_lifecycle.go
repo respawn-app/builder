@@ -34,6 +34,16 @@ type SessionPersistInputDraftRequest struct {
 
 type SessionPersistInputDraftResponse struct{}
 
+type SessionRetargetWorkspaceRequest struct {
+	ClientRequestID string `json:"client_request_id"`
+	SessionID       string `json:"session_id"`
+	WorkspaceRoot   string `json:"workspace_root"`
+}
+
+type SessionRetargetWorkspaceResponse struct {
+	Binding ProjectBinding `json:"binding"`
+}
+
 type SessionResolveTransitionRequest struct {
 	ClientRequestID   string            `json:"client_request_id"`
 	SessionID         string            `json:"session_id,omitempty"`
@@ -54,6 +64,7 @@ type SessionResolveTransitionResponse struct {
 type SessionLifecycleService interface {
 	GetInitialInput(ctx context.Context, req SessionInitialInputRequest) (SessionInitialInputResponse, error)
 	PersistInputDraft(ctx context.Context, req SessionPersistInputDraftRequest) (SessionPersistInputDraftResponse, error)
+	RetargetSessionWorkspace(ctx context.Context, req SessionRetargetWorkspaceRequest) (SessionRetargetWorkspaceResponse, error)
 	ResolveTransition(ctx context.Context, req SessionResolveTransitionRequest) (SessionResolveTransitionResponse, error)
 }
 
@@ -72,6 +83,19 @@ func (r SessionInitialInputRequest) Validate() error {
 		return nil
 	}
 	return validateLifecycleSessionID(r.SessionID)
+}
+
+func (r SessionRetargetWorkspaceRequest) Validate() error {
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
+	if err := validateLifecycleSessionID(r.SessionID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.WorkspaceRoot) == "" {
+		return errors.New("workspace_root is required")
+	}
+	return nil
 }
 
 func (r SessionResolveTransitionRequest) Validate() error {

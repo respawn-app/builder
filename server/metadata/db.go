@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,11 @@ import (
 
 //go:embed migrations/*.up.sql
 var migrationsFS embed.FS
+
+// Goose logger is process-wide; metadata owns this setting and currently keeps
+// routine migration status output silent unless debug logging is explicitly enabled.
+var metadataMigrationDebugLogs = false
+var metadataMigrationLogWriter io.Writer = os.Stderr
 
 func openDatabase(persistenceRoot string) (*sql.DB, error) {
 	trimmedRoot := filepath.Clean(persistenceRoot)
@@ -73,6 +79,7 @@ func configureDatabase(db *sql.DB) error {
 
 func runMigrations(db *sql.DB) error {
 	goose.SetBaseFS(migrationsFS)
+	goose.SetLogger(newMetadataMigrationLogger(metadataMigrationLogWriter, metadataMigrationDebugLogs))
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("set metadata migration dialect: %w", err)
 	}
@@ -84,4 +91,30 @@ func runMigrations(db *sql.DB) error {
 
 func metadataDBPath(cfg config.App) string {
 	return config.MainDatabasePath(cfg)
+}
+
+type metadataMigrationLogger struct {
+	out   io.Writer
+	debug bool
+}
+
+func newMetadataMigrationLogger(out io.Writer, debug bool) goose.Logger {
+	if !debug || out == nil {
+		return goose.NopLogger()
+	}
+	return &metadataMigrationLogger{out: out, debug: debug}
+}
+
+func (l *metadataMigrationLogger) Fatalf(format string, v ...any) {
+	if l == nil || !l.debug || l.out == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(l.out, format+"\n", v...)
+}
+
+func (l *metadataMigrationLogger) Printf(format string, v ...any) {
+	if l == nil || !l.debug || l.out == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(l.out, format+"\n", v...)
 }
