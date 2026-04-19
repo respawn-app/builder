@@ -540,7 +540,7 @@ func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true})
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true})
 	defer cleanup()
 	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
 		return identity.PID == 111
@@ -554,7 +554,7 @@ func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T)
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
-	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true})
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true})
 	defer cleanup()
 	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, nil); ok || remote != nil {
 		t.Fatalf("expected unregistered workspace to skip configured remote attach, got remote=%v ok=%t", remote, ok)
@@ -679,7 +679,7 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 	configuredRemoteAttachTimeout = 20 * time.Millisecond
 	configuredRemoteWorkspaceDiscoveryTimeout = 120 * time.Millisecond
 	projectViews := &configuredProjectViewRemoteStub{
-		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true, AuthBootstrap: true}},
 		resolveProjectPath: func(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 			return serverapi.ProjectResolvePathResponse{PathAvailability: clientui.ProjectAvailabilityMissing}, nil
 		},
@@ -728,6 +728,33 @@ func TestTryDialConfiguredRunPromptRemoteUsesFreshDialTimeoutAfterWorkspaceDisco
 	}
 	if dialRemaining <= configuredRemoteAttachTimeout/2 {
 		t.Fatalf("expected fresh attach timeout after workspace discovery, remaining=%v attach=%v", dialRemaining, configuredRemoteAttachTimeout)
+	}
+}
+
+func TestTryDialConfiguredRunPromptRemoteSkipsServerWithoutAuthBootstrapCapability(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalProjectViewsDial := dialConfiguredProjectViewRemote
+	t.Cleanup(func() { dialConfiguredProjectViewRemote = originalProjectViewsDial })
+
+	projectViews := &configuredProjectViewRemoteStub{
+		identity: protocol.ServerIdentity{Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+	}
+	dialConfiguredProjectViewRemote = func(context.Context, string) (configuredProjectViewRemote, error) {
+		return projectViews, nil
+	}
+
+	remote, ok, err := tryDialConfiguredRunPromptRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("tryDialConfiguredRunPromptRemote: %v", err)
+	}
+	if ok || remote != nil {
+		t.Fatalf("expected configured remote without auth bootstrap to be skipped, got remote=%v ok=%t", remote, ok)
+	}
+	if !projectViews.closed.Load() {
+		t.Fatal("expected incompatible project view remote to be closed")
 	}
 }
 

@@ -40,7 +40,7 @@ type HeadlessBootstrap struct {
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher))
+	service := newMemoizingPromptService(primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
 	return client.NewLoopbackRunPromptClient(service)
 }
 
