@@ -171,6 +171,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - CLI local server attach should use the explicitly configured `server_host` and `server_port` with compatibility handshake; persisted discovery artifacts are not part of the target architecture.
 - On Unix platforms the daemon also exposes a derived same-machine Unix domain socket in runtime-local ephemeral state keyed by the persistence root. This socket is additive only; it does not introduce new user-facing config and does not replace configured TCP.
 - Same-machine clients may prefer that derived Unix socket when it is clearly available, but `server_host` and `server_port` remain the source of truth for remote-capable transport semantics and for the daemon's HTTP health/readiness surface.
+- The default WebSocket adapter remains `golang.org/x/net/websocket` after the 2026-04-19 `gws` spike. `gws` is acceptable as an additive adapter behind `shared/rpcwire`, but Builder-specific benchmarks did not show a clear enough win across dial/handshake, attach, and steady-state RPC to justify flipping production default yet.
 - Compatibility should be established through a dedicated initial handshake method before attach or query calls.
 - Session attachment and event subscription should be separate explicit protocol steps.
 - `attach` should acknowledge plus return minimal attached-resource metadata such as ids and kinds, but not snapshots.

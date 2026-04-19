@@ -71,7 +71,10 @@ func shouldPreferConfiguredLocalSocket(cfg config.App) bool {
 }
 
 func dialRemoteWithPlan(ctx context.Context, plan remoteDialPlan, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
-	transport := rpcwire.NewWebSocketTransport()
+	return dialRemoteWithTransport(ctx, plan, rpcwire.NewWebSocketTransport(), projectID, workspaceID, workspaceRoot)
+}
+
+func dialRemoteWithTransport(ctx context.Context, plan remoteDialPlan, transport rpcwire.ClientTransport, projectID string, workspaceID string, workspaceRoot string) (*Remote, error) {
 	trimmedProjectID := strings.TrimSpace(projectID)
 	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)

@@ -15,7 +15,7 @@ import (
 
 type Remote struct {
 	plan          remoteDialPlan
-	transport     rpcwire.WebSocketTransport
+	transport     rpcwire.ClientTransport
 	mu            sync.Mutex
 	control       *remoteControlConn
 	identity      protocol.ServerIdentity
