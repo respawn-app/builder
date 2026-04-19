@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,7 @@ type responseStreamAccumulator struct {
 	assistantMessages *assistantMessageAccumulator
 	toolCalls         *toolCallAccumulator
 	reasoning         *reasoningAccumulator
+	passthrough       *passthroughOutputAccumulator
 	completed         *responses.Response
 }
 
@@ -25,6 +27,7 @@ func newResponseStreamAccumulator(callbacks StreamCallbacks, windowTokens int) *
 		assistantMessages: newAssistantMessageAccumulator(),
 		toolCalls:         newToolCallAccumulator(),
 		reasoning:         newReasoningAccumulator(),
+		passthrough:       newPassthroughOutputAccumulator(),
 	}
 }
 
@@ -42,6 +45,7 @@ func (a *responseStreamAccumulator) Consume(evt responses.ResponseStreamEventUni
 		a.assistantMessages.Upsert(evt.Item, evt.OutputIndex)
 		a.toolCalls.UpsertFromOutput(evt.Item)
 		a.reasoning.UpsertReasoningItem(evt.Item)
+		a.passthrough.Upsert(evt.Item, evt.OutputIndex)
 	case "response.function_call_arguments.delta":
 		a.toolCalls.AppendArguments(evt.ItemID, evt.Delta)
 	case "response.function_call_arguments.done":
@@ -82,7 +86,7 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	finalCalls := a.toolCalls.ToToolCalls()
 	finalReasoning := a.reasoning.Entries()
 	finalReasoningItems := a.reasoning.Items()
-	finalOutputItems := buildOutputItemsFromStream(finalText, finalPhase, finalCalls, finalReasoning, finalReasoningItems)
+	finalOutputItems := mergePassthroughOutputItems(buildOutputItemsFromStream(finalText, finalPhase, finalCalls, finalReasoning, finalReasoningItems), a.passthrough.Items())
 
 	if a.completed == nil {
 		return OpenAIResponse{
@@ -111,7 +115,7 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	finalReasoning = normalizeReasoningEntries(mergeReasoningEntries(parsedReasoning, finalReasoning))
 	finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
 	if len(parsedItems) > 0 {
-		finalOutputItems = repairAssistantOutputItems(parsedItems, finalText, finalPhase, streamOutputIndex, hasResolvedStream)
+		finalOutputItems = mergePassthroughOutputItems(repairAssistantOutputItems(parsedItems, finalText, finalPhase, streamOutputIndex, hasResolvedStream), a.passthrough.Items())
 	}
 
 	return OpenAIResponse{
@@ -559,4 +563,91 @@ func buildOutputItemsFromStream(text string, phase MessagePhase, toolCalls []Too
 		})
 	}
 	return items
+}
+
+type passthroughOutputAccumulator struct {
+	byIndex map[int64]ResponseItem
+	order   []int64
+}
+
+func newPassthroughOutputAccumulator() *passthroughOutputAccumulator {
+	return &passthroughOutputAccumulator{
+		byIndex: make(map[int64]ResponseItem),
+		order:   make([]int64, 0, 4),
+	}
+}
+
+func (a *passthroughOutputAccumulator) Upsert(item responses.ResponseOutputItemUnion, outputIndex int64) {
+	if a == nil || isKnownResponseOutputItemType(item.Type) {
+		return
+	}
+	raw := json.RawMessage(item.RawJSON())
+	if len(raw) == 0 || !json.Valid(raw) {
+		return
+	}
+	if _, exists := a.byIndex[outputIndex]; !exists {
+		a.order = append(a.order, outputIndex)
+	}
+	copyRaw := append(json.RawMessage(nil), raw...)
+	a.byIndex[outputIndex] = ResponseItem{Type: ResponseItemTypeOther, OutputIndex: outputIndex, Raw: copyRaw}
+}
+
+func (a *passthroughOutputAccumulator) Items() []ResponseItem {
+	if a == nil {
+		return nil
+	}
+	out := make([]ResponseItem, 0, len(a.order))
+	for _, outputIndex := range a.order {
+		item, ok := a.byIndex[outputIndex]
+		if !ok {
+			continue
+		}
+		copyItem := item
+		copyItem.Raw = append(json.RawMessage(nil), item.Raw...)
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func mergePassthroughOutputItems(items []ResponseItem, passthrough []ResponseItem) []ResponseItem {
+	if len(passthrough) == 0 {
+		return items
+	}
+	out := CloneResponseItems(items)
+	seen := make(map[string]struct{}, len(out))
+	for _, item := range out {
+		if key, ok := passthroughOutputItemKey(item); ok {
+			seen[key] = struct{}{}
+		}
+	}
+	for _, item := range passthrough {
+		key, ok := passthroughOutputItemKey(item)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		copyItem := item
+		copyItem.Raw = append(json.RawMessage(nil), item.Raw...)
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func passthroughOutputItemKey(item ResponseItem) (string, bool) {
+	if item.Type != ResponseItemTypeOther || len(item.Raw) == 0 {
+		return "", false
+	}
+	return fmt.Sprintf("%d\x00%s", item.OutputIndex, string(item.Raw)), true
+}
+
+func isKnownResponseOutputItemType(itemType string) bool {
+	switch strings.TrimSpace(itemType) {
+	case "message", "function_call", "reasoning", "compaction":
+		return true
+	default:
+		return false
+	}
 }
