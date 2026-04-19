@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"builder/server/rootlock"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/testopenai"
 )
 
 func TestNewBuildsReusableServerCore(t *testing.T) {
@@ -287,6 +290,89 @@ func TestSessionLaunchClientForProjectWorkspaceReplaysForceNewSessionAcrossClien
 	}
 	if firstPlan.Plan.SessionID != secondPlan.Plan.SessionID {
 		t.Fatalf("session ids = %q and %q, want stable replay", firstPlan.Plan.SessionID, secondPlan.Plan.SessionID)
+	}
+}
+
+func TestRunPromptClientForProjectWorkspaceReplaysHeadlessRunAcrossClientInstances(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 1) {
+			return
+		}
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		testopenai.WriteCompletedResponseStream(w, "ok", 1, 1)
+	}))
+	defer server.Close()
+
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	resolved.Config.Settings.Model = "gpt-5"
+	resolved.Config.Settings.OpenAIBaseURL = server.URL
+	binding, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.State{
+		Scope:  auth.ScopeGlobal,
+		Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
+	}), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupport.Background.Close() })
+
+	appCore, err := New(resolved.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = appCore.Close() })
+
+	firstClient, err := appCore.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, workspace)
+	if err != nil {
+		t.Fatalf("RunPromptClientForProjectWorkspace first: %v", err)
+	}
+	secondClient, err := appCore.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, workspace)
+	if err != nil {
+		t.Fatalf("RunPromptClientForProjectWorkspace second: %v", err)
+	}
+	req := serverapi.RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello"}
+	firstRun, err := firstClient.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt first: %v", err)
+	}
+	secondRun, err := secondClient.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt second: %v", err)
+	}
+	if firstRun.SessionID != secondRun.SessionID {
+		t.Fatalf("session ids = %q and %q, want stable replay", firstRun.SessionID, secondRun.SessionID)
+	}
+	if firstRun.Result != "ok" || secondRun.Result != "ok" {
+		t.Fatalf("results = (%q, %q), want both ok", firstRun.Result, secondRun.Result)
+	}
+	overview, err := appCore.ProjectViewClient().GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("GetProjectOverview: %v", err)
+	}
+	if len(overview.Overview.Sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(overview.Overview.Sessions))
+	}
+	if overview.Overview.Sessions[0].SessionID != firstRun.SessionID {
+		t.Fatalf("persisted session id = %q, want %q", overview.Overview.Sessions[0].SessionID, firstRun.SessionID)
 	}
 }
 
