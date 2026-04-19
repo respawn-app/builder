@@ -10,8 +10,8 @@ import (
 	"builder/shared/protocol"
 )
 
-func TestGWSTransportRoundTrip(t *testing.T) {
-	transport := NewGWSTransport()
+func TestWebSocketTransportRoundTrip(t *testing.T) {
+	transport := NewWebSocketTransport()
 	serverErr := make(chan error, 1)
 	server := httptest.NewServer(transport.Handler(func(ctx context.Context, conn Conn) {
 		select {
