@@ -50,6 +50,14 @@ type runtimeHandle struct {
 	close               func()
 }
 
+type activationClaim int
+
+const (
+	activationClaimOwner activationClaim = iota
+	activationClaimReuse
+	activationClaimTakeover
+)
+
 func NewService(persistenceRoot string, metadataStore *metadata.Store, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	return &Service{
 		persistenceRoot:  strings.TrimSpace(persistenceRoot),
@@ -71,15 +79,18 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
-	handle, owner, err := s.claimActivation(sessionID, requestID)
+	handle, claim, err := s.claimActivation(sessionID, requestID)
 	if err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	if !owner {
+	if claim == activationClaimReuse {
 		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 			return serverapi.SessionRuntimeActivateResponse{}, err
 		}
 		return activationResponseForHandle(handle)
+	}
+	if claim == activationClaimTakeover {
+		return s.takeOverActivation(ctx, sessionID, requestID, handle)
 	}
 	var leaseID string
 	var cleanup func()
@@ -272,18 +283,63 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 // Phase 2 temporarily allows many attached readers, but exactly one controlling
 // client per session. A second activation must fail explicitly instead of
 // joining the active runtime.
-func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeHandle, bool, error) {
+func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeHandle, activationClaim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
 		if current.controllerRequestID == requestID {
-			return current, false, nil
+			return current, activationClaimReuse, nil
 		}
-		return nil, false, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+		if runtimeHandleReady(current) && current.activationErr == nil {
+			return current, activationClaimTakeover, nil
+		}
+		return nil, activationClaimOwner, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 	}
 	handle := &runtimeHandle{controllerRequestID: requestID, ready: make(chan struct{})}
 	s.handles[sessionID] = handle
-	return handle, true, nil
+	return handle, activationClaimOwner, nil
+}
+
+func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requestID string, handle *runtimeHandle) (serverapi.SessionRuntimeActivateResponse, error) {
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if _, err := activationResponseForHandle(handle); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	leaseID := strings.TrimSpace(lease.LeaseID)
+	s.mu.Lock()
+	current := s.handles[sessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
+		if strings.TrimSpace(leaseID) != "" {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+		}
+		return serverapi.SessionRuntimeActivateResponse{}, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+	}
+	current.controllerRequestID = requestID
+	current.controllerLeaseID = leaseID
+	s.mu.Unlock()
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func runtimeHandleReady(handle *runtimeHandle) bool {
+	if handle == nil || handle.ready == nil {
+		return true
+	}
+	select {
+	case <-handle.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) completeActivation(handle *runtimeHandle, leaseID string, closeFn func()) {

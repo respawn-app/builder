@@ -7,6 +7,7 @@ import (
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/requestmemo"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessionpath"
@@ -20,6 +21,13 @@ type Service struct {
 	authManager     *auth.Manager
 	controller      ControllerLeaseVerifier
 	storeOptions    []session.StoreOption
+	transitions     *requestmemo.Memo[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]
+}
+
+type sessionTransitionMemoRequest struct {
+	SessionID         string
+	ControllerLeaseID string
+	Transition        serverapi.SessionTransition
 }
 
 type sessionStoreResolver interface {
@@ -31,11 +39,11 @@ type ControllerLeaseVerifier interface {
 }
 
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...)}
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
 func NewGlobalService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...)}
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
 }
 
 func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) *Service {
@@ -89,10 +97,36 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return serverapi.SessionResolveTransitionResponse{}, err
+	memoReq := sessionTransitionMemoRequest{
+		SessionID:         strings.TrimSpace(req.SessionID),
+		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
+		Transition:        req.Transition,
 	}
-	return s.resolveTransitionOnce(ctx, req)
+	return s.transitions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTransitionMemoRequest, func(context.Context) (serverapi.SessionResolveTransitionResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionResolveTransitionResponse{}, err
+		}
+		return s.resolveTransitionOnce(ctx, req)
+	})
+}
+
+func sameSessionTransitionMemoRequest(a sessionTransitionMemoRequest, b sessionTransitionMemoRequest) bool {
+	return a.SessionID == b.SessionID &&
+		a.ControllerLeaseID == b.ControllerLeaseID &&
+		a.Transition.Action == b.Transition.Action &&
+		a.Transition.InitialPrompt == b.Transition.InitialPrompt &&
+		a.Transition.InitialInput == b.Transition.InitialInput &&
+		a.Transition.TargetSessionID == b.Transition.TargetSessionID &&
+		a.Transition.ForkUserMessageIndex == b.Transition.ForkUserMessageIndex &&
+		forkTranscriptEntryIndexEqual(a.Transition.ForkTranscriptEntryIndex, b.Transition.ForkTranscriptEntryIndex) &&
+		a.Transition.ParentSessionID == b.Transition.ParentSessionID
+}
+
+func forkTranscriptEntryIndexEqual(a *int, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {

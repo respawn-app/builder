@@ -25,11 +25,11 @@ func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, owner, err := svc.claimActivation("session-1", "req-1")
+	handle, claim, err := svc.claimActivation("session-1", "req-1")
 	if err != nil {
 		t.Fatalf("claimActivation: %v", err)
 	}
-	if owner {
+	if claim != activationClaimReuse {
 		t.Fatal("expected duplicate activation to reuse existing controller")
 	}
 	if handle != svc.handles["session-1"] {
@@ -37,7 +37,7 @@ func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
 	}
 }
 
-func TestClaimActivationRejectsDistinctController(t *testing.T) {
+func TestClaimActivationAllowsTakeoverAfterReady(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
 			controllerRequestID: "req-1",
@@ -47,9 +47,15 @@ func TestClaimActivationRejectsDistinctController(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	_, _, err := svc.claimActivation("session-1", "req-2")
-	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
-		t.Fatalf("claimActivation error = %v, want session already controlled", err)
+	handle, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation: %v", err)
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("claimActivation claim = %v, want takeover", claim)
+	}
+	if handle != svc.handles["session-1"] {
+		t.Fatal("expected takeover activation to return existing handle")
 	}
 }
 
@@ -85,22 +91,35 @@ func TestActivateSessionRuntimeReplaysDuplicateRequestAfterReady(t *testing.T) {
 	}
 }
 
-func TestActivateSessionRuntimeRejectsSecondControllerWhileActive(t *testing.T) {
+func TestActivateSessionRuntimeReissuesControllerLeaseForTakeover(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
 	handle := &runtimeHandle{
 		controllerRequestID: "req-1",
-		controllerLeaseID:   "lease-1",
+		controllerLeaseID:   lease.LeaseID,
 		ready:               make(chan struct{}),
 	}
 	close(handle.ready)
 	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
 
-	_, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+	resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
 		ClientRequestID: "req-2",
 		SessionID:       fixture.store.Meta().SessionID,
 	})
-	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
-		t.Fatalf("ActivateSessionRuntime error = %v, want session already controlled", err)
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime takeover: %v", err)
+	}
+	if strings.TrimSpace(resp.LeaseID) == "" || resp.LeaseID == lease.LeaseID {
+		t.Fatalf("takeover lease id = %q, want non-empty replacement for %q", resp.LeaseID, lease.LeaseID)
+	}
+	if handle.controllerRequestID != "req-2" {
+		t.Fatalf("controller request id = %q, want req-2", handle.controllerRequestID)
+	}
+	if handle.controllerLeaseID != resp.LeaseID {
+		t.Fatalf("controller lease id = %q, want %q", handle.controllerLeaseID, resp.LeaseID)
 	}
 }
 
