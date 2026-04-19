@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"builder/server/approvalview"
 	"builder/server/askview"
@@ -52,6 +53,8 @@ type Core struct {
 	metadataStore    *metadata.Store
 	runtimeRegistry  *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
+	sessionLaunchMu  sync.Mutex
+	sessionLaunchMap map[string]client.SessionLaunchClient
 	projectID        string
 	projectViews     client.ProjectViewClient
 	authBootstrap    client.AuthBootstrapClient
@@ -145,6 +148,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		metadataStore:    metadataStore,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
+		sessionLaunchMap: make(map[string]client.SessionLaunchClient),
 		projectViews:     projectViews,
 		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
@@ -232,8 +236,7 @@ func (s *Core) SessionLaunchClientForProjectWorkspaceID(ctx context.Context, pro
 	if err != nil {
 		return nil, err
 	}
-	service := sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores)
-	return client.NewLoopbackSessionLaunchClient(service), nil
+	return s.sessionLaunchClientForProjectContext(projectCtx), nil
 }
 
 func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.SessionLaunchClient, error) {
@@ -241,8 +244,7 @@ func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, proje
 	if err != nil {
 		return nil, err
 	}
-	service := sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores)
-	return client.NewLoopbackSessionLaunchClient(service), nil
+	return s.sessionLaunchClientForProjectContext(projectCtx), nil
 }
 
 func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) (client.RunPromptClient, error) {
@@ -361,6 +363,32 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 		projectRoot:    overview.Project.RootPath,
 		projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
 	}, nil
+}
+
+func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) client.SessionLaunchClient {
+	if s == nil {
+		return nil
+	}
+	scopeKey := sessionLaunchScopeKey(projectCtx)
+	s.sessionLaunchMu.Lock()
+	defer s.sessionLaunchMu.Unlock()
+	if cached := s.sessionLaunchMap[scopeKey]; cached != nil {
+		return cached
+	}
+	service := sessionlaunch.NewService(launch.Planner{
+		Config:       projectCtx.config,
+		ContainerDir: projectCtx.projectSession,
+		ProjectID:    projectCtx.projectID,
+		ProjectViews: s.projectViews,
+		StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions(),
+	}, s.sessionStores)
+	client := client.NewLoopbackSessionLaunchClient(service)
+	s.sessionLaunchMap[scopeKey] = client
+	return client
+}
+
+func sessionLaunchScopeKey(projectCtx projectContext) string {
+	return strings.TrimSpace(projectCtx.projectID) + "\n" + strings.TrimSpace(projectCtx.config.WorkspaceRoot)
 }
 
 func (s *Core) Close() error {
