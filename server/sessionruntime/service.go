@@ -56,6 +56,7 @@ type runtimeTakeover struct {
 	leaseID   string
 	err       error
 	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 type activationClaim int
@@ -228,11 +229,13 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	current := s.handles[sessionID]
 	if current == nil || current != handle || strings.TrimSpace(current.controllerLeaseID) != leaseID {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", sessionID))
+		return serverapi.SessionRuntimeReleaseResponse{}, invalidControllerLeaseError(sessionID)
 	}
 	delete(s.handles, sessionID)
 	closeFn := current.close
+	takeover := current.takeover
 	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(sessionID))
 	if closeFn != nil {
 		closeFn()
 	}
@@ -252,7 +255,9 @@ func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHa
 	}
 	delete(s.handles, trimmedSessionID)
 	closeFn := current.close
+	takeover := current.takeover
 	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(trimmedSessionID))
 	if closeFn != nil {
 		closeFn()
 	}
@@ -268,7 +273,7 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	handle := s.handles[trimmedSessionID]
 	s.mu.Unlock()
 	if handle == nil {
-		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 		return err
@@ -277,16 +282,16 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	current := s.handles[trimmedSessionID]
 	if current == nil || current != handle {
 		s.mu.Unlock()
-		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	activationErr := current.activationErr
 	controllerLeaseID := strings.TrimSpace(current.controllerLeaseID)
 	s.mu.Unlock()
 	if activationErr != nil {
-		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	if controllerLeaseID != trimmedLeaseID {
-		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	return nil
 }
@@ -371,7 +376,9 @@ func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requ
 		if strings.TrimSpace(leaseID) != "" {
 			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
 		}
-		return serverapi.SessionRuntimeActivateResponse{}, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+		err := errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+		finishRuntimeTakeover(takeover, "", err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
 }
@@ -422,12 +429,11 @@ func (s *Service) completeTakeover(sessionID string, handle *runtimeHandle, take
 		s.mu.Unlock()
 		return false
 	}
-	takeover.leaseID = trimmedLeaseID
 	current.controllerRequestID = strings.TrimSpace(requestID)
 	current.controllerLeaseID = trimmedLeaseID
 	current.takeover = nil
-	close(takeover.ready)
 	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, trimmedLeaseID, nil)
 	return true
 }
 
@@ -439,11 +445,10 @@ func (s *Service) failTakeover(sessionID string, handle *runtimeHandle, takeover
 	s.mu.Lock()
 	current := s.handles[trimmedSessionID]
 	if current != nil && current == handle && current.takeover == takeover {
-		takeover.err = err
 		current.takeover = nil
-		close(takeover.ready)
 	}
 	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, "", err)
 }
 
 func (s *Service) failActivation(sessionID string, handle *runtimeHandle, err error) {
@@ -458,7 +463,25 @@ func (s *Service) failActivation(sessionID string, handle *runtimeHandle, err er
 	if current == nil || current != handle {
 		return
 	}
+	finishRuntimeTakeover(current.takeover, "", err)
 	delete(s.handles, strings.TrimSpace(sessionID))
+}
+
+func finishRuntimeTakeover(takeover *runtimeTakeover, leaseID string, err error) {
+	if takeover == nil {
+		return
+	}
+	takeover.readyOnce.Do(func() {
+		takeover.leaseID = strings.TrimSpace(leaseID)
+		takeover.err = err
+		if takeover.ready != nil {
+			close(takeover.ready)
+		}
+	})
+}
+
+func invalidControllerLeaseError(sessionID string) error {
+	return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID)))
 }
 
 func (s *Service) resolveExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
