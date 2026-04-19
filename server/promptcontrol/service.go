@@ -74,9 +74,6 @@ func (s *Service) AnswerAsk(ctx context.Context, req serverapi.AskAnswerRequest)
 	if s == nil || s.prompts == nil {
 		return errors.New("prompt responder is required")
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return err
-	}
 	memoReq := askAnswerMemoRequest{
 		SessionID:            req.SessionID,
 		ControllerLeaseID:    req.ControllerLeaseID,
@@ -86,7 +83,10 @@ func (s *Service) AnswerAsk(ctx context.Context, req serverapi.AskAnswerRequest)
 		SelectedOptionNumber: req.SelectedOptionNumber,
 		FreeformAnswer:       req.FreeformAnswer,
 	}
-	_, err := s.asks.Do(ctx, req.ClientRequestID, memoReq, sameAskAnswerMemoRequest, func(context.Context) (struct{}, error) {
+	_, err := s.asks.Do(ctx, req.ClientRequestID, memoReq, sameAskAnswerMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return struct{}{}, err
+		}
 		if req.ErrorMessage != "" {
 			return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.AskID}, errors.New(req.ErrorMessage))
 		}
@@ -107,9 +107,6 @@ func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnsw
 	if s == nil || s.prompts == nil {
 		return errors.New("prompt responder is required")
 	}
-	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-		return err
-	}
 	memoReq := approvalAnswerMemoRequest{
 		SessionID:         req.SessionID,
 		ControllerLeaseID: req.ControllerLeaseID,
@@ -118,7 +115,10 @@ func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnsw
 		Decision:          req.Decision,
 		Commentary:        req.Commentary,
 	}
-	_, err := s.approvals.Do(ctx, req.ClientRequestID, memoReq, sameApprovalAnswerMemoRequest, func(context.Context) (struct{}, error) {
+	_, err := s.approvals.Do(ctx, req.ClientRequestID, memoReq, sameApprovalAnswerMemoRequest, func(ctx context.Context) (struct{}, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return struct{}{}, err
+		}
 		if req.ErrorMessage != "" {
 			return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.ApprovalID}, errors.New(req.ErrorMessage))
 		}

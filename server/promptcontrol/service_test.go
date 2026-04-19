@@ -106,6 +106,33 @@ func TestServiceAnswerAskDedupesSuccessfulRetry(t *testing.T) {
 	}
 }
 
+func TestServiceAnswerAskReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	responder := &stubPromptResponder{}
+	verifier := &stubLeaseVerifier{}
+	service := NewService(responder).WithControllerLeaseVerifier(verifier)
+	req := serverapi.AskAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		AskID:             "ask-1",
+		Answer:            "hello",
+	}
+
+	if err := service.AnswerAsk(context.Background(), req); err != nil {
+		t.Fatalf("AnswerAsk first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.AnswerAsk(context.Background(), req); err != nil {
+		t.Fatalf("AnswerAsk replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
 func TestServiceAnswerAskRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	responder := &stubPromptResponder{}
 	service := NewService(responder)
@@ -182,6 +209,34 @@ func TestServiceAnswerApprovalDedupesSuccessfulRetry(t *testing.T) {
 	responder.submitErr = serverapi.ErrPromptAlreadyResolved
 	if err := service.AnswerApproval(context.Background(), req); err != nil {
 		t.Fatalf("AnswerApproval replay: %v", err)
+	}
+	if responder.calls != 1 {
+		t.Fatalf("responder call count = %d, want 1", responder.calls)
+	}
+}
+
+func TestServiceAnswerApprovalReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
+	responder := &stubPromptResponder{}
+	verifier := &stubLeaseVerifier{}
+	service := NewService(responder).WithControllerLeaseVerifier(verifier)
+	req := serverapi.ApprovalAnswerRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		ApprovalID:        "approval-1",
+		Decision:          clientui.ApprovalDecisionAllowOnce,
+		Commentary:        "looks good",
+	}
+
+	if err := service.AnswerApproval(context.Background(), req); err != nil {
+		t.Fatalf("AnswerApproval first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if err := service.AnswerApproval(context.Background(), req); err != nil {
+		t.Fatalf("AnswerApproval replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
 	}
 	if responder.calls != 1 {
 		t.Fatalf("responder call count = %d, want 1", responder.calls)
