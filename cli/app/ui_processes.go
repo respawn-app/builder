@@ -523,16 +523,9 @@ func processStateColor(entry clientui.BackgroundProcess, palette uiColors) lipgl
 func renderProcessStateIndicator(entry clientui.BackgroundProcess, spinnerFrame int) string {
 	state := strings.TrimSpace(entry.State)
 	if state == "starting" || state == "running" || (state == "" && entry.Running) {
-		if len(pendingToolSpinner.Frames) == 0 {
-			return "●"
-		}
-		index := spinnerFrame % len(pendingToolSpinner.Frames)
-		if index < 0 {
-			index = 0
-		}
-		return pendingToolSpinner.Frames[index]
+		return pendingToolSpinnerFrame(spinnerFrame)
 	}
-	return "●"
+	return padSpinnerIndicator(statusStateCircleGlyph)
 }
 
 func processStateLabel(entry clientui.BackgroundProcess) string {

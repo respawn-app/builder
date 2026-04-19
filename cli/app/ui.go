@@ -53,6 +53,7 @@ type compactDoneMsg struct {
 
 type spinnerTickMsg struct {
 	token uint64
+	at    time.Time
 }
 
 type processListRefreshTickMsg struct{}
@@ -475,6 +476,7 @@ type uiModel struct {
 	fastModeEnabled       bool
 	modelContractLocked   bool
 	spinnerFrame          int
+	spinnerClock          frameAnimationClock
 	spinnerGeneration     uint64
 	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry
@@ -566,6 +568,10 @@ type uiModel struct {
 	nativeLiveRegionLines               int
 	nativeLiveRegionPad                 int
 	nativeStreamingActive               bool
+	nativeStreamingText                 string
+	nativeStreamingWidth                int
+	nativeStreamingFlushedLineCount     int
+	nativeStreamingDividerFlushed       bool
 	nativeResizeReplayToken             uint64
 	nativeResizeReplayAt                time.Time
 
@@ -733,6 +739,7 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
 	flushSequenceBefore := m.nativeFlushSequence
+	wasReviewerRunning := m.reviewerRunning
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch", map[string]string{
 		"session_id":             strings.TrimSpace(m.sessionID),
 		"mode":                   string(m.view.Mode()),
@@ -743,10 +750,19 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	}))
 	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
 	cmd := result.cmd
+	if !wasReviewerRunning && m.reviewerRunning {
+		cmd = tea.Batch(cmd, m.ensureSpinnerTicking())
+	}
+	if wasReviewerRunning && !m.reviewerRunning && !m.shouldAnimateSpinner() {
+		m.stopSpinnerTicking()
+	}
 	if !result.awaitsHydration {
 		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
 	}
 	m.syncViewport()
+	if !result.transcriptMutated {
+		cmd = sequenceCmds(cmd, m.syncNativeStreamingScrollback())
+	}
 	if result.awaitsHydration {
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_pause", map[string]string{
 			"session_id":             strings.TrimSpace(m.sessionID),

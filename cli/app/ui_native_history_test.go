@@ -31,15 +31,33 @@ func stripANSIPreserve(v string) string {
 	return xansi.Strip(v)
 }
 
-func pendingSpinnerFrame(frame int) string {
-	if len(pendingToolSpinner.Frames) == 0 {
-		return ""
+func pendingSpinnerFrameText(frame int) string {
+	return pendingToolSpinnerFrame(frame)
+}
+
+func pendingSpinnerLine(frame int, text string) string {
+	return pendingSpinnerFrameText(frame) + text
+}
+
+func collectNativeHistoryFlushText(msgs []tea.Msg) string {
+	var out strings.Builder
+	for _, msg := range msgs {
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if !ok {
+			continue
+		}
+		out.WriteString(stripANSIPreserve(flush.Text))
+		out.WriteByte('\n')
 	}
-	index := frame % len(pendingToolSpinner.Frames)
-	if index < 0 {
-		index = 0
+	return out.String()
+}
+
+func makeStreamingLines(count int) string {
+	parts := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		parts = append(parts, fmt.Sprintf("line-%02d", i))
 	}
-	return strings.TrimSpace(pendingToolSpinner.Frames[index])
+	return strings.Join(parts, "\n")
 }
 
 func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
@@ -815,13 +833,13 @@ func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
 
 	rendered := renderNativePendingToolSnapshot(entries, "dark", 40, 0)
 	plain := stripANSIPreserve(rendered)
-	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo a") {
+	if !strings.Contains(plain, pendingSpinnerLine(0, "echo a")) {
 		t.Fatalf("expected first pending tool preview in live region, got %q", plain)
 	}
 	if !strings.Contains(plain, "$ echo b") {
 		t.Fatalf("expected completed pending call to use its final symbol, got %q", plain)
 	}
-	if strings.Contains(plain, pendingSpinnerFrame(0)+" echo b") {
+	if strings.Contains(plain, pendingSpinnerLine(0, "echo b")) {
 		t.Fatalf("did not expect completed pending call to keep spinner state, got %q", plain)
 	}
 	if strings.Contains(plain, "waiting") {
@@ -856,7 +874,7 @@ func TestNativePendingMultilineShellPreviewStaysTwoLines(t *testing.T) {
 	for _, line := range rendered {
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
-	if !strings.HasPrefix(plain[0], pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF") {
+	if !strings.HasPrefix(plain[0], pendingSpinnerLine(0, "cat > /tmp/demo.txt <<'EOF'")) {
 		t.Fatalf("unexpected first collapsed line: %q", plain[0])
 	}
 	if !strings.HasSuffix(plain[0], "…") {
@@ -881,7 +899,7 @@ func TestNativePendingMultilineShellPreviewStaysTwoLinesWhenHeaderWraps(t *testi
 	if len(rendered) != 1 {
 		t.Fatalf("expected wrapped multiline pending shell preview collapsed to one truncated line, got %d (%q)", len(rendered), rendered)
 	}
-	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasPrefix(got, pendingSpinnerFrame(0)+" ") {
+	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasPrefix(got, pendingSpinnerFrameText(0)) {
 		t.Fatalf("expected wrapped multiline pending shell preview to use spinner icon, got %q", rendered[0])
 	}
 	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasSuffix(got, "…") {
@@ -903,7 +921,7 @@ func TestNativePendingWebSearchPreviewUsesAtPrefixAndVerboseQuery(t *testing.T) 
 
 	rendered := renderNativePendingToolSnapshot(entries, "dark", 80, 0)
 	plain := stripANSIPreserve(rendered)
-	if !strings.Contains(plain, pendingSpinnerFrame(0)+` web search: "latest golang release"`) {
+	if !strings.Contains(plain, pendingSpinnerLine(0, `web search: "latest golang release"`)) {
 		t.Fatalf("expected pending web search preview to use spinner and verbose query, got %q", plain)
 	}
 	if strings.Contains(plain, `web search: invalid query`) {
@@ -1043,13 +1061,13 @@ func TestNativePendingCompletedErrorToolKeepsFinalStateWithoutSpinner(t *testing
 
 	rendered := renderNativePendingToolSnapshot(entries, "dark", 80, 0)
 	plain := stripANSIPreserve(rendered)
-	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo a") {
+	if !strings.Contains(plain, pendingSpinnerLine(0, "echo a")) {
 		t.Fatalf("expected unresolved pending call to keep spinner, got %q", plain)
 	}
 	if !strings.Contains(plain, "$ exit 1") {
 		t.Fatalf("expected completed error call to use final shell symbol, got %q", plain)
 	}
-	if strings.Contains(plain, pendingSpinnerFrame(0)+" exit 1") {
+	if strings.Contains(plain, pendingSpinnerLine(0, "exit 1")) {
 		t.Fatalf("did not expect completed error call to keep spinner state, got %q", plain)
 	}
 	if strings.Contains(plain, "waiting") {
@@ -1079,7 +1097,7 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 		t.Fatalf("expected pending tool call to stay out of committed scrollback, got %T", cmd())
 	}
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, pendingSpinnerFrame(0)+" pwd") {
+	if !strings.Contains(view, pendingSpinnerLine(0, "pwd")) {
 		t.Fatalf("expected pending tool call visible in native live region, got %q", view)
 	}
 	if strings.Contains(m.nativeRenderedSnapshot, "pwd") {
@@ -1113,7 +1131,7 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 	}
 }
 
-func TestNativePendingToolPreviewUsesBubbleTeaDotSpinnerWithoutCommittingScrollback(t *testing.T) {
+func TestNativePendingToolPreviewUsesDotsCircleSpinnerWithoutCommittingScrollback(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	)
@@ -1140,11 +1158,11 @@ func TestNativePendingToolPreviewUsesBubbleTeaDotSpinnerWithoutCommittingScrollb
 	m.spinnerFrame = 1
 	view1 := stripANSIPreserve(m.View())
 
-	if !strings.Contains(view0, pendingSpinnerFrame(0)) {
-		t.Fatalf("expected pending tool preview to use Bubble Tea Dot frame 0, got %q", view0)
+	if !strings.Contains(view0, pendingSpinnerFrameText(0)) {
+		t.Fatalf("expected pending tool preview to use dots_circle frame 0, got %q", view0)
 	}
-	if !strings.Contains(view1, pendingSpinnerFrame(1)) {
-		t.Fatalf("expected pending tool preview to use Bubble Tea Dot frame 1, got %q", view1)
+	if !strings.Contains(view1, pendingSpinnerFrameText(1)) {
+		t.Fatalf("expected pending tool preview to use dots_circle frame 1, got %q", view1)
 	}
 	if view0 == view1 {
 		t.Fatalf("expected pending tool preview to animate across frames, got %q", view0)
@@ -1176,7 +1194,7 @@ func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing
 		t.Fatalf("expected no committed flush before first pending call resolves, got %T", cmd())
 	}
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") || !strings.Contains(view, "$ echo b") {
+	if !strings.Contains(view, pendingSpinnerLine(0, "echo a")) || !strings.Contains(view, "$ echo b") {
 		t.Fatalf("expected pending rows to match committed shell preview formatting, got %q", view)
 	}
 	if strings.Contains(view, "waiting") {
@@ -1564,6 +1582,249 @@ func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
 	}
 	if !strings.Contains(plain, "❮ Second Stream Check") {
 		t.Fatalf("expected assistant prefix in streaming live region, got %q", plain)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageSpillsHydratedStreamingOverflowWithoutPriorAssistantDelta(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	m.busy = true
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     1,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "try again",
+		}},
+		Ongoing: streamText,
+	})
+	if cmd == nil {
+		t.Fatal("expected runtime transcript page apply to spill hydrated streaming overflow")
+	}
+	flushText := collectNativeHistoryFlushText(collectCmdMessages(t, cmd))
+	if !strings.Contains(flushText, "line-01") {
+		t.Fatalf("expected spilled hydrate flush to include earliest streaming line, got %q", flushText)
+	}
+	view := stripANSIPreserve(m.View())
+	if strings.Contains(view, "line-01") {
+		t.Fatalf("expected spilled prefix removed from live region, got %q", view)
+	}
+	if !strings.Contains(view, fmt.Sprintf("line-%02d", lineCount)) {
+		t.Fatalf("expected live region to keep latest streaming tail, got %q", view)
+	}
+	if m.nativeStreamingFlushedLineCount <= 0 {
+		t.Fatalf("expected flushed streaming line count to advance, got %d", m.nativeStreamingFlushedLineCount)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected hydrate spill to work without synthesizing assistant delta flag")
+	}
+}
+
+func TestProjectedRuntimeAssistantDeltaSpillsOverflowIntoScrollback(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	next, cmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: streamText}),
+	}})
+	m = next.(*uiModel)
+	flushText := collectNativeHistoryFlushText(collectCmdMessages(t, cmd))
+	if !strings.Contains(flushText, "line-01") {
+		t.Fatalf("expected runtime delta batch to spill earliest streaming line, got %q", flushText)
+	}
+	view := stripANSIPreserve(m.View())
+	if strings.Contains(view, "line-01") {
+		t.Fatalf("expected runtime spill to trim live prefix, got %q", view)
+	}
+	if !strings.Contains(view, fmt.Sprintf("line-%02d", lineCount)) {
+		t.Fatalf("expected runtime spill to preserve latest tail, got %q", view)
+	}
+}
+
+func TestProjectedRuntimeAssistantFinalAfterSpillDoesNotDuplicateEarlierStreamingLines(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	next, firstCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: streamText}),
+	}})
+	m = next.(*uiModel)
+	firstFlush := collectNativeHistoryFlushText(collectCmdMessages(t, firstCmd))
+	if !strings.Contains(firstFlush, "line-01") {
+		t.Fatalf("expected first spill to include earliest streaming line, got %q", firstFlush)
+	}
+
+	next, finalCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, Message: llm.Message{Role: llm.RoleAssistant, Content: streamText, Phase: llm.MessagePhaseFinal}}),
+	}})
+	m = next.(*uiModel)
+	finalFlush := collectNativeHistoryFlushText(collectCmdMessages(t, finalCmd))
+	if strings.Contains(finalFlush, "line-01") {
+		t.Fatalf("expected finalized append to skip already spilled prefix, got %q", finalFlush)
+	}
+	if !strings.Contains(finalFlush, fmt.Sprintf("line-%02d", lineCount)) {
+		t.Fatalf("expected finalized append to include remaining streaming tail, got %q", finalFlush)
+	}
+	if got := strings.Count(firstFlush+finalFlush, "line-01"); got != 1 {
+		t.Fatalf("expected earliest streaming line emitted exactly once, got %d in %q%q", got, firstFlush, finalFlush)
+	}
+	if strings.TrimSpace(m.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after commit, got %q", m.view.OngoingStreamingText())
+	}
+	if m.nativeStreamingText != "" || m.nativeStreamingFlushedLineCount != 0 || m.nativeStreamingDividerFlushed {
+		t.Fatalf("expected streaming spill state reset after commit, got text=%q flushed=%d divider=%v", m.nativeStreamingText, m.nativeStreamingFlushedLineCount, m.nativeStreamingDividerFlushed)
+	}
+}
+
+func TestProjectedRuntimeFirstAssistantFinalAfterSpillDoesNotInsertBogusDivider(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	next, firstCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: streamText}),
+	}})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, firstCmd)
+
+	next, finalCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, Message: llm.Message{Role: llm.RoleAssistant, Content: streamText, Phase: llm.MessagePhaseFinal}}),
+	}})
+	m = next.(*uiModel)
+	finalFlush := collectNativeHistoryFlushText(collectCmdMessages(t, finalCmd))
+	if strings.Contains(finalFlush, strings.Repeat("─", m.termWidth)) {
+		t.Fatalf("expected first assistant spill commit to avoid bogus divider, got %q", finalFlush)
+	}
+	if got := strings.TrimSpace(stripANSIPreserve(m.nativeRenderedSnapshot)); strings.HasPrefix(got, tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot to avoid leading divider for first assistant reply, got %q", got)
+	}
+	if got := strings.TrimSpace(stripANSIPreserve(m.nativeProjection.Render(tui.TranscriptDivider))); strings.HasPrefix(got, tui.TranscriptDivider) {
+		t.Fatalf("expected committed projection to avoid leading divider for first assistant reply, got %q", got)
+	}
+}
+
+func TestProjectedRuntimeAssistantFinalAfterSpillDefersNormalScrollbackAppendUntilReturnFromDetail(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	next, spillCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: streamText}),
+	}})
+	m = next.(*uiModel)
+	spillFlush := collectNativeHistoryFlushText(collectCmdMessages(t, spillCmd))
+	if !strings.Contains(spillFlush, "line-01") {
+		t.Fatalf("expected initial spill before detail mode, got %q", spillFlush)
+	}
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+
+	next, finalCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, Message: llm.Message{Role: llm.RoleAssistant, Content: streamText, Phase: llm.MessagePhaseFinal}}),
+	}})
+	m = next.(*uiModel)
+	finalMsgs := collectCmdMessages(t, finalCmd)
+	if flushText := collectNativeHistoryFlushText(finalMsgs); strings.TrimSpace(flushText) != "" {
+		t.Fatalf("expected no normal-buffer append while detail mode active, got %q", flushText)
+	}
+	if strings.TrimSpace(m.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after commit in detail mode, got %q", m.view.OngoingStreamingText())
+	}
+	if strings.TrimSpace(m.nativeStreamingText) == "" {
+		t.Fatal("expected deferred spill state preserved until return to ongoing")
+	}
+
+	returnCmd := m.toggleTranscriptModeWithNativeReplay(true)
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode after return, got %q", m.view.Mode())
+	}
+	returnFlush := collectNativeHistoryFlushText(collectCmdMessages(t, returnCmd))
+	if strings.Contains(returnFlush, "line-01") {
+		t.Fatalf("expected return append to avoid duplicating already spilled prefix, got %q", returnFlush)
+	}
+	if !strings.Contains(returnFlush, fmt.Sprintf("line-%02d", lineCount)) {
+		t.Fatalf("expected return append to flush deferred tail, got %q", returnFlush)
+	}
+	if strings.TrimSpace(m.nativeStreamingText) != "" || m.nativeStreamingFlushedLineCount != 0 || m.nativeStreamingDividerFlushed {
+		t.Fatalf("expected deferred spill state cleared after return append, got text=%q flushed=%d divider=%v", m.nativeStreamingText, m.nativeStreamingFlushedLineCount, m.nativeStreamingDividerFlushed)
+	}
+}
+
+func TestNativeStreamingResizeRestartsSpillTrackingAtNewWidth(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	m.busy = true
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	streamText := makeStreamingLines(lineCount)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: streamText})
+	m.syncViewport()
+
+	firstCmd := m.syncNativeHistoryFromTranscript()
+	firstFlush := collectNativeHistoryFlushText(collectCmdMessages(t, firstCmd))
+	if !strings.Contains(firstFlush, "line-01") {
+		t.Fatalf("expected initial spill to include earliest streaming line, got %q", firstFlush)
+	}
+
+	next, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 16, Height: 8})
+	m = next.(*uiModel)
+	_ = resizeCmd
+	if m.nativeStreamingWidth != 22 {
+		t.Fatalf("expected width reset to happen on next spill sync, got %d", m.nativeStreamingWidth)
+	}
+
+	resizedCount := lineCount + 1
+	resizedStream := makeStreamingLines(resizedCount)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: resizedStream})
+	m.syncViewport()
+
+	secondCmd := m.syncNativeHistoryFromTranscript()
+	secondFlush := collectNativeHistoryFlushText(collectCmdMessages(t, secondCmd))
+	if !strings.Contains(secondFlush, "line-01") {
+		t.Fatalf("expected resized spill to restart from earliest streaming line, got %q", secondFlush)
+	}
+	if m.nativeStreamingWidth != 16 {
+		t.Fatalf("expected spill tracking width updated after resize, got %d", m.nativeStreamingWidth)
+	}
+	if got := strings.Count(firstFlush+secondFlush, "line-01"); got != 2 {
+		t.Fatalf("expected resize restart to emit earliest line twice, got %d in %q%q", got, firstFlush, secondFlush)
+	}
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, fmt.Sprintf("line-%02d", resizedCount)) {
+		t.Fatalf("expected live region to keep latest resized tail, got %q", view)
 	}
 }
 

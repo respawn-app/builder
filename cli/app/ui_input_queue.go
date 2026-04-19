@@ -16,7 +16,6 @@ const (
 func (m *uiModel) queueInput(text string) {
 	m.queued = append(m.queued, text)
 	m.clearInput()
-	m.activity = uiActivityQueued
 }
 
 func (m *uiModel) enqueueInjectedInput(text string) bool {
@@ -28,7 +27,6 @@ func (m *uiModel) enqueueInjectedInput(text string) bool {
 		m.queueRuntimeUserMessage(trimmed)
 	}
 	m.pendingInjected = append(m.pendingInjected, trimmed)
-	m.activity = uiActivityQueued
 	return true
 }
 
