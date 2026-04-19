@@ -1,8 +1,10 @@
 package rpcwire
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -19,6 +21,8 @@ type Endpoint struct {
 	Address   string
 	ServerURL string
 	OriginURL string
+	UseTLS    bool
+	TLSConfig *tls.Config
 }
 
 func ParseWebSocketEndpoint(raw string) (Endpoint, error) {
@@ -33,14 +37,24 @@ func ParseWebSocketEndpoint(raw string) (Endpoint, error) {
 	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
 		return Endpoint{}, fmt.Errorf("unsupported websocket scheme %q", parsed.Scheme)
 	}
-	if strings.TrimSpace(parsed.Host) == "" {
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
 		return Endpoint{}, errors.New("websocket host is required")
+	}
+	port := strings.TrimSpace(parsed.Port())
+	if port == "" {
+		if parsed.Scheme == "wss" {
+			port = "443"
+		} else {
+			port = "80"
+		}
 	}
 	return Endpoint{
 		Transport: TransportTCP,
-		Address:   parsed.Host,
+		Address:   net.JoinHostPort(host, port),
 		ServerURL: trimmed,
 		OriginURL: websocketOrigin(parsed),
+		UseTLS:    parsed.Scheme == "wss",
 	}, nil
 }
 

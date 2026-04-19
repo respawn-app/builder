@@ -2,11 +2,13 @@ package rpcwire
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -215,11 +217,34 @@ func dialWebSocketEndpoint(ctx context.Context, endpoint Endpoint) (net.Conn, er
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	network := "tcp"
 	if endpoint.Transport == TransportUnix {
-		network = "unix"
+		return (&net.Dialer{}).DialContext(ctx, "unix", endpoint.Address)
 	}
-	return (&net.Dialer{}).DialContext(ctx, network, endpoint.Address)
+	if endpoint.UseTLS {
+		return (&tls.Dialer{NetDialer: &net.Dialer{}, Config: webSocketTLSConfig(endpoint)}).DialContext(ctx, "tcp", endpoint.Address)
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint.Address)
+}
+
+func webSocketTLSConfig(endpoint Endpoint) *tls.Config {
+	config := endpoint.TLSConfig
+	if config == nil {
+		config = &tls.Config{}
+	} else {
+		config = config.Clone()
+	}
+	if config.ServerName == "" {
+		config.ServerName = tlsServerName(endpoint)
+	}
+	return config
+}
+
+func tlsServerName(endpoint Endpoint) string {
+	serverURL, err := url.Parse(endpoint.ServerURL)
+	if err != nil {
+		return ""
+	}
+	return serverURL.Hostname()
 }
 
 func dialWebSocketClientContext(ctx context.Context, rawConn net.Conn, endpoint Endpoint, adapter *webSocketConn) (*gws.Conn, error) {
