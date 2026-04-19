@@ -230,19 +230,19 @@ func (c *Remote) ShouldCompactBeforeUserMessage(ctx context.Context, req servera
 
 func (c *Remote) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
 	var resp serverapi.RuntimeSubmitUserMessageResponse
-	return resp, c.call(ctx, protocol.MethodRuntimeSubmitUserMessage, req, &resp)
+	return resp, c.callDedicated(ctx, "runtime-submit-user-message", protocol.MethodRuntimeSubmitUserMessage, req, &resp)
 }
 
 func (c *Remote) SubmitUserShellCommand(ctx context.Context, req serverapi.RuntimeSubmitUserShellCommandRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
+	return c.callDedicated(ctx, "runtime-submit-user-shell-command", protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
 }
 
 func (c *Remote) CompactContext(ctx context.Context, req serverapi.RuntimeCompactContextRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeCompactContext, req, nil)
+	return c.callDedicated(ctx, "runtime-compact-context", protocol.MethodRuntimeCompactContext, req, nil)
 }
 
 func (c *Remote) CompactContextForPreSubmit(ctx context.Context, req serverapi.RuntimeCompactContextForPreSubmitRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
+	return c.callDedicated(ctx, "runtime-compact-context-pre-submit", protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
 }
 
 func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
@@ -252,11 +252,11 @@ func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHas
 
 func (c *Remote) SubmitQueuedUserMessages(ctx context.Context, req serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
 	var resp serverapi.RuntimeSubmitQueuedUserMessagesResponse
-	return resp, c.call(ctx, protocol.MethodRuntimeSubmitQueuedUserMessages, req, &resp)
+	return resp, c.callDedicated(ctx, "runtime-submit-queued-user-messages", protocol.MethodRuntimeSubmitQueuedUserMessages, req, &resp)
 }
 
 func (c *Remote) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptRequest) error {
-	return c.call(ctx, protocol.MethodRuntimeInterrupt, req, nil)
+	return c.callDedicated(ctx, "runtime-interrupt", protocol.MethodRuntimeInterrupt, req, nil)
 }
 
 func (c *Remote) QueueUserMessage(ctx context.Context, req serverapi.RuntimeQueueUserMessageRequest) error {

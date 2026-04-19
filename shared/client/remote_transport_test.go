@@ -305,6 +305,115 @@ func TestRemoteReconnectsUnaryControlConnectionAfterDrop(t *testing.T) {
 	requireNoHandlerError(t, handlerErrs)
 }
 
+func TestRemoteInterruptUsesDedicatedConnWhileSubmitIsInFlight(t *testing.T) {
+	var connectionCount atomic.Int32
+	handlerErrs := make(chan error, 8)
+	submitStarted := make(chan struct{}, 1)
+	interruptSeen := make(chan struct{}, 1)
+	releaseSubmit := make(chan struct{})
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		connectionCount.Add(1)
+		handshaken := false
+		attached := false
+		for event := range conn.Events() {
+			if event.Err != nil {
+				return
+			}
+			req := event.Frame.Request()
+			if !handshaken {
+				if req.Method != protocol.MethodHandshake {
+					reportHandlerError(handlerErrs, "first method = %q, want handshake", req.Method)
+					return
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+					reportHandlerError(handlerErrs, "send handshake response: %w", err)
+					return
+				}
+				handshaken = true
+				continue
+			}
+			if !attached {
+				if req.Method != protocol.MethodAttachProject {
+					reportHandlerError(handlerErrs, "second method = %q, want attach project", req.Method)
+					return
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: "project-1", WorkspaceRoot: "/tmp/workspace-a"}))); err != nil {
+					reportHandlerError(handlerErrs, "send attach response: %w", err)
+					return
+				}
+				attached = true
+				continue
+			}
+			switch req.Method {
+			case protocol.MethodRuntimeSubmitUserMessage:
+				select {
+				case submitStarted <- struct{}{}:
+				default:
+				}
+				<-releaseSubmit
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.RuntimeSubmitUserMessageResponse{Message: "done"}))); err != nil {
+					reportHandlerError(handlerErrs, "send submit response: %w", err)
+				}
+				return
+			case protocol.MethodRuntimeInterrupt:
+				select {
+				case interruptSeen <- struct{}{}:
+				default:
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, struct{}{}))); err != nil {
+					reportHandlerError(handlerErrs, "send interrupt response: %w", err)
+				}
+				return
+			default:
+				reportHandlerError(handlerErrs, "unexpected method %q", req.Method)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: "submit-1", SessionID: "session-1", ControllerLeaseID: "lease-1", Text: "run"})
+		submitDone <- submitErr
+	}()
+
+	select {
+	case <-submitStarted:
+	case err := <-handlerErrs:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for submit start")
+	}
+
+	interruptCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := remote.Interrupt(interruptCtx, serverapi.RuntimeInterruptRequest{ClientRequestID: "interrupt-1", SessionID: "session-1", ControllerLeaseID: "lease-1"}); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	select {
+	case <-interruptSeen:
+	case err := <-handlerErrs:
+		t.Fatal(err)
+	case <-time.After(time.Second):
+		t.Fatal("expected interrupt on dedicated connection")
+	}
+	if got := connectionCount.Load(); got < 3 {
+		t.Fatalf("connectionCount = %d, want >= 3", got)
+	}
+	close(releaseSubmit)
+	if err := <-submitDone; err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	requireNoHandlerError(t, handlerErrs)
+}
+
 func startUnixWebSocketServer(t *testing.T, socketPath string, handler func(context.Context, rpcwire.Conn)) func() {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {

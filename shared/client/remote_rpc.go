@@ -171,6 +171,15 @@ func (c *Remote) openRPCConn(ctx context.Context) (rpcwire.Conn, func(), error) 
 	return conn, cleanup, nil
 }
 
+func (c *Remote) callDedicated(ctx context.Context, requestID string, method string, params any, out any) error {
+	conn, cleanup, err := c.openRPCConn(ctx)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return callRPC(ctx, conn, requestID, method, params, out)
+}
+
 func newRemoteControlConn(conn rpcwire.Conn) *remoteControlConn {
 	control := &remoteControlConn{
 		conn:    conn,
