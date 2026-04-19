@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"builder/server/primaryrun"
+	"builder/server/requestmemo"
 	"builder/server/runtime"
 	"builder/shared/serverapi"
 )
@@ -22,10 +23,21 @@ type Service struct {
 	runtimes RuntimeResolver
 	gate     primaryrun.Gate
 	control  ControllerLeaseVerifier
+	submits  *requestmemo.Memo[submitUserMessageMemoRequest, serverapi.RuntimeSubmitUserMessageResponse]
+}
+
+type submitUserMessageMemoRequest struct {
+	SessionID         string
+	ControllerLeaseID string
+	Text              string
 }
 
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
-	return &Service{runtimes: runtimes, gate: gate}
+	return &Service{
+		runtimes: runtimes,
+		gate:     gate,
+		submits:  requestmemo.New[submitUserMessageMemoRequest, serverapi.RuntimeSubmitUserMessageResponse](),
+	}
 }
 
 func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) *Service {
@@ -173,20 +185,27 @@ func (s *Service) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSu
 	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 		return serverapi.RuntimeSubmitUserMessageResponse{}, err
 	}
-	lease, err := s.acquirePrimaryRun(req.SessionID)
-	if err != nil {
-		return serverapi.RuntimeSubmitUserMessageResponse{}, err
+	memoReq := submitUserMessageMemoRequest{
+		SessionID:         strings.TrimSpace(req.SessionID),
+		ControllerLeaseID: strings.TrimSpace(req.ControllerLeaseID),
+		Text:              req.Text,
 	}
-	defer lease.Release()
-	engine, err := s.resolve(ctx, req.SessionID)
-	if err != nil {
-		return serverapi.RuntimeSubmitUserMessageResponse{}, err
-	}
-	msg, err := engine.SubmitUserMessage(ctx, req.Text)
-	if err != nil {
-		return serverapi.RuntimeSubmitUserMessageResponse{}, err
-	}
-	return serverapi.RuntimeSubmitUserMessageResponse{Message: msg.Content}, nil
+	return s.submits.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSubmitUserMessageMemoRequest, func(ctx context.Context) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+		lease, err := s.acquirePrimaryRun(memoReq.SessionID)
+		if err != nil {
+			return serverapi.RuntimeSubmitUserMessageResponse{}, err
+		}
+		defer lease.Release()
+		engine, err := s.resolve(ctx, memoReq.SessionID)
+		if err != nil {
+			return serverapi.RuntimeSubmitUserMessageResponse{}, err
+		}
+		msg, err := engine.SubmitUserMessage(ctx, memoReq.Text)
+		if err != nil {
+			return serverapi.RuntimeSubmitUserMessageResponse{}, err
+		}
+		return serverapi.RuntimeSubmitUserMessageResponse{Message: msg.Content}, nil
+	})
 }
 
 func (s *Service) SubmitUserShellCommand(ctx context.Context, req serverapi.RuntimeSubmitUserShellCommandRequest) error {
@@ -333,6 +352,12 @@ func (s *Service) acquirePrimaryRun(sessionID string) (primaryrun.Lease, error) 
 		return primaryrun.LeaseFunc(func() {}), nil
 	}
 	return s.gate.AcquirePrimaryRun(strings.TrimSpace(sessionID))
+}
+
+func sameSubmitUserMessageMemoRequest(a submitUserMessageMemoRequest, b submitUserMessageMemoRequest) bool {
+	return a.SessionID == b.SessionID &&
+		a.ControllerLeaseID == b.ControllerLeaseID &&
+		a.Text == b.Text
 }
 
 var _ serverapi.RuntimeControlService = (*Service)(nil)
