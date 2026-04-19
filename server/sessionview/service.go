@@ -21,14 +21,19 @@ type RuntimeResolver interface {
 	ResolveRuntime(ctx context.Context, sessionID string) (*runtime.Engine, error)
 }
 
+type ExecutionTargetResolver interface {
+	ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error)
+}
+
 type Service struct {
 	sessions SessionStoreResolver
 	runtimes RuntimeResolver
+	targets  ExecutionTargetResolver
 	dormant  *dormantTranscriptCache
 }
 
-func NewService(sessions SessionStoreResolver, runtimes RuntimeResolver) *Service {
-	return &Service{sessions: sessions, runtimes: runtimes, dormant: newDormantTranscriptCache(nil)}
+func NewService(sessions SessionStoreResolver, runtimes RuntimeResolver, targets ExecutionTargetResolver) *Service {
+	return &Service{sessions: sessions, runtimes: runtimes, targets: targets, dormant: newDormantTranscriptCache(nil)}
 }
 
 type staticSessionResolver struct {
@@ -80,7 +85,11 @@ func (s *Service) GetSessionMainView(ctx context.Context, req serverapi.SessionM
 	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
 		return serverapi.SessionMainViewResponse{}, err
 	} else if runtimeEngine != nil {
-		return serverapi.SessionMainViewResponse{MainView: runtimeview.MainViewFromRuntime(runtimeEngine)}, nil
+		view, err := s.enrichMainViewWithExecutionTarget(ctx, runtimeview.MainViewFromRuntime(runtimeEngine))
+		if err != nil {
+			return serverapi.SessionMainViewResponse{}, err
+		}
+		return serverapi.SessionMainViewResponse{MainView: view}, nil
 	}
 	if store, err := s.resolveSessionStore(ctx, req.SessionID); err != nil {
 		return serverapi.SessionMainViewResponse{}, err
@@ -98,7 +107,7 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
 	}
-	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window}
+	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window, KnownRevision: req.KnownRevision, KnownCommittedEntryCount: req.KnownCommittedEntryCount}
 	pageReq = runtimeview.NormalizeDefaultTranscriptRequest(pageReq)
 	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
@@ -162,6 +171,27 @@ func (s *Service) resolveRuntime(ctx context.Context, sessionID string) (*runtim
 	return s.runtimes.ResolveRuntime(ctx, sessionID)
 }
 
+func (s *Service) enrichMainViewWithExecutionTarget(ctx context.Context, view clientui.RuntimeMainView) (clientui.RuntimeMainView, error) {
+	sessionView, err := s.enrichSessionViewWithExecutionTarget(ctx, view.Session)
+	if err != nil {
+		return clientui.RuntimeMainView{}, err
+	}
+	view.Session = sessionView
+	return view, nil
+}
+
+func (s *Service) enrichSessionViewWithExecutionTarget(ctx context.Context, view clientui.RuntimeSessionView) (clientui.RuntimeSessionView, error) {
+	if s == nil || s.targets == nil || strings.TrimSpace(view.SessionID) == "" {
+		return view, nil
+	}
+	target, err := s.targets.ResolveSessionExecutionTarget(ctx, view.SessionID)
+	if err != nil {
+		return clientui.RuntimeSessionView{}, err
+	}
+	view.ExecutionTarget = target
+	return view, nil
+}
+
 func (s *Service) dormantMainViewFromStore(ctx context.Context, store *session.Store) (clientui.RuntimeMainView, error) {
 	if store == nil {
 		return clientui.RuntimeMainView{}, errors.New("session store is required")
@@ -173,7 +203,7 @@ func (s *Service) dormantMainViewFromStore(ctx context.Context, store *session.S
 	meta := store.Meta()
 	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
 	view := entry.mainView(meta, freshness)
-	return view, nil
+	return s.enrichMainViewWithExecutionTarget(ctx, view)
 }
 
 func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
@@ -188,7 +218,7 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 		return clientui.TranscriptPage{}, err
 	}
 	if req.Window == clientui.TranscriptWindowOngoingTail {
-		return entry.transcriptPageFromTail(meta, freshness), nil
+		return entry.transcriptPageFromTail(meta, freshness, req), nil
 	}
 	offset := req.Offset
 	limit := req.Limit

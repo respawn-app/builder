@@ -15,7 +15,9 @@ import (
 	"builder/server/auth"
 	"builder/server/runtime"
 	"builder/server/session"
+	"builder/server/sessionview"
 	"builder/server/tools"
+	"builder/shared/client"
 	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -285,6 +287,45 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 	}
 	if len(history) == 0 || history[len(history)-1] != "/status" {
 		t.Fatalf("expected persisted /status prompt history entry, got %+v", history)
+	}
+}
+
+func TestStatusCommandRendersGlobalDebugMode(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		Workdir: "/tmp/workdir",
+		Model:   uiStatusModelInfo{Summary: "gpt-5 high"},
+		Context: uiStatusContextInfo{WindowTokens: 400000, UsedTokens: 1000, AvailableTokens: 399000, ThresholdTokens: 300000},
+		Config:  uiStatusConfigInfo{AutoCompaction: true, Debug: true},
+	}}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if msg == nil {
+			continue
+		}
+		next, _ = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	found := false
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.TrimSpace(line) == "debug on" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected /status to show global debug mode, got %q", plain)
 	}
 }
 
@@ -883,18 +924,51 @@ func TestStatusUsageWindowsByLabelDisambiguatesDuplicateExtraBucketsWithoutUniqu
 	}
 }
 
-func TestStatusParentSessionNameResolvesFromPersistenceRoot(t *testing.T) {
+func TestStatusParentSessionNameResolvesFromSessionViews(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
-	parentStore, err := session.Create(containerDir, "workspace-a", "/tmp/work-a")
-	if err != nil {
-		t.Fatalf("create parent store: %v", err)
-	}
+	parentStore := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/work-a")
 	if err := parentStore.SetName("incident-root"); err != nil {
 		t.Fatalf("set parent name: %v", err)
 	}
-	if got := statusParentSessionName(persistenceRoot, parentStore.Meta().SessionID); got != "incident-root" {
+	sessionViews := client.NewLoopbackSessionViewClient(sessionview.NewService(sessionview.NewStaticSessionResolver(parentStore), nil, nil))
+	got, warning := statusParentSessionName(context.Background(), sessionViews, parentStore.Meta().SessionID)
+	if warning != "" {
+		t.Fatalf("unexpected warning: %q", warning)
+	}
+	if got != "incident-root" {
 		t.Fatalf("parent session name = %q", got)
+	}
+}
+
+func TestStatusRefreshCmdSchedulesBaseEnrichmentForProgressiveCollector(t *testing.T) {
+	persistenceRoot := t.TempDir()
+	parentStore := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/work-a")
+	if err := parentStore.SetName("incident-root"); err != nil {
+		t.Fatalf("set parent name: %v", err)
+	}
+	sessionViews := client.NewLoopbackSessionViewClient(sessionview.NewService(sessionview.NewStaticSessionResolver(parentStore), nil, nil))
+	collector := &stubProgressiveStatusCollector{base: uiStatusSnapshot{ParentSessionID: parentStore.Meta().SessionID}}
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{SessionViews: sessionViews}),
+		WithUIStatusCollector(collector),
+	)
+	cmd := m.statusRefreshCmd()
+	if cmd == nil {
+		t.Fatal("expected progressive status refresh to schedule base enrichment")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want tea.BatchMsg", cmd())
+	}
+	if len(batch) == 0 {
+		t.Fatal("expected at least one batched status command")
+	}
+	baseMsg, ok := batch[0]().(statusBaseRefreshDoneMsg)
+	if !ok {
+		t.Fatalf("batched message type = %T, want statusBaseRefreshDoneMsg", batch[0]())
+	}
+	if baseMsg.snapshot.ParentSessionName != "incident-root" {
+		t.Fatalf("parent session name = %q, want incident-root", baseMsg.snapshot.ParentSessionName)
 	}
 }
 

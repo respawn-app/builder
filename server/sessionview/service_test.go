@@ -15,7 +15,9 @@ import (
 	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 type serviceFakeLLM struct {
@@ -40,7 +42,15 @@ type serviceBlockingTool struct {
 	release chan struct{}
 }
 
-func (serviceBlockingTool) Name() tools.ID { return tools.ToolShell }
+type staticExecutionTargetResolver struct {
+	target clientui.SessionExecutionTarget
+}
+
+func (r staticExecutionTargetResolver) ResolveSessionExecutionTarget(context.Context, string) (clientui.SessionExecutionTarget, error) {
+	return r.target, nil
+}
+
+func (serviceBlockingTool) Name() toolspec.ID { return toolspec.ToolShell }
 
 func (t serviceBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
@@ -64,7 +74,7 @@ func TestServiceGetSessionMainViewUsesLiveRuntimeWhenAttached(t *testing.T) {
 	client := &serviceFakeLLM{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -76,7 +86,7 @@ func TestServiceGetSessionMainViewUsesLiveRuntimeWhenAttached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng))
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
 
 	done := make(chan error, 1)
 	go func() {
@@ -125,7 +135,7 @@ func TestServiceGetSessionMainViewFallsBackToDurableSessionState(t *testing.T) {
 		t.Fatalf("append run start: %v", err)
 	}
 
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 	resp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("get session main view: %v", err)
@@ -150,8 +160,34 @@ func TestServiceGetSessionMainViewFallsBackToDurableSessionState(t *testing.T) {
 	}
 }
 
+func TestServiceGetSessionMainViewIncludesExecutionTarget(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	target := clientui.SessionExecutionTarget{
+		WorkspaceID:      "workspace-1",
+		WorkspaceRoot:    dir,
+		CwdRelpath:       ".",
+		EffectiveWorkdir: dir,
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil, staticExecutionTargetResolver{target: target})
+
+	resp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view: %v", err)
+	}
+	if resp.MainView.Session.ExecutionTarget.WorkspaceID != "workspace-1" {
+		t.Fatalf("workspace id = %q, want workspace-1", resp.MainView.Session.ExecutionTarget.WorkspaceID)
+	}
+	if resp.MainView.Session.ExecutionTarget.EffectiveWorkdir != dir {
+		t.Fatalf("effective workdir = %q, want %q", resp.MainView.Session.ExecutionTarget.EffectiveWorkdir, dir)
+	}
+}
+
 func TestServiceRequiresSessionStoreResolverForDormantReads(t *testing.T) {
-	svc := NewService(nil, nil)
+	svc := NewService(nil, nil, nil)
 
 	if _, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: "session-1"}); err == nil || err.Error() != "session store resolver is required" {
 		t.Fatalf("expected explicit session store resolver error for main view, got %v", err)
@@ -184,7 +220,7 @@ func TestServiceGetSessionTranscriptPageUsesLiveRuntimeWhenAttached(t *testing.T
 		t.Fatalf("new engine: %v", err)
 	}
 	eng.AppendLocalEntry("assistant", "two")
-	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng))
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
 
 	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
@@ -201,6 +237,39 @@ func TestServiceGetSessionTranscriptPageUsesLiveRuntimeWhenAttached(t *testing.T
 	}
 	if resp.Transcript.Entries[2].Text != "two" {
 		t.Fatalf("unexpected tail entry: %+v", resp.Transcript.Entries[2])
+	}
+}
+
+func TestServiceGetSessionTranscriptPageUsesIncrementalOngoingTailForDormantSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("reply-%03d", i), Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
+		SessionID:                store.Meta().SessionID,
+		Window:                   clientui.TranscriptWindowOngoingTail,
+		KnownRevision:            store.Meta().LastSequence - 1,
+		KnownCommittedEntryCount: 590,
+	})
+	if err != nil {
+		t.Fatalf("get incremental dormant transcript page: %v", err)
+	}
+	if got := resp.Transcript.Offset; got != 558 {
+		t.Fatalf("offset = %d, want 558", got)
+	}
+	if got := len(resp.Transcript.Entries); got != 42 {
+		t.Fatalf("entry count = %d, want 42", got)
+	}
+	if got := resp.Transcript.Entries[0].Text; got != "reply-558" {
+		t.Fatalf("first entry = %q, want reply-558", got)
 	}
 }
 
@@ -224,7 +293,7 @@ func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 			t.Fatalf("append message %d: %v", i, err)
 		}
 	}
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 
 	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 1, Limit: 2})
 	if err != nil {
@@ -253,7 +322,7 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testi
 			t.Fatalf("append message %d: %v", i, err)
 		}
 	}
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 
 	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
@@ -279,7 +348,7 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testi
 	}
 }
 
-func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t *testing.T) {
+func TestServiceDormantReviewerRollbackIsIgnoredOnRead(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -301,7 +370,7 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 		t.Fatalf("append reviewer rollback: %v", err)
 	}
 
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 
 	transcriptResp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
 		SessionID: store.Meta().SessionID,
@@ -311,14 +380,20 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 	if err != nil {
 		t.Fatalf("get session transcript page: %v", err)
 	}
-	if transcriptResp.Transcript.TotalEntries != 1 {
-		t.Fatalf("total entries = %d, want 1", transcriptResp.Transcript.TotalEntries)
+	if transcriptResp.Transcript.TotalEntries != 3 {
+		t.Fatalf("total entries = %d, want 3", transcriptResp.Transcript.TotalEntries)
 	}
-	if len(transcriptResp.Transcript.Entries) != 1 {
-		t.Fatalf("entry count = %d, want 1", len(transcriptResp.Transcript.Entries))
+	if len(transcriptResp.Transcript.Entries) != 3 {
+		t.Fatalf("entry count = %d, want 3", len(transcriptResp.Transcript.Entries))
 	}
 	if got := transcriptResp.Transcript.Entries[0].Text; got != "u1" {
-		t.Fatalf("visible transcript entries = %+v, want only u1", transcriptResp.Transcript.Entries)
+		t.Fatalf("first visible transcript entry = %+v, want u1", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[1].Text; got != "rolled back final" {
+		t.Fatalf("second visible transcript entry = %+v, want rolled back final", transcriptResp.Transcript.Entries)
+	}
+	if got := transcriptResp.Transcript.Entries[2].Text; got != "u2" {
+		t.Fatalf("third visible transcript entry = %+v, want u2", transcriptResp.Transcript.Entries)
 	}
 
 	mainViewResp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
@@ -326,10 +401,10 @@ func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t 
 		t.Fatalf("get session main view: %v", err)
 	}
 	if got := mainViewResp.MainView.Status.LastCommittedAssistantFinalAnswer; got != "" {
-		t.Fatalf("last committed assistant final answer = %q, want empty after rollback", got)
+		t.Fatalf("last committed assistant final answer = %q, want empty because later user message supersedes it", got)
 	}
-	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 1 {
-		t.Fatalf("committed entry count = %d, want 1", got)
+	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 3 {
+		t.Fatalf("committed entry count = %d, want 3", got)
 	}
 }
 
@@ -355,7 +430,7 @@ func TestServiceGetSessionTranscriptPageKeepsDormantCompactionSummaryAndCarryove
 	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeManualCompactionCarryover, Content: "Last user message before handoff\n\ncarry this forward"}); err != nil {
 		t.Fatalf("append manual carryover: %v", err)
 	}
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 
 	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
@@ -364,11 +439,108 @@ func TestServiceGetSessionTranscriptPageKeepsDormantCompactionSummaryAndCarryove
 	if len(resp.Transcript.Entries) != 3 {
 		t.Fatalf("entries = %d, want 3 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
 	}
+	if resp.Transcript.Entries[0].Role != "compaction_summary" || resp.Transcript.Entries[0].Text != "condensed provider summary" {
+		t.Fatalf("expected projected provider compaction summary entry, got %+v", resp.Transcript.Entries[0])
+	}
 	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed summary" {
-		t.Fatalf("expected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+		t.Fatalf("expected persisted compaction summary entry, got %+v", resp.Transcript.Entries[1])
 	}
 	if resp.Transcript.Entries[2].Role != "manual_compaction_carryover" {
 		t.Fatalf("expected manual carryover entry, got %+v", resp.Transcript.Entries[2])
+	}
+}
+
+func TestServiceGetSessionTranscriptPagePreservesHistoryAcrossActiveCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "local",
+		"mode":   "manual",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}}),
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "compaction_notice", "text": "after replace notice"}); err != nil {
+		t.Fatalf("append compaction notice entry: %v", err)
+	}
+	eng, err := runtime.New(store, &serviceFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("assistant", "live local")
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 10})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if len(resp.Transcript.Entries) != 4 {
+		t.Fatalf("entries = %d, want 4 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	}
+	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before compaction" {
+		t.Fatalf("expected preserved pre-compaction entry, got %+v", resp.Transcript.Entries[0])
+	}
+	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" {
+		t.Fatalf("expected projected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+	}
+	if resp.Transcript.Entries[2].Role != "compaction_notice" || resp.Transcript.Entries[2].Text != "after replace notice" {
+		t.Fatalf("expected persisted post-compaction local entry, got %+v", resp.Transcript.Entries[2])
+	}
+	if resp.Transcript.Entries[3].Role != "assistant" || resp.Transcript.Entries[3].Text != "live local" {
+		t.Fatalf("expected live local entry after compaction, got %+v", resp.Transcript.Entries[3])
+	}
+}
+
+func TestServiceGetSessionTranscriptPagePaginatesBeforeActiveCompactionBoundary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "before-1"}); err != nil {
+		t.Fatalf("append first user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "before-2", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "local",
+		"mode":   "manual",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}}),
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "compaction_notice", "text": "after replace notice"}); err != nil {
+		t.Fatalf("append compaction notice entry: %v", err)
+	}
+	eng, err := runtime.New(store, &serviceFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("assistant", "live local")
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 2})
+	if err != nil {
+		t.Fatalf("get paginated session transcript page: %v", err)
+	}
+	if resp.Transcript.TotalEntries != 5 {
+		t.Fatalf("total entries = %d, want 5", resp.Transcript.TotalEntries)
+	}
+	if len(resp.Transcript.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	}
+	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before-1" {
+		t.Fatalf("expected first pre-compaction entry, got %+v", resp.Transcript.Entries[0])
+	}
+	if resp.Transcript.Entries[1].Role != "assistant" || resp.Transcript.Entries[1].Text != "before-2" {
+		t.Fatalf("expected second pre-compaction entry, got %+v", resp.Transcript.Entries[1])
 	}
 }
 
@@ -383,7 +555,7 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailWindow(t *testing.
 			t.Fatalf("append message %d: %v", i, err)
 		}
 	}
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 
 	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
 		SessionID: store.Meta().SessionID,
@@ -424,7 +596,7 @@ func TestServiceGetRunReturnsDurableRunRecord(t *testing.T) {
 		t.Fatalf("append run finish: %v", err)
 	}
 
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 	resp, err := svc.GetRun(context.Background(), serverapi.RunGetRequest{SessionID: store.Meta().SessionID, RunID: "run-1"})
 	if err != nil {
 		t.Fatalf("get run: %v", err)
@@ -462,7 +634,7 @@ func TestServiceGetSessionMainViewDoesNotMutatePersistedSessionFiles(t *testing.
 		t.Fatalf("read events file before: %v", err)
 	}
 
-	svc := NewService(NewStaticSessionResolver(store), nil)
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
 	resp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("get session main view: %v", err)

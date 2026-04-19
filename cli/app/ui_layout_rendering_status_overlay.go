@@ -129,6 +129,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	appendWrapped(statusContextRemainingSummary(snapshot.Context), boldStyle)
 	appendWrapped(statusContextCompactionSummary(snapshot.Context), lipgloss.Style{})
 	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
+	appendWrapped("debug "+statusOnOff(snapshot.Config.Debug), lipgloss.Style{})
 	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
 
 	loadedSkills, failedSkills := statusPartitionSkills(snapshot.Skills)

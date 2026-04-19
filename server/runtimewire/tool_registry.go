@@ -8,6 +8,7 @@ import (
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
+	"builder/shared/toolspec"
 	"fmt"
 	"time"
 )
@@ -88,7 +89,7 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 	}
 }
 
-func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -124,7 +125,7 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 			)
 		}),
 	}
-	enabledSet := make(map[tools.ID]struct{}, len(enabled))
+	enabledSet := make(map[toolspec.ID]struct{}, len(enabled))
 	for _, id := range enabled {
 		enabledSet[id] = struct{}{}
 	}

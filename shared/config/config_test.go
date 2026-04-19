@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestMain(m *testing.M) {
@@ -52,6 +52,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.PriorityRequestMode {
 		t.Fatalf("expected default priority_request_mode=false")
 	}
+	if cfg.Settings.Debug {
+		t.Fatalf("expected default debug=false")
+	}
 	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
 		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
 	}
@@ -61,22 +64,22 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
 		t.Fatalf("expected sessions root to exist: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolViewImage] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolShell] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
-		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
+	if cfg.Settings.EnabledTools[toolspec.ToolMultiToolUseParallel] {
+		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", toolspec.ToolMultiToolUseParallel)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
-		t.Fatalf("expected %s disabled in static defaults", tools.ToolTriggerHandoff)
+	if cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
+		t.Fatalf("expected %s disabled in static defaults", toolspec.ToolTriggerHandoff)
 	}
 	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolMultiToolUseParallel, got)
+		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolMultiToolUseParallel, got)
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolTriggerHandoff, got)
+		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolTriggerHandoff, got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
 	}
 	if cfg.Settings.ContextCompactionThresholdTokens != defaultCompactionThreshold {
@@ -128,6 +131,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "# model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
 	}
+	if !strings.Contains(string(settingsBytes), "# debug = false") {
+		t.Fatalf("expected default config to expose global debug option, got %q", string(settingsBytes))
+	}
 	if !strings.Contains(string(settingsBytes), "# pre_submit_compaction_lead_tokens = 35000") {
 		t.Fatalf("expected default config to expose pre-submit runway default, got %q", string(settingsBytes))
 	}
@@ -161,6 +167,9 @@ func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	toml := settingsTOML(defaultSettings())
 	if !strings.Contains(toml, "# theme = \"auto\"") {
 		t.Fatalf("expected onboarding config to comment auto theme default, got %q", toml)
+	}
+	if !strings.Contains(toml, "# debug = false") {
+		t.Fatalf("expected onboarding config to comment global debug default, got %q", toml)
 	}
 	for _, want := range []string{
 		"# provider_override = \"\"",
@@ -221,6 +230,16 @@ func TestSettingsTOMLForOnboardingMatchesRequestedShape(t *testing.T) {
 	}
 	if strings.Index(toml, "[tools]") > strings.Index(toml, "[reviewer]") {
 		t.Fatalf("expected tools section before reviewer section, got %q", toml)
+	}
+	if strings.Contains(toml, "debug =") {
+		t.Fatalf("expected onboarding config to omit debug setting, got %q", toml)
+	}
+}
+
+func TestOnboardingDefaultSettingsTOMLOmitsDebugSetting(t *testing.T) {
+	toml := onboardingDefaultSettingsTOML("dark")
+	if strings.Contains(toml, "debug =") {
+		t.Fatalf("expected onboarding default config to omit debug setting, got %q", toml)
 	}
 }
 
@@ -1020,7 +1039,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "file" {
 		t.Fatalf("expected web_search source file, got %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool to remain enabled by default")
 	}
 
@@ -1035,7 +1054,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "env" {
 		t.Fatalf("expected web_search source env, got %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected web_search tool to stay enabled when only web_search mode is off")
 	}
 
@@ -1062,7 +1081,7 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+	if cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected explicit tools.web_search=false to stay disabled")
 	}
 	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
@@ -1087,7 +1106,7 @@ func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
 		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "file" {
@@ -1355,7 +1374,7 @@ shell_default_seconds = 50
 	if cfg.Settings.ThinkingLevel != "xhigh" {
 		t.Fatalf("expected cli thinking_level, got %q", cfg.Settings.ThinkingLevel)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolPatch] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolPatch] {
 		t.Fatalf("expected env tool override to enable patch")
 	}
 	if got := cfg.Source.Sources["model"]; got != "cli" {
@@ -1745,6 +1764,106 @@ func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "env" {
 		t.Fatalf("expected allow_non_cwd_edits source env, got %q", got)
+	}
+}
+
+func TestLoadDebugPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("debug = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.Debug {
+		t.Fatalf("expected file debug=true")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "file" {
+		t.Fatalf("expected debug source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Debug {
+		t.Fatalf("expected env debug=false")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "env" {
+		t.Fatalf("expected debug source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_DEBUG error")
+	}
+}
+
+func TestLoadServerHostPortPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("server_host = \"127.0.0.2\"\nserver_port = 54321\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ServerHost != "127.0.0.2" || cfg.Settings.ServerPort != 54321 {
+		t.Fatalf("unexpected server settings from file: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "file" {
+		t.Fatalf("expected server_host source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "file" {
+		t.Fatalf("expected server_port source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_HOST", "::1")
+	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.ServerHost != "::1" || cfg.Settings.ServerPort != 65432 {
+		t.Fatalf("unexpected server settings from env: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "env" {
+		t.Fatalf("expected server_host source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "env" {
+		t.Fatalf("expected server_port source env, got %q", got)
+	}
+	if got := ServerListenAddress(cfg); got != "[::1]:65432" {
+		t.Fatalf("ServerListenAddress = %q, want [::1]:65432", got)
+	}
+	if got := ServerHTTPBaseURL(cfg); got != "http://[::1]:65432" {
+		t.Fatalf("ServerHTTPBaseURL = %q, want http://[::1]:65432", got)
+	}
+	if got := ServerRPCURL(cfg); got != "ws://[::1]:65432/rpc" {
+		t.Fatalf("ServerRPCURL = %q, want ws://[::1]:65432/rpc", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_PORT", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_SERVER_PORT error")
 	}
 }
 

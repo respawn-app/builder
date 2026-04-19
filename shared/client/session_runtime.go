@@ -8,8 +8,8 @@ import (
 )
 
 type SessionRuntimeClient interface {
-	ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error
-	ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error
+	ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error)
+	ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error)
 }
 
 type loopbackSessionRuntimeClient struct {
@@ -20,16 +20,16 @@ func NewLoopbackSessionRuntimeClient(service serverapi.SessionRuntimeService) Se
 	return &loopbackSessionRuntimeClient{service: service}
 }
 
-func (c *loopbackSessionRuntimeClient) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+func (c *loopbackSessionRuntimeClient) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	if c == nil || c.service == nil {
-		return errors.New("session runtime service is required")
+		return serverapi.SessionRuntimeActivateResponse{}, errors.New("session runtime service is required")
 	}
 	return c.service.ActivateSessionRuntime(ctx, req)
 }
 
-func (c *loopbackSessionRuntimeClient) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+func (c *loopbackSessionRuntimeClient) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
 	if c == nil || c.service == nil {
-		return errors.New("session runtime service is required")
+		return serverapi.SessionRuntimeReleaseResponse{}, errors.New("session runtime service is required")
 	}
 	return c.service.ReleaseSessionRuntime(ctx, req)
 }

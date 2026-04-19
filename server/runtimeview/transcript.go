@@ -6,6 +6,7 @@ import (
 )
 
 const OngoingTailEntryLimit = 500
+const OngoingTailIncrementalOverlapEntries = 32
 
 func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
 	if engine == nil {
@@ -13,12 +14,13 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 	}
 	req = NormalizeDefaultTranscriptRequest(req)
 	if req.Window == clientui.TranscriptWindowOngoingTail {
-		return TranscriptPageFromWindow(
+		return TranscriptPageFromOngoingTailWindow(
 			engine.SessionID(),
 			engine.SessionName(),
 			ConversationFreshnessFromSession(engine.ConversationFreshness()),
 			engine.TranscriptRevision(),
 			engine.OngoingTailTranscriptWindow(OngoingTailEntryLimit),
+			req,
 		)
 	}
 	offset, limit := transcriptOffsetAndLimit(req)
@@ -32,6 +34,21 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 		page.TotalEntries,
 		page.Offset,
 		clientui.TranscriptPageRequest{Offset: page.Offset, Limit: limit},
+	)
+}
+
+func TranscriptPageFromOngoingTailWindow(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, window runtime.TranscriptWindowSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	req = NormalizeDefaultTranscriptRequest(req)
+	pageReq := ongoingTailTranscriptRequest(req, revision, window)
+	return TranscriptPageFromCollectedChat(
+		sessionID,
+		sessionName,
+		freshness,
+		revision,
+		ChatSnapshotFromRuntime(window.Snapshot),
+		window.TotalEntries,
+		window.Offset,
+		pageReq,
 	)
 }
 
@@ -72,6 +89,35 @@ func TranscriptPageFromWindow(sessionID, sessionName string, freshness clientui.
 		window.Offset,
 		clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
 	)
+}
+
+func ongoingTailTranscriptRequest(req clientui.TranscriptPageRequest, revision int64, window runtime.TranscriptWindowSnapshot) clientui.TranscriptPageRequest {
+	pageReq := clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset}
+	if req.Window != clientui.TranscriptWindowOngoingTail {
+		return pageReq
+	}
+	if req.KnownRevision <= 0 || req.KnownCommittedEntryCount <= 0 {
+		return pageReq
+	}
+	if req.KnownRevision >= revision {
+		return pageReq
+	}
+	if req.KnownCommittedEntryCount >= window.TotalEntries {
+		return pageReq
+	}
+	if req.KnownCommittedEntryCount < window.Offset {
+		return pageReq
+	}
+	offset := req.KnownCommittedEntryCount - OngoingTailIncrementalOverlapEntries
+	if offset < window.Offset {
+		offset = window.Offset
+	}
+	if offset >= window.TotalEntries {
+		offset = window.Offset
+	}
+	pageReq.Offset = offset
+	pageReq.Limit = window.TotalEntries - offset
+	return pageReq
 }
 
 func TranscriptPageFromCollectedChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.TranscriptPageRequest) clientui.TranscriptPage {

@@ -205,16 +205,12 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	m.logf("step.done assistant_chars=%d", len(msg.message))
 	m.sawAssistantDelta = false
-	transcriptSyncCmd := tea.Cmd(nil)
-	if m.hasRuntimeClient() {
-		transcriptSyncCmd = m.requestRuntimeTranscriptSync()
-	}
 	if len(m.queued) > 0 {
 		if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
 			m.pendingQueuedDrainAfterHydration = true
 			m.queuedDrainReadyAfterHydration = false
 			m.syncViewport()
-			return m, transcriptSyncCmd
+			return m, m.requestRuntimeQueuedDrainTranscriptSync()
 		}
 		next, drainCmd := c.flushQueuedInputs(queueDrainAuto)
 		c.notifyTurnQueueDrainedIfIdle()
@@ -222,7 +218,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	c.notifyTurnQueueDrainedIfIdle()
 	m.syncViewport()
-	return m, transcriptSyncCmd
+	return m, nil
 }
 
 func (c uiInputController) queuedDrainRequiresHydration() bool {

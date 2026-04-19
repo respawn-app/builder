@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"builder/server/tools"
 	"builder/shared/compaction"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -28,6 +28,8 @@ const (
 	defaultReviewerTimeoutSec            = 60
 	defaultTUIAlternateScreen            = "auto"
 	defaultCompactionMode                = "local"
+	defaultServerHost                    = "127.0.0.1"
+	defaultServerPort                    = 53082
 )
 
 func defaultSettings() Settings {
@@ -53,7 +55,7 @@ func settingsTOMLForOnboarding(settings Settings, preservedDefaults map[string]b
 		// provider_override must round-trip with an explicit model line.
 		preserved["model"] = true
 	}
-	return settingsTOMLWithPreservedDefaults(settings, true, preserved)
+	return settingsTOMLWithRenderingOptions(settings, true, preserved, map[string]bool{"debug": true})
 }
 
 func onboardingDefaultSettingsTOML(selectedTheme string) string {
@@ -61,11 +63,11 @@ func onboardingDefaultSettingsTOML(selectedTheme string) string {
 	if normalized := theme.Normalize(selectedTheme); normalized != "" {
 		settings.Theme = normalized
 	}
-	return settingsTOMLWithOptions(settings, true)
+	return settingsTOMLWithRenderingOptions(settings, true, nil, map[string]bool{"debug": true})
 }
 
 func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string {
-	return settingsTOMLWithPreservedDefaults(settings, includeToolSection, nil)
+	return settingsTOMLWithRenderingOptions(settings, includeToolSection, nil, nil)
 }
 
 func appendPreservedReviewerLines(lines []defaultConfigLine, settings Settings, preservedDefaults map[string]bool) []defaultConfigLine {
@@ -83,12 +85,19 @@ func appendPreservedReviewerLines(lines []defaultConfigLine, settings Settings, 
 }
 
 func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection bool, preservedDefaults map[string]bool) string {
+	return settingsTOMLWithRenderingOptions(settings, includeToolSection, preservedDefaults, nil)
+}
+
+func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool, preservedDefaults map[string]bool, omittedKeys map[string]bool) string {
 	state := configRegistry.defaultState()
 	state.Settings = settings
 	inheritReviewerDefaults(&state.Settings)
 	lines := configRegistry.defaultLines(state)
 	defaultLines := configRegistry.defaultLines(configRegistry.defaultState())
 	rootLines := annotateRenderedLines(filterDefaultLines(lines, ""), filterDefaultLines(defaultLines, ""), preservedDefaults)
+	if len(omittedKeys) > 0 {
+		rootLines = filterRenderedLines(rootLines, omittedKeys)
+	}
 	timeoutLines := annotateRenderedLines(filterDefaultLines(lines, "timeouts"), filterDefaultLines(defaultLines, "timeouts"), nil)
 	reviewerLines := annotateRenderedLines(filterDefaultLines(lines, "reviewer"), filterDefaultLines(defaultLines, "reviewer"), nil)
 
@@ -123,6 +132,20 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	}
 	writeSkillTogglesSection(&out, state.Settings.SkillToggles)
 	return out.String()
+}
+
+func filterRenderedLines(lines []defaultConfigLine, omittedKeys map[string]bool) []defaultConfigLine {
+	if len(lines) == 0 || len(omittedKeys) == 0 {
+		return lines
+	}
+	filtered := make([]defaultConfigLine, 0, len(lines))
+	for _, line := range lines {
+		if omittedKeys[strings.Join(line.Path, ".")] {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
 }
 
 func annotateRenderedLines(lines []defaultConfigLine, defaults []defaultConfigLine, preserved map[string]bool) []defaultConfigLine {
@@ -167,9 +190,9 @@ func writeRootConfigLines(builder *strings.Builder, lines []defaultConfigLine) {
 	}
 }
 
-func writeToolLines(builder *strings.Builder, enabledTools map[tools.ID]bool) {
+func writeToolLines(builder *strings.Builder, enabledTools map[toolspec.ID]bool) {
 	defaults := defaultEnabledToolMap()
-	ids := tools.CatalogIDs()
+	ids := toolspec.CatalogIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
 		configured, ok := enabledTools[id]

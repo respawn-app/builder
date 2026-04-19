@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"builder/cli/tui"
-	"builder/server/session"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -23,7 +23,7 @@ const (
 
 type sessionPickerResult struct {
 	CreateNew bool
-	Session   *session.Summary
+	Session   *clientui.SessionSummary
 	Canceled  bool
 }
 
@@ -38,7 +38,7 @@ type sessionPickerStyles struct {
 }
 
 type sessionPickerModel struct {
-	sessions []session.Summary
+	sessions []clientui.SessionSummary
 	cursor   int
 	offset   int
 	width    int
@@ -49,8 +49,8 @@ type sessionPickerModel struct {
 	result   sessionPickerResult
 }
 
-func newSessionPickerModel(summaries []session.Summary, theme string) *sessionPickerModel {
-	items := append([]session.Summary(nil), summaries...)
+func newSessionPickerModel(summaries []clientui.SessionSummary, theme string) *sessionPickerModel {
+	items := append([]clientui.SessionSummary(nil), summaries...)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
@@ -287,7 +287,7 @@ func (m *sessionPickerModel) renderRow(index int, showPreview bool) string {
 	return titleLine + "\n" + previewLine
 }
 
-func sessionPickerTitle(item session.Summary) string {
+func sessionPickerTitle(item clientui.SessionSummary) string {
 	if title := strings.TrimSpace(item.Name); title != "" {
 		return title
 	}
@@ -336,7 +336,7 @@ func humanTime(ts time.Time) string {
 	return ts.Local().Format("2006-01-02 15:04")
 }
 
-func runSessionPicker(summaries []session.Summary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+func runSessionPicker(summaries []clientui.SessionSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 	model := newSessionPickerModel(summaries, theme)
 	options := []tea.ProgramOption{}
 	if shouldUseStartupPickerAltScreen(alternateScreen) {

@@ -10,9 +10,9 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
-	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/compaction"
+	"builder/shared/toolspec"
 )
 
 type compactionMode string
@@ -631,8 +631,9 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	instructions := compactionInstructions(args)
 	manualCarryover := ""
 	if mode == compactionModeManual && includeManualCarryover {
-		manualCarryover = e.lastVisibleUserMessage()
+		manualCarryover = lastVisibleUserMessageSinceLatestCompaction(input)
 	}
+	wasHeadless := e.chat.headlessActive()
 	var result compactionResult
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, stepID, input, providerID, instructions)
@@ -643,34 +644,29 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		result, err = e.compactLocal(ctx, input, providerID, instructions)
 	}
 	if err != nil {
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
 
 	if len(result.items) == 0 {
 		err := errors.New("compaction returned empty replacement history")
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
 
 	if err := e.replaceHistory(stepID, result.engine, mode, result.items); err != nil {
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
-	if strings.TrimSpace(result.summary) != "" {
+	if strings.TrimSpace(result.summary) != "" && result.engine != "local" {
 		summary := strings.TrimSpace(result.summary)
 		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", summary); err != nil {
-			_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-			return compactionResult{}, err
+			statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+			return compactionResult{}, errors.Join(err, statusErr)
 		}
 	}
-	if mode == compactionModeManual {
-		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
-			if err := e.appendMessage(stepID, carryover); err != nil {
-				_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-				return compactionResult{}, err
-			}
-		}
+	if err := e.appendPostCompactionMessages(stepID, e.postCompactionMessages(mode, manualCarryover, wasHeadless)); err != nil {
+		return compactionResult{}, err
 	}
 	compactionNumber := e.nextCompactionCount()
 	windowTokens := result.usage.WindowTokens
@@ -705,7 +701,6 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 		return compactionResult{}, err
 	}
 	contextLimit := e.effectiveContextTokenLimit()
-	canonicalContext := extractCanonicalContext(input)
 	requestItems := compactionConversationReplicaItems(input)
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
@@ -723,9 +718,10 @@ func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.R
 	if err != nil {
 		return compactionResult{}, err
 	}
-	replacement := make([]llm.ResponseItem, 0, len(canonicalContext)+len(sanitized))
-	replacement = append(replacement, canonicalContext...)
-	replacement = append(replacement, sanitized...)
+	replacement, err := e.buildCanonicalCompactionReplacement(sanitized)
+	if err != nil {
+		return compactionResult{}, err
+	}
 	return compactionResult{
 		engine:            "remote",
 		items:             replacement,
@@ -860,17 +856,21 @@ func isCompactionContextOverflow(err error) bool {
 }
 
 func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
-	locked, err := e.ensureLocked()
-	if err != nil {
-		return compactionResult{}, err
-	}
 	summary, err := e.localCompactionSummary(ctx, input, instructions)
 	if err != nil {
 		return compactionResult{}, err
 	}
-	replacement := e.rebuildLocalCompactionHistory(ctx, locked.Model, input, summary, e.cfg.LocalCompactionCarryoverLimit)
+	replacement, err := e.buildCanonicalCompactionReplacement([]llm.ResponseItem{{
+		Type:        llm.ResponseItemTypeMessage,
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeCompactionSummary,
+		Content:     strings.TrimSpace(summary),
+	}})
+	if err != nil {
+		return compactionResult{}, err
+	}
 	usageInputTokens := estimateItemsTokens(replacement)
-	if preciseInput, ok := e.inputTokensForItems(ctx, locked.Model, "", replacement); ok {
+	if preciseInput, ok := e.inputTokensForItems(ctx, e.currentModel(), "", replacement); ok {
 		usageInputTokens = preciseInput
 	}
 	return compactionResult{
@@ -936,14 +936,7 @@ func localCompactionWindow(input []llm.ResponseItem) []llm.ResponseItem {
 		}
 	}
 	window := llm.CloneResponseItems(input[start:])
-	if start == 0 {
-		return window
-	}
-	canonical := extractCanonicalContext(input)
-	out := make([]llm.ResponseItem, 0, len(canonical)+len(window))
-	out = append(out, canonical...)
-	out = append(out, window...)
-	return out
+	return window
 }
 
 func isCompactionBoundaryItem(item llm.ResponseItem) bool {
@@ -956,18 +949,24 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 	return false
 }
 
-func (e *Engine) lastVisibleUserMessage() string {
-	messages := e.snapshotMessages()
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != llm.RoleUser {
+func lastVisibleUserMessageSinceLatestCompaction(items []llm.ResponseItem) string {
+	start := 0
+	for i := len(items) - 1; i >= 0; i-- {
+		if !isCompactionBoundaryItem(items[i]) {
 			continue
 		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" || msg.MessageType == llm.MessageTypeCompactionSummary {
+		start = i + 1
+		break
+	}
+	for i := len(items) - 1; i >= start; i-- {
+		item := items[i]
+		if item.Type != llm.ResponseItemTypeMessage || item.Role != llm.RoleUser {
 			continue
 		}
-		return msg.Content
+		if item.MessageType == llm.MessageTypeCompactionSummary || strings.TrimSpace(item.Content) == "" {
+			continue
+		}
+		return item.Content
 	}
 	return ""
 }
@@ -1054,17 +1053,79 @@ func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string)
 		return nil
 	}
 	if _, err := e.compactNow(ctx, stepID, compactionModeHandoff, req.summarizerPrompt, false); err != nil {
+		if e.pendingHandoffFutureMessageSnapshot() != "" {
+			e.clearPendingHandoffRequest()
+		}
 		return err
 	}
 	e.clearPendingHandoffRequest()
-	if futureMessage := strings.TrimSpace(req.futureAgentMessage); futureMessage != "" {
-		e.queuePendingHandoffFutureMessage(futureMessage)
-		if msg := handoffFutureAgentMessage(futureMessage); strings.TrimSpace(msg.Content) != "" {
-			if err := e.appendMessage(stepID, msg); err != nil {
-				return err
+	return nil
+}
+
+func (e *Engine) buildCanonicalCompactionReplacement(prefix []llm.ResponseItem) ([]llm.ResponseItem, error) {
+	meta, err := e.compactionReinjectedBaseMessages()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]llm.ResponseItem, 0, len(prefix)+len(meta))
+	out = append(out, llm.CloneResponseItems(prefix)...)
+	out = append(out, llm.ItemsFromMessages(meta)...)
+	return out, nil
+}
+
+func (e *Engine) compactionReinjectedBaseMessages() ([]llm.Message, error) {
+	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.currentModel(), e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{
+		IncludeAgents:      true,
+		IncludeSkills:      true,
+		IncludeEnvironment: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return metaResult.OrderedBaseMessages(), nil
+}
+
+func (e *Engine) postCompactionMessages(mode compactionMode, manualCarryover string, wasHeadless bool) []llm.Message {
+	out := make([]llm.Message, 0, 3)
+	if mode == compactionModeManual {
+		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
+			out = append(out, carryover)
+		}
+	}
+	if mode == compactionModeHandoff {
+		if req := e.pendingHandoffRequestSnapshot(); req != nil {
+			if futureMessage := handoffFutureAgentMessage(req.futureAgentMessage); strings.TrimSpace(futureMessage.Content) != "" {
+				out = append(out, futureMessage)
 			}
 		}
-		e.clearPendingHandoffFutureMessage()
+	}
+	if wasHeadless {
+		if headless, ok := headlessModeMetaMessage(); ok {
+			out = append(out, headless)
+		}
+	}
+	return out
+}
+
+func (e *Engine) appendPostCompactionMessages(stepID string, messages []llm.Message) error {
+	for _, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeManualCompactionCarryover:
+			if err := e.appendMessageWithoutConversationUpdate(stepID, message); err != nil {
+				return err
+			}
+		default:
+			if err := e.appendMessage(stepID, message); err != nil {
+				if message.MessageType == llm.MessageTypeHandoffFutureMessage {
+					e.queuePendingHandoffFutureMessage(message.Content)
+				}
+				return err
+			}
+			if message.MessageType == llm.MessageTypeHandoffFutureMessage {
+				e.clearPendingHandoffFutureMessage()
+			}
+		}
 	}
 	return nil
 }
@@ -1117,7 +1178,7 @@ func (e *Engine) syncCompactionSoonReminderIssuedFromItems(items []llm.ResponseI
 
 func (e *Engine) triggerHandoffConfigured() bool {
 	for _, id := range e.cfg.EnabledTools {
-		if id == tools.ToolTriggerHandoff {
+		if id == toolspec.ToolTriggerHandoff {
 			return true
 		}
 	}

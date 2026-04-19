@@ -2,100 +2,153 @@ package sessionruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"builder/server/auth"
+	"builder/server/metadata"
 	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/runtimewire"
 	"builder/server/session"
-	"builder/server/sessionpath"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 	"builder/shared/transcriptdiag"
+
 	"github.com/google/uuid"
 )
 
 type Service struct {
-	containerDir     string
+	persistenceRoot  string
+	metadataStore    *metadata.Store
 	authManager      *auth.Manager
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimes         *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
+	storeOptions     []session.StoreOption
 
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
 }
 
 type runtimeHandle struct {
-	refs               int
-	activationRequests map[string]struct{}
-	releaseRequests    map[string]struct{}
-	ready              chan struct{}
-	close              func()
+	controllerRequestID string
+	controllerLeaseID   string
+	activationErr       error
+	takeover            *runtimeTakeover
+	ready               chan struct{}
+	close               func()
 }
 
-func NewService(containerDir string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry) *Service {
+type runtimeTakeover struct {
+	requestID string
+	leaseID   string
+	err       error
+	ready     chan struct{}
+	readyOnce sync.Once
+}
+
+type activationClaim int
+
+const (
+	activationClaimOwner activationClaim = iota
+	activationClaimReuse
+	activationClaimTakeoverReuse
+	activationClaimTakeover
+)
+
+func NewService(persistenceRoot string, metadataStore *metadata.Store, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	return &Service{
-		containerDir:     strings.TrimSpace(containerDir),
+		persistenceRoot:  strings.TrimSpace(persistenceRoot),
+		metadataStore:    metadataStore,
 		authManager:      authManager,
 		fastModeState:    fastModeState,
 		background:       background,
 		backgroundRouter: backgroundRouter,
 		runtimes:         runtimes,
 		sessionStores:    sessionStores,
+		storeOptions:     append([]session.StoreOption(nil), storeOptions...),
 		handles:          make(map[string]*runtimeHandle),
 	}
 }
 
-func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
-
-	s.mu.Lock()
-	if handle := s.handles[sessionID]; handle != nil {
-		if _, ok := handle.activationRequests[requestID]; ok {
-			s.mu.Unlock()
-			return waitForRuntimeHandleReady(ctx, handle)
-		}
-		handle.activationRequests[requestID] = struct{}{}
-		handle.refs++
-		s.mu.Unlock()
-		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, handle)
-			return err
-		}
-		return nil
+	handle, takeover, claim, err := s.claimActivation(sessionID, requestID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	s.mu.Unlock()
-
+	if claim == activationClaimReuse {
+		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+			return serverapi.SessionRuntimeActivateResponse{}, err
+		}
+		return activationResponseForHandle(handle)
+	}
+	if claim == activationClaimTakeoverReuse {
+		if err := waitForRuntimeTakeoverReady(ctx, takeover); err != nil {
+			return serverapi.SessionRuntimeActivateResponse{}, err
+		}
+		return activationResponseForTakeover(takeover)
+	}
+	if claim == activationClaimTakeover {
+		return s.takeOverActivation(ctx, sessionID, requestID, handle, takeover)
+	}
+	var leaseID string
+	var cleanup func()
+	defer func() {
+		if err == nil {
+			return
+		}
+		if cleanup != nil {
+			cleanup()
+		}
+		if strings.TrimSpace(leaseID) != "" {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+		}
+		s.failActivation(sessionID, handle, err)
+	}()
 	store, err := s.resolveStore(ctx, sessionID)
 	if err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := store.EnsureDurable(); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	leaseID = lease.LeaseID
+	target, err := s.resolveExecutionTarget(ctx, sessionID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	logger, err := runprompt.NewRunLogger(store.Dir(), nil)
 	if err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	logger.Logf("app.interactive.start session_id=%s workspace=%s model=%s", sessionID, req.WorkspaceRoot, req.ActiveSettings.Model)
+	logger.Logf("app.interactive.start session_id=%s workspace=%s workdir=%s model=%s", sessionID, target.WorkspaceRoot, target.EffectiveWorkdir, req.ActiveSettings.Model)
 	logger.Logf("config.settings path=%s created=%t", req.Source.SettingsPath, req.Source.CreatedDefaultConfig)
 	for _, line := range configSourceLines(req.Source.Sources) {
 		logger.Logf("config.source %s", line)
@@ -103,13 +156,13 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	enabledTools, err := parseToolIDs(req.EnabledToolIDs)
 	if err != nil {
 		_ = logger.Close()
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, req.ActiveSettings, enabledTools, req.WorkspaceRoot, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
+	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, req.ActiveSettings, enabledTools, target.EffectiveWorkdir, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
 		FastMode: s.fastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", runprompt.FormatRuntimeEvent(evt))
-			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+			if transcriptdiag.EnabledForProcess(req.ActiveSettings.Debug) {
 				projected := runtimeview.EventFromRuntime(evt)
 				logger.Logf("%s", runprompt.FormatTranscriptProjectionDiagnostic(sessionID, projected))
 				logger.Logf("%s", runprompt.FormatTranscriptPublishDiagnostic(sessionID, projected))
@@ -121,81 +174,124 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	})
 	if err != nil {
 		_ = logger.Close()
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if wiring.AskBroker != nil && s.runtimes != nil {
 		wiring.AskBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 			return s.runtimes.AwaitPromptResponse(context.Background(), sessionID, req)
 		})
 	}
-	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]struct{}{requestID: {}},
-		releaseRequests:    make(map[string]struct{}),
-		ready:              make(chan struct{}),
-		close: func() {
-			if s.runtimes != nil {
-				s.runtimes.Unregister(sessionID, wiring.Engine)
-			}
-			if s.backgroundRouter != nil {
-				s.backgroundRouter.ClearActiveSession(sessionID)
-			}
-			_ = wiring.Close()
-			_ = logger.Close()
-		},
-	}
-	current, installed := s.installHandle(sessionID, requestID, handle)
-	if !installed {
-		_ = logger.Close()
-		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, current)
-			return err
-		}
-		return nil
-	}
-	defer close(handle.ready)
 	if s.runtimes != nil {
 		s.runtimes.Register(sessionID, wiring.Engine)
 	}
 	if s.backgroundRouter != nil {
 		s.backgroundRouter.SetActiveSession(sessionID, wiring.Engine)
 	}
-	return nil
+	cleanup = func() {
+		if s.runtimes != nil {
+			s.runtimes.Unregister(sessionID, wiring.Engine)
+		}
+		if s.backgroundRouter != nil {
+			s.backgroundRouter.ClearActiveSession(sessionID)
+		}
+		_ = wiring.Close()
+		_ = logger.Close()
+	}
+	s.completeActivation(handle, leaseID, cleanup)
+	cleanup = nil
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
 }
 
-func (s *Service) ReleaseSessionRuntime(_ context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return serverapi.SessionRuntimeReleaseResponse{}, err
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
-	requestID := strings.TrimSpace(req.ClientRequestID)
+	leaseID := strings.TrimSpace(req.LeaseID)
+	leaseErr := error(nil)
+	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
+		leaseErr = err
+	}
 	s.mu.Lock()
 	handle := s.handles[sessionID]
 	if handle == nil {
 		s.mu.Unlock()
-		return nil
+		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
-	if _, ok := handle.releaseRequests[requestID]; ok {
+	s.mu.Unlock()
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		if leaseErr == nil {
+			s.closeReleasedRuntimeHandle(sessionID, handle)
+		}
+		return serverapi.SessionRuntimeReleaseResponse{}, err
+	}
+	s.mu.Lock()
+	current := s.handles[sessionID]
+	if current == nil || current != handle || strings.TrimSpace(current.controllerLeaseID) != leaseID {
 		s.mu.Unlock()
-		return nil
-	}
-	handle.releaseRequests[requestID] = struct{}{}
-	if handle.refs > 0 {
-		handle.refs--
-	}
-	if handle.refs > 0 {
-		s.mu.Unlock()
-		return nil
+		return serverapi.SessionRuntimeReleaseResponse{}, invalidControllerLeaseError(sessionID)
 	}
 	delete(s.handles, sessionID)
-	ready := handle.ready
-	closeFn := handle.close
+	closeFn := current.close
+	takeover := current.takeover
 	s.mu.Unlock()
-	if ready != nil {
-		<-ready
-	}
+	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(sessionID))
 	if closeFn != nil {
 		closeFn()
+	}
+	return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
+}
+
+func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHandle) {
+	if handle == nil {
+		return
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.handles, trimmedSessionID)
+	closeFn := current.close
+	takeover := current.takeover
+	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, "", invalidControllerLeaseError(trimmedSessionID))
+	if closeFn != nil {
+		closeFn()
+	}
+}
+
+func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if trimmedLeaseID == "" {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is required", trimmedSessionID))
+	}
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	activationErr := current.activationErr
+	controllerLeaseID := strings.TrimSpace(current.controllerLeaseID)
+	s.mu.Unlock()
+	if activationErr != nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if controllerLeaseID != trimmedLeaseID {
+		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	return nil
 }
@@ -213,11 +309,7 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 			return store, nil
 		}
 	}
-	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	store, err := session.Open(sessionDir)
+	store, err := session.OpenByID(s.persistenceRoot, sessionID, s.storeOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -230,38 +322,194 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	return store, nil
 }
 
-func (s *Service) installHandle(sessionID string, requestID string, handle *runtimeHandle) (*runtimeHandle, bool) {
+// Phase 2 temporarily allows many attached readers, but exactly one controlling
+// client per session. A second activation must fail explicitly instead of
+// joining the active runtime.
+func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeHandle, *runtimeTakeover, activationClaim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
-		if _, exists := current.activationRequests[requestID]; exists {
-			return current, false
+		if current.controllerRequestID == requestID {
+			return current, nil, activationClaimReuse, nil
 		}
-		current.activationRequests[requestID] = struct{}{}
-		current.refs++
-		return current, false
+		if current.takeover != nil {
+			if current.takeover.requestID == requestID {
+				return current, current.takeover, activationClaimTakeoverReuse, nil
+			}
+			return nil, nil, activationClaimOwner, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+		}
+		if runtimeHandleReady(current) && current.activationErr == nil {
+			takeover := &runtimeTakeover{
+				requestID: requestID,
+				ready:     make(chan struct{}),
+			}
+			current.takeover = takeover
+			return current, takeover, activationClaimTakeover, nil
+		}
+		return nil, nil, activationClaimOwner, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 	}
+	handle := &runtimeHandle{controllerRequestID: requestID, ready: make(chan struct{})}
 	s.handles[sessionID] = handle
-	return handle, true
+	return handle, nil, activationClaimOwner, nil
 }
 
-func (s *Service) rollbackActivationClaim(sessionID string, requestID string, handle *runtimeHandle) {
+func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requestID string, handle *runtimeHandle, takeover *runtimeTakeover) (serverapi.SessionRuntimeActivateResponse, error) {
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		s.failTakeover(sessionID, handle, takeover, err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if _, err := activationResponseForHandle(handle); err != nil {
+		s.failTakeover(sessionID, handle, takeover, err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
+		s.failTakeover(sessionID, handle, takeover, err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
+	if err != nil {
+		s.failTakeover(sessionID, handle, takeover, err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	leaseID := strings.TrimSpace(lease.LeaseID)
+	if !s.completeTakeover(sessionID, handle, takeover, requestID, leaseID) {
+		if strings.TrimSpace(leaseID) != "" {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+		}
+		err := errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
+		finishRuntimeTakeover(takeover, "", err)
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func runtimeHandleReady(handle *runtimeHandle) bool {
+	if handle == nil || handle.ready == nil {
+		return true
+	}
+	select {
+	case <-handle.ready:
+		return true
+	default:
+		return false
+	}
+}
+
+func waitForRuntimeTakeoverReady(ctx context.Context, takeover *runtimeTakeover) error {
+	if takeover == nil || takeover.ready == nil {
+		return nil
+	}
+	select {
+	case <-takeover.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) completeActivation(handle *runtimeHandle, leaseID string, closeFn func()) {
 	if handle == nil {
 		return
 	}
+	handle.takeover = nil
+	handle.controllerLeaseID = strings.TrimSpace(leaseID)
+	handle.close = closeFn
+	close(handle.ready)
+}
+
+func (s *Service) completeTakeover(sessionID string, handle *runtimeHandle, takeover *runtimeTakeover, requestID string, leaseID string) bool {
+	if handle == nil || takeover == nil {
+		return false
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle || current.takeover != takeover {
+		s.mu.Unlock()
+		return false
+	}
+	current.controllerRequestID = strings.TrimSpace(requestID)
+	current.controllerLeaseID = trimmedLeaseID
+	current.takeover = nil
+	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, trimmedLeaseID, nil)
+	return true
+}
+
+func (s *Service) failTakeover(sessionID string, handle *runtimeHandle, takeover *runtimeTakeover, err error) {
+	if handle == nil || takeover == nil {
+		return
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current != nil && current == handle && current.takeover == takeover {
+		current.takeover = nil
+	}
+	s.mu.Unlock()
+	finishRuntimeTakeover(takeover, "", err)
+}
+
+func (s *Service) failActivation(sessionID string, handle *runtimeHandle, err error) {
+	if handle == nil {
+		return
+	}
+	handle.activationErr = err
+	close(handle.ready)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.handles[strings.TrimSpace(sessionID)]
 	if current == nil || current != handle {
 		return
 	}
-	if _, ok := current.activationRequests[strings.TrimSpace(requestID)]; !ok {
+	finishRuntimeTakeover(current.takeover, "", err)
+	delete(s.handles, strings.TrimSpace(sessionID))
+}
+
+func finishRuntimeTakeover(takeover *runtimeTakeover, leaseID string, err error) {
+	if takeover == nil {
 		return
 	}
-	delete(current.activationRequests, strings.TrimSpace(requestID))
-	if current.refs > 0 {
-		current.refs--
+	takeover.readyOnce.Do(func() {
+		takeover.leaseID = strings.TrimSpace(leaseID)
+		takeover.err = err
+		if takeover.ready != nil {
+			close(takeover.ready)
+		}
+	})
+}
+
+func invalidControllerLeaseError(sessionID string) error {
+	return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", strings.TrimSpace(sessionID)))
+}
+
+func (s *Service) resolveExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
+	if s == nil || s.metadataStore == nil {
+		return clientui.SessionExecutionTarget{}, fmt.Errorf("metadata store is required")
 	}
+	return s.metadataStore.ResolveSessionExecutionTarget(ctx, sessionID)
+}
+
+func (s *Service) createRuntimeLease(ctx context.Context, sessionID string, requestID string) (metadata.RuntimeLeaseRecord, error) {
+	if s == nil || s.metadataStore == nil {
+		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.CreateRuntimeLease(ctx, sessionID, requestID)
+}
+
+func (s *Service) releaseRuntimeLease(ctx context.Context, sessionID string, leaseID string) (metadata.RuntimeLeaseRecord, error) {
+	if s == nil || s.metadataStore == nil {
+		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.ReleaseRuntimeLease(ctx, sessionID, leaseID)
+}
+
+func (s *Service) releaseStaleRuntimeLeases(ctx context.Context, sessionID string) error {
+	if s == nil || s.metadataStore == nil {
+		return fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.ReleaseActiveRuntimeLeasesBySession(ctx, sessionID)
 }
 
 func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {
@@ -276,13 +524,41 @@ func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error
 	}
 }
 
-func parseToolIDs(raw []string) ([]tools.ID, error) {
+func activationResponseForHandle(handle *runtimeHandle) (serverapi.SessionRuntimeActivateResponse, error) {
+	if handle == nil {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: missing runtime handle")
+	}
+	if handle.activationErr != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, handle.activationErr
+	}
+	leaseID := strings.TrimSpace(handle.controllerLeaseID)
+	if leaseID == "" {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: controller lease is unavailable")
+	}
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func activationResponseForTakeover(takeover *runtimeTakeover) (serverapi.SessionRuntimeActivateResponse, error) {
+	if takeover == nil {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: missing takeover state")
+	}
+	if takeover.err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, takeover.err
+	}
+	leaseID := strings.TrimSpace(takeover.leaseID)
+	if leaseID == "" {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: takeover lease is unavailable")
+	}
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func parseToolIDs(raw []string) ([]toolspec.ID, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	ids := make([]tools.ID, 0, len(raw))
+	ids := make([]toolspec.ID, 0, len(raw))
 	for _, item := range raw {
-		id, ok := tools.ParseID(item)
+		id, ok := toolspec.ParseID(item)
 		if !ok {
 			return nil, fmt.Errorf("unknown tool id %q", item)
 		}
@@ -304,7 +580,7 @@ func configSourceLines(src map[string]string) []string {
 	return lines
 }
 
-func NewActivateRequest(clientRequestID string, sessionID string, settings config.Settings, enabledToolIDs []string, workspaceRoot string, source config.SourceReport) serverapi.SessionRuntimeActivateRequest {
+func NewActivateRequest(clientRequestID string, sessionID string, settings config.Settings, enabledToolIDs []string, source config.SourceReport) serverapi.SessionRuntimeActivateRequest {
 	id := strings.TrimSpace(clientRequestID)
 	if id == "" {
 		id = uuid.NewString()
@@ -314,7 +590,6 @@ func NewActivateRequest(clientRequestID string, sessionID string, settings confi
 		SessionID:       strings.TrimSpace(sessionID),
 		ActiveSettings:  settings,
 		EnabledToolIDs:  append([]string(nil), enabledToolIDs...),
-		WorkspaceRoot:   strings.TrimSpace(filepath.Clean(workspaceRoot)),
 		Source:          source,
 	}
 }

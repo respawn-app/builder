@@ -26,6 +26,8 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -867,14 +869,65 @@ func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
 	if updated.exitAction != UIActionForkRollback {
 		t.Fatalf("expected fork rollback action, got %q", updated.exitAction)
 	}
-	if updated.nextForkUserMessageIndex != 3 {
-		t.Fatalf("expected rollback user index, got %d", updated.nextForkUserMessageIndex)
+	if updated.nextForkTranscriptEntryIndex != 3 {
+		t.Fatalf("expected rollback transcript entry index, got %d", updated.nextForkTranscriptEntryIndex)
+	}
+	if updated.nextForkUserMessageIndex != 0 {
+		t.Fatalf("expected user message index translation deferred to server, got %d", updated.nextForkUserMessageIndex)
 	}
 	if updated.nextSessionInitialPrompt != "edited user message" {
 		t.Fatalf("expected startup prompt to match edited input, got %q", updated.nextSessionInitialPrompt)
 	}
 	if updated.input != "" {
 		t.Fatalf("expected rollback edit buffer cleared before quit, got %q", updated.input)
+	}
+}
+
+func TestRollbackSelectionUsesAbsoluteTranscriptEntryIndexWhenPaged(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "u-100"},
+		{Role: "assistant", Text: "a-100"},
+		{Role: "user", Text: "u-101"},
+	}
+	m.transcriptBaseOffset = 200
+	m.transcriptTotalEntries = 203
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if !testRollbackSelecting(updated) {
+		t.Fatal("expected rollback selection mode after double esc")
+	}
+	selectedLine := lineContaining(updated.View(), "u-101")
+	if selectedLine == "" {
+		t.Fatalf("expected selected paged rollback message visible, got %q", stripANSIAndTrimRight(updated.View()))
+	}
+	if !strings.Contains(selectedLine, themeSelectionBackgroundEscape(updated.theme)) {
+		t.Fatalf("expected paged rollback selection highlight, got %q", selectedLine)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !testRollbackEditing(updated) {
+		t.Fatal("expected rollback editing mode after enter")
+	}
+	if updated.input != "u-101" {
+		t.Fatalf("expected selected paged message loaded into input, got %q", updated.input)
+	}
+
+	updated.input = "edited paged user message"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.nextForkTranscriptEntryIndex != 202 {
+		t.Fatalf("expected absolute rollback transcript entry index, got %d", updated.nextForkTranscriptEntryIndex)
 	}
 }
 
@@ -2158,29 +2211,25 @@ func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(
 		StepID:      "step-1",
 		UserMessage: "say hi",
 	}))
-	if cmd == nil {
-		t.Fatal("expected native replay command for flushed user message")
-	}
 	if got := len(updated.transcriptEntries); got != 1 {
 		t.Fatalf("expected one transcript entry after flushed user message, got %d", got)
 	}
 	if updated.transcriptEntries[0].Role != "user" || updated.transcriptEntries[0].Text != "say hi" {
 		t.Fatalf("unexpected transcript entry: %+v", updated.transcriptEntries[0])
 	}
+	if updated.transcriptEntries[0].Transient != true {
+		t.Fatalf("expected runtime-backed flushed user message to stay transient until hydrate, got %+v", updated.transcriptEntries[0])
+	}
 	msgs := collectCmdMessages(t, cmd)
-	flushFound := false
+	refreshFound := false
 	for _, msg := range msgs {
-		flushMsg, ok := msg.(nativeHistoryFlushMsg)
-		if !ok {
-			continue
-		}
-		if strings.Contains(stripANSIPreserve(flushMsg.Text), "say hi") {
-			flushFound = true
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refreshFound = true
 			break
 		}
 	}
-	if !flushFound {
-		t.Fatalf("expected flushed replay text to include user message, got %+v", msgs)
+	if refreshFound {
+		t.Fatalf("did not expect flushed runtime user message to trigger transcript hydration, got %+v", msgs)
 	}
 }
 
@@ -3361,6 +3410,30 @@ func TestRenderQueuedMessagesPaneShowsPendingInjectedAfterQueuedMessages(t *test
 	m := newProjectedStaticUIModel()
 	m.queued = []string{"queued later"}
 	m.pendingInjected = []string{"please continue with tests"}
+
+	lines := m.renderQueuedMessagesPane(80)
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"queued later", "next: please continue with tests"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
+func TestRenderQueuedMessagesPaneShowsDeferredCommittedInjectedMessages(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.queued = []string{"queued later"}
+	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{
+		rangeStart: 1,
+		rangeEnd:   2,
+		revision:   7,
+		entries:    []clientui.ChatEntry{{Role: "user", Text: "please continue with tests"}},
+		pending:    []string{"please continue with tests"},
+	}}
 
 	lines := m.renderQueuedMessagesPane(80)
 	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
@@ -4816,13 +4889,8 @@ func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
 	}
 }
 
-func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
-	client := &refreshingRuntimeClient{
-		transcripts: []clientui.TranscriptPage{{
-			SessionID: "session-1",
-			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
-		}},
-	}
+func TestSubmitDoneWithRuntimeClientDoesNotRequestTranscriptCatchUpWithoutQueuedWork(t *testing.T) {
+	client := &refreshingRuntimeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
 	m.busy = true
@@ -4830,26 +4898,14 @@ func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
 
 	next, cmd := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
 	updated := next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected transcript sync command after runtime-backed submit completes")
-	}
-	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
-	}
-	next, applyCmd := updated.Update(refreshMsg)
-	updated = next.(*uiModel)
-	if applyCmd != nil {
-		_ = applyCmd()
+	if cmd != nil {
+		t.Fatalf("did not expect transcript sync command after ordinary runtime-backed submit completion, got %T", cmd())
 	}
 	if updated.activity != uiActivityIdle {
 		t.Fatalf("expected idle activity after submit completion, got %v", updated.activity)
 	}
-	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
-		t.Fatalf("expected transcript catch-up to hydrate final answer, got %q", got)
-	}
-	if client.calls != 1 {
-		t.Fatalf("refresh call count = %d, want 1", client.calls)
+	if client.calls != 0 {
+		t.Fatalf("refresh call count = %d, want 0", client.calls)
 	}
 }
 
@@ -4908,6 +4964,9 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg from follow-up hydration command, got %T", applyCmd())
 	}
+	if refreshAgain.syncCause != runtimeTranscriptSyncCauseDirtyFollowUp {
+		t.Fatalf("follow-up sync cause = %q, want %q", refreshAgain.syncCause, runtimeTranscriptSyncCauseDirtyFollowUp)
+	}
 
 	next, finalCmd := updated.Update(refreshAgain)
 	updated = next.(*uiModel)
@@ -4925,6 +4984,72 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	}
 	if finalCmd == nil {
 		t.Fatal("expected follow-up command sequence after hydration")
+	}
+}
+
+func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.T) {
+	client := &refreshingRuntimeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.pendingInjected = []string{"steered message"}
+	m.input = "steered message"
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "seed"}}
+	m.transcriptRevision = 6
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	})
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected queued user flush to stop using deferred committed tail, got %d", got)
+	}
+
+	m.busy = false
+	m.activity = uiActivityIdle
+	m.queued = []string{"follow up"}
+	m.pendingQueuedDrainAfterHydration = true
+	m.queuedDrainReadyAfterHydration = false
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	next, cmd := m.Update(runtimeTranscriptRefreshedMsg{
+		token: 7,
+		req:   clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail},
+		transcript: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     6,
+			Offset:       0,
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+		},
+	})
+	updated := next.(*uiModel)
+	if got := len(updated.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected stale hydrate + queued drain path to keep deferred committed tail empty, got %d", got)
+	}
+	if updated.pendingPreSubmitText != "follow up" {
+		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got pending=%q", updated.pendingPreSubmitText)
+	}
+	if !updated.busy {
+		t.Fatal("expected queued drain to start the next submission after stale hydrate rejection")
+	}
+	if cmd == nil {
+		t.Fatal("expected queued follow-up command after stale hydrate rejection")
 	}
 }
 
@@ -5238,6 +5363,9 @@ func TestBusyQueuedReviewSlashCommandWaitsForHydrationBeforePromptSubmission(t *
 	if !refreshFound {
 		t.Fatalf("expected runtime transcript refresh before queued /review drains, got %+v", msgs)
 	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseQueuedDrain {
+		t.Fatalf("queued /review sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseQueuedDrain)
+	}
 
 	next, drainCmd := updated.Update(refresh)
 	updated = next.(*uiModel)
@@ -5315,6 +5443,9 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	}
 	if !refreshFound {
 		t.Fatalf("expected transcript refresh before queued /review handoff, got %+v", msgs)
+	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseQueuedDrain {
+		t.Fatalf("queued /review handoff sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseQueuedDrain)
 	}
 
 	next, followCmd := updated.Update(refresh)
@@ -5879,7 +6010,7 @@ func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
 	mainClient := &busyToggleFakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -6310,9 +6441,6 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	m := newProjectedEngineUIModel(eng)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(line, "cache --") {
-		t.Fatalf("expected cache placeholder in status line, got %q", line)
-	}
 	if !strings.Contains(line, "0%") {
 		t.Fatalf("expected context usage label in status line, got %q", line)
 	}
@@ -6321,7 +6449,7 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestStatusLineShowsServerOwnershipAfterCacheSectionWhenCLIStartsServer(t *testing.T) {
+func TestStatusLineShowsServerOwnershipBeforeContextUsageWhenCLIStartsServer(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -6334,11 +6462,32 @@ func TestStatusLineShowsServerOwnershipAfterCacheSectionWhenCLIStartsServer(t *t
 	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: true}))
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(line, "cache --", "server owned") {
-		t.Fatalf("expected server ownership marker immediately after cache section, got %q", line)
-	}
 	if !containsInOrder(line, "server owned", "0%") {
 		t.Fatalf("expected server ownership marker to stay left of context usage, got %q", line)
+	}
+}
+
+func TestStatusLineKeepsServerOwnershipAndContextUsageVisibleAtNarrowWidth(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: true}))
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(70, uiThemeStyles("dark")))
+	if !containsInOrder(line, "server owned", "0%") {
+		t.Fatalf("expected narrow status line to keep server ownership left of context usage, got %q", line)
+	}
+	if !strings.Contains(line, "▯") {
+		t.Fatalf("expected narrow status line to keep context progress bar visible, got %q", line)
+	}
+	if strings.Contains(line, "cache") {
+		t.Fatalf("did not expect removed cache section to reappear at narrow width, got %q", line)
 	}
 }
 
@@ -7042,8 +7191,8 @@ type busyTogglePatchTool struct {
 	delay time.Duration
 }
 
-func (t busyTogglePatchTool) Name() tools.ID {
-	return tools.ToolPatch
+func (t busyTogglePatchTool) Name() toolspec.ID {
+	return toolspec.ToolPatch
 }
 
 func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

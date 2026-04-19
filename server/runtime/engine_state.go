@@ -10,7 +10,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -114,7 +114,7 @@ func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string)
 	}
 	e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 	e.emit(Event{Kind: EventLocalEntryAdded, LocalEntry: localEntryChatEntry(entry)})
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emitConversationUpdated("")
 }
 
 func (e *Engine) RecordPromptHistory(text string) error {
@@ -128,12 +128,12 @@ func (e *Engine) RecordPromptHistory(text string) error {
 
 func (e *Engine) SetOngoingError(text string) {
 	e.chat.setOngoingError(text)
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emit(Event{Kind: EventOngoingErrorUpdated})
 }
 
 func (e *Engine) ClearOngoingError() {
 	e.chat.clearOngoingError()
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emit(Event{Kind: EventOngoingErrorUpdated})
 }
 
 func (e *Engine) SetSessionName(name string) error {
@@ -397,7 +397,7 @@ type historyReplacementPayload struct {
 	Items  []llm.ResponseItem `json:"items"`
 }
 
-func toToolNames(ids []tools.ID) []string {
+func toToolNames(ids []toolspec.ID) []string {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {
@@ -583,9 +583,73 @@ func (e *Engine) cacheHitSnapshot() (int, bool) {
 func (e *Engine) emit(evt Event) {
 	evt.TranscriptRevision = e.TranscriptRevision()
 	evt.CommittedEntryCount = e.CommittedTranscriptEntryCount()
+	if !evt.CommittedEntryStartSet && eventMayInferCommittedEntryStart(evt.Kind) {
+		entries := TranscriptEntriesFromEvent(evt)
+		if len(entries) > 0 {
+			start := evt.CommittedEntryCount - len(entries)
+			if start < 0 {
+				start = 0
+			}
+			evt.CommittedEntryStart = start
+			evt.CommittedEntryStartSet = true
+		}
+	}
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(evt)
 	}
+}
+
+func (e *Engine) emitConversationUpdated(stepID string) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+}
+
+func (e *Engine) emitCommittedTranscriptAdvanced(stepID string) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
+}
+
+func eventMayInferCommittedEntryStart(kind EventKind) bool {
+	switch kind {
+	case EventCompactionCompleted, EventCompactionFailed:
+		return false
+	default:
+		return true
+	}
+}
+
+func (e *Engine) rememberPendingToolCallStarts(starts map[string]int) {
+	if e == nil || len(starts) == 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.pendingToolCallStarts == nil {
+		e.pendingToolCallStarts = make(map[string]int, len(starts))
+	}
+	for callID, start := range starts {
+		e.pendingToolCallStarts[callID] = start
+	}
+}
+
+func (e *Engine) pendingToolCallStart(callID string) (int, bool) {
+	if e == nil || callID == "" {
+		return 0, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	start, ok := e.pendingToolCallStarts[callID]
+	if !ok {
+		return 0, false
+	}
+	return start, true
+}
+
+func (e *Engine) forgetPendingToolCallStart(callID string) {
+	if e == nil || callID == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.pendingToolCallStarts, callID)
 }
 
 func (e *Engine) nextCompactionCount() int {

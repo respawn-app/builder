@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 const recipientPrefix = "functions."
@@ -20,8 +21,8 @@ func New(getRegistry func() *tools.Registry) *Tool {
 	return &Tool{getRegistry: getRegistry}
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolMultiToolUseParallel
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolMultiToolUseParallel
 }
 
 type input struct {
@@ -64,7 +65,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 
 	resolved := make([]struct {
 		name   string
-		toolID tools.ID
+		toolID toolspec.ID
 		input  json.RawMessage
 	}, len(in.ToolUses))
 
@@ -77,11 +78,11 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		if name == "" {
 			return tools.ErrorResult(c, fmt.Sprintf("tool_uses[%d].recipient_name is required", i)), nil
 		}
-		toolID, ok := tools.ParseID(name)
+		toolID, ok := toolspec.ParseID(name)
 		if !ok {
 			return tools.ErrorResult(c, fmt.Sprintf("tool_uses[%d].recipient_name references unknown tool %q", i, recipient)), nil
 		}
-		if toolID == tools.ToolMultiToolUseParallel {
+		if toolID == toolspec.ToolMultiToolUseParallel {
 			return tools.ErrorResult(c, "recursive calls to multi_tool_use_parallel are not allowed"), nil
 		}
 
@@ -95,7 +96,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		}
 		resolved[i] = struct {
 			name   string
-			toolID tools.ID
+			toolID toolspec.ID
 			input  json.RawMessage
 		}{
 			name:   recipient,

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 type countingSessionViewClient struct {
@@ -160,7 +162,7 @@ type runtimeClientBlockingTool struct {
 	release chan struct{}
 }
 
-func (runtimeClientBlockingTool) Name() tools.ID { return tools.ToolShell }
+func (runtimeClientBlockingTool) Name() toolspec.ID { return toolspec.ToolShell }
 
 func (t runtimeClientBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
@@ -410,7 +412,7 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 	fakeLLM := &runtimeClientFakeLLM{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -427,7 +429,7 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 
 	runtimeClient := newRuntimeClient(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	result := make(chan error, 1)
@@ -486,7 +488,7 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 
 	runtimeClient := newUIRuntimeClientWithReads(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	view := runtimeClient.MainView()
@@ -519,7 +521,7 @@ func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *t
 
 	runtimeClient := newUIRuntimeClientWithReads(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	view := runtimeClient.MainView()
@@ -763,6 +765,127 @@ func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientRefreshTranscriptPagePreservesLastKnownPageOnReadError(t *testing.T) {
+	reads := &countingSessionViewClient{}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	seedReq := clientui.TranscriptPageRequest{Page: 2, PageSize: 25}
+	seedPage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     7,
+		Offset:       25,
+		TotalEntries: 40,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "cached page"}},
+	}
+	concrete.storeTranscriptForRequest(seedReq, seedPage)
+
+	var observedErr error
+	concrete.SetConnectionStateObserver(func(err error) { observedErr = err })
+	concrete.reads = &flakySessionViewClient{errs: []error{context.DeadlineExceeded}}
+
+	page, err := concrete.refreshTranscriptPageSync(seedReq, time.Millisecond)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("refresh transcript page error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if observedErr != context.DeadlineExceeded {
+		t.Fatalf("observed connection state error = %v, want %v", observedErr, context.DeadlineExceeded)
+	}
+	if !reflect.DeepEqual(page, seedPage) {
+		t.Fatalf("refresh transcript page fallback = %+v, want %+v", page, seedPage)
+	}
+}
+
+func TestRuntimeClientQueueUserMessageNotifiesConnectionObserverOnFailure(t *testing.T) {
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		&countingSessionViewClient{},
+		sharedclient.NewLoopbackRuntimeControlClient(nil),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	var observedErr error
+	concrete.SetConnectionStateObserver(func(err error) { observedErr = err })
+
+	concrete.QueueUserMessage("queued input")
+
+	if observedErr == nil || observedErr.Error() != "runtime control service is required" {
+		t.Fatalf("observed connection state error = %v, want runtime control service is required", observedErr)
+	}
+}
+
+func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *testing.T) {
+	reads := &countingSessionViewClient{}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	seedReq := clientui.TranscriptPageRequest{Page: 2, PageSize: 25}
+	seedPage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     7,
+		Offset:       25,
+		TotalEntries: 40,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "cached page"}},
+	}
+	authoritativePage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     8,
+		Offset:       25,
+		TotalEntries: 41,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "authoritative page"}},
+	}
+	concrete.storeTranscriptForRequest(seedReq, seedPage)
+
+	var observed []error
+	concrete.SetConnectionStateObserver(func(err error) {
+		observed = append(observed, err)
+	})
+	concrete.reads = &flakySessionViewClient{
+		errs:  []error{context.DeadlineExceeded, nil},
+		pages: []serverapi.SessionTranscriptPageResponse{{}, {Transcript: authoritativePage}},
+	}
+
+	page, err := concrete.refreshTranscriptPageSync(seedReq, time.Millisecond)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("refresh transcript page error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if !reflect.DeepEqual(page, seedPage) {
+		t.Fatalf("refresh transcript page fallback = %+v, want %+v", page, seedPage)
+	}
+
+	page, err = concrete.refreshTranscriptPageSync(seedReq, time.Millisecond)
+	if err != nil {
+		t.Fatalf("refresh transcript page recovery error = %v", err)
+	}
+	if !reflect.DeepEqual(page, authoritativePage) {
+		t.Fatalf("refresh transcript page recovery = %+v, want %+v", page, authoritativePage)
+	}
+	cached, hasCached, _ := concrete.cachedTranscriptPage(seedReq)
+	if !hasCached {
+		t.Fatal("expected transcript cache entry after successful recovery")
+	}
+	if !reflect.DeepEqual(cached, authoritativePage) {
+		t.Fatalf("cached transcript page after recovery = %+v, want %+v", cached, authoritativePage)
+	}
+	if len(observed) != 2 || observed[0] != context.DeadlineExceeded || observed[1] != nil {
+		t.Fatalf("connection observer sequence = %+v, want [%v <nil>]", observed, context.DeadlineExceeded)
+	}
+}
+
 func TestRuntimeClientAsyncMainViewRefreshNotifiesConnectionObserverOnRecovery(t *testing.T) {
 	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil))
@@ -802,7 +925,7 @@ func TestRuntimeClientSetFastModeEnabledUpdatesCachedMainView(t *testing.T) {
 	runtimeRegistry.Register(store.Meta().SessionID, eng)
 	runtimeClient := newRuntimeClient(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, nil)),
 	)
 	if _, err := runtimeClient.SetFastModeEnabled(true); err != nil {

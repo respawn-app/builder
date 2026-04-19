@@ -6,12 +6,11 @@ import (
 	"io"
 	"strings"
 
-	"builder/server/launch"
-	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 
 	"github.com/google/uuid"
 )
@@ -22,12 +21,6 @@ const (
 	launchModeInteractive launchMode = "interactive"
 	launchModeHeadless    launchMode = "headless"
 )
-
-type bootstrapLaunchPlan struct {
-	WorkspaceRoot    string
-	OpenAIBaseURL    string
-	UseOpenAIBaseURL bool
-}
 
 type sessionLaunchRequest struct {
 	Mode              launchMode
@@ -40,7 +33,7 @@ type sessionLaunchPlan struct {
 	Mode                launchMode
 	SessionID           string
 	ActiveSettings      config.Settings
-	EnabledTools        []tools.ID
+	EnabledTools        []toolspec.ID
 	ConfiguredModelName string
 	SessionName         string
 	ModelContractLocked bool
@@ -50,9 +43,10 @@ type sessionLaunchPlan struct {
 }
 
 type runtimeLaunchPlan struct {
-	Logger *runLogger
-	Wiring *runtimeWiring
-	close  func()
+	Logger            *runLogger
+	Wiring            *runtimeWiring
+	ControllerLeaseID string
+	close             func()
 }
 
 func (p *runtimeLaunchPlan) Close() {
@@ -62,46 +56,20 @@ func (p *runtimeLaunchPlan) Close() {
 	p.close()
 }
 
-type sessionPickerRunner func([]session.Summary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error)
+type sessionPickerRunner func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error)
 
 type launchPlanner struct {
-	persistenceRoot string
-	server          embeddedServer
-	pickSession     sessionPickerRunner
-}
-
-func newBootstrapLaunchPlanner(persistenceRoot string) *launchPlanner {
-	return &launchPlanner{persistenceRoot: strings.TrimSpace(persistenceRoot)}
+	server      embeddedServer
+	pickSession sessionPickerRunner
 }
 
 func newSessionLaunchPlanner(server embeddedServer) *launchPlanner {
 	return &launchPlanner{
 		server: server,
-		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			return runSessionPicker(summaries, theme, alternateScreenPolicy)
 		},
 	}
-}
-
-func (p *launchPlanner) PlanBootstrap(opts Options) (bootstrapLaunchPlan, error) {
-	plan, err := launch.ResolveBootstrapPlan(p.persistenceRoot, launch.BootstrapRequest{
-		WorkspaceRoot:         requestedWorkspaceRootValue(opts.WorkspaceRoot),
-		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
-		SessionID:             strings.TrimSpace(opts.SessionID),
-		OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
-		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
-	})
-	if err != nil {
-		return bootstrapLaunchPlan{}, err
-	}
-	return bootstrapLaunchPlan(plan), nil
-}
-
-func requestedWorkspaceRootValue(workspaceRoot string) string {
-	if strings.TrimSpace(workspaceRoot) == "" {
-		return "."
-	}
-	return workspaceRoot
 }
 
 func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchRequest) (sessionLaunchPlan, error) {
@@ -116,13 +84,18 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
-	enabledTools := make([]tools.ID, 0, len(resp.Plan.EnabledToolIDs))
+	enabledTools := make([]toolspec.ID, 0, len(resp.Plan.EnabledToolIDs))
 	for _, raw := range resp.Plan.EnabledToolIDs {
-		if id, ok := tools.ParseID(raw); ok {
+		if id, ok := toolspec.ParseID(raw); ok {
 			enabledTools = append(enabledTools, id)
 		}
 	}
 	cfg := p.server.Config()
+	authManager := p.server.AuthManager()
+	authStatePath := ""
+	if authManager != nil {
+		authStatePath = config.GlobalAuthConfigPath(cfg)
+	}
 	plan := sessionLaunchPlan{
 		Mode:                req.Mode,
 		SessionID:           resp.Plan.SessionID,
@@ -134,10 +107,11 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 		StatusConfig: uiStatusConfig{
 			WorkspaceRoot:   resp.Plan.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
+			SessionViews:    p.server.SessionViewClient(),
 			Settings:        resp.Plan.ActiveSettings,
 			Source:          resp.Plan.Source,
-			AuthManager:     p.server.AuthManager(),
-			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
+			AuthManager:     authManager,
+			AuthStatePath:   authStatePath,
 			OwnsServer:      p.server.OwnsServer(),
 		},
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,
@@ -198,7 +172,7 @@ func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunc
 	return resolved, nil
 }
 
-func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]session.Summary, error) {
+func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]clientui.SessionSummary, error) {
 	if p == nil || p.server == nil {
 		return nil, errors.New("launch planner bootstrap is required")
 	}
@@ -213,20 +187,7 @@ func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]session.Sum
 	if err != nil {
 		return nil, err
 	}
-	return sessionSummariesFromProjectView(resp.Overview.Sessions), nil
-}
-
-func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.Summary {
-	out := make([]session.Summary, 0, len(items))
-	for _, item := range items {
-		out = append(out, session.Summary{
-			SessionID:          item.SessionID,
-			Name:               item.Name,
-			FirstPromptPreview: item.FirstPromptPreview,
-			UpdatedAt:          item.UpdatedAt,
-		})
-	}
-	return out
+	return append([]clientui.SessionSummary(nil), resp.Overview.Sessions...), nil
 }
 
 func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {
@@ -298,11 +259,11 @@ func mergeCLISources(base config.SourceReport, override config.SourceReport) con
 	return merged
 }
 
-func cloneEnabledToolSet(in map[tools.ID]bool) map[tools.ID]bool {
+func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {
 	if len(in) == 0 {
-		return map[tools.ID]bool{}
+		return map[toolspec.ID]bool{}
 	}
-	out := make(map[tools.ID]bool, len(in))
+	out := make(map[toolspec.ID]bool, len(in))
 	for id, enabled := range in {
 		out[id] = enabled
 	}

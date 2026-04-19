@@ -39,6 +39,7 @@ type execUIPathReferenceCommandRunner struct{}
 func (execUIPathReferenceCommandRunner) Output(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	return cmd.Output()
 }
 
@@ -316,7 +317,7 @@ func (s *uiPathReferenceSearchService) buildCorpus(workspaceRoot string, generat
 }
 
 func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, workspaceRoot string) (uiPathReferenceCorpusSnapshot, error) {
-	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--files", "-0", "--hidden", "-g", "!.git")
+	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--no-config", "--files", "-0", "--hidden", "-g", "!.git")
 	if err != nil {
 		if isEmptyRipgrepFilesResult(err, output) {
 			return uiPathReferenceCorpusSnapshot{}, nil

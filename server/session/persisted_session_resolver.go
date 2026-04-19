@@ -1,0 +1,20 @@
+package session
+
+import "context"
+
+// PersistedSessionRecord is the authoritative persisted session lookup result.
+// On success, SessionDir must be a non-empty absolute normalized path to the
+// scoped session directory. Meta should be nil only when metadata truly does
+// not exist for an otherwise valid record.
+type PersistedSessionRecord struct {
+	SessionDir string
+	Meta       *Meta
+}
+
+// PersistedSessionResolver resolves authoritative persisted session metadata.
+// ResolvePersistedSession must return a fully normalized SessionDir and a
+// populated Meta on success, or a zero-value PersistedSessionRecord with a
+// non-nil error on failure.
+type PersistedSessionResolver interface {
+	ResolvePersistedSession(ctx context.Context, sessionID string) (PersistedSessionRecord, error)
+}

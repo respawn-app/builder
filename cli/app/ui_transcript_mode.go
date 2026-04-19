@@ -57,12 +57,12 @@ func (m *uiModel) primeDetailTranscriptFromCurrentTail() {
 		return
 	}
 	page := clientui.TranscriptPage{
-		Offset:       m.view.TranscriptBaseOffset(),
-		TotalEntries: m.view.TranscriptTotalEntries(),
+		Offset:       m.transcriptBaseOffset,
+		TotalEntries: m.transcriptTotalEntries,
 		Ongoing:      m.view.OngoingStreamingText(),
 		OngoingError: m.view.OngoingErrorText(),
 	}
-	for _, entry := range m.view.LoadedTranscriptEntries() {
+	for _, entry := range committedTranscriptEntriesForApp(m.transcriptEntries) {
 		page.Entries = append(page.Entries, clientui.ChatEntry{
 			Visibility:  entry.Visibility,
 			Role:        entry.Role,

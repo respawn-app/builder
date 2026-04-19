@@ -13,15 +13,6 @@ type defaultReviewerPipeline struct {
 	stepRunner stepLoopRunner
 }
 
-func appendReviewerStatusBestEffort(engine *Engine, stepID string, status ReviewerStatus) {
-	if engine == nil {
-		return
-	}
-	// The outer step loop emits EventReviewerCompleted from reviewerFollowUpResult,
-	// so live UI observability does not depend on this store append succeeding.
-	_ = engine.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-}
-
 func (r *defaultReviewerPipeline) ShouldRunTurn(frequency string, reviewerClient llm.Client, patchEditsApplied bool) bool {
 	if reviewerClient == nil {
 		return false
@@ -38,9 +29,8 @@ func (r *defaultReviewerPipeline) ShouldRunTurn(frequency string, reviewerClient
 	}
 }
 
-func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
+func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string, original llm.Message, originalCommittedStart int, originalCommittedStartSet bool, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
 	e := r.engine
-	baselineItems := e.snapshotItems()
 	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
 	reviewerResult, err := r.RunSuggestions(ctx, stepID, reviewerClient)
 	if err != nil {
@@ -48,14 +38,12 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			Outcome: "failed",
 			Error:   strings.TrimSpace(err.Error()),
 		}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 	suggestions := reviewerResult.Suggestions
 	if len(suggestions) == 0 {
 		status := ReviewerStatus{Outcome: "no_suggestions"}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 	if e.cfg.Reviewer.VerboseOutput {
 		_ = e.appendPersistedLocalEntryWithOngoingText(
@@ -75,8 +63,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 			Error:                 strings.TrimSpace(err.Error()),
 		}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 	if r.stepRunner == nil {
 		status := ReviewerStatus{
@@ -84,11 +71,10 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			SuggestionsCount: len(suggestions),
 			Error:            "reviewer step runner is not configured",
 		}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 
-	followUp, followUpExecutedToolCall, noopFinalAnswer, err := r.stepRunner.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
+	followUp, err := r.stepRunner.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
 		ReviewerFrequency:              "off",
 		ReviewerClient:                 nil,
 		EmitAssistantEvent:             false,
@@ -102,21 +88,16 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 			Error:                 strings.TrimSpace(err.Error()),
 		}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
-	if noopFinalAnswer || isNoopFinalAnswer(followUp) {
-		if !followUpExecutedToolCall {
-			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
-		}
+	if followUp.NoopFinalAnswer || isNoopFinalAnswer(followUp.Message) {
 		status := ReviewerStatus{
 			Outcome:               "noop",
 			SuggestionsCount:      len(suggestions),
 			CacheHitPercent:       reviewerResult.CacheHitPercent,
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 		}
-		appendReviewerStatusBestEffort(e, stepID, status)
-		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
+		return reviewerFollowUpResult{Message: original, Completion: &status, AssistantCommittedStart: originalCommittedStart, AssistantCommittedStartSet: originalCommittedStartSet}, nil
 	}
 	status := ReviewerStatus{
 		Outcome:               "applied",
@@ -124,8 +105,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		CacheHitPercent:       reviewerResult.CacheHitPercent,
 		HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 	}
-	appendReviewerStatusBestEffort(e, stepID, status)
-	return reviewerFollowUpResult{Message: followUp, Completion: &status}, nil
+	return reviewerFollowUpResult{Message: followUp.Message, Completion: &status, AssistantCommittedStart: followUp.AssistantCommittedStart, AssistantCommittedStartSet: followUp.AssistantCommittedStartSet}, nil
 }
 
 func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID string, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {

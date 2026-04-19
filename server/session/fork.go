@@ -40,7 +40,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	}
 
 	containerDir := filepath.Dir(parent.Dir())
-	child, err := NewLazy(containerDir, parentMeta.WorkspaceContainer, parentMeta.WorkspaceRoot)
+	child, err := newLazyWithStoreOptions(containerDir, parentMeta.WorkspaceContainer, parentMeta.WorkspaceRoot, parent.options)
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +55,12 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
 	child.mu.Unlock()
 
+	if len(replay) == 0 {
+		if err := child.EnsureDurable(); err != nil {
+			return nil, fmt.Errorf("persist empty fork replay: %w", err)
+		}
+		return child, nil
+	}
 	if _, err := child.AppendReplayEvents(replay); err != nil {
 		return nil, fmt.Errorf("append fork replay events: %w", err)
 	}
@@ -94,14 +100,9 @@ func reminderIssuedFromReplayEvents(events []ReplayEvent) bool {
 			}
 		case "history_replaced":
 			var payload struct {
-				Engine string            `json:"engine"`
-				Items  []json.RawMessage `json:"items"`
+				Engine string `json:"engine"`
 			}
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
-				continue
-			}
-			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				issued = itemsContainCompactionSoonReminder(payload.Items)
 				continue
 			}
 			issued = false
@@ -129,25 +130,3 @@ type reminderEventMessage struct {
 func (m reminderEventMessage) GetRole() string        { return m.Role }
 func (m reminderEventMessage) GetMessageType() string { return m.MessageType }
 func (m reminderEventMessage) GetContent() string     { return m.Content }
-
-func itemsContainCompactionSoonReminder(items []json.RawMessage) bool {
-	for _, raw := range items {
-		var item struct {
-			Type        string `json:"type"`
-			Role        string `json:"role"`
-			MessageType string `json:"message_type"`
-			Content     string `json:"content"`
-		}
-		if err := json.Unmarshal(raw, &item); err != nil {
-			continue
-		}
-		if strings.TrimSpace(item.Type) != "message" {
-			continue
-		}
-		msg := reminderEventMessage{Role: item.Role, MessageType: item.MessageType, Content: item.Content}
-		if isCompactionSoonReminderMessage(msg) {
-			return true
-		}
-	}
-	return false
-}

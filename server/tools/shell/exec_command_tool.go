@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type execCommandInput struct {
@@ -49,8 +50,8 @@ func NewExecCommandTool(workspaceRoot string, outputLimit int, background *Manag
 	}
 }
 
-func (t *ExecCommandTool) Name() tools.ID {
-	return tools.ToolExecCommand
+func (t *ExecCommandTool) Name() toolspec.ID {
+	return toolspec.ToolExecCommand
 }
 
 func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

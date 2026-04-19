@@ -3,12 +3,6 @@ package runprompt
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"time"
 
 	"builder/server/auth"
 	"builder/server/launch"
@@ -16,6 +10,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/runtimewire"
+	"builder/server/session"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -27,6 +22,7 @@ import (
 type HeadlessBootstrap struct {
 	Config          config.App
 	ContainerDir    string
+	StoreOptions    []session.StoreOption
 	AuthManager     *auth.Manager
 	FastModeState   *runtime.FastModeState
 	Background      *shelltool.Manager
@@ -44,30 +40,8 @@ type HeadlessBootstrap struct {
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := newDeduplicatingPromptService(runPromptDedupeScopeID(boot), primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
+	service := newMemoizingPromptService(primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
 	return client.NewLoopbackRunPromptClient(service)
-}
-
-func runPromptDedupeScopeID(boot HeadlessBootstrap) string {
-	parts := make([]string, 0, 3)
-	if part := normalizedRunPromptScopePart(boot.Config.PersistenceRoot); part != "" {
-		parts = append(parts, part)
-	}
-	if part := normalizedRunPromptScopePart(boot.ContainerDir); part != "" {
-		parts = append(parts, part)
-	}
-	if part := normalizedRunPromptScopePart(boot.Config.WorkspaceRoot); part != "" {
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, "|")
-}
-
-func normalizedRunPromptScopePart(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	return filepath.Clean(trimmed)
 }
 
 type headlessPromptLauncher struct {
@@ -75,7 +49,7 @@ type headlessPromptLauncher struct {
 }
 
 func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
-	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir}
+	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir, StoreOptions: l.boot.StoreOptions}
 	plan, err := planner.PlanSession(launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
 	if err != nil {
 		return nil, err
@@ -124,7 +98,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		FastMode: l.boot.FastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", FormatRuntimeEvent(evt))
-			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+			if transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug) {
 				projected := runtimeview.EventFromRuntime(evt)
 				logger.Logf("%s", FormatTranscriptProjectionDiagnostic(plan.Store.Meta().SessionID, projected))
 				logger.Logf("%s", FormatTranscriptPublishDiagnostic(plan.Store.Meta().SessionID, projected))
@@ -221,135 +195,5 @@ func RunPromptProgressFromRuntimeEvent(evt runtime.Event) (serverapi.RunPromptPr
 		return serverapi.RunPromptProgress{Kind: serverapi.RunPromptProgressKindWarning, Message: "Run cleanup warning"}, true
 	default:
 		return serverapi.RunPromptProgress{}, false
-	}
-}
-
-type deduplicatingPromptService struct {
-	scopeID string
-	inner   serverapi.RunPromptService
-}
-
-type dedupeFingerprint struct {
-	selectedSessionID string
-	prompt            string
-	timeout           time.Duration
-	overrides         dedupeOverridesFingerprint
-}
-
-type dedupeOverridesFingerprint struct {
-	model               string
-	providerOverride    string
-	thinkingLevel       string
-	theme               string
-	modelTimeoutSeconds int
-	shellTimeoutSeconds int
-	tools               string
-	openAIBaseURL       string
-}
-
-type dedupeEntry struct {
-	fingerprint dedupeFingerprint
-	response    serverapi.RunPromptResponse
-	err         error
-	done        bool
-	cacheable   bool
-	completedAt time.Time
-	ready       chan struct{}
-}
-
-const runPromptDedupeRetention = 10 * time.Minute
-
-var runPromptDedupeNow = time.Now
-
-var runPromptDedupeRegistry = struct {
-	mu      sync.Mutex
-	entries map[string]*dedupeEntry
-}{entries: map[string]*dedupeEntry{}}
-
-func newDeduplicatingPromptService(scopeID string, inner serverapi.RunPromptService) serverapi.RunPromptService {
-	return &deduplicatingPromptService{scopeID: strings.TrimSpace(scopeID), inner: inner}
-}
-
-func sweepExpiredRunPromptDedupeEntriesLocked(now time.Time) {
-	for key, entry := range runPromptDedupeRegistry.entries {
-		if entry == nil || !entry.done || entry.completedAt.IsZero() {
-			continue
-		}
-		if now.Sub(entry.completedAt) >= runPromptDedupeRetention {
-			delete(runPromptDedupeRegistry.entries, key)
-		}
-	}
-}
-
-func fingerprintRunPromptRequest(req serverapi.RunPromptRequest) dedupeFingerprint {
-	return dedupeFingerprint{
-		selectedSessionID: strings.TrimSpace(req.SelectedSessionID),
-		prompt:            strings.TrimSpace(req.Prompt),
-		timeout:           req.Timeout,
-		overrides: dedupeOverridesFingerprint{
-			model:               strings.TrimSpace(req.Overrides.Model),
-			providerOverride:    strings.TrimSpace(req.Overrides.ProviderOverride),
-			thinkingLevel:       strings.TrimSpace(req.Overrides.ThinkingLevel),
-			theme:               strings.TrimSpace(req.Overrides.Theme),
-			modelTimeoutSeconds: req.Overrides.ModelTimeoutSeconds,
-			shellTimeoutSeconds: req.Overrides.ShellTimeoutSeconds,
-			tools:               strings.TrimSpace(req.Overrides.Tools),
-			openAIBaseURL:       strings.TrimSpace(req.Overrides.OpenAIBaseURL),
-		},
-	}
-}
-
-func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
-	for {
-		key := strings.Join([]string{s.scopeID, strings.TrimSpace(req.SelectedSessionID), strings.TrimSpace(req.ClientRequestID)}, "|")
-		fp := fingerprintRunPromptRequest(req)
-
-		runPromptDedupeRegistry.mu.Lock()
-		sweepExpiredRunPromptDedupeEntriesLocked(runPromptDedupeNow())
-		entry, exists := runPromptDedupeRegistry.entries[key]
-		if exists {
-			if entry.fingerprint != fp {
-				runPromptDedupeRegistry.mu.Unlock()
-				return serverapi.RunPromptResponse{}, fmt.Errorf("client_request_id %q reused with different payload", req.ClientRequestID)
-			}
-			if entry.done {
-				if entry.cacheable {
-					response, err := entry.response, entry.err
-					runPromptDedupeRegistry.mu.Unlock()
-					return response, err
-				}
-				delete(runPromptDedupeRegistry.entries, key)
-				runPromptDedupeRegistry.mu.Unlock()
-				continue
-			}
-			ready := entry.ready
-			runPromptDedupeRegistry.mu.Unlock()
-			select {
-			case <-ready:
-				continue
-			case <-ctx.Done():
-				return serverapi.RunPromptResponse{}, ctx.Err()
-			}
-		}
-
-		entry = &dedupeEntry{fingerprint: fp, ready: make(chan struct{})}
-		runPromptDedupeRegistry.entries[key] = entry
-		runPromptDedupeRegistry.mu.Unlock()
-
-		response, err := s.inner.RunPrompt(ctx, req, progress)
-		cacheable := !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, primaryrun.ErrActivePrimaryRun)
-
-		runPromptDedupeRegistry.mu.Lock()
-		entry.response = response
-		entry.err = err
-		entry.done = true
-		entry.cacheable = cacheable
-		entry.completedAt = runPromptDedupeNow()
-		close(entry.ready)
-		if !cacheable {
-			delete(runPromptDedupeRegistry.entries, key)
-		}
-		runPromptDedupeRegistry.mu.Unlock()
-		return response, err
 	}
 }

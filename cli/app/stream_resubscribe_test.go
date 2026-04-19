@@ -27,7 +27,7 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil)
+	}, func() bool { return false }, nil)
 	defer stop()
 
 	first := waitSessionActivityEvent(t, events)
@@ -38,6 +38,9 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 	rehydrate := waitSessionActivityEvent(t, events)
 	if rehydrate.Kind != clientui.EventConversationUpdated {
 		t.Fatalf("expected synthetic conversation update after resubscribe, got %+v", rehydrate)
+	}
+	if rehydrate.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected stream-gap recovery cause on synthetic refresh, got %+v", rehydrate)
 	}
 
 	second := waitSessionActivityEvent(t, events)
@@ -63,11 +66,11 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 		next := remainingA[0]
 		remainingA = remainingA[1:]
 		return next, nil
-	}, nil)
+	}, func() bool { return false }, nil)
 	defer stopA()
 	eventsB, stopB := startSessionActivityEvents(ctx, initialB, func(context.Context) (serverapi.SessionActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil)
+	}, func() bool { return false }, nil)
 	defer stopB()
 
 	firstA := waitSessionActivityEvent(t, eventsA)
@@ -82,6 +85,9 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 	rehydrateA := waitSessionActivityEvent(t, eventsA)
 	if rehydrateA.Kind != clientui.EventConversationUpdated {
 		t.Fatalf("expected synthetic refresh only on stream A, got %+v", rehydrateA)
+	}
+	if rehydrateA.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected stream-gap recovery cause only on stream A, got %+v", rehydrateA)
 	}
 	secondA := waitSessionActivityEvent(t, eventsA)
 	if secondA.Kind != clientui.EventRunStateChanged || secondA.StepID != "step-a" {
@@ -110,7 +116,7 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -147,7 +153,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 		return next, nil
 	}, func(context.Context) (map[string]struct{}, error) {
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{})
+	}, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -187,7 +193,7 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotReadFails(t *test
 			return nil, errors.New("snapshot unavailable")
 		}
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{})
+	}, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -219,7 +225,7 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -262,7 +268,7 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
 
 	first := waitPromptEvent(t, events)
 	stop()
@@ -289,7 +295,7 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -311,7 +317,7 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -338,7 +344,7 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -358,6 +364,32 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 	}
 	if got := control.askCallCount(); got != 1 {
 		t.Fatalf("AnswerAsk call count = %d, want 1", got)
+	}
+}
+
+func TestPendingPromptEventRetryUsesLatestControllerLease(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}}}
+	control := &retryingPromptControlClient{askErrors: []error{serverapi.ErrInvalidControllerLease, nil}}
+	leaseID := "lease-old"
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, nil, control, func() string { return leaseID })
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+
+	retried := waitPromptEvent(t, events)
+	leaseID = "lease-new"
+	retried.reply <- askReply{response: askquestion.Response{RequestID: retried.req.ID, Answer: "handled again"}}
+
+	waitForPromptAskCallCount(t, control, 2)
+	if leases := control.askLeaseIDs(); len(leases) != 2 || leases[0] != "lease-old" || leases[1] != "lease-new" {
+		t.Fatalf("ask lease ids = %+v, want [lease-old lease-new]", leases)
 	}
 }
 
@@ -430,8 +462,10 @@ func (stubPromptControlClient) AnswerApproval(context.Context, serverapi.Approva
 type retryingPromptControlClient struct {
 	mu                 sync.Mutex
 	askErr             error
+	askErrors          []error
 	approvalErr        error
 	askCalls           int
+	askLeaseIDValues   []string
 	approvalCallCountV int
 }
 
@@ -441,10 +475,22 @@ func (c *retryingPromptControlClient) askCallCount() int {
 	return c.askCalls
 }
 
-func (c *retryingPromptControlClient) AnswerAsk(context.Context, serverapi.AskAnswerRequest) error {
+func (c *retryingPromptControlClient) askLeaseIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.askLeaseIDValues...)
+}
+
+func (c *retryingPromptControlClient) AnswerAsk(_ context.Context, req serverapi.AskAnswerRequest) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.askCalls++
+	c.askLeaseIDValues = append(c.askLeaseIDValues, req.ControllerLeaseID)
+	if len(c.askErrors) > 0 {
+		err := c.askErrors[0]
+		c.askErrors = c.askErrors[1:]
+		return err
+	}
 	return c.askErr
 }
 
@@ -466,6 +512,10 @@ func waitSessionActivityEvent(t *testing.T, events <-chan clientui.Event) client
 	}
 }
 
+func staticControllerLeaseProvider(leaseID string) controllerLeaseProvider {
+	return func() string { return leaseID }
+}
+
 func waitPromptEvent(t *testing.T, events <-chan askEvent) askEvent {
 	return waitPromptEventWithin(t, events, time.Second)
 }
@@ -479,6 +529,18 @@ func waitPromptEventWithin(t *testing.T, events <-chan askEvent, timeout time.Du
 		t.Fatal("timed out waiting for prompt event")
 		return askEvent{}
 	}
+}
+
+func waitForPromptAskCallCount(t *testing.T, control *retryingPromptControlClient, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if got := control.askCallCount(); got == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("AnswerAsk call count = %d, want %d", control.askCallCount(), want)
 }
 
 var _ serverapi.SessionActivitySubscription = (*stubSessionActivitySubscription)(nil)

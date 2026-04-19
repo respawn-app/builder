@@ -1,17 +1,20 @@
 package clientui
 
 import (
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/cachewarn"
+	patchformat "builder/shared/transcript/patchformat"
 	"time"
 )
 
 type EventKind string
 
+type TranscriptRecoveryCause string
+
 const (
 	EventConversationUpdated EventKind = "conversation_updated"
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
+	EventOngoingErrorUpdated EventKind = "ongoing_error_updated"
 	EventReasoningDelta      EventKind = "reasoning_delta"
 	EventReasoningDeltaReset EventKind = "reasoning_delta_reset"
 	EventAssistantMessage    EventKind = "assistant_message"
@@ -29,23 +32,38 @@ const (
 	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
+
+	TranscriptRecoveryCauseNone         TranscriptRecoveryCause = ""
+	TranscriptRecoveryCauseStreamGap    TranscriptRecoveryCause = "stream_gap"
+	TranscriptRecoveryCauseHydrateRetry TranscriptRecoveryCause = "hydrate_retry"
 )
 
 type Event struct {
-	Kind                   EventKind
-	StepID                 string
-	TranscriptRevision     int64
-	CommittedEntryCount    int
-	Error                  string
-	AssistantDelta         string
-	ReasoningDelta         *ReasoningDelta
-	UserMessage            string
-	UserMessageBatch       []string
-	TranscriptEntries      []ChatEntry
-	CacheWarning           *cachewarn.Warning
-	CacheWarningVisibility EntryVisibility
-	RunState               *RunState
-	Background             *BackgroundShellEvent
+	Kind                       EventKind
+	StepID                     string
+	RecoveryCause              TranscriptRecoveryCause
+	CommittedTranscriptChanged bool
+	TranscriptRevision         int64
+	CommittedEntryCount        int
+	CommittedEntryStart        int
+	CommittedEntryStartSet     bool
+	Error                      string
+	AssistantDelta             string
+	ReasoningDelta             *ReasoningDelta
+	UserMessage                string
+	UserMessageBatch           []string
+	TranscriptEntries          []ChatEntry
+	Compaction                 *CompactionStatus
+	CacheWarning               *cachewarn.Warning
+	CacheWarningVisibility     EntryVisibility
+	RunState                   *RunState
+	Background                 *BackgroundShellEvent
+}
+
+type CompactionStatus struct {
+	Mode  string
+	Count int
+	Error string
 }
 
 type ReasoningDelta struct {
@@ -102,11 +120,13 @@ const (
 )
 
 type TranscriptPageRequest struct {
-	Offset   int
-	Limit    int
-	Page     int
-	PageSize int
-	Window   TranscriptWindow
+	Offset                   int
+	Limit                    int
+	Page                     int
+	PageSize                 int
+	Window                   TranscriptWindow
+	KnownRevision            int64
+	KnownCommittedEntryCount int
 }
 
 type TranscriptPage struct {

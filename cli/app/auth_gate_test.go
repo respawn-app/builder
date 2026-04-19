@@ -68,6 +68,7 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
+	registerAppWorkspace(t, workspace)
 
 	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -133,6 +134,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root, Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
 		interactor,
 		store.Meta().SessionID,
+		"lease-test-controller",
 		UITransition{Action: UIActionLogout},
 	)
 	if err != nil {
@@ -183,6 +185,7 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 		&testEmbeddedServer{authManager: mgr},
 		interactor,
 		"",
+		"",
 		UITransition{Action: UIActionLogout},
 	)
 	if err != nil {
@@ -204,6 +207,7 @@ func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "")
+	registerAppWorkspace(t, workspace)
 
 	interactor := &stubAuthInteractor{
 		interactive:    false,
@@ -370,6 +374,7 @@ func TestResolveSessionActionLoginSkipClearsStoredAuthOnOptionalAuthSetup(t *tes
 		ctx,
 		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5", OpenAIBaseURL: "http://127.0.0.1:8080/v1"}}, authManager: mgr},
 		interactor,
+		"",
 		"",
 		UITransition{Action: UIActionLogout},
 	)

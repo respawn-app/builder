@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,17 @@ func EnabledFromEnv(getenv func(string) string) bool {
 	default:
 		return true
 	}
+}
+
+func Enabled(debug bool, getenv func(string) string) bool {
+	if debug {
+		return true
+	}
+	return EnabledFromEnv(getenv)
+}
+
+func EnabledForProcess(debug bool) bool {
+	return Enabled(debug, os.Getenv)
 }
 
 func EntriesDigest(entries []clientui.ChatEntry) string {
@@ -95,6 +107,12 @@ func RequestFields(req clientui.TranscriptPageRequest) map[string]string {
 	}
 	if req.PageSize != 0 {
 		fields["page_size"] = strconv.Itoa(req.PageSize)
+	}
+	if req.KnownRevision != 0 {
+		fields["known_revision"] = strconv.FormatInt(req.KnownRevision, 10)
+	}
+	if req.KnownCommittedEntryCount != 0 {
+		fields["known_committed_entry_count"] = strconv.Itoa(req.KnownCommittedEntryCount)
 	}
 	return fields
 }

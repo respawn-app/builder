@@ -1,0 +1,14 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema:
+      - "server/metadata/migrations/*.up.sql"
+    queries:
+      - "server/metadata/queries.sql"
+    gen:
+      go:
+        package: "sqlitegen"
+        out: "server/metadata/sqlitegen"
+        sql_package: "database/sql"
+        emit_json_tags: false
+        emit_interface: false

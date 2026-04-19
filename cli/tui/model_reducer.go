@@ -194,6 +194,8 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 	}
 	m.transcript = append(m.transcript, TranscriptEntry{
 		Visibility:  transcript.NormalizeEntryVisibility(msg.Visibility),
+		Transient:   msg.Transient,
+		Committed:   msg.Committed,
 		Role:        role,
 		Text:        msg.Text,
 		OngoingText: msg.OngoingText,

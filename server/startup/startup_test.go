@@ -10,9 +10,22 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/embedded"
+	"builder/server/metadata"
+	"builder/server/rootlock"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
+
+func registerStartupWorkspace(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+}
 
 type stubAuthHandler struct {
 	lookupEnv func(string) string
@@ -229,12 +242,12 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	request := Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := startupEnvAuthHandler{}
 	onboarding := startupNoopOnboarding{}
+	registerStartupWorkspace(t, workspace)
 
 	appCore, err := StartCore(context.Background(), request, authHandler, onboarding)
 	if err != nil {
 		t.Fatalf("StartCore: %v", err)
 	}
-	defer func() { _ = appCore.Close() }()
 
 	wrapped := &embedded.Server{Core: appCore}
 	if wrapped.ProjectViewClient() != appCore.ProjectViewClient() {
@@ -252,6 +265,14 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	if wrapped.RunPromptClient() != appCore.RunPromptClient() {
 		t.Fatal("expected embedded wrapper to expose core run prompt client")
 	}
+	coreProjectID := appCore.ProjectID()
+	coreProjects, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("core ListProjects: %v", err)
+	}
+	if err := appCore.Close(); err != nil {
+		t.Fatalf("appCore.Close: %v", err)
+	}
 
 	started, err := Start(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -261,12 +282,8 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	if started.Core == nil {
 		t.Fatal("expected embedded server to carry core")
 	}
-	if started.ProjectID() != appCore.ProjectID() {
-		t.Fatalf("project id mismatch: started=%q core=%q", started.ProjectID(), appCore.ProjectID())
-	}
-	coreProjects, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
-	if err != nil {
-		t.Fatalf("core ListProjects: %v", err)
+	if started.ProjectID() != coreProjectID {
+		t.Fatalf("project id mismatch: started=%q core=%q", started.ProjectID(), coreProjectID)
 	}
 	startedProjects, err := started.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
 	if err != nil {
@@ -287,6 +304,7 @@ func TestHeadlessHandlersStartCoreWithoutCLIFrontendDependencies(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	registerStartupWorkspace(t, workspace)
 	appCore, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
 	if err != nil {
 		t.Fatalf("StartCore: %v", err)
@@ -304,6 +322,26 @@ func TestHeadlessHandlersStartCoreWithoutCLIFrontendDependencies(t *testing.T) {
 	}
 	if _, err := os.Stat(appCore.Config().Source.SettingsPath); err != nil {
 		t.Fatalf("expected settings file to exist: %v", err)
+	}
+}
+
+func TestStartCoreRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	registerStartupWorkspace(t, workspace)
+	first, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
+	if err != nil {
+		t.Fatalf("StartCore first: %v", err)
+	}
+	defer func() { _ = first.Close() }()
+
+	_, err = StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
+	if !errors.Is(err, rootlock.ErrPersistenceRootBusy) {
+		t.Fatalf("StartCore second error = %v, want ErrPersistenceRootBusy", err)
 	}
 }
 
@@ -327,6 +365,7 @@ func TestHeadlessHandlersAllowExplicitOpenAIBaseURLWithoutCredentials(t *testing
 	t.Setenv("OPENAI_API_KEY", "")
 
 	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	registerStartupWorkspace(t, workspace)
 	appCore, err := StartCore(context.Background(), Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,

@@ -12,6 +12,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/transcriptdiag"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +22,8 @@ type embeddedServer interface {
 	Close() error
 	OwnsServer() bool
 	Config() config.App
+	BindProject(ctx context.Context, projectID string) (embeddedServer, error)
+	BindProjectWorkspace(ctx context.Context, projectID string, workspaceID string) (embeddedServer, error)
 	AuthManager() *auth.Manager
 	ProjectID() string
 	ApprovalViewClient() client.ApprovalViewClient
@@ -43,7 +46,10 @@ type embeddedServer interface {
 }
 
 type embeddedAppServer struct {
-	inner *serverembedded.Server
+	inner              *serverembedded.Server
+	boundProjectID     string
+	boundSessionLaunch client.SessionLaunchClient
+	boundRunPrompt     client.RunPromptClient
 }
 
 func newEmbeddedAppServer(inner *serverembedded.Server) *embeddedAppServer {
@@ -71,6 +77,46 @@ func (s *embeddedAppServer) Config() config.App {
 	return s.inner.Config()
 }
 
+func (s *embeddedAppServer) BindProject(ctx context.Context, projectID string) (embeddedServer, error) {
+	return s.BindProjectWorkspace(ctx, projectID, "")
+}
+
+func (s *embeddedAppServer) BindProjectWorkspace(ctx context.Context, projectID string, workspaceID string) (embeddedServer, error) {
+	if s == nil || s.inner == nil {
+		return nil, errors.New("embedded server is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return nil, errors.New("project id is required")
+	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	var launchClient client.SessionLaunchClient
+	var runPromptClient client.RunPromptClient
+	var err error
+	if trimmedWorkspaceID != "" {
+		launchClient, err = s.inner.SessionLaunchClientForProjectWorkspaceID(ctx, trimmedProjectID, trimmedWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		runPromptClient, err = s.inner.RunPromptClientForProjectWorkspaceID(ctx, trimmedProjectID, trimmedWorkspaceID)
+	} else {
+		launchClient, err = s.inner.SessionLaunchClientForProjectWorkspace(ctx, trimmedProjectID, s.Config().WorkspaceRoot)
+		if err != nil {
+			return nil, err
+		}
+		runPromptClient, err = s.inner.RunPromptClientForProjectWorkspace(ctx, trimmedProjectID, s.Config().WorkspaceRoot)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &embeddedAppServer{
+		inner:              s.inner,
+		boundProjectID:     trimmedProjectID,
+		boundSessionLaunch: launchClient,
+		boundRunPrompt:     runPromptClient,
+	}, nil
+}
+
 func (s *embeddedAppServer) AuthManager() *auth.Manager {
 	if s == nil || s.inner == nil {
 		return nil
@@ -79,7 +125,13 @@ func (s *embeddedAppServer) AuthManager() *auth.Manager {
 }
 
 func (s *embeddedAppServer) ProjectID() string {
-	if s == nil || s.inner == nil {
+	if s == nil {
+		return ""
+	}
+	if trimmed := strings.TrimSpace(s.boundProjectID); trimmed != "" {
+		return trimmed
+	}
+	if s.inner == nil {
 		return ""
 	}
 	return s.inner.ProjectID()
@@ -121,14 +173,26 @@ func (s *embeddedAppServer) PromptActivityClient() client.PromptActivityClient {
 }
 
 func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
-	if s == nil || s.inner == nil {
+	if s == nil {
+		return nil
+	}
+	if s.boundRunPrompt != nil {
+		return s.boundRunPrompt
+	}
+	if s.inner == nil {
 		return nil
 	}
 	return s.inner.RunPromptClient()
 }
 
 func (s *embeddedAppServer) SessionLaunchClient() client.SessionLaunchClient {
-	if s == nil || s.inner == nil {
+	if s == nil {
+		return nil
+	}
+	if s.boundSessionLaunch != nil {
+		return s.boundSessionLaunch
+	}
+	if s.inner == nil {
 		return nil
 	}
 	return s.inner.SessionLaunchClient()
@@ -224,37 +288,44 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		SessionID:       plan.SessionID,
 		ActiveSettings:  plan.ActiveSettings,
 		EnabledToolIDs:  toolIDs,
-		WorkspaceRoot:   plan.WorkspaceRoot,
 		Source:          plan.Source,
 	}
-	if err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, activateReq); err != nil {
+	activateResp, err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, activateReq)
+	if err != nil {
 		return nil, err
+	}
+	leaseID := strings.TrimSpace(activateResp.LeaseID)
+	if leaseID == "" {
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
+		return nil, errors.New("session runtime activation returned empty controller lease id")
 	}
 	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
-		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		return nil, err
 	}
 	promptSub, err := server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		_ = sub.Close()
-		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		return nil, err
 	}
 	logger := &runLogger{}
 	_ = diagnosticWriter
 	logger.Logf("%s", startLogLine)
+	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()).(*sessionRuntimeClient)
+	runtimeClient.SetControllerLeaseID(leaseID)
+	runtimeClient.SetTranscriptDiagnosticsEnabled(transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug))
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
 		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
-	}, func(line string) {
+	}, runtimeClient.transcriptDiagnosticsEnabled, func(line string) {
 		logger.Logf("%s", line)
 	})
 	askEvents, stopAskEvents := startPendingPromptEvents(ctx, promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
-	}, server.PromptControlClient())
-	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient())
+	}, server.PromptControlClient(), runtimeClient.controllerLeaseIDValue)
 	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
@@ -280,23 +351,27 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		sessionViews:    server.SessionViewClient(),
 	}
 	return &runtimeLaunchPlan{
-		Logger: logger,
-		Wiring: wiring,
+		Logger:            logger,
+		Wiring:            wiring,
+		ControllerLeaseID: leaseID,
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()
-			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		},
 	}, nil
 }
 
-func releaseSharedRuntime(client serverapi.SessionRuntimeService, sessionID string) {
+func releaseSharedRuntime(client serverapi.SessionRuntimeService, sessionID string, leaseID string) {
 	if client == nil {
+		return
+	}
+	if strings.TrimSpace(leaseID) == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), runtimeReleaseTimeout)
 	defer cancel()
-	_ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID})
+	_, _ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID, LeaseID: leaseID})
 }
 
 func listPendingPromptIDs(ctx context.Context, sessionID string, askViews client.AskViewClient, approvalViews client.ApprovalViewClient) (map[string]struct{}, error) {

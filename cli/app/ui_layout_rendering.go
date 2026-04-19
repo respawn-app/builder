@@ -179,14 +179,32 @@ func (l uiViewLayout) queuedVisibleMessages() ([]queuedPaneEntry, int) {
 }
 
 func (l uiViewLayout) queuedMessages() []queuedPaneEntry {
-	entries := make([]queuedPaneEntry, 0, len(l.model.queued)+len(l.model.pendingInjected))
+	deferredPending := l.model.deferredPendingInjectedMessages()
+	entries := make([]queuedPaneEntry, 0, len(l.model.queued)+len(deferredPending)+len(l.model.pendingInjected))
 	for _, message := range l.model.queued {
 		entries = append(entries, queuedPaneEntry{Text: message, Kind: queuedPaneEntryQueued})
+	}
+	for _, message := range deferredPending {
+		entries = append(entries, queuedPaneEntry{Text: message, Kind: queuedPaneEntryPending})
 	}
 	for _, message := range l.model.pendingInjected {
 		entries = append(entries, queuedPaneEntry{Text: message, Kind: queuedPaneEntryPending})
 	}
 	return entries
+}
+
+func (m *uiModel) deferredPendingInjectedMessages() []string {
+	if m == nil || len(m.deferredCommittedTail) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(m.deferredCommittedTail))
+	for _, deferred := range m.deferredCommittedTail {
+		messages = append(messages, deferred.pending...)
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	return messages
 }
 
 func (e queuedPaneEntry) displayText() string {
