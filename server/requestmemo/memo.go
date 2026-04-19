@@ -60,6 +60,10 @@ func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, sam
 			return zero, ctx.Err()
 		}
 	}
+	if !m.ensureCapacityForInsertLocked() {
+		m.mu.Unlock()
+		return run(ctx)
+	}
 	now := m.now()
 	e := &entry[Req, Resp]{req: req, done: make(chan struct{}), createdAt: now}
 	m.entries[requestID] = e
@@ -104,6 +108,18 @@ func (m *Memo[Req, Resp]) pruneLocked() {
 		}
 		delete(m.entries, oldestKey)
 	}
+}
+
+func (m *Memo[Req, Resp]) ensureCapacityForInsertLocked() bool {
+	if m == nil || m.maxEntries <= 0 || len(m.entries) < m.maxEntries {
+		return true
+	}
+	oldestKey, found := oldestCompletedEntryKey(m.entries)
+	if !found {
+		return false
+	}
+	delete(m.entries, oldestKey)
+	return len(m.entries) < m.maxEntries
 }
 
 func shouldMemoize(err error) bool {

@@ -301,6 +301,9 @@ func TestGatewayAuthBootstrapStatusAllowedBeforeAttach(t *testing.T) {
 	if !containsString(status.AllowedPreAuthMethods, protocol.MethodAuthCompleteBootstrap) {
 		t.Fatalf("allowed pre-auth methods = %+v, want %q", status.AllowedPreAuthMethods, protocol.MethodAuthCompleteBootstrap)
 	}
+	if !sameStringSet(status.AllowedPreAuthMethods, protocol.AllowedPreAuthMethods()) {
+		t.Fatalf("allowed pre-auth methods = %+v, want %+v", status.AllowedPreAuthMethods, protocol.AllowedPreAuthMethods())
+	}
 }
 
 func TestGatewayAuthBootstrapAPIKeyCompletionEnablesAuthRequiredMethods(t *testing.T) {
@@ -490,6 +493,28 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func sameStringSet(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, item := range left {
+		counts[item]++
+	}
+	for _, item := range right {
+		counts[item]--
+		if counts[item] < 0 {
+			return false
+		}
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {

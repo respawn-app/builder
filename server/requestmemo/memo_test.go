@@ -105,3 +105,51 @@ func TestMemoPrunesExpiredEntriesBelowCapacity(t *testing.T) {
 		t.Fatalf("req-1 run calls = %d, want 2", firstCalls)
 	}
 }
+
+func TestMemoDoesNotGrowPastCapacityWhenOnlyInflightEntriesExist(t *testing.T) {
+	memo := New[string, string]()
+	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	memo.now = func() time.Time { return base }
+	memo.maxEntries = 2
+	memo.entries["req-1"] = &entry[string, string]{req: "a", done: make(chan struct{}), createdAt: base}
+	memo.entries["req-2"] = &entry[string, string]{req: "b", done: make(chan struct{}), createdAt: base.Add(time.Second)}
+
+	runCalls := 0
+	resp, err := memo.Do(context.Background(), "req-3", "c", func(a string, b string) bool {
+		return a == b
+	}, func(context.Context) (string, error) {
+		runCalls++
+		return "fresh", nil
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if resp != "fresh" {
+		t.Fatalf("response = %q, want fresh", resp)
+	}
+	if runCalls != 1 {
+		t.Fatalf("run calls = %d, want 1", runCalls)
+	}
+	if got := len(memo.entries); got != 2 {
+		t.Fatalf("memo size = %d, want 2", got)
+	}
+	if _, ok := memo.entries["req-3"]; ok {
+		t.Fatalf("did not expect req-3 to be memoized at capacity, entries=%+v", memo.entries)
+	}
+
+	resp, err = memo.Do(context.Background(), "req-3", "c", func(a string, b string) bool {
+		return a == b
+	}, func(context.Context) (string, error) {
+		runCalls++
+		return "fresh-again", nil
+	})
+	if err != nil {
+		t.Fatalf("second Do: %v", err)
+	}
+	if resp != "fresh-again" {
+		t.Fatalf("second response = %q, want fresh-again", resp)
+	}
+	if runCalls != 2 {
+		t.Fatalf("run calls after second request = %d, want 2", runCalls)
+	}
+}
