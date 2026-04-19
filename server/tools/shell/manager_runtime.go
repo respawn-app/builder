@@ -90,7 +90,11 @@ func (m *Manager) Close() error {
 		}
 	}
 
-	graceDeadline := time.Now().Add(closeGracePeriod)
+	gracePeriod := m.closeGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = closeGracePeriod
+	}
+	graceDeadline := time.Now().Add(gracePeriod)
 	for _, entry := range entries {
 		if waitForEntryDone(entry, time.Until(graceDeadline)) {
 			continue
@@ -103,7 +107,11 @@ func (m *Manager) Close() error {
 		}
 	}
 
-	deadline := time.Now().Add(closeWaitTimeout)
+	waitTimeout := m.closeWaitTimeout
+	if waitTimeout <= 0 {
+		waitTimeout = closeWaitTimeout
+	}
+	deadline := time.Now().Add(waitTimeout)
 	pending := make([]string, 0)
 	for _, entry := range entries {
 		if waitForEntryDone(entry, time.Until(deadline)) {
