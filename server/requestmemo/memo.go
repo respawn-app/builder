@@ -2,6 +2,7 @@ package requestmemo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -67,21 +68,23 @@ func (m *Memo[Req, Resp]) Do(ctx context.Context, requestID string, req Req, sam
 	resp, err := run(ctx)
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	e.resp = resp
 	e.err = err
-	e.completedAt = m.now()
+	if shouldMemoize(err) {
+		e.completedAt = m.now()
+	} else {
+		delete(m.entries, requestID)
+	}
 	close(e.done)
-	m.mu.Unlock()
 	return resp, err
 }
 
 func (m *Memo[Req, Resp]) pruneLocked() {
-	if m == nil || len(m.entries) < m.maxEntries {
+	if m == nil || len(m.entries) == 0 {
 		return
 	}
 	now := m.now()
-	oldestKey := ""
-	var oldestTime time.Time
 	for key, item := range m.entries {
 		if item == nil {
 			delete(m.entries, key)
@@ -89,25 +92,37 @@ func (m *Memo[Req, Resp]) pruneLocked() {
 		}
 		if !item.completedAt.IsZero() && now.Sub(item.completedAt) >= m.ttl {
 			delete(m.entries, key)
+		}
+	}
+	if m.maxEntries <= 0 {
+		return
+	}
+	for len(m.entries) >= m.maxEntries {
+		oldestKey, found := oldestCompletedEntryKey(m.entries)
+		if !found {
+			return
+		}
+		delete(m.entries, oldestKey)
+	}
+}
+
+func shouldMemoize(err error) bool {
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func oldestCompletedEntryKey[Req any, Resp any](entries map[string]*entry[Req, Resp]) (string, bool) {
+	oldestKey := ""
+	var oldestTime time.Time
+	found := false
+	for key, item := range entries {
+		if item == nil || item.completedAt.IsZero() {
 			continue
 		}
-		if oldestKey == "" || item.createdAt.Before(oldestTime) {
+		if !found || item.createdAt.Before(oldestTime) {
 			oldestKey = key
 			oldestTime = item.createdAt
+			found = true
 		}
 	}
-	for len(m.entries) >= m.maxEntries && oldestKey != "" {
-		delete(m.entries, oldestKey)
-		oldestKey = ""
-		for key, item := range m.entries {
-			if item == nil {
-				delete(m.entries, key)
-				continue
-			}
-			if oldestKey == "" || item.createdAt.Before(oldestTime) {
-				oldestKey = key
-				oldestTime = item.createdAt
-			}
-		}
-	}
+	return oldestKey, found
 }
