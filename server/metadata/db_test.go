@@ -1,12 +1,38 @@
 package metadata
 
 import (
+	"bytes"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 )
+
+func TestOpenSuppressesGooseStatusLogging(t *testing.T) {
+	root := t.TempDir()
+	var buf bytes.Buffer
+	previousDebug := metadataMigrationDebugLogs
+	previousWriter := metadataMigrationLogWriter
+	metadataMigrationDebugLogs = false
+	metadataMigrationLogWriter = &buf
+	t.Cleanup(func() {
+		metadataMigrationDebugLogs = previousDebug
+		metadataMigrationLogWriter = previousWriter
+	})
+
+	store, err := Open(root)
+	if err != nil {
+		t.Fatalf("open metadata store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close metadata store: %v", err)
+	}
+	if strings.Contains(buf.String(), "goose:") {
+		t.Fatalf("did not expect goose status log output, got %q", buf.String())
+	}
+}
 
 func TestOpenAllowsDatabaseAtRemovedMigrationVersion(t *testing.T) {
 	root := t.TempDir()

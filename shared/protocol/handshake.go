@@ -25,6 +25,7 @@ const (
 	MethodSessionGetTranscriptPage                 = "session.getTranscriptPage"
 	MethodSessionGetInitialInput                   = "session.getInitialInput"
 	MethodSessionPersistInputDraft                 = "session.persistInputDraft"
+	MethodSessionRetargetWorkspace                 = "session.retargetWorkspace"
 	MethodSessionResolveTransition                 = "session.resolveTransition"
 	MethodSessionRuntimeActivate                   = "session.runtime.activate"
 	MethodSessionRuntimeRelease                    = "session.runtime.release"

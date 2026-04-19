@@ -21,6 +21,8 @@ const (
 	defaultPickerHeight         = 24
 )
 
+var runSessionPickerFlow = runSessionPicker
+
 type sessionPickerResult struct {
 	CreateNew bool
 	Session   *clientui.SessionSummary

@@ -512,6 +512,9 @@ func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptUnsupported, Message: "unsupported"}); !errors.Is(err, serverapi.ErrPromptUnsupported) {
 		t.Fatalf("expected prompt unsupported, got %v", err)
 	}
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeMethodNotFound, Message: "missing method"}); !errors.Is(err, serverapi.ErrMethodNotFound) {
+		t.Fatalf("expected rpc method not found, got %v", err)
+	}
 }
 
 func TestProtocolErrorMapsAuthRequiredCode(t *testing.T) {

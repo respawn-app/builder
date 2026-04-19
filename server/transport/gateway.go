@@ -273,6 +273,10 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			}
 			return g.core.SessionLifecycleClient().PersistInputDraft(ctx, params)
 		})
+	case protocol.MethodSessionRetargetWorkspace:
+		return decodeAndHandle(req, func(params serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+			return g.core.SessionLifecycleClient().RetargetSessionWorkspace(ctx, params)
+		})
 	case protocol.MethodSessionResolveTransition:
 		return decodeAndHandle(req, func(params serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 			if err := g.requireSessionInActiveProjectIfPresent(ctx, state, params.SessionID); err != nil {

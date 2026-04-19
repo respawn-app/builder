@@ -403,6 +403,8 @@ func protocolError(resp *protocol.ResponseError) error {
 		message = "protocol request failed"
 	}
 	switch resp.Code {
+	case protocol.ErrCodeMethodNotFound:
+		return errors.Join(serverapi.ErrMethodNotFound, errors.New(message))
 	case protocol.ErrCodeAuthRequired:
 		return errors.Join(serverapi.ErrServerAuthRequired, errors.New(message))
 	case protocol.ErrCodeStreamGap:
