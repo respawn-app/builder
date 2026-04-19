@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"builder/server/primaryrun"
 )
 
 const (
@@ -123,7 +125,9 @@ func (m *Memo[Req, Resp]) ensureCapacityForInsertLocked() bool {
 }
 
 func shouldMemoize(err error) bool {
-	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	return !errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, primaryrun.ErrActivePrimaryRun)
 }
 
 func oldestCompletedEntryKey[Req any, Resp any](entries map[string]*entry[Req, Resp]) (string, bool) {
