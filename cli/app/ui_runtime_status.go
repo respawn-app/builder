@@ -83,6 +83,9 @@ func (m *uiModel) localRuntimeStatus() clientui.RuntimeStatus {
 func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) string {
 	answer := ""
 	for _, entry := range entries {
+		if !transcriptEntryCommittedForApp(entry) {
+			break
+		}
 		if !transcriptEntryAffectsCommittedAssistantFinalAnswer(entry) {
 			continue
 		}
@@ -105,8 +108,9 @@ func transcriptEntryAffectsCommittedAssistantFinalAnswer(entry tui.TranscriptEnt
 }
 
 func (m *uiModel) localRuntimeTranscript() clientui.TranscriptPage {
-	entries := make([]clientui.ChatEntry, 0, len(m.transcriptEntries))
-	for _, entry := range m.transcriptEntries {
+	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
+	entries := make([]clientui.ChatEntry, 0, len(committedEntries))
+	for _, entry := range committedEntries {
 		entries = append(entries, clientui.ChatEntry{
 			Visibility:  entry.Visibility,
 			Role:        entry.Role,

@@ -176,6 +176,42 @@ func TestCommittedOngoingProjectionPreservesSuccessStateForEmptyToolResult(t *te
 	}
 }
 
+func TestCommittedOngoingPrefixEndExcludesToolCallWhenMatchingResultIsTransient(t *testing.T) {
+	entries := []TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1", Transient: true},
+	}
+
+	if got := committedOngoingPrefixEnd(entries); got != 1 {
+		t.Fatalf("committedOngoingPrefixEnd = %d, want 1", got)
+	}
+	committed := CommittedOngoingEntries(entries)
+	if len(committed) != 1 || committed[0].Role != "user" {
+		t.Fatalf("expected committed entries to exclude unresolved tool pair, got %#v", committed)
+	}
+}
+
+func TestCommittedOngoingPrefixEndKeepsResolvedToolPairBeforeLaterTransientEntry(t *testing.T) {
+	entries := []TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1"},
+		{Role: "assistant", Text: "streaming", Transient: true},
+	}
+
+	if got := committedOngoingPrefixEnd(entries); got != 3 {
+		t.Fatalf("committedOngoingPrefixEnd = %d, want 3", got)
+	}
+	committed := CommittedOngoingEntries(entries)
+	if len(committed) != 3 {
+		t.Fatalf("expected committed entries to keep resolved tool pair, got %#v", committed)
+	}
+	if committed[1].Role != "tool_call" || committed[2].Role != "tool_result_ok" {
+		t.Fatalf("expected committed tool pair before transient tail, got %#v", committed)
+	}
+}
+
 func TestCommittedOngoingProjectionPreservesWebSearchSuccessState(t *testing.T) {
 	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})

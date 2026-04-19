@@ -8,19 +8,62 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"builder/server/auth"
 	"builder/server/core"
 	"builder/server/startup"
 	"builder/server/transport"
-	"builder/shared/discovery"
+	"builder/shared/config"
 	"builder/shared/protocol"
 )
 
 type Server struct {
 	*core.Core
 	ready atomic.Bool
+}
+
+var localSocketListener = listenLocalSocket
+
+var (
+	testListenReservationsMu sync.Mutex
+	testListenReservations   = map[string]net.Listener{}
+)
+
+// ReserveTestListenReservation keeps a test-owned listener alive until the
+// configured daemon bind path is ready to claim the same address.
+func ReserveTestListenReservation(listener net.Listener) {
+	if listener == nil {
+		return
+	}
+	addr := strings.TrimSpace(listener.Addr().String())
+	if addr == "" {
+		_ = listener.Close()
+		return
+	}
+	testListenReservationsMu.Lock()
+	if existing := testListenReservations[addr]; existing != nil {
+		_ = existing.Close()
+	}
+	testListenReservations[addr] = listener
+	testListenReservationsMu.Unlock()
+}
+
+func ReleaseTestListenReservation(addr string) {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" {
+		return
+	}
+	testListenReservationsMu.Lock()
+	listener := testListenReservations[trimmed]
+	delete(testListenReservations, trimmed)
+	testListenReservationsMu.Unlock()
+	if listener != nil {
+		_ = listener.Close()
+	}
 }
 
 func Start(ctx context.Context, req startup.Request, authHandler startup.AuthHandler, onboardingHandler startup.OnboardingHandler) (*Server, error) {
@@ -50,21 +93,33 @@ func (s *Server) Serve(ctx context.Context) error {
 	if s == nil || s.Core == nil {
 		return errors.New("server core is required")
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listenAddress := config.ServerListenAddress(s.Config())
+	ReleaseTestListenReservation(listenAddress)
+	tcpListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen local control endpoint: %w", err)
 	}
-	defer func() { _ = listener.Close() }()
+	cleanupFns := []func(){func() { _ = tcpListener.Close() }}
+	defer func() {
+		for _, cleanup := range cleanupFns {
+			cleanup()
+		}
+	}()
+	listeners := []net.Listener{tcpListener}
+	if localListener, localCleanup, ok, err := localSocketListener(s.Config()); err != nil {
+		// Derived same-machine UDS is additive only. Configured TCP stays authoritative.
+	} else if ok {
+		listeners = append(listeners, localListener)
+		cleanupFns = append(cleanupFns, localCleanup)
+	}
 
-	baseURL := "http://" + listener.Addr().String()
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
-		ServerID:        fmt.Sprintf("%s:%d", s.ProjectID(), os.Getpid()),
-		ProjectID:       s.ProjectID(),
-		WorkspaceRoot:   s.Config().WorkspaceRoot,
+		ServerID:        fmt.Sprintf("builder:%d", os.Getpid()),
 		PID:             os.Getpid(),
 		Capabilities: protocol.CapabilityFlags{
 			JSONRPCWebSocket:        true,
+			AuthBootstrap:           true,
 			ProjectAttach:           true,
 			SessionAttach:           true,
 			HealthEndpoint:          true,
@@ -85,84 +140,94 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	record := protocol.DiscoveryRecord{
-		Identity:  identity,
-		HTTPURL:   baseURL,
-		RPCURL:    "ws://" + listener.Addr().String() + protocol.RPCPath,
-		HealthURL: baseURL + protocol.HealthPath,
-		ReadyURL:  baseURL + protocol.ReadinessPath,
-		StartedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	discoveryPath, err := discovery.PathForContainer(s.ContainerDir())
-	if err != nil {
-		return err
-	}
-	if err := discovery.Write(discoveryPath, record); err != nil {
-		return err
-	}
-	defer func() { _ = cleanupDiscoveryRecord(discoveryPath, record) }()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		writeStatusJSON(w, http.StatusOK, map[string]any{
-			"status":         "ok",
-			"project_id":     s.ProjectID(),
-			"workspace_root": s.Config().WorkspaceRoot,
+			"status":     "ok",
+			"server_id":  identity.ServerID,
+			"pid":        identity.PID,
+			"auth_ready": authReady,
 		})
 	})
 	s.ready.Store(true)
-	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, r *http.Request) {
+		authReady := serverAuthReady(r.Context(), s.Core)
 		status := http.StatusServiceUnavailable
-		body := map[string]any{"ready": false}
-		if s.ready.Load() {
+		body := map[string]any{"ready": false, "auth_ready": authReady}
+		if s.ready.Load() && authReady {
 			status = http.StatusOK
 			body = map[string]any{
-				"ready":          true,
-				"project_id":     s.ProjectID(),
-				"workspace_root": s.Config().WorkspaceRoot,
+				"ready":      true,
+				"server_id":  identity.ServerID,
+				"pid":        identity.PID,
+				"auth_ready": true,
 			}
+		} else if s.ready.Load() {
+			body["transport_ready"] = true
+			body["server_id"] = identity.ServerID
+			body["pid"] = identity.PID
 		}
 		writeStatusJSON(w, status, body)
 	})
 	mux.Handle(protocol.RPCPath, gateway.Handler())
 
-	httpServer := &http.Server{Handler: mux}
-	errCh := make(chan error, 1)
-	go func() {
-		serveErr := httpServer.Serve(listener)
-		if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
-			errCh <- nil
-			return
+	httpServers := make([]*http.Server, 0, len(listeners))
+	errCh := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		httpServer := &http.Server{Handler: mux}
+		httpServers = append(httpServers, httpServer)
+		go func(server *http.Server, frontend net.Listener) {
+			serveErr := server.Serve(frontend)
+			if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
+				errCh <- nil
+				return
+			}
+			errCh <- serveErr
+		}(httpServer, listener)
+	}
+	shutdownServers := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, httpServer := range httpServers {
+			_ = httpServer.Shutdown(shutdownCtx)
 		}
-		errCh <- serveErr
-	}()
+	}
+	waitServers := func(expect int) {
+		for i := 0; i < expect; i++ {
+			<-errCh
+		}
+	}
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
-		<-errCh
+		shutdownServers()
+		waitServers(len(listeners))
 		return ctx.Err()
 	case serveErr := <-errCh:
+		shutdownServers()
+		waitServers(len(listeners) - 1)
 		return serveErr
 	}
-}
-
-func cleanupDiscoveryRecord(path string, record protocol.DiscoveryRecord) error {
-	current, err := discovery.Read(path)
-	if err != nil {
-		return nil
-	}
-	if current.Identity.ServerID != record.Identity.ServerID || current.StartedAt != record.StartedAt {
-		return nil
-	}
-	return discovery.Remove(path)
 }
 
 func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func serverAuthReady(ctx context.Context, appCore *core.Core) bool {
+	if appCore == nil || appCore.AuthManager() == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state, err := appCore.AuthManager().Load(ctx)
+	if err != nil {
+		return false
+	}
+	return auth.EvaluateStartupGate(state).Ready
 }

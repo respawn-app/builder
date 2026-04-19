@@ -10,16 +10,13 @@ import (
 
 func (m *uiModel) refreshRollbackCandidates() {
 	candidates := make([]rollbackCandidate, 0)
-	userMessageIndex := 0
 	for idx, entry := range m.transcriptEntries {
 		if strings.TrimSpace(entry.Role) != "user" {
 			continue
 		}
-		userMessageIndex++
 		candidates = append(candidates, rollbackCandidate{
-			TranscriptIndex:  idx,
-			UserMessageIndex: userMessageIndex,
-			Text:             entry.Text,
+			TranscriptIndex: m.transcriptBaseOffset + idx,
+			Text:            entry.Text,
 		})
 	}
 	m.rollback.candidates = candidates
@@ -27,7 +24,7 @@ func (m *uiModel) refreshRollbackCandidates() {
 		m.rollback.selection = 0
 		m.rollback.phase = uiRollbackPhaseInactive
 		m.rollback.ownsTranscriptMode = false
-		m.rollback.selectedUserMessageIndex = 0
+		m.rollback.selectedTranscriptEntry = -1
 		m.clearRollbackSelectionHighlight()
 		if m.inputMode() == uiInputModeRollbackSelection || m.inputMode() == uiInputModeRollbackEdit {
 			m.restorePrimaryInputMode()
@@ -54,10 +51,10 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 	if len(m.rollback.candidates) == 0 {
 		return false
 	}
-	if m.rollback.selectedUserMessageIndex > 0 {
+	if m.rollback.selectedTranscriptEntry >= 0 {
 		matched := -1
 		for idx, candidate := range m.rollback.candidates {
-			if candidate.UserMessageIndex == m.rollback.selectedUserMessageIndex {
+			if candidate.TranscriptIndex == m.rollback.selectedTranscriptEntry {
 				matched = idx
 				break
 			}
@@ -69,7 +66,7 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 		m.rollback.selection = len(m.rollback.candidates) - 1
 	}
 	m.rollback.phase = uiRollbackPhaseSelection
-	m.rollback.selectedUserMessageIndex = 0
+	m.rollback.selectedTranscriptEntry = -1
 	m.setInputMode(uiInputModeRollbackSelection)
 	m.clearInput()
 	m.applyRollbackSelectionHighlight()
@@ -128,7 +125,7 @@ func (m *uiModel) beginRollbackEditing() (int, bool) {
 		return -1, false
 	}
 	selected := m.rollback.candidates[m.rollback.selection]
-	m.rollback.selectedUserMessageIndex = selected.UserMessageIndex
+	m.rollback.selectedTranscriptEntry = selected.TranscriptIndex
 	m.rollback.phase = uiRollbackPhaseEditing
 	m.setInputMode(uiInputModeRollbackEdit)
 	m.replaceMainInput(selected.Text, -1)
@@ -147,7 +144,7 @@ func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
 func (m *uiModel) clearRollbackFlow() {
 	m.rollback.phase = uiRollbackPhaseInactive
 	m.rollback.ownsTranscriptMode = false
-	m.rollback.selectedUserMessageIndex = 0
+	m.rollback.selectedTranscriptEntry = -1
 	m.rollback.restoreScrollActive = false
 	m.clearRollbackSelectionHighlight()
 	m.restorePrimaryInputMode()

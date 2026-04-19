@@ -10,11 +10,11 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/sessionpath"
-	"builder/server/tools"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -53,7 +53,7 @@ type SessionRequest struct {
 type SessionPlan struct {
 	Store               *session.Store
 	ActiveSettings      config.Settings
-	EnabledTools        []tools.ID
+	EnabledTools        []toolspec.ID
 	ConfiguredModelName string
 	SessionName         string
 	ModelContractLocked bool
@@ -249,6 +249,10 @@ func (p Planner) createSession(parentSessionID string) (*session.Store, error) {
 		if err := created.SetParentSessionID(parentSessionID); err != nil {
 			return nil, err
 		}
+	} else {
+		if err := created.EnsureDurable(); err != nil {
+			return nil, err
+		}
 	}
 	return created, nil
 }
@@ -279,51 +283,51 @@ func EffectiveSettings(base config.Settings, locked *session.LockedContract) con
 	return out
 }
 
-func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []tools.ID {
+func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []toolspec.ID {
 	if locked != nil {
-		ids := make([]tools.ID, 0, len(locked.EnabledTools))
+		ids := make([]toolspec.ID, 0, len(locked.EnabledTools))
 		for _, raw := range locked.EnabledTools {
-			if id, ok := tools.ParseID(raw); ok {
+			if id, ok := toolspec.ParseID(raw); ok {
 				ids = append(ids, id)
 			}
 		}
 		return DedupeSortToolIDs(ids)
 	}
 	ids := config.EnabledToolIDs(settings)
-	sourceKind := strings.TrimSpace(source.Sources["tools."+string(tools.ToolMultiToolUseParallel)])
+	sourceKind := strings.TrimSpace(source.Sources["tools."+string(toolspec.ToolMultiToolUseParallel)])
 	if sourceKind != "" && sourceKind != "default" {
 		return DedupeSortToolIDs(ids)
 	}
-	enabled := map[tools.ID]bool{}
+	enabled := map[toolspec.ID]bool{}
 	for _, id := range ids {
 		enabled[id] = true
 	}
 	if llm.SupportsMultiToolUseParallelModel(settings.Model) {
-		enabled[tools.ToolMultiToolUseParallel] = true
+		enabled[toolspec.ToolMultiToolUseParallel] = true
 	} else {
-		delete(enabled, tools.ToolMultiToolUseParallel)
+		delete(enabled, toolspec.ToolMultiToolUseParallel)
 	}
-	resolved := make([]tools.ID, 0, len(enabled))
+	resolved := make([]toolspec.ID, 0, len(enabled))
 	for id := range enabled {
 		resolved = append(resolved, id)
 	}
 	return DedupeSortToolIDs(resolved)
 }
 
-func cloneEnabledToolSet(in map[tools.ID]bool) map[tools.ID]bool {
+func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {
 	if len(in) == 0 {
-		return map[tools.ID]bool{}
+		return map[toolspec.ID]bool{}
 	}
-	out := make(map[tools.ID]bool, len(in))
+	out := make(map[toolspec.ID]bool, len(in))
 	for id, enabled := range in {
 		out[id] = enabled
 	}
 	return out
 }
 
-func DedupeSortToolIDs(ids []tools.ID) []tools.ID {
-	seen := map[tools.ID]bool{}
-	out := make([]tools.ID, 0, len(ids))
+func DedupeSortToolIDs(ids []toolspec.ID) []toolspec.ID {
+	seen := map[toolspec.ID]bool{}
+	out := make([]toolspec.ID, 0, len(ids))
 	for _, id := range ids {
 		if seen[id] {
 			continue

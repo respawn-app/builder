@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
 		if req.Method != protocol.MethodHandshake {
 			t.Fatalf("handshake method = %q", req.Method)
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			t.Fatalf("send handshake response: %v", err)
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -49,7 +50,7 @@ func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -96,7 +97,7 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -162,7 +163,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -243,7 +244,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -300,6 +301,207 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 	}
 }
 
+func TestRemoteProcessOutputSubscriptionAttachesProjectBeforeSubscribe(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project before process output subscribe, got %q", req.Method)
+		}
+		var attach protocol.AttachProjectRequest
+		if err := json.Unmarshal(req.Params, &attach); err != nil {
+			t.Fatalf("decode attach-project: %v", err)
+		}
+		if attach.ProjectID != "project-1" {
+			t.Fatalf("attach project id = %q, want project-1", attach.ProjectID)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: attach.ProjectID})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodProcessSubscribeOutput {
+			t.Fatalf("expected process output subscribe after attach-project, got %q", req.Method)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		_ = websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodProcessOutputComplete, Params: mustJSON(t, protocol.StreamCompleteParams{})})
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1"})
+	if err != nil {
+		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+}
+
+func TestDialRemoteURLForProjectAttachesProjectAndReturnsRemote(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project during dial, got %q", req.Method)
+		}
+		var attach protocol.AttachProjectRequest
+		if err := json.Unmarshal(req.Params, &attach); err != nil {
+			t.Fatalf("decode attach-project: %v", err)
+		}
+		if attach.ProjectID != "project-1" {
+			t.Fatalf("attach project id = %q, want project-1", attach.ProjectID)
+		}
+		_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: attach.ProjectID}))
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+	if got := remote.ProjectID(); got != "project-1" {
+		t.Fatalf("ProjectID = %q, want project-1", got)
+	}
+	if got := remote.Identity().ServerID; got != "server-1" {
+		t.Fatalf("server id = %q, want server-1", got)
+	}
+}
+
+func TestDialRemoteURLForProjectValidatesAttachProject(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project during dial, got %q", req.Method)
+		}
+		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, "project not available"))
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-missing")
+	if err == nil {
+		if remote != nil {
+			_ = remote.Close()
+		}
+		t.Fatal("expected dial to fail when project attach is rejected")
+	}
+	if remote != nil {
+		t.Fatalf("expected nil remote on attach failure, got %v", remote)
+	}
+}
+
+func TestRemoteProjectViewCallsReuseInitialProjectAttach(t *testing.T) {
+	var attachCount atomic.Int32
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			t.Fatalf("receive handshake: %v", err)
+		}
+		if req.Method != protocol.MethodHandshake {
+			t.Fatalf("handshake method = %q", req.Method)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			t.Fatalf("send handshake response: %v", err)
+		}
+		for {
+			if err := websocket.JSON.Receive(ws, &req); err != nil {
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				t.Fatalf("receive project view request: %v", err)
+			}
+			switch req.Method {
+			case protocol.MethodAttachProject:
+				attachCount.Add(1)
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: "project-1", WorkspaceRoot: "/tmp/attached"}))
+			case protocol.MethodProjectResolvePath:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectResolvePathResponse{CanonicalRoot: "/tmp/workspace-a"}))
+			case protocol.MethodProjectCreate:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectCreateResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
+			case protocol.MethodProjectAttachWorkspace:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectAttachWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
+			case protocol.MethodProjectRebindWorkspace:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectRebindWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1", WorkspaceID: "workspace-1"}}))
+			case protocol.MethodProjectGetOverview:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectGetOverviewResponse{}))
+			case protocol.MethodSessionListByProject:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.SessionListByProjectResponse{}))
+			case protocol.MethodProjectList:
+				_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectListResponse{}))
+			default:
+				t.Fatalf("unexpected project view method %q", req.Method)
+			}
+		}
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProjectWorkspace(context.Background(), "ws"+server.URL[len("http"):], "project-1", "/tmp/attached")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProjectWorkspace: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+	if _, err := remote.ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: "/tmp/workspace-a"}); err != nil {
+		t.Fatalf("ResolveProjectPath: %v", err)
+	}
+	if _, err := remote.CreateProject(context.Background(), serverapi.ProjectCreateRequest{DisplayName: "demo", WorkspaceRoot: "/tmp/workspace-a"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if _, err := remote.AttachWorkspaceToProject(context.Background(), serverapi.ProjectAttachWorkspaceRequest{ProjectID: "project-1", WorkspaceRoot: "/tmp/workspace-b"}); err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	if _, err := remote.RebindWorkspace(context.Background(), serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: "/tmp/workspace-a", NewWorkspaceRoot: "/tmp/workspace-b"}); err != nil {
+		t.Fatalf("RebindWorkspace: %v", err)
+	}
+	if _, err := remote.GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: "project-1"}); err != nil {
+		t.Fatalf("GetProjectOverview: %v", err)
+	}
+	if _, err := remote.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: "project-1"}); err != nil {
+		t.Fatalf("ListSessionsByProject: %v", err)
+	}
+	if _, err := remote.ListProjects(context.Background(), serverapi.ProjectListRequest{}); err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if got := attachCount.Load(); got != 1 {
+		t.Fatalf("attachCount = %d, want 1", got)
+	}
+}
+
 func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptNotFound, Message: "missing"}); !errors.Is(err, serverapi.ErrPromptNotFound) {
 		t.Fatalf("expected prompt not found, got %v", err)
@@ -309,6 +511,12 @@ func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	}
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptUnsupported, Message: "unsupported"}); !errors.Is(err, serverapi.ErrPromptUnsupported) {
 		t.Fatalf("expected prompt unsupported, got %v", err)
+	}
+}
+
+func TestProtocolErrorMapsAuthRequiredCode(t *testing.T) {
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeAuthRequired, Message: "auth required"}); !errors.Is(err, serverapi.ErrServerAuthRequired) {
+		t.Fatalf("expected server auth required, got %v", err)
 	}
 }
 

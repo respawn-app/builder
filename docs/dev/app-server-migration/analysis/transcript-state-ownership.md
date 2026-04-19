@@ -238,9 +238,7 @@ These are the working rules for the stabilization phase.
 - [x] make loopback and remote transcript-critical flows obey the same ownership rules
 - [x] add rendered-path tests around each remaining local high-risk overlap
 
-The remaining remote raw-stream commentary-entry gap is an explicit runtime-event contract defer, not an ownership-rule violation.
-
-This document does not claim event-for-event raw stream parity between loopback and remote paths. It only claims that both paths now obey the same frontend ownership rules for committed transcript hydrate vs live transient state.
+This document does not claim full raw event parity between loopback and remote paths. It only defines ownership rules for committed transcript hydrate vs live transient state.
 
 ## Exit Condition For This Workstream
 

@@ -1,9 +1,12 @@
 package config
 
 import (
+	"net"
 	"path/filepath"
+	"strconv"
 
-	"builder/server/tools"
+	"builder/shared/protocol"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -70,6 +73,9 @@ type Settings struct {
 	NotificationMethod               string
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
+	Debug                            bool
+	ServerHost                       string
+	ServerPort                       int
 	WebSearch                        string
 	ProviderOverride                 string
 	OpenAIBaseURL                    string
@@ -81,7 +87,7 @@ type Settings struct {
 	PreSubmitCompactionLeadTokens    int
 	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
-	EnabledTools                     map[tools.ID]bool
+	EnabledTools                     map[toolspec.ID]bool
 	SkillToggles                     map[string]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
@@ -132,9 +138,9 @@ type App struct {
 
 type settingsFile map[string]any
 
-func EnabledToolIDs(v Settings) []tools.ID {
-	ids := make([]tools.ID, 0, len(v.EnabledTools))
-	for _, id := range tools.CatalogIDs() {
+func EnabledToolIDs(v Settings) []toolspec.ID {
+	ids := make([]toolspec.ID, 0, len(v.EnabledTools))
+	for _, id := range toolspec.CatalogIDs() {
 		if v.EnabledTools[id] {
 			ids = append(ids, id)
 		}
@@ -180,4 +186,16 @@ func MigrationBackupsRoot(cfg App) string {
 
 func MigrationsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, "migrations")
+}
+
+func ServerListenAddress(cfg App) string {
+	return net.JoinHostPort(cfg.Settings.ServerHost, strconv.Itoa(cfg.Settings.ServerPort))
+}
+
+func ServerRPCURL(cfg App) string {
+	return "ws://" + ServerListenAddress(cfg) + protocol.RPCPath
+}
+
+func ServerHTTPBaseURL(cfg App) string {
+	return "http://" + ServerListenAddress(cfg)
 }

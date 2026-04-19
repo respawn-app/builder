@@ -7,12 +7,13 @@ import (
 )
 
 type SessionTransition struct {
-	Action               string `json:"action"`
-	InitialPrompt        string `json:"initial_prompt,omitempty"`
-	InitialInput         string `json:"initial_input,omitempty"`
-	TargetSessionID      string `json:"target_session_id,omitempty"`
-	ForkUserMessageIndex int    `json:"fork_user_message_index,omitempty"`
-	ParentSessionID      string `json:"parent_session_id,omitempty"`
+	Action                   string `json:"action"`
+	InitialPrompt            string `json:"initial_prompt,omitempty"`
+	InitialInput             string `json:"initial_input,omitempty"`
+	TargetSessionID          string `json:"target_session_id,omitempty"`
+	ForkUserMessageIndex     int    `json:"fork_user_message_index,omitempty"`
+	ForkTranscriptEntryIndex *int   `json:"fork_transcript_entry_index,omitempty"`
+	ParentSessionID          string `json:"parent_session_id,omitempty"`
 }
 
 type SessionInitialInputRequest struct {
@@ -25,15 +26,19 @@ type SessionInitialInputResponse struct {
 }
 
 type SessionPersistInputDraftRequest struct {
-	SessionID string `json:"session_id"`
-	Input     string `json:"input,omitempty"`
+	ClientRequestID   string `json:"client_request_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id"`
+	Input             string `json:"input,omitempty"`
 }
 
 type SessionPersistInputDraftResponse struct{}
 
 type SessionResolveTransitionRequest struct {
-	SessionID  string            `json:"session_id,omitempty"`
-	Transition SessionTransition `json:"transition"`
+	ClientRequestID   string            `json:"client_request_id"`
+	SessionID         string            `json:"session_id,omitempty"`
+	ControllerLeaseID string            `json:"controller_lease_id,omitempty"`
+	Transition        SessionTransition `json:"transition"`
 }
 
 type SessionResolveTransitionResponse struct {
@@ -53,7 +58,13 @@ type SessionLifecycleService interface {
 }
 
 func (r SessionPersistInputDraftRequest) Validate() error {
-	return validateLifecycleSessionID(r.SessionID)
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
+	if err := validateLifecycleSessionID(r.SessionID); err != nil {
+		return err
+	}
+	return validateControllerLeaseID(r.ControllerLeaseID)
 }
 
 func (r SessionInitialInputRequest) Validate() error {
@@ -64,8 +75,14 @@ func (r SessionInitialInputRequest) Validate() error {
 }
 
 func (r SessionResolveTransitionRequest) Validate() error {
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
 	if strings.TrimSpace(r.SessionID) != "" {
 		if err := validateLifecycleSessionID(r.SessionID); err != nil {
+			return err
+		}
+		if err := validateControllerLeaseID(r.ControllerLeaseID); err != nil {
 			return err
 		}
 	}

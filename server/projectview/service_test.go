@@ -2,11 +2,14 @@ package projectview
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"builder/server/metadata"
 	"builder/server/session"
 	"builder/shared/clientui"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 )
 
@@ -80,5 +83,99 @@ func TestServiceRejectsUnknownProjectID(t *testing.T) {
 	}
 	if _, err := svc.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: "project-2"}); err == nil {
 		t.Fatal("expected ListSessionsByProject to reject unknown project")
+	}
+}
+
+func TestMetadataServiceSupportsWildcardAndScopedProjectListing(t *testing.T) {
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfgA, err := config.Load(workspaceA, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace A: %v", err)
+	}
+	store, err := metadata.Open(cfgA.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	bindingA, err := store.RegisterWorkspaceBinding(context.Background(), cfgA.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding A: %v", err)
+	}
+
+	cfgB, err := config.Load(workspaceB, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace B: %v", err)
+	}
+	bindingB, err := store.RegisterWorkspaceBinding(context.Background(), cfgB.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding B: %v", err)
+	}
+
+	wildcard, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService wildcard: %v", err)
+	}
+	projects, err := wildcard.ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("ListProjects wildcard: %v", err)
+	}
+	if len(projects.Projects) != 2 {
+		t.Fatalf("expected wildcard metadata service to list both projects, got %+v", projects.Projects)
+	}
+
+	scoped, err := NewMetadataService(store, bindingA.ProjectID, "")
+	if err != nil {
+		t.Fatalf("NewMetadataService scoped: %v", err)
+	}
+	projects, err = scoped.ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("ListProjects scoped: %v", err)
+	}
+	if len(projects.Projects) != 1 || projects.Projects[0].ProjectID != bindingA.ProjectID {
+		t.Fatalf("expected scoped metadata service to list only project A, got %+v", projects.Projects)
+	}
+	if _, err := scoped.GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: bindingB.ProjectID}); err == nil {
+		t.Fatal("expected scoped metadata service to reject other project overview")
+	}
+}
+
+func TestMetadataServiceResolveProjectPathLeavesNestedDirectoryUnbound(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "nested", "deeper")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	_, err = store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	resolved, err := svc.ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: nested})
+	if err != nil {
+		t.Fatalf("ResolveProjectPath: %v", err)
+	}
+	if resolved.Binding != nil {
+		t.Fatalf("expected nested path to remain unbound, got %+v", resolved.Binding)
 	}
 }

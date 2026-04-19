@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
+
 	"github.com/google/uuid"
 )
 
@@ -357,8 +359,8 @@ func NewTool(b *Broker) *Tool {
 	return &Tool{broker: b}
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolAskQuestion
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolAskQuestion
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

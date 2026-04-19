@@ -88,6 +88,7 @@ Proof:
 Meaning:
 
 - user flush no longer schedules the transcript hydrate that previously raced with live assistant commentary
+- transient tool/final runtime events also stay live-only until an explicit `conversation_updated` or recovery hydrate establishes committed authority
 
 ### 6. Stream-gap recovery rehydrate across multiple streams
 
@@ -109,12 +110,12 @@ Meaning:
 
 No remaining local loopback/frontend overwrite race is currently proven in automated tests.
 
-The main remaining transcript-equivalence caveat is not a local overwrite bug. It is the deferred remote session-activity parity gap:
+The old remote commentary-stream caveat is now resolved:
 
 - remote session activity preserves live assistant progress via `assistant_delta`
-- it does not yet carry the persisted assistant commentary transcript entry for assistant/tool-call turns on the raw stream
+- it also carries the persisted assistant commentary transcript entry for assistant/tool-call turns on the raw stream
 
-That gap is tracked as an intentional defer in the stabilization plan.
+Hydrate is still required for reconnect/stream-gap recovery, but not for ordinary commentary/tool-call convergence.
 
 ## Conclusion
 

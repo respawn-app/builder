@@ -2,8 +2,8 @@ package app
 
 import (
 	"builder/cli/tui"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 	"strings"
 	"testing"
 

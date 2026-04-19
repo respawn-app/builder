@@ -92,8 +92,8 @@ Current remote proof:
 
 Important limitation:
 
-- These tests intentionally prove ordering with live assistant progress via `assistant_delta`.
-- They do not prove raw session-activity parity for the persisted assistant commentary transcript entry on assistant/tool-call turns.
+- `server/transport/gateway_test.go` now proves raw session-activity parity for the persisted assistant commentary transcript entry on assistant/tool-call turns.
+- `shared/client/remote_test.go` remains narrower and only proves ordering with live assistant progress via `assistant_delta`.
 
 ## Minimum Required Scenarios
 
@@ -109,7 +109,20 @@ Proven now:
 
 Still intentionally open:
 
-- loopback and remote paths behave equivalently for transcript-critical commentary flow on the raw session-activity stream
+- remote rendered-path proof for suffix repair and rebuild parity with loopback
+
+## Phase 5A Pre-Implementation Gaps
+
+The stabilization slice proved the older hydrate-vs-live overlap rules, but Phase 5A adds stricter requirements that still need concrete proof work.
+
+Explicit remaining gaps before Phase 5A can be called complete:
+
+- rendered proof that assistant deltas never enter committed ongoing scrollback before commit
+- rendered proof that stream-gap recovery invalidates visible transient ongoing state immediately
+- rendered proof of suffix-only recovery after `last_emitted_committed_revision`
+- rendered proof of production rebuild fallback when suffix continuity cannot be proven
+- rendered proof of global debug-mode hard-fail behavior
+- remote rendered-path proof for suffix repair and rebuild parity with loopback
 
 ## How To Use This Document
 

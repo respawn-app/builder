@@ -75,12 +75,6 @@ func main() {
 }
 
 func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
-	if len(args) > 0 && args[0] == "run" {
-		return runSubcommand(args[1:])
-	}
-	if len(args) > 0 && args[0] == "serve" {
-		return serveSubcommand(args[1:], stdout, stderr)
-	}
 	if stdin == nil {
 		stdin = strings.NewReader("")
 	}
@@ -90,9 +84,25 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	if stderr == nil {
 		stderr = io.Discard
 	}
+	if len(args) > 0 && args[0] == "run" {
+		return runSubcommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "project" {
+		return projectSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "attach" {
+		return attachSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "rebind" {
+		return rebindSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "serve" {
+		return serveSubcommand(args[1:], stdout, stderr)
+	}
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
 	rootFS.SetOutput(stderr)
+	rootFS.Usage = func() { writeRootUsage(rootFS) }
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
 	flags := registerCommonFlags(rootFS)
@@ -148,6 +158,35 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		return 1
 	}
 	return 0
+}
+
+func writeRootUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	_, _ = fmt.Fprintln(out, "Usage of builder:")
+	_, _ = fmt.Fprintln(out, "  builder [flags]")
+	_, _ = fmt.Fprintln(out, "  builder run [flags] <prompt>")
+	_, _ = fmt.Fprintln(out, "  builder serve [flags]")
+	_, _ = fmt.Fprintln(out, "  builder project [path]")
+	_, _ = fmt.Fprintln(out, "  builder project list")
+	_, _ = fmt.Fprintln(out, "  builder project create --path <server-path> --name <project-name>")
+	_, _ = fmt.Fprintln(out, "  builder attach [path]")
+	_, _ = fmt.Fprintln(out, "  builder attach --project <project-id> <server-path>")
+	_, _ = fmt.Fprintln(out, "  builder rebind <old-path> <new-path>")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Commands:")
+	_, _ = fmt.Fprintln(out, "  run      Execute a headless prompt against the current workspace")
+	_, _ = fmt.Fprintln(out, "  serve    Start the configured app server")
+	_, _ = fmt.Fprintln(out, "  project  Print the project id bound to a workspace path; for remote daemons the path is server-visible")
+	_, _ = fmt.Fprintln(out, "  project list    List projects on the configured server")
+	_, _ = fmt.Fprintln(out, "  project create  Create a project for a server-visible workspace path")
+	_, _ = fmt.Fprintln(out, "  attach   Attach a workspace path to the current project; with --project the path is server-visible")
+	_, _ = fmt.Fprintln(out, "  rebind   Move an existing workspace binding to a new path without changing workspace identity")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Flags:")
+	fs.PrintDefaults()
 }
 
 func requireInteractiveTerminal(stdin io.Reader, stdout io.Writer, force bool) error {

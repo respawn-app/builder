@@ -299,6 +299,9 @@ func TestDeferredDetailLoadRefreshesWhenTranscriptDirty(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", refreshCmd())
 	}
+	if refreshed.syncCause != runtimeTranscriptSyncCauseManualTranscriptRefresh {
+		t.Fatalf("detail refresh sync cause = %q, want %q", refreshed.syncCause, runtimeTranscriptSyncCauseManualTranscriptRefresh)
+	}
 	expectedReq := clientui.TranscriptPageRequest{Offset: seed.Offset, Limit: len(seed.Entries)}
 	if refreshed.req != expectedReq {
 		t.Fatalf("dirty deferred detail request = %+v, want %+v", refreshed.req, expectedReq)
@@ -399,19 +402,10 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	}
 
 	eng.AppendLocalEntry("assistant", "post-resume live update")
-	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventConversationUpdated})
-	if cmd == nil {
-		t.Fatal("expected conversation refresh command")
-	}
-	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
-	}
-	next, _ := m.Update(refreshMsg)
-	updated := next.(*uiModel)
-	live := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, LocalEntry: &runtime.ChatEntry{Role: "assistant", Text: "post-resume live update"}})
+	live := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(live, "post-resume live update") {
-		t.Fatalf("expected live update after conversation refresh, got %q", live)
+		t.Fatalf("expected live update after local entry event, got %q", live)
 	}
 
 	reopened, err := session.Open(store.Dir())

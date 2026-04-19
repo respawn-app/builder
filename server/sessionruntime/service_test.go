@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"builder/server/metadata"
 	"builder/server/registry"
@@ -15,205 +16,286 @@ import (
 	"builder/shared/serverapi"
 )
 
-func TestInstallHandleDoesNotDoubleCountDuplicateActivationRequest(t *testing.T) {
+func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
-			refs:               1,
-			activationRequests: map[string]string{"req-1": "lease-1"},
-			activeLeases:       map[string]struct{}{"lease-1": {}},
-			ready:              make(chan struct{}),
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
 		},
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed, leaseID, ownsClaim := svc.installHandle("session-1", "req-1", "lease-2", &runtimeHandle{})
-	if installed {
-		t.Fatal("expected duplicate activation to reuse existing handle")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-1")
+	if err != nil {
+		t.Fatalf("claimActivation: %v", err)
 	}
-	if ownsClaim {
-		t.Fatal("expected duplicate activation request to keep existing claim ownership")
+	if takeover != nil {
+		t.Fatalf("claimActivation takeover = %+v, want nil", takeover)
+	}
+	if claim != activationClaimReuse {
+		t.Fatal("expected duplicate activation to reuse existing controller")
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected duplicate activation to return existing handle")
 	}
-	if leaseID != "lease-1" {
-		t.Fatalf("lease id = %q, want lease-1", leaseID)
-	}
-	if got := svc.handles["session-1"].refs; got != 1 {
-		t.Fatalf("refs = %d, want 1", got)
-	}
-	if got := len(svc.handles["session-1"].activeLeases); got != 1 {
-		t.Fatalf("active leases = %d, want 1", got)
-	}
 }
 
-func TestInstallHandleCountsDistinctActivationRequestOnExistingHandle(t *testing.T) {
+func TestClaimActivationAllowsTakeoverAfterReady(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
-			refs:               1,
-			activationRequests: map[string]string{"req-1": "lease-1"},
-			activeLeases:       map[string]struct{}{"lease-1": {}},
-			ready:              make(chan struct{}),
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
 		},
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed, leaseID, ownsClaim := svc.installHandle("session-1", "req-2", "lease-2", &runtimeHandle{})
-	if installed {
-		t.Fatal("expected existing handle to remain authoritative")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation: %v", err)
 	}
-	if !ownsClaim {
-		t.Fatal("expected distinct activation request to own the newly added claim")
+	if takeover == nil {
+		t.Fatal("expected takeover activation to allocate pending takeover state")
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("claimActivation claim = %v, want takeover", claim)
 	}
 	if handle != svc.handles["session-1"] {
-		t.Fatal("expected distinct activation to return existing handle")
-	}
-	if leaseID != "lease-2" {
-		t.Fatalf("lease id = %q, want lease-2", leaseID)
-	}
-	if got := svc.handles["session-1"].refs; got != 2 {
-		t.Fatalf("refs = %d, want 2", got)
-	}
-	if _, ok := svc.handles["session-1"].activeLeases["lease-2"]; !ok {
-		t.Fatal("expected distinct lease to be tracked")
+		t.Fatal("expected takeover activation to return existing handle")
 	}
 }
 
-func TestClaimExistingHandleLeaseKeepsExistingClaimOwnershipForDuplicateRequest(t *testing.T) {
+func TestClaimActivationReusesPendingTakeoverRequest(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
-			refs:               1,
-			activationRequests: map[string]string{"req-1": "lease-1"},
-			activeLeases:       map[string]struct{}{"lease-1": {}},
-			ready:              make(chan struct{}),
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
 		},
 	}}
+	close(svc.handles["session-1"].ready)
 
-	handle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-1", "lease-2")
-	if !ok {
-		t.Fatal("expected existing handle lease claim to succeed")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
 	}
-	if ownsClaim {
-		t.Fatal("expected duplicate activation request to keep existing claim ownership")
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	if handle != svc.handles["session-1"] {
-		t.Fatal("expected duplicate request to return existing handle")
+	reusedHandle, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation pending retry: %v", err)
 	}
-	if leaseID != "lease-1" {
-		t.Fatalf("lease id = %q, want lease-1", leaseID)
+	if reusedClaim != activationClaimTakeoverReuse {
+		t.Fatalf("pending retry claim = %v, want takeover reuse", reusedClaim)
+	}
+	if reusedHandle != handle {
+		t.Fatal("expected pending retry to return same handle")
+	}
+	if reusedTakeover != takeover {
+		t.Fatal("expected pending retry to return same takeover state")
+	}
+	if !svc.completeTakeover("session-1", handle, takeover, "req-2", "lease-2") {
+		t.Fatal("expected completeTakeover to succeed")
+	}
+	resp, err := activationResponseForTakeover(reusedTakeover)
+	if err != nil {
+		t.Fatalf("activationResponseForTakeover: %v", err)
+	}
+	if resp.LeaseID != "lease-2" {
+		t.Fatalf("takeover lease id = %q, want lease-2", resp.LeaseID)
 	}
 }
 
-func TestClaimExistingHandleLeaseOwnsDistinctRequest(t *testing.T) {
+func TestPendingTakeoverRetryUnblocksWhenTakeoverFails(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
-			refs:               1,
-			activationRequests: map[string]string{"req-1": "lease-1"},
-			activeLeases:       map[string]struct{}{"lease-1": {}},
-			ready:              make(chan struct{}),
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
 		},
 	}}
+	close(svc.handles["session-1"].ready)
 
-	handle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-2", "lease-2")
-	if !ok {
-		t.Fatal("expected existing handle lease claim to succeed")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
 	}
-	if !ownsClaim {
-		t.Fatal("expected distinct activation request to own the newly added claim")
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	if handle != svc.handles["session-1"] {
-		t.Fatal("expected distinct request to return existing handle")
+	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation pending retry: %v", err)
 	}
-	if leaseID != "lease-2" {
-		t.Fatalf("lease id = %q, want lease-2", leaseID)
+	if reusedClaim != activationClaimTakeoverReuse {
+		t.Fatalf("pending retry claim = %v, want takeover reuse", reusedClaim)
 	}
-	if got := handle.refs; got != 2 {
-		t.Fatalf("refs = %d, want 2", got)
+	errCh := make(chan error, 1)
+	go func() {
+		if err := waitForRuntimeTakeoverReady(context.Background(), reusedTakeover); err != nil {
+			errCh <- err
+			return
+		}
+		_, err := activationResponseForTakeover(reusedTakeover)
+		errCh <- err
+	}()
+
+	expectedErr := errors.Join(serverapi.ErrSessionAlreadyControlled, errors.New("takeover lost"))
+	svc.failTakeover("session-1", handle, takeover, expectedErr)
+
+	err = <-errCh
+	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		t.Fatalf("takeover waiter error = %v, want session already controlled", err)
 	}
 }
 
-func TestActivateSessionRuntimeWaitsForExistingHandleReady(t *testing.T) {
+func TestCloseReleasedRuntimeHandleSignalsPendingTakeoverWaiters(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
+	}
+	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation pending retry: %v", err)
+	}
+	if reusedClaim != activationClaimTakeoverReuse {
+		t.Fatalf("pending retry claim = %v, want takeover reuse", reusedClaim)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		if err := waitForRuntimeTakeoverReady(context.Background(), reusedTakeover); err != nil {
+			errCh <- err
+			return
+		}
+		_, err := activationResponseForTakeover(reusedTakeover)
+		errCh <- err
+	}()
+
+	svc.closeReleasedRuntimeHandle("session-1", handle)
+
+	err = <-errCh
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("takeover waiter error = %v, want invalid controller lease", err)
+	}
+	if _, ok := svc.handles["session-1"]; ok {
+		t.Fatal("expected runtime handle removed after closeReleasedRuntimeHandle")
+	}
+	if takeover.err == nil {
+		t.Fatal("expected takeover terminal error to be recorded")
+	}
+}
+
+func TestClaimActivationRejectsConcurrentDifferentTakeoverRequest(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+
+	_, _, claim, err := svc.claimActivation("session-1", "req-2")
+	if err != nil {
+		t.Fatalf("claimActivation first takeover: %v", err)
+	}
+	if claim != activationClaimTakeover {
+		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
+	}
+	_, _, _, err = svc.claimActivation("session-1", "req-3")
+	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		t.Fatalf("claimActivation competing takeover error = %v, want session already controlled", err)
+	}
+}
+
+func TestActivateSessionRuntimeReplaysDuplicateRequestAfterReady(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{"req-1": "lease-1"},
-		activeLeases:       map[string]struct{}{"lease-1": {}},
-		ready:              make(chan struct{}),
+		controllerRequestID: "req-1",
+		controllerLeaseID:   "lease-1",
+		ready:               make(chan struct{}),
 	}
 	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
-	done := make(chan error, 1)
+	done := make(chan serverapi.SessionRuntimeActivateResponse, 1)
+	errCh := make(chan error, 1)
 	go func() {
-		_, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
-			ClientRequestID: "req-2",
+		resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+			ClientRequestID: "req-1",
 			SessionID:       fixture.store.Meta().SessionID,
 		})
-		done <- err
+		done <- resp
+		errCh <- err
 	}()
 	select {
-	case err := <-done:
-		t.Fatalf("expected activation to wait for ready handle, got %v", err)
+	case <-done:
+		t.Fatal("expected duplicate activation to wait for ready handle")
 	default:
 	}
 	close(handle.ready)
-	if err := <-done; err != nil {
+	if err := <-errCh; err != nil {
 		t.Fatalf("ActivateSessionRuntime: %v", err)
 	}
-	if got := fixture.service.handles[fixture.store.Meta().SessionID].refs; got != 2 {
-		t.Fatalf("refs = %d, want 2", got)
+	if got := (<-done).LeaseID; got != "lease-1" {
+		t.Fatalf("lease id = %q, want lease-1", got)
 	}
 }
 
-func TestActivateSessionRuntimeRollsBackClaimWhenWaitIsCanceled(t *testing.T) {
+func TestActivateSessionRuntimeReissuesControllerLeaseForTakeover(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{"req-1": "lease-1"},
-		activeLeases:       map[string]struct{}{"lease-1": {}},
-		ready:              make(chan struct{}),
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+	}
+	close(handle.ready)
 	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-2",
+		SessionID:       fixture.store.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime takeover: %v", err)
+	}
+	if strings.TrimSpace(resp.LeaseID) == "" || resp.LeaseID == lease.LeaseID {
+		t.Fatalf("takeover lease id = %q, want non-empty replacement for %q", resp.LeaseID, lease.LeaseID)
+	}
+	if handle.controllerRequestID != "req-2" {
+		t.Fatalf("controller request id = %q, want req-2", handle.controllerRequestID)
+	}
+	if handle.controllerLeaseID != resp.LeaseID {
+		t.Fatalf("controller lease id = %q, want %q", handle.controllerLeaseID, resp.LeaseID)
+	}
+}
+
+func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := fixture.service.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{
-			ClientRequestID: "req-2",
-			SessionID:       fixture.store.Meta().SessionID,
-		})
-		done <- err
-	}()
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
+	_, err := fixture.service.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{ClientRequestID: "req-1", SessionID: fixture.store.Meta().SessionID})
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ActivateSessionRuntime error = %v, want context canceled", err)
 	}
-	if got := fixture.service.handles[fixture.store.Meta().SessionID].refs; got != 1 {
-		t.Fatalf("refs = %d, want 1", got)
-	}
-	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID].activationRequests["req-2"]; ok {
-		t.Fatal("expected canceled activation request to be rolled back")
-	}
-}
-
-func TestRollbackActivationClaimPreservesExistingClaimWhenNotOwned(t *testing.T) {
-	svc := &Service{handles: map[string]*runtimeHandle{
-		"session-1": {
-			refs:               1,
-			activationRequests: map[string]string{"req-1": "lease-1"},
-			activeLeases:       map[string]struct{}{"lease-1": {}},
-			ready:              make(chan struct{}),
-		},
-	}}
-	handle := svc.handles["session-1"]
-
-	svc.rollbackActivationClaim("session-1", "req-1", "lease-1", handle, false)
-
-	if got := handle.refs; got != 1 {
-		t.Fatalf("refs = %d, want 1", got)
-	}
-	if got := handle.activationRequests["req-1"]; got != "lease-1" {
-		t.Fatalf("activation request lease = %q, want lease-1", got)
-	}
-	if _, ok := handle.activeLeases["lease-1"]; !ok {
-		t.Fatal("expected original lease to remain active")
+	if len(fixture.service.handles) != 0 {
+		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
 	}
 }
 
@@ -225,10 +307,9 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	}
 	closed := make(chan struct{}, 1)
 	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{"req-1": lease.LeaseID},
-		activeLeases:       map[string]struct{}{lease.LeaseID: {}},
-		ready:              make(chan struct{}),
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
 		close: func() {
 			closed <- struct{}{}
 		},
@@ -259,35 +340,40 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	}
 }
 
-func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *testing.T) {
+func TestReleaseSessionRuntimeClosesHandleWhenLeaseAlreadyReleasedAndWaitCanceled(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := fixture.service.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{ClientRequestID: "req-1", SessionID: fixture.store.Meta().SessionID})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("ActivateSessionRuntime error = %v, want context canceled", err)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
-	if len(fixture.service.handles) != 0 {
-		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ReleaseRuntimeLease setup: %v", err)
 	}
-}
-
-func TestClaimExistingHandleLeaseReturnsNotFoundWhenHandleDisappears(t *testing.T) {
-	svc := &Service{handles: make(map[string]*runtimeHandle)}
+	closed := atomic.Int32{}
 	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{"req-old": "lease-old"},
-		activeLeases:       map[string]struct{}{"lease-old": {}},
-		ready:              make(chan struct{}),
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
 	}
-	svc.handles["session-1"] = handle
-	delete(svc.handles, "session-1")
-	claimedHandle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-new", "lease-new")
-	if ok {
-		t.Fatal("expected claimExistingHandleLease to report missing handle")
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err = fixture.service.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ReleaseSessionRuntime error = %v, want context deadline exceeded", err)
 	}
-	if claimedHandle != nil || leaseID != "" || ownsClaim {
-		t.Fatalf("unexpected claim result: handle=%v leaseID=%q ownsClaim=%t", claimedHandle, leaseID, ownsClaim)
+	if closed.Load() != 1 {
+		t.Fatalf("expected closeFn to run exactly once, got %d", closed.Load())
+	}
+	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
+		t.Fatal("expected runtime handle removed after canceled wait with released lease")
 	}
 }
 
@@ -295,10 +381,9 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.
 	fixture := newSessionRuntimeFixture(t)
 	closed := atomic.Int32{}
 	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{"req-1": "lease-missing"},
-		activeLeases:       map[string]struct{}{"lease-missing": {}},
-		ready:              make(chan struct{}),
+		controllerRequestID: "req-1",
+		controllerLeaseID:   "lease-missing",
+		ready:               make(chan struct{}),
 		close: func() {
 			closed.Add(1)
 		},
@@ -318,6 +403,144 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.
 	}
 	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
 		t.Fatal("expected runtime handle to be removed even when lease release fails")
+	}
+}
+
+func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseReleased(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	}
+
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime retry: %v", err)
+	}
+}
+
+func TestReleaseSessionRuntimeReleasesPersistedLeaseWhenHandleAlreadyMissing(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+
+	released, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease verification: %v", err)
+	}
+	if released.Active() {
+		t.Fatalf("expected lease to stay released after missing-handle cleanup, got %+v", released)
+	}
+}
+
+func TestReleaseSessionRuntimeRejectsMismatchedControllerLeaseWithoutClosingHandle(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	_, err = fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         "lease-other",
+	})
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ReleaseSessionRuntime error = %v, want invalid controller lease", err)
+	}
+	if closed.Load() != 0 {
+		t.Fatalf("expected closeFn not to run for mismatched lease, got %d", closed.Load())
+	}
+	if got := fixture.service.handles[fixture.store.Meta().SessionID]; got != handle {
+		t.Fatalf("expected runtime handle preserved for mismatched lease, got %+v", got)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("expected original runtime lease to remain releasable after mismatched release, got %v", err)
+	}
+}
+
+func TestRequireControllerLeaseAcceptsActiveController(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+	if err := svc.RequireControllerLease(context.Background(), "session-1", "lease-1"); err != nil {
+		t.Fatalf("RequireControllerLease: %v", err)
+	}
+}
+
+func TestRequireControllerLeaseRejectsUnknownLease(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	close(svc.handles["session-1"].ready)
+	err := svc.RequireControllerLease(context.Background(), "session-1", "lease-2")
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("RequireControllerLease error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestRequireControllerLeaseRejectsReplacedHandleAfterReadyWait(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			controllerRequestID: "req-1",
+			controllerLeaseID:   "lease-1",
+			ready:               make(chan struct{}),
+		},
+	}}
+	original := svc.handles["session-1"]
+	replacement := &runtimeHandle{
+		controllerRequestID: "req-2",
+		controllerLeaseID:   "lease-2",
+		ready:               make(chan struct{}),
+	}
+	close(replacement.ready)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.RequireControllerLease(context.Background(), "session-1", "lease-1")
+	}()
+	svc.mu.Lock()
+	svc.handles["session-1"] = replacement
+	svc.mu.Unlock()
+	close(original.ready)
+	err := <-errCh
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("RequireControllerLease error = %v, want invalid controller lease", err)
 	}
 }
 

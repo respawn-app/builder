@@ -7,24 +7,67 @@ import (
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/requestmemo"
+	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/serverapi"
 )
 
 type Service struct {
-	containerDir string
-	stores       sessionStoreResolver
-	authManager  *auth.Manager
-	storeOptions []session.StoreOption
+	persistenceRoot string
+	containerDir    string
+	stores          sessionStoreResolver
+	authManager     *auth.Manager
+	controller      ControllerLeaseVerifier
+	storeOptions    []session.StoreOption
+	drafts          *requestmemo.Memo[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse]
+	transitions     *requestmemo.Memo[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]
+}
+
+type sessionDraftMemoRequest struct {
+	SessionID string
+	Input     string
+}
+
+type sessionTransitionMemoRequest struct {
+	SessionID  string
+	Transition serverapi.SessionTransition
 }
 
 type sessionStoreResolver interface {
 	ResolveStore(ctx context.Context, sessionID string) (*session.Store, error)
 }
 
+type ControllerLeaseVerifier interface {
+	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
+}
+
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
-	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...)}
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
+}
+
+func NewGlobalService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), drafts: requestmemo.New[sessionDraftMemoRequest, serverapi.SessionPersistInputDraftResponse](), transitions: requestmemo.New[sessionTransitionMemoRequest, serverapi.SessionResolveTransitionResponse]()}
+}
+
+func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) *Service {
+	if s == nil {
+		return nil
+	}
+	s.controller = verifier
+	return s
+}
+
+func (s *Service) requireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return nil
+	}
+	if s == nil || s.controller == nil {
+		return serverapi.ErrInvalidControllerLease
+	}
+	return s.controller.RequireControllerLease(ctx, trimmedSessionID, strings.TrimSpace(leaseID))
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
@@ -38,24 +81,65 @@ func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitia
 	return serverapi.SessionInitialInputResponse{Input: serverlifecycle.InitialInput(store, req.TransitionInput)}, nil
 }
 
-func (s *Service) PersistInputDraft(_ context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+func (s *Service) PersistInputDraft(ctx context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	store, err := s.openStore(req.SessionID)
-	if err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
-		return serverapi.SessionPersistInputDraftResponse{}, err
-	}
-	return serverapi.SessionPersistInputDraftResponse{}, nil
+	memoReq := sessionDraftMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Input: req.Input}
+	return s.drafts.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionDraftMemoRequest, func(context.Context) (serverapi.SessionPersistInputDraftResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		store, err := s.openStore(req.SessionID)
+		if err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
+			return serverapi.SessionPersistInputDraftResponse{}, err
+		}
+		return serverapi.SessionPersistInputDraftResponse{}, nil
+	})
 }
 
 func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
+	memoReq := sessionTransitionMemoRequest{
+		SessionID:  strings.TrimSpace(req.SessionID),
+		Transition: req.Transition,
+	}
+	return s.transitions.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionTransitionMemoRequest, func(context.Context) (serverapi.SessionResolveTransitionResponse, error) {
+		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.SessionResolveTransitionResponse{}, err
+		}
+		return s.resolveTransitionOnce(ctx, req)
+	})
+}
+
+func sameSessionTransitionMemoRequest(a sessionTransitionMemoRequest, b sessionTransitionMemoRequest) bool {
+	return a.SessionID == b.SessionID &&
+		a.Transition.Action == b.Transition.Action &&
+		a.Transition.InitialPrompt == b.Transition.InitialPrompt &&
+		a.Transition.InitialInput == b.Transition.InitialInput &&
+		a.Transition.TargetSessionID == b.Transition.TargetSessionID &&
+		a.Transition.ForkUserMessageIndex == b.Transition.ForkUserMessageIndex &&
+		forkTranscriptEntryIndexEqual(a.Transition.ForkTranscriptEntryIndex, b.Transition.ForkTranscriptEntryIndex) &&
+		a.Transition.ParentSessionID == b.Transition.ParentSessionID
+}
+
+func sameSessionDraftMemoRequest(a sessionDraftMemoRequest, b sessionDraftMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Input == b.Input
+}
+
+func forkTranscriptEntryIndexEqual(a *int, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	action := serverlifecycle.Action(req.Transition.Action)
 	if action == serverlifecycle.ActionLogout {
 		if s.authManager == nil {
@@ -80,6 +164,11 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 		if err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
 		}
+		forkUserMessageIndex, resolveErr := s.resolveForkUserMessageIndex(ctx, store, req.Transition)
+		if resolveErr != nil {
+			return serverapi.SessionResolveTransitionResponse{}, resolveErr
+		}
+		req.Transition.ForkUserMessageIndex = forkUserMessageIndex
 	}
 	resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
 		Store: store,
@@ -107,6 +196,35 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 	}, nil
 }
 
+func (s *Service) resolveForkUserMessageIndex(ctx context.Context, store *session.Store, transition serverapi.SessionTransition) (int, error) {
+	if transition.ForkTranscriptEntryIndex != nil {
+		return resolveForkUserMessageIndexFromTranscriptEntry(ctx, store, *transition.ForkTranscriptEntryIndex)
+	}
+	if transition.ForkUserMessageIndex > 0 {
+		return transition.ForkUserMessageIndex, nil
+	}
+	return 0, errors.New("rollback fork target is required")
+}
+
+func resolveForkUserMessageIndexFromTranscriptEntry(ctx context.Context, store *session.Store, transcriptEntryIndex int) (int, error) {
+	if store == nil {
+		return 0, errors.New("current store is required for rollback fork")
+	}
+	if transcriptEntryIndex < 0 {
+		return 0, errors.New("rollback fork transcript entry index must be >= 0")
+	}
+	return runtime.ResolvePersistedUserMessageIndex(func(visit func(session.Event) error) error {
+		return store.WalkEvents(func(evt session.Event) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			return visit(evt)
+		})
+	}, transcriptEntryIndex)
+}
+
 func (s *Service) openStore(sessionID string) (*session.Store, error) {
 	trimmed := strings.TrimSpace(sessionID)
 	if trimmed == "" {
@@ -120,7 +238,10 @@ func (s *Service) openStore(sessionID string) (*session.Store, error) {
 		}
 	}
 	if strings.TrimSpace(s.containerDir) == "" {
-		return nil, nil
+		if strings.TrimSpace(s.persistenceRoot) == "" {
+			return nil, nil
+		}
+		return session.OpenByID(s.persistenceRoot, trimmed, s.storeOptions...)
 	}
 	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, trimmed)
 	if err != nil {
