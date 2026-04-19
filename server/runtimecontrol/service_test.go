@@ -34,12 +34,12 @@ func (s *stubRuntimeLeaseVerifier) RequireControllerLease(context.Context, strin
 }
 
 type runtimeControlFakeClient struct {
-	mu        sync.Mutex
-	responses []llm.Response
+	mu                  sync.Mutex
+	responses           []llm.Response
 	compactionResponses []llm.CompactionResponse
 	capabilities        llm.ProviderCapabilities
-	calls     int
-	compactionCalls int
+	calls               int
+	compactionCalls     int
 }
 
 type fakeShellHandler struct{}
