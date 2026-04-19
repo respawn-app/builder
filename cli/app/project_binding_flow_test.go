@@ -755,8 +755,8 @@ func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *t
 	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "builder rebind") || !strings.Contains(got, "missing") {
-		t.Fatalf("error = %q, want rebind guidance", got)
+	if got := err.Error(); !strings.Contains(got, "missing") || !strings.Contains(got, "Rebind affected sessions") {
+		t.Fatalf("error = %q, want missing-root recovery guidance", got)
 	}
 }
 
@@ -796,7 +796,7 @@ func TestEnsureInteractiveProjectBindingFormatsInaccessibleBoundProjectError(t *
 	if !errors.Is(err, serverapi.ErrProjectUnavailable) {
 		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "Restore access") || !strings.Contains(got, "inaccessible") || !strings.Contains(got, "builder rebind") {
+	if got := err.Error(); !strings.Contains(got, "Restore access") || !strings.Contains(got, "inaccessible") || !strings.Contains(got, "rebind affected sessions") {
 		t.Fatalf("error = %q, want inaccessible-root recovery guidance", got)
 	}
 }

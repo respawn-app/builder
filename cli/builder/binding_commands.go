@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"builder/server/metadata"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -143,10 +144,10 @@ func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	remaining := fs.Args()
 	if len(remaining) != 2 {
-		fmt.Fprintln(stderr, "rebind requires <old-path> and <new-path>")
+		fmt.Fprintln(stderr, "rebind requires <session-id> and <new-path>")
 		return 2
 	}
-	binding, err := rebindWorkspace(context.Background(), remaining[0], remaining[1])
+	binding, err := retargetSessionWorkspace(context.Background(), remaining[0], remaining[1])
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -283,6 +284,30 @@ func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serve
 		return serverapi.ProjectBinding{}, err
 	}
 	return resp.Binding, nil
+}
+
+func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath string) (serverapi.ProjectBinding, error) {
+	newCfg, err := loadBindingCommandConfig(newPath)
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	metadataStore, err := metadata.Open(newCfg.PersistenceRoot)
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RetargetSessionWorkspace(ctx, sessionID, newCfg.WorkspaceRoot)
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	return serverapi.ProjectBinding{
+		ProjectID:       binding.ProjectID,
+		ProjectName:     binding.ProjectName,
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   binding.CanonicalRoot,
+		WorkspaceName:   binding.WorkspaceName,
+		WorkspaceStatus: binding.WorkspaceStatus,
+	}, nil
 }
 
 func openBindingCommandRemote(ctx context.Context, path string) (config.App, *client.Remote, error) {
