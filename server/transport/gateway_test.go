@@ -371,8 +371,22 @@ func TestGatewayAuthBootstrapAPIKeyCompletionEnablesAuthRequiredMethods(t *testi
 	if err := websocket.JSON.Receive(conn, &secondCompleteResp); err != nil {
 		t.Fatalf("receive second auth.completeBootstrap: %v", err)
 	}
-	if secondCompleteResp.Error == nil || secondCompleteResp.Error.Code != protocol.ErrCodeAuthRequired {
-		t.Fatalf("second auth.completeBootstrap error = %+v, want auth required", secondCompleteResp.Error)
+	if secondCompleteResp.Error != nil {
+		t.Fatalf("second auth.completeBootstrap error = %+v, want success", secondCompleteResp.Error)
+	}
+	var secondComplete serverapi.AuthCompleteBootstrapResponse
+	if err := json.Unmarshal(secondCompleteResp.Result, &secondComplete); err != nil {
+		t.Fatalf("decode second auth.completeBootstrap result: %v", err)
+	}
+	if !secondComplete.AuthReady || secondComplete.MethodType != string(auth.MethodAPIKey) {
+		t.Fatalf("unexpected second auth.completeBootstrap result: %+v", secondComplete)
+	}
+	state, err = authSupport.AuthManager.StoredState(context.Background())
+	if err != nil {
+		t.Fatalf("StoredState after second complete: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "server-key" {
+		t.Fatalf("unexpected stored auth method after retry: %+v", state.Method)
 	}
 }
 
