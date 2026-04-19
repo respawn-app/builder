@@ -53,12 +53,12 @@ func (s *Service) CompleteBootstrap(ctx context.Context, req serverapi.AuthCompl
 	if s == nil || s.manager == nil {
 		return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
 	}
-	ready, err := s.authReady(ctx)
+	state, err := s.manager.Load(ctx)
 	if err != nil {
 		return serverapi.AuthCompleteBootstrapResponse{}, err
 	}
-	if ready {
-		return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
+	if auth.EvaluateStartupGate(state).Ready {
+		return bootstrapResponseFromState(state), nil
 	}
 	var (
 		method      auth.Method
@@ -81,16 +81,11 @@ func (s *Service) CompleteBootstrap(ctx context.Context, req serverapi.AuthCompl
 	if completeErr != nil {
 		return serverapi.AuthCompleteBootstrapResponse{}, completeErr
 	}
-	state, err := s.manager.SwitchMethodAndSetEnvAPIKeyPreference(ctx, method, auth.EnvAPIKeyPreferencePreferSaved, true, true)
+	state, err = s.manager.SwitchMethodAndSetEnvAPIKeyPreference(ctx, method, auth.EnvAPIKeyPreferencePreferSaved, true, true)
 	if err != nil {
 		return serverapi.AuthCompleteBootstrapResponse{}, err
 	}
-	return serverapi.AuthCompleteBootstrapResponse{
-		AuthReady:  state.IsConfigured(),
-		MethodType: strings.TrimSpace(string(state.Method.Type)),
-		AccountID:  methodAccountID(state.Method),
-		Email:      methodEmail(state.Method),
-	}, nil
+	return bootstrapResponseFromState(state), nil
 }
 
 func (s *Service) authReady(ctx context.Context) (bool, error) {
@@ -116,6 +111,15 @@ func methodEmail(method auth.Method) string {
 		return strings.TrimSpace(method.OAuth.Email)
 	}
 	return ""
+}
+
+func bootstrapResponseFromState(state auth.State) serverapi.AuthCompleteBootstrapResponse {
+	return serverapi.AuthCompleteBootstrapResponse{
+		AuthReady:  auth.EvaluateStartupGate(state).Ready,
+		MethodType: strings.TrimSpace(string(state.Method.Type)),
+		AccountID:  methodAccountID(state.Method),
+		Email:      methodEmail(state.Method),
+	}
 }
 
 var _ serverapi.AuthBootstrapService = (*Service)(nil)
