@@ -352,13 +352,15 @@ func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWork
 }
 
 func TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWorkspaces(t *testing.T) {
-	// One prompt does not emit enough session-activity events to deterministically overflow the
-	// server-side subscription buffer plus the client-side relay buffer. Keep this flood size above
-	// that combined capacity so the test proves a real remote ErrStreamGap instead of timing luck.
+	// The lagging remote subscriber is drained by a gateway goroutine that forwards events into a
+	// websocket connection. Flood both event count and payload size so CI cannot hide the gap behind
+	// socket buffering and timing luck.
 	const floodPromptCount = 320
+	floodPromptText := strings.Repeat("flood the lagging subscriber ", 96)
+	floodReplyText := strings.Repeat("flood reply ", 96)
 	replies := make([]string, 0, floodPromptCount+1)
 	for i := 0; i < floodPromptCount; i++ {
-		replies = append(replies, "flood reply")
+		replies = append(replies, floodReplyText)
 	}
 	replies = append(replies, "reply after gap recovery")
 
@@ -373,12 +375,12 @@ func TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWork
 	defer func() { _ = laggingSub.Close() }()
 
 	for i := 0; i < floodPromptCount; i++ {
-		message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "flood the lagging subscriber")
+		message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), floodPromptText)
 		if err != nil {
 			t.Fatalf("SubmitUserMessage flood %d: %v", i, err)
 		}
-		if message != "flood reply" {
-			t.Fatalf("assistant message flood %d = %q, want %q", i, message, "flood reply")
+		if message != floodReplyText {
+			t.Fatalf("assistant message flood %d = %q, want %q", i, message, floodReplyText)
 		}
 	}
 	if hits.Load() != floodPromptCount {

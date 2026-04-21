@@ -305,12 +305,19 @@ func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath str
 	}
 	_, remote, err := bindingCommandRemoteOpener(ctx, newPath)
 	if err != nil {
+		if shouldFallbackToLocalSessionRetargetOpenError(newCfg, err) {
+			resp, localErr := bindingCommandSessionRetargeter(ctx, bindingCommandLocalSessionLifecycleClient(newCfg), sessionID, newCfg.WorkspaceRoot)
+			if localErr != nil {
+				return serverapi.ProjectBinding{}, localErr
+			}
+			return resp.Binding, nil
+		}
 		return serverapi.ProjectBinding{}, err
 	}
 	defer func() { _ = remote.Close() }()
 	resp, err := bindingCommandSessionRetargeter(ctx, remote, sessionID, newCfg.WorkspaceRoot)
 	if err != nil {
-		if shouldFallbackToLocalSessionRetarget(newCfg, err) {
+		if shouldFallbackToLocalSessionRetargetRPCError(newCfg, err) {
 			resp, err = bindingCommandSessionRetargeter(ctx, bindingCommandLocalSessionLifecycleClient(newCfg), sessionID, newCfg.WorkspaceRoot)
 		}
 	}
@@ -320,7 +327,15 @@ func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath str
 	return resp.Binding, nil
 }
 
-func shouldFallbackToLocalSessionRetarget(cfg config.App, err error) bool {
+func shouldFallbackToLocalSessionRetargetOpenError(cfg config.App, err error) bool {
+	if !serverTargetIsLoopback(cfg) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+func shouldFallbackToLocalSessionRetargetRPCError(cfg config.App, err error) bool {
 	return errors.Is(err, serverapi.ErrMethodNotFound) && serverTargetIsLoopback(cfg)
 }
 

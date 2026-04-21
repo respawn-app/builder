@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -199,6 +200,10 @@ func (t *Tool) resolvePath(ctx context.Context, path string, approvedOutside map
 			ApprovalFailed:       "outside-workspace read approval failed",
 			RejectedByUserPrefix: "view_image path outside workspace rejected by user",
 		},
+		patchtool.OutsideWorkspaceFailureFactory{
+			ApprovalFailed: readImageOutsideWorkspaceApprovalFailed,
+			UserDenied:     readImageOutsideWorkspaceUserDenied,
+		},
 		patchtool.IsPathInTemporaryDir,
 		func(req patchtool.OutsideWorkspaceRequest, reason string) {
 			t.logOutsideWorkspaceApproval(req, reason)
@@ -236,6 +241,54 @@ func detectFileMIME(path string, data []byte) string {
 func normalizeMIME(raw string) string {
 	main := strings.TrimSpace(strings.Split(raw, ";")[0])
 	return strings.ToLower(main)
+}
+
+func readImageOutsideWorkspaceApprovalFailed(req patchtool.OutsideWorkspaceRequest, err error) error {
+	path := readImageOutsideWorkspacePath(req)
+	reason := strings.TrimSpace(err.Error())
+	message := "outside-workspace read approval failed"
+	if path != "" {
+		message += " for " + path + "."
+	} else {
+		message += "."
+	}
+	if reason != "" {
+		message += "\nReason: " + reason
+	}
+	return errors.New(message)
+}
+
+func readImageOutsideWorkspaceUserDenied(req patchtool.OutsideWorkspaceRequest, approval patchtool.OutsideWorkspaceApproval, rejectionInstruction string) error {
+	path := readImageOutsideWorkspacePath(req)
+	commentary := strings.TrimSpace(approval.Commentary)
+
+	var builder strings.Builder
+	builder.WriteString("view_image path outside workspace rejected by user")
+	if path != "" {
+		builder.WriteString(": ")
+		builder.WriteString(path)
+	}
+	builder.WriteString(".")
+	if commentary != "" {
+		builder.WriteString(" User rejected the approval request for this tool call, and said: ")
+		builder.WriteString(strconv.Quote(commentary))
+		builder.WriteString(".")
+	} else {
+		builder.WriteString(" User rejected the approval request for this tool call.")
+	}
+	builder.WriteString(" Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative.")
+	if instruction := strings.TrimSpace(rejectionInstruction); instruction != "" {
+		builder.WriteString(" ")
+		builder.WriteString(instruction)
+	}
+	return errors.New(builder.String())
+}
+
+func readImageOutsideWorkspacePath(req patchtool.OutsideWorkspaceRequest) string {
+	if path := strings.TrimSpace(req.ResolvedPath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(req.RequestedPath)
 }
 
 func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem, error) {
