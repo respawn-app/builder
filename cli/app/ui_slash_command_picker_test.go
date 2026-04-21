@@ -129,6 +129,17 @@ func TestSlashCommandPickerHidesResumeWithoutOtherSessions(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerShowsResumeWhenOtherSessionAvailabilityIsUnknown(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIHasOtherSessions(false, false))
+	m.input = "/re"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if !slashPickerContainsCommand(state, "resume") {
+		t.Fatalf("expected /resume when other session availability is unknown, got %+v", slashPickerCommandNames(state))
+	}
+}
+
 func TestResumeSlashCommandShowsErrorWithoutOtherSessions(t *testing.T) {
 	m := newProjectedStaticUIModel(WithUIHasOtherSessions(true, false))
 	m.input = "/resume"
@@ -150,6 +161,20 @@ func TestResumeSlashCommandShowsErrorWithoutOtherSessions(t *testing.T) {
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, resumeCommandUnavailableMessage) {
 		t.Fatalf("expected unavailable /resume status line, got %q", status)
+	}
+}
+
+func TestResumeSlashCommandAllowsUnknownOtherSessionAvailability(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIHasOtherSessions(false, false))
+	m.input = "/resume"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /resume when availability is unknown")
+	}
+	updated := next.(*uiModel)
+	if updated.Action() != UIActionResume {
+		t.Fatalf("expected UIActionResume, got %q", updated.Action())
 	}
 }
 
