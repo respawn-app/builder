@@ -907,6 +907,24 @@ func TestOpenByIDFindsLegacySessionDirectlyUnderSessionsRoot(t *testing.T) {
 	}
 }
 
+func TestSetWorkspaceRootPreservesWorkspaceContainer(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-container", "/tmp/work-a")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	if err := store.SetWorkspaceRoot("/tmp/work-b"); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	if got := store.Meta().WorkspaceContainer; got != "workspace-container" {
+		t.Fatalf("workspace container = %q, want workspace-container", got)
+	}
+	if got := store.Meta().WorkspaceRoot; got != "/tmp/work-b" {
+		t.Fatalf("workspace root = %q, want /tmp/work-b", got)
+	}
+}
+
 func TestEventLogOnlySessionDirectoryRemainsUndiscoverable(t *testing.T) {
 	root := t.TempDir()
 	container := filepath.Join(root, sessionsDirName, "workspace-x")

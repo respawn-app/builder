@@ -275,6 +275,9 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodSessionRetargetWorkspace:
 		return decodeAndHandle(req, func(params serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionRetargetWorkspaceResponse{}, err
+			}
 			return g.core.SessionLifecycleClient().RetargetSessionWorkspace(ctx, params)
 		})
 	case protocol.MethodSessionResolveTransition:

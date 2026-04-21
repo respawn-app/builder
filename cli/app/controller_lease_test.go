@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -126,5 +127,23 @@ func TestControllerLeaseManagerKeepsSharedRecoveryAliveAfterInitiatorCancel(t *t
 	}
 	if got := manager.Value(); got != "lease-new" {
 		t.Fatalf("manager lease id = %q, want lease-new", got)
+	}
+}
+
+func TestControllerLeaseManagerRejectsEmptyRecoveredLeaseID(t *testing.T) {
+	manager := newControllerLeaseManager("lease-old")
+	manager.SetRecoverFunc(func(context.Context) (string, error) {
+		return "   ", nil
+	})
+
+	leaseID, err := manager.Recover(context.Background())
+	if !errors.Is(err, errControllerLeaseRecoveryEmptyLeaseID) {
+		t.Fatalf("Recover error = %v, want errControllerLeaseRecoveryEmptyLeaseID", err)
+	}
+	if leaseID != "" {
+		t.Fatalf("Recover lease id = %q, want empty", leaseID)
+	}
+	if got := manager.Value(); got != "lease-old" {
+		t.Fatalf("manager lease id = %q, want lease-old", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 )
 
 var errControllerLeaseRecoveryUnavailable = errors.New("controller lease recovery is unavailable")
+var errControllerLeaseRecoveryEmptyLeaseID = errors.New("controller lease recovery returned empty lease id")
 
 const controllerLeaseRecoveryTimeout = uiRuntimeControlTimeout
 
@@ -91,12 +92,15 @@ func (m *controllerLeaseManager) runRecovery(recovery *controllerLeaseRecovery, 
 	defer cancel()
 	leaseID, err := recoverFn(recoverCtx)
 	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if err == nil && trimmedLeaseID == "" {
+		err = errControllerLeaseRecoveryEmptyLeaseID
+	}
 
 	m.mu.Lock()
 	if err == nil && trimmedLeaseID != "" {
 		m.leaseID = trimmedLeaseID
+		recovery.leaseID = trimmedLeaseID
 	}
-	recovery.leaseID = m.leaseID
 	recovery.err = err
 	close(recovery.done)
 	m.inflight = nil

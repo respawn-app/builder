@@ -178,21 +178,25 @@ func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
 }
 
 func discoverProviderSkillSymlinkItems(provider onboardingImportProvider, base string) (string, []onboardingSkillImportItem, error) {
-	root, err := providerSkillSymlinkSourceAtBase(provider, base)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil, nil
+	for _, candidate := range provider.SkillSourceCandidates {
+		root := filepath.Join(base, candidate)
+		exists, err := pathExists(root)
+		if err != nil {
+			return "", nil, err
 		}
-		return "", nil, err
+		if !exists {
+			continue
+		}
+		items, err := discoverDirectProviderSkills(provider, root)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(items) == 0 {
+			continue
+		}
+		return root, items, nil
 	}
-	items, err := discoverDirectProviderSkills(provider, root)
-	if err != nil {
-		return "", nil, err
-	}
-	if len(items) == 0 {
-		return "", nil, nil
-	}
-	return root, items, nil
+	return "", nil, nil
 }
 
 func discoverDirectProviderSkills(provider onboardingImportProvider, root string) ([]onboardingSkillImportItem, error) {

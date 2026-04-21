@@ -354,9 +354,9 @@ func openBindingCommandRemote(ctx context.Context, path string) (config.App, *cl
 		return config.App{}, nil, err
 	}
 	dialCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
 	remote, err := client.DialConfiguredRemote(dialCtx, cfg)
 	if err != nil {
-		cancel()
 		return config.App{}, nil, err
 	}
 	return cfg, remote, nil

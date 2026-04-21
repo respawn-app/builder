@@ -285,6 +285,31 @@ func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 	}
 }
 
+func TestDiscoverProviderSkillSymlinkItemsFallsBackWhenPreferredDirectoryIsEmpty(t *testing.T) {
+	home := t.TempDir()
+	provider, ok := onboardingImportProviderByID(onboardingImportProviderCodex)
+	if !ok {
+		t.Fatal("expected codex provider")
+	}
+	base := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(filepath.Join(base, "skills", "local"), 0o755); err != nil {
+		t.Fatalf("mkdir local skills: %v", err)
+	}
+	writeOnboardingTestSkill(t, filepath.Join(base, "skills", "fallback-skill"), "fallback", "from skills root")
+
+	root, items, err := discoverProviderSkillSymlinkItems(provider, base)
+	if err != nil {
+		t.Fatalf("discoverProviderSkillSymlinkItems: %v", err)
+	}
+	expectedRoot := filepath.Join(base, "skills")
+	if root != expectedRoot {
+		t.Fatalf("root = %q, want %q", root, expectedRoot)
+	}
+	if len(items) != 1 || items[0].TargetDirName != "fallback-skill" {
+		t.Fatalf("unexpected discovered items: %+v", items)
+	}
+}
+
 func TestProviderSkillSymlinkSourceErrorsWithoutSkillsRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
