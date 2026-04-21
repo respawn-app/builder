@@ -125,6 +125,9 @@ func TestControllerLeaseManagerKeepsSharedRecoveryAliveAfterInitiatorCancel(t *t
 	if second.leaseID != "lease-new" {
 		t.Fatalf("second Recover lease id = %q, want lease-new", second.leaseID)
 	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("recovery call count after shared recovery release = %d, want 1", got)
+	}
 	if got := manager.Value(); got != "lease-new" {
 		t.Fatalf("manager lease id = %q, want lease-new", got)
 	}

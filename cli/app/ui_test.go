@@ -3944,9 +3944,13 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 	}
 
 	_ = start("printf 'running-output\n'; sleep 1", "running-job")
-	_ = start("printf 'completed-output\n'; sleep 0.05", "completed-job")
-	_ = start("printf 'failed-output\n'; sleep 0.05; exit 2", "failed-job")
-	time.Sleep(120 * time.Millisecond)
+	completedID := start("printf 'completed-output\n'; sleep 0.05", "completed-job")
+	failedID := start("printf 'failed-output\n'; sleep 0.05; exit 2", "failed-job")
+	waitForTestCondition(t, 2*time.Second, "completed and failed background jobs to exit", func() bool {
+		completed, completedOK := findBackgroundSnapshot(manager.List(), completedID)
+		failed, failedOK := findBackgroundSnapshot(manager.List(), failedID)
+		return completedOK && failedOK && !completed.Running && !failed.Running
+	})
 
 	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
