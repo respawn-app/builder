@@ -29,7 +29,6 @@ type commonFlags struct {
 	ThinkingLevel         string
 	Theme                 string
 	ModelTimeoutSeconds   int
-	ShellTimeoutSeconds   int
 	Tools                 string
 	OpenAIBaseURL         string
 	OpenAIBaseURLExplicit bool
@@ -141,7 +140,6 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   effectiveShellTimeout(*flags),
 		Tools:                 flags.Tools,
 		OpenAIBaseURL:         flags.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
@@ -276,7 +274,6 @@ func runSubcommand(args []string) int {
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   effectiveShellTimeout(*flags),
 		Tools:                 flags.Tools,
 		OpenAIBaseURL:         flags.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
@@ -343,7 +340,6 @@ func registerCommonFlags(fs *flag.FlagSet) *commonFlags {
 	fs.StringVar(&flags.ThinkingLevel, "thinking-level", "", "thinking level override (low|medium|high|xhigh)")
 	fs.StringVar(&flags.Theme, "theme", "", "theme override (light|dark)")
 	fs.IntVar(&flags.ModelTimeoutSeconds, "model-timeout-seconds", 0, "model request timeout override in seconds")
-	fs.IntVar(&flags.ShellTimeoutSeconds, "shell-timeout-seconds", 0, "shell default timeout override in seconds")
 	fs.StringVar(&flags.Tools, "tools", "", "enabled tools override as csv (e.g. shell,patch)")
 	fs.StringVar(&flags.OpenAIBaseURL, "openai-base-url", "", "OpenAI-compatible base URL override")
 	return flags
@@ -359,10 +355,6 @@ func effectiveSessionID(flags commonFlags) (string, error) {
 		return continueID, nil
 	}
 	return sessionID, nil
-}
-
-func effectiveShellTimeout(flags commonFlags) int {
-	return flags.ShellTimeoutSeconds
 }
 
 func markExplicitCommonFlags(fs *flag.FlagSet, flags *commonFlags) {

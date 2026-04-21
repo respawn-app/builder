@@ -171,9 +171,8 @@ func persistedTranscriptToolCallMeta(call llm.ToolCall) *transcript.ToolCallMeta
 		return meta
 	}
 	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
-		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-		DefaultShellPath:           currentTranscriptDefaultShellPath(),
-		GOOS:                       goruntime.GOOS,
+		DefaultShellPath: currentTranscriptDefaultShellPath(),
+		GOOS:             goruntime.GOOS,
 	}, call.Input)
 	return &built
 }

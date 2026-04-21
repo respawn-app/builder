@@ -125,9 +125,6 @@ func validateTimeouts(state settingsState, _ map[string]string) error {
 	if state.Settings.Timeouts.ModelRequestSeconds <= 0 {
 		return fmt.Errorf("timeouts.model_request_seconds must be > 0")
 	}
-	if state.Settings.Timeouts.ShellDefaultSeconds <= 0 {
-		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
-	}
 	return nil
 }
 

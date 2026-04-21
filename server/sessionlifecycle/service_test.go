@@ -449,7 +449,7 @@ func TestResolveForkUserMessageIndexFromTranscriptEntryIgnoresToolCompletedOrdin
 		Role: llm.RoleAssistant,
 		ToolCalls: []llm.ToolCall{{
 			ID:    "call-1",
-			Name:  string(toolspec.ToolShell),
+			Name:  string(toolspec.ToolExecCommand),
 			Input: json.RawMessage(`{"command":"pwd"}`),
 		}},
 	}); err != nil {
@@ -457,13 +457,13 @@ func TestResolveForkUserMessageIndexFromTranscriptEntryIgnoresToolCompletedOrdin
 	}
 	if _, err := store.AppendEvent("step-1", "tool_completed", map[string]any{
 		"call_id":  "call-1",
-		"name":     string(toolspec.ToolShell),
+		"name":     string(toolspec.ToolExecCommand),
 		"is_error": false,
 		"output":   json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	}); err != nil {
 		t.Fatalf("append tool_completed: %v", err)
 	}
-	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell)}); err != nil {
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolExecCommand)}); err != nil {
 		t.Fatalf("append tool message: %v", err)
 	}
 	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}); err != nil {

@@ -21,7 +21,6 @@ func startEmbeddedServer(ctx context.Context, opts Options, interactor authInter
 		ThinkingLevel:         opts.ThinkingLevel,
 		Theme:                 opts.Theme,
 		ModelTimeoutSeconds:   opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   opts.ShellTimeoutSeconds,
 		Tools:                 opts.Tools,
 		OpenAIBaseURL:         opts.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,

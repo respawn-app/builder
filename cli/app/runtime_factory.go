@@ -172,7 +172,6 @@ func configSourceLines(src config.SourceReport) []string {
 type localToolRuntimeContext struct {
 	workspaceRoot                   string
 	ownerSessionID                  string
-	shellDefaultTimeout             time.Duration
 	shellOutputMaxChars             int
 	allowNonCwdEdits                bool
 	supportsVision                  bool
@@ -189,7 +188,6 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 	return runtimewire.BuildLocalRuntimeHandler(def, runtimewire.LocalToolRuntimeContext{
 		WorkspaceRoot:                   ctx.workspaceRoot,
 		OwnerSessionID:                  ctx.ownerSessionID,
-		ShellDefaultTimeout:             ctx.shellDefaultTimeout,
 		ShellOutputMaxChars:             ctx.shellOutputMaxChars,
 		AllowNonCwdEdits:                ctx.allowNonCwdEdits,
 		SupportsVision:                  ctx.supportsVision,
@@ -203,12 +201,11 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 	})
 }
 
-func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	return runtimewire.BuildToolRegistry(
 		workspaceRoot,
 		ownerSessionID,
 		enabled,
-		shellDefaultTimeout,
 		minimumExecToBgTime,
 		shellOutputMaxChars,
 		allowNonCwdEdits,

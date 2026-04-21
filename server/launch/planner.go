@@ -103,7 +103,6 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		ThinkingLevel:       strings.TrimSpace(overrides.ThinkingLevel),
 		Theme:               strings.TrimSpace(overrides.Theme),
 		ModelTimeoutSeconds: overrides.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: overrides.ShellTimeoutSeconds,
 		Tools:               strings.TrimSpace(overrides.Tools),
 		OpenAIBaseURL:       strings.TrimSpace(overrides.OpenAIBaseURL),
 	})
@@ -128,9 +127,6 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	if overrides.ModelTimeoutSeconds > 0 {
 		next.ActiveSettings.Timeouts.ModelRequestSeconds = loaded.Settings.Timeouts.ModelRequestSeconds
-	}
-	if overrides.ShellTimeoutSeconds > 0 {
-		next.ActiveSettings.Timeouts.ShellDefaultSeconds = loaded.Settings.Timeouts.ShellDefaultSeconds
 	}
 	if locked == nil {
 		if strings.TrimSpace(overrides.Tools) != "" {

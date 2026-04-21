@@ -55,7 +55,7 @@ func hostedContract(request RequestExposure, presentation transcript.ToolPresent
 
 func defaultToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
-		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
+		command, inlineMeta := formatToolInput(toolID, raw)
 		command = strings.TrimSpace(command)
 		if command == "" {
 			command = defaultToolCallFallback
@@ -71,7 +71,7 @@ func defaultToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessa
 
 func shellToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
-		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
+		command, inlineMeta := formatToolInput(toolID, raw)
 		command = strings.TrimSpace(command)
 		if command == "" {
 			command = defaultToolCallFallback
@@ -734,7 +734,7 @@ func decodeHostedWebSearchOutput(item HostedToolOutput) (HostedExecution, bool) 
 	}, true
 }
 
-func formatToolInput(toolID toolspec.ID, raw json.RawMessage, shellTimeoutSeconds int) (string, string) {
+func formatToolInput(toolID toolspec.ID, raw json.RawMessage) (string, string) {
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return strings.TrimSpace(string(raw)), ""
@@ -754,18 +754,18 @@ func formatToolInput(toolID toolspec.ID, raw json.RawMessage, shellTimeoutSecond
 		}
 		return fmt.Sprintf("write stdin session %d", sessionID), ""
 	}
-	if cmd, ok := asString(obj["cmd"]); ok && toolID == toolspec.ToolExecCommand {
-		return cmd, ""
+	if toolID == toolspec.ToolExecCommand {
+		if cmd, ok := asString(obj["cmd"]); ok {
+			return cmd, ""
+		}
+		if cmd, ok := asString(obj["command"]); ok {
+			return cmd, ""
+		}
 	}
 	if cmd, ok := asString(obj["command"]); ok {
 		inlineMeta := ""
 		if secs, ok := asInt(obj["timeout_seconds"]); ok && secs > 0 {
 			inlineMeta = "timeout: " + formatDurationShort(time.Duration(secs)*time.Second)
-		} else if toolID == toolspec.ToolShell {
-			if shellTimeoutSeconds <= 0 {
-				shellTimeoutSeconds = DefaultShellTimeoutSeconds
-			}
-			inlineMeta = "timeout: " + formatDurationShort(time.Duration(shellTimeoutSeconds)*time.Second)
 		}
 		return cmd, inlineMeta
 	}

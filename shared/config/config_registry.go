@@ -287,12 +287,6 @@ func newSettingsRegistry() settingsRegistry {
 			"BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS",
 			func(opts LoadOptions) (int, bool, error) { return positiveCLIInt(opts.ModelTimeoutSeconds) },
 			settingDocOptions{}),
-		newIntSetting("timeouts.shell_default_seconds", defaultShellTimeoutSeconds,
-			func(state *settingsState, value int) { state.Settings.Timeouts.ShellDefaultSeconds = value },
-			func(state settingsState) int { return state.Settings.Timeouts.ShellDefaultSeconds },
-			"BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS",
-			func(opts LoadOptions) (int, bool, error) { return positiveCLIInt(opts.ShellTimeoutSeconds) },
-			settingDocOptions{}),
 		newIntSetting("shell_output_max_chars", defaultShellOutputMaxChars,
 			func(state *settingsState, value int) { state.Settings.ShellOutputMaxChars = value },
 			func(state settingsState) int { return state.Settings.ShellOutputMaxChars },
@@ -668,7 +662,7 @@ func (toolsSetting) applyFile(raw settingsFile, settingsPath string, state *sett
 		return err
 	}
 	for key, rawValue := range table {
-		id, valid := toolspec.ParseID(strings.TrimSpace(key))
+		id, valid := toolspec.ParseConfigID(strings.TrimSpace(key))
 		if !valid {
 			return fmt.Errorf("invalid tools key in %s: %q", settingsPath, key)
 		}
@@ -716,7 +710,7 @@ func (toolsSetting) applyCLI(opts LoadOptions, state *settingsState, sources map
 
 func (toolsSetting) registerFileKeys(tree *fileKeyTree) {
 	tree.allowDynamicChildren([]string{"tools"}, func(key string) bool {
-		_, ok := toolspec.ParseID(strings.TrimSpace(key))
+		_, ok := toolspec.ParseConfigID(strings.TrimSpace(key))
 		return ok
 	})
 }
@@ -724,7 +718,7 @@ func (toolsSetting) registerFileKeys(tree *fileKeyTree) {
 func (toolsSetting) appendDefaultPayload(payload map[string]any, state settingsState) {
 	toolDefaults := map[string]bool{}
 	for _, id := range toolspec.CatalogIDs() {
-		toolDefaults[string(id)] = state.Settings.EnabledTools[id]
+		toolDefaults[toolspec.ConfigName(id)] = state.Settings.EnabledTools[id]
 	}
 	payload["tools"] = toolDefaults
 }
@@ -732,7 +726,7 @@ func (toolsSetting) appendDefaultPayload(payload map[string]any, state settingsS
 func (toolsSetting) appendDefaultLines(lines *[]defaultConfigLine, state settingsState) {
 	for _, id := range toolspec.CatalogIDs() {
 		*lines = append(*lines, defaultConfigLine{
-			Path:  []string{"tools", string(id)},
+			Path:  []string{"tools", toolspec.ConfigName(id)},
 			Value: state.Settings.EnabledTools[id],
 		})
 	}
@@ -977,7 +971,7 @@ func splitSettingKey(key string) []string {
 }
 
 func toolSourceKey(id toolspec.ID) string {
-	return "tools." + string(id)
+	return "tools." + toolspec.ConfigName(id)
 }
 
 func skillSourceKey(name string) string {

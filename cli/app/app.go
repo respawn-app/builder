@@ -21,7 +21,6 @@ type Options struct {
 	ThinkingLevel         string
 	Theme                 string
 	ModelTimeoutSeconds   int
-	ShellTimeoutSeconds   int
 	Tools                 string
 	OpenAIBaseURL         string
 	OpenAIBaseURLExplicit bool

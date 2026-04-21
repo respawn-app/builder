@@ -50,7 +50,6 @@ server_port = 53082
 
 [timeouts]
 model_request_seconds = 400
-shell_default_seconds = 300
 
 [tools]
 shell = true
@@ -81,7 +80,6 @@ These flags overlay settings at startup.
 | `--thinking-level` | `thinking_level` | |
 | `--theme` | `theme` | |
 | `--model-timeout-seconds` | `timeouts.model_request_seconds` | |
-| `--shell-timeout-seconds` | `timeouts.shell_default_seconds` | |
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
 
@@ -111,7 +109,7 @@ These flags overlay settings at startup.
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
 | `context_compaction_threshold_tokens` | int | `258400` | `BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS` |  | Auto-compaction threshold. Must be `> 0`, `< model_context_window`, and at least `50%` of `model_context_window`. The default is derived from the default context window. |
 | `pre_submit_compaction_lead_tokens` | int | `35000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Fixed pre-submit runway reserve before auto-compaction. Builder compacts before sending the next user prompt once (`context_compaction_threshold_tokens` - this threshold) is reached. |
-| `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Minimum `exec_command` yield time before it moves to background and lets Builder manage it asynchronously. Lower values are clamped up. Use if model frequently expects your commands to complete fast, they background, and force model to poll for them. |
+| `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Default floor for `exec_command` yield time before it moves to background and lets Builder manage it asynchronously. Lower values are clamped up. Use if model frequently expects your commands to complete fast, they background, and force model to poll for them. |
 | `compaction_mode` | string | `local` | `BUILDER_COMPACTION_MODE` |  | Allowed: `native`, `local`, `none`. `native` prefers provider-native compaction and falls back to local compaction. `local` always uses local summary compaction. `none` disables auto-compaction and makes manual compaction fail. |
 | `cache_warning_mode` | string | `default` | `BUILDER_CACHE_WARNING_MODE` |  | Prompt-cache warning policy. Allowed: `off`, `default`, `verbose`. `default` catches unwanted invalidations and keeps them in detail mode. `verbose` includes everything from `default`, surfaces cache warnings in ongoing mode too, and a broader range of warnings. |
 | `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices before they are truncated. |
@@ -123,7 +121,6 @@ These flags overlay settings at startup.
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
 | `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `--model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
-| `timeouts.shell_default_seconds` | int | `300` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` | `--shell-timeout-seconds` | Default timeout for shell tool calls. Must be `> 0`. |
 
 ### Supervisor
 
@@ -169,7 +166,7 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 | Key | Default | What enabling it exposes |
 | --- | --- | --- |
 | `tools.ask_question` | `true` | Tool to ask interactive questions |
-| `tools.exec_command` | `true` | The primary shell tool |
+| `tools.shell` | `true` | The primary shell tool. Internally this maps to `exec_command`. |
 | `tools.multi_tool_use_parallel` | Model-derived | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
 | `tools.patch` | `true` | The edit tool |
 | `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |

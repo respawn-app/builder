@@ -72,7 +72,7 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
 		t.Fatalf("expected sessions root to exist: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[toolspec.ToolShell] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolExecCommand] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
 	if cfg.Settings.EnabledTools[toolspec.ToolMultiToolUseParallel] {
@@ -1398,7 +1398,6 @@ ask_question = true
 
 [timeouts]
 model_request_seconds = 45
-shell_default_seconds = 50
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -1673,8 +1672,6 @@ func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
-	t.Setenv("BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS", "234")
-
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -1682,14 +1679,8 @@ func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 	if cfg.Settings.Timeouts.ModelRequestSeconds != 123 {
 		t.Fatalf("expected canonical env model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
 	}
-	if cfg.Settings.Timeouts.ShellDefaultSeconds != 234 {
-		t.Fatalf("expected canonical env shell timeout, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
-	}
 	if got := cfg.Source.Sources["timeouts.model_request_seconds"]; got != "env" {
 		t.Fatalf("expected timeouts.model_request_seconds source env, got %q", got)
-	}
-	if got := cfg.Source.Sources["timeouts.shell_default_seconds"]; got != "env" {
-		t.Fatalf("expected timeouts.shell_default_seconds source env, got %q", got)
 	}
 }
 

@@ -109,11 +109,11 @@ func newPromptCacheContinuityFixture(t *testing.T) *promptCacheContinuityFixture
 	}
 	client := &fakeClient{caps: clientCaps}
 	reviewerClient := &fakeClient{caps: clientCaps}
-	registry := tools.NewRegistry(fakeTool{name: toolspec.ToolShell}, fakeTool{name: toolspec.ToolAskQuestion})
+	registry := tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}, fakeTool{name: toolspec.ToolAskQuestion})
 	cfg := Config{
 		Model:         "gpt-5",
 		ThinkingLevel: "medium",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell, toolspec.ToolAskQuestion},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolAskQuestion},
 		Reviewer: ReviewerConfig{
 			Model:         "gpt-5",
 			ThinkingLevel: "medium",
@@ -181,7 +181,7 @@ func seedPromptCacheContinuityConversation(t *testing.T, engine *Engine) {
 	}
 	toolCall := llm.ToolCall{
 		ID:   "call-shell-1",
-		Name: string(toolspec.ToolShell),
+		Name: string(toolspec.ToolExecCommand),
 		Input: mustJSON(map[string]any{
 			"command": "git status --short",
 			"workdir": ".",
@@ -192,7 +192,7 @@ func seedPromptCacheContinuityConversation(t *testing.T, engine *Engine) {
 	}
 	toolResult := tools.Result{
 		CallID: toolCall.ID,
-		Name:   toolspec.ToolShell,
+		Name:   toolspec.ToolExecCommand,
 		Output: mustJSON(map[string]any{
 			"stdout":    " M server/runtime/request_cache_lineage.go\n M server/runtime/reviewer_pipeline.go",
 			"exit_code": 0,

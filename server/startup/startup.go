@@ -24,7 +24,6 @@ type Request struct {
 	ThinkingLevel         string
 	Theme                 string
 	ModelTimeoutSeconds   int
-	ShellTimeoutSeconds   int
 	Tools                 string
 	OpenAIBaseURL         string
 	OpenAIBaseURLExplicit bool
@@ -147,7 +146,6 @@ func buildRequest(req Request, authHandler AuthHandler) serverbootstrap.Request 
 			ThinkingLevel:       req.ThinkingLevel,
 			Theme:               req.Theme,
 			ModelTimeoutSeconds: req.ModelTimeoutSeconds,
-			ShellTimeoutSeconds: req.ShellTimeoutSeconds,
 			Tools:               req.Tools,
 		},
 	}

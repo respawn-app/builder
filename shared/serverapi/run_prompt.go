@@ -21,7 +21,6 @@ type RunPromptOverrides struct {
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
-	ShellTimeoutSeconds int
 	Tools               string
 	OpenAIBaseURL       string
 }
@@ -32,7 +31,6 @@ func (o RunPromptOverrides) HasAny() bool {
 		strings.TrimSpace(o.ThinkingLevel) != "" ||
 		strings.TrimSpace(o.Theme) != "" ||
 		o.ModelTimeoutSeconds > 0 ||
-		o.ShellTimeoutSeconds > 0 ||
 		strings.TrimSpace(o.Tools) != "" ||
 		strings.TrimSpace(o.OpenAIBaseURL) != ""
 }

@@ -55,7 +55,6 @@ func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *test
 				plan.WorkspaceRoot,
 				plan.SessionID,
 				[]toolspec.ID{toolspec.ToolPatch},
-				5*time.Second,
 				15*time.Second,
 				16_000,
 				false,

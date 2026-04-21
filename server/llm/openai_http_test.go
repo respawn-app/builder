@@ -482,7 +482,7 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
-			Name:   string(toolspec.ToolShell),
+			Name:   string(toolspec.ToolExecCommand),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
 		},
 	})

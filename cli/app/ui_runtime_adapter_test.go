@@ -227,7 +227,7 @@ func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testi
 		StepID: "step-1",
 		ToolCall: &llm.ToolCall{
 			ID:           "call-1",
-			Name:         string(toolspec.ToolShell),
+			Name:         string(toolspec.ToolExecCommand),
 			Presentation: toolcodec.EncodeToolCallMeta(callMeta),
 		},
 	}))
@@ -241,7 +241,7 @@ func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testi
 		StepID: "step-1",
 		ToolResult: &tools.Result{
 			CallID: "call-1",
-			Name:   toolspec.ToolShell,
+			Name:   toolspec.ToolExecCommand,
 			Output: []byte("/tmp"),
 		},
 	}))
@@ -333,7 +333,7 @@ func TestRuntimeEventBatchCoalescesCommittedNativeFlushAndPreservesOrder(t *test
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}}),
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(toolspec.ToolExecCommand), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
 	}
 	updated, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
 	m = updated.(*uiModel)

@@ -19,7 +19,7 @@ func TestEffectiveSettingsKeepsBaseThinkingLevelEvenWhenSessionIsLocked(t *testi
 }
 
 func TestActiveToolIDs_DerivesMultiToolDefaultFromModelCapability(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true, toolspec.ToolMultiToolUseParallel: false}}
 	source := config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "default"}}
 
 	ids := activeToolIDs(settings, source, nil)
@@ -35,13 +35,13 @@ func TestActiveToolIDs_DerivesMultiToolDefaultFromModelCapability(t *testing.T) 
 }
 
 func TestActiveToolIDs_ConfigSourceOverridesDerivedMultiToolDefault(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true, toolspec.ToolMultiToolUseParallel: false}}
 	ids := activeToolIDs(settings, config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "file"}}, nil)
 	if containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected explicit file disable to win, got %+v", ids)
 	}
 
-	settings = config.Settings{Model: "gpt-5.4", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: true}}
+	settings = config.Settings{Model: "gpt-5.4", EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true, toolspec.ToolMultiToolUseParallel: true}}
 	ids = activeToolIDs(settings, config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "file"}}, nil)
 	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected explicit file enable to win, got %+v", ids)
@@ -49,7 +49,7 @@ func TestActiveToolIDs_ConfigSourceOverridesDerivedMultiToolDefault(t *testing.T
 }
 
 func TestActiveToolIDs_MissingSourceEntryStillUsesDerivedMultiToolDefault(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true, toolspec.ToolMultiToolUseParallel: false}}
 	ids := activeToolIDs(settings, config.SourceReport{}, nil)
 	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected missing source entry to behave like default, got %+v", ids)
@@ -57,7 +57,7 @@ func TestActiveToolIDs_MissingSourceEntryStillUsesDerivedMultiToolDefault(t *tes
 }
 
 func TestActiveToolIDs_UsesLockedEnabledToolsVerbatim(t *testing.T) {
-	locked := &session.LockedContract{EnabledTools: []string{string(toolspec.ToolShell), string(toolspec.ToolMultiToolUseParallel)}}
+	locked := &session.LockedContract{EnabledTools: []string{string(toolspec.ToolExecCommand), string(toolspec.ToolMultiToolUseParallel)}}
 	ids := activeToolIDs(config.Settings{Model: "gpt-5.4"}, config.SourceReport{}, locked)
 	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected locked enabled tools to be used verbatim, got %+v", ids)
