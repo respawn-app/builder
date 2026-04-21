@@ -106,14 +106,6 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 		t.Fatalf("expected %s to be request-exposed with vision support", toolspec.ToolViewImage)
 	}
 
-	parallel, ok := DefinitionFor(toolspec.ToolMultiToolUseParallel)
-	if !ok {
-		t.Fatalf("expected %s definition", toolspec.ToolMultiToolUseParallel)
-	}
-	if !parallel.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed when enabled", toolspec.ToolMultiToolUseParallel)
-	}
-
 	triggerHandoff, ok := DefinitionFor(toolspec.ToolTriggerHandoff)
 	if !ok {
 		t.Fatalf("expected %s definition", toolspec.ToolTriggerHandoff)

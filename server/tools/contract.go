@@ -73,13 +73,12 @@ type TranscriptContract struct {
 type LocalRuntimeBuilder string
 
 const (
-	LocalRuntimeBuilderExecCommand          LocalRuntimeBuilder = "exec_command"
-	LocalRuntimeBuilderWriteStdin           LocalRuntimeBuilder = "write_stdin"
-	LocalRuntimeBuilderViewImage            LocalRuntimeBuilder = "view_image"
-	LocalRuntimeBuilderPatch                LocalRuntimeBuilder = "patch"
-	LocalRuntimeBuilderAskQuestion          LocalRuntimeBuilder = "ask_question"
-	LocalRuntimeBuilderTriggerHandoff       LocalRuntimeBuilder = "trigger_handoff"
-	LocalRuntimeBuilderMultiToolUseParallel LocalRuntimeBuilder = "multi_tool_use_parallel"
+	LocalRuntimeBuilderExecCommand    LocalRuntimeBuilder = "exec_command"
+	LocalRuntimeBuilderWriteStdin     LocalRuntimeBuilder = "write_stdin"
+	LocalRuntimeBuilderViewImage      LocalRuntimeBuilder = "view_image"
+	LocalRuntimeBuilderPatch          LocalRuntimeBuilder = "patch"
+	LocalRuntimeBuilderAskQuestion    LocalRuntimeBuilder = "ask_question"
+	LocalRuntimeBuilderTriggerHandoff LocalRuntimeBuilder = "trigger_handoff"
 )
 
 type RuntimeContract struct {

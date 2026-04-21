@@ -175,7 +175,6 @@ type localToolRuntimeContext struct {
 	shellOutputMaxChars             int
 	allowNonCwdEdits                bool
 	supportsVision                  bool
-	registryProvider                func() *tools.Registry
 	askQuestionBroker               *askquestion.Broker
 	backgroundShellManager          *shelltool.Manager
 	triggerHandoffController        func() triggerhandofftool.Controller
@@ -191,7 +190,6 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 		ShellOutputMaxChars:             ctx.shellOutputMaxChars,
 		AllowNonCwdEdits:                ctx.allowNonCwdEdits,
 		SupportsVision:                  ctx.supportsVision,
-		RegistryProvider:                ctx.registryProvider,
 		AskQuestionBroker:               ctx.askQuestionBroker,
 		BackgroundShellManager:          ctx.backgroundShellManager,
 		TriggerHandoffController:        ctx.triggerHandoffController,

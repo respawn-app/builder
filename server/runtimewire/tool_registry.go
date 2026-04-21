@@ -3,7 +3,6 @@ package runtimewire
 import (
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
-	multitooluseparallel "builder/server/tools/multitooluseparallel"
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
@@ -28,7 +27,6 @@ type LocalToolRuntimeContext struct {
 	ShellOutputMaxChars             int
 	AllowNonCwdEdits                bool
 	SupportsVision                  bool
-	RegistryProvider                func() *tools.Registry
 	AskQuestionBroker               *askquestion.Broker
 	BackgroundShellManager          *shelltool.Manager
 	TriggerHandoffController        func() triggerhandofftool.Controller
@@ -81,11 +79,6 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 			opts = append(opts, readimagetool.WithOutsideWorkspaceAuditLogger(ctx.ViewImageOutsideWorkspaceLogger))
 		}
 		return readimagetool.New(ctx.WorkspaceRoot, ctx.SupportsVision, opts...)
-	case tools.LocalRuntimeBuilderMultiToolUseParallel:
-		if ctx.RegistryProvider == nil {
-			return nil, fmt.Errorf("multi_tool_use_parallel registry provider is unavailable")
-		}
-		return multitooluseparallel.New(ctx.RegistryProvider), nil
 	default:
 		return nil, fmt.Errorf("unsupported local runtime builder %q for tool %q", def.LocalRuntimeBuilder(), def.ID)
 	}
@@ -131,8 +124,6 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		enabledSet[id] = struct{}{}
 	}
 	handlers := make([]tools.Handler, 0, len(enabledSet))
-	var registry *tools.Registry
-	ctx.RegistryProvider = func() *tools.Registry { return registry }
 	for _, id := range tools.CatalogIDs() {
 		if _, ok := enabledSet[id]; !ok {
 			continue
@@ -149,11 +140,8 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 			return nil, nil, nil, wrapSessionWorkspaceRetargetHint(ctx.OwnerSessionID, ctx.WorkspaceRoot, err)
 		}
 		handlers = append(handlers, handler)
-		registry = tools.NewRegistry(handlers...)
 	}
-	if registry == nil {
-		registry = tools.NewRegistry()
-	}
+	registry := tools.NewRegistry(handlers...)
 	return registry, broker, background, nil
 }
 

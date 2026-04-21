@@ -485,23 +485,22 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 		},
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
-		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
 		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
-		"model":                         "cli",
-		"tools.shell":                   "default",
-		"tools.multi_tool_use_parallel": "default",
+		"model":       "cli",
+		"tools.shell": "default",
 	}}}
 
 	updated := applyCLIOverridesToSessionPlan(plan, cfg)
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolExecCommand || updated.EnabledTools[1] != toolspec.ToolMultiToolUseParallel {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected recomputed tools for overridden model, got %+v", updated.EnabledTools)
 	}
 }
@@ -514,16 +513,15 @@ func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrid
 		},
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
-		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
 		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
-		"model":                         "cli",
-		"tools.shell":                   "cli",
-		"tools.multi_tool_use_parallel": "cli",
+		"model":       "cli",
+		"tools.shell": "cli",
 	}}}
 
 	updated := applyCLIOverridesToSessionPlan(plan, cfg)
