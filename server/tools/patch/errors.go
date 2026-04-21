@@ -163,6 +163,25 @@ func attachFailurePath(err error, path string) error {
 	return &copy
 }
 
+func attachFailureReasonContext(err error, context string) error {
+	trimmedContext := strings.TrimSpace(context)
+	if trimmedContext == "" {
+		return err
+	}
+	var f *failure
+	if !errors.As(err, &f) || f == nil {
+		return internalFailure("", trimmedContext+": "+err.Error())
+	}
+	copy := *f
+	trimmedReason := strings.TrimSpace(copy.Reason)
+	if trimmedReason == "" {
+		copy.Reason = trimmedContext
+	} else {
+		copy.Reason = trimmedContext + ": " + trimmedReason
+	}
+	return &copy
+}
+
 func patchErrorResult(c tools.Call, err error) tools.Result {
 	return tools.ErrorResultWith(c, errorMessage(err), func(any) (json.RawMessage, error) {
 		return json.Marshal(errorPayload(err))

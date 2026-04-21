@@ -47,11 +47,11 @@ func applyEdit(original []string, changes []patchformat.ChangeLine) ([]string, e
 		}
 		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition)
 		if err != nil {
-			return nil, attachFailurePath(err, fmt.Sprintf("hunk %d", idx+1))
+			return nil, attachFailureReasonContext(err, fmt.Sprintf("hunk %d", idx+1))
 		}
 		next, oldCount, newCount, err := applyHunkAt(current, h.changes, anchor)
 		if err != nil {
-			return nil, attachFailurePath(err, fmt.Sprintf("hunk %d", idx+1))
+			return nil, attachFailureReasonContext(err, fmt.Sprintf("hunk %d", idx+1))
 		}
 		if h.header.hasPosition {
 			if oldCount != h.header.oldCount || newCount != h.header.newCount {
