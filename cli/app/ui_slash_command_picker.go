@@ -121,7 +121,10 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 }
 
 func (m *uiModel) resumeCommandAvailable() bool {
-	return m.hasOtherSessionsKnown && m.hasOtherSessions
+	if !m.hasOtherSessionsKnown {
+		return true
+	}
+	return m.hasOtherSessions
 }
 
 func (m *uiModel) hasParentSession() bool {
