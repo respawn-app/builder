@@ -102,6 +102,8 @@ func TestSessionPickerHeaderUsesAppForeground(t *testing.T) {
 	}
 	if stripped := ansi.Strip(header); !strings.Contains(stripped, "Select session") {
 		t.Fatalf("expected session picker header text preserved, got %q", stripped)
+	} else if strings.HasPrefix(stripped, "  ") {
+		t.Fatalf("expected session picker header without left padding, got %q", stripped)
 	}
 }
 
