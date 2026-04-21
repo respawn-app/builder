@@ -123,6 +123,8 @@ func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
 	}
 	if stripped := ansi.Strip(header); !strings.Contains(stripped, "Sign in to Builder") {
 		t.Fatalf("expected auth picker header text preserved, got %q", stripped)
+	} else if strings.HasPrefix(stripped, "  ") {
+		t.Fatalf("expected auth picker header without left padding, got %q", stripped)
 	}
 }
 
