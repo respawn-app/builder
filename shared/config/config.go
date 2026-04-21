@@ -24,6 +24,7 @@ type CompactionMode string
 type BGShellsOutputMode string
 type CacheWarningMode string
 type ModelVerbosity string
+type ShellPostprocessingMode string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
@@ -45,6 +46,11 @@ const (
 	ModelVerbosityLow    ModelVerbosity = "low"
 	ModelVerbosityMedium ModelVerbosity = "medium"
 	ModelVerbosityHigh   ModelVerbosity = "high"
+
+	ShellPostprocessingModeNone    ShellPostprocessingMode = "none"
+	ShellPostprocessingModeBuiltin ShellPostprocessingMode = "builtin"
+	ShellPostprocessingModeUser    ShellPostprocessingMode = "user"
+	ShellPostprocessingModeAll     ShellPostprocessingMode = "all"
 )
 
 type LoadOptions struct {
@@ -59,6 +65,11 @@ type LoadOptions struct {
 
 type Timeouts struct {
 	ModelRequestSeconds int
+}
+
+type ShellSettings struct {
+	PostprocessingMode ShellPostprocessingMode
+	PostprocessHook    string
 }
 
 type Settings struct {
@@ -90,6 +101,7 @@ type Settings struct {
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
 	BGShellsOutput                   BGShellsOutputMode
+	Shell                            ShellSettings
 	CacheWarningMode                 CacheWarningMode
 	Reviewer                         ReviewerSettings
 }

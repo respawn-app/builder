@@ -154,10 +154,28 @@ func (m *Manager) waitForExit(entry *processEntry) {
 		return
 	}
 	snapshot := entry.closeOnExit(exitCode, state)
-	preview, removed, previewErr := readPreviewFromFile(entry.logPath, defaultLimit)
-	if previewErr != nil {
-		preview = fmt.Sprintf("failed to read output preview: %v", previewErr)
-		removed = 0
+	preview := ""
+	removed := 0
+	previewProcessed := false
+	fullOutput, readErr := readSanitizedOutputFile(entry.logPath)
+	if readErr == nil {
+		processed, err := m.applyPostprocessing(context.Background(), entry, fullOutput, snapshot.ExitCode, true, defaultLimit)
+		if err == nil && processed.Processed {
+			preview = processed.Output
+			previewProcessed = true
+		} else {
+			preview, removed, err = readPreviewFromFile(entry.logPath, defaultLimit)
+			if err != nil {
+				preview = fmt.Sprintf("failed to read output preview: %v", err)
+				removed = 0
+			}
+		}
+	} else {
+		preview, removed, readErr = readPreviewFromFile(entry.logPath, defaultLimit)
+		if readErr != nil {
+			preview = fmt.Sprintf("failed to read output preview: %v", readErr)
+			removed = 0
+		}
 	}
 	eventType := EventCompleted
 	if state == "killed" {
@@ -166,7 +184,7 @@ func (m *Manager) waitForExit(entry *processEntry) {
 	entry.interactMu.Lock()
 	noticeSuppressed := entry.completionNoticeConsumed()
 	entry.interactMu.Unlock()
-	m.emitEvent(Event{Type: eventType, Snapshot: snapshot, Preview: preview, Removed: removed, NoticeSuppressed: noticeSuppressed})
+	m.emitEvent(Event{Type: eventType, Snapshot: snapshot, Preview: preview, PreviewProcessed: previewProcessed, Removed: removed, NoticeSuppressed: noticeSuppressed})
 	entry.finalizeClosedExit()
 }
 

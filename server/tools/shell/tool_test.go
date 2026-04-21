@@ -3,13 +3,16 @@ package shell
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/server/tools"
+	"builder/server/tools/shell/postprocess"
 	"builder/shared/config"
 	"builder/shared/toolspec"
 )
@@ -64,6 +67,34 @@ func assertBackgroundTransitionMessageWithOutput(t *testing.T, text, sessionID s
 	if strings.Contains(text, "Process running with session ID "+sessionID) {
 		t.Fatalf("did not expect legacy session-id line after background transition, got %q", text)
 	}
+}
+
+func writeGoTestModule(t *testing.T, sleep time.Duration) string {
+	t.Helper()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/postprocess-test\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	body := ""
+	imports := "\t\"testing\"\n"
+	if sleep > 0 {
+		imports += "\t\"time\"\n"
+		body = fmt.Sprintf("\ttime.Sleep(%d * time.Millisecond)\n", sleep/time.Millisecond)
+	}
+	content := "package postprocesstest\n\nimport (\n" + imports + ")\n\nfunc TestPass(t *testing.T) {\n" + body + "}\n"
+	if err := os.WriteFile(filepath.Join(workspace, "postprocess_test.go"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	return workspace
+}
+
+func writeExecutableScript(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hook.sh")
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	return path
 }
 
 func newBackgroundTestManager(t *testing.T) *Manager {
@@ -385,6 +416,128 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("expected command output in poll output, got %q", pollText)
 	}
 	waitForManagerCount(t, manager, 0, time.Second)
+}
+
+func TestExecCommandSuccessfulGoTestCollapsesToPass(t *testing.T) {
+	workspace := writeGoTestModule(t, 0)
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "go test -run TestPass",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 5_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-pass", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if got := decodeStringToolOutput(t, result); got != "PASS" {
+		t.Fatalf("output = %q, want PASS", got)
+	}
+}
+
+func TestExecCommandRawBypassesGoTestPostprocessing(t *testing.T) {
+	workspace := writeGoTestModule(t, 0)
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "go test -run TestPass",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"raw":           true,
+		"yield_time_ms": 5_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-raw", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	text := decodeStringToolOutput(t, result)
+	if text == "PASS" {
+		t.Fatalf("expected raw output, got collapsed PASS")
+	}
+	if !strings.Contains(text, "PASS") || !strings.Contains(text, "ok") {
+		t.Fatalf("expected raw go test output, got %q", text)
+	}
+}
+
+func TestWriteStdinCompletionUsesPostprocessedGoTestOutput(t *testing.T) {
+	workspace := writeGoTestModule(t, 400*time.Millisecond)
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "go test -run TestPass",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-bg", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if !strings.Contains(decodeStringToolOutput(t, result), "Process moved to background with ID 1000") {
+		t.Fatalf("expected command to move to background, got %q", decodeStringToolOutput(t, result))
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    1000,
+		"yield_time_ms": 2_000,
+	})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "go-test-bg-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if pollResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
+	}
+	if got := decodeStringToolOutput(t, pollResult); got != "PASS" {
+		t.Fatalf("output = %q, want PASS", got)
+	}
+}
+
+func TestExecCommandAppliesUserHookOutput(t *testing.T) {
+	workspace := t.TempDir()
+	hookPath := writeExecutableScript(t, "#!/bin/sh\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
+	manager, err := NewManager(
+		WithMinimumExecToBgTime(250*time.Millisecond),
+		WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond),
+		WithPostprocessor(postprocess.NewRunner(postprocess.Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})),
+	)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "printf raw",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 5_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "hooked", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if got := decodeStringToolOutput(t, result); got != "HOOKED" {
+		t.Fatalf("output = %q, want HOOKED", got)
+	}
 }
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {

@@ -300,6 +300,22 @@ func newSettingsRegistry() settingsRegistry {
 			nil,
 			nil,
 			settingDocOptions{}),
+		newStringSetting("shell.postprocessing_mode", ShellPostprocessingMode(defaultShellPostprocessingMode),
+			func(state *settingsState, value ShellPostprocessingMode) {
+				state.Settings.Shell.PostprocessingMode = value
+			},
+			func(state settingsState) ShellPostprocessingMode { return state.Settings.Shell.PostprocessingMode },
+			"BUILDER_SHELL_POSTPROCESSING_MODE",
+			nil,
+			normalizeShellPostprocessingMode,
+			settingDocOptions{}),
+		newStringSetting("shell.postprocess_hook", "",
+			func(state *settingsState, value string) { state.Settings.Shell.PostprocessHook = value },
+			func(state settingsState) string { return state.Settings.Shell.PostprocessHook },
+			"BUILDER_SHELL_POSTPROCESS_HOOK",
+			nil,
+			nil,
+			settingDocOptions{}),
 		newStringSetting("cache_warning_mode", CacheWarningMode(defaultCacheWarningMode),
 			func(state *settingsState, value CacheWarningMode) { state.Settings.CacheWarningMode = value },
 			func(state settingsState) CacheWarningMode { return state.Settings.CacheWarningMode },
@@ -378,6 +394,7 @@ func newSettingsRegistry() settingsRegistry {
 			validateShellOutputMaxChars,
 			validateMinimumExecToBgSeconds,
 			validateBGShellsOutput,
+			validateShellPostprocessing,
 			validateCacheWarningMode,
 			validateContextWindow,
 			validateCompactionMode,
@@ -1029,6 +1046,8 @@ func renderTOMLValue(value any) string {
 	case CompactionMode:
 		return strconv.Quote(string(v))
 	case BGShellsOutputMode:
+		return strconv.Quote(string(v))
+	case ShellPostprocessingMode:
 		return strconv.Quote(string(v))
 	default:
 		return strconv.Quote(fmt.Sprintf("%v", v))

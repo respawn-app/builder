@@ -58,6 +58,10 @@ view_image = true
 web_search = true
 trigger_handoff = false
 
+[shell]
+postprocessing_mode = "builtin"
+# postprocess_hook = "~/.builder/shell_postprocess_hook"
+
 [skills]
 "skill name" = true
 
@@ -114,6 +118,8 @@ These flags overlay settings at startup.
 | `cache_warning_mode` | string | `default` | `BUILDER_CACHE_WARNING_MODE` |  | Prompt-cache warning policy. Allowed: `off`, `default`, `verbose`. `default` catches unwanted invalidations and keeps them in detail mode. `verbose` includes everything from `default`, surfaces cache warnings in ongoing mode too, and a broader range of warnings. |
 | `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices before they are truncated. |
 | `bg_shells_output` | string | `default` | `BUILDER_BG_SHELLS_OUTPUT` |  | Background-shell output mode (injection of shell outputs into model context). Allowed: `default`, `verbose`, `concise`. Verbose dumps all output into the main agent's model. Concise forces it to read output files. Default outputs truncated previews + gives a file path. |
+| `shell.postprocessing_mode` | string | `builtin` | `BUILDER_SHELL_POSTPROCESSING_MODE` |  | Semantic post-processing mode for `exec_command`. Allowed: `none`, `builtin`, `user`, `all`. `builtin` enables Builder processors only. `all` runs Builder processors first, then your hook. |
+| `shell.postprocess_hook` | string | `""` | `BUILDER_SHELL_POSTPROCESS_HOOK` |  | Optional executable/script path for a single local command post-processing hook. Builder sends JSON on stdin and expects JSON on stdout. |
 | `persistence_root` | string | `~/.builder` | `BUILDER_PERSISTENCE_ROOT` |  | Root for auth, session, and workspace index storage. Does not change the location of `~/.builder/config.toml`. |
 
 ### Timeouts

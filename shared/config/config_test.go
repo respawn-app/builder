@@ -111,6 +111,12 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.BGShellsOutput != BGShellsOutputDefault {
 		t.Fatalf("default bg_shells_output mismatch: %q", cfg.Settings.BGShellsOutput)
 	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeBuiltin {
+		t.Fatalf("default shell.postprocessing_mode mismatch: %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "" {
+		t.Fatalf("default shell.postprocess_hook mismatch: %q", cfg.Settings.Shell.PostprocessHook)
+	}
 	if cfg.Settings.Reviewer.Frequency != defaultReviewerFrequency {
 		t.Fatalf("expected default reviewer.frequency=%s, got %q", defaultReviewerFrequency, cfg.Settings.Reviewer.Frequency)
 	}
@@ -153,6 +159,12 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsBytes), "[tools]") {
 		t.Fatalf("expected default config to include tools section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "[shell]") {
+		t.Fatalf("expected default config to include shell section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# postprocessing_mode = \"builtin\"") {
+		t.Fatalf("expected default config to expose shell.postprocessing_mode, got %q", string(settingsBytes))
 	}
 	if !strings.Contains(string(settingsBytes), "# ask_question = true") {
 		t.Fatalf("expected default config to include commented default tool values, got %q", string(settingsBytes))
@@ -1564,6 +1576,61 @@ func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "loud")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid bg_shells_output")
+	}
+}
+
+func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[shell]\npostprocessing_mode = \"all\"\npostprocess_hook = \"/tmp/file-hook\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeAll {
+		t.Fatalf("expected file shell.postprocessing_mode=all, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/file-hook" {
+		t.Fatalf("expected file shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "file" {
+		t.Fatalf("expected shell.postprocessing_mode source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "file" {
+		t.Fatalf("expected shell.postprocess_hook source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "user")
+	t.Setenv("BUILDER_SHELL_POSTPROCESS_HOOK", "/tmp/env-hook")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeUser {
+		t.Fatalf("expected env shell.postprocessing_mode=user, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/env-hook" {
+		t.Fatalf("expected env shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "env" {
+		t.Fatalf("expected shell.postprocessing_mode source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "env" {
+		t.Fatalf("expected shell.postprocess_hook source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid shell.postprocessing_mode")
 	}
 }
 

@@ -20,6 +20,7 @@ const (
 	defaultMinimumExecToBgSec            = 15
 	defaultShellOutputMaxChars           = 16_000
 	defaultBGShellsOutput                = "default"
+	defaultShellPostprocessingMode       = ShellPostprocessingModeBuiltin
 	defaultCacheWarningMode              = CacheWarningModeDefault
 	defaultCompactionThreshold           = defaultModelContextWindow * 95 / 100
 	defaultPreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
@@ -117,6 +118,11 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 	if includeToolSection {
 		out.WriteString("\n[tools]\n")
 		writeToolLines(&out, state.Settings.EnabledTools)
+	}
+	shellLines := annotateRenderedLines(filterDefaultLines(lines, "shell"), filterDefaultLines(defaultLines, "shell"), nil)
+	if len(shellLines) > 0 {
+		out.WriteString("\n[shell]\n")
+		writeDefaultLines(&out, shellLines)
 	}
 	if len(timeoutLines) > 0 {
 		out.WriteString("\n[timeouts]\n")

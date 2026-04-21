@@ -37,6 +37,7 @@ type Event struct {
 	Type             EventType
 	Snapshot         Snapshot
 	Preview          string
+	PreviewProcessed bool
 	Removed          int
 	NoticeSuppressed bool
 }
@@ -74,6 +75,7 @@ type ExecRequest struct {
 	YieldTime      time.Duration
 	MaxOutputChars int
 	KeepStdinOpen  bool
+	Raw            bool
 }
 
 type ExecResult struct {
@@ -89,6 +91,7 @@ type ExecResult struct {
 	Truncated         bool
 	TruncationBytes   int
 	MovedToBackground bool
+	SemanticProcessed bool
 }
 
 type BackgroundNoticeSummary struct {
@@ -138,6 +141,7 @@ type processEntry struct {
 	ownerStepID    string
 	command        string
 	workdir        string
+	raw            bool
 	startedAt      time.Time
 	finishedAt     time.Time
 	exitCode       *int
