@@ -923,6 +923,17 @@ func TestSetWorkspaceRootPreservesWorkspaceContainer(t *testing.T) {
 	if got := store.Meta().WorkspaceRoot; got != "/tmp/work-b" {
 		t.Fatalf("workspace root = %q, want /tmp/work-b", got)
 	}
+
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if got := reopened.Meta().WorkspaceContainer; got != "workspace-container" {
+		t.Fatalf("persisted workspace container = %q, want workspace-container", got)
+	}
+	if got := reopened.Meta().WorkspaceRoot; got != "/tmp/work-b" {
+		t.Fatalf("persisted workspace root = %q, want /tmp/work-b", got)
+	}
 }
 
 func TestEventLogOnlySessionDirectoryRemainsUndiscoverable(t *testing.T) {

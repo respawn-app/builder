@@ -645,6 +645,9 @@ func TestGatewayAllowsUnscopedSessionRetargetOutsideServerDefaultProject(t *test
 	if err != nil {
 		t.Fatalf("session.Create foreign: %v", err)
 	}
+	if err := foreignSession.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable foreign: %v", err)
+	}
 
 	authSupport := newGatewayTestAuthSupport(t, true)
 	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
