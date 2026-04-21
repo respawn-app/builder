@@ -19,6 +19,7 @@ type execCommandInput struct {
 	Shell           string `json:"shell,omitempty"`
 	Login           *bool  `json:"login,omitempty"`
 	TTY             bool   `json:"tty,omitempty"`
+	Raw             bool   `json:"raw,omitempty"`
 	YieldTimeMS     *int   `json:"yield_time_ms,omitempty"`
 	MaxOutputTokens *int   `json:"max_output_tokens,omitempty"`
 }
@@ -102,6 +103,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 		YieldTime:      yieldTime,
 		MaxOutputChars: maxChars,
 		KeepStdinOpen:  in.TTY,
+		Raw:            in.Raw,
 	})
 	if err != nil {
 		return tools.ErrorResultWith(c, fmt.Sprintf("exec_command failed: %v", err), marshalNoHTMLEscape), nil

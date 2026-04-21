@@ -151,6 +151,15 @@ func validateBGShellsOutput(state settingsState, _ map[string]string) error {
 	}
 }
 
+func validateShellPostprocessing(state settingsState, _ map[string]string) error {
+	switch normalizeShellPostprocessingMode(string(state.Settings.Shell.PostprocessingMode)) {
+	case ShellPostprocessingModeNone, ShellPostprocessingModeBuiltin, ShellPostprocessingModeUser, ShellPostprocessingModeAll:
+		return nil
+	default:
+		return fmt.Errorf("invalid shell.postprocessing_mode %q (expected none|builtin|user|all)", state.Settings.Shell.PostprocessingMode)
+	}
+}
+
 func validateCacheWarningMode(state settingsState, _ map[string]string) error {
 	switch strings.ToLower(strings.TrimSpace(string(state.Settings.CacheWarningMode))) {
 	case "off", "default", "verbose":
@@ -259,6 +268,21 @@ func normalizeCacheWarningMode(raw string) CacheWarningMode {
 		return CacheWarningModeVerbose
 	default:
 		return CacheWarningMode(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeShellPostprocessingMode(raw string) ShellPostprocessingMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "none":
+		return ShellPostprocessingModeNone
+	case "builtin":
+		return ShellPostprocessingModeBuiltin
+	case "user":
+		return ShellPostprocessingModeUser
+	case "all":
+		return ShellPostprocessingModeAll
+	default:
+		return ShellPostprocessingMode(strings.TrimSpace(raw))
 	}
 }
 

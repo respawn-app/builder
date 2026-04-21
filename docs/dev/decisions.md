@@ -28,8 +28,8 @@
 - Uses direct shell invocation only (no runtime command parsing/AST preprocessing).
 - Inherits parent environment and adds non-interactive hints.
 - Merges stdout/stderr into one stream without origin tags.
-- Default timeout follows `exec_command` runtime defaults.
-- Per-call timeout override is allowed up to 1 hour.
+- Command execution has no explicit timeout. `yield_time_ms` only controls when Builder returns control and backgrounds the process.
+- Command lifetime is unlimited. `yield_time_ms` only controls when Builder returns control and backgrounds the process.
 - Non-zero exit is recoverable (does not auto-abort the turn).
 - No automatic retry for shell process-launch failures.
 - Interrupt escalation is `SIGINT` then `SIGKILL` after 10s grace.
@@ -42,12 +42,12 @@
 - Command post-processing is configured under a dedicated `[shell]` config table.
 - `[shell].postprocessing_mode` is the global mode switch and uses explicit values: `none | builtin | user | all`.
 - Per-call `raw=true` still bypasses semantic shaping regardless of global mode.
-- User hook timeout is derived from the command timeout and counts as part of overall command execution time rather than as a separate independent knob.
+- User hook has no separate timeout knob; it follows the same unlimited command lifetime and parent tool-call cancellation semantics.
 - Built-in processors may run on both success and failure; each processor decides based on exit code.
 - `exec_command` result JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
 - Built-in processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
 - User-facing docs for command post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
-- Hook failure warnings may surface directly in `exec_command` results in v1; if surfaced, they should use a dedicated structured warning field rather than prepended prose. Warning deduplication is optional in v1.
+- Hook failures must not change the provider-facing command-output envelope in v1. Warning surfacing, if any, stays plain-text-compatible and warning deduplication is optional.
 - If an `exec_command` backgrounds, its selected processing mode persists with that process session for later `write_stdin` polls and completion notices.
 - The first built-in processor in v1 is intentionally trivial: direct simple `go test ...` commands collapse successful output to the exact token `PASS`; failures fall back to unprocessed output.
 - Foreground `exec_command` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.

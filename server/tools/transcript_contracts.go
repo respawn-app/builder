@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"builder/server/tools/shellcmd"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	patchformat "builder/shared/transcript/patchformat"
-	"mvdan.cc/sh/v3/syntax"
 )
 
 var sedPrintRangePattern = regexp.MustCompile(`^\d+(?:,\d+)?p$`)
@@ -438,12 +438,12 @@ func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact
 
 func detectShellRenderHint(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage, command string) *transcript.ToolRenderHint {
 	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell, ShellDialect: detectToolShellDialect(ctx, toolID, raw)}
-	args, ok := parseSimpleShellCommand(command)
+	args, ok := shellcmd.ParseSimpleCommand(command)
 	if !ok || len(args) == 0 {
 		return defaultHint
 	}
 
-	name := normalizeCommandName(args[0])
+	name := shellcmd.NormalizeCommandName(args[0])
 	switch name {
 	case "cat":
 		filePath, ok := parseCatFileArg(args)
@@ -525,77 +525,6 @@ func shellExecutableName(shellPath string) string {
 	if ext := filepath.Ext(base); ext != "" {
 		base = strings.TrimSuffix(base, ext)
 	}
-	return base
-}
-
-func parseSimpleShellCommand(command string) ([]string, bool) {
-	parser := syntax.NewParser()
-	file, err := parser.Parse(strings.NewReader(command), "")
-	if err != nil || file == nil || len(file.Stmts) != 1 {
-		return nil, false
-	}
-
-	stmt := file.Stmts[0]
-	if stmt == nil || stmt.Cmd == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) > 0 {
-		return nil, false
-	}
-
-	callExpr, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || len(callExpr.Assigns) > 0 || len(callExpr.Args) == 0 {
-		return nil, false
-	}
-
-	args := make([]string, 0, len(callExpr.Args))
-	for _, arg := range callExpr.Args {
-		literal, ok := literalWord(arg)
-		if !ok || literal == "" {
-			return nil, false
-		}
-		args = append(args, literal)
-	}
-
-	return args, true
-}
-
-func literalWord(word *syntax.Word) (string, bool) {
-	if word == nil || len(word.Parts) == 0 {
-		return "", false
-	}
-
-	var out strings.Builder
-	for _, part := range word.Parts {
-		switch x := part.(type) {
-		case *syntax.Lit:
-			out.WriteString(x.Value)
-		case *syntax.SglQuoted:
-			out.WriteString(x.Value)
-		case *syntax.DblQuoted:
-			for _, nested := range x.Parts {
-				lit, ok := nested.(*syntax.Lit)
-				if !ok {
-					return "", false
-				}
-				out.WriteString(lit.Value)
-			}
-		default:
-			return "", false
-		}
-	}
-
-	return out.String(), true
-}
-
-func normalizeCommandName(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
-	}
-	base := path.Base(strings.ReplaceAll(command, "\\", "/"))
-	base = strings.ToLower(strings.TrimSpace(base))
-	base = strings.TrimSuffix(base, ".exe")
-	base = strings.TrimSuffix(base, ".cmd")
-	base = strings.TrimSuffix(base, ".bat")
-	base = strings.TrimSuffix(base, ".com")
 	return base
 }
 

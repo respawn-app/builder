@@ -92,6 +92,20 @@ func effectiveBackgroundOutputMode(exitCode *int, successMode BackgroundOutputMo
 }
 
 func backgroundNoticePreview(evt Event, maxChars int, mode BackgroundOutputMode) (string, int, bool) {
+	if evt.PreviewProcessed {
+		if mode == BackgroundOutputConcise {
+			return "", 0, false
+		}
+		preview := strings.TrimSpace(evt.Preview)
+		if preview == "" {
+			return "", 0, false
+		}
+		if mode == BackgroundOutputVerbose {
+			return preview, countOutputLines(preview), false
+		}
+		display, truncated, _ := truncateBackgroundOutput(preview, maxChars)
+		return display, countOutputLines(preview), truncated
+	}
 	if strings.TrimSpace(evt.Snapshot.LogPath) != "" {
 		preview, lineCount, truncated, err := readBackgroundSummaryFromFile(evt.Snapshot.LogPath, maxChars, mode)
 		if err == nil {
@@ -325,6 +339,12 @@ func utf8EncodeRune(dst []byte, r rune) int {
 func formatExecResponse(result ExecResult) string {
 	sections := make([]string, 0, 6)
 	output := strings.TrimSpace(result.Output)
+	if result.SemanticProcessed && result.ExitCode != nil && *result.ExitCode == 0 && !result.MovedToBackground {
+		if output == "" {
+			return noOutputText
+		}
+		return output
+	}
 	if strings.TrimSpace(result.Warning) != "" {
 		sections = append(sections, result.Warning)
 	}

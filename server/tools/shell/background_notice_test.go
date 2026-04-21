@@ -79,6 +79,27 @@ func TestSummarizeBackgroundEventVerboseSuccessIncludesFullOutput(t *testing.T) 
 	}
 }
 
+func TestSummarizeBackgroundEventUsesProcessedPreviewWhenAvailable(t *testing.T) {
+	exitCode := 0
+	summary := SummarizeBackgroundEvent(Event{
+		Type: EventCompleted,
+		Snapshot: Snapshot{
+			ID:       "1000",
+			State:    "completed",
+			ExitCode: &exitCode,
+		},
+		Preview:          "PASS",
+		PreviewProcessed: true,
+	}, BackgroundNoticeOptions{MaxChars: 80, SuccessOutputMode: BackgroundOutputDefault})
+
+	if !strings.Contains(summary.DetailText, "Output:\nPASS") {
+		t.Fatalf("expected processed preview in summary, got %q", summary.DetailText)
+	}
+	if summary.LineCount != 1 {
+		t.Fatalf("expected processed preview line count 1, got %d", summary.LineCount)
+	}
+}
+
 func TestSummarizeBackgroundEventConciseSuccessOmitsOutputSection(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "1000.log")
 	if err := os.WriteFile(logPath, []byte("alpha\n"), 0o644); err != nil {

@@ -57,6 +57,10 @@ var catalogEntries = []CatalogEntry{
       "type": "boolean",
       "description": "Whether to keep stdin open for follow-up write_stdin calls. Defaults to false."
     },
+    "raw": {
+      "type": "boolean",
+      "description": "Bypasses semantic command post-processing while keeping normal sanitization and truncation behavior. Defaults to false."
+    },
     "yield_time_ms": {
       "type": "integer",
       "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands."
