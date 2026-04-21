@@ -212,11 +212,11 @@ func TestAuthMethodPickerSubtitleSeparatedFromHeaderByBlankLine(t *testing.T) {
 	if !strings.Contains(lines[titleLine+2], "Choose how Builder should complete OpenAI sign-in.") {
 		t.Fatalf("expected subtitle after blank line, got %q", strings.Join(lines, "\n"))
 	}
-	if !strings.HasPrefix(lines[titleLine], "  ") {
-		t.Fatalf("expected indented title line, got %q", lines[titleLine])
+	if strings.HasPrefix(lines[titleLine], "  ") {
+		t.Fatalf("expected flush-left title line, got %q", lines[titleLine])
 	}
-	if !strings.HasPrefix(lines[titleLine+2], "  ") {
-		t.Fatalf("expected subtitle aligned with title, got %q", lines[titleLine+2])
+	if strings.HasPrefix(lines[titleLine+2], "  ") {
+		t.Fatalf("expected flush-left subtitle line, got %q", lines[titleLine+2])
 	}
 }
 
@@ -267,11 +267,11 @@ func TestAuthConflictPickerUsesBodySubtitleAndSingleLineRows(t *testing.T) {
 	) {
 		t.Fatalf("expected single-line conflict rows, got %q", out)
 	}
-	if !strings.HasPrefix(lines[titleLine], "  ") {
-		t.Fatalf("expected indented title line, got %q", lines[titleLine])
+	if strings.HasPrefix(lines[titleLine], "  ") {
+		t.Fatalf("expected flush-left title line, got %q", lines[titleLine])
 	}
-	if !strings.HasPrefix(lines[titleLine+2], "  ") {
-		t.Fatalf("expected subtitle aligned with title, got %q", lines[titleLine+2])
+	if strings.HasPrefix(lines[titleLine+2], "  ") {
+		t.Fatalf("expected flush-left subtitle line, got %q", lines[titleLine+2])
 	}
 }
 
