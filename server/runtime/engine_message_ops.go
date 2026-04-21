@@ -12,6 +12,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	shelltool "builder/server/tools/shell"
 	"builder/shared/transcript"
 )
 
@@ -355,11 +356,16 @@ func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
 }
 
 func environmentContextMessage(workspaceRoot string, model string, now time.Time) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil || strings.TrimSpace(cwd) == "" {
-		cwd = strings.TrimSpace(workspaceRoot)
+	// Keep the reminder aligned with the default shell-tool workdir so daemon
+	// process cwd cannot leak into fresh session environment context.
+	cwd := shelltool.ResolveWorkdir(workspaceRoot, "")
+	if cwd == "" {
+		resolvedCWD, err := os.Getwd()
+		if err == nil {
+			cwd = strings.TrimSpace(resolvedCWD)
+		}
 	}
-	if strings.TrimSpace(cwd) == "" {
+	if cwd == "" {
 		cwd = "unknown"
 	}
 
