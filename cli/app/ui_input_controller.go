@@ -9,10 +9,44 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/shared/serverapi"
+	"builder/shared/transcript"
 
 	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Operator-facing turn-start failures must stay visible in ongoing scrollback.
+// Plain "error" remains reserved for detail-only diagnostics and raw failures.
+func (m *uiModel) appendOperatorErrorFeedback(text string) tea.Cmd {
+	return m.appendLocalEntry(string(transcript.EntryRoleDeveloperErrorFeedback), text)
+}
+
+func (c uiInputController) appendLocalEntry(role, text string) tea.Cmd {
+	if c.model == nil {
+		return nil
+	}
+	return c.model.appendLocalEntry(role, text)
+}
+
+func (c uiInputController) appendSystemFeedback(text string) tea.Cmd {
+	return c.appendLocalEntry("system", text)
+}
+
+func (c uiInputController) appendErrorFeedback(text string) tea.Cmd {
+	return c.appendLocalEntry("error", text)
+}
+
+func (c uiInputController) appendLocalEntryWithStatus(role, text string, status tea.Cmd) tea.Cmd {
+	return sequenceCmds(c.appendLocalEntry(role, text), status)
+}
+
+func (c uiInputController) appendSystemFeedbackWithStatus(text string, status tea.Cmd) tea.Cmd {
+	return c.appendLocalEntryWithStatus("system", text, status)
+}
+
+func (c uiInputController) appendErrorFeedbackWithStatus(text string, status tea.Cmd) tea.Cmd {
+	return c.appendLocalEntryWithStatus("error", text, status)
+}
 
 type uiInputController struct {
 	model *uiModel
@@ -123,13 +157,28 @@ func parseUserShellCommand(text string) (string, bool) {
 	return command, true
 }
 
-func (m *uiModel) appendLocalEntry(role, text string) {
-	if text == "" {
-		return
+func (m *uiModel) appendLocalEntry(role, text string) tea.Cmd {
+	role = strings.TrimSpace(role)
+	text = strings.TrimSpace(text)
+	if role == "" || text == "" {
+		return nil
 	}
 	if m.hasRuntimeClient() {
-		_ = m.appendRuntimeLocalEntry(role, text)
-		return
+		if err := m.appendRuntimeLocalEntry(role, text); err == nil {
+			return nil
+		}
 	}
+	return m.appendLocalEntryFallback(role, text)
+}
+
+func (m *uiModel) appendLocalEntryFallback(role, text string) tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	entry := tui.TranscriptEntry{Role: role, Text: text}
+	m.transcriptEntries = append(m.transcriptEntries, entry)
+	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(committedTranscriptEntriesForApp(m.transcriptEntries)))
+	m.refreshRollbackCandidates()
 	m.forwardToView(tui.AppendTranscriptMsg{Role: role, Text: text})
+	return m.syncNativeHistoryFromTranscript()
 }

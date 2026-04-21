@@ -19,6 +19,10 @@ const EntryRoleDeveloperContext EntryRole = "developer_context"
 // visible in ongoing mode.
 const EntryRoleDeveloperFeedback EntryRole = "developer_feedback"
 
+// EntryRoleDeveloperErrorFeedback marks operator-facing error feedback that
+// should remain visible in ongoing mode.
+const EntryRoleDeveloperErrorFeedback EntryRole = "developer_error_feedback"
+
 // EntryRoleInterruption marks persisted interruption notices.
 const EntryRoleInterruption EntryRole = "interruption"
 

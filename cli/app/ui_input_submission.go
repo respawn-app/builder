@@ -14,8 +14,8 @@ import (
 
 func (c uiInputController) startSubmission(text string) tea.Cmd {
 	m := c.model
-	if c.blockDisconnectedSubmission(true, text) {
-		return nil
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
+		return disconnectCmd
 	}
 	c.startBusyActivity(false)
 	command, isUserShell := parseUserShellCommand(text)
@@ -48,8 +48,8 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
 	m := c.model
-	if c.blockDisconnectedSubmission(true, text) {
-		return nil
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
+		return disconnectCmd
 	}
 	_, isUserShell := parseUserShellCommand(text)
 	if m.hasRuntimeClient() && !isUserShell {
@@ -191,10 +191,10 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		}
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("step.error err=%q", detailErr)
 		m.syncViewport()
-		return m, nil
+		return m, appendCmd
 	}
 
 	m.activity = uiActivityIdle
@@ -267,10 +267,10 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 		c.restoreQueuedMessagesIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("step.pre_submit_check.error err=%q", detailErr)
 		m.syncViewport()
-		return m, nil
+		return m, appendCmd
 	}
 	if !msg.shouldCompact {
 		m.discardQueuedText(msg.text)
@@ -318,10 +318,10 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		c.restoreQueuedMessagesIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("compaction.error err=%q", detailErr)
 		m.syncViewport()
-		return m, nil
+		return m, appendCmd
 	}
 
 	m.activity = uiActivityIdle
@@ -334,10 +334,10 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		c.restorePendingInjectedIntoInput()
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("queue_check.error err=%q", detailErr)
 		m.syncViewport()
-		return m, nil
+		return m, appendCmd
 	}
 	if queuedRuntimeWork {
 		return m, c.startQueuedInjectionSubmission()

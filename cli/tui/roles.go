@@ -6,6 +6,7 @@ const roleManualCompactionCarryover = string(transcript.EntryRoleManualCompactio
 const roleCompactionSummary = string(transcript.EntryRoleCompactionSummary)
 const roleDeveloperContext = string(transcript.EntryRoleDeveloperContext)
 const roleDeveloperFeedback = string(transcript.EntryRoleDeveloperFeedback)
+const roleDeveloperErrorFeedback = string(transcript.EntryRoleDeveloperErrorFeedback)
 const roleInterruption = string(transcript.EntryRoleInterruption)
 
 const interruptionUserVisibleText = "You interrupted"

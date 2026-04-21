@@ -20,8 +20,7 @@ func (c uiInputController) handleQueuedSlashCommandInput(text string) (bool, tea
 		return false, m, nil
 	}
 	if errText, blocked := m.blockedDeferredSlashCommand(selection.commandText()); blocked {
-		m.appendLocalEntry("error", errText)
-		return true, m, c.showErrorStatus(errText)
+		return true, m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
 	next, cmd := c.queueOrStartSubmission(selection.commandText())
 	return true, next, cmd

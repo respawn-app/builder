@@ -67,6 +67,8 @@
 - Large tool output is truncated for model consumption using standardized payloads (head+tail + truncation metadata, threshold configurable).
 - Model-step transient failures use exponential backoff retries with 5 attempts (`1s, 2s, 4s, 8s, 16s`).
 - Model/API errors in `ongoing` are shown as concise single-line errors; full details remain in detail view/logs.
+- Transcript error roles are split by operator visibility: plain `error` remains a detail-only diagnostic role, while persisted operator-facing turn-start failures (submit/pre-submit/queued-resume failures that prevent the agent loop from starting) use `developer_error_feedback` so the message is appended into ongoing scrollback.
+- Local command/validation failures that do not block a model turn from starting stay on plain `error` by design. Examples: slash validation, `/fast` and `/ps` usage errors, and settings/status/process command failures that are already surfaced via detail mode and/or transient statusline notices.
 
 ## Ask Question
 

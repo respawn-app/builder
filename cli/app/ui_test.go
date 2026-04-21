@@ -27,6 +27,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -3240,7 +3241,7 @@ func TestCompactDoneSurfacesQueuedRuntimeWorkProbeFailure(t *testing.T) {
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity after queued runtime work probe failure, got %v", updated.activity)
 	}
-	if client.appendedRole != "error" || !strings.Contains(client.appendedText, "daemon stalled") {
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || !strings.Contains(client.appendedText, "daemon stalled") {
 		t.Fatalf("expected runtime error entry with probe failure, role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
@@ -5750,8 +5751,15 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 	updated.input = "/fast status"
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if cmd != nil {
-		t.Fatal("did not expect transient status cmd for /fast status")
+	if cmd == nil {
+		t.Fatal("expected transcript sync cmd for /fast status")
+	}
+	flush, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg for /fast status, got %T", cmd())
+	}
+	if !strings.Contains(stripANSIAndTrimRight(flush.Text), "Fast mode is off") {
+		t.Fatalf("expected /fast status flush to include feedback, got %q", flush.Text)
 	}
 	plain = stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(plain, "Fast mode is off") {
@@ -6580,12 +6588,8 @@ func TestDisconnectedEnterKeepsInputAndDoesNotStartSubmission(t *testing.T) {
 	m.setRuntimeDisconnected(true)
 	m.input = "continue with tests"
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect submission command while disconnected")
-	}
 	if updated.busy {
 		t.Fatal("did not expect busy state while disconnected")
 	}
@@ -6597,6 +6601,52 @@ func TestDisconnectedEnterKeepsInputAndDoesNotStartSubmission(t *testing.T) {
 	}
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity while disconnected, got %v", updated.activity)
+	}
+}
+
+func TestDisconnectedEnterAppendsOperatorFeedbackWhenRuntimeAppendFails(t *testing.T) {
+	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.input = "continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != runtimeDisconnectedStatusMessage {
+		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
+	}
+	if client.submitText != "" {
+		t.Fatalf("did not expect runtime submit attempt, got %q", client.submitText)
+	}
+}
+
+func TestBlockDisconnectedSubmissionBlocksEvenWhenRuntimeAppendSucceeds(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.pendingInjected = []string{"hidden steering"}
+
+	blocked, cmd := m.inputController().blockDisconnectedSubmission(true, "generated prompt")
+
+	if !blocked {
+		t.Fatal("expected disconnected submission to block")
+	}
+	if cmd != nil {
+		t.Fatal("did not expect fallback transcript cmd when runtime append succeeds")
+	}
+	if m.activity != uiActivityError {
+		t.Fatalf("expected error activity while disconnected, got %v", m.activity)
+	}
+	if m.input != "hidden steering\n\ngenerated prompt" {
+		t.Fatalf("expected hidden drafts restored into input, got %q", m.input)
+	}
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || client.appendedText != runtimeDisconnectedStatusMessage {
+		t.Fatalf("unexpected runtime local entry attempt: role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
 
@@ -6643,12 +6693,8 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPrompt(t *testing.T) {
 	m := newProjectedTestUIModel(client, nil, nil)
 	m.setRuntimeDisconnected(true)
 
-	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect command submission while disconnected")
-	}
 	if updated.input != "generated prompt" {
 		t.Fatalf("expected generated prompt restored into input, got %q", updated.input)
 	}
@@ -6663,17 +6709,40 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPromptAlongsideHiddenSteering
 	m.setRuntimeDisconnected(true)
 	m.pendingInjected = []string{"hidden steering"}
 
-	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect command submission while disconnected")
-	}
 	if updated.input != "hidden steering\n\ngenerated prompt" {
 		t.Fatalf("expected generated prompt restored after hidden steering, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected drafts restored and cleared, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestApplyCommandResultBackWithoutParentReturnsVisibleSystemFeedbackCmd(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 120
+
+	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, Action: commands.ActionBack})
+	updated := next.(*uiModel)
+
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != "system" || entry.Text != "No parent session available" {
+		t.Fatalf("unexpected transcript entry: %+v", entry)
+	}
+	if cmd == nil {
+		t.Fatal("expected native history sync command")
+	}
+	flush, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	if !strings.Contains(stripANSIAndTrimRight(flush.Text), "No parent session available") {
+		t.Fatalf("expected native history flush to include system feedback, got %q", flush.Text)
 	}
 }
 
