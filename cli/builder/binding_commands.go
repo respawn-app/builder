@@ -328,7 +328,7 @@ func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath str
 }
 
 func shouldFallbackToLocalSessionRetargetOpenError(cfg config.App, err error) bool {
-	if !serverTargetIsLoopback(cfg) {
+	if !shouldFallbackToImplicitLoopbackSessionRetarget(cfg) {
 		return false
 	}
 	var opErr *net.OpError
@@ -336,7 +336,20 @@ func shouldFallbackToLocalSessionRetargetOpenError(cfg config.App, err error) bo
 }
 
 func shouldFallbackToLocalSessionRetargetRPCError(cfg config.App, err error) bool {
-	return errors.Is(err, serverapi.ErrMethodNotFound) && serverTargetIsLoopback(cfg)
+	return errors.Is(err, serverapi.ErrMethodNotFound) && shouldFallbackToImplicitLoopbackSessionRetarget(cfg)
+}
+
+func shouldFallbackToImplicitLoopbackSessionRetarget(cfg config.App) bool {
+	return serverTargetIsLoopback(cfg) && !serverTargetConfiguredExplicitly(cfg)
+}
+
+func serverTargetConfiguredExplicitly(cfg config.App) bool {
+	return configSourceIsExplicit(cfg, "server_host") || configSourceIsExplicit(cfg, "server_port")
+}
+
+func configSourceIsExplicit(cfg config.App, key string) bool {
+	source := strings.TrimSpace(cfg.Source.Sources[key])
+	return source != "" && source != "default"
 }
 
 func serverTargetIsLoopback(cfg config.App) bool {
