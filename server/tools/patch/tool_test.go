@@ -445,6 +445,36 @@ func TestUpdateMissingTargetReturnsStructuredFailure(t *testing.T) {
 	}
 }
 
+func TestUpdateContentMismatchPreservesTargetPathInFailurePayload(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(target, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("seed target file: %v", err)
+	}
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "content-mismatch", "*** Begin Patch\n*** Update File: a.txt\n@@\n-one\n+uno\n three\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatal("expected content mismatch failure")
+	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "content_mismatch" {
+		t.Fatalf("expected content_mismatch payload, got %+v", payload)
+	}
+	if payload.Path != "a.txt" {
+		t.Fatalf("expected target path in payload, got %+v", payload)
+	}
+	if !strings.Contains(payload.Reason, "hunk 1:") {
+		t.Fatalf("expected hunk context in reason, got %+v", payload)
+	}
+	if strings.Contains(payload.Path, "hunk 1") {
+		t.Fatalf("expected real file path instead of hunk label, got %+v", payload)
+	}
+}
+
 func TestAddExistingTargetReturnsStructuredFailure(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "exists.txt")
