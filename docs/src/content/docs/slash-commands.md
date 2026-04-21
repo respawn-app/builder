@@ -8,7 +8,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | --- | --- | --- |
 | `/exit` | none | Exit Builder, same as Ctrl/CMD+C. |
 | `/new` | none | Start a new session. |
-| `/resume` | none | Return to the startup session picker. |
+| `/resume` | none | Return to the startup session picker. Hidden when there are no other sessions to resume. |
 | `/login` | none | Open the auth picker again. You can re-authenticate or continue without Builder auth. |
 | `/logout` | none | Alias for `/login`; clears saved auth first so re-auth starts from a clean choice. |
 | `/compact <instructions>` | optional free-form text | Compact the current context. Trailing text is passed through as compaction instructions. |
@@ -47,4 +47,3 @@ To add a custom prompt, create a Markdown file in one of these directories:
 
 The command id is derived from the filename as `prompt:<normalized_base_name>`. 
 Duplicate command ids are deduplicated by first match, so repo-scoped commands override global command.
-

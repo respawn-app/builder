@@ -6,20 +6,27 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"builder/server/sessionlifecycle"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"github.com/google/uuid"
 )
 
 var bindingCommandRPCTimeout = 5 * time.Second
 var bindingCommandRemoteOpener = openBindingCommandRemote
 var bindingCommandWorkspaceResolver = resolveWorkspaceBinding
+var bindingCommandSessionRetargeter = retargetSessionWorkspaceWithTimeout
+var bindingCommandLocalSessionLifecycleClient = func(cfg config.App) client.SessionLifecycleClient {
+	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, nil, nil))
+}
 
 func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 {
@@ -143,10 +150,10 @@ func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	remaining := fs.Args()
 	if len(remaining) != 2 {
-		fmt.Fprintln(stderr, "rebind requires <old-path> and <new-path>")
+		fmt.Fprintln(stderr, "rebind requires <session-id> and <new-path>")
 		return 2
 	}
-	binding, err := rebindWorkspace(context.Background(), remaining[0], remaining[1])
+	binding, err := retargetSessionWorkspace(context.Background(), remaining[0], remaining[1])
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -225,6 +232,12 @@ func rebindWorkspaceWithTimeout(ctx context.Context, remote client.ProjectViewCl
 	return remote.RebindWorkspace(rpcCtx, serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: oldWorkspaceRoot, NewWorkspaceRoot: newWorkspaceRoot})
 }
 
+func retargetSessionWorkspaceWithTimeout(ctx context.Context, remote client.SessionLifecycleClient, sessionID string, workspaceRoot string) (serverapi.SessionRetargetWorkspaceResponse, error) {
+	rpcCtx, cancel := bindingCommandRPCContext(ctx)
+	defer cancel()
+	return remote.RetargetSessionWorkspace(rpcCtx, serverapi.SessionRetargetWorkspaceRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID, WorkspaceRoot: workspaceRoot})
+}
+
 func listProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
 	_, remote, err := bindingCommandRemoteOpener(ctx, ".")
 	if err != nil {
@@ -285,14 +298,77 @@ func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (serve
 	return resp.Binding, nil
 }
 
+func retargetSessionWorkspace(ctx context.Context, sessionID string, newPath string) (serverapi.ProjectBinding, error) {
+	newCfg, err := loadBindingCommandConfig(newPath)
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	_, remote, err := bindingCommandRemoteOpener(ctx, newPath)
+	if err != nil {
+		if shouldFallbackToLocalSessionRetargetOpenError(newCfg, err) {
+			resp, localErr := bindingCommandSessionRetargeter(ctx, bindingCommandLocalSessionLifecycleClient(newCfg), sessionID, newCfg.WorkspaceRoot)
+			if localErr != nil {
+				return serverapi.ProjectBinding{}, localErr
+			}
+			return resp.Binding, nil
+		}
+		return serverapi.ProjectBinding{}, err
+	}
+	defer func() { _ = remote.Close() }()
+	resp, err := bindingCommandSessionRetargeter(ctx, remote, sessionID, newCfg.WorkspaceRoot)
+	if err != nil {
+		if shouldFallbackToLocalSessionRetargetRPCError(newCfg, err) {
+			resp, err = bindingCommandSessionRetargeter(ctx, bindingCommandLocalSessionLifecycleClient(newCfg), sessionID, newCfg.WorkspaceRoot)
+		}
+	}
+	if err != nil {
+		return serverapi.ProjectBinding{}, err
+	}
+	return resp.Binding, nil
+}
+
+func shouldFallbackToLocalSessionRetargetOpenError(cfg config.App, err error) bool {
+	if !shouldFallbackToImplicitLoopbackSessionRetarget(cfg) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+func shouldFallbackToLocalSessionRetargetRPCError(cfg config.App, err error) bool {
+	return errors.Is(err, serverapi.ErrMethodNotFound) && shouldFallbackToImplicitLoopbackSessionRetarget(cfg)
+}
+
+func shouldFallbackToImplicitLoopbackSessionRetarget(cfg config.App) bool {
+	return serverTargetIsLoopback(cfg) && !serverTargetConfiguredExplicitly(cfg)
+}
+
+func serverTargetConfiguredExplicitly(cfg config.App) bool {
+	return configSourceIsExplicit(cfg, "server_host") || configSourceIsExplicit(cfg, "server_port")
+}
+
+func configSourceIsExplicit(cfg config.App, key string) bool {
+	source := strings.TrimSpace(cfg.Source.Sources[key])
+	return source != "" && source != "default"
+}
+
+func serverTargetIsLoopback(cfg config.App) bool {
+	host := strings.TrimSpace(cfg.Settings.ServerHost)
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
 func openBindingCommandRemote(ctx context.Context, path string) (config.App, *client.Remote, error) {
 	cfg, err := loadBindingCommandConfig(path)
 	if err != nil {
 		return config.App{}, nil, err
 	}
-	ctx, cancel := bindingCommandRPCContext(ctx)
+	dialCtx, cancel := bindingCommandRPCContext(ctx)
 	defer cancel()
-	remote, err := client.DialConfiguredRemote(ctx, cfg)
+	remote, err := client.DialConfiguredRemote(dialCtx, cfg)
 	if err != nil {
 		return config.App{}, nil, err
 	}

@@ -104,9 +104,15 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 	if prev != tui.ModeDetail || next != tui.ModeOngoing {
 		return nil
 	}
-	// Detail-mode transcript changes may append newly committed suffix rows on return,
-	// but non-contiguous changes must only rebase internal state, never rewrite scrollback.
+	// Detail-mode transcript changes may append newly committed suffix rows on return.
+	// If a spilled streaming assistant committed while detail was active, finalize that
+	// deferred tail through the normal sync path; otherwise preserve the existing
+	// append-only replay path for deferred committed deltas.
 	m.armNativeHistoryReplayPermit(nativeHistoryReplayPermitModeRestore)
+	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
+	if m.canFinalizeNativeStreamingCommit(committedEntries, len(committedEntries)) {
+		return m.syncNativeHistoryFromTranscript()
+	}
 	return m.emitCurrentNativeScrollbackState(false)
 }
 

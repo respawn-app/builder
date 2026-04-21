@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"builder/server/llm"
 	"builder/server/session"
@@ -118,6 +119,8 @@ func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *test
 }
 
 func TestGenerateWithRetryClient_FailedRequestDoesNotAdvanceLineage(t *testing.T) {
+	withGenerateRetryDelays(t, []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond})
+
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 	"context"
 	"encoding/json"
 	"strings"
@@ -150,7 +151,7 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 
 func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	shell, _ := DefinitionFor(toolspec.ToolShell)
-	shellMeta := shell.BuildToolCallMeta(ToolCallContext{DefaultShellTimeoutSeconds: DefaultShellTimeoutSeconds}, json.RawMessage(`{"command":"pwd"}`))
+	shellMeta := shell.BuildToolCallMeta(ToolCallContext{DefaultShellTimeoutSeconds: DefaultShellTimeoutSeconds, DefaultShellPath: "/bin/zsh", GOOS: "darwin"}, json.RawMessage(`{"command":"pwd"}`))
 	if !shellMeta.IsShell || shellMeta.Presentation != "shell" {
 		t.Fatalf("expected shell contract to mark shell presentation, got %+v", shellMeta)
 	}
@@ -162,6 +163,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 	if shellMeta.InlineMeta != "timeout: 5m" || shellMeta.TimeoutLabel != "timeout: 5m" {
 		t.Fatalf("expected shell timeout metadata, got %+v", shellMeta)
+	}
+	if shellMeta.RenderHint == nil || shellMeta.RenderHint.Kind != transcript.ToolRenderKindShell || shellMeta.RenderHint.ShellDialect != transcript.ToolShellDialectPosix {
+		t.Fatalf("expected shell render hint with posix dialect, got %+v", shellMeta.RenderHint)
 	}
 
 	patch, _ := DefinitionFor(toolspec.ToolPatch)
@@ -216,6 +220,25 @@ func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
 
 	if got != "No output" {
 		t.Fatalf("expected No output, got %q", got)
+	}
+}
+
+func TestDefinitionContractsFormatStructuredPatchFailure(t *testing.T) {
+	patch, _ := DefinitionFor(toolspec.ToolPatch)
+	got := patch.FormatToolResult(Result{
+		Name: toolspec.ToolPatch,
+		Output: json.RawMessage(`{
+			"kind":"content_mismatch",
+			"path":"main.go",
+			"line":17,
+			"error":"ignored"
+		}`),
+		IsError: true,
+	})
+
+	want := "Patch failed: mismatch between file content and model-provided patch in main.go at line 17."
+	if got != want {
+		t.Fatalf("patch failure summary = %q, want %q", got, want)
 	}
 }
 

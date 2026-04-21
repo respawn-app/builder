@@ -27,6 +27,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -3240,7 +3241,7 @@ func TestCompactDoneSurfacesQueuedRuntimeWorkProbeFailure(t *testing.T) {
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity after queued runtime work probe failure, got %v", updated.activity)
 	}
-	if client.appendedRole != "error" || !strings.Contains(client.appendedText, "daemon stalled") {
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || !strings.Contains(client.appendedText, "daemon stalled") {
 		t.Fatalf("expected runtime error entry with probe failure, role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
@@ -3651,17 +3652,17 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 }
 
 func TestPSTightHeightKeepsTitleVisibleWithoutTailCropping(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'tiny\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'tiny\n'; sleep 1"},
 		DisplayCommand: "printf tiny",
 		Workdir:        t.TempDir(),
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start tight-height job: %v", err)
@@ -3695,7 +3696,7 @@ func TestPSTightHeightKeepsTitleVisibleWithoutTailCropping(t *testing.T) {
 }
 
 func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -3704,10 +3705,10 @@ func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
 	workdir := t.TempDir()
 	for i := 1; i <= 4; i++ {
 		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
-			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d\\n'; sleep 30", i)},
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d\\n'; sleep 1", i)},
 			DisplayCommand: fmt.Sprintf("job-%d", i),
 			Workdir:        workdir,
-			YieldTime:      250 * time.Millisecond,
+			YieldTime:      20 * time.Millisecond,
 		})
 		if startErr != nil {
 			t.Fatalf("start job-%d: %v", i, startErr)
@@ -3750,7 +3751,7 @@ func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
 }
 
 func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -3762,10 +3763,10 @@ func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
 			t.Fatalf("mkdir workdir %d: %v", i, mkErr)
 		}
 		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
-			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d-output\\n'; sleep 30", i)},
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d-output\\n'; sleep 1", i)},
 			DisplayCommand: fmt.Sprintf("job-%d-command", i),
 			Workdir:        workdir,
-			YieldTime:      250 * time.Millisecond,
+			YieldTime:      20 * time.Millisecond,
 		})
 		if startErr != nil {
 			t.Fatalf("start job-%d: %v", i, startErr)
@@ -3807,7 +3808,7 @@ func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
 }
 
 func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -3820,10 +3821,10 @@ func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
 		"EOF",
 	}, "\n")
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'final-output\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'final-output\n'; sleep 1"},
 		DisplayCommand: command,
 		Workdir:        t.TempDir(),
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start multiline job: %v", err)
@@ -3884,8 +3885,8 @@ func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
 	selected := renderProcessListEntry(clientui.BackgroundProcess{ID: "1003", State: "running", Running: true, Command: "echo selected"}, true, 120, "dark", 0, style)
 
 	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
-	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
-	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render(statusStateCircleGlyph)
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(statusStateCircleGlyph)
 
 	if !strings.Contains(running[0], runningIndicator) {
 		t.Fatalf("expected running entry to use primary spinner indicator, got %q", running[0])
@@ -3919,7 +3920,7 @@ func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
 }
 
 func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -3931,7 +3932,7 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 			Command:        []string{"sh", "-c", command},
 			DisplayCommand: display,
 			Workdir:        workdir,
-			YieldTime:      250 * time.Millisecond,
+			YieldTime:      20 * time.Millisecond,
 		})
 		if startErr != nil {
 			t.Fatalf("start %s: %v", display, startErr)
@@ -3942,10 +3943,14 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 		return res.SessionID
 	}
 
-	_ = start("printf 'running-output\n'; sleep 30", "running-job")
-	_ = start("printf 'completed-output\n'; sleep 0.4", "completed-job")
-	_ = start("printf 'failed-output\n'; sleep 0.4; exit 2", "failed-job")
-	time.Sleep(900 * time.Millisecond)
+	_ = start("printf 'running-output\n'; sleep 1", "running-job")
+	completedID := start("printf 'completed-output\n'; sleep 0.05", "completed-job")
+	failedID := start("printf 'failed-output\n'; sleep 0.05; exit 2", "failed-job")
+	waitForTestCondition(t, 2*time.Second, "completed and failed background jobs to exit", func() bool {
+		completed, completedOK := findBackgroundSnapshot(manager.List(), completedID)
+		failed, failedOK := findBackgroundSnapshot(manager.List(), failedID)
+		return completedOK && failedOK && !completed.Running && !failed.Running
+	})
 
 	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
@@ -3961,8 +3966,8 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 	palette := uiPalette("dark")
 	styles := uiThemeStyles("dark")
 	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
-	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
-	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render(statusStateCircleGlyph)
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(statusStateCircleGlyph)
 	dollarStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 
 	if !strings.Contains(raw, runningIndicator) {
@@ -3989,7 +3994,7 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 }
 
 func TestPSOverlaySelectedRowUsesFullWidthHighlightAndContinuousRail(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -3998,10 +4003,10 @@ func TestPSOverlaySelectedRowUsesFullWidthHighlightAndContinuousRail(t *testing.
 	workdir := t.TempDir()
 	start := func(label string) string {
 		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
-			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s-output\n'; sleep 30", label)},
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s-output\n'; sleep 1", label)},
 			DisplayCommand: label,
 			Workdir:        workdir,
-			YieldTime:      250 * time.Millisecond,
+			YieldTime:      20 * time.Millisecond,
 		})
 		if startErr != nil {
 			t.Fatalf("start %s: %v", label, startErr)
@@ -4066,17 +4071,17 @@ func TestPSOverlaySelectedRowUsesFullWidthHighlightAndContinuousRail(t *testing.
 }
 
 func TestPSOverlaySpinnerTickAnimatesRunningEntriesWhileIdle(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 1"},
 		DisplayCommand: "spin-job",
 		Workdir:        t.TempDir(),
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start spin job: %v", err)
@@ -4112,17 +4117,13 @@ func TestPSOverlaySpinnerTickAnimatesRunningEntriesWhileIdle(t *testing.T) {
 }
 
 func TestPSOverlayIgnoresStaleSpinnerTickTokens(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 1"},
 		DisplayCommand: "spin-job",
 		Workdir:        t.TempDir(),
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start spin job: %v", err)
@@ -4155,17 +4156,13 @@ func TestPSOverlayIgnoresStaleSpinnerTickTokens(t *testing.T) {
 }
 
 func TestPSOverlayIgnoresStaleSpinnerTickAfterRestart(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 1"},
 		DisplayCommand: "spin-job",
 		Workdir:        t.TempDir(),
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start spin job: %v", err)
@@ -4220,19 +4217,15 @@ func TestPSOverlayIgnoresStaleSpinnerTickAfterRestart(t *testing.T) {
 }
 
 func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	start := func(label string) string {
 		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
-			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s\\n'; sleep 30", label)},
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s\\n'; sleep 1", label)},
 			DisplayCommand: label,
 			Workdir:        workdir,
-			YieldTime:      250 * time.Millisecond,
+			YieldTime:      fastBackgroundTestYield,
 		})
 		if startErr != nil {
 			t.Fatalf("start %s: %v", label, startErr)
@@ -4292,18 +4285,14 @@ func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 }
 
 func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'locked-job\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'locked-job\n'; sleep 1"},
 		DisplayCommand: "locked-job",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start locked-job: %v", err)
@@ -4349,18 +4338,14 @@ func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
 }
 
 func TestDirectPSInlineCommandPastesTranscriptIntoInput(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'direct-inline\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'direct-inline\n'; sleep 1"},
 		DisplayCommand: "direct-inline",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start direct-inline: %v", err)
@@ -4393,18 +4378,14 @@ func TestDirectPSInlineCommandPastesTranscriptIntoInput(t *testing.T) {
 }
 
 func TestDirectPSLogsCommandUsesDefaultOpenSuccess(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'direct-logs\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'direct-logs\n'; sleep 1"},
 		DisplayCommand: "direct-logs",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start direct-logs: %v", err)
@@ -4439,18 +4420,14 @@ func TestDirectPSLogsCommandUsesDefaultOpenSuccess(t *testing.T) {
 }
 
 func TestDirectPSKillCommandSignalsBackgroundProcess(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'direct-kill\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'direct-kill\n'; sleep 1"},
 		DisplayCommand: "direct-kill",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start direct-kill: %v", err)
@@ -4494,11 +4471,7 @@ func findBackgroundSnapshot(entries []shelltool.Snapshot, id string) (shelltool.
 }
 
 func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
@@ -4514,10 +4487,10 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'tick-job\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'tick-job\n'; sleep 1"},
 		DisplayCommand: "tick-job",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start tick-job: %v", err)
@@ -4540,27 +4513,23 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 }
 
 func TestPSOverlayRefreshPreservesSelectionByProcessID(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	first, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'first\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'first\n'; sleep 1"},
 		DisplayCommand: "first",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start first job: %v", err)
 	}
 	second, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'second\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'second\n'; sleep 1"},
 		DisplayCommand: "second",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start second job: %v", err)
@@ -4583,10 +4552,10 @@ func TestPSOverlayRefreshPreservesSelectionByProcessID(t *testing.T) {
 	}
 
 	_, err = manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'third\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'third\n'; sleep 1"},
 		DisplayCommand: "third",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start third job: %v", err)
@@ -4599,18 +4568,14 @@ func TestPSOverlayRefreshPreservesSelectionByProcessID(t *testing.T) {
 }
 
 func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'log-job\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'log-job\n'; sleep 1"},
 		DisplayCommand: "log-job",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start log-job: %v", err)
@@ -5235,18 +5200,14 @@ func TestBusyQueuedUnknownSlashDrainsAsPromptSubmission(t *testing.T) {
 }
 
 func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'queued-inline\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'queued-inline\n'; sleep 1"},
 		DisplayCommand: "queued-inline",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start queued-inline: %v", err)
@@ -5794,8 +5755,15 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 	updated.input = "/fast status"
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if cmd != nil {
-		t.Fatal("did not expect transient status cmd for /fast status")
+	if cmd == nil {
+		t.Fatal("expected transcript sync cmd for /fast status")
+	}
+	flush, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg for /fast status, got %T", cmd())
+	}
+	if !strings.Contains(stripANSIAndTrimRight(flush.Text), "Fast mode is off") {
+		t.Fatalf("expected /fast status flush to include feedback, got %q", flush.Text)
 	}
 	plain = stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(plain, "Fast mode is off") {
@@ -6309,7 +6277,7 @@ func TestSlashCommandSetsExitAction(t *testing.T) {
 }
 
 func TestSlashCommandSetsResumeAction(t *testing.T) {
-	m := newProjectedStaticUIModel()
+	m := newProjectedStaticUIModel(WithUIHasOtherSessions(true, true))
 	m.input = "/resume"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -6341,6 +6309,100 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	detail := stripANSIAndTrimRight(next.(*uiModel).View())
 	if !containsInOrder(detail, "❯", "hello", "❮", "world") {
 		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
+	}
+}
+
+func TestSubmitDoneNoopFinalStaysInvisibleWithoutRuntimeClient(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+
+	next, _ := m.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	updated := next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected UI idle after NO_OP final")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, uiNoopFinalToken) {
+		t.Fatalf("expected NO_OP to stay invisible in local flow, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("expected no transcript entries after NO_OP final, got %+v", updated.transcriptEntries)
+	}
+}
+
+func TestRuntimeSubmitNoopFinalStaysSilent(t *testing.T) {
+	ringer := &countRinger{}
+	bells := newBellHooks(ringer, nil)
+	client := &runtimeControlFakeClient{submitResult: uiNoopFinalToken}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITurnQueueHook(bells))
+	m.startupCmds = nil
+	m.input = "hello"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected pre-submit command batch")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var preSubmit preSubmitCompactionCheckDoneMsg
+	preSubmitFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			preSubmit = typed
+			preSubmitFound = true
+		}
+	}
+	if !preSubmitFound {
+		t.Fatalf("expected pre-submit completion message, got %+v", msgs)
+	}
+	if preSubmit.shouldCompact {
+		t.Fatal("did not expect pre-submit compaction")
+	}
+
+	next, cmd = updated.Update(preSubmit)
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected submit command batch")
+	}
+	msgs = collectCmdMessages(t, cmd)
+	var done submitDoneMsg
+	doneFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(submitDoneMsg); ok {
+			done = typed
+			doneFound = true
+		}
+	}
+	if !doneFound {
+		t.Fatalf("expected submitDone message, got %+v", msgs)
+	}
+	if !done.silentFinal {
+		t.Fatalf("expected runtime NO_OP submit result to be marked silent, got %+v", done)
+	}
+
+	next, _ = updated.Update(done)
+	updated = next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected UI idle after runtime NO_OP final")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	if client.submitText != "hello" {
+		t.Fatalf("submit text = %q, want hello", client.submitText)
+	}
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after runtime NO_OP final, want 0", got)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, uiNoopFinalToken) {
+		t.Fatalf("expected runtime NO_OP to stay invisible, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("expected no transcript entries after runtime NO_OP final, got %+v", updated.transcriptEntries)
 	}
 }
 
@@ -6530,12 +6592,8 @@ func TestDisconnectedEnterKeepsInputAndDoesNotStartSubmission(t *testing.T) {
 	m.setRuntimeDisconnected(true)
 	m.input = "continue with tests"
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect submission command while disconnected")
-	}
 	if updated.busy {
 		t.Fatal("did not expect busy state while disconnected")
 	}
@@ -6547,6 +6605,52 @@ func TestDisconnectedEnterKeepsInputAndDoesNotStartSubmission(t *testing.T) {
 	}
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity while disconnected, got %v", updated.activity)
+	}
+}
+
+func TestDisconnectedEnterAppendsOperatorFeedbackWhenRuntimeAppendFails(t *testing.T) {
+	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.input = "continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != runtimeDisconnectedStatusMessage {
+		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
+	}
+	if client.submitText != "" {
+		t.Fatalf("did not expect runtime submit attempt, got %q", client.submitText)
+	}
+}
+
+func TestBlockDisconnectedSubmissionBlocksEvenWhenRuntimeAppendSucceeds(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.pendingInjected = []string{"hidden steering"}
+
+	blocked, cmd := m.inputController().blockDisconnectedSubmission(true, "generated prompt")
+
+	if !blocked {
+		t.Fatal("expected disconnected submission to block")
+	}
+	if cmd != nil {
+		t.Fatal("did not expect fallback transcript cmd when runtime append succeeds")
+	}
+	if m.activity != uiActivityError {
+		t.Fatalf("expected error activity while disconnected, got %v", m.activity)
+	}
+	if m.input != "hidden steering\n\ngenerated prompt" {
+		t.Fatalf("expected hidden drafts restored into input, got %q", m.input)
+	}
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || client.appendedText != runtimeDisconnectedStatusMessage {
+		t.Fatalf("unexpected runtime local entry attempt: role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
 
@@ -6567,6 +6671,25 @@ func TestDisconnectedQueuedFlushRestoresHiddenQueuedDrafts(t *testing.T) {
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued drafts restored and cleared, got %+v", updated.queued)
+	}
+}
+
+func TestDisconnectedQueuedFlushWithoutQueuedWorkDoesNotAppendFeedback(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+
+	next, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect command for no-op queued flush")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	if client.appendedRole != "" || client.appendedText != "" {
+		t.Fatalf("did not expect disconnect feedback append, got role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
 
@@ -6593,12 +6716,8 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPrompt(t *testing.T) {
 	m := newProjectedTestUIModel(client, nil, nil)
 	m.setRuntimeDisconnected(true)
 
-	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect command submission while disconnected")
-	}
 	if updated.input != "generated prompt" {
 		t.Fatalf("expected generated prompt restored into input, got %q", updated.input)
 	}
@@ -6613,17 +6732,40 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPromptAlongsideHiddenSteering
 	m.setRuntimeDisconnected(true)
 	m.pendingInjected = []string{"hidden steering"}
 
-	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	next, _ := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
 	updated := next.(*uiModel)
-
-	if cmd != nil {
-		t.Fatal("did not expect command submission while disconnected")
-	}
 	if updated.input != "hidden steering\n\ngenerated prompt" {
 		t.Fatalf("expected generated prompt restored after hidden steering, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected drafts restored and cleared, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestApplyCommandResultBackWithoutParentReturnsVisibleSystemFeedbackCmd(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 120
+
+	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, Action: commands.ActionBack})
+	updated := next.(*uiModel)
+
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != "system" || entry.Text != "No parent session available" {
+		t.Fatalf("unexpected transcript entry: %+v", entry)
+	}
+	if cmd == nil {
+		t.Fatal("expected native history sync command")
+	}
+	flush, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	if !strings.Contains(stripANSIAndTrimRight(flush.Text), "No parent session available") {
+		t.Fatalf("expected native history flush to include system feedback, got %q", flush.Text)
 	}
 }
 
@@ -6819,9 +6961,6 @@ func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
 			m.busy = true
 			m.activity = uiActivityRunning
 		}},
-		{name: "queued", apply: func(m *uiModel) {
-			m.activity = uiActivityQueued
-		}},
 		{name: "question", apply: func(m *uiModel) {
 			m.activity = uiActivityQuestion
 		}},
@@ -6930,9 +7069,14 @@ func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionStarted}))
 	started := next.(*uiModel)
-	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	rawLine := started.renderStatusLine(120, uiThemeStyles("dark"))
+	line := stripANSIAndTrimRight(rawLine)
 	if !strings.Contains(strings.ToLower(line), "compacting") {
 		t.Fatalf("expected compaction warning in status line, got %q", line)
+	}
+	yellowSpinner := lipgloss.NewStyle().Foreground(statusAmberColor()).Render(pendingToolSpinnerFrame(0))
+	if !strings.Contains(rawLine, yellowSpinner) {
+		t.Fatalf("expected compaction status line to render yellow spinner %q, got %q", yellowSpinner, rawLine)
 	}
 
 	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionCompleted}))
@@ -6948,9 +7092,14 @@ func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
-	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	rawLine := started.renderStatusLine(120, uiThemeStyles("dark"))
+	line := stripANSIAndTrimRight(rawLine)
 	if !strings.Contains(strings.ToLower(line), "review") {
 		t.Fatalf("expected reviewer warning in status line, got %q", line)
+	}
+	greenSpinner := lipgloss.NewStyle().Foreground(statusGreenColor()).Render(pendingToolSpinnerFrame(0))
+	if !strings.Contains(rawLine, greenSpinner) {
+		t.Fatalf("expected reviewer status line to render green spinner %q, got %q", greenSpinner, rawLine)
 	}
 
 	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerCompleted}))

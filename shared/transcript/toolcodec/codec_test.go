@@ -24,3 +24,24 @@ func TestDecodeToolCallMetaRoundTripsNonEmptyMetadata(t *testing.T) {
 		t.Fatalf("unexpected decoded metadata: %+v", meta)
 	}
 }
+
+func TestEncodeDecodeToolCallMetaRoundTripsShellDialect(t *testing.T) {
+	raw := EncodeToolCallMeta(transcript.ToolCallMeta{
+		ToolName: "exec_command",
+		Command:  "copy /y C:\\src.txt C:\\dst.txt",
+		RenderHint: &transcript.ToolRenderHint{
+			Kind:         transcript.ToolRenderKindShell,
+			ShellDialect: transcript.ToolShellDialectWindowsCommand,
+		},
+	})
+	meta, ok := DecodeToolCallMeta(raw)
+	if !ok {
+		t.Fatal("expected tool metadata to decode successfully")
+	}
+	if meta.RenderHint == nil {
+		t.Fatalf("expected render hint, got %+v", meta)
+	}
+	if meta.RenderHint.ShellDialect != transcript.ToolShellDialectWindowsCommand {
+		t.Fatalf("expected shell dialect to round-trip, got %+v", meta.RenderHint)
+	}
+}

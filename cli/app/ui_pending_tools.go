@@ -20,13 +20,6 @@ func renderNativePendingOngoingSnapshot(entries []tui.TranscriptEntry, theme str
 	if len(entries) == 0 {
 		return ""
 	}
-	frame := ""
-	if len(pendingToolSpinner.Frames) > 0 {
-		index := spinnerFrame % len(pendingToolSpinner.Frames)
-		if index < 0 {
-			index = 0
-		}
-		frame = pendingToolSpinner.Frames[index]
-	}
+	frame := pendingToolSpinnerFrame(spinnerFrame)
 	return renderStyledNativeProjectionLines(tui.RenderPendingOngoingSnapshotLines(entries, theme, width, frame), theme, width)
 }

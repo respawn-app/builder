@@ -122,6 +122,7 @@ func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, app
 			ApprovalFailed:       "outside-workspace edit approval failed",
 			RejectedByUserPrefix: "patch target outside workspace rejected by user",
 		},
+		OutsideWorkspaceFailureFactory{},
 		IsPathInTemporaryDir,
 		nil,
 	)

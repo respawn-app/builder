@@ -314,7 +314,7 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 			s.sessionStoreRegistry(),
 			s.authManager,
 			metadataStore.AuthoritativeSessionStoreOptions()...,
-		).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
+		).WithPersistenceRoot(s.cfg.PersistenceRoot).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
 		return client.NewLoopbackSessionLifecycleClient(service)
 	}
 	containerDir := strings.TrimSpace(s.containerDir)
@@ -325,7 +325,7 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 		}
 		containerDir = resolvedContainerDir
 	}
-	service := sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
+	service := sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager).WithPersistenceRoot(s.cfg.PersistenceRoot).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
 	return client.NewLoopbackSessionLifecycleClient(service)
 }
 func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient {
@@ -446,7 +446,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	if manager == nil {
 		t.Fatal("expected server background manager")
 	}
-	manager.SetMinimumExecToBgTime(250 * time.Millisecond)
+	manager.SetMinimumExecToBgTime(fastBackgroundTestYield)
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
 		Command:        []string{"sh", "-c", "printf 'local\n'; sleep 1"},
 		DisplayCommand: "local-process",
@@ -454,7 +454,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 		OwnerRunID:     "local-run",
 		OwnerStepID:    "local-step",
 		Workdir:        workspace,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start background process: %v", err)
@@ -1196,12 +1196,12 @@ func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 	if manager == nil {
 		t.Fatal("expected server background manager")
 	}
-	manager.SetMinimumExecToBgTime(250 * time.Millisecond)
+	manager.SetMinimumExecToBgTime(fastBackgroundTestYield)
 	result, err := manager.Start(context.Background(), shelltool.ExecRequest{
 		Command:        []string{"/bin/sh", "-lc", "printf 'embedded process output\n'; sleep 1"},
 		DisplayCommand: "printf 'embedded process output'; sleep 1",
 		Workdir:        workspace,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 		OwnerSessionID: plan.SessionID,
 	})
 	if err != nil {

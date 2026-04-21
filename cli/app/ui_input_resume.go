@@ -9,18 +9,18 @@ import (
 
 func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	m := c.model
-	if c.blockDisconnectedSubmission(true, "") {
-		return nil
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, ""); blocked {
+		return disconnectCmd
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
 		c.restorePendingInjectedIntoInput()
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("queue_check.error err=%q", detailErr)
 		m.syncViewport()
-		return nil
+		return appendCmd
 	}
 	if !queuedRuntimeWork {
 		return nil
@@ -35,15 +35,15 @@ func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
+			return newSubmitDoneMsg("", "", errors.New("runtime engine is not configured"))
 		}
 		msg, err := m.submitQueuedRuntimeUserMessages(context.Background())
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{err: errSubmissionInterrupted}
+				return newSubmitDoneMsg("", "", errSubmissionInterrupted)
 			}
-			return submitDoneMsg{err: err}
+			return newSubmitDoneMsg("", "", err)
 		}
-		return submitDoneMsg{message: msg}
+		return newSubmitDoneMsg(msg, "", nil)
 	}
 }

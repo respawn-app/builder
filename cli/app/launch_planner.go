@@ -30,22 +30,35 @@ type sessionLaunchRequest struct {
 }
 
 type sessionLaunchPlan struct {
-	Mode                launchMode
-	SessionID           string
-	ActiveSettings      config.Settings
-	EnabledTools        []toolspec.ID
-	ConfiguredModelName string
-	SessionName         string
-	ModelContractLocked bool
-	StatusConfig        uiStatusConfig
-	WorkspaceRoot       string
-	Source              config.SourceReport
+	Mode                                 launchMode
+	SessionID                            string
+	SelectedViaPicker                    bool
+	SelectedSessionWorkspaceRoot         string
+	SelectedSessionWorkspaceLookupFailed bool
+	HasOtherSessions                     bool
+	HasOtherSessionsKnown                bool
+	ActiveSettings                       config.Settings
+	EnabledTools                         []toolspec.ID
+	ConfiguredModelName                  string
+	SessionName                          string
+	ModelContractLocked                  bool
+	StatusConfig                         uiStatusConfig
+	WorkspaceRoot                        string
+	Source                               config.SourceReport
+}
+
+type resolvedSessionPlanRequest struct {
+	request             serverapi.SessionPlanRequest
+	selectedViaPicker   bool
+	sessionSummaries    []clientui.SessionSummary
+	hasSessionSummaries bool
 }
 
 type runtimeLaunchPlan struct {
 	Logger            *runLogger
 	Wiring            *runtimeWiring
 	ControllerLeaseID string
+	controllerLease   *controllerLeaseManager
 	close             func()
 }
 
@@ -56,7 +69,23 @@ func (p *runtimeLaunchPlan) Close() {
 	p.close()
 }
 
+func (p *runtimeLaunchPlan) CurrentControllerLeaseID() string {
+	if p == nil {
+		return ""
+	}
+	if p.controllerLease != nil {
+		if leaseID := strings.TrimSpace(p.controllerLease.Value()); leaseID != "" {
+			return leaseID
+		}
+	}
+	return strings.TrimSpace(p.ControllerLeaseID)
+}
+
 type sessionPickerRunner func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error)
+
+type sessionViewReader interface {
+	GetSessionMainView(ctx context.Context, req serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error)
+}
 
 type launchPlanner struct {
 	server      embeddedServer
@@ -67,7 +96,7 @@ func newSessionLaunchPlanner(server embeddedServer) *launchPlanner {
 	return &launchPlanner{
 		server: server,
 		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-			return runSessionPicker(summaries, theme, alternateScreenPolicy)
+			return runSessionPickerFlow(summaries, theme, alternateScreenPolicy)
 		},
 	}
 }
@@ -80,7 +109,7 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
-	resp, err := p.server.SessionLaunchClient().PlanSession(ctx, resolved)
+	resp, err := p.server.SessionLaunchClient().PlanSession(ctx, resolved.request)
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
@@ -96,14 +125,28 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	if authManager != nil {
 		authStatePath = config.GlobalAuthConfigPath(cfg)
 	}
+	selectedSessionWorkspaceRoot := ""
+	selectedSessionWorkspaceLookupFailed := false
+	if resolved.selectedViaPicker {
+		selectedSessionWorkspaceRoot, err = loadSelectedSessionWorkspaceRoot(ctx, p.server.SessionViewClient(), resp.Plan.SessionID)
+		if err != nil {
+			selectedSessionWorkspaceLookupFailed = true
+		}
+	}
+	hasOtherSessions, hasOtherSessionsKnown := p.resolveHasOtherSessions(ctx, resolved, resp.Plan.SessionID)
 	plan := sessionLaunchPlan{
-		Mode:                req.Mode,
-		SessionID:           resp.Plan.SessionID,
-		ActiveSettings:      resp.Plan.ActiveSettings,
-		EnabledTools:        enabledTools,
-		ConfiguredModelName: resp.Plan.ConfiguredModelName,
-		SessionName:         resp.Plan.SessionName,
-		ModelContractLocked: resp.Plan.ModelContractLocked,
+		Mode:                                 req.Mode,
+		SessionID:                            resp.Plan.SessionID,
+		SelectedViaPicker:                    resolved.selectedViaPicker,
+		SelectedSessionWorkspaceRoot:         selectedSessionWorkspaceRoot,
+		SelectedSessionWorkspaceLookupFailed: selectedSessionWorkspaceLookupFailed,
+		HasOtherSessions:                     hasOtherSessions,
+		HasOtherSessionsKnown:                hasOtherSessionsKnown,
+		ActiveSettings:                       resp.Plan.ActiveSettings,
+		EnabledTools:                         enabledTools,
+		ConfiguredModelName:                  resp.Plan.ConfiguredModelName,
+		SessionName:                          resp.Plan.SessionName,
+		ModelContractLocked:                  resp.Plan.ModelContractLocked,
 		StatusConfig: uiStatusConfig{
 			WorkspaceRoot:   resp.Plan.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
@@ -120,6 +163,17 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	return applyCLIOverridesToSessionPlan(plan, cfg), nil
 }
 
+func loadSelectedSessionWorkspaceRoot(ctx context.Context, sessionViews sessionViewReader, sessionID string) (string, error) {
+	if sessionViews == nil {
+		return "", errors.New("session view client is required")
+	}
+	resp, err := sessionViews.GetSessionMainView(ctx, serverapi.SessionMainViewRequest{SessionID: strings.TrimSpace(sessionID)})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.MainView.Session.ExecutionTarget.WorkspaceRoot), nil
+}
+
 func (p *launchPlanner) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if p == nil || p.server == nil {
 		return nil, io.ErrClosedPipe
@@ -127,48 +181,51 @@ func (p *launchPlanner) PrepareRuntime(ctx context.Context, plan sessionLaunchPl
 	return p.server.PrepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
 }
 
-func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunchRequest) (serverapi.SessionPlanRequest, error) {
-	resolved := serverapi.SessionPlanRequest{
+func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunchRequest) (resolvedSessionPlanRequest, error) {
+	resolved := resolvedSessionPlanRequest{request: serverapi.SessionPlanRequest{
 		ClientRequestID:   uuid.NewString(),
 		Mode:              serverapi.SessionLaunchMode(req.Mode),
 		SelectedSessionID: strings.TrimSpace(req.SelectedSessionID),
 		ForceNewSession:   req.ForceNewSession,
 		ParentSessionID:   strings.TrimSpace(req.ParentSessionID),
-	}
-	if resolved.Mode == serverapi.SessionLaunchModeHeadless && resolved.SelectedSessionID == "" {
-		resolved.ForceNewSession = true
+	}}
+	if resolved.request.Mode == serverapi.SessionLaunchModeHeadless && resolved.request.SelectedSessionID == "" {
+		resolved.request.ForceNewSession = true
 		return resolved, nil
 	}
-	if resolved.SelectedSessionID != "" || resolved.ForceNewSession {
+	if resolved.request.SelectedSessionID != "" || resolved.request.ForceNewSession {
 		return resolved, nil
 	}
 	summaries, err := p.listSessionSummaries(ctx)
 	if err != nil {
-		return serverapi.SessionPlanRequest{}, err
+		return resolvedSessionPlanRequest{}, err
 	}
+	resolved.sessionSummaries = append([]clientui.SessionSummary(nil), summaries...)
+	resolved.hasSessionSummaries = true
 	if len(summaries) == 0 {
-		resolved.ForceNewSession = true
+		resolved.request.ForceNewSession = true
 		return resolved, nil
 	}
 	if p.pickSession == nil {
-		return serverapi.SessionPlanRequest{}, errors.New("session picker is required")
+		return resolvedSessionPlanRequest{}, errors.New("session picker is required")
 	}
 	cfg := p.server.Config()
 	picked, err := p.pickSession(summaries, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
 	if err != nil {
-		return serverapi.SessionPlanRequest{}, err
+		return resolvedSessionPlanRequest{}, err
 	}
 	if picked.Canceled {
-		return serverapi.SessionPlanRequest{}, errors.New("startup canceled by user")
+		return resolvedSessionPlanRequest{}, errors.New("startup canceled by user")
 	}
 	if picked.CreateNew {
-		resolved.ForceNewSession = true
+		resolved.request.ForceNewSession = true
 		return resolved, nil
 	}
 	if picked.Session == nil {
-		return serverapi.SessionPlanRequest{}, errors.New("no session selected")
+		return resolvedSessionPlanRequest{}, errors.New("no session selected")
 	}
-	resolved.SelectedSessionID = picked.Session.SessionID
+	resolved.request.SelectedSessionID = picked.Session.SessionID
+	resolved.selectedViaPicker = true
 	return resolved, nil
 }
 
@@ -188,6 +245,27 @@ func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]clientui.Se
 		return nil, err
 	}
 	return append([]clientui.SessionSummary(nil), resp.Overview.Sessions...), nil
+}
+
+func (p *launchPlanner) resolveHasOtherSessions(ctx context.Context, resolved resolvedSessionPlanRequest, sessionID string) (bool, bool) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, false
+	}
+	summaries := resolved.sessionSummaries
+	if !resolved.hasSessionSummaries {
+		var err error
+		summaries, err = p.listSessionSummaries(ctx)
+		if err != nil {
+			return false, false
+		}
+	}
+	for _, summary := range summaries {
+		if strings.TrimSpace(summary.SessionID) == strings.TrimSpace(sessionID) {
+			continue
+		}
+		return true, true
+	}
+	return false, true
 }
 
 func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {

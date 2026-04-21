@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -14,6 +13,11 @@ type OutsideWorkspaceErrorLabels struct {
 	OutsidePath          string
 	ApprovalFailed       string
 	RejectedByUserPrefix string
+}
+
+type OutsideWorkspaceFailureFactory struct {
+	ApprovalFailed func(OutsideWorkspaceRequest, error) error
+	UserDenied     func(OutsideWorkspaceRequest, OutsideWorkspaceApproval, string) error
 }
 
 type OutsideWorkspaceGuard struct {
@@ -27,11 +31,12 @@ type OutsideWorkspaceGuard struct {
 	setSessionAllowed     func(bool)
 	rejectionInstruction  string
 	errorLabels           OutsideWorkspaceErrorLabels
+	failures              OutsideWorkspaceFailureFactory
 	temporaryPathAllowed  func(string) bool
 	onApproved            func(OutsideWorkspaceRequest, string)
 }
 
-func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, workspaceRootInfo os.FileInfo, workspaceOnly bool, allowOutsideWorkspace bool, approver OutsideWorkspaceApprover, sessionAllowed func() bool, setSessionAllowed func(bool), rejectionInstruction string, errorLabels OutsideWorkspaceErrorLabels, temporaryPathAllowed func(string) bool, onApproved func(OutsideWorkspaceRequest, string)) OutsideWorkspaceGuard {
+func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, workspaceRootInfo os.FileInfo, workspaceOnly bool, allowOutsideWorkspace bool, approver OutsideWorkspaceApprover, sessionAllowed func() bool, setSessionAllowed func(bool), rejectionInstruction string, errorLabels OutsideWorkspaceErrorLabels, failures OutsideWorkspaceFailureFactory, temporaryPathAllowed func(string) bool, onApproved func(OutsideWorkspaceRequest, string)) OutsideWorkspaceGuard {
 	return OutsideWorkspaceGuard{
 		workspaceRoot:         workspaceRoot,
 		workspaceRootReal:     workspaceRootReal,
@@ -43,6 +48,7 @@ func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, wo
 		setSessionAllowed:     setSessionAllowed,
 		rejectionInstruction:  rejectionInstruction,
 		errorLabels:           errorLabels,
+		failures:              failures,
 		temporaryPathAllowed:  temporaryPathAllowed,
 		onApproved:            onApproved,
 	}
@@ -82,11 +88,14 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		return resolvedPath, nil
 	}
 	if g.approver == nil {
-		return "", fmt.Errorf("%s: %s", g.errorLabels.OutsidePath, requestedPath)
+		return "", noPermissionFailure(requestedPath, g.errorLabels.OutsidePath)
 	}
 	approval, approveErr := g.approver(ctx, req)
 	if approveErr != nil {
-		return "", fmt.Errorf("%s for %s: %w", g.errorLabels.ApprovalFailed, requestedPath, approveErr)
+		if g.failures.ApprovalFailed != nil {
+			return "", g.failures.ApprovalFailed(req, approveErr)
+		}
+		return "", approvalFailedFailure(requestedPath, approveErr.Error())
 	}
 	switch approval.Decision {
 	case OutsideWorkspaceDecisionAllowOnce:
@@ -105,25 +114,11 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		g.logApproved(req, "allow_session")
 		return resolvedPath, nil
 	default:
-		return "", errors.New(g.rejectedByUserError(requestedPath, approval.Commentary))
+		if g.failures.UserDenied != nil {
+			return "", g.failures.UserDenied(req, approval, g.rejectionInstruction)
+		}
+		return "", userDeniedFailure(requestedPath, approval.Commentary)
 	}
-}
-
-func (g OutsideWorkspaceGuard) rejectedByUserError(requestedPath string, commentary string) string {
-	var parts []string
-	if prefix := strings.TrimSpace(g.errorLabels.RejectedByUserPrefix); prefix != "" {
-		parts = append(parts, fmt.Sprintf("%s: %s", prefix, requestedPath))
-	}
-	errMessage := "User rejected the approval request for this tool call"
-	if trimmedCommentary := strings.TrimSpace(commentary); trimmedCommentary != "" {
-		errMessage += fmt.Sprintf(", and said: %s", strconv.Quote(trimmedCommentary))
-	}
-	errMessage += ". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative."
-	if instruction := strings.TrimSpace(g.rejectionInstruction); instruction != "" {
-		errMessage += " " + instruction
-	}
-	parts = append(parts, errMessage)
-	return strings.Join(parts, ". ")
 }
 
 func (g OutsideWorkspaceGuard) isWithinWorkspace(real string) (bool, error) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -70,6 +71,41 @@ func TestCall_ImagePathReturnsInputImageContentItem(t *testing.T) {
 	}
 	if string(decoded) != string(tinyPNG) {
 		t.Fatalf("decoded image bytes mismatch")
+	}
+}
+
+func TestNewMissingWorkspaceSuggestsRebind(t *testing.T) {
+	missingWorkspace := filepath.Join(t.TempDir(), "workspace-removed")
+
+	_, err := New(missingWorkspace, true)
+	if err == nil {
+		t.Fatal("expected error for missing workspace")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist, got %v", err)
+	}
+	want := `workspace root ` + strconv.Quote(missingWorkspace) + ` is missing`
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestNewSymlinkLoopWorkspaceReturnsContextualResolutionError(t *testing.T) {
+	root := t.TempDir()
+	loopPath := filepath.Join(root, "loop")
+	if err := os.Symlink(loopPath, loopPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := New(loopPath, true)
+	if err == nil {
+		t.Fatal("expected error for symlink loop workspace")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected non-missing workspace error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "resolve workspace real path") {
+		t.Fatalf("expected contextual resolution error, got %v", err)
 	}
 }
 

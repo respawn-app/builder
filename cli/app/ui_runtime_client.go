@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ type sessionRuntimeClient struct {
 	reads                   client.SessionViewClient
 	controls                client.RuntimeControlClient
 	sessionID               string
-	controllerLeaseID       string
+	controllerLease         *controllerLeaseManager
 	diagLogf                func(string)
 	transcriptDiagnostics   bool
 	connectionStateObserver func(error)
@@ -79,35 +80,76 @@ func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClien
 		return nil
 	}
 	return &sessionRuntimeClient{
-		sessionID:         sessionID,
-		controllerLeaseID: "local-ui-controller",
-		reads:             reads,
-		controls:          controls,
-		mainView:          clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
-		transcript:        clientui.TranscriptPage{SessionID: sessionID},
-		transcriptPages:   make(map[string]cachedTranscriptPage),
+		sessionID:       sessionID,
+		controllerLease: newControllerLeaseManager("local-ui-controller"),
+		reads:           reads,
+		controls:        controls,
+		mainView:        clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
+		transcript:      clientui.TranscriptPage{SessionID: sessionID},
+		transcriptPages: make(map[string]cachedTranscriptPage),
 	}
+}
+
+func (c *sessionRuntimeClient) SetControllerLeaseManager(manager *controllerLeaseManager) {
+	if c == nil || manager == nil {
+		return
+	}
+	c.mu.Lock()
+	c.controllerLease = manager
+	c.mu.Unlock()
 }
 
 func (c *sessionRuntimeClient) SetControllerLeaseID(leaseID string) {
 	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if strings.TrimSpace(leaseID) == "" {
-		return
+	if manager := c.controllerLeaseManager(); manager != nil {
+		manager.Set(leaseID)
 	}
-	c.controllerLeaseID = strings.TrimSpace(leaseID)
 }
 
 func (c *sessionRuntimeClient) controllerLeaseIDValue() string {
+	if manager := c.controllerLeaseManager(); manager != nil {
+		return manager.Value()
+	}
+	return ""
+}
+
+func (c *sessionRuntimeClient) controllerLeaseManager() *controllerLeaseManager {
 	if c == nil {
-		return ""
+		return nil
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.controllerLeaseID
+	return c.controllerLease
+}
+
+func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context) error {
+	manager := c.controllerLeaseManager()
+	if manager == nil {
+		return errControllerLeaseRecoveryUnavailable
+	}
+	_, err := manager.Recover(ctx)
+	return err
+}
+
+func (c *sessionRuntimeClient) retryControlCallNoResult(ctx context.Context, call func(controllerLeaseID string) error) error {
+	_, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (struct{}, error) {
+		return struct{}{}, call(controllerLeaseID)
+	})
+	return err
+}
+
+func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context) error, call func(controllerLeaseID string) (T, error)) (T, error) {
+	value, err := call(currentLeaseID())
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return value, err
+	}
+	var zero T
+	if recoverErr := recoverLease(ctx); recoverErr != nil {
+		return zero, recoverErr
+	}
+	return call(currentLeaseID())
 }
 
 func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) {
@@ -589,7 +631,9 @@ func cloneTranscriptEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
 func (c *sessionRuntimeClient) SetSessionName(name string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	if err := c.controls.SetSessionName(ctx, serverapi.RuntimeSetSessionNameRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Name: name}); err != nil {
+	if err := c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.SetSessionName(ctx, serverapi.RuntimeSetSessionNameRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Name: name})
+	}); err != nil {
 		return err
 	}
 	c.patchMainView(func(view *clientui.RuntimeMainView) {
@@ -600,7 +644,9 @@ func (c *sessionRuntimeClient) SetSessionName(name string) error {
 func (c *sessionRuntimeClient) SetThinkingLevel(level string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	if err := c.controls.SetThinkingLevel(ctx, serverapi.RuntimeSetThinkingLevelRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Level: level}); err != nil {
+	if err := c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.SetThinkingLevel(ctx, serverapi.RuntimeSetThinkingLevelRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Level: level})
+	}); err != nil {
 		return err
 	}
 	c.patchMainView(func(view *clientui.RuntimeMainView) {
@@ -611,7 +657,9 @@ func (c *sessionRuntimeClient) SetThinkingLevel(level string) error {
 func (c *sessionRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetFastModeEnabled(ctx, serverapi.RuntimeSetFastModeEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+		return c.controls.SetFastModeEnabled(ctx, serverapi.RuntimeSetFastModeEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Enabled: enabled})
+	})
 	if err == nil {
 		c.patchMainView(func(view *clientui.RuntimeMainView) {
 			view.Status.FastModeEnabled = enabled
@@ -622,7 +670,9 @@ func (c *sessionRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 func (c *sessionRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetReviewerEnabled(ctx, serverapi.RuntimeSetReviewerEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+		return c.controls.SetReviewerEnabled(ctx, serverapi.RuntimeSetReviewerEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Enabled: enabled})
+	})
 	if err == nil {
 		c.patchMainView(func(view *clientui.RuntimeMainView) {
 			view.Status.ReviewerFrequency = resp.Mode
@@ -634,7 +684,9 @@ func (c *sessionRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, e
 func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.SetAutoCompactionEnabled(ctx, serverapi.RuntimeSetAutoCompactionEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Enabled: enabled})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+		return c.controls.SetAutoCompactionEnabled(ctx, serverapi.RuntimeSetAutoCompactionEnabledRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Enabled: enabled})
+	})
 	if err != nil {
 		return false, false, err
 	}
@@ -646,24 +698,34 @@ func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, boo
 func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Role: role, Text: text})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Role: role, Text: text})
+	})
 }
 func (c *sessionRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	resp, err := c.controls.ShouldCompactBeforeUserMessage(ctx, serverapi.RuntimeShouldCompactBeforeUserMessageRequest{SessionID: c.sessionID, Text: text})
 	return resp.ShouldCompact, err
 }
 func (c *sessionRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
-	resp, err := c.controls.SubmitUserMessage(ctx, serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+		return c.controls.SubmitUserMessage(ctx, serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Text: text})
+	})
 	return resp.Message, err
 }
 func (c *sessionRuntimeClient) SubmitUserShellCommand(ctx context.Context, command string) error {
-	return c.controls.SubmitUserShellCommand(ctx, serverapi.RuntimeSubmitUserShellCommandRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Command: command})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.SubmitUserShellCommand(ctx, serverapi.RuntimeSubmitUserShellCommandRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Command: command})
+	})
 }
 func (c *sessionRuntimeClient) CompactContext(ctx context.Context, args string) error {
-	return c.controls.CompactContext(ctx, serverapi.RuntimeCompactContextRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Args: args})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.CompactContext(ctx, serverapi.RuntimeCompactContextRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Args: args})
+	})
 }
 func (c *sessionRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
-	return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID})
+	})
 }
 func (c *sessionRuntimeClient) HasQueuedUserWork() (bool, error) {
 	ctx, cancel := c.controlContext()
@@ -675,19 +737,25 @@ func (c *sessionRuntimeClient) HasQueuedUserWork() (bool, error) {
 	return resp.HasQueuedUserWork, nil
 }
 func (c *sessionRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
-	resp, err := c.controls.SubmitQueuedUserMessages(ctx, serverapi.RuntimeSubmitQueuedUserMessagesRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+		return c.controls.SubmitQueuedUserMessages(ctx, serverapi.RuntimeSubmitQueuedUserMessagesRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID})
+	})
 	return resp.Message, err
 }
 func (c *sessionRuntimeClient) Interrupt() error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.Interrupt(ctx, serverapi.RuntimeInterruptRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue()})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.Interrupt(ctx, serverapi.RuntimeInterruptRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID})
+	})
 }
 
 func (c *sessionRuntimeClient) QueueUserMessage(text string) {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	if err := c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text}); err != nil {
+	if err := c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Text: text})
+	}); err != nil {
 		c.notifyConnectionState(err)
 	}
 }
@@ -695,7 +763,9 @@ func (c *sessionRuntimeClient) QueueUserMessage(text string) {
 func (c *sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	resp, err := c.controls.DiscardQueuedUserMessagesMatching(ctx, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+		return c.controls.DiscardQueuedUserMessagesMatching(ctx, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Text: text})
+	})
 	if err != nil {
 		return 0
 	}
@@ -705,5 +775,7 @@ func (c *sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) in
 func (c *sessionRuntimeClient) RecordPromptHistory(text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	return c.controls.RecordPromptHistory(ctx, serverapi.RuntimeRecordPromptHistoryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: c.controllerLeaseIDValue(), Text: text})
+	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
+		return c.controls.RecordPromptHistory(ctx, serverapi.RuntimeRecordPromptHistoryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Text: text})
+	})
 }

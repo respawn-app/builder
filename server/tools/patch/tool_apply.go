@@ -1,7 +1,6 @@
 package patch
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -48,22 +47,22 @@ func applyEdit(original []string, changes []patchformat.ChangeLine) ([]string, e
 		}
 		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition)
 		if err != nil {
-			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+			return nil, attachFailureReasonContext(err, fmt.Sprintf("hunk %d", idx+1))
 		}
 		next, oldCount, newCount, err := applyHunkAt(current, h.changes, anchor)
 		if err != nil {
-			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+			return nil, attachFailureReasonContext(err, fmt.Sprintf("hunk %d", idx+1))
 		}
 		if h.header.hasPosition {
 			if oldCount != h.header.oldCount || newCount != h.header.newCount {
-				return nil, fmt.Errorf(
-					"hunk %d: header count mismatch: old %d->%d new %d->%d",
+				return nil, malformedFailure(fmt.Sprintf(
+					"hunk %d header count mismatch: expected old/new %d/%d, applied %d/%d",
 					idx+1,
 					h.header.oldCount,
-					oldCount,
 					h.header.newCount,
+					oldCount,
 					newCount,
-				)
+				))
 			}
 		}
 		current = next
@@ -84,7 +83,7 @@ func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 	flush := func() error {
 		if len(current.changes) == 0 {
 			if current.header.hasPosition {
-				return errors.New("hunk header without changes")
+				return malformedFailure("hunk header without changes")
 			}
 			return nil
 		}
@@ -107,7 +106,7 @@ func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 		case ' ', '+', '-':
 			current.changes = append(current.changes, ch)
 		default:
-			return nil, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
+			return nil, malformedFailure(fmt.Sprintf("unknown change line prefix %q", string(ch.Kind)))
 		}
 	}
 	if err := flush(); err != nil {
@@ -124,29 +123,29 @@ func parseHunkHeader(line string) (hunkHeader, error) {
 
 	m := unifiedHunkHeaderPattern.FindStringSubmatch(line)
 	if len(m) == 0 {
-		return hunkHeader{}, fmt.Errorf("invalid hunk header: %q", line)
+		return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk header %q", line))
 	}
 
 	oldStart, err := strconv.Atoi(m[1])
 	if err != nil {
-		return hunkHeader{}, fmt.Errorf("invalid hunk old start %q: %w", m[1], err)
+		return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk old start %q", m[1]))
 	}
 	oldCount := 1
 	if strings.TrimSpace(m[2]) != "" {
 		oldCount, err = strconv.Atoi(m[2])
 		if err != nil {
-			return hunkHeader{}, fmt.Errorf("invalid hunk old count %q: %w", m[2], err)
+			return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk old count %q", m[2]))
 		}
 	}
 	newStart, err := strconv.Atoi(m[3])
 	if err != nil {
-		return hunkHeader{}, fmt.Errorf("invalid hunk new start %q: %w", m[3], err)
+		return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk new start %q", m[3]))
 	}
 	newCount := 1
 	if strings.TrimSpace(m[4]) != "" {
 		newCount, err = strconv.Atoi(m[4])
 		if err != nil {
-			return hunkHeader{}, fmt.Errorf("invalid hunk new count %q: %w", m[4], err)
+			return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk new count %q", m[4]))
 		}
 	}
 
@@ -174,6 +173,9 @@ func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, 
 	}
 
 	if anchored {
+		if expected > maxStart {
+			return -1, outOfBoundsFailure(expected+1, fmt.Sprintf("patch references line %d, but file has %d lines", expected+1, len(lines)))
+		}
 		if expected >= floor && expected <= maxStart && matchAt(expected) {
 			return expected, nil
 		}
@@ -187,7 +189,7 @@ func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, 
 				return down, nil
 			}
 		}
-		return -1, fmt.Errorf("hunk did not match near expected line %d (fuzz %d)", expected+1, hunkMaxFuzz)
+		return -1, contentMismatchFailure(expected+1, true, fmt.Sprintf("patch hunk did not match within %d lines of the expected location", hunkMaxFuzz))
 	}
 
 	for start := floor; start <= maxStart; start++ {
@@ -195,12 +197,12 @@ func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, 
 			return start, nil
 		}
 	}
-	return -1, errors.New("hunk did not match file content")
+	return -1, contentMismatchFailure(0, false, "patch hunk did not match file content")
 }
 
 func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([]string, int, int, error) {
 	if start < 0 || start > len(lines) {
-		return nil, 0, 0, fmt.Errorf("invalid hunk start %d", start)
+		return nil, 0, 0, outOfBoundsFailure(start+1, fmt.Sprintf("invalid hunk start %d", start))
 	}
 
 	out := make([]string, 0, len(lines)+len(changes))
@@ -213,7 +215,7 @@ func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([
 		switch ch.Kind {
 		case ' ':
 			if cursor >= len(lines) || lines[cursor] != ch.Content {
-				return nil, 0, 0, fmt.Errorf("context mismatch at line %d: want %q", cursor+1, ch.Content)
+				return nil, 0, 0, contentMismatchFailure(cursor+1, false, fmt.Sprintf("expected context line %q", ch.Content))
 			}
 			out = append(out, lines[cursor])
 			cursor++
@@ -221,7 +223,7 @@ func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([
 			newCount++
 		case '-':
 			if cursor >= len(lines) || lines[cursor] != ch.Content {
-				return nil, 0, 0, fmt.Errorf("delete mismatch at line %d: want %q", cursor+1, ch.Content)
+				return nil, 0, 0, contentMismatchFailure(cursor+1, false, fmt.Sprintf("expected deleted line %q", ch.Content))
 			}
 			cursor++
 			oldCount++
@@ -229,7 +231,7 @@ func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([
 			out = append(out, ch.Content)
 			newCount++
 		default:
-			return nil, 0, 0, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
+			return nil, 0, 0, malformedFailure(fmt.Sprintf("unknown change line prefix %q", string(ch.Kind)))
 		}
 	}
 

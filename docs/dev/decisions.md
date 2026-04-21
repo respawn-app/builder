@@ -7,6 +7,7 @@
 - Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, mirrors the root `README.md` as the initial docs home, and uses Algolia DocSearch for site search.
 - v1 excludes MCP, plugins, and native subagent orchestration.
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
+- First-run onboarding may optionally symlink skills and slash-command roots from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout; normal runtime discovery still reads only Builder-owned directories.
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
@@ -66,6 +67,8 @@
 - Large tool output is truncated for model consumption using standardized payloads (head+tail + truncation metadata, threshold configurable).
 - Model-step transient failures use exponential backoff retries with 5 attempts (`1s, 2s, 4s, 8s, 16s`).
 - Model/API errors in `ongoing` are shown as concise single-line errors; full details remain in detail view/logs.
+- Transcript error roles are split by operator visibility: plain `error` remains a detail-only diagnostic role, while persisted operator-facing turn-start failures (submit/pre-submit/queued-resume failures that prevent the agent loop from starting) use `developer_error_feedback` so the message is appended into ongoing scrollback.
+- Local command/validation failures that do not block a model turn from starting stay on plain `error` by design. Examples: slash validation, `/fast` and `/ps` usage errors, and settings/status/process command failures that are already surfaced via detail mode and/or transient statusline notices.
 
 ## Ask Question
 
@@ -114,7 +117,8 @@
 - To support agent recovery in that fail-fast model, Builder will expose explicit workspace-binding CLI commands: `builder project [path]` to inspect the project bound to a path, `builder attach [path]` to bind a workspace to the project already bound to `cwd`, and `builder attach --project <project-id> [path]` as the explicit project-id override. All forms default `path` to `cwd`.
 - The minimum server-admin setup command surface is `builder project list`, `builder project create --path <server-path> --name <project-name>`, and `builder attach --project <project-id> <server-path>`.
 - Those server-admin commands must prefer RPC to the configured running daemon when one exists; they must not require shutting the server down or taking local ownership of the persistence root.
-- Explicit relocation recovery is `builder rebind <old-path> <new-path>`, which preserves the existing `workspace_id` while retargeting the canonical workspace root. Unknown-cwd startup does not infer relocation; it stays on the normal bind/create flow.
+- Explicit relocation recovery is `builder rebind <session-id> <new-path>`, which retargets one session to a different workspace root. Unknown-cwd startup does not infer relocation; it stays on the normal bind/create flow.
+- When a session is chosen from the interactive session picker and its stored workspace root differs from Builder's current workspace root, startup must show a `Workspace changed` confirmation. `Yes` retargets that session to the current workspace root before opening it; `No` returns to the session picker.
 - For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
 - The attempted SQLite-backed `client_request_id` dedup persistence expansion is being hard-cut before ship. Current shipping direction keeps `client_request_id` on the API surface, retains lease-specific semantics for `sessionruntime.activate` / `sessionruntime.release`, and defers any durable/shared dedup authority to later dedicated session-control work.
 - Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.

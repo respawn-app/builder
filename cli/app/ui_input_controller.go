@@ -8,18 +8,61 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/llm"
+	"builder/shared/serverapi"
+	"builder/shared/transcript"
 
 	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Operator-facing turn-start failures must stay visible in ongoing scrollback.
+// Plain "error" remains reserved for detail-only diagnostics and raw failures.
+func (m *uiModel) appendOperatorErrorFeedback(text string) tea.Cmd {
+	return m.appendLocalEntry(string(transcript.EntryRoleDeveloperErrorFeedback), text)
+}
+
+func (c uiInputController) appendLocalEntry(role, text string) tea.Cmd {
+	if c.model == nil {
+		return nil
+	}
+	return c.model.appendLocalEntry(role, text)
+}
+
+func (c uiInputController) appendSystemFeedback(text string) tea.Cmd {
+	return c.appendLocalEntry("system", text)
+}
+
+func (c uiInputController) appendErrorFeedback(text string) tea.Cmd {
+	return c.appendLocalEntry("error", text)
+}
+
+func (c uiInputController) appendLocalEntryWithStatus(role, text string, status tea.Cmd) tea.Cmd {
+	return sequenceCmds(c.appendLocalEntry(role, text), status)
+}
+
+func (c uiInputController) appendSystemFeedbackWithStatus(text string, status tea.Cmd) tea.Cmd {
+	return c.appendLocalEntryWithStatus("system", text, status)
+}
+
+func (c uiInputController) appendErrorFeedbackWithStatus(text string, status tea.Cmd) tea.Cmd {
+	return c.appendLocalEntryWithStatus("error", text, status)
+}
+
 type uiInputController struct {
 	model *uiModel
 }
 
-var pendingToolSpinner = bubblespinner.Dot
+var pendingToolSpinner = bubblespinner.Spinner{
+	Frames: []string{"⢎ ", "⠎⠁", "⠊⠑", "⠈⠱", " ⡱", "⢀⡰", "⢄⡠", "⢆⡀"},
+	FPS:    80 * time.Millisecond,
+}
 var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 8 * time.Second
+var scheduleTransientStatusClear = func(token uint64) tea.Cmd {
+	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
+		return clearTransientStatusMsg{token: token}
+	})
+}
 var processListRefreshInterval = 1500 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond
@@ -31,9 +74,12 @@ func waitProcessListRefresh() tea.Cmd {
 	})
 }
 
-func tickSpinner(token uint64) tea.Cmd {
-	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
-		return spinnerTickMsg{token: token}
+func tickSpinner(token uint64, delay time.Duration) tea.Cmd {
+	if delay <= 0 {
+		delay = spinnerTickInterval
+	}
+	return tea.Tick(delay, func(now time.Time) tea.Msg {
+		return spinnerTickMsg{token: token, at: now}
 	})
 }
 
@@ -41,7 +87,7 @@ func (m *uiModel) shouldAnimateSpinner() bool {
 	if m == nil {
 		return false
 	}
-	return m.busy || m.processListHasRunningEntries()
+	return m.busy || m.reviewerRunning || m.processListHasRunningEntries()
 }
 
 func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
@@ -55,13 +101,16 @@ func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
 	if m.spinnerTickToken != 0 {
 		return nil
 	}
+	now := uiAnimationNow()
+	m.spinnerClock.Start(now)
+	m.spinnerFrame = 0
 	m.spinnerGeneration++
 	m.spinnerTickToken = m.spinnerGeneration
 	if m.spinnerTickToken == 0 {
 		m.spinnerGeneration++
 		m.spinnerTickToken = m.spinnerGeneration
 	}
-	return tickSpinner(m.spinnerTickToken)
+	return tickSpinner(m.spinnerTickToken, m.spinnerClock.NextDelay(now, spinnerTickInterval))
 }
 
 func (m *uiModel) stopSpinnerTicking() {
@@ -69,11 +118,18 @@ func (m *uiModel) stopSpinnerTicking() {
 		return
 	}
 	m.spinnerTickToken = 0
+	m.spinnerClock.Stop()
 }
 
 func formatSubmissionError(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		return "session is controlled by another client; retry to take over"
+	}
+	if errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return "lost control of this session; retry to reclaim it"
 	}
 	if formatted := llm.UserFacingError(err); strings.TrimSpace(formatted) != "" {
 		return formatted
@@ -101,13 +157,28 @@ func parseUserShellCommand(text string) (string, bool) {
 	return command, true
 }
 
-func (m *uiModel) appendLocalEntry(role, text string) {
-	if text == "" {
-		return
+func (m *uiModel) appendLocalEntry(role, text string) tea.Cmd {
+	role = strings.TrimSpace(role)
+	text = strings.TrimSpace(text)
+	if role == "" || text == "" {
+		return nil
 	}
 	if m.hasRuntimeClient() {
-		_ = m.appendRuntimeLocalEntry(role, text)
-		return
+		if err := m.appendRuntimeLocalEntry(role, text); err == nil {
+			return nil
+		}
 	}
+	return m.appendLocalEntryFallback(role, text)
+}
+
+func (m *uiModel) appendLocalEntryFallback(role, text string) tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	entry := tui.TranscriptEntry{Role: role, Text: text}
+	m.transcriptEntries = append(m.transcriptEntries, entry)
+	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(committedTranscriptEntriesForApp(m.transcriptEntries)))
+	m.refreshRollbackCandidates()
 	m.forwardToView(tui.AppendTranscriptMsg{Role: role, Text: text})
+	return m.syncNativeHistoryFromTranscript()
 }

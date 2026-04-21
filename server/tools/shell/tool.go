@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -125,14 +124,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		timeout = requested
 	}
 
-	workdir := t.workspaceRoot
-	if in.Workdir != "" {
-		if filepath.IsAbs(in.Workdir) {
-			workdir = in.Workdir
-		} else {
-			workdir = filepath.Join(t.workspaceRoot, in.Workdir)
-		}
-	}
+	workdir := ResolveWorkdir(t.workspaceRoot, in.Workdir)
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

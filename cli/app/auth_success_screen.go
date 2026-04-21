@@ -25,8 +25,7 @@ type authSuccessScreenModel struct {
 }
 
 type authSuccessScreenStyles struct {
-	title lipgloss.Style
-	hint  lipgloss.Style
+	hint lipgloss.Style
 }
 
 func newAuthSuccessScreenModel(data authSuccessScreenData) *authSuccessScreenModel {
@@ -41,8 +40,7 @@ func newAuthSuccessScreenModel(data authSuccessScreenData) *authSuccessScreenMod
 func newAuthSuccessScreenStyles(theme string) authSuccessScreenStyles {
 	palette := uiPalette(theme)
 	return authSuccessScreenStyles{
-		title: lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
-		hint:  lipgloss.NewStyle().Foreground(palette.foreground),
+		hint: lipgloss.NewStyle().Foreground(palette.foreground),
 	}
 }
 
@@ -69,7 +67,7 @@ func (m *authSuccessScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *authSuccessScreenModel) View() string {
 	body := strings.Join([]string{
-		m.styles.title.Render(authSuccessScreenTitle(m.data.Method)),
+		renderStartupPlainTitle(authSuccessScreenTitle(m.data.Method), m.data.Theme),
 		"",
 		m.styles.hint.Render("Press any key to continue"),
 	}, "\n")

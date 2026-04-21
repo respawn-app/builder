@@ -21,9 +21,9 @@ func formatProjectBindingStartupError(workspaceRoot string, projectID string, er
 		if unavailable, ok := serverapi.AsProjectUnavailable(err); ok {
 			switch unavailable.Availability {
 			case clientui.ProjectAvailabilityMissing:
-				return fmt.Errorf("project %q root %q is missing. Run `builder rebind <old-path> <new-path>` if the workspace moved: %w", unavailable.ProjectID, unavailable.RootPath, err)
+				return fmt.Errorf("project %q root %q is missing. Rebind affected sessions from their new workspace roots: %w", unavailable.ProjectID, unavailable.RootPath, err)
 			case clientui.ProjectAvailabilityInaccessible:
-				return fmt.Errorf("project %q root %q is inaccessible. Restore access or run `builder rebind <old-path> <new-path>` if the workspace moved: %w", unavailable.ProjectID, unavailable.RootPath, err)
+				return fmt.Errorf("project %q root %q is inaccessible. Restore access or rebind affected sessions from another workspace root: %w", unavailable.ProjectID, unavailable.RootPath, err)
 			}
 		}
 	}

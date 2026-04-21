@@ -17,7 +17,7 @@ func transcriptMessageStyleForRole(role string) transcriptMessageStyle {
 		return transcriptMessageStyleSuccess
 	case "warning", "cache_warning":
 		return transcriptMessageStyleWarning
-	case "error":
+	case "error", roleDeveloperErrorFeedback:
 		return transcriptMessageStyleError
 	default:
 		return transcriptMessageStyleNone

@@ -24,16 +24,23 @@ const (
 
 type ToolRenderKind string
 
+type ToolShellDialect string
+
 const (
 	ToolRenderKindShell  ToolRenderKind = "shell"
 	ToolRenderKindDiff   ToolRenderKind = "diff"
 	ToolRenderKindSource ToolRenderKind = "source"
+
+	ToolShellDialectPosix          ToolShellDialect = "posix"
+	ToolShellDialectPowerShell     ToolShellDialect = "powershell"
+	ToolShellDialectWindowsCommand ToolShellDialect = "windows_command"
 )
 
 type ToolRenderHint struct {
-	Kind       ToolRenderKind
-	Path       string
-	ResultOnly bool
+	Kind         ToolRenderKind
+	Path         string
+	ResultOnly   bool
+	ShellDialect ToolShellDialect
 }
 
 type ToolCallMeta struct {

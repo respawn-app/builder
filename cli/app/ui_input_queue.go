@@ -16,7 +16,6 @@ const (
 func (m *uiModel) queueInput(text string) {
 	m.queued = append(m.queued, text)
 	m.clearInput()
-	m.activity = uiActivityQueued
 }
 
 func (m *uiModel) enqueueInjectedInput(text string) bool {
@@ -28,7 +27,6 @@ func (m *uiModel) enqueueInjectedInput(text string) bool {
 		m.queueRuntimeUserMessage(trimmed)
 	}
 	m.pendingInjected = append(m.pendingInjected, trimmed)
-	m.activity = uiActivityQueued
 	return true
 }
 
@@ -44,8 +42,8 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
-	if c.blockDisconnectedSubmission(false, "") {
-		return m, nil
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(false, ""); blocked {
+		return m, disconnectCmd
 	}
 	draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 	m.queueInput(text)
@@ -56,10 +54,10 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	return c.flushQueuedInputs(queueDrainOne)
 }
 
-func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submittedText string) bool {
+func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submittedText string) (bool, tea.Cmd) {
 	m := c.model
 	if !m.runtimeDisconnectStatusVisible() {
-		return false
+		return false, nil
 	}
 	if restoreHidden {
 		c.restorePendingInjectedIntoInput()
@@ -68,7 +66,7 @@ func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submi
 	}
 	m.activity = uiActivityError
 	m.syncViewport()
-	return true
+	return true, m.appendOperatorErrorFeedback(runtimeDisconnectedStatusMessage)
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {
@@ -167,11 +165,11 @@ func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 
 func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, tea.Cmd) {
 	m := c.model
-	if c.blockDisconnectedSubmission(true, "") {
-		return m, nil
-	}
 	if len(m.queued) == 0 {
 		return m, nil
+	}
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, ""); blocked {
+		return m, disconnectCmd
 	}
 	cmds := make([]tea.Cmd, 0, 2)
 	for len(m.queued) > 0 {

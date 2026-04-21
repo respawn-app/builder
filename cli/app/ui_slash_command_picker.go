@@ -106,6 +106,9 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 	}
 	filtered := make([]commands.Command, 0, len(matches))
 	for _, command := range matches {
+		if command.Name == "resume" && !m.resumeCommandAvailable() {
+			continue
+		}
 		if command.Name == "fast" && !m.fastModeAvailable {
 			continue
 		}
@@ -115,6 +118,13 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 		filtered = append(filtered, command)
 	}
 	return filtered
+}
+
+func (m *uiModel) resumeCommandAvailable() bool {
+	if !m.hasOtherSessionsKnown {
+		return true
+	}
+	return m.hasOtherSessions
 }
 
 func (m *uiModel) hasParentSession() bool {

@@ -53,7 +53,7 @@ func SummarizeBackgroundEvent(evt Event, opts BackgroundNoticeOptions) Backgroun
 	if evt.Snapshot.ExitCode != nil {
 		detail = append(detail, fmt.Sprintf("Exit code: %d", *evt.Snapshot.ExitCode))
 	}
-	if strings.TrimSpace(evt.Snapshot.LogPath) != "" && lineCount >= 0 {
+	if strings.TrimSpace(evt.Snapshot.LogPath) != "" && lineCount > 0 {
 		detail = append(detail, fmt.Sprintf("Output file (%s): %s", formatOutputLineCount(lineCount), evt.Snapshot.LogPath))
 	}
 	if mode != BackgroundOutputConcise {

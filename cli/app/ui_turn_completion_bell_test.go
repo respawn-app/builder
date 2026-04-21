@@ -99,3 +99,61 @@ func TestPreSubmitCheckErrorAbortsPendingTurnCompletionBell(t *testing.T) {
 		t.Fatalf("ring count = %d after pre-submit check abort, want 0", got)
 	}
 }
+
+func TestNoopFinalAbortsPendingTurnCompletionBell(t *testing.T) {
+	ringer := &countRinger{}
+	bells := newBellHooks(ringer, nil)
+	m := newProjectedStaticUIModel(WithUITurnQueueHook(bells))
+	m.busy = true
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}}})
+	updated = next.(*uiModel)
+
+	next, _ = updated.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	updated = next.(*uiModel)
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after NO_OP final, want 0", got)
+	}
+	bells.OnTurnQueueDrained()
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after forced drain following NO_OP final, want 0", got)
+	}
+	if updated.busy {
+		t.Fatal("expected UI idle after NO_OP final")
+	}
+}
+
+func TestQueuedFollowUpAfterNoopFinalDoesNotLeakTurnCompletionBell(t *testing.T) {
+	ringer := &countRinger{}
+	bells := newBellHooks(ringer, nil)
+	m := newProjectedStaticUIModel(WithUITurnQueueHook(bells))
+	m.busy = true
+	m.queued = []string{"follow up"}
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}}})
+	updated = next.(*uiModel)
+
+	next, cmd := updated.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued follow-up to start after NO_OP final")
+	}
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after NO_OP final queued follow-up, want 0", got)
+	}
+	if !updated.busy {
+		t.Fatal("expected queued follow-up submission to be running")
+	}
+	bells.OnTurnQueueDrained()
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after forced drain following queued NO_OP final, want 0", got)
+	}
+}

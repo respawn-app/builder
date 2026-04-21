@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"builder/server/llm"
 	"builder/server/session"
@@ -234,6 +235,8 @@ func TestRemoteCompactionOnlyTrimsAfterOverflowAndWarnsOnCacheBreak(t *testing.T
 }
 
 func TestCompactionTransientRetryObservesCacheLineageOnce(t *testing.T) {
+	withCompactionRetryDelays(t, []time.Duration{time.Millisecond})
+
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

@@ -4,13 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"builder/server/llm"
 	"builder/shared/config"
 	"builder/shared/theme"
 	"builder/shared/toolspec"
 
-	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,6 +20,10 @@ import (
 type onboardingFinalizeDoneMsg struct {
 	result onboardingResult
 	err    error
+}
+
+type onboardingSpinnerTickMsg struct {
+	at time.Time
 }
 
 const onboardingToggleAllOptionID = "__toggle_all__"
@@ -55,7 +59,8 @@ type onboardingModel struct {
 	width           int
 	height          int
 	styles          onboardingStyles
-	spinner         bubblespinner.Model
+	spinnerClock    frameAnimationClock
+	spinnerFrame    int
 	input           textinput.Model
 	currentScreen   onboardingScreen
 	stepIndex       int
@@ -95,8 +100,6 @@ func newOnboardingStyles(theme string) onboardingStyles {
 }
 
 func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardingModel {
-	spin := bubblespinner.New()
-	spin.Spinner = pendingToolSpinner
 	input := textinput.New()
 	input.Prompt = ""
 	input.Focus()
@@ -107,12 +110,25 @@ func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardin
 		width:      defaultPickerWidth,
 		height:     defaultPickerHeight,
 		styles:     newOnboardingStyles(state.theme),
-		spinner:    spin,
 		input:      input,
 	}
+	m.spinnerClock.Start(uiAnimationNow())
 	m.applyInputTheme(m.activeTheme())
 	m.syncScreen(true)
 	return m
+}
+
+func tickOnboardingSpinner(delay time.Duration) tea.Cmd {
+	if delay <= 0 {
+		delay = spinnerTickInterval
+	}
+	return tea.Tick(delay, func(now time.Time) tea.Msg {
+		return onboardingSpinnerTickMsg{at: now}
+	})
+}
+
+func (m *onboardingModel) shouldAnimateSpinner() bool {
+	return m.finalizing || m.currentScreen.Kind == onboardingScreenLoading
 }
 
 func (m *onboardingModel) activeTheme() string {
@@ -139,7 +155,7 @@ func (m *onboardingModel) applyActiveThemeStyles() {
 
 func (m *onboardingModel) Init() tea.Cmd {
 	m.state.imports.pending = true
-	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+	return tea.Batch(tickOnboardingSpinner(m.spinnerClock.NextDelay(uiAnimationNow(), spinnerTickInterval)), func() tea.Msg {
 		return onboardingImportDiscoveryDoneMsg{discovery: discoverOnboardingImports(m.globalRoot)}
 	})
 }
@@ -177,15 +193,14 @@ func (m *onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.result = typed.result
 		return m, tea.Quit
-	case bubblespinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(typed)
-		if m.finalizing || m.currentScreen.Kind == onboardingScreenLoading {
-			return m, cmd
+	case onboardingSpinnerTickMsg:
+		m.spinnerFrame = m.spinnerClock.Frame(typed.at, len(pendingToolSpinner.Frames), spinnerTickInterval)
+		if !m.shouldAnimateSpinner() {
+			return m, nil
 		}
-		return m, nil
+		return m, tickOnboardingSpinner(m.spinnerClock.NextDelay(typed.at, spinnerTickInterval))
 	case tea.KeyMsg:
-		if m.finalizing || m.currentScreen.Kind == onboardingScreenLoading {
+		if m.shouldAnimateSpinner() {
 			switch typed.Type {
 			case tea.KeyCtrlC, tea.KeyEsc:
 				m.canceled = true
@@ -891,7 +906,7 @@ func (m *onboardingModel) renderLoadingView() string {
 	if m.finalizingLabel != "" {
 		loadingText = m.finalizingLabel
 	}
-	content := strings.Join([]string{m.styles.title.Render(title), "", m.styles.spinner.Render(m.spinner.View() + " " + loadingText)}, "\n")
+	content := strings.Join([]string{m.styles.title.Render(title), "", m.styles.spinner.Render(pendingToolSpinnerFrame(m.spinnerFrame) + " " + loadingText)}, "\n")
 	if m.currentScreen.ErrorText != "" {
 		content += "\n\n" + m.styles.errorText.Render(m.currentScreen.ErrorText)
 	}

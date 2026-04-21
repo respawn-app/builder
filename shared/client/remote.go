@@ -176,6 +176,11 @@ func (c *Remote) PersistInputDraft(ctx context.Context, req serverapi.SessionPer
 	return resp, c.call(ctx, protocol.MethodSessionPersistInputDraft, req, &resp)
 }
 
+func (c *Remote) RetargetSessionWorkspace(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+	var resp serverapi.SessionRetargetWorkspaceResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodSessionRetargetWorkspace, req, &resp)
+}
+
 func (c *Remote) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	var resp serverapi.SessionResolveTransitionResponse
 	return resp, c.call(ctx, protocol.MethodSessionResolveTransition, req, &resp)

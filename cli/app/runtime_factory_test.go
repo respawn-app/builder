@@ -342,7 +342,7 @@ func TestNewRuntimeWiring_ProviderOverrideSupportsAliasModelsForMainAndReviewer(
 }
 
 func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -438,9 +438,9 @@ func TestBackgroundEventRouterRoutesCompletionToMatchingActiveOwnerSession(t *te
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
 	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1002.log")}, Type: shelltool.EventCompleted, Preview: "done"})
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for clientA.CallCount() == 0 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	if got := clientA.CallCount(); got == 0 {
 		t.Fatal("expected owner session completion to route to its active engine even when another session is also active")
@@ -703,7 +703,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 
 func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionResume(t *testing.T) {
 	root := t.TempDir()
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(20 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -732,11 +732,11 @@ func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionRe
 	router.SetActiveSession(storeA.Meta().SessionID, engA)
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf resume-check\\n; sleep 1"},
+		Command:        []string{"sh", "-c", "printf resume-check\\n; sleep 0.1"},
 		DisplayCommand: "resume-check",
 		OwnerSessionID: storeA.Meta().SessionID,
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("start process: %v", err)
@@ -766,7 +766,7 @@ func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionRe
 	}
 
 	router.SetActiveSession(storeA.Meta().SessionID, engA)
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if got := clientA.CallCount(); got != 0 {
 		t.Fatalf("expected no retroactive notice on owner session resume, got %d", got)
 	}
@@ -778,11 +778,7 @@ func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionRe
 
 func TestBackgroundEventRouterDropsNoticeWhenNoSessionIsActive(t *testing.T) {
 	root := t.TempDir()
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 	router := newBackgroundEventRouter(manager, 16_000, shelltool.BackgroundOutputDefault)
 
 	store, err := session.Create(root, "ws", root)
@@ -797,7 +793,7 @@ func TestBackgroundEventRouterDropsNoticeWhenNoSessionIsActive(t *testing.T) {
 	router.SetActiveSession(store.Meta().SessionID, eng)
 	router.ClearActiveSession(store.Meta().SessionID)
 	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: store.Meta().SessionID, State: "completed"}, Type: shelltool.EventCompleted, Preview: "done"})
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if got := client.CallCount(); got != 0 {
 		t.Fatalf("expected no notice delivery while no session is active, got %d", got)
 	}

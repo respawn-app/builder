@@ -273,6 +273,17 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			}
 			return g.core.SessionLifecycleClient().PersistInputDraft(ctx, params)
 		})
+	case protocol.MethodSessionRetargetWorkspace:
+		return decodeAndHandle(req, func(params serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
+			// `builder rebind <session-id> <new-path>` opens an unscoped remote and only knows
+			// the target workspace root. Enforce project isolation when the connection explicitly
+			// attached a project, but do not inherit the daemon's default project as an implicit
+			// authorization scope for this session-level maintenance RPC.
+			if err := g.requireSessionInAttachedProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionRetargetWorkspaceResponse{}, err
+			}
+			return g.core.SessionLifecycleClient().RetargetSessionWorkspace(ctx, params)
+		})
 	case protocol.MethodSessionResolveTransition:
 		return decodeAndHandle(req, func(params serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 			if err := g.requireSessionInActiveProjectIfPresent(ctx, state, params.SessionID); err != nil {
@@ -592,6 +603,14 @@ func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *conn
 	projectID, err := g.activeProjectID(ctx, state)
 	if err != nil {
 		return err
+	}
+	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
+}
+
+func (g *Gateway) requireSessionInAttachedProject(ctx context.Context, state *connectionState, sessionID string) error {
+	projectID := strings.TrimSpace(state.attachedProject)
+	if projectID == "" {
+		return nil
 	}
 	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
 }

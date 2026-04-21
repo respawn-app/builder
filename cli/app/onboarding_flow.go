@@ -787,7 +787,14 @@ func sortedImportProviders[T any](byProvider map[onboardingImportProviderID][]T)
 	for provider := range byProvider {
 		providers = append(providers, provider)
 	}
-	sort.Slice(providers, func(i, j int) bool { return providers[i] < providers[j] })
+	sort.Slice(providers, func(i, j int) bool {
+		leftOrder := onboardingImportProviderOrder(providers[i])
+		rightOrder := onboardingImportProviderOrder(providers[j])
+		if leftOrder != rightOrder {
+			return leftOrder < rightOrder
+		}
+		return providers[i] < providers[j]
+	})
 	return providers
 }
 

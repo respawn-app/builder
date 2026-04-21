@@ -38,13 +38,13 @@ Use these CLI helpers to inspect or repair workspace bindings:
 builder project [path]
 builder attach [path]
 builder attach --project <project-id> [path]
-builder rebind <old-path> <new-path>
+builder rebind <session-id> <new-path>
 ```
 
 - `builder project` prints the project id for the bound workspace at `path` or `cwd`.
 - `builder attach [path]` attaches another workspace to the project already bound to `cwd`.
 - `builder attach --project <project-id> [path]` skips the `cwd` lookup and attaches explicitly.
-- `builder rebind` updates an existing workspace binding after the workspace moved on disk.
+- `builder rebind <session-id> <new-path>` retargets one session to a different workspace root.
 
 For the full list of shared overrides, see [Configuration](../config/).
 

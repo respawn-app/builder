@@ -299,6 +299,24 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		return nil, errors.New("session runtime activation returned empty controller lease id")
 	}
+	leaseManager := newControllerLeaseManager(leaseID)
+	leaseManager.SetRecoverFunc(func(ctx context.Context) (string, error) {
+		resp, err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       plan.SessionID,
+			ActiveSettings:  plan.ActiveSettings,
+			EnabledToolIDs:  toolIDs,
+			Source:          plan.Source,
+		})
+		if err != nil {
+			return "", err
+		}
+		leaseID := strings.TrimSpace(resp.LeaseID)
+		if leaseID == "" {
+			return "", errors.New("session runtime activation returned empty controller lease id")
+		}
+		return leaseID, nil
+	})
 	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
@@ -314,7 +332,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	_ = diagnosticWriter
 	logger.Logf("%s", startLogLine)
 	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()).(*sessionRuntimeClient)
-	runtimeClient.SetControllerLeaseID(leaseID)
+	runtimeClient.SetControllerLeaseManager(leaseManager)
 	runtimeClient.SetTranscriptDiagnosticsEnabled(transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug))
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
 		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
@@ -325,7 +343,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
-	}, server.PromptControlClient(), runtimeClient.controllerLeaseIDValue)
+	}, server.PromptControlClient(), leaseManager)
 	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
@@ -335,29 +353,32 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		return strings.TrimSpace(plan.SessionName)
 	})
 	wiring := &runtimeWiring{
-		runtimeEvents:   runtimeEvents,
-		askEvents:       askEvents,
-		background:      nil,
-		turnQueueHook:   turnQueueHook,
-		runtimeClient:   runtimeClient,
-		promptControl:   server.PromptControlClient(),
-		runtimeControls: server.RuntimeControlClient(),
-		processControls: server.ProcessControlClient(),
-		processOutput:   server.ProcessOutputClient(),
-		processViews:    server.ProcessViewClient(),
-		approvalViews:   server.ApprovalViewClient(),
-		askViews:        server.AskViewClient(),
-		sessionActivity: server.SessionActivityClient(),
-		sessionViews:    server.SessionViewClient(),
+		runtimeEvents:         runtimeEvents,
+		askEvents:             askEvents,
+		background:            nil,
+		turnQueueHook:         turnQueueHook,
+		runtimeClient:         runtimeClient,
+		promptControl:         server.PromptControlClient(),
+		runtimeControls:       server.RuntimeControlClient(),
+		processControls:       server.ProcessControlClient(),
+		processOutput:         server.ProcessOutputClient(),
+		processViews:          server.ProcessViewClient(),
+		approvalViews:         server.ApprovalViewClient(),
+		askViews:              server.AskViewClient(),
+		sessionActivity:       server.SessionActivityClient(),
+		sessionViews:          server.SessionViewClient(),
+		hasOtherSessions:      plan.HasOtherSessions,
+		hasOtherSessionsKnown: plan.HasOtherSessionsKnown,
 	}
 	return &runtimeLaunchPlan{
 		Logger:            logger,
 		Wiring:            wiring,
 		ControllerLeaseID: leaseID,
+		controllerLease:   leaseManager,
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()
-			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
+			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseManager.Value())
 		},
 	}, nil
 }

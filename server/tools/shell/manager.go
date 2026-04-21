@@ -19,6 +19,8 @@ type Manager struct {
 	tempDir             string
 	onEvent             func(Event)
 	minimumExecToBgTime time.Duration
+	closeGracePeriod    time.Duration
+	closeWaitTimeout    time.Duration
 	closed              bool
 }
 
@@ -28,6 +30,17 @@ func WithMinimumExecToBgTime(value time.Duration) ManagerOption {
 	return func(m *Manager) {
 		if value > 0 {
 			m.minimumExecToBgTime = value
+		}
+	}
+}
+
+func WithCloseTimeouts(gracePeriod, waitTimeout time.Duration) ManagerOption {
+	return func(m *Manager) {
+		if gracePeriod > 0 {
+			m.closeGracePeriod = gracePeriod
+		}
+		if waitTimeout > 0 {
+			m.closeWaitTimeout = waitTimeout
 		}
 	}
 }
@@ -42,6 +55,8 @@ func NewManager(opts ...ManagerOption) (*Manager, error) {
 		entries:             make(map[string]*processEntry),
 		tempDir:             tempDir,
 		minimumExecToBgTime: defaultMinimumExecToBgTime,
+		closeGracePeriod:    closeGracePeriod,
+		closeWaitTimeout:    closeWaitTimeout,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -136,7 +151,11 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if !req.KeepStdinOpen {
 		if err := stdin.Close(); err != nil {
 			_ = killManagedProcess(cmd.Process)
-			_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(closeGracePeriod))
+			gracePeriod := m.closeGracePeriod
+			if gracePeriod <= 0 {
+				gracePeriod = closeGracePeriod
+			}
+			_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(gracePeriod))
 			_ = logFile.Close()
 			m.releaseEntry(id)
 			return ExecResult{}, fmt.Errorf("close stdin: %w", err)

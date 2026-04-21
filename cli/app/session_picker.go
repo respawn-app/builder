@@ -11,6 +11,8 @@ import (
 	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	glamouransi "github.com/charmbracelet/glamour/ansi"
+	glamourstyles "github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -20,6 +22,8 @@ const (
 	defaultPickerWidth          = 80
 	defaultPickerHeight         = 24
 )
+
+var runSessionPickerFlow = runSessionPicker
 
 type sessionPickerResult struct {
 	CreateNew bool
@@ -315,18 +319,25 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 }
 
 func newStartupMarkdownRenderer(theme string) *glamour.TermRenderer {
-	style := "dark"
-	if strings.EqualFold(strings.TrimSpace(theme), "light") {
-		style = "light"
-	}
+	style := startupMarkdownStyle(theme)
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(0),
-		glamour.WithStandardStyle(style),
+		glamour.WithStyles(style),
 	)
 	if err != nil {
 		return nil
 	}
 	return renderer
+}
+
+func startupMarkdownStyle(theme string) glamouransi.StyleConfig {
+	style := glamourstyles.DarkStyleConfig
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		style = glamourstyles.LightStyleConfig
+	}
+	zero := uint(0)
+	style.Document.Margin = &zero
+	return style
 }
 
 func humanTime(ts time.Time) string {

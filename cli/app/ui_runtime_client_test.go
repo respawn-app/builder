@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -947,5 +948,123 @@ func TestRuntimeClientSetFastModeEnabledPreservesCachedMainViewOnError(t *testin
 	}
 	if !runtimeClient.MainView().Status.FastModeEnabled {
 		t.Fatal("expected failed fast-mode toggle to preserve cached main view")
+	}
+}
+
+type leaseRetryRuntimeControlClient struct {
+	mu            sync.Mutex
+	submitLeaseID []string
+}
+
+func (c *leaseRetryRuntimeControlClient) submitLeaseIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.submitLeaseID...)
+}
+
+func (c *leaseRetryRuntimeControlClient) SetSessionName(context.Context, serverapi.RuntimeSetSessionNameRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SetThinkingLevel(context.Context, serverapi.RuntimeSetThinkingLevelRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SetFastModeEnabled(context.Context, serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+	return serverapi.RuntimeSetFastModeEnabledResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SetReviewerEnabled(context.Context, serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+	return serverapi.RuntimeSetReviewerEnabledResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SetAutoCompactionEnabled(context.Context, serverapi.RuntimeSetAutoCompactionEnabledRequest) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+	return serverapi.RuntimeSetAutoCompactionEnabledResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) AppendLocalEntry(context.Context, serverapi.RuntimeAppendLocalEntryRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) ShouldCompactBeforeUserMessage(context.Context, serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
+	return serverapi.RuntimeShouldCompactBeforeUserMessageResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SubmitUserMessage(_ context.Context, req serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.submitLeaseID = append(c.submitLeaseID, req.ControllerLeaseID)
+	switch req.ControllerLeaseID {
+	case "lease-old":
+		return serverapi.RuntimeSubmitUserMessageResponse{}, serverapi.ErrInvalidControllerLease
+	case "lease-new":
+		return serverapi.RuntimeSubmitUserMessageResponse{Message: "recovered"}, nil
+	default:
+		return serverapi.RuntimeSubmitUserMessageResponse{}, errors.New("unexpected controller lease")
+	}
+}
+
+func (c *leaseRetryRuntimeControlClient) SubmitUserShellCommand(context.Context, serverapi.RuntimeSubmitUserShellCommandRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) CompactContext(context.Context, serverapi.RuntimeCompactContextRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) CompactContextForPreSubmit(context.Context, serverapi.RuntimeCompactContextForPreSubmitRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) HasQueuedUserWork(context.Context, serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
+	return serverapi.RuntimeHasQueuedUserWorkResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SubmitQueuedUserMessages(context.Context, serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+	return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) Interrupt(context.Context, serverapi.RuntimeInterruptRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) QueueUserMessage(context.Context, serverapi.RuntimeQueueUserMessageRequest) error {
+	return nil
+}
+
+func (c *leaseRetryRuntimeControlClient) DiscardQueuedUserMessagesMatching(context.Context, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+	return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) RecordPromptHistory(context.Context, serverapi.RuntimeRecordPromptHistoryRequest) error {
+	return nil
+}
+
+func TestRuntimeClientSubmitUserMessageRecoversInvalidControllerLease(t *testing.T) {
+	controls := &leaseRetryRuntimeControlClient{}
+	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
+	leaseManager := newControllerLeaseManager("lease-old")
+	recoveryCalls := 0
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
+		recoveryCalls++
+		return "lease-new", nil
+	})
+	runtimeClient.SetControllerLeaseManager(leaseManager)
+
+	message, err := runtimeClient.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "recovered" {
+		t.Fatalf("SubmitUserMessage message = %q, want recovered", message)
+	}
+	if recoveryCalls != 1 {
+		t.Fatalf("recovery call count = %d, want 1", recoveryCalls)
+	}
+	if got := runtimeClient.controllerLeaseIDValue(); got != "lease-new" {
+		t.Fatalf("controller lease id = %q, want lease-new", got)
+	}
+	if got := controls.submitLeaseIDs(); !reflect.DeepEqual(got, []string{"lease-old", "lease-new"}) {
+		t.Fatalf("submit lease ids = %+v, want [lease-old lease-new]", got)
 	}
 }

@@ -549,11 +549,26 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 		config.ProjectSessionsRoot(resolvedB.Config, bindingB.ProjectID),
 		"workspace-b",
 		resolvedB.Config.WorkspaceRoot,
-		metadataStore.AuthoritativeSessionStoreOptions()...,
+		metadataStore.SessionStoreOptions()...,
 	)
 	if err != nil {
 		t.Fatalf("session.Create foreign: %v", err)
 	}
+	if err := foreignSession.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable foreign: %v", err)
+	}
+	if _, err := metadataStore.ResolveSessionExecutionTarget(context.Background(), foreignSession.Meta().SessionID); err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget precondition: %v", err)
+	}
+	record, err := metadataStore.ResolvePersistedSession(context.Background(), foreignSession.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolvePersistedSession precondition: %v", err)
+	}
+	opened, err := session.Open(record.SessionDir, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Open precondition: %v", err)
+	}
+	_ = opened
 
 	authSupport := newGatewayTestAuthSupport(t, true)
 	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
@@ -585,8 +600,75 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 	if _, err := remote.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{ClientRequestID: "persist-foreign", SessionID: foreignSession.Meta().SessionID, ControllerLeaseID: "lease-foreign", Input: "should fail"}); err == nil {
 		t.Fatal("expected foreign-project session mutation to be rejected")
 	}
+	if _, err := remote.RetargetSessionWorkspace(context.Background(), serverapi.SessionRetargetWorkspaceRequest{ClientRequestID: "retarget-foreign", SessionID: foreignSession.Meta().SessionID, WorkspaceRoot: resolvedA.Config.WorkspaceRoot}); err == nil {
+		t.Fatal("expected foreign-project session retarget to be rejected")
+	}
 	if bindingA.ProjectID == bindingB.ProjectID {
 		t.Fatalf("expected distinct project ids, both=%q", bindingA.ProjectID)
+	}
+}
+
+func TestGatewayAllowsUnscopedSessionRetargetOutsideServerDefaultProject(t *testing.T) {
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+	configureGatewayTestServerPort(t)
+
+	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
+	if err != nil {
+		t.Fatalf("ResolveConfig A: %v", err)
+	}
+	bindingA, err := metadata.RegisterBinding(context.Background(), resolvedA.Config.PersistenceRoot, resolvedA.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding A: %v", err)
+	}
+	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
+	if err != nil {
+		t.Fatalf("ResolveConfig B: %v", err)
+	}
+	bindingB, err := metadata.RegisterBinding(context.Background(), resolvedB.Config.PersistenceRoot, resolvedB.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding B: %v", err)
+	}
+	metadataStore, err := metadata.Open(resolvedA.Config.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	foreignSession, err := session.Create(
+		config.ProjectSessionsRoot(resolvedB.Config, bindingB.ProjectID),
+		"workspace-b",
+		resolvedB.Config.WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create foreign: %v", err)
+	}
+	if err := foreignSession.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable foreign: %v", err)
+	}
+
+	authSupport := newGatewayTestAuthSupport(t, true)
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	defer func() { _ = runtimeSupport.Background.Close() }()
+	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	if err := gateway.requireSessionInAttachedProject(context.Background(), &connectionState{}, foreignSession.Meta().SessionID); err != nil {
+		t.Fatalf("requireSessionInAttachedProject unscoped: %v", err)
+	}
+	if err := gateway.requireSessionInAttachedProject(context.Background(), &connectionState{attachedProject: bindingA.ProjectID}, foreignSession.Meta().SessionID); err == nil {
+		t.Fatal("expected attached project scope to reject foreign session retarget")
 	}
 }
 

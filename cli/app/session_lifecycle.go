@@ -39,6 +39,18 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		forceNewSession = false
 		nextSessionParentID = ""
+		workspaceChangeAction, err := maybeHandlePickedSessionWorkspaceChange(ctx, server, plan)
+		if err != nil {
+			return err
+		}
+		switch workspaceChangeAction {
+		case sessionWorkspaceChangePickAgain:
+			currentSessionID = ""
+			continue
+		case sessionWorkspaceChangeReplanSelected:
+			currentSessionID = plan.SessionID
+			continue
+		}
 		runtimePlan, err := planner.PrepareRuntime(ctx, plan, os.Stderr, "app.start session_id="+plan.SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
 		if err != nil {
 			return err
@@ -69,13 +81,13 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			runtimePlan.Close()
 			return runErr
 		}
-		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, runtimePlan.ControllerLeaseID, finalModel); err != nil {
+		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), finalModel); err != nil {
 			runtimePlan.Close()
 			return err
 		}
 
 		transition := extractUITransition(finalModel)
-		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.ControllerLeaseID, transition)
+		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), transition)
 		runtimePlan.Close()
 		if err != nil {
 			return err
