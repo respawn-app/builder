@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"builder/server/tools"
+	"builder/shared/config"
 	"builder/shared/toolspec"
 
 	xansi "github.com/charmbracelet/x/ansi"
@@ -247,11 +248,29 @@ func enrichEnv(base []string) []string {
 		env[key] = value
 	}
 
+	if _, exists := env["RIPGREP_CONFIG_PATH"]; !exists {
+		if path, ok := managedRGConfigEnvValue(); ok {
+			order = append(order, "RIPGREP_CONFIG_PATH")
+			env["RIPGREP_CONFIG_PATH"] = path
+		}
+	}
+
 	out := make([]string, 0, len(order))
 	for _, key := range order {
 		out = append(out, key+"="+env[key])
 	}
 	return out
+}
+
+func managedRGConfigEnvValue() (string, bool) {
+	path, err := config.ResolveManagedRGConfigPath()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 func sanitizeOutput(s string) string {
