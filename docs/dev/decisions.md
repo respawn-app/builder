@@ -379,6 +379,21 @@
 - If no sessions exist, startup goes directly to new-session setup.
 - In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or explicitly attach the current workspace to an existing project. Outside that flow, the CLI remains workspace-first.
 
+## Worktree Management
+
+- Worktree-management planning and implementation use `workspace` terminology only; older `repo` references are stale.
+- Planned `/worktree` management keeps session identity stable and changes only the shared session execution target `(workspace_id, worktree_id?, cwd_relpath)`.
+- The first `/worktree` slice does not introduce a separate teleport-root abstraction; execution-target switching plus explicit worktree/origin status is sufficient.
+- Worktree transitions append an immediate user-visible local note and also maintain a lazy typed developer-context reminder for the next model submission; the latest pending reminder always wins before submit and may reappear after compaction generation changes.
+- Git remains the source of truth for worktree topology; Builder stores only additive metadata and blocks deleting a worktree that is still targeted by another session.
+- Existing non-Builder git worktrees remain manageable from Builder in the first slice, but should be visually marked where feasible.
+- Worktree delete is rebind-first cleanup: if the current session targets the worktree, Builder first moves it back to the main workspace, then performs remaining git cleanup even if the worktree directory was already removed manually.
+- Worktree delete is also blocked while background shell processes still run under that worktree.
+- Automatic branch cleanup after worktree delete is conservative and best-effort; safe delete is allowed, force delete is not part of the first slice.
+- New worktrees default under `worktrees.base_dir`, rooted under Builder persistence state by default; Builder creates missing base directories and auto-picks unique suffixed paths on collisions.
+- Live worktree retarget should rebind runtime-local tool handlers to the new effective root rather than leaving tools pinned to the original startup workspace.
+- The optional post-create worktree setup script is configured by `worktrees.setup_script`, runs asynchronously after new-worktree creation only, and receives both positional args and stdin JSON plus mirrored env vars; failure or timeout surfaces as transcript-local error info and does not undo the created worktree or session switch.
+
 ## Slash Commands
 
 - Leading slash input enters command mode when first non-space char is `/`.
