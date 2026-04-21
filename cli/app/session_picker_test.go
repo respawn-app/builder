@@ -107,6 +107,18 @@ func TestSessionPickerHeaderUsesAppForeground(t *testing.T) {
 	}
 }
 
+func TestStartupMarkdownStyleRemovesDocumentMargin(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		style := startupMarkdownStyle(theme)
+		if style.Document.Margin == nil {
+			t.Fatalf("expected document margin override for %s theme", theme)
+		}
+		if got := *style.Document.Margin; got != 0 {
+			t.Fatalf("document margin for %s theme = %d, want 0", theme, got)
+		}
+	}
+}
+
 func TestSessionPickerPrefersSessionName(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
 	m := newSessionPickerModel([]clientui.SessionSummary{{
