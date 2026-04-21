@@ -151,6 +151,9 @@ func internalFailure(path, reason string) error {
 }
 
 func attachFailurePath(err error, path string) error {
+	if err == nil {
+		return nil
+	}
 	var f *failure
 	if !errors.As(err, &f) || f == nil {
 		return internalFailure(path, err.Error())
@@ -164,6 +167,9 @@ func attachFailurePath(err error, path string) error {
 }
 
 func attachFailureReasonContext(err error, context string) error {
+	if err == nil {
+		return nil
+	}
 	trimmedContext := strings.TrimSpace(context)
 	if trimmedContext == "" {
 		return err

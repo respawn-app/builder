@@ -1086,3 +1086,15 @@ func toolFailurePayload(t *testing.T, result tools.Result) toolFailureErrorPaylo
 	}
 	return payload
 }
+
+func TestAttachFailurePathNilErrorIsNoOp(t *testing.T) {
+	if got := attachFailurePath(nil, "target.txt"); got != nil {
+		t.Fatalf("attachFailurePath(nil) = %v, want nil", got)
+	}
+}
+
+func TestAttachFailureReasonContextNilErrorIsNoOp(t *testing.T) {
+	if got := attachFailureReasonContext(nil, "hunk 1"); got != nil {
+		t.Fatalf("attachFailureReasonContext(nil) = %v, want nil", got)
+	}
+}
