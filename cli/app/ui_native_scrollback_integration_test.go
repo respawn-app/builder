@@ -1513,9 +1513,16 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 	})
 
 	waitForSubmitResult(t, roundTripTimeout, submitDone)
-	waitForTestCondition(t, roundTripTimeout, "detail mode keeps deferred final visible", func() bool {
-		detail := stripANSIAndTrimRight(model.view.DetailProjection(true, true).Render(tui.TranscriptDivider))
-		return strings.Contains(detail, "foreground done")
+	waitForTestCondition(t, roundTripTimeout, "detail mode commits deferred final into transcript state", func() bool {
+		if model.view.Mode() != tui.ModeDetail {
+			return false
+		}
+		for _, entry := range model.view.LoadedTranscriptEntries() {
+			if entry.Role == string(llm.RoleAssistant) && entry.Text == "foreground done" && entry.Phase == llm.MessagePhaseFinal {
+				return true
+			}
+		}
+		return false
 	})
 
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
