@@ -1020,6 +1020,30 @@ func TestDeveloperFeedbackAndInterruptionRenderInOngoing(t *testing.T) {
 	}
 }
 
+func TestDeveloperErrorFeedbackRendersInOngoing(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperErrorFeedback, Text: "unable to start run"})
+
+	ongoingRendered := m.View()
+	ongoing := plainTranscript(ongoingRendered)
+	if !strings.Contains(ongoing, "unable to start run") {
+		t.Fatalf("expected developer error feedback visible in ongoing view, got %q", ongoing)
+	}
+	if !strings.Contains(ongoingRendered, m.palette().error.Render("unable to start run")) {
+		t.Fatalf("expected developer error feedback to use error style in ongoing view, got %q", ongoingRendered)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailRendered := m.View()
+	detail := plainTranscript(detailRendered)
+	if !strings.Contains(detail, "unable to start run") {
+		t.Fatalf("expected developer error feedback visible in detail view, got %q", detail)
+	}
+	if !strings.Contains(detailRendered, m.palette().error.Render("unable to start run")) {
+		t.Fatalf("expected developer error feedback to use error style in detail view, got %q", detailRendered)
+	}
+}
+
 func TestCompactionSoonReminderRendersDetailOnly(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "warning", Text: "Compaction soon: 92% of context window used."})

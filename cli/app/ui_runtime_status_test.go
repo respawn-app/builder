@@ -9,6 +9,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
@@ -55,6 +56,19 @@ func TestRuntimeStatusLocalFallbackSkipsTrailingDeveloperFeedback(t *testing.T) 
 	m.transcriptEntries = []tui.TranscriptEntry{
 		{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal},
 		{Role: "developer_feedback", Text: "phase mismatch"},
+	}
+
+	status := m.runtimeStatus()
+	if status.LastCommittedAssistantFinalAnswer != "done" {
+		t.Fatalf("last committed assistant answer = %q, want done", status.LastCommittedAssistantFinalAnswer)
+	}
+}
+
+func TestRuntimeStatusLocalFallbackSkipsTrailingDeveloperErrorFeedback(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal},
+		{Role: string(transcript.EntryRoleDeveloperErrorFeedback), Text: "server disconnected"},
 	}
 
 	status := m.runtimeStatus()

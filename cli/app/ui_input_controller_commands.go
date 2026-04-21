@@ -13,8 +13,10 @@ import (
 
 func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
 	m := c.model
-	if commandResult.SubmitUser && c.blockDisconnectedSubmission(true, commandResult.User) {
-		return m, nil
+	if commandResult.SubmitUser {
+		if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, commandResult.User); blocked {
+			return m, disconnectCmd
+		}
 	}
 	if commandResult.SubmitUser && commandResult.FreshConversation && m.currentConversationFreshness() != clientui.ConversationFreshnessFresh {
 		m.nextSessionInitialPrompt = commandResult.User
@@ -25,54 +27,64 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 	if commandResult.SubmitUser {
 		return m, c.startSubmission(commandResult.User)
 	}
+	prefixCmd := tea.Cmd(nil)
 	if commandResult.Text != "" {
-		m.appendLocalEntry("system", commandResult.Text)
+		prefixCmd = c.appendSystemFeedback(commandResult.Text)
 	}
 
 	switch commandResult.Action {
 	case commands.ActionExit:
 		m.exitAction = UIActionExit
-		return m, tea.Quit
+		return m, sequenceCmds(prefixCmd, tea.Quit)
 	case commands.ActionNew:
 		m.nextParentSessionID = m.sessionID
 		m.exitAction = UIActionNewSession
-		return m, tea.Quit
+		return m, sequenceCmds(prefixCmd, tea.Quit)
 	case commands.ActionResume:
-		return c.handleResumeCommand()
+		next, cmd := c.handleResumeCommand()
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionBack:
-		return c.handleBackCommand()
+		next, cmd := c.handleBackCommand()
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionLogout:
 		m.exitAction = UIActionLogout
-		return m, tea.Quit
+		return m, sequenceCmds(prefixCmd, tea.Quit)
 	case commands.ActionSetName:
-		return c.handleSessionNameCommand(commandResult.SessionName)
+		next, cmd := c.handleSessionNameCommand(commandResult.SessionName)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionSetThinking:
-		return c.handleThinkingLevelCommand(commandResult.ThinkingLevel)
+		next, cmd := c.handleThinkingLevelCommand(commandResult.ThinkingLevel)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionSetFast:
-		return c.handleFastModeCommand(commandResult.FastMode)
+		next, cmd := c.handleFastModeCommand(commandResult.FastMode)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionSetSupervisor:
-		return c.handleSupervisorModeCommand(commandResult.SupervisorMode)
+		next, cmd := c.handleSupervisorModeCommand(commandResult.SupervisorMode)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionSetAutoCompaction:
-		return c.handleAutoCompactionCommand(commandResult.AutoCompactionMode)
+		next, cmd := c.handleAutoCompactionCommand(commandResult.AutoCompactionMode)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionCompact:
-		return m, c.startCompaction(commandResult.Args)
+		return m, sequenceCmds(prefixCmd, c.startCompaction(commandResult.Args))
 	case commands.ActionStatus:
-		return m, c.startStatusFlowCmd()
+		return m, sequenceCmds(prefixCmd, c.startStatusFlowCmd())
 	case commands.ActionProcesses:
 		args := strings.Fields(strings.TrimSpace(commandResult.Args))
 		if len(args) == 0 {
-			return m, c.startProcessListFlowCmd()
+			return m, sequenceCmds(prefixCmd, c.startProcessListFlowCmd())
 		}
 		action := strings.ToLower(strings.TrimSpace(args[0]))
 		id := ""
 		if len(args) > 1 {
 			id = strings.TrimSpace(args[1])
 		}
-		return c.runProcessAction(action, id)
+		next, cmd := c.runProcessAction(action, id)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionCopy:
-		return c.handleCopyCommand()
+		next, cmd := c.handleCopyCommand()
+		return next, sequenceCmds(prefixCmd, cmd)
 	}
-	return m, nil
+	return m, prefixCmd
 }
 
 const resumeCommandUnavailableMessage = "No other sessions available"
@@ -80,8 +92,7 @@ const resumeCommandUnavailableMessage = "No other sessions available"
 func (c uiInputController) handleResumeCommand() (tea.Model, tea.Cmd) {
 	m := c.model
 	if !m.resumeCommandAvailable() {
-		m.appendLocalEntry("error", resumeCommandUnavailableMessage)
-		return m, c.showErrorStatus(resumeCommandUnavailableMessage)
+		return m, c.appendErrorFeedbackWithStatus(resumeCommandUnavailableMessage, c.showErrorStatus(resumeCommandUnavailableMessage))
 	}
 	m.exitAction = UIActionResume
 	return m, tea.Quit
@@ -91,8 +102,7 @@ func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {
 	m := c.model
 	status := m.runtimeStatus()
 	if strings.TrimSpace(status.ParentSessionID) == "" {
-		m.appendLocalEntry("system", "No parent session available")
-		return m, nil
+		return m, c.appendSystemFeedback("No parent session available")
 	}
 	m.nextSessionInitialInput = m.backTeleportInput()
 	m.nextSessionID = strings.TrimSpace(status.ParentSessionID)
@@ -124,8 +134,7 @@ func (c uiInputController) handleCopyCommand() (tea.Model, tea.Cmd) {
 func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Model, tea.Cmd) {
 	m := c.model
 	if err := m.setRuntimeSessionName(sessionName); err != nil {
-		m.appendLocalEntry("error", formatSubmissionError(err))
-		return m, nil
+		return m, c.appendErrorFeedback(formatSubmissionError(err))
 	}
 	m.sessionName = strings.TrimSpace(sessionName)
 	return m, tea.SetWindowTitle(m.windowTitle())
@@ -142,28 +151,23 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 		if current == "" {
 			current = "unknown"
 		}
-		m.appendLocalEntry("system", "Thinking level is "+current)
-		return m, nil
+		return m, c.appendSystemFeedback("Thinking level is " + current)
 	}
 
 	normalized, ok := runtime.NormalizeThinkingLevel(requested)
 	if !ok {
 		errText := "invalid thinking level " + strconv.Quote(requested) + " (expected low|medium|high|xhigh)"
-		m.appendLocalEntry("error", errText)
-		return m, nil
+		return m, c.appendErrorFeedback(errText)
 	}
 	if err := m.setRuntimeThinkingLevel(normalized); err != nil {
-		m.appendLocalEntry("error", formatSubmissionError(err))
-		return m, nil
+		return m, c.appendErrorFeedback(formatSubmissionError(err))
 	}
 	if m.hasRuntimeClient() {
 		m.thinkingLevel = m.runtimeStatus().ThinkingLevel
-		m.appendLocalEntry("system", "Thinking level set to "+m.thinkingLevel)
-		return m, nil
+		return m, c.appendSystemFeedback("Thinking level set to " + m.thinkingLevel)
 	}
 	m.thinkingLevel = normalized
-	m.appendLocalEntry("system", "Thinking level set to "+m.thinkingLevel)
-	return m, nil
+	return m, c.appendSystemFeedback("Thinking level set to " + m.thinkingLevel)
 }
 
 func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, tea.Cmd) {
@@ -171,8 +175,7 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 	available, currentEnabled := m.fastModeState()
 	if !available {
 		errText := "Fast mode is only available for OpenAI-based Responses providers"
-		m.appendLocalEntry("error", errText)
-		return m, c.showErrorStatus(errText)
+		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
 
 	requested = strings.ToLower(strings.TrimSpace(requested))
@@ -182,14 +185,12 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 		if currentEnabled {
 			status = "on"
 		}
-		m.appendLocalEntry("system", "Fast mode is "+status)
-		return m, nil
+		return m, c.appendSystemFeedback("Fast mode is " + status)
 	case "", "on", "off":
 		// supported
 	default:
 		errText := "Usage: /fast [on|off|status]"
-		m.appendLocalEntry("error", errText)
-		return m, c.showErrorStatus(errText)
+		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
 
 	targetEnabled := currentEnabled
@@ -208,8 +209,7 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 		changed, err = m.setRuntimeFastModeEnabled(targetEnabled)
 		if err != nil {
 			detailErr := formatSubmissionError(err)
-			m.appendLocalEntry("error", detailErr)
-			return m, c.showErrorStatus(detailErr)
+			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
 		m.fastModeEnabled = m.runtimeStatus().FastModeEnabled
 	} else {
@@ -217,8 +217,7 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 	}
 
 	status := fastModeToggleStatusMessage(m.fastModeEnabled, changed)
-	m.appendLocalEntry("system", status)
-	return m, c.showSuccessStatus(status)
+	return m, c.appendSystemFeedbackWithStatus(status, c.showSuccessStatus(status))
 }
 
 func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Model, tea.Cmd) {
@@ -235,8 +234,7 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 		targetEnabled = false
 	default:
 		errText := "invalid supervisor mode " + strconv.Quote(requested) + " (expected on|off)"
-		m.appendLocalEntry("error", errText)
-		return m, nil
+		return m, c.appendErrorFeedback(errText)
 	}
 
 	changed := false
@@ -245,8 +243,7 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 		var err error
 		changed, nextMode, err = m.setRuntimeReviewerEnabled(targetEnabled)
 		if err != nil {
-			m.appendLocalEntry("error", formatSubmissionError(err))
-			return m, nil
+			return m, c.appendErrorFeedback(formatSubmissionError(err))
 		}
 	} else {
 		nextMode = "off"
@@ -258,8 +255,7 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 	m.reviewerMode = nextMode
 	m.reviewerEnabled = nextMode != "off"
 	status := reviewerToggleStatusMessage(m.reviewerEnabled, nextMode, changed)
-	m.appendLocalEntry("system", status)
-	return m, c.showTransientStatus(status)
+	return m, c.appendSystemFeedbackWithStatus(status, c.showTransientStatus(status))
 }
 
 func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Model, tea.Cmd) {
@@ -280,8 +276,7 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 		targetEnabled = false
 	default:
 		errText := "invalid autocompaction mode " + strconv.Quote(requested) + " (expected on|off)"
-		m.appendLocalEntry("error", errText)
-		return m, nil
+		return m, c.appendErrorFeedback(errText)
 	}
 
 	changed := false
@@ -291,8 +286,7 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 		changed, nextEnabled, err = m.setRuntimeAutoCompactionEnabled(targetEnabled)
 		if err != nil {
 			errText := formatSubmissionError(err)
-			m.appendLocalEntry("error", errText)
-			return m, c.showTransientStatus(errText)
+			return m, c.appendErrorFeedbackWithStatus(errText, c.showTransientStatus(errText))
 		}
 	} else {
 		nextEnabled = targetEnabled
@@ -300,6 +294,5 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 	}
 	m.autoCompactionEnabled = nextEnabled
 	status := autoCompactionToggleStatusMessage(nextEnabled, changed, currentCompactionMode)
-	m.appendLocalEntry("system", status)
-	return m, c.showTransientStatus(status)
+	return m, c.appendSystemFeedbackWithStatus(status, c.showTransientStatus(status))
 }

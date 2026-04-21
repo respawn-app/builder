@@ -9,18 +9,18 @@ import (
 
 func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	m := c.model
-	if c.blockDisconnectedSubmission(true, "") {
-		return nil
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, ""); blocked {
+		return disconnectCmd
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
 		c.restorePendingInjectedIntoInput()
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
-		m.appendLocalEntry("error", detailErr)
+		appendCmd := m.appendOperatorErrorFeedback(detailErr)
 		m.logf("queue_check.error err=%q", detailErr)
 		m.syncViewport()
-		return nil
+		return appendCmd
 	}
 	if !queuedRuntimeWork {
 		return nil

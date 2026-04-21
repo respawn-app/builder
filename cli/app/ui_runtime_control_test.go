@@ -11,6 +11,7 @@ import (
 	"builder/server/llm"
 	"builder/server/primaryrun"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 type runtimeControlFakeClient struct {
@@ -335,8 +336,61 @@ func TestSubmitErrorWithRuntimeClientAppendsActivePrimaryRunEntry(t *testing.T) 
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity, got %v", updated.activity)
 	}
-	if client.appendedRole != "error" || client.appendedText != primaryrun.ErrActivePrimaryRun.Error() {
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || client.appendedText != primaryrun.ErrActivePrimaryRun.Error() {
 		t.Fatalf("unexpected runtime local entry: role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
+func TestSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
+	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+
+	next, _ := m.Update(submitDoneMsg{err: primaryrun.ErrActivePrimaryRun})
+	updated := next.(*uiModel)
+
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity, got %v", updated.activity)
+	}
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || client.appendedText != primaryrun.ErrActivePrimaryRun.Error() {
+		t.Fatalf("unexpected runtime local entry attempt: role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != primaryrun.ErrActivePrimaryRun.Error() {
+		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
+	}
+	loaded := updated.view.LoadedTranscriptEntries()
+	if len(loaded) != 1 {
+		t.Fatalf("expected one loaded transcript entry, got %+v", loaded)
+	}
+	if loaded[0].Role != string(transcript.EntryRoleDeveloperErrorFeedback) || loaded[0].Text != primaryrun.ErrActivePrimaryRun.Error() {
+		t.Fatalf("unexpected loaded transcript entry: %+v", loaded[0])
+	}
+}
+
+func TestPreSubmitCheckErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
+	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+	m.preSubmitCheckToken = 1
+
+	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{token: 1, text: "prompt", err: errors.New("pre-submit failed")})
+	updated := next.(*uiModel)
+
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity, got %v", updated.activity)
+	}
+	if len(updated.transcriptEntries) != 1 {
+		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
+	}
+	entry := updated.transcriptEntries[0]
+	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != "pre-submit failed" {
+		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
 	}
 }
 
