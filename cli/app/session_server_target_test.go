@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/llm"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	askquestion "builder/server/tools/askquestion"
@@ -135,6 +136,105 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 	}
 	if refreshed.MainView.Session.Transcript.CommittedEntryCount == 0 {
 		t.Fatalf("expected refreshed transcript metadata, got %+v", refreshed.MainView.Session.Transcript)
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestConfiguredDaemonEnvironmentContextUsesSessionWorkspaceRootForCWD(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"interactive daemon reply"})
+	defer fakeResponses.Close()
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test daemon environment cwd")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through interactive daemon")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "interactive daemon reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "interactive daemon reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected daemon-backed llm call once, got %d", hits.Load())
+	}
+	store := openAuthoritativeWorkspaceSessionStore(t, workspace, fakeResponses.URL, plan.SessionID)
+	messages, err := readStoredMessages(store)
+	if err != nil {
+		t.Fatalf("readStoredMessages: %v", err)
+	}
+	authoritativeWorkspace := store.Meta().WorkspaceRoot
+	if authoritativeWorkspace == "" {
+		t.Fatal("expected authoritative workspace root in session metadata")
+	}
+	var envContent string
+	processCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	for _, msg := range messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeEnvironment {
+			envContent = msg.Content
+			break
+		}
+	}
+	if envContent == "" {
+		t.Fatalf("expected persisted environment context message in %+v", messages)
+	}
+	if !strings.Contains(envContent, "\nCWD: "+authoritativeWorkspace+"\n") {
+		t.Fatalf("expected environment context to use session workspace root %q, got %q", authoritativeWorkspace, envContent)
+	}
+	if processCWD != authoritativeWorkspace && strings.Contains(envContent, "\nCWD: "+processCWD+"\n") {
+		t.Fatalf("expected environment context to avoid process cwd %q leak, got %q", processCWD, envContent)
 	}
 
 	cancel()

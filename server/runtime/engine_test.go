@@ -7205,6 +7205,31 @@ func TestEnvironmentContextMessageIncludesLabeledModelIdentifier(t *testing.T) {
 	}
 }
 
+func TestEnvironmentContextMessageUsesWorkspaceRootForCWD(t *testing.T) {
+	workspace := t.TempDir()
+	msg, err := environmentContextMessage(workspace, "gpt-5.3-codex", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("environmentContextMessage: %v", err)
+	}
+	if !strings.Contains(msg, "\nCWD: "+workspace+"\n") {
+		t.Fatalf("expected environment message cwd to use workspace root %q, got %q", workspace, msg)
+	}
+}
+
+func TestEnvironmentContextMessageFallsBackToProcessCWDWhenWorkspaceRootMissing(t *testing.T) {
+	processCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	msg, err := environmentContextMessage("", "gpt-5.3-codex", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("environmentContextMessage: %v", err)
+	}
+	if !strings.Contains(msg, "\nCWD: "+processCWD+"\n") {
+		t.Fatalf("expected environment message cwd to fall back to process cwd %q, got %q", processCWD, msg)
+	}
+}
+
 func TestEnvironmentContextMessageRejectsEmptyModel(t *testing.T) {
 	workspace := t.TempDir()
 	if _, err := environmentContextMessage(workspace, "", time.Unix(0, 0).UTC()); err == nil {
@@ -7279,6 +7304,9 @@ func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 	}
 	if !strings.Contains(envMsg.Content, "\nYour model: gpt-5.3-codex\n") {
 		t.Fatalf("expected environment context to contain labeled model identifier, got %q", envMsg.Content)
+	}
+	if !strings.Contains(envMsg.Content, "\nCWD: "+workspace+"\n") {
+		t.Fatalf("expected environment context cwd to use session workspace root %q, got %q", workspace, envMsg.Content)
 	}
 	if strings.Contains(envMsg.Content, "Your model: gpt-5.3-codex high") {
 		t.Fatalf("expected environment context to exclude thinking level from model identifier, got %q", envMsg.Content)
