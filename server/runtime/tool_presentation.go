@@ -5,6 +5,9 @@ import (
 	"builder/server/tools"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
+	"os"
+	goruntime "runtime"
+	"strings"
 )
 
 func normalizeMessageForTranscript(msg llm.Message, workingDir string) llm.Message {
@@ -44,8 +47,17 @@ func transcriptToolCallMeta(call llm.ToolCall, workingDir string) *transcript.To
 	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
 		WorkingDir:                 workingDir,
 		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+		DefaultShellPath:           currentTranscriptDefaultShellPath(),
+		GOOS:                       goruntime.GOOS,
 	}, call.Input)
 	return &built
+}
+
+func currentTranscriptDefaultShellPath() string {
+	if shellPath := strings.TrimSpace(os.Getenv("SHELL")); shellPath != "" {
+		return shellPath
+	}
+	return strings.TrimSpace(os.Getenv("COMSPEC"))
 }
 
 func decodeToolCallMeta(call llm.ToolCall) *transcript.ToolCallMeta {

@@ -102,6 +102,8 @@ func transcriptEntryAffectsCommittedAssistantFinalAnswer(entry tui.TranscriptEnt
 	switch transcript.NormalizeEntryRole(entry.Role) {
 	case "", "system", "error", "warning", "cache_warning", "reviewer_status", "reviewer_suggestions", "compaction_notice", "tool_question_error", string(transcript.EntryRoleDeveloperFeedback):
 		return false
+	case string(transcript.EntryRoleDeveloperErrorFeedback):
+		return false
 	default:
 		return true
 	}

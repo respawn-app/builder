@@ -494,6 +494,10 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		pageReq.Window = clientui.TranscriptWindowOngoingTail
 	}
 	entries := transcriptEntriesFromPage(page)
+	if shouldPreserveLiveAssistantOngoingForPage(m, pageReq, page) {
+		page.Ongoing = m.view.OngoingStreamingText()
+		page.OngoingError = m.view.OngoingErrorText()
+	}
 	if authoritativePageDuplicatesCommittedAssistantOngoing(entries, page.Ongoing, m.view.OngoingStreamingText()) {
 		page.Ongoing = ""
 		page.OngoingError = ""
@@ -671,6 +675,36 @@ func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.Transcri
 		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
 	}
 	return false
+}
+
+func shouldPreserveLiveAssistantOngoingForPage(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
+	if m == nil {
+		return false
+	}
+	replacesOngoingTail := req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail)
+	if replacesOngoingTail {
+		return false
+	}
+	effectiveRevision, _ := committedTranscriptStateIncludingDeferredTail(m)
+	if page.Revision <= 0 || page.Revision != effectiveRevision {
+		return false
+	}
+	trimmedLiveOngoing := strings.TrimSpace(m.view.OngoingStreamingText())
+	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
+		return false
+	}
+	entries := page.Entries
+	for idx := len(entries) - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		return strings.TrimSpace(entry.Text) != trimmedLiveOngoing
+	}
+	return true
 }
 
 func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.TranscriptPage) bool {
@@ -1618,9 +1652,10 @@ func transcriptToolCallMeta(meta *clientui.ToolCallMeta) *transcript.ToolCallMet
 	}
 	if meta.RenderHint != nil {
 		out.RenderHint = &transcript.ToolRenderHint{
-			Kind:       transcript.ToolRenderKind(meta.RenderHint.Kind),
-			Path:       meta.RenderHint.Path,
-			ResultOnly: meta.RenderHint.ResultOnly,
+			Kind:         transcript.ToolRenderKind(meta.RenderHint.Kind),
+			Path:         meta.RenderHint.Path,
+			ResultOnly:   meta.RenderHint.ResultOnly,
+			ShellDialect: transcript.ToolShellDialect(meta.RenderHint.ShellDialect),
 		}
 	}
 	if meta.PatchRender != nil {
@@ -1654,9 +1689,10 @@ func transcriptToolCallMetaClient(meta *transcript.ToolCallMeta) *clientui.ToolC
 	}
 	if meta.RenderHint != nil {
 		out.RenderHint = &clientui.ToolRenderHint{
-			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
-			Path:       meta.RenderHint.Path,
-			ResultOnly: meta.RenderHint.ResultOnly,
+			Kind:         clientui.ToolRenderKind(meta.RenderHint.Kind),
+			Path:         meta.RenderHint.Path,
+			ResultOnly:   meta.RenderHint.ResultOnly,
+			ShellDialect: clientui.ToolShellDialect(meta.RenderHint.ShellDialect),
 		}
 	}
 	if meta.PatchRender != nil {

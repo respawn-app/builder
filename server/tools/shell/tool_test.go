@@ -66,7 +66,7 @@ func assertBackgroundTransitionMessageWithOutput(t *testing.T, text, sessionID s
 
 func newBackgroundTestManager(t *testing.T) *Manager {
 	t.Helper()
-	manager, err := NewManager(WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := NewManager(WithMinimumExecToBgTime(250*time.Millisecond), WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestManagerSubscribeOutputStreamsTailAndEndsAtEOF(t *testing.T) {
 	workspace := t.TempDir()
 
 	result, err := manager.Start(context.Background(), ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'hello\\n'; sleep 0.4; printf 'world\\n'"},
+		Command:        []string{"sh", "-c", "printf 'hello\\n'; sleep 0.3; printf 'world\\n'"},
 		DisplayCommand: "tail-test",
 		Workdir:        workspace,
 		YieldTime:      250 * time.Millisecond,
@@ -318,7 +318,7 @@ func TestManagerSubscribeOutputCloseUnblocksNext(t *testing.T) {
 	workspace := t.TempDir()
 
 	result, err := manager.Start(context.Background(), ExecRequest{
-		Command:        []string{"sh", "-c", "sleep 30"},
+		Command:        []string{"sh", "-c", "sleep 1"},
 		DisplayCommand: "tail-close-test",
 		Workdir:        workspace,
 		YieldTime:      250 * time.Millisecond,
@@ -341,7 +341,7 @@ func TestManagerSubscribeOutputCloseUnblocksNext(t *testing.T) {
 		done <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	if err := sub.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestManagerSubscribeOutputCloseUnblocksNext(t *testing.T) {
 		if err != io.EOF {
 			t.Fatalf("expected EOF after Close, got %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(300 * time.Millisecond):
 		t.Fatal("timed out waiting for Next to unblock after Close")
 	}
 	_ = manager.Kill(result.SessionID)
@@ -405,7 +405,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	pollTool := NewWriteStdinTool(16_000, manager)
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "sleep 1; echo done",
+		"cmd":           "sleep 0.3; echo done",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
@@ -431,7 +431,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 
 	pollInput, _ := json.Marshal(map[string]any{
 		"session_id":    1000,
-		"yield_time_ms": 2_000,
+		"yield_time_ms": 800,
 	})
 	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
@@ -453,12 +453,12 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	if !strings.Contains(pollText, "done") {
 		t.Fatalf("expected command output in poll output, got %q", pollText)
 	}
-	waitForManagerCount(t, manager, 0, 3*time.Second)
+	waitForManagerCount(t, manager, 0, time.Second)
 }
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager(WithMinimumExecToBgTime(1500 * time.Millisecond))
+	manager, err := NewManager(WithMinimumExecToBgTime(150 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -466,10 +466,10 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "sleep 1; echo done",
+		"cmd":           "sleep 0.1; echo done",
 		"shell":         "/bin/sh",
 		"login":         false,
-		"yield_time_ms": 250,
+		"yield_time_ms": 20,
 	})
 	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
@@ -543,7 +543,7 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 	pollTool := NewWriteStdinTool(16_000, manager)
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "sleep 3",
+		"cmd":           "sleep 0.8",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
@@ -558,7 +558,7 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 
 	pollInput, _ := json.Marshal(map[string]any{
 		"session_id":        1000,
-		"yield_time_ms":     1200,
+		"yield_time_ms":     300,
 		"max_output_tokens": 32,
 	})
 	start := time.Now()
@@ -570,10 +570,10 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
-	if elapsed < time.Second {
+	if elapsed < 250*time.Millisecond {
 		t.Fatalf("poll returned too early: %s", elapsed)
 	}
-	if elapsed > 2500*time.Millisecond {
+	if elapsed > time.Second {
 		t.Fatalf("poll took too long: %s", elapsed)
 	}
 
@@ -587,7 +587,7 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 	if !payload.Backgrounded {
 		t.Fatalf("expected session to remain backgrounded, got %+v", payload)
 	}
-	waitForManagerCount(t, manager, 0, 4*time.Second)
+	waitForManagerCount(t, manager, 0, 2*time.Second)
 }
 
 func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
@@ -634,7 +634,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 	pollTool := NewWriteStdinTool(16_000, manager)
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":               "i=0; while [ $i -lt 400 ]; do printf x; i=$((i+1)); done; sleep 1",
+		"cmd":               "i=0; while [ $i -lt 400 ]; do printf x; i=$((i+1)); done; sleep 0.3",
 		"shell":             "/bin/sh",
 		"login":             false,
 		"yield_time_ms":     250,
@@ -664,7 +664,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 
 	pollInput, _ := json.Marshal(map[string]any{
 		"session_id":    1000,
-		"yield_time_ms": 2_000,
+		"yield_time_ms": 800,
 	})
 	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-trunc-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
@@ -673,7 +673,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
-	waitForManagerCount(t, manager, 0, 3*time.Second)
+	waitForManagerCount(t, manager, 0, time.Second)
 }
 
 func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
@@ -708,7 +708,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	stdinInput, _ := json.Marshal(map[string]any{
 		"session_id":    1000,
 		"chars":         "hello builder\n",
-		"yield_time_ms": 2_000,
+		"yield_time_ms": 800,
 	})
 	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-2", Name: toolspec.ToolWriteStdin, Input: stdinInput})
 	if err != nil {
@@ -730,7 +730,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	if !strings.Contains(stdinText, "hello builder") {
 		t.Fatalf("expected echoed stdin in output, got %q", stdinText)
 	}
-	waitForManagerCount(t, manager, 0, 3*time.Second)
+	waitForManagerCount(t, manager, 0, time.Second)
 }
 
 func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
@@ -799,7 +799,7 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 	})
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "sleep 1; echo done",
+		"cmd":           "sleep 0.3; echo done",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
@@ -814,7 +814,7 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 
 	pollInput, _ := json.Marshal(map[string]any{
 		"session_id":    1000,
-		"yield_time_ms": 2_000,
+		"yield_time_ms": 800,
 	})
 	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
 	if err != nil {
@@ -829,10 +829,10 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 		if !evt.NoticeSuppressed {
 			t.Fatalf("expected completion event notice to be suppressed after write_stdin harvest, got %+v", evt)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for completion event")
 	}
-	waitForManagerCount(t, manager, 0, 3*time.Second)
+	waitForManagerCount(t, manager, 0, time.Second)
 }
 
 func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
@@ -885,7 +885,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 }
 
 func TestManagerCloseKillsRunningProcesses(t *testing.T) {
-	manager, err := NewManager(WithMinimumExecToBgTime(250 * time.Millisecond))
+	manager, err := NewManager(WithMinimumExecToBgTime(250*time.Millisecond), WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -919,7 +919,7 @@ func TestManagerCloseKillsRunningProcesses(t *testing.T) {
 	if err := manager.Close(); err != nil {
 		t.Fatalf("close manager: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > closeWaitTimeout+time.Second {
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Fatalf("close took too long: %v", elapsed)
 	}
 
@@ -931,8 +931,8 @@ func TestManagerCloseKillsRunningProcesses(t *testing.T) {
 		if evt.Snapshot.State != "killed" {
 			t.Fatalf("killed event state = %s, want killed", evt.Snapshot.State)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for killed event")
 	}
-	waitForManagerCount(t, manager, 0, 3*time.Second)
+	waitForManagerCount(t, manager, 0, time.Second)
 }

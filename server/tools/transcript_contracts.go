@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -75,7 +76,7 @@ func shellToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage
 		if command == "" {
 			command = defaultToolCallFallback
 		}
-		renderHint := detectShellRenderHint(command)
+		renderHint := detectShellRenderHint(ctx, toolID, raw, command)
 		if toolID == toolspec.ToolWriteStdin {
 			renderHint = nil
 		}
@@ -236,6 +237,79 @@ func formatPatchToolResult(result Result) string {
 	if !result.IsError {
 		return ""
 	}
+	var payload struct {
+		Error      string `json:"error"`
+		Kind       string `json:"kind,omitempty"`
+		Path       string `json:"path,omitempty"`
+		Line       int    `json:"line,omitempty"`
+		NearLine   bool   `json:"near_line,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+		Commentary string `json:"commentary,omitempty"`
+	}
+	if err := json.Unmarshal(result.Output, &payload); err == nil && strings.TrimSpace(payload.Kind) != "" {
+		suffix := func() string {
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return " in " + path
+			}
+			return ""
+		}
+		withReason := func(base string) string {
+			if reason := strings.TrimSpace(payload.Reason); reason != "" {
+				return base + "\nReason: " + reason
+			}
+			return base
+		}
+		switch payload.Kind {
+		case "malformed_syntax":
+			return withReason("Patch failed: malformed patch syntax.")
+		case "content_mismatch":
+			lineRef := ""
+			if payload.Line > 0 {
+				if payload.NearLine {
+					lineRef = fmt.Sprintf(" near line %d", payload.Line)
+				} else {
+					lineRef = fmt.Sprintf(" at line %d", payload.Line)
+				}
+			}
+			return withReason("Patch failed: mismatch between file content and model-provided patch" + suffix() + lineRef + ".")
+		case "out_of_bounds":
+			lineRef := ""
+			if payload.Line > 0 {
+				lineRef = fmt.Sprintf(" at line %d", payload.Line)
+			}
+			return withReason("Patch failed: model tried to change lines outside file bounds" + suffix() + lineRef + ".")
+		case "no_permission":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: no file edit permission for " + path + ".")
+			}
+			return withReason("Patch failed: no file edit permission.")
+		case "user_denied":
+			message := "Patch failed: user denied the edit"
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				message += " for " + path
+			}
+			message += "."
+			if commentary := strings.TrimSpace(payload.Commentary); commentary != "" {
+				message += "\nUser said: " + commentary
+			}
+			return message
+		case "approval_failed":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: file edit approval failed for " + path + ".")
+			}
+			return withReason("Patch failed: file edit approval failed.")
+		case "target_missing":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: target file does not exist: " + path + ".")
+			}
+			return withReason("Patch failed: target file does not exist.")
+		case "target_exists":
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				return withReason("Patch failed: target file already exists: " + path + ".")
+			}
+			return withReason("Patch failed: target file already exists.")
+		}
+	}
 	return formatGenericToolResult(result)
 }
 
@@ -362,8 +436,8 @@ func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact
 	return r.DetailText(), r.SummaryText(), &r, true
 }
 
-func detectShellRenderHint(command string) *transcript.ToolRenderHint {
-	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}
+func detectShellRenderHint(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage, command string) *transcript.ToolRenderHint {
+	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell, ShellDialect: detectToolShellDialect(ctx, toolID, raw)}
 	args, ok := parseSimpleShellCommand(command)
 	if !ok || len(args) == 0 {
 		return defaultHint
@@ -392,6 +466,66 @@ func detectShellRenderHint(command string) *transcript.ToolRenderHint {
 	default:
 		return defaultHint
 	}
+}
+
+func detectToolShellDialect(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage) transcript.ToolShellDialect {
+	if toolID == toolspec.ToolExecCommand {
+		if shellPath := parseRequestedExecShell(raw); shellPath != "" {
+			if dialect, ok := shellDialectForExecutable(shellPath); ok {
+				return dialect
+			}
+		}
+	}
+	if shellPath := strings.TrimSpace(ctx.DefaultShellPath); shellPath != "" {
+		if dialect, ok := shellDialectForExecutable(shellPath); ok {
+			return dialect
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(ctx.GOOS), "windows") {
+		return transcript.ToolShellDialectWindowsCommand
+	}
+	return transcript.ToolShellDialectPosix
+}
+
+func parseRequestedExecShell(raw json.RawMessage) string {
+	var in struct {
+		Shell string `json:"shell,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(in.Shell)
+}
+
+func shellDialectForExecutable(shellPath string) (transcript.ToolShellDialect, bool) {
+	name := shellExecutableName(shellPath)
+	switch name {
+	case "pwsh", "powershell":
+		return transcript.ToolShellDialectPowerShell, true
+	case "cmd", "command":
+		return transcript.ToolShellDialectWindowsCommand, true
+	case "sh", "bash", "zsh", "dash", "ash", "ksh", "mksh", "fish", "nu", "nushell":
+		return transcript.ToolShellDialectPosix, true
+	default:
+		return "", false
+	}
+}
+
+func shellExecutableName(shellPath string) string {
+	trimmed := strings.TrimSpace(shellPath)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	base := path.Base(trimmed)
+	if base == "." || base == "/" {
+		base = filepath.Base(trimmed)
+	}
+	base = strings.ToLower(strings.TrimSpace(base))
+	if ext := filepath.Ext(base); ext != "" {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return base
 }
 
 func parseSimpleShellCommand(command string) ([]string, bool) {

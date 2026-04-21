@@ -24,6 +24,8 @@ func TestRenderSnapshots(t *testing.T) {
 		{name: "markdown_light", theme: "light", render: func(t *testing.T) string { return newMarkdownSnapshotModel(t, "light") }},
 		{name: "diff_file_lines_dark", theme: "dark", render: func(t *testing.T) string { return newDiffSnapshot(t, "dark") }},
 		{name: "diff_file_lines_light", theme: "light", render: func(t *testing.T) string { return newDiffSnapshot(t, "light") }},
+		{name: "diff_error_block_dark", theme: "dark", render: func(t *testing.T) string { return newPatchErrorSnapshot(t, "dark") }},
+		{name: "diff_error_block_light", theme: "light", render: func(t *testing.T) string { return newPatchErrorSnapshot(t, "light") }},
 		{name: "wrapped_highlighted_lines_dark", theme: "dark", render: func(t *testing.T) string { return newWrappedHighlightSnapshot(t, "dark") }},
 		{name: "wrapped_highlighted_lines_light", theme: "light", render: func(t *testing.T) string { return newWrappedHighlightSnapshot(t, "light") }},
 	}
@@ -91,4 +93,19 @@ func newWrappedHighlightSnapshot(t *testing.T, theme string) string {
 	meta := &transcript.ToolCallMeta{RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindSource, Path: "main.go", ResultOnly: true}}
 	text := "package main\nfunc main() { fmt.Println(\"wrapped highlight\") }"
 	return strings.Join(m.flattenEntryWithMeta("tool_success", text, false, meta), "\n")
+}
+
+func newPatchErrorSnapshot(t *testing.T, theme string) string {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
+	meta := &transcript.ToolCallMeta{
+		PatchDetail: "Edited: ./main.go +1 -1\n+package main\n-old",
+		RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
+			{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+			{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
+			{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+		}},
+	}
+	return strings.Join(m.flattenPatchToolBlock("tool_error", meta, "Patch failed: mismatch between file content and model-provided patch in ./main.go at line 3."), "\n")
 }

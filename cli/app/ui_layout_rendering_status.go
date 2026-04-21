@@ -16,9 +16,9 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
 	if m.reviewerRunning {
-		spin = renderReviewerStatus()
+		spin = renderReviewerStatus(m.spinnerFrame)
 	} else if m.compacting {
-		spin = renderCompactionStatus()
+		spin = renderCompactionStatus(m.spinnerFrame)
 	}
 	segments := []string{
 		spin,
@@ -33,6 +33,9 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	}
 	separator := style.meta.Render(" | ")
 	left := strings.Join(segments, separator)
+	if lipgloss.Width(left) >= width {
+		return padANSIRight(truncateANSIRight(left, width), width)
+	}
 	right := l.renderStatusLineRight(width, left, style)
 	if right == "" {
 		return padANSIRight(left, width)
@@ -253,32 +256,36 @@ func statusContextZone(themeName string, percent int) theme.Color {
 	return palette.Error
 }
 
+const statusStateCircleGlyph = "●"
+
+func renderStatusSpinner(color lipgloss.TerminalColor, frame int) string {
+	return lipgloss.NewStyle().Foreground(color).Render(pendingToolSpinnerFrame(frame))
+}
+
 func renderStatusDot(theme string, activity uiActivity, frame int) string {
 	palette := uiPalette(theme)
 	switch activity {
 	case uiActivityRunning:
-		if (frame/3)%2 == 1 {
-			return " "
-		}
-		return lipgloss.NewStyle().Foreground(palette.muted).Render("●")
-	case uiActivityQueued:
-		return lipgloss.NewStyle().Foreground(statusAmberColor()).Render("●")
+		return renderStatusSpinner(palette.primary, frame)
 	case uiActivityQuestion:
-		return lipgloss.NewStyle().Foreground(palette.primary).Render("●")
-	case uiActivityInterrupted:
-		return lipgloss.NewStyle().Foreground(statusAmberColor()).Faint(true).Render("●")
-	case uiActivityError:
-		return lipgloss.NewStyle().Foreground(statusRedColor()).Render("●")
+		return lipgloss.NewStyle().Foreground(palette.primary).Render(statusStateCircleGlyph)
 	default:
-		return lipgloss.NewStyle().Foreground(statusGreenColor()).Render("●")
+		color := statusGreenColor()
+		if activity == uiActivityError {
+			color = statusRedColor()
+		}
+		return lipgloss.NewStyle().Foreground(color).Render(statusStateCircleGlyph)
 	}
 }
 
-func renderCompactionStatus() string {
-	return lipgloss.NewStyle().Foreground(statusAmberColor()).Render("⚠ compacting")
+func renderCompactionStatus(frame int) string {
+	indicator := renderStatusSpinner(statusAmberColor(), frame)
+	keyword := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true).Render("compacting")
+	return indicator + " " + keyword
 }
 
-func renderReviewerStatus() string {
+func renderReviewerStatus(frame int) string {
+	indicator := renderStatusSpinner(statusGreenColor(), frame)
 	keyword := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("reviewing")
-	return "● " + keyword
+	return indicator + " " + keyword
 }

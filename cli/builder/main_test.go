@@ -60,7 +60,7 @@ func TestRootCommandHelpReturnsZero(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder:") || !strings.Contains(got, "builder project [path]") || !strings.Contains(got, "builder project create --path <server-path> --name <project-name>") || !strings.Contains(got, "builder attach --project <project-id> <server-path>") || !strings.Contains(got, "builder rebind <old-path> <new-path>") {
+	if !strings.Contains(got, "Usage of builder:") || !strings.Contains(got, "builder project [path]") || !strings.Contains(got, "builder project create --path <server-path> --name <project-name>") || !strings.Contains(got, "builder attach --project <project-id> <server-path>") || !strings.Contains(got, "builder rebind <session-id> <new-path>") {
 		t.Fatalf("stderr = %q, want root usage with binding commands", got)
 	}
 }

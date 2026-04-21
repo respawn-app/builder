@@ -403,6 +403,52 @@ func (s *Store) RebindWorkspace(ctx context.Context, oldWorkspaceRoot string, ne
 	return s.lookupWorkspaceBinding(ctx, newCanonicalRoot)
 }
 
+func (s *Store) RetargetSessionWorkspace(ctx context.Context, sessionID string, newWorkspaceRoot string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return Binding{}, errors.New("session id is required")
+	}
+	newCanonicalRoot, err := canonicalFilesystemPath(newWorkspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	if err := requireExistingDirectory(newCanonicalRoot); err != nil {
+		return Binding{}, err
+	}
+
+	targetRow, err := s.queries.GetSessionExecutionTargetByID(ctx, trimmedSessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Binding{}, session.ErrSessionNotFound
+		}
+		return Binding{}, fmt.Errorf("get session execution target: %w", err)
+	}
+	projectID := strings.TrimSpace(targetRow.ProjectID)
+	if projectID == "" {
+		return Binding{}, fmt.Errorf("session %q has no project", trimmedSessionID)
+	}
+
+	binding, err := s.AttachWorkspaceToProject(ctx, projectID, newCanonicalRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	record, err := s.ResolvePersistedSession(ctx, trimmedSessionID)
+	if err != nil {
+		return Binding{}, err
+	}
+	opened, err := session.Open(record.SessionDir, s.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		return Binding{}, err
+	}
+	if err := opened.SetWorkspaceRoot(binding.CanonicalRoot); err != nil {
+		return Binding{}, err
+	}
+	return binding, nil
+}
+
 func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
 	if s == nil || s.queries == nil {
 		return Binding{}, errors.New("metadata store is required")

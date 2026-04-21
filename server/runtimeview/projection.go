@@ -250,9 +250,10 @@ func cloneToolCallMeta(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {
 	}
 	if meta.RenderHint != nil {
 		copyMeta.RenderHint = &clientui.ToolRenderHint{
-			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
-			Path:       meta.RenderHint.Path,
-			ResultOnly: meta.RenderHint.ResultOnly,
+			Kind:         clientui.ToolRenderKind(meta.RenderHint.Kind),
+			Path:         meta.RenderHint.Path,
+			ResultOnly:   meta.RenderHint.ResultOnly,
+			ShellDialect: clientui.ToolShellDialect(meta.RenderHint.ShellDialect),
 		}
 	}
 	if meta.PatchRender != nil {

@@ -2237,6 +2237,98 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionTailReplacementThatClears
 	}
 }
 
+func TestApplyRuntimeTranscriptPagePreservesLiveOngoingForEqualRevisionDetailPage(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "working"})
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: 1, Entries: m.transcriptEntries, Ongoing: m.view.OngoingStreamingText(), OngoingError: "boom"})
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+
+	staleDetail := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 1}, staleDetail); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	if got := m.view.OngoingStreamingText(); got != "working" {
+		t.Fatalf("expected live ongoing stream preserved for detail page, got %q", got)
+	}
+	if got := m.view.OngoingErrorText(); got != "boom" {
+		t.Fatalf("expected live ongoing error preserved for detail page, got %q", got)
+	}
+	detail := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(detail, "working") {
+		t.Fatalf("expected detail view to preserve live ongoing stream, got %q", detail)
+	}
+}
+
+func TestRuntimeTranscriptRefreshPreservesLiveOngoingForEqualRevisionDetailPage(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "working"})
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: 1, Entries: m.transcriptEntries, Ongoing: m.view.OngoingStreamingText(), OngoingError: "boom"})
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	staleDetail := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	next, cmd := m.Update(runtimeTranscriptRefreshedMsg{
+		token:      7,
+		req:        clientui.TranscriptPageRequest{Offset: 0, Limit: 1},
+		transcript: staleDetail,
+	})
+	updated := next.(*uiModel)
+	_ = collectCmdMessages(t, cmd)
+	if got := updated.view.OngoingStreamingText(); got != "working" {
+		t.Fatalf("expected hydrated detail page to preserve live ongoing stream, got %q mode=%q revision=%d detail_loaded=%t detail_ongoing=%q detail_error=%q", got, updated.view.Mode(), updated.transcriptRevision, updated.detailTranscript.loaded, updated.detailTranscript.ongoing, updated.detailTranscript.ongoingError)
+	}
+	if got := updated.view.OngoingErrorText(); got != "boom" {
+		t.Fatalf("expected hydrated detail page to preserve live ongoing error, got %q", got)
+	}
+	detail := stripANSIAndTrimRight(updated.view.View())
+	if !strings.Contains(detail, "working") {
+		t.Fatalf("expected hydrated detail view to preserve live ongoing stream, got %q", detail)
+	}
+}
+
 func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementThatClearsLiveOngoing(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
@@ -3374,13 +3466,13 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 
 	rawView := m.View()
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") {
+	if !strings.Contains(view, pendingSpinnerLine(0, "echo a")) {
 		t.Fatalf("expected unresolved tool to keep spinner in live view, got %q", view)
 	}
 	if !strings.Contains(view, "$ echo b") {
 		t.Fatalf("expected completed sibling to use final shell symbol in live view, got %q", view)
 	}
-	if strings.Contains(view, pendingSpinnerFrame(0)+" echo b") {
+	if strings.Contains(view, pendingSpinnerLine(0, "echo b")) {
 		t.Fatalf("did not expect completed sibling to keep spinner in live view, got %q", view)
 	}
 	if strings.Contains(view, "waiting") {

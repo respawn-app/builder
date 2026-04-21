@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,8 +18,12 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
+	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/protocol"
+	"builder/shared/rpcwire"
+	"builder/shared/serverapi"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
@@ -26,6 +31,86 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
 )
+
+type runtimeDisconnectTestRemote struct {
+	server *httptest.Server
+	mu     sync.Mutex
+	conn   rpcwire.Conn
+}
+
+func (r *runtimeDisconnectTestRemote) URL() string {
+	if r == nil || r.server == nil {
+		return ""
+	}
+	return r.server.URL
+}
+
+func (r *runtimeDisconnectTestRemote) Close() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	conn := r.conn
+	r.conn = nil
+	r.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if r.server != nil {
+		r.server.Close()
+	}
+}
+
+func newRuntimeDisconnectTestRemote(t *testing.T) *runtimeDisconnectTestRemote {
+	t.Helper()
+	remote := &runtimeDisconnectTestRemote{}
+	remote.server = httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		remote.mu.Lock()
+		remote.conn = conn
+		remote.mu.Unlock()
+		handshaken := false
+		attached := false
+		for event := range conn.Events() {
+			if event.Err != nil {
+				return
+			}
+			req := event.Frame.Request()
+			if !handshaken {
+				if req.Method != protocol.MethodHandshake {
+					return
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}}))); err != nil {
+					return
+				}
+				handshaken = true
+				continue
+			}
+			if !attached {
+				if req.Method != protocol.MethodAttachProject {
+					return
+				}
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: "project-1", WorkspaceRoot: "/tmp/workspace-a"}))); err != nil {
+					return
+				}
+				attached = true
+				continue
+			}
+			switch req.Method {
+			case protocol.MethodSessionGetMainView:
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.SessionMainViewResponse{MainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}}))); err != nil {
+					return
+				}
+			case protocol.MethodSessionGetTranscriptPage:
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(protocol.NewSuccessResponse(req.ID, serverapi.SessionTranscriptPageResponse{Transcript: clientui.TranscriptPage{SessionID: "session-1"}}))); err != nil {
+					return
+				}
+			default:
+				return
+			}
+		}
+	}))
+	return remote
+}
 
 func closedAskEvents() <-chan askEvent {
 	ch := make(chan askEvent)
@@ -1057,6 +1142,229 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 }
 
+func TestNativeSubmitErrorFallbackAppendsToScrollbackWhenRuntimeAppendFails(t *testing.T) {
+	out := &bytes.Buffer{}
+	client := &runtimeControlFakeClient{submitErr: errors.New("daemon stalled"), appendErr: errors.New("append failed")}
+	model := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	model.input = "run task"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "window size to apply before submit", func() bool {
+		return model.windowSizeKnown
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(model.transcriptEntries) == 1 && strings.Contains(normalizedOutput(out.String()), "daemon stalled") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for submit error fallback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q window=%t replayed=%t flushed=%d", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()), model.windowSizeKnown, model.nativeHistoryReplayed, model.nativeFlushedEntryCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, "daemon stalled") {
+		t.Fatalf("expected submit error in native ongoing scrollback, got %q", normalized)
+	}
+}
+
+func TestNativeDisconnectedSubmissionAppendsToScrollbackWhenRuntimeAppendFails(t *testing.T) {
+	out := &bytes.Buffer{}
+	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
+	model := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	model.input = "run task"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "window size to apply before disconnected submit", func() bool {
+		return model.windowSizeKnown
+	})
+	model.setRuntimeDisconnected(true)
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(model.transcriptEntries) == 1 && strings.Contains(normalizedOutput(out.String()), runtimeDisconnectedStatusMessage) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for disconnected submit fallback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q window=%t replayed=%t flushed=%d", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()), model.windowSizeKnown, model.nativeHistoryReplayed, model.nativeFlushedEntryCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, runtimeDisconnectedStatusMessage) {
+		t.Fatalf("expected disconnect error in native ongoing scrollback, got %q", normalized)
+	}
+}
+
+func TestNativeDisconnectedSubmissionAfterRealRemoteDisconnectAppendsToScrollback(t *testing.T) {
+	server := newRuntimeDisconnectTestRemote(t)
+	defer server.Close()
+	remote, err := sharedclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL()[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	runtimeClient := newUIRuntimeClientWithReads("session-1", remote, remote)
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents())
+	model.input = "run task"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "window size to apply before real disconnect", func() bool {
+		return model.windowSizeKnown
+	})
+
+	server.Close()
+	var refreshErr error
+	waitForTestCondition(t, 2*time.Second, "refresh main view error after remote shutdown", func() bool {
+		_, refreshErr = runtimeClient.RefreshMainView()
+		return refreshErr != nil
+	})
+	waitForTestCondition(t, 2*time.Second, "disconnect state after real remote shutdown", func() bool {
+		return model.runtimeDisconnectStatusVisible()
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(model.transcriptEntries) == 1 && strings.Contains(normalizedOutput(out.String()), runtimeDisconnectedStatusMessage) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for real disconnect fallback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q window=%t replayed=%t flushed=%d", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()), model.windowSizeKnown, model.nativeHistoryReplayed, model.nativeFlushedEntryCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, runtimeDisconnectedStatusMessage) {
+		t.Fatalf("expected disconnect error in native ongoing scrollback, got %q", normalized)
+	}
+}
+
+func TestNativeBackCommandSystemFeedbackAppendsToScrollback(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := newProjectedStaticUIModel()
+	model.input = "/back"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForTestCondition(t, 2*time.Second, "window size to apply before back command", func() bool {
+		return model.windowSizeKnown
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(model.transcriptEntries) == 1 && strings.Contains(normalizedOutput(out.String()), "No parent session available") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for back command feedback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q window=%t replayed=%t flushed=%d", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()), model.windowSizeKnown, model.nativeHistoryReplayed, model.nativeFlushedEntryCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, "No parent session available") {
+		t.Fatalf("expected back command feedback in native ongoing scrollback, got %q", normalized)
+	}
+}
+
 func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInScrollback(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -1140,6 +1448,175 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 	}
 	if model.sawAssistantDelta {
 		t.Fatal("expected sawAssistantDelta cleared after deferred final commit")
+	}
+}
+
+func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *testing.T) {
+	const roundTripTimeout = 5 * time.Second
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			Reviewer: runtime.ReviewerConfig{
+				Frequency:     "all",
+				Model:         "gpt-5",
+				ThinkingLevel: "low",
+				Client:        reviewerNoSuggestionsClient{},
+			},
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.QueueUserMessage("steer now")
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	waitForTestCondition(t, roundTripTimeout, "live deferred final delta visible", func() bool {
+		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, roundTripTimeout, "detail mode active", func() bool {
+		return model.view.Mode() == tui.ModeDetail
+	})
+
+	waitForSubmitResult(t, roundTripTimeout, submitDone)
+
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, roundTripTimeout, "ongoing mode active", func() bool {
+		return model.view.Mode() == tui.ModeOngoing
+	})
+	waitForTestCondition(t, roundTripTimeout, "ongoing view keeps deferred final visible after detail exit", func() bool {
+		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+		return strings.Contains(ongoing, "foreground done")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+}
+
+func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeCommit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			Reviewer: runtime.ReviewerConfig{
+				Frequency:     "all",
+				Model:         "gpt-5",
+				ThinkingLevel: "low",
+				Client:        reviewerNoSuggestionsClient{},
+			},
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.QueueUserMessage("steer now")
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
+		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "detail mode active", func() bool {
+		return model.view.Mode() == tui.ModeDetail
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForTestCondition(t, 2*time.Second, "ongoing mode active before final commit", func() bool {
+		return model.view.Mode() == tui.ModeOngoing
+	})
+
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "ongoing view keeps deferred final visible after early detail exit", func() bool {
+		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+		return strings.Contains(ongoing, "foreground done")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !strings.Contains(normalized, "foreground done") {
+		t.Fatalf("expected final answer to survive early detail round-trip, got %q", normalized)
 	}
 }
 
@@ -1560,7 +2037,7 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 	pendingPlain := xansi.Strip(pendingDelta)
 	hasDotFrame := false
 	for _, frame := range pendingToolSpinner.Frames {
-		if strings.Contains(pendingPlain, strings.TrimSpace(frame)+" pwd") {
+		if strings.Contains(pendingPlain, frame+"pwd") {
 			hasDotFrame = true
 			break
 		}

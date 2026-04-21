@@ -217,6 +217,31 @@ func TestSummarizeBackgroundEventWhitespacePreviewUsesNoOutputLine(t *testing.T)
 	}
 }
 
+func TestSummarizeBackgroundEventEmptyLogOmitsOutputFileLine(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "1000.log")
+	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	exitCode := 0
+	summary := SummarizeBackgroundEvent(Event{
+		Type: EventCompleted,
+		Snapshot: Snapshot{
+			ID:       "1000",
+			State:    "completed",
+			LogPath:  logPath,
+			ExitCode: &exitCode,
+		},
+	}, BackgroundNoticeOptions{MaxChars: 80, SuccessOutputMode: BackgroundOutputDefault})
+
+	want := "Background shell 1000 completed.\nExit code: 0\nNo output"
+	if summary.DetailText != want {
+		t.Fatalf("unexpected detail text:\nwant: %q\n got: %q", want, summary.DetailText)
+	}
+	if summary.LineCount != 0 {
+		t.Fatalf("expected zero line count, got %d", summary.LineCount)
+	}
+}
+
 func TestFormatExecResponseBlankOutputUsesNoOutput(t *testing.T) {
 	exitCode := 1
 	text := formatExecResponse(ExecResult{ExitCode: &exitCode, Output: " \n\t "})

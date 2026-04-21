@@ -4811,7 +4811,7 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 	if assistant.Content != "done" {
 		t.Fatalf("assistant content = %q, want done", assistant.Content)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCount := len(client.calls)
 	client.mu.Unlock()
@@ -4921,7 +4921,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	if !containsNotice(requests[1]) {
 		t.Fatalf("expected background notice in first available in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5321,7 +5321,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 	if !containsNotice(requests[1]) {
 		t.Fatalf("expected background notice in same-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5451,7 +5451,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 		t.Fatalf("expected both background notices in the same in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	client.mu.Lock()
 	callCountAfterReturn := len(client.calls)
 	client.mu.Unlock()
@@ -5480,7 +5480,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call_exec_1",
 				Name:  string(toolspec.ToolExecCommand),
-				Input: json.RawMessage(`{"cmd":"sleep 1; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
+				Input: json.RawMessage(`{"cmd":"sleep 0.3; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
 			}},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -5489,7 +5489,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call_poll_1",
 				Name:  string(toolspec.ToolWriteStdin),
-				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":2000}`),
+				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":800}`),
 			}},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -5538,7 +5538,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 	if assistant.Content != "done" {
 		t.Fatalf("assistant content = %q, want done", assistant.Content)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	client.mu.Lock()
 	callCount := len(client.calls)
@@ -6448,6 +6448,8 @@ func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T
 }
 
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
+	withGenerateRetryDelays(t, []time.Duration{time.Millisecond})
+
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7203,6 +7205,31 @@ func TestEnvironmentContextMessageIncludesLabeledModelIdentifier(t *testing.T) {
 	}
 }
 
+func TestEnvironmentContextMessageUsesWorkspaceRootForCWD(t *testing.T) {
+	workspace := t.TempDir()
+	msg, err := environmentContextMessage(workspace, "gpt-5.3-codex", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("environmentContextMessage: %v", err)
+	}
+	if !strings.Contains(msg, "\nCWD: "+workspace+"\n") {
+		t.Fatalf("expected environment message cwd to use workspace root %q, got %q", workspace, msg)
+	}
+}
+
+func TestEnvironmentContextMessageFallsBackToProcessCWDWhenWorkspaceRootMissing(t *testing.T) {
+	processCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	msg, err := environmentContextMessage("", "gpt-5.3-codex", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("environmentContextMessage: %v", err)
+	}
+	if !strings.Contains(msg, "\nCWD: "+processCWD+"\n") {
+		t.Fatalf("expected environment message cwd to fall back to process cwd %q, got %q", processCWD, msg)
+	}
+}
+
 func TestEnvironmentContextMessageRejectsEmptyModel(t *testing.T) {
 	workspace := t.TempDir()
 	if _, err := environmentContextMessage(workspace, "", time.Unix(0, 0).UTC()); err == nil {
@@ -7277,6 +7304,9 @@ func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 	}
 	if !strings.Contains(envMsg.Content, "\nYour model: gpt-5.3-codex\n") {
 		t.Fatalf("expected environment context to contain labeled model identifier, got %q", envMsg.Content)
+	}
+	if !strings.Contains(envMsg.Content, "\nCWD: "+workspace+"\n") {
+		t.Fatalf("expected environment context cwd to use session workspace root %q, got %q", workspace, envMsg.Content)
 	}
 	if strings.Contains(envMsg.Content, "Your model: gpt-5.3-codex high") {
 		t.Fatalf("expected environment context to exclude thinking level from model identifier, got %q", envMsg.Content)

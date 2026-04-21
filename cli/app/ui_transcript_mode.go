@@ -54,6 +54,9 @@ func (m *uiModel) primeDetailTranscriptFromCurrentTail() {
 		return
 	}
 	if m.detailTranscript.loaded {
+		m.detailTranscript.totalEntries = max(m.detailTranscript.totalEntries, m.transcriptTotalEntries)
+		m.detailTranscript.ongoing = m.view.OngoingStreamingText()
+		m.detailTranscript.ongoingError = m.view.OngoingErrorText()
 		return
 	}
 	page := clientui.TranscriptPage{

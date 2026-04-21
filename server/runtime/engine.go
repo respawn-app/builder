@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"builder/server/llm"
 	"builder/server/session"
@@ -566,7 +565,7 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, stepID string, cli
 	if err := e.observePromptCacheRequest(stepID, prepared); err != nil {
 		return llm.Response{}, err
 	}
-	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
+	delays := generateRetryDelays
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		var (
@@ -632,10 +631,8 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, stepID string, cli
 		if i == len(delays) {
 			break
 		}
-		select {
-		case <-ctx.Done():
-			return llm.Response{}, ctx.Err()
-		case <-time.After(delays[i]):
+		if err := waitForRetryDelay(ctx, delays[i]); err != nil {
+			return llm.Response{}, err
 		}
 	}
 	return llm.Response{}, fmt.Errorf("model generation failed after retries: %w", lastErr)

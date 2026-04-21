@@ -14,6 +14,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func writeOnboardingTestSkill(t *testing.T, dir string, name string, description string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: "+name+"\ndescription: "+description+"\n---\n"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+}
+
 func TestSkillSelectionCandidatesAnnotateOpponentSource(t *testing.T) {
 	state := &onboardingFlowState{
 		imports: onboardingImportDiscovery{skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
@@ -57,6 +67,46 @@ func TestDiscoverOnboardingImportsSkipsExistingTargets(t *testing.T) {
 	}
 	if !discovery.skipCommands {
 		t.Fatal("expected command import flow to be skipped when commands root already exists")
+	}
+}
+
+func TestDiscoverOnboardingImportsIncludesAgentsSkillsAndCommands(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	agentsSkillsDir := filepath.Join(home, ".agents", "skills")
+	writeOnboardingTestSkill(t, filepath.Join(agentsSkillsDir, "demo-skill"), "demo", "from agents")
+	agentsCommandsDir := filepath.Join(home, ".agents", "commands")
+	if err := os.MkdirAll(agentsCommandsDir, 0o755); err != nil {
+		t.Fatalf("mkdir agents commands: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsCommandsDir, "review.md"), []byte("review"), 0o644); err != nil {
+		t.Fatalf("write agents command: %v", err)
+	}
+
+	discovery := discoverOnboardingImports(globalRoot)
+	if discovery.err != nil {
+		t.Fatalf("discover imports: %v", discovery.err)
+	}
+	if got := discovery.skillSymlinkRoots[onboardingImportProviderAgents]; got != agentsSkillsDir {
+		t.Fatalf("expected agents skill root %q, got %q", agentsSkillsDir, got)
+	}
+	items := discovery.skillSymlinkItems[onboardingImportProviderAgents]
+	if len(items) != 1 {
+		t.Fatalf("expected one agents skill import candidate, got %+v", items)
+	}
+	if items[0].ProviderLabel != "Agents" || items[0].TargetDirName != "demo-skill" {
+		t.Fatalf("unexpected agents skill candidate: %+v", items[0])
+	}
+	if got := discovery.commandSymlinkRoots[onboardingImportProviderAgents]; got != agentsCommandsDir {
+		t.Fatalf("expected agents command root %q, got %q", agentsCommandsDir, got)
+	}
+	commandItems := discovery.commandSymlinkItems[onboardingImportProviderAgents]
+	if len(commandItems) != 1 {
+		t.Fatalf("expected one agents slash command import candidate, got %+v", commandItems)
+	}
+	if commandItems[0].ProviderLabel != "Agents" || commandItems[0].TargetFileName != "review.md" {
+		t.Fatalf("unexpected agents slash command candidate: %+v", commandItems[0])
 	}
 }
 
@@ -150,6 +200,25 @@ func TestExecuteSkillImportSymlinksRootDirectory(t *testing.T) {
 	}
 }
 
+func TestExecuteSkillImportSymlinksAgentsRootDirectory(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	sourceDir := filepath.Join(home, ".agents", "skills")
+	writeOnboardingTestSkill(t, filepath.Join(sourceDir, "demo-skill"), "demo", "from agents")
+	if _, err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderAgents}); err != nil {
+		t.Fatalf("execute skill import: %v", err)
+	}
+	targetPath := filepath.Join(globalRoot, "skills")
+	resolved, err := os.Readlink(targetPath)
+	if err != nil {
+		t.Fatalf("readlink target: %v", err)
+	}
+	if resolved != sourceDir {
+		t.Fatalf("expected agents skills root symlink to point to %q, got %q", sourceDir, resolved)
+	}
+}
+
 func TestExecuteSkillImportReplacesEmptyTargetDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
@@ -213,6 +282,31 @@ func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 	expected := filepath.Join(home, ".codex", "skills", "local")
 	if resolved != expected {
 		t.Fatalf("expected codex skill symlink source %q, got %q", expected, resolved)
+	}
+}
+
+func TestDiscoverProviderSkillSymlinkItemsFallsBackWhenPreferredDirectoryIsEmpty(t *testing.T) {
+	home := t.TempDir()
+	provider, ok := onboardingImportProviderByID(onboardingImportProviderCodex)
+	if !ok {
+		t.Fatal("expected codex provider")
+	}
+	base := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(filepath.Join(base, "skills", "local"), 0o755); err != nil {
+		t.Fatalf("mkdir local skills: %v", err)
+	}
+	writeOnboardingTestSkill(t, filepath.Join(base, "skills", "fallback-skill"), "fallback", "from skills root")
+
+	root, items, err := discoverProviderSkillSymlinkItems(provider, base)
+	if err != nil {
+		t.Fatalf("discoverProviderSkillSymlinkItems: %v", err)
+	}
+	expectedRoot := filepath.Join(base, "skills")
+	if root != expectedRoot {
+		t.Fatalf("root = %q, want %q", root, expectedRoot)
+	}
+	if len(items) != 1 || items[0].TargetDirName != "fallback-skill" {
+		t.Fatalf("unexpected discovered items: %+v", items)
 	}
 }
 
@@ -299,6 +393,39 @@ func TestBuildSkillImportScreenOffersOnlySymlinkOptionsAndPrefersLargestProvider
 	}
 }
 
+func TestBuildSkillImportScreenIncludesAgentsOptionInDeclaredOrder(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderAgents: {
+				{ID: "agents:one", Provider: onboardingImportProviderAgents, ProviderLabel: "Agents", TargetDirName: "one"},
+			},
+			onboardingImportProviderCodex: {
+				{ID: "codex:one", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "one"},
+			},
+			onboardingImportProviderClaudeCode: {
+				{ID: "claude:one", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetDirName: "one"},
+			},
+		},
+	}}
+	screen := buildSkillImportScreen(state)
+	if !strings.Contains(screen.Body, "Claude Code, Codex, Agents") {
+		t.Fatalf("expected skill import body to mention all providers in declared order, got %q", screen.Body)
+	}
+	titles := []string{}
+	for _, option := range screen.Options {
+		titles = append(titles, option.Title)
+	}
+	joined := strings.Join(titles, "\n")
+	for _, want := range []string{"Symlink to Claude Code (1 found)", "Symlink to Codex (1 found)", "Symlink to Agents (1 found)"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected skill import options to include %q, got %q", want, joined)
+		}
+	}
+	if screen.Options[1].ID != "symlink:claude_code" || screen.Options[2].ID != "symlink:codex" || screen.Options[3].ID != "symlink:agents" {
+		t.Fatalf("expected skill import options in declared provider order, got %+v", screen.Options)
+	}
+}
+
 func TestBuildCommandImportScreenIncludesSymlinkOnlyCommandCandidates(t *testing.T) {
 	state := &onboardingFlowState{imports: onboardingImportDiscovery{
 		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{
@@ -343,6 +470,13 @@ func TestBuildCommandImportScreenOffersOnlySymlinkOptionsAndPrefersLargestProvid
 	}
 }
 
+func TestBuildCommandImportScreenLoadingTextListsAllCommandProviders(t *testing.T) {
+	screen := buildCommandImportScreen(&onboardingFlowState{imports: onboardingImportDiscovery{pending: true}})
+	if !strings.Contains(screen.LoadingText, "Claude Code") || !strings.Contains(screen.LoadingText, "Codex") || !strings.Contains(screen.LoadingText, "Agents") {
+		t.Fatalf("expected loading text to mention slash command providers, got %q", screen.LoadingText)
+	}
+}
+
 func TestApplyImportChoiceRejectsRemovedCopyModes(t *testing.T) {
 	selection := onboardingImportSelection{}
 	if err := applyImportChoice(&selection, "copy:claude_code"); err == nil {
@@ -381,6 +515,30 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	}
 	if resolved != sourceDir {
 		t.Fatalf("expected prompts root symlink to point to %q, got %q", sourceDir, resolved)
+	}
+}
+
+func TestExecuteCommandImportSymlinksAgentsRootDirectory(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	sourceDir := filepath.Join(home, ".agents", "commands")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "review.md"), []byte("review"), 0o644); err != nil {
+		t.Fatalf("write source command: %v", err)
+	}
+	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderAgents}); err != nil {
+		t.Fatalf("execute command import: %v", err)
+	}
+	targetPath := filepath.Join(globalRoot, "prompts")
+	resolved, err := os.Readlink(targetPath)
+	if err != nil {
+		t.Fatalf("readlink target: %v", err)
+	}
+	if resolved != sourceDir {
+		t.Fatalf("expected agents prompts root symlink to point to %q, got %q", sourceDir, resolved)
 	}
 }
 
@@ -440,6 +598,31 @@ func TestExecuteCommandImportFallsBackToPromptsWhenCommandsHasNoDirectMarkdown(t
 	}
 
 	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}); err != nil {
+		t.Fatalf("execute command import: %v", err)
+	}
+	targetPath := filepath.Join(globalRoot, "prompts")
+	resolved, err := os.Readlink(targetPath)
+	if err != nil {
+		t.Fatalf("readlink target: %v", err)
+	}
+	if resolved != promptsDir {
+		t.Fatalf("expected prompts root symlink to point to %q, got %q", promptsDir, resolved)
+	}
+}
+
+func TestExecuteCommandImportFallsBackToAgentsPromptsWhenCommandsMissing(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	promptsDir := filepath.Join(home, ".agents", "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("prompts"), 0o644); err != nil {
+		t.Fatalf("write prompt command: %v", err)
+	}
+
+	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderAgents}); err != nil {
 		t.Fatalf("execute command import: %v", err)
 	}
 	targetPath := filepath.Join(globalRoot, "prompts")
@@ -766,6 +949,54 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	}
 	if got := updated.input.Value(); got != "draft-model-alias" {
 		t.Fatalf("expected import discovery refresh to preserve typed input, got %q", got)
+	}
+}
+
+func TestOnboardingSpinnerTickDoesNotRescheduleOutsideLoadingOrFinalize(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.state.imports.pending = false
+	model.syncScreen(true)
+	if model.currentScreen.Kind == onboardingScreenLoading {
+		t.Fatalf("expected non-loading onboarding screen, got %q", model.currentScreen.Kind)
+	}
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected spinner tick to advance frame even when stopping animation")
+	}
+	if cmd != nil {
+		t.Fatalf("did not expect spinner tick to reschedule on %q screen", updated.currentScreen.Kind)
+	}
+}
+
+func TestOnboardingSpinnerTickReschedulesWhileLoading(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenLoading}
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected loading spinner tick to advance frame")
+	}
+	if cmd == nil {
+		t.Fatal("expected loading spinner tick to reschedule")
+	}
+}
+
+func TestOnboardingSpinnerTickReschedulesWhileFinalizing(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.state.imports.pending = false
+	model.syncScreen(true)
+	model.finalizing = true
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected finalizing spinner tick to advance frame")
+	}
+	if cmd == nil {
+		t.Fatal("expected finalizing spinner tick to reschedule")
 	}
 }
 

@@ -1,0 +1,5 @@
+<ESC>[38;2;224;108;117m•<ESC>[0m <ESC>[38;2;171;178;191m<ESC>[38;2;171;178;191mEdited: ./main.go +1 -1<ESC>[0;38;2;171;178;191m<ESC>[0m
+<ESC>[48;2;31;42;34m  <ESC>[38;2;171;178;191m+<ESC>[38;2;171;178;191m<ESC>[38;5;209mpackage<ESC>[0;38;2;171;178;191m<ESC>[48;2;31;42;34m<ESC>[38;5;243m <ESC>[0;38;2;171;178;191m<ESC>[48;2;31;42;34m<ESC>[38;5;249mmain<ESC>[0;38;2;171;178;191m<ESC>[48;2;31;42;34m<ESC>[38;5;243m<ESC>[0;38;2;171;178;191m<ESC>[48;2;31;42;34m<ESC>[0m<ESC>[48;2;31;42;34m                                                                                                         <ESC>[0m
+<ESC>[48;2;43;31;34m  <ESC>[38;2;171;178;191m-<ESC>[38;5;249mold<ESC>[0;38;2;171;178;191m<ESC>[48;2;43;31;34m<ESC>[0;38;2;171;178;191m<ESC>[48;2;43;31;34m<ESC>[0m<ESC>[48;2;43;31;34m                                                                                                                  <ESC>[0m
+
+  <ESC>[38;2;224;108;117mPatch failed: mismatch between file content and model-provided patch in ./main.go at line 3.<ESC>[0m

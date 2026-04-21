@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,14 +65,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 	if cmdText == "" {
 		return tools.ErrorResultWith(c, "cmd is required", marshalNoHTMLEscape), nil
 	}
-	workdir := t.workspaceRoot
-	if trimmed := strings.TrimSpace(in.Workdir); trimmed != "" {
-		if filepath.IsAbs(trimmed) {
-			workdir = filepath.Clean(trimmed)
-		} else {
-			workdir = filepath.Join(t.workspaceRoot, trimmed)
-		}
-	}
+	workdir := ResolveWorkdir(t.workspaceRoot, in.Workdir)
 	resolvedShell := strings.TrimSpace(in.Shell)
 	if resolvedShell == "" {
 		resolvedShell = t.defaultShell

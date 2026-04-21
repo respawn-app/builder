@@ -53,8 +53,7 @@ func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme str
 }
 
 func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEntry, spinner string) []ongoingBlock {
-	trimmedSpinner := strings.TrimSpace(spinner)
-	if trimmedSpinner == "" {
+	if strings.TrimSpace(spinner) == "" {
 		return blocks
 	}
 	consumedResults := make(map[int]struct{})
@@ -65,7 +64,7 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 			out = append(out, block)
 			continue
 		}
-		spinnerSymbol := styleForRole(block.role, m.palette()).Render(trimmedSpinner)
+		spinnerSymbol := styleForRole(block.role, m.palette()).Render(spinner)
 		rebuilt, ok := m.renderPendingSpinnerBlock(block, entries, spinnerSymbol)
 		if !ok {
 			out = append(out, block)

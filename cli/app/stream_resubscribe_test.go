@@ -116,7 +116,7 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -153,7 +153,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 		return next, nil
 	}, func(context.Context) (map[string]struct{}, error) {
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
+	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -193,7 +193,7 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotReadFails(t *test
 			return nil, errors.New("snapshot unavailable")
 		}
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
+	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -225,7 +225,7 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, control, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -268,7 +268,7 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, control, staticControllerLeaseManager("lease-test-controller"))
 
 	first := waitPromptEvent(t, events)
 	stop()
@@ -295,7 +295,7 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, stubPromptControlClient{}, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -317,7 +317,7 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, control, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -344,7 +344,7 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control, staticControllerLeaseProvider("lease-test-controller"))
+	}, nil, control, staticControllerLeaseManager("lease-test-controller"))
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -373,23 +373,27 @@ func TestPendingPromptEventRetryUsesLatestControllerLease(t *testing.T) {
 
 	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}}}
 	control := &retryingPromptControlClient{askErrors: []error{serverapi.ErrInvalidControllerLease, nil}}
-	leaseID := "lease-old"
+	leaseManager := newControllerLeaseManager("lease-old")
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
+		return "lease-new", nil
+	})
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control, func() string { return leaseID })
+	}, nil, control, leaseManager)
 	defer stop()
 
 	first := waitPromptEvent(t, events)
 	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
 
-	retried := waitPromptEvent(t, events)
-	leaseID = "lease-new"
-	retried.reply <- askReply{response: askquestion.Response{RequestID: retried.req.ID, Answer: "handled again"}}
-
 	waitForPromptAskCallCount(t, control, 2)
 	if leases := control.askLeaseIDs(); len(leases) != 2 || leases[0] != "lease-old" || leases[1] != "lease-new" {
 		t.Fatalf("ask lease ids = %+v, want [lease-old lease-new]", leases)
+	}
+	select {
+	case evt := <-events:
+		t.Fatalf("did not expect prompt requeue after successful lease recovery: %+v", evt.req)
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 
@@ -512,8 +516,8 @@ func waitSessionActivityEvent(t *testing.T, events <-chan clientui.Event) client
 	}
 }
 
-func staticControllerLeaseProvider(leaseID string) controllerLeaseProvider {
-	return func() string { return leaseID }
+func staticControllerLeaseManager(leaseID string) *controllerLeaseManager {
+	return newControllerLeaseManager(leaseID)
 }
 
 func waitPromptEvent(t *testing.T, events <-chan askEvent) askEvent {

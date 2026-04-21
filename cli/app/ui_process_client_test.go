@@ -72,18 +72,14 @@ func (fixedUIProcessClient) InlineOutput(string, int) (string, string, error) {
 }
 
 func TestUIProcessClientProjectsManagerSnapshots(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'done\n'; sleep 0.4; exit 7"},
+		Command:        []string{"sh", "-c", "printf 'done\n'; sleep 0.05; exit 7"},
 		DisplayCommand: "project-test",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start background process: %v", err)
@@ -141,11 +137,7 @@ func TestUIProcessClientProjectsManagerSnapshots(t *testing.T) {
 }
 
 func TestExplicitUIProcessClientWinsOverBackgroundManagerOptionOrder(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	explicit := fixedUIProcessClient{entries: []clientui.BackgroundProcess{{ID: "explicit-process"}}}
 
@@ -178,21 +170,17 @@ func TestUIProcessClientUsesLoopbackReadsWhenAvailable(t *testing.T) {
 }
 
 func TestUIProcessClientDoesNotBypassSharedReadBoundaryOnError(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'done\n'; sleep 0.4; exit 0"},
+		Command:        []string{"sh", "-c", "printf 'done\n'; sleep 0.05; exit 0"},
 		DisplayCommand: "fallback-process",
 		OwnerSessionID: "session-1",
 		OwnerRunID:     "run-1",
 		OwnerStepID:    "step-1",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start background process: %v", err)
@@ -230,18 +218,14 @@ func TestUIProcessClientUsesLoopbackControlWhenAvailable(t *testing.T) {
 }
 
 func TestUIProcessClientDoesNotBypassSharedControlBoundaryOnError(t *testing.T) {
-	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
-	if err != nil {
-		t.Fatalf("new background manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newFastBackgroundTestManager(t)
 
 	workdir := t.TempDir()
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"sh", "-c", "printf 'fallback-control\n'; sleep 30"},
+		Command:        []string{"sh", "-c", "printf 'fallback-control\n'; sleep 1"},
 		DisplayCommand: "fallback-control",
 		Workdir:        workdir,
-		YieldTime:      250 * time.Millisecond,
+		YieldTime:      fastBackgroundTestYield,
 	})
 	if err != nil {
 		t.Fatalf("start background process: %v", err)

@@ -20,8 +20,7 @@ func (c uiInputController) handleQueuedSlashCommandInput(text string) (bool, tea
 		return false, m, nil
 	}
 	if errText, blocked := m.blockedDeferredSlashCommand(selection.commandText()); blocked {
-		m.appendLocalEntry("error", errText)
-		return true, m, c.showErrorStatus(errText)
+		return true, m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
 	next, cmd := c.queueOrStartSubmission(selection.commandText())
 	return true, next, cmd
@@ -69,6 +68,10 @@ func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool)
 		return "", false
 	}
 	switch commandResult.Action {
+	case commands.ActionResume:
+		if !m.resumeCommandAvailable() {
+			return resumeCommandUnavailableMessage, true
+		}
 	case commands.ActionBack:
 		if !m.hasParentSession() {
 			return "No parent session available", true
