@@ -2311,8 +2311,8 @@ func TestRuntimeTranscriptRefreshPreservesLiveOngoingForEqualRevisionDetailPage(
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
 	}
 	next, cmd := m.Update(runtimeTranscriptRefreshedMsg{
-		token: 7,
-		req:   clientui.TranscriptPageRequest{Offset: 0, Limit: 1},
+		token:      7,
+		req:        clientui.TranscriptPageRequest{Offset: 0, Limit: 1},
 		transcript: staleDetail,
 	})
 	updated := next.(*uiModel)
