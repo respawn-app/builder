@@ -442,6 +442,7 @@ func TestRebindSubcommandRetargetsSessionWorkspace(t *testing.T) {
 	oldWorkspace := t.TempDir()
 	newWorkspace := t.TempDir()
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
@@ -506,6 +507,7 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	targetWorkspace := t.TempDir()
 	missingWorkspace := filepath.Join(t.TempDir(), "missing")
 	t.Setenv("HOME", home)
+	configureBindingCommandTestServerPort(t)
 
 	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
 	if err != nil {
@@ -628,6 +630,57 @@ func TestRetargetSessionWorkspaceFallsBackToLocalLifecycleClientForLoopbackMetho
 	}
 }
 
+func TestRetargetSessionWorkspaceFallsBackToLocalLifecycleClientForLoopbackOpenFailure(t *testing.T) {
+	originalOpener := bindingCommandRemoteOpener
+	originalRetargeter := bindingCommandSessionRetargeter
+	originalLocalClient := bindingCommandLocalSessionLifecycleClient
+	t.Cleanup(func() {
+		bindingCommandRemoteOpener = originalOpener
+		bindingCommandSessionRetargeter = originalRetargeter
+		bindingCommandLocalSessionLifecycleClient = originalLocalClient
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	newWorkspace := t.TempDir()
+	newCfg, err := config.Load(newWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
+		return config.App{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect refused")}
+	}
+	localCalls := 0
+	const sessionID = "session-123"
+	bindingCommandSessionRetargeter = func(ctx context.Context, lifecycle client.SessionLifecycleClient, gotSessionID string, workspaceRoot string) (serverapi.SessionRetargetWorkspaceResponse, error) {
+		if gotSessionID != sessionID {
+			t.Fatalf("session id = %q, want %q", gotSessionID, sessionID)
+		}
+		if workspaceRoot != newCfg.WorkspaceRoot {
+			t.Fatalf("workspace root = %q, want %q", workspaceRoot, newCfg.WorkspaceRoot)
+		}
+		localCalls++
+		return serverapi.SessionRetargetWorkspaceResponse{Binding: serverapi.ProjectBinding{WorkspaceID: "workspace-local"}}, nil
+	}
+	bindingCommandLocalSessionLifecycleClient = func(cfg config.App) client.SessionLifecycleClient {
+		if cfg.WorkspaceRoot != newCfg.WorkspaceRoot {
+			t.Fatalf("local client cfg workspace = %q, want %q", cfg.WorkspaceRoot, newCfg.WorkspaceRoot)
+		}
+		return bindingCommandTimeoutSessionLifecycleStub{}
+	}
+
+	binding, err := retargetSessionWorkspace(context.Background(), sessionID, newWorkspace)
+	if err != nil {
+		t.Fatalf("retargetSessionWorkspace: %v", err)
+	}
+	if binding.WorkspaceID != "workspace-local" {
+		t.Fatalf("binding workspace id = %q, want %q", binding.WorkspaceID, "workspace-local")
+	}
+	if localCalls != 1 {
+		t.Fatalf("local calls = %d, want 1", localCalls)
+	}
+}
+
 func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackMethodNotFound(t *testing.T) {
 	originalOpener := bindingCommandRemoteOpener
 	originalRetargeter := bindingCommandSessionRetargeter
@@ -666,6 +719,39 @@ func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackMethodNotFound(t *
 	}
 	if remoteCalls != 1 {
 		t.Fatalf("remote calls = %d, want 1", remoteCalls)
+	}
+	if localCalls != 0 {
+		t.Fatalf("local calls = %d, want 0", localCalls)
+	}
+}
+
+func TestRetargetSessionWorkspaceDoesNotFallbackForNonLoopbackOpenFailure(t *testing.T) {
+	originalOpener := bindingCommandRemoteOpener
+	originalRetargeter := bindingCommandSessionRetargeter
+	originalLocalClient := bindingCommandLocalSessionLifecycleClient
+	t.Cleanup(func() {
+		bindingCommandRemoteOpener = originalOpener
+		bindingCommandSessionRetargeter = originalRetargeter
+		bindingCommandLocalSessionLifecycleClient = originalLocalClient
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_SERVER_HOST", "192.0.2.10")
+	newWorkspace := t.TempDir()
+	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
+		return config.App{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect refused")}
+	}
+	localCalls := 0
+	bindingCommandLocalSessionLifecycleClient = func(config.App) client.SessionLifecycleClient {
+		localCalls++
+		return bindingCommandTimeoutSessionLifecycleStub{}
+	}
+
+	_, err := retargetSessionWorkspace(context.Background(), "session-123", newWorkspace)
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("retargetSessionWorkspace error = %v, want net.OpError", err)
 	}
 	if localCalls != 0 {
 		t.Fatalf("local calls = %d, want 0", localCalls)

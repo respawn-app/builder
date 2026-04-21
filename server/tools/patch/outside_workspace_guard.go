@@ -15,6 +15,11 @@ type OutsideWorkspaceErrorLabels struct {
 	RejectedByUserPrefix string
 }
 
+type OutsideWorkspaceFailureFactory struct {
+	ApprovalFailed func(OutsideWorkspaceRequest, error) error
+	UserDenied     func(OutsideWorkspaceRequest, OutsideWorkspaceApproval, string) error
+}
+
 type OutsideWorkspaceGuard struct {
 	workspaceRoot         string
 	workspaceRootReal     string
@@ -26,11 +31,12 @@ type OutsideWorkspaceGuard struct {
 	setSessionAllowed     func(bool)
 	rejectionInstruction  string
 	errorLabels           OutsideWorkspaceErrorLabels
+	failures              OutsideWorkspaceFailureFactory
 	temporaryPathAllowed  func(string) bool
 	onApproved            func(OutsideWorkspaceRequest, string)
 }
 
-func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, workspaceRootInfo os.FileInfo, workspaceOnly bool, allowOutsideWorkspace bool, approver OutsideWorkspaceApprover, sessionAllowed func() bool, setSessionAllowed func(bool), rejectionInstruction string, errorLabels OutsideWorkspaceErrorLabels, temporaryPathAllowed func(string) bool, onApproved func(OutsideWorkspaceRequest, string)) OutsideWorkspaceGuard {
+func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, workspaceRootInfo os.FileInfo, workspaceOnly bool, allowOutsideWorkspace bool, approver OutsideWorkspaceApprover, sessionAllowed func() bool, setSessionAllowed func(bool), rejectionInstruction string, errorLabels OutsideWorkspaceErrorLabels, failures OutsideWorkspaceFailureFactory, temporaryPathAllowed func(string) bool, onApproved func(OutsideWorkspaceRequest, string)) OutsideWorkspaceGuard {
 	return OutsideWorkspaceGuard{
 		workspaceRoot:         workspaceRoot,
 		workspaceRootReal:     workspaceRootReal,
@@ -42,6 +48,7 @@ func NewOutsideWorkspaceGuard(workspaceRoot string, workspaceRootReal string, wo
 		setSessionAllowed:     setSessionAllowed,
 		rejectionInstruction:  rejectionInstruction,
 		errorLabels:           errorLabels,
+		failures:              failures,
 		temporaryPathAllowed:  temporaryPathAllowed,
 		onApproved:            onApproved,
 	}
@@ -85,6 +92,9 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 	}
 	approval, approveErr := g.approver(ctx, req)
 	if approveErr != nil {
+		if g.failures.ApprovalFailed != nil {
+			return "", g.failures.ApprovalFailed(req, approveErr)
+		}
 		return "", approvalFailedFailure(requestedPath, approveErr.Error())
 	}
 	switch approval.Decision {
@@ -104,6 +114,9 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		g.logApproved(req, "allow_session")
 		return resolvedPath, nil
 	default:
+		if g.failures.UserDenied != nil {
+			return "", g.failures.UserDenied(req, approval, g.rejectionInstruction)
+		}
 		return "", userDeniedFailure(requestedPath, approval.Commentary)
 	}
 }
