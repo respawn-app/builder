@@ -577,6 +577,11 @@ func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
 		t.Fatalf("server picker narrow notice has unexpected left padding: %q", narrowView)
 	}
 
+	workspacePicker := newProjectWorkspacePickerModel(nil, "dark")
+	if got := xansi.Strip(workspacePicker.renderHeader()); strings.HasPrefix(got, "  ") {
+		t.Fatalf("workspace picker header has unexpected left padding: %q", got)
+	}
+
 	prompt := newProjectNamePromptModel("demo", "dark")
 	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("project name header has unexpected left padding: %q", got)

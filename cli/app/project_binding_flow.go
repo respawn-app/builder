@@ -277,7 +277,9 @@ func (m *projectBindingPickerModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(m.options.HeaderMarkdown)
 		if err == nil {
-			return tui.ApplyThemeDefaultForeground(trimRenderedHeaderInset(rendered), m.theme)
+			if header := normalizeRenderedHeaderText(rendered); header != "" {
+				return m.styles.headerFallback.Render(header)
+			}
 		}
 	}
 	return m.styles.headerFallback.Render(m.options.HeaderFallback)
@@ -612,7 +614,9 @@ func (m *projectWorkspacePickerModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(projectWorkspacePickerHeaderMarkdown)
 		if err == nil {
-			return tui.ApplyThemeDefaultForeground(trimRenderedHeaderInset(rendered), m.theme)
+			if header := normalizeRenderedHeaderText(rendered); header != "" {
+				return m.styles.headerFallback.Render(header)
+			}
 		}
 	}
 	return m.styles.headerFallback.Render(projectWorkspacePickerHeaderFallback)
@@ -772,7 +776,9 @@ func (m *projectNamePromptModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(projectNamePromptHeaderMarkdown)
 		if err == nil {
-			return tui.ApplyThemeDefaultForeground(trimRenderedHeaderInset(rendered), m.theme)
+			if header := normalizeRenderedHeaderText(rendered); header != "" {
+				return lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true).Render(header)
+			}
 		}
 	}
 	return lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true).Render(projectNamePromptHeaderFallback)
@@ -948,6 +954,10 @@ func trimRenderedHeaderInset(rendered string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func normalizeRenderedHeaderText(rendered string) string {
+	return strings.TrimSpace(ansi.Strip(trimRenderedHeaderInset(rendered)))
 }
 
 func renderStartupEditableInput(width int, height int, theme string, spec uiEditableInputRenderSpec) string {
