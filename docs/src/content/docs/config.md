@@ -24,6 +24,14 @@ The settings file is always:
 ~/.builder/config.toml
 ```
 
+Builder also installs a user-editable ripgrep config at:
+
+```text
+~/.builder/rg.conf
+```
+
+Builder creates `~/.builder/rg.conf` when missing and exports it to shell tools via `RIPGREP_CONFIG_PATH` only when you have not already set `RIPGREP_CONFIG_PATH` yourself.
+
 Changing `persistence_root` does not move `config.toml`. `persistence_root` controls where Builder stores its database & auth state. The default is `~/.builder`.
 
 

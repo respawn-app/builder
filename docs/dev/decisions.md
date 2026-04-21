@@ -38,6 +38,25 @@
 - Non-zero exit is recoverable (does not auto-abort the turn).
 - No automatic retry for shell process-launch failures.
 - Interrupt escalation is `SIGINT` then `SIGKILL` after 10s grace.
+- Shell output semantic post-processing is built into Builder, not delegated to shell wrappers. It applies after command execution and base sanitization, not before execution.
+- `raw` is a first-class public parameter on both `shell` and `exec_command`; default is processed output, `raw=true` bypasses semantic post-processing while keeping transport hygiene/safety truncation.
+- Built-in shell post-processors run before the optional user-defined hook.
+- User shell post-process hook is configured as a path to an executable/script; Builder sends JSON on stdin and expects JSON on stdout.
+- User shell post-process hook receives both original sanitized output and Builder's current built-in-processed output so it can either add on top or replace.
+- Builder does not hard-block the user hook on irreversible commands; hook responsibility stays with the user. Built-in Builder processors still target read-only/reversible command families by policy.
+- Shell semantic post-processing is configured under a dedicated `[shell]` config table.
+- `[shell].postprocessing_mode` is the global mode switch and uses explicit values: `none | builtin | user | all`.
+- Per-call `raw=true` still bypasses semantic shaping regardless of global mode.
+- User hook timeout is derived from the shell command timeout and counts as part of overall shell execution time rather than as a separate independent knob.
+- Built-in processors may run on both success and failure; each processor decides based on exit code.
+- Shell tool JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
+- Built-in shell processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
+- User-facing docs for shell post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
+- Hook failure warnings may surface directly in shell tool call results in v1; if surfaced, they should use a dedicated structured warning field rather than prepended prose. Warning deduplication is optional in v1.
+- The same post-processing pipeline applies to `shell` and `exec_command` inline output in v1.
+- If an `exec_command` backgrounds, its selected processing mode persists with that process session for later `write_stdin` polls and completion notices.
+- The first built-in processor in v1 is intentionally trivial: direct simple `go test ...` commands collapse successful output to the exact token `PASS`; failures fall back to unprocessed output.
+- Foreground `shell` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.
 - Background shell processes (`exec_command` / `write_stdin`) are app-global, not session-scoped.
 - Background process ids are app-global within one app instance; owner session metadata is advisory for routing notices/history, not an access-control boundary.
 - `/ps` may surface and operate on background processes started from other sessions in the same app instance; this is intentional in v1 to preserve operator visibility/control of long-running jobs.

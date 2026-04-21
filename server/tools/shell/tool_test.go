@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/server/tools"
+	"builder/shared/config"
 	"builder/shared/toolspec"
 )
 
@@ -214,6 +216,33 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
+	}
+}
+
+func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.EnsureManagedRGConfigFile(); err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+
+	env := envSliceToMap(t, enrichEnv([]string{"KEEP=1"}))
+	want := filepath.Join(home, ".builder", "rg.conf")
+	if env["RIPGREP_CONFIG_PATH"] != want {
+		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want %q", env["RIPGREP_CONFIG_PATH"], want)
+	}
+}
+
+func TestEnrichEnvKeepsUserRIPGREPConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.EnsureManagedRGConfigFile(); err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+
+	env := envSliceToMap(t, enrichEnv([]string{"RIPGREP_CONFIG_PATH=/tmp/user-rg.conf"}))
+	if env["RIPGREP_CONFIG_PATH"] != "/tmp/user-rg.conf" {
+		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want /tmp/user-rg.conf", env["RIPGREP_CONFIG_PATH"])
 	}
 }
 

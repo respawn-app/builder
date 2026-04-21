@@ -28,6 +28,14 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected config file to stay absent, got err=%v", err)
 	}
+	rgConfigPath := filepath.Join(home, ".builder", managedRGConfigName)
+	rgConfigBytes, err := os.ReadFile(rgConfigPath)
+	if err != nil {
+		t.Fatalf("read managed rg config: %v", err)
+	}
+	if string(rgConfigBytes) != managedRGConfigContents {
+		t.Fatalf("managed rg config contents mismatch: %q", string(rgConfigBytes))
+	}
 	if cfg.Source.CreatedDefaultConfig {
 		t.Fatalf("expected CreatedDefaultConfig=false")
 	}
@@ -160,6 +168,41 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if strings.Contains(string(settingsBytes), "This JSON block mirrors") {
 		t.Fatalf("expected default config to omit mirrored JSON block, got %q", string(settingsBytes))
+	}
+}
+
+func TestEnsureManagedRGConfigFilePreservesExistingContents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := ResolveManagedRGConfigPath()
+	if err != nil {
+		t.Fatalf("resolve managed rg config path: %v", err)
+	}
+	if err := ensureSettingsDir(path); err != nil {
+		t.Fatalf("ensure settings dir: %v", err)
+	}
+	const existing = "--max-columns=80\n"
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing managed rg config: %v", err)
+	}
+
+	createdPath, created, err := EnsureManagedRGConfigFile()
+	if err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+	if created {
+		t.Fatal("expected existing managed rg config not to be replaced")
+	}
+	if createdPath != path {
+		t.Fatalf("managed rg config path = %q, want %q", createdPath, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read managed rg config: %v", err)
+	}
+	if string(data) != existing {
+		t.Fatalf("managed rg config contents = %q, want %q", string(data), existing)
 	}
 }
 
