@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/client"
@@ -289,25 +288,7 @@ func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked 
 		}
 		return DedupeSortToolIDs(ids)
 	}
-	ids := config.EnabledToolIDs(settings)
-	sourceKind := strings.TrimSpace(source.Sources["tools."+string(toolspec.ToolMultiToolUseParallel)])
-	if sourceKind != "" && sourceKind != "default" {
-		return DedupeSortToolIDs(ids)
-	}
-	enabled := map[toolspec.ID]bool{}
-	for _, id := range ids {
-		enabled[id] = true
-	}
-	if llm.SupportsMultiToolUseParallelModel(settings.Model) {
-		enabled[toolspec.ToolMultiToolUseParallel] = true
-	} else {
-		delete(enabled, toolspec.ToolMultiToolUseParallel)
-	}
-	resolved := make([]toolspec.ID, 0, len(enabled))
-	for id := range enabled {
-		resolved = append(resolved, id)
-	}
-	return DedupeSortToolIDs(resolved)
+	return DedupeSortToolIDs(config.EnabledToolIDs(settings))
 }
 
 func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {

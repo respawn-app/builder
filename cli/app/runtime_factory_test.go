@@ -68,7 +68,6 @@ func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
 		shellOutputMaxChars:    16_000,
 		allowNonCwdEdits:       false,
 		supportsVision:         true,
-		registryProvider:       func() *tools.Registry { return tools.NewRegistry() },
 		askQuestionBroker:      askquestion.NewBroker(),
 		backgroundShellManager: background,
 		triggerHandoffController: func() triggerhandofftool.Controller {
@@ -94,33 +93,6 @@ func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
 		if handler.Name() != id {
 			t.Fatalf("handler/name mismatch: got %s want %s", handler.Name(), id)
 		}
-	}
-}
-
-func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
-	workspace := t.TempDir()
-
-	registry, _, _, err := buildToolRegistry(
-		workspace,
-		"",
-		[]toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolMultiToolUseParallel},
-		15*time.Second,
-		16_000,
-		false,
-		true,
-		nil,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("build tool registry: %v", err)
-	}
-
-	defs := registry.Definitions()
-	if len(defs) != 2 {
-		t.Fatalf("expected 2 local runtime tools in registry, got %d", len(defs))
-	}
-	if defs[0].ID != toolspec.ToolExecCommand || defs[1].ID != toolspec.ToolMultiToolUseParallel {
-		t.Fatalf("unexpected runtime tool definitions: %+v", defs)
 	}
 }
 

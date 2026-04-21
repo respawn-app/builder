@@ -252,8 +252,8 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolExecCommand || updated.EnabledTools[1] != toolspec.ToolMultiToolUseParallel {
-		t.Fatalf("enabled tools = %+v, want multi_tool_use_parallel+shell", updated.EnabledTools)
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
+		t.Fatalf("enabled tools = %+v, want shell only", updated.EnabledTools)
 	}
 }
 
@@ -278,9 +278,8 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 		ConfiguredModelName: "gpt-5.4",
 		WorkspaceRoot:       workspace,
 		Source: config.SourceReport{Sources: map[string]string{
-			"model":                         "file",
-			"tools.shell":                   "cli",
-			"tools.multi_tool_use_parallel": "cli",
+			"model":       "file",
+			"tools.shell": "cli",
 		}},
 	}
 
@@ -294,8 +293,8 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("enabled tools = %+v, want shell only", updated.EnabledTools)
 	}
-	if updated.Source.Sources["tools.multi_tool_use_parallel"] != "cli" {
-		t.Fatalf("tool source = %q, want cli", updated.Source.Sources["tools.multi_tool_use_parallel"])
+	if updated.Source.Sources["tools.shell"] != "cli" {
+		t.Fatalf("tool source = %q, want cli", updated.Source.Sources["tools.shell"])
 	}
 }
 

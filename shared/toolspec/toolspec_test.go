@@ -20,8 +20,6 @@ func TestParseID(t *testing.T) {
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "trigger_handoff", want: ToolTriggerHandoff, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
-		{in: "multi_tool_use_parallel", want: ToolMultiToolUseParallel, ok: true},
-		{in: "parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "unknown", ok: false},
 	}
 

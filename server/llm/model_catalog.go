@@ -56,13 +56,6 @@ func SupportsVisionInputsModel(model string) bool {
 	return ok && contract.SupportsVisionInputs
 }
 
-// SupportsMultiToolUseParallelModel reports whether the model benefits from the
-// Codex-style parallel tool wrapper compatibility schema.
-func SupportsMultiToolUseParallelModel(model string) bool {
-	contract, ok := LookupModelCapabilityContract(model)
-	return ok && contract.SupportsMultiToolUseParallel
-}
-
 // SupportsVerbosityModel reports whether Responses API text verbosity should be
 // sent for the given model identifier. Unknown models default to false because
 // unsupported verbosity fields can hard-fail requests.

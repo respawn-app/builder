@@ -18,12 +18,7 @@
 
 - Core tools: `exec_command`, `write_stdin`, `view_image`, `patch`, `ask_question`.
 - Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
-- Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
-- Tool execution concurrency inside a model step is unbounded.
-- Parallel call results are always returned in model-declared order.
-- If one parallel call fails, in-flight calls are allowed to finish before returning ordered results.
-- Ordered-result buffering is strict and uncapped in v1.
 
 ## Command Execution Tool
 

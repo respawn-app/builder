@@ -75,14 +75,8 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.EnabledTools[toolspec.ToolExecCommand] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
-	if cfg.Settings.EnabledTools[toolspec.ToolMultiToolUseParallel] {
-		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", toolspec.ToolMultiToolUseParallel)
-	}
 	if cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
 		t.Fatalf("expected %s disabled in static defaults", toolspec.ToolTriggerHandoff)
-	}
-	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolMultiToolUseParallel, got)
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
 		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolTriggerHandoff, got)

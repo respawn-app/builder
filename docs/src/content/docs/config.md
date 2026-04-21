@@ -167,7 +167,6 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 | --- | --- | --- |
 | `tools.ask_question` | `true` | Tool to ask interactive questions |
 | `tools.shell` | `true` | The primary shell tool. Internally this maps to `exec_command`. |
-| `tools.multi_tool_use_parallel` | Model-derived | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
 | `tools.patch` | `true` | The edit tool |
 | `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
@@ -177,7 +176,6 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
-- `multi_tool_use_parallel` tool is only needed for Codex models (because they are post-trained on it). All other models default to that tool being disabled.
 
 ### Skills
 
