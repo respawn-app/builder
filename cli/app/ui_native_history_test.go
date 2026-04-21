@@ -1696,6 +1696,42 @@ func TestProjectedRuntimeAssistantFinalAfterSpillDoesNotDuplicateEarlierStreamin
 	}
 }
 
+func TestProjectedRuntimeAssistantFinalAfterSpillMatchesTrimmedCommittedText(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "trim me"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	lineCount := m.nativeStreamingAssistantLiveBudget(m.termWidth) + 3
+	committedText := makeStreamingLines(lineCount)
+	streamText := committedText + "   "
+	next, firstCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: streamText}),
+	}})
+	m = next.(*uiModel)
+	firstFlush := collectNativeHistoryFlushText(collectCmdMessages(t, firstCmd))
+	if !strings.Contains(firstFlush, "line-01") {
+		t.Fatalf("expected first spill to include earliest streaming line, got %q", firstFlush)
+	}
+
+	next, finalCmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, Message: llm.Message{Role: llm.RoleAssistant, Content: committedText, Phase: llm.MessagePhaseFinal}}),
+	}})
+	m = next.(*uiModel)
+	finalFlush := collectNativeHistoryFlushText(collectCmdMessages(t, finalCmd))
+	if !strings.Contains(finalFlush, fmt.Sprintf("line-%02d", lineCount)) {
+		t.Fatalf("expected finalized append to include remaining streaming tail, got %q", finalFlush)
+	}
+	if got := strings.Count(firstFlush+finalFlush, "line-01"); got != 1 {
+		t.Fatalf("expected earliest streaming line emitted exactly once after trimmed commit, got %d in %q%q", got, firstFlush, finalFlush)
+	}
+	if strings.TrimSpace(m.nativeStreamingText) != "" || m.nativeStreamingFlushedLineCount != 0 || m.nativeStreamingDividerFlushed {
+		t.Fatalf("expected streaming spill state reset after trimmed commit, got text=%q flushed=%d divider=%v", m.nativeStreamingText, m.nativeStreamingFlushedLineCount, m.nativeStreamingDividerFlushed)
+	}
+}
+
 func TestProjectedRuntimeFirstAssistantFinalAfterSpillDoesNotInsertBogusDivider(t *testing.T) {
 	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil)
 	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 22, Height: 8})
