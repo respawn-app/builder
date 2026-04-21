@@ -297,7 +297,6 @@ func (s *Store) SetWorkspaceRoot(workspaceRoot string) error {
 	}
 	return s.mutateAndPersist(func() error {
 		s.meta.WorkspaceRoot = trimmedWorkspaceRoot
-		s.meta.WorkspaceContainer = filepath.Base(filepath.Clean(trimmedWorkspaceRoot))
 		s.meta.UpdatedAt = time.Now().UTC()
 		return nil
 	})

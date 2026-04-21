@@ -6670,6 +6670,25 @@ func TestDisconnectedQueuedFlushRestoresHiddenQueuedDrafts(t *testing.T) {
 	}
 }
 
+func TestDisconnectedQueuedFlushWithoutQueuedWorkDoesNotAppendFeedback(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+
+	next, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect command for no-op queued flush")
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("activity = %v, want idle", updated.activity)
+	}
+	if client.appendedRole != "" || client.appendedText != "" {
+		t.Fatalf("did not expect disconnect feedback append, got role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
 func TestDisconnectedQueuedInjectionSubmissionRestoresHiddenInjectedDrafts(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, nil, nil)

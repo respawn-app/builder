@@ -165,11 +165,11 @@ func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 
 func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, tea.Cmd) {
 	m := c.model
-	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, ""); blocked {
-		return m, disconnectCmd
-	}
 	if len(m.queued) == 0 {
 		return m, nil
+	}
+	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, ""); blocked {
+		return m, disconnectCmd
 	}
 	cmds := make([]tea.Cmd, 0, 2)
 	for len(m.queued) > 0 {

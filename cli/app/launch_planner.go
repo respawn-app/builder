@@ -74,7 +74,9 @@ func (p *runtimeLaunchPlan) CurrentControllerLeaseID() string {
 		return ""
 	}
 	if p.controllerLease != nil {
-		return p.controllerLease.Value()
+		if leaseID := strings.TrimSpace(p.controllerLease.Value()); leaseID != "" {
+			return leaseID
+		}
 	}
 	return strings.TrimSpace(p.ControllerLeaseID)
 }

@@ -48,6 +48,13 @@ func (s *plannerOwnershipServer) OwnsServer() bool {
 	return s != nil && s.owns
 }
 
+func TestRuntimeLaunchPlanCurrentControllerLeaseIDFallsBackToRawID(t *testing.T) {
+	plan := &runtimeLaunchPlan{ControllerLeaseID: " lease-raw ", controllerLease: newControllerLeaseManager("")}
+	if got := plan.CurrentControllerLeaseID(); got != "lease-raw" {
+		t.Fatalf("CurrentControllerLeaseID = %q, want lease-raw", got)
+	}
+}
+
 func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := "/tmp/workspace-a"

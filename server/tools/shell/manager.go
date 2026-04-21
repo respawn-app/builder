@@ -151,7 +151,11 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if !req.KeepStdinOpen {
 		if err := stdin.Close(); err != nil {
 			_ = killManagedProcess(cmd.Process)
-			_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(closeGracePeriod))
+			gracePeriod := m.closeGracePeriod
+			if gracePeriod <= 0 {
+				gracePeriod = closeGracePeriod
+			}
+			_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(gracePeriod))
 			_ = logFile.Close()
 			m.releaseEntry(id)
 			return ExecResult{}, fmt.Errorf("close stdin: %w", err)

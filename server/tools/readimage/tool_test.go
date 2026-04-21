@@ -90,6 +90,25 @@ func TestNewMissingWorkspaceSuggestsRebind(t *testing.T) {
 	}
 }
 
+func TestNewSymlinkLoopWorkspaceReturnsContextualResolutionError(t *testing.T) {
+	root := t.TempDir()
+	loopPath := filepath.Join(root, "loop")
+	if err := os.Symlink(loopPath, loopPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := New(loopPath, true)
+	if err == nil {
+		t.Fatal("expected error for symlink loop workspace")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected non-missing workspace error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "resolve workspace real path") {
+		t.Fatalf("expected contextual resolution error, got %v", err)
+	}
+}
+
 func TestCall_PDFPathReturnsInputFileContentItem(t *testing.T) {
 	workspace := t.TempDir()
 	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
