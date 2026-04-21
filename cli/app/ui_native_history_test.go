@@ -2097,6 +2097,67 @@ func TestNativeHistorySnapshotDoesNotReplaySameSessionRewriteInOngoingMode(t *te
 	}
 }
 
+func TestNativeHistorySnapshotAppendsVisibleSuffixAfterHiddenRewriteWithoutReplay(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	previous := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", EntryIndex: 0, EntryEnd: 0, Lines: []string{"❯ before compaction"}},
+		{Role: "assistant", DividerGroup: "assistant", EntryIndex: 1, EntryEnd: 1, Lines: []string{"❮ existing answer"}},
+	}}
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "compaction_notice", DividerGroup: "notice", EntryIndex: 3, EntryEnd: 3, Lines: []string{"context compacted for the 1st time"}},
+	}}
+	m.nativeRenderedProjection = previous
+	m.nativeRenderedSnapshot = previous.Render(tui.TranscriptDivider)
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitNone)
+	if cmd == nil {
+		t.Fatal("expected hidden rewrite to append visible suffix")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "context compacted for the 1st time") {
+		t.Fatalf("expected visible suffix append to include compaction notice, got %q", plain)
+	}
+	if strings.Contains(plain, "before compaction") || strings.Contains(plain, "existing answer") {
+		t.Fatalf("expected hidden rewrite append to avoid replaying prior visible history, got %q", plain)
+	}
+	if got := m.nativeRenderedSnapshot; got != m.nativeProjection.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot rebased to current projection, got %q", got)
+	}
+}
+
+func TestNativeHistorySnapshotDoesNotAppendSuffixWhenVisibleRewriteTouchesRenderedFrontier(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	previous := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", EntryIndex: 0, EntryEnd: 0, Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", EntryIndex: 1, EntryEnd: 1, Lines: []string{"❮ before"}},
+	}}
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", EntryIndex: 0, EntryEnd: 0, Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", EntryIndex: 1, EntryEnd: 1, Lines: []string{"❮ after"}},
+		{Role: "compaction_notice", DividerGroup: "notice", EntryIndex: 3, EntryEnd: 3, Lines: []string{"context compacted for the 1st time"}},
+	}}
+	m.nativeRenderedProjection = previous
+	m.nativeRenderedSnapshot = previous.Render(tui.TranscriptDivider)
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitNone)
+	if cmd == nil {
+		t.Fatal("expected same-session visible rewrite to surface a transient error notice")
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(nativeHistoryFlushMsg); ok {
+			t.Fatalf("did not expect visible rewrite to append stale suffix after divergence, got %+v", msg)
+		}
+	}
+}
+
 func TestNativeScrollbackResumesAssistantFlushesAfterSameSessionRebase(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "commit/push"}, {Role: "assistant", Text: "before"}}),

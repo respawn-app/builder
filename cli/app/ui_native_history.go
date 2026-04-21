@@ -63,6 +63,9 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		if appendCmd, appended := m.emitNativeSlidingWindowAppend(projection, previousProjection, m.transcriptBaseOffset, previousBaseOffset); appended {
 			return m.sequenceNativeStreamingScrollback(appendCmd)
 		}
+		if appendCmd, appended := m.emitNativePostRewriteVisibleAppend(projection, previousProjection); appended {
+			return m.sequenceNativeStreamingScrollback(appendCmd)
+		}
 		if replayPermit == nativeHistoryReplayPermitContinuityRecovery {
 			return m.sequenceNativeStreamingScrollback(m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection))
 		}
@@ -437,6 +440,9 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 		if appendCmd, appended := m.emitNativeSlidingWindowAppend(m.nativeProjection, m.nativeRenderedProjection, m.nativeProjectionBaseOffset, m.nativeRenderedBaseOffset); appended {
 			return appendCmd
 		}
+		if appendCmd, appended := m.emitNativePostRewriteVisibleAppend(m.nativeProjection, m.nativeRenderedProjection); appended {
+			return appendCmd
+		}
 		if rewriteRenderedHistory {
 			if replayPermit == nativeHistoryReplayPermitContinuityRecovery {
 				return m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
@@ -504,6 +510,83 @@ func (m *uiModel) emitNativeSlidingWindowAppend(current tui.TranscriptProjection
 		return nil, true
 	}
 	return m.emitNativeRenderedText(styledDelta), true
+}
+
+func (m *uiModel) emitNativePostRewriteVisibleAppend(current tui.TranscriptProjection, rendered tui.TranscriptProjection) (tea.Cmd, bool) {
+	if current.Empty() || rendered.Empty() {
+		return nil, false
+	}
+	renderedFrontier, ok := nativeProjectionRenderedFrontier(rendered)
+	if !ok {
+		return nil, false
+	}
+	if !nativeProjectionOverlapMatchesRendered(current, rendered, renderedFrontier) {
+		return nil, false
+	}
+	startBlock := nativeProjectionFirstBlockAfterEntry(current, renderedFrontier)
+	if startBlock < 0 {
+		return nil, false
+	}
+	m.nativeRenderedProjection = current
+	m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
+	m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
+	styledDelta := renderStyledNativeProjectionLines(current.LinesFromBlock(startBlock, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
+	if strings.TrimSpace(styledDelta) == "" {
+		return nil, true
+	}
+	return m.emitNativeRenderedText(styledDelta), true
+}
+
+func nativeProjectionRenderedFrontier(projection tui.TranscriptProjection) (int, bool) {
+	if len(projection.Blocks) == 0 {
+		return 0, false
+	}
+	frontier := projection.Blocks[len(projection.Blocks)-1].EntryEnd
+	if frontier < 0 {
+		frontier = projection.Blocks[len(projection.Blocks)-1].EntryIndex
+	}
+	return frontier, frontier >= 0
+}
+
+func nativeProjectionFirstBlockAfterEntry(projection tui.TranscriptProjection, frontier int) int {
+	for idx, block := range projection.Blocks {
+		if block.EntryIndex > frontier {
+			return idx
+		}
+	}
+	return -1
+}
+
+func nativeProjectionOverlapMatchesRendered(current tui.TranscriptProjection, rendered tui.TranscriptProjection, frontier int) bool {
+	if frontier < 0 {
+		return false
+	}
+	renderedByRange := make(map[[2]int]tui.TranscriptProjectionBlock, len(rendered.Blocks))
+	for _, block := range rendered.Blocks {
+		renderedByRange[[2]int{block.EntryIndex, block.EntryEnd}] = block
+	}
+	for _, block := range current.Blocks {
+		if block.EntryEnd > frontier {
+			continue
+		}
+		renderedBlock, ok := renderedByRange[[2]int{block.EntryIndex, block.EntryEnd}]
+		if !ok || !nativeProjectionBlocksEqual(block, renderedBlock) {
+			return false
+		}
+	}
+	return true
+}
+
+func nativeProjectionBlocksEqual(left tui.TranscriptProjectionBlock, right tui.TranscriptProjectionBlock) bool {
+	if left.Role != right.Role || left.DividerGroup != right.DividerGroup || len(left.Lines) != len(right.Lines) {
+		return false
+	}
+	for idx := range left.Lines {
+		if left.Lines[idx] != right.Lines[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *uiModel) emitNonContiguousNativeProjectionRecovery(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
