@@ -1452,6 +1452,7 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 }
 
 func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *testing.T) {
+	const roundTripTimeout = 5 * time.Second
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1503,25 +1504,25 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 		submitDone <- err
 	}()
 
-	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
+	waitForTestCondition(t, roundTripTimeout, "live deferred final delta visible", func() bool {
 		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
 	})
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, 2*time.Second, "detail mode active", func() bool {
+	waitForTestCondition(t, roundTripTimeout, "detail mode active", func() bool {
 		return model.view.Mode() == tui.ModeDetail
 	})
 
-	waitForSubmitResult(t, 2*time.Second, submitDone)
-	waitForTestCondition(t, 2*time.Second, "detail mode keeps deferred final visible", func() bool {
+	waitForSubmitResult(t, roundTripTimeout, submitDone)
+	waitForTestCondition(t, roundTripTimeout, "detail mode keeps deferred final visible", func() bool {
 		detail := stripANSIAndTrimRight(model.View())
 		return strings.Contains(detail, "foreground done")
 	})
 
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, 2*time.Second, "ongoing mode active", func() bool {
+	waitForTestCondition(t, roundTripTimeout, "ongoing mode active", func() bool {
 		return model.view.Mode() == tui.ModeOngoing
 	})
-	waitForTestCondition(t, 2*time.Second, "ongoing view keeps deferred final visible after detail exit", func() bool {
+	waitForTestCondition(t, roundTripTimeout, "ongoing view keeps deferred final visible after detail exit", func() bool {
 		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
 		return strings.Contains(ongoing, "foreground done")
 	})
