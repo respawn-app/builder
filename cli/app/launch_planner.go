@@ -287,9 +287,6 @@ func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sess
 	if sourceIsCLI(sources, "timeouts.model_request_seconds") {
 		plan.ActiveSettings.Timeouts.ModelRequestSeconds = cfg.Settings.Timeouts.ModelRequestSeconds
 	}
-	if sourceIsCLI(sources, "timeouts.shell_default_seconds") {
-		plan.ActiveSettings.Timeouts.ShellDefaultSeconds = cfg.Settings.Timeouts.ShellDefaultSeconds
-	}
 	if sourceIsCLI(sources, "openai_base_url") {
 		plan.ActiveSettings.OpenAIBaseURL = cfg.Settings.OpenAIBaseURL
 	}

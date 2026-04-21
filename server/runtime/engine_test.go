@@ -338,7 +338,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingErrorFeedback(t *testing.
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingHandoffFutureMessage(t *t
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestLastCommittedAssistantFinalAnswerDoesNotSkipTrailingUntypedDeveloperMes
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -586,11 +586,11 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: true,
 	})
 	if err != nil {
@@ -607,7 +607,7 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	if meta.Locked.Model != "gpt-5" {
 		t.Fatalf("locked model = %q", meta.Locked.Model)
 	}
-	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(toolspec.ToolShell) {
+	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(toolspec.ToolExecCommand) {
 		t.Fatalf("locked enabled tools = %+v", meta.Locked.EnabledTools)
 	}
 	if meta.Locked.ToolPreambles == nil || !*meta.Locked.ToolPreambles {
@@ -639,11 +639,11 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "high",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		HeadlessMode:  true,
 		ToolPreambles: true,
 	})
@@ -677,9 +677,9 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: false,
 	})
 	if err != nil {
@@ -696,9 +696,9 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: true,
 	})
 	if err != nil {
@@ -724,11 +724,11 @@ func TestThinkingLevelCanChangeAfterLock(t *testing.T) {
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "two"}, Usage: llm.Usage{WindowTokens: 200000}},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -760,7 +760,7 @@ func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		ThinkingLevel: "high",
 	})
@@ -798,10 +798,10 @@ func TestPoisonedLockedSessionFallsBackToModelReasoningSupport(t *testing.T) {
 	}
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5.4",
 		ThinkingLevel: "high",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -835,11 +835,11 @@ func TestFastModeCanChangeAfterLock(t *testing.T) {
 		caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5.3-codex",
 		Temperature:   1,
 		ThinkingLevel: "high",
-		EnabledTools:  []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -875,7 +875,7 @@ func TestSetFastModeRejectsUnsupportedProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5.3-codex",
 	})
 	if err != nil {
@@ -900,7 +900,7 @@ func TestSetFastModeTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	cfg := Config{Model: "gpt-5.3-codex"}
-	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -913,7 +913,7 @@ func TestSetFastModeTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("expected fast mode enabled, changed=%v enabled=%v", changed, eng.FastModeEnabled())
 	}
 
-	restarted, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	restarted, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new restarted engine: %v", err)
 	}
@@ -929,7 +929,7 @@ func TestFastModeSharedStateAppliesAcrossEngines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store A: %v", err)
 	}
-	engA, err := New(storeA, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	engA, err := New(storeA, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5.3-codex",
 		FastModeState: state,
 	})
@@ -949,7 +949,7 @@ func TestFastModeSharedStateAppliesAcrossEngines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store B: %v", err)
 	}
-	engB, err := New(storeB, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	engB, err := New(storeB, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5.3-codex",
 		FastModeState: state,
 	})
@@ -968,7 +968,7 @@ func TestSetAutoCompactionEnabledTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	cfg := Config{Model: "gpt-5"}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -981,7 +981,7 @@ func TestSetAutoCompactionEnabledTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("expected runtime auto-compaction disabled, got %v", got)
 	}
 
-	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new restarted engine: %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestSetAutoCompactionDisabledConcurrentWithBusyStepSkipsCompactionForCurren
 		responses: []llm.Response{
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-				ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 				Usage:     llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
 			},
 			{
@@ -1022,7 +1022,7 @@ func TestSetAutoCompactionDisabledConcurrentWithBusyStepSkipsCompactionForCurren
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolShell, started: started, release: release}), Config{
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 350000,
 	})
@@ -1070,7 +1070,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 			Client:        &fakeClient{},
 		},
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("reviewer frequency = %q, want edits", got)
 	}
 
-	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), cfg)
+	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err != nil {
 		t.Fatalf("new restarted engine: %v", err)
 	}
@@ -1100,7 +1100,7 @@ func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",
@@ -1130,7 +1130,7 @@ func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",
@@ -1405,7 +1405,7 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 		IsOpenAIFirstParty:            true,
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		WebSearchMode: "native",
 		EnabledTools:  []toolspec.ID{toolspec.ToolWebSearch},
@@ -1489,7 +1489,7 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 				Phase:   llm.MessagePhaseCommentary,
 			},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -1503,7 +1503,7 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -1718,7 +1718,7 @@ func TestEnsureLocked_DoesNotPersistFallbackProviderContractOnTransientFailure(t
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -1788,10 +1788,10 @@ func TestEnsureLocked_PersistsProviderCapabilityOverrideOverTransportMetadata(t 
 		IsOpenAIFirstParty:            true,
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                        "gpt-5.4",
 		ProviderCapabilitiesOverride: override,
-		EnabledTools:                 []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:                 []toolspec.ID{toolspec.ToolExecCommand},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -1845,7 +1845,7 @@ func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T)
 				Phase:   llm.MessagePhaseCommentary,
 			},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -1859,7 +1859,7 @@ func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T)
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -1931,7 +1931,7 @@ func TestSubmitUserMessageMissingPhaseLegacyClientRemainsTerminal(t *testing.T) 
 	}}
 	client.caps = llm.ProviderCapabilities{ProviderID: "anthropic", SupportsResponsesAPI: false, IsOpenAIFirstParty: false}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -1985,7 +1985,7 @@ func TestSubmitUserMessageMissingPhaseLegacyClientEmitsAssistantEventOnce(t *tes
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -2035,7 +2035,7 @@ func TestSubmitUserMessageMissingPhaseOpenAILegacyResponseRemainsTerminal(t *tes
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2091,7 +2091,7 @@ func TestSubmitUserMessageCommentaryWithoutToolsNonOpenAIRemainsTerminal(t *test
 	}}
 	client.caps = llm.ProviderCapabilities{ProviderID: "anthropic", SupportsResponsesAPI: false, IsOpenAIFirstParty: false}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "claude-3"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "claude-3"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2155,7 +2155,7 @@ func TestSubmitUserMessageCommentaryWithoutToolsEmitsRealtimeAssistantEvent(t *t
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -2206,7 +2206,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsEmitsRealtimeAssistantEventWith
 				Content: "working",
 				Phase:   llm.MessagePhaseCommentary,
 			},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -2223,7 +2223,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsEmitsRealtimeAssistantEventWith
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -2278,7 +2278,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 				Content: "working",
 				Phase:   llm.MessagePhaseCommentary,
 			},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -2295,7 +2295,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -2420,7 +2420,7 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -2480,7 +2480,7 @@ func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice
 	}
 
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
@@ -2564,7 +2564,7 @@ func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *te
 				Content: "working",
 				Phase:   llm.MessagePhaseCommentary,
 			},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			OutputItems: []llm.ResponseItem{{
 				Type: llm.ResponseItemTypeOther,
 				Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
@@ -2581,9 +2581,9 @@ func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *te
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:        "gpt-5",
-		EnabledTools: []toolspec.ID{toolspec.ToolShell, toolspec.ToolWebSearch},
+		EnabledTools: []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolWebSearch},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -2618,7 +2618,7 @@ func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2674,7 +2674,7 @@ func TestSubmitUserMessageLegacyEnvelopeLeakRemainsTerminal(t *testing.T) {
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2738,7 +2738,7 @@ func TestSubmitUserMessageFinalAnswerWithoutContentForcesNextLoop(t *testing.T) 
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2785,13 +2785,13 @@ func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T)
 				Phase:   llm.MessagePhaseFinal,
 			},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -2863,7 +2863,7 @@ func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "edits",
@@ -2904,7 +2904,7 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -2946,7 +2946,7 @@ func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:           "gpt-5",
 		FastModeEnabled: true,
 		Reviewer: ReviewerConfig{
@@ -2991,7 +2991,7 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3137,7 +3137,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -3156,7 +3156,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3262,7 +3262,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		if strings.Contains(message.Content, "Tool call:") && strings.Contains(message.Content, "pwd") {
 			foundToolCallEntry = true
 		}
-		if strings.Contains(message.Content, "Tool result:") && strings.Contains(message.Content, "{\"tool\":\"shell\"}") {
+		if strings.Contains(message.Content, "Tool result:") && strings.Contains(message.Content, "{\"tool\":\"exec_command\"}") {
 			foundToolResultEntry = true
 		}
 	}
@@ -3314,7 +3314,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -3329,7 +3329,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3375,7 +3375,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -3390,7 +3390,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3436,7 +3436,7 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -3455,7 +3455,7 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3496,7 +3496,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{
-				{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -3515,7 +3515,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -3610,7 +3610,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		t.Fatalf("expected assistant -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -3660,7 +3660,7 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusStateWithoutTransc
 		snapshotAtReviewerComplete ChatSnapshot
 		eng                        *Engine
 	)
-	eng, err = New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err = New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
@@ -3784,7 +3784,7 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:    "gpt-5",
 		Reviewer: ReviewerConfig{Model: "gpt-5"},
 	})
@@ -3853,7 +3853,7 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 1_000_000,
 		OnEvent: func(evt Event) {
@@ -3948,7 +3948,7 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -4011,7 +4011,7 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 		t.Fatalf("append legacy reviewer_status: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -4034,7 +4034,7 @@ func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *test
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -4062,7 +4062,7 @@ func TestAppendLocalEntryWithOngoingTextSkipsBlankEntries(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -4086,19 +4086,19 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	presentation := toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
-		ToolName:       string(toolspec.ToolShell),
+		ToolName:       string(toolspec.ToolExecCommand),
 		Presentation:   transcript.ToolPresentationShell,
 		RenderBehavior: transcript.ToolCallRenderBehaviorShell,
 		IsShell:        true,
 		Command:        "pwd",
-		TimeoutLabel:   "timeout: 5m",
+		TimeoutLabel:   "",
 	})
 	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{
 		Role:    llm.RoleAssistant,
 		Content: "working",
 		ToolCalls: []llm.ToolCall{{
 			ID:           "call_1",
-			Name:         string(toolspec.ToolShell),
+			Name:         string(toolspec.ToolExecCommand),
 			Input:        json.RawMessage(`{"command":"pwd"}`),
 			Presentation: presentation,
 		}},
@@ -4106,7 +4106,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 		t.Fatalf("append assistant tool call message: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -4124,7 +4124,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 	if toolEntry.ToolCall.Command != "pwd" {
 		t.Fatalf("expected restored shell command, got %+v", toolEntry.ToolCall)
 	}
-	if toolEntry.ToolCall.TimeoutLabel != "timeout: 5m" {
+	if toolEntry.ToolCall.TimeoutLabel != "" {
 		t.Fatalf("expected restored timeout label, got %+v", toolEntry.ToolCall)
 	}
 }
@@ -4136,7 +4136,7 @@ func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testi
 		t.Fatalf("create store: %v", err)
 	}
 	presentation := toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
-		ToolName:       string(toolspec.ToolShell),
+		ToolName:       string(toolspec.ToolExecCommand),
 		Presentation:   transcript.ToolPresentationShell,
 		RenderBehavior: transcript.ToolCallRenderBehaviorShell,
 		IsShell:        true,
@@ -4147,7 +4147,7 @@ func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testi
 		{
 			Type:             llm.ResponseItemTypeFunctionCall,
 			CallID:           "call_1",
-			Name:             string(toolspec.ToolShell),
+			Name:             string(toolspec.ToolExecCommand),
 			ToolPresentation: presentation,
 			Arguments:        json.RawMessage(`{"command":"pwd"}`),
 		},
@@ -4166,7 +4166,7 @@ func TestRestoreMessagesIgnoresLegacyReviewerRollbackHistoryReplacement(t *testi
 	}
 	resultCh := make(chan restoreResult, 1)
 	go func() {
-		restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+		restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 		resultCh <- restoreResult{engine: restored, err: err}
 	}()
 	var restored *Engine
@@ -4204,7 +4204,7 @@ func TestRestoreMessagesFailsOnMalformedHistoryReplacementPayload(t *testing.T) 
 			t.Fatalf("append malformed replay event: %v", err)
 		}
 
-		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
 			t.Fatalf("expected malformed history replacement decode error, got %v", err)
 		}
 	})
@@ -4223,7 +4223,7 @@ func TestRestoreMessagesFailsOnMalformedHistoryReplacementPayload(t *testing.T) 
 			t.Fatalf("append malformed replay event: %v", err)
 		}
 
-		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"}); err != nil {
+		if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"}); err != nil {
 			t.Fatalf("expected malformed legacy reviewer rollback payload to be ignored, got %v", err)
 		}
 	})
@@ -4249,7 +4249,7 @@ func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -4301,7 +4301,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -4341,7 +4341,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 		t.Fatalf("expected concise reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -4385,9 +4385,9 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 	messages := []llm.Message{
 		{Role: llm.RoleAssistant, Phase: llm.MessagePhaseCommentary, Content: "I’ll inspect quickly."},
 		{Role: llm.RoleUser, Content: "user request"},
-		{Role: llm.RoleAssistant, Content: "Running command now.", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{{ID: "call_1", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)}}},
+		{Role: llm.RoleAssistant, Content: "Running command now.", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{{ID: "call_1", Name: "exec_command", Input: json.RawMessage(`{"command":"pwd"}`)}}},
 		{Role: llm.RoleAssistant, Content: "assistant response", Phase: llm.MessagePhaseFinal},
-		{Role: llm.RoleTool, Name: "shell", ToolCallID: "call_1", Content: "{\"output\":\"ok\"}"},
+		{Role: llm.RoleTool, Name: "exec_command", ToolCallID: "call_1", Content: "{\"output\":\"ok\"}"},
 		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environmentInjectedHeader + "\nOS: darwin"},
 	}
 
@@ -4420,7 +4420,7 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 
 func TestBuildReviewerTranscriptMessagesKeepsOrphanToolOutputEntry(t *testing.T) {
 	messages := []llm.Message{
-		{Role: llm.RoleTool, Name: "shell", ToolCallID: "orphan_call", Content: "{\"output\":\"orphan\"}"},
+		{Role: llm.RoleTool, Name: "exec_command", ToolCallID: "orphan_call", Content: "{\"output\":\"orphan\"}"},
 	}
 
 	reviewerMessages := buildReviewerTranscriptMessages(messages)
@@ -4835,7 +4835,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	client := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -4850,7 +4850,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolShell, started: started, release: release}), Config{
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -4953,7 +4953,7 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -4976,7 +4976,7 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(blockingTool{name: toolspec.ToolShell, started: started, release: release}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -5071,7 +5071,7 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -5169,7 +5169,7 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -5241,7 +5241,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 	client := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -5256,7 +5256,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolShell, started: started, release: release}), Config{
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -5376,7 +5376,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 	client := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -5387,7 +5387,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolShell, started: started, release: release}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -5575,7 +5575,7 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 		chmodDone  bool
 		chmodError error
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -5672,7 +5672,7 @@ func TestNewNormalizesPersistedInFlightStepOnReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -5716,15 +5716,15 @@ func TestReopenCarriesInterruptedAskQuestionToolAttemptIntoNextModelRequest(t *t
 func TestReopenCarriesInterruptedShellToolAttemptIntoNextModelRequest(t *testing.T) {
 	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
 		ID:    "call_shell",
-		Name:  string(toolspec.ToolShell),
+		Name:  string(toolspec.ToolExecCommand),
 		Input: json.RawMessage(`{"command":"pwd"}`),
 		Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
-			ToolName:       string(toolspec.ToolShell),
+			ToolName:       string(toolspec.ToolExecCommand),
 			Presentation:   transcript.ToolPresentationShell,
 			RenderBehavior: transcript.ToolCallRenderBehaviorShell,
 			IsShell:        true,
 			Command:        "pwd",
-			TimeoutLabel:   "timeout: 5m",
+			TimeoutLabel:   "",
 		}),
 	})
 }
@@ -5820,7 +5820,7 @@ func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -5829,7 +5829,7 @@ func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.
 	if err != nil {
 		t.Fatalf("submit user shell command: %v", err)
 	}
-	if result.Name != toolspec.ToolShell {
+	if result.Name != toolspec.ToolExecCommand {
 		t.Fatalf("unexpected tool result name: %+v", result)
 	}
 
@@ -5847,11 +5847,11 @@ func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.
 				foundDeveloperNotice = true
 			}
 		case llm.RoleAssistant:
-			if len(msg.ToolCalls) == 1 && msg.ToolCalls[0].Name == string(toolspec.ToolShell) {
+			if len(msg.ToolCalls) == 1 && msg.ToolCalls[0].Name == string(toolspec.ToolExecCommand) {
 				foundAssistantToolCall = true
 			}
 		case llm.RoleTool:
-			if msg.Name == string(toolspec.ToolShell) && strings.TrimSpace(msg.Content) != "" {
+			if msg.Name == string(toolspec.ToolExecCommand) && strings.TrimSpace(msg.Content) != "" {
 				foundToolOutput = true
 			}
 		}
@@ -5904,7 +5904,7 @@ func TestSubmitUserShellCommandReturnsUnknownToolErrorWhenShellNotRegistered(t *
 	if !strings.Contains(err.Error(), "unknown tool") {
 		t.Fatalf("expected unknown tool error, got %v", err)
 	}
-	if result.Name != toolspec.ToolShell || !result.IsError {
+	if result.Name != toolspec.ToolExecCommand || !result.IsError {
 		t.Fatalf("expected shell error result, got %+v", result)
 	}
 	var payload struct {
@@ -5923,7 +5923,7 @@ func TestSubmitUserShellCommandReturnsUnknownToolErrorWhenShellNotRegistered(t *
 		if msg.Role != llm.RoleTool {
 			continue
 		}
-		if msg.Name != string(toolspec.ToolShell) {
+		if msg.Name != string(toolspec.ToolExecCommand) {
 			continue
 		}
 		foundToolOutput = true
@@ -5945,7 +5945,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 			ToolCalls: []llm.ToolCall{
-				{ID: "a", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{}`)},
+				{ID: "a", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{}`)},
 				{ID: "b", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
@@ -5957,7 +5957,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	}}
 
 	eng, err := New(store, client, tools.NewRegistry(
-		fakeTool{name: toolspec.ToolShell, delay: 40 * time.Millisecond},
+		fakeTool{name: toolspec.ToolExecCommand, delay: 40 * time.Millisecond},
 		fakeTool{name: toolspec.ToolPatch, delay: 1 * time.Millisecond},
 	), Config{Model: "gpt-5", Temperature: 1})
 	if err != nil {
@@ -6024,7 +6024,7 @@ func TestParallelToolCompletionAppearsInChatSnapshotBeforeAllToolsFinish(t *test
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 			ToolCalls: []llm.ToolCall{
-				{ID: "a", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{}`)},
+				{ID: "a", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{}`)},
 				{ID: "b", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
@@ -6035,7 +6035,7 @@ func TestParallelToolCompletionAppearsInChatSnapshotBeforeAllToolsFinish(t *test
 		},
 	}}
 
-	slow := blockingTool{name: toolspec.ToolShell, started: make(chan struct{}), release: make(chan struct{})}
+	slow := blockingTool{name: toolspec.ToolExecCommand, started: make(chan struct{}), release: make(chan struct{})}
 	toolCompleted := make(chan tools.Result, 4)
 	eng, err := New(store, client, tools.NewRegistry(
 		slow,
@@ -6116,7 +6116,7 @@ func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 			ToolCalls: []llm.ToolCall{
-				{ID: "a", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				{ID: "a", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
@@ -6126,7 +6126,7 @@ func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -6181,12 +6181,12 @@ func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
 		{
 			name:     "known tool without handler",
 			registry: tools.NewRegistry(),
-			callName: string(toolspec.ToolShell),
+			callName: string(toolspec.ToolExecCommand),
 		},
 		{
 			name:     "registered tool handler",
-			registry: tools.NewRegistry(fakeTool{name: toolspec.ToolShell}),
-			callName: string(toolspec.ToolShell),
+			registry: tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}),
+			callName: string(toolspec.ToolExecCommand),
 		},
 	}
 
@@ -6283,11 +6283,11 @@ func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *test
 		}
 		return 100
 	}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	call := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}
 	if err := eng.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
 		t.Fatalf("append assistant tool call: %v", err)
 	}
@@ -6332,18 +6332,18 @@ func TestRestoreMessagesPreservesRecoveredMultiToolProviderOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	call1 := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
-	call2 := llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"ls"}`)}
 	if _, err := store.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
 		t.Fatalf("append assistant tool calls: %v", err)
 	}
-	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"/tmp"}`)}); err != nil {
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(`{"output":"/tmp"}`)}); err != nil {
 		t.Fatalf("append first tool completion: %v", err)
 	}
-	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"a.txt"}`)}); err != nil {
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(`{"output":"a.txt"}`)}); err != nil {
 		t.Fatalf("append second tool completion: %v", err)
 	}
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -6390,12 +6390,12 @@ func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T
 		return count
 	}
 	client := &fakeCompactionClient{inputTokenCountFn: countForRequest}
-	live, err := New(liveStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	live, err := New(liveStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new live engine: %v", err)
 	}
-	call1 := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
-	call2 := llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"ls"}`)}
 	if err := live.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
 		t.Fatalf("append live assistant tool calls: %v", err)
 	}
@@ -6413,13 +6413,13 @@ func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T
 	if _, err := restoredStore.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
 		t.Fatalf("append restored assistant tool calls: %v", err)
 	}
-	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(`{"tool":"exec_command"}`)}); err != nil {
 		t.Fatalf("append restored tool completion 1: %v", err)
 	}
-	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(`{"tool":"exec_command"}`)}); err != nil {
 		t.Fatalf("append restored tool completion 2: %v", err)
 	}
-	restored, err := New(restoredStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	restored, err := New(restoredStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new restored engine: %v", err)
 	}
@@ -6462,7 +6462,7 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -6525,7 +6525,7 @@ func TestStreamingEmitsReasoningSummaryDeltaEvents(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, fakeReasoningStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, fakeReasoningStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -6566,7 +6566,7 @@ func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, fakeAsyncLateDeltaClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, fakeAsyncLateDeltaClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -6610,7 +6610,7 @@ func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, fakeNoopStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, fakeNoopStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -6680,7 +6680,7 @@ func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
 		conversationWithLive int
 	)
 	var eng *Engine
-	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -6724,7 +6724,7 @@ func TestChatSnapshotOngoingTracksStreamingAndClearsOnCommit(t *testing.T) {
 		deltaSnapshots []string
 	)
 	var eng *Engine
-	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind != EventAssistantDelta || eng == nil {
@@ -6768,7 +6768,7 @@ func TestAuthErrorsAreNotRetried(t *testing.T) {
 	}
 
 	client := &authFailClient{}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 	})
 	if err != nil {
@@ -6794,7 +6794,7 @@ func TestNonRetriableStatusCodesAreNotRetried(t *testing.T) {
 			}
 
 			client := &statusFailClient{status: status}
-			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 				Model: "gpt-5",
 			})
 			if err != nil {
@@ -6820,7 +6820,7 @@ func TestProviderContractErrorsAreNotRetried(t *testing.T) {
 	}
 
 	client := &providerContractFailClient{}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -6878,7 +6878,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -6971,7 +6971,7 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7016,7 +7016,7 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-1"}, Usage: llm.Usage{WindowTokens: 200000}},
 		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-2"}, Usage: llm.Usage{WindowTokens: 200000}},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7093,7 +7093,7 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 	}
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		DisabledSkills: map[string]bool{"workspace skill": true},
 	})
@@ -7141,7 +7141,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	}
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7247,7 +7247,7 @@ func TestNewRejectsEmptyModel(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	_, err = New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{})
+	_, err = New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
 	if err == nil {
 		t.Fatal("expected New to reject empty model")
 	}
@@ -7277,7 +7277,7 @@ func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5.3-codex",
 		ThinkingLevel:         "high",
 		AutoCompactTokenLimit: 1_000_000_000,
@@ -7360,7 +7360,7 @@ func TestManualCompactionReinjectsHeadlessEnterOnlyWhileHeadlessRemainsActive(t 
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7404,7 +7404,7 @@ func TestManualCompactionDoesNotReinjectHeadlessEnterAfterExit(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7456,7 +7456,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new interactive engine: %v", err)
 	}
@@ -7486,7 +7486,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", HeadlessMode: true})
+	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
 	if err != nil {
 		t.Fatalf("new headless engine: %v", err)
 	}
@@ -7556,7 +7556,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", HeadlessMode: true})
+	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
 	if err != nil {
 		t.Fatalf("new headless engine: %v", err)
 	}
@@ -7586,7 +7586,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new interactive engine: %v", err)
 	}
@@ -7665,7 +7665,7 @@ func TestSubmitUserMessageDoesNotInjectHeadlessExitPromptForNormalSession(t *tes
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7702,7 +7702,7 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}}
 
 	var seenFlushed bool
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" {
@@ -7765,7 +7765,7 @@ func TestQueuedUserMessageFlushDoesNotEmitConversationUpdatedForInjectedMessage(
 		eventIndex int
 		flushIndex = -1
 	)
-	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
@@ -7809,7 +7809,7 @@ func TestDirectUserMessageFlushDoesNotEmitConversationUpdated(t *testing.T) {
 		eventIndex int
 		flushIndex = -1
 	)
-	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
@@ -7856,7 +7856,7 @@ func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 		flushCount int
 		flushed    Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed {
@@ -7918,7 +7918,7 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -7986,7 +7986,7 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8063,7 +8063,7 @@ func TestDiscardQueuedUserMessagesMatchingRemovesQueuedEntries(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8091,7 +8091,7 @@ func TestContextUsageUsesLastUsageWhenAvailable(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8113,7 +8113,7 @@ func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8137,7 +8137,7 @@ func TestContextUsageTracksWeightedCacheHitPercentageFromModelUsage(t *testing.T
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8166,7 +8166,7 @@ func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8194,7 +8194,7 @@ func TestContextUsageAddsOnlyPostCheckpointEstimateDelta(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8227,7 +8227,7 @@ func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8246,7 +8246,7 @@ func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -8272,7 +8272,7 @@ func TestHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8314,7 +8314,7 @@ func TestReopenedSessionHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8329,7 +8329,7 @@ func TestReopenedSessionHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -8385,7 +8385,7 @@ func TestContextUsageDoesNotInflateInlineImagePayloadByBase64Length(t *testing.T
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -8415,7 +8415,7 @@ func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   410_000,
 		AutoCompactTokenLimit: 300,
@@ -8441,7 +8441,7 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 900,
@@ -8666,7 +8666,7 @@ func TestShouldAutoCompactRechecksProviderBeforeCompactingOnLargeEstimate(t *tes
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 1, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 2,
@@ -8699,7 +8699,7 @@ func TestShouldAutoCompactPrefersConfiguredThresholdOverResolvedContextWindow(t 
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 950, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 360_000,
@@ -8732,7 +8732,7 @@ func TestShouldAutoCompactAccountsForReservedOutputBudget(t *testing.T) {
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 850, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 900,
@@ -8758,7 +8758,7 @@ func TestShouldAutoCompactSkipsPreciseCountWhenFarBelowThreshold(t *testing.T) {
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 999999, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 100_000,
@@ -8786,7 +8786,7 @@ func TestShouldAutoCompactMemoizesPreciseCountForUnchangedRequest(t *testing.T) 
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 96000, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 100_000,
@@ -8814,7 +8814,7 @@ func TestCompactionSoonReminderStaysSingleShotAfterReEnablingAutoCompactionAbove
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -8891,7 +8891,7 @@ func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) 
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -8911,7 +8911,7 @@ func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -8942,7 +8942,7 @@ func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T)
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -8965,7 +8965,7 @@ func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T)
 	if forkedStore.Meta().CompactionSoonReminderIssued {
 		t.Fatal("expected fork before reminder to clear reminder-issued state")
 	}
-	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -8993,7 +8993,7 @@ func TestForkedSessionDoesNotCopyPersistedUsageState(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -9023,7 +9023,7 @@ func TestForkedSessionAfterReminderPreservesCompactionSoonReminderIssuedState(t 
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9065,7 +9065,7 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9096,7 +9096,7 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9119,7 +9119,7 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	if forkedStore.Meta().CompactionSoonReminderIssued {
 		t.Fatal("expected fork of compacted session to inherit cleared reminder-issued state")
 	}
-	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9140,7 +9140,7 @@ func TestLegacyReviewerRollbackHistoryReplacementIsIgnoredAcrossReopen(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -9188,7 +9188,7 @@ func TestCompactionSoonReminderSkipsPreciseCountingWhenSuppressed(t *testing.T) 
 			}
 
 			client := &preciseCompactionClient{inputTokenCount: 890, contextWindow: 2_000}
-			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 				Model:                 "gpt-5",
 				ContextWindowTokens:   2_000,
 				AutoCompactTokenLimit: 1_000,
@@ -9249,7 +9249,7 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   20_000,
 		AutoCompactTokenLimit: 10_000,
@@ -9302,7 +9302,7 @@ func TestRunStepLoopInjectsCompactionSoonReminderBeforeFinalAnswerRequest(t *tes
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9368,7 +9368,7 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterToolOutputBound
 		responses: []llm.Response{
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "checking", Phase: llm.MessagePhaseCommentary},
-				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 				Usage:     llm.Usage{InputTokens: 100, WindowTokens: 2_000},
 			},
 			{
@@ -9391,7 +9391,7 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterToolOutputBound
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9456,7 +9456,7 @@ func TestRunStepLoopDoesNotDuplicateCompactionSoonReminderAfterAutoCompactionIsD
 		responses: []llm.Response{
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "checking", Phase: llm.MessagePhaseCommentary},
-				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 				Usage:     llm.Usage{InputTokens: 100, WindowTokens: 2_000},
 			},
 			{
@@ -9483,7 +9483,7 @@ func TestRunStepLoopDoesNotDuplicateCompactionSoonReminderAfterAutoCompactionIsD
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -9553,12 +9553,12 @@ func TestCompactionSoonReminderIncludesTriggerHandoffAdditionWhenConfigured(t *t
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
-		EnabledTools:          []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9592,12 +9592,12 @@ func TestCompactionSoonReminderRechecksPreciselyAfterTranscriptMutation(t *testi
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 840, contextWindow: 2_000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
-		EnabledTools:          []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9649,10 +9649,10 @@ func TestTriggerHandoffFailsBeforeReminder(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9674,10 +9674,10 @@ func TestTriggerHandoffFailsWhenAutoCompactionDisabled(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9709,10 +9709,10 @@ func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCa
 	client := &fakeClient{
 		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9799,10 +9799,10 @@ func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 		},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9871,10 +9871,10 @@ func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecom
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -9947,10 +9947,10 @@ func TestReopenedSessionAfterTriggerHandoffFutureMessageAppendFailureRetriesWith
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10002,10 +10002,10 @@ func TestReopenedSessionAfterTriggerHandoffFutureMessageAppendFailureRetriesWith
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
 	}}}
-	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10076,13 +10076,13 @@ func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsF
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolShell},
+		fakeTool{name: toolspec.ToolExecCommand},
 		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
 	)
 	eng, err = New(store, client, registry, Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10164,7 +10164,7 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolShell},
+		fakeTool{name: toolspec.ToolExecCommand},
 		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
 	)
 	eng, err = New(store, client, registry, Config{
@@ -10172,7 +10172,7 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 		CompactionMode:        "local",
 		ContextWindowTokens:   20_000,
 		AutoCompactTokenLimit: 10_000,
-		EnabledTools:          []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10260,13 +10260,13 @@ func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLing
 
 	var eng *Engine
 	registry := tools.NewRegistry(
-		fakeTool{name: toolspec.ToolShell},
+		fakeTool{name: toolspec.ToolExecCommand},
 		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
 	)
 	eng, err = New(store, firstClient, registry, Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10298,10 +10298,10 @@ func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLing
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 2_000},
 	}}}
-	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10340,10 +10340,10 @@ func TestReopenedSessionAfterSuccessfulTriggerHandoffRequeuesPendingHandoff(t *t
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10384,10 +10384,10 @@ func TestReopenedSessionAfterSuccessfulTriggerHandoffRequeuesPendingHandoff(t *t
 			Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
 		},
 	}}
-	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10458,10 +10458,10 @@ func TestForkedSessionAfterTriggerHandoffRequeuesPendingHandoff(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10495,10 +10495,10 @@ func TestForkedSessionAfterTriggerHandoffRequeuesPendingHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork session: %v", err)
 	}
-	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore forked engine: %v", err)
@@ -10518,10 +10518,10 @@ func TestReopenedSessionAfterTriggerHandoffDoesNotRequeueWhenAnyCompactionAlread
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10556,10 +10556,10 @@ func TestReopenedSessionAfterTriggerHandoffDoesNotRequeueWhenAnyCompactionAlread
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
 	}}}
-	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10601,10 +10601,10 @@ func TestReopenedSessionAfterFailedTriggerHandoffDoesNotRequeuePendingHandoff(t 
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10629,10 +10629,10 @@ func TestReopenedSessionAfterFailedTriggerHandoffDoesNotRequeuePendingHandoff(t 
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10649,10 +10649,10 @@ func TestReopenedSessionAfterLegacyReviewerRollbackStillRequeuesPendingTriggerHa
 		t.Fatalf("create store: %v", err)
 	}
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10683,10 +10683,10 @@ func TestReopenedSessionAfterLegacyReviewerRollbackStillRequeuesPendingTriggerHa
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -10717,10 +10717,10 @@ func TestManualCompactionClearsQueuedTriggerHandoff(t *testing.T) {
 		},
 	}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		CompactionMode: "local",
-		EnabledTools:   []toolspec.ID{toolspec.ToolShell, toolspec.ToolTriggerHandoff},
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -10777,7 +10777,7 @@ func TestManualCompactionRemotePassesSlashCommandArgumentsAsInstructions(t *test
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -10809,7 +10809,7 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
 		},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -10853,7 +10853,7 @@ func TestManualCompactionLocalSendsPromptAsDeveloperMessage(t *testing.T) {
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"},
 		}},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -10902,7 +10902,7 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -10974,7 +10974,7 @@ func TestManualLocalCompactionRebuildsCanonicalContextOrder(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11020,7 +11020,7 @@ func TestHandoffCompactionAppendsFutureMessageBeforeHeadlessReentry(t *testing.T
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11071,7 +11071,7 @@ func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testin
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11125,7 +11125,7 @@ func TestManualLocalCompactionOmitsCarryoverWithoutNewUserMessageSincePreviousCo
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11166,7 +11166,7 @@ func TestReopenedManualCompactionKeepsCarryoverAsSingleDetailTranscriptEntry(t *
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11181,7 +11181,7 @@ func TestReopenedManualCompactionKeepsCarryoverAsSingleDetailTranscriptEntry(t *
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
 	}
@@ -11246,7 +11246,7 @@ func TestRemoteCompactionTrimUsesSublinearPreciseTokenCountCalls(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11288,7 +11288,7 @@ func TestLocalCompactionCarryoverUsesSublinearPreciseTokenCountCalls(t *testing.
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		ContextWindowTokens: 400_000,
 		CompactionMode:      "local",
@@ -11339,7 +11339,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
 		},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11426,11 +11426,11 @@ func TestManualCompactionLocalFailsWhenModelAttemptsToolCalls(t *testing.T) {
 		responses: []llm.Response{
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
-				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			},
 		},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11455,7 +11455,7 @@ func TestManualCompactionDisabledWhenModeNone(t *testing.T) {
 	}
 
 	client := &fakeCompactionClient{}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "none"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "none"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11497,7 +11497,7 @@ func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11533,7 +11533,7 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11584,7 +11584,7 @@ func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 	})
 	if err != nil {
@@ -11618,7 +11618,7 @@ func TestEmitCompactionStatusStillPublishesTerminalEventWhenNoticePersistenceFai
 		t.Fatalf("create store: %v", err)
 	}
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -11658,7 +11658,7 @@ func TestEmitCompactionStatusStillPublishesFailureEventWhenErrorPersistenceFails
 		t.Fatalf("create store: %v", err)
 	}
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -11702,7 +11702,7 @@ func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
 			},
@@ -11722,7 +11722,7 @@ func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11797,7 +11797,7 @@ func TestAutoCompactionRemoteDropsPreCompactionDeveloperContext(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
 			},
@@ -11817,7 +11817,7 @@ func TestAutoCompactionRemoteDropsPreCompactionDeveloperContext(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11892,7 +11892,7 @@ func TestManualRemoteCompactionRebuildsCanonicalPrefixOrder(t *testing.T) {
 		},
 		Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -11969,7 +11969,7 @@ func TestRemoteCompactionMissingCheckpointFallsBackToLocal(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
 			},
@@ -11992,7 +11992,7 @@ func TestRemoteCompactionMissingCheckpointFallsBackToLocal(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -12040,7 +12040,7 @@ func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
 			},
@@ -12064,7 +12064,7 @@ func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -12098,7 +12098,7 @@ func TestAutoCompactionDoesNotRetryNonOverflow400(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
 			},
@@ -12118,7 +12118,7 @@ func TestAutoCompactionDoesNotRetryNonOverflow400(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -12143,7 +12143,7 @@ func TestAutoCompactionRetries413ByTrimmingOldestEligibleItems(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
 			},
@@ -12167,7 +12167,7 @@ func TestAutoCompactionRetries413ByTrimmingOldestEligibleItems(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5.3-codex"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -12201,7 +12201,7 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 			{
 				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 				ToolCalls: []llm.ToolCall{
-					{ID: "call_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
 			},
@@ -12225,7 +12225,7 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

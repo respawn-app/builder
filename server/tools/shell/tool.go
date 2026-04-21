@@ -2,27 +2,18 @@ package shell
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"sync/atomic"
-	"time"
 	"unicode"
 
-	"builder/server/tools"
 	"builder/shared/config"
-	"builder/shared/toolspec"
 
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const (
-	defaultTimeout                     = 5 * time.Minute
-	maxTimeout                         = time.Hour
 	defaultLimit                       = 16_000
 	headTailSize                       = 1000
 	truncationBannerTemplate           = "\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n"
@@ -52,164 +43,6 @@ var shellEnvOverrides = []string{
 	"PY_COLORS=0",
 	"CARGO_TERM_COLOR=never",
 	"NPM_CONFIG_COLOR=false",
-}
-
-type input struct {
-	Command        string `json:"command"`
-	Cmd            string `json:"cmd,omitempty"`
-	TimeoutSeconds *int   `json:"timeout_seconds,omitempty"`
-	Workdir        string `json:"workdir,omitempty"`
-}
-
-type output struct {
-	ExitCode        int    `json:"exit_code"`
-	Output          string `json:"output"`
-	Truncated       bool   `json:"truncated"`
-	TruncationBytes int    `json:"truncation_bytes,omitempty"`
-}
-
-type Tool struct {
-	workspaceRoot  string
-	outputLimit    int
-	defaultTimeout time.Duration
-}
-
-type Option func(*Tool)
-
-func WithDefaultTimeout(timeout time.Duration) Option {
-	return func(t *Tool) {
-		if timeout > 0 {
-			t.defaultTimeout = timeout
-		}
-	}
-}
-
-func New(workspaceRoot string, outputLimit int, opts ...Option) *Tool {
-	if outputLimit <= 0 {
-		outputLimit = defaultLimit
-	}
-	t := &Tool{workspaceRoot: workspaceRoot, outputLimit: outputLimit, defaultTimeout: defaultTimeout}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(t)
-		}
-	}
-	return t
-}
-
-func (t *Tool) Name() toolspec.ID {
-	return toolspec.ToolShell
-}
-
-func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
-	var in input
-	if err := json.Unmarshal(c.Input, &in); err != nil {
-		return tools.ErrorResultWith(c, fmt.Sprintf("invalid input: %v", err), marshalNoHTMLEscape), nil
-	}
-	if strings.TrimSpace(in.Command) == "" {
-		in.Command = strings.TrimSpace(in.Cmd)
-	}
-	if in.Command == "" {
-		return tools.ErrorResultWith(c, "command is required", marshalNoHTMLEscape), nil
-	}
-
-	timeout := t.defaultTimeout
-	if in.TimeoutSeconds != nil {
-		requested := time.Duration(*in.TimeoutSeconds) * time.Second
-		if requested <= 0 {
-			return tools.ErrorResultWith(c, "timeout_seconds must be positive", marshalNoHTMLEscape), nil
-		}
-		if requested > maxTimeout {
-			requested = maxTimeout
-		}
-		timeout = requested
-	}
-
-	workdir := ResolveWorkdir(t.workspaceRoot, in.Workdir)
-
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell, "-lc", in.Command)
-	cmd.Dir = workdir
-	cmd.Env = enrichEnv(os.Environ())
-
-	var merged bytes.Buffer
-	cmd.Stdout = &merged
-	cmd.Stderr = &merged
-
-	if err := cmd.Start(); err != nil {
-		return tools.ErrorResultWith(c, fmt.Sprintf("failed to launch command: %v", err), marshalNoHTMLEscape), nil
-	}
-
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
-	}()
-
-	var err error
-	var timedOut atomic.Bool
-	select {
-	case err = <-waitCh:
-	case <-callCtx.Done():
-		if callCtx.Err() == context.DeadlineExceeded {
-			timedOut.Store(true)
-		}
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(os.Interrupt)
-		}
-		select {
-		case err = <-waitCh:
-		case <-time.After(10 * time.Second):
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			err = <-waitCh
-		}
-	}
-
-	exitCode := 0
-	if timedOut.Load() {
-		exitCode = 124
-	}
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			if timedOut.Load() {
-				exitCode = 124
-			} else {
-				exitCode = ee.ExitCode()
-				if exitCode == -1 {
-					exitCode = 130
-				}
-			}
-		} else if timedOut.Load() {
-			exitCode = 124
-		} else if errors.Is(callCtx.Err(), context.Canceled) {
-			exitCode = 130
-		} else {
-			return tools.ErrorResultWith(c, fmt.Sprintf("failed to launch command: %v", err), marshalNoHTMLEscape), nil
-		}
-	}
-
-	raw := sanitizeOutput(merged.String())
-	display, truncated, removed := truncate(raw, t.outputLimit)
-
-	body, marshalErr := marshalNoHTMLEscape(output{
-		ExitCode:        exitCode,
-		Output:          display,
-		Truncated:       truncated,
-		TruncationBytes: removed,
-	})
-	if marshalErr != nil {
-		return tools.Result{}, marshalErr
-	}
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
 }
 
 func marshalNoHTMLEscape(v any) (json.RawMessage, error) {

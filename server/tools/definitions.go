@@ -19,41 +19,8 @@ type CatalogEntry struct {
 
 var catalogEntries = []CatalogEntry{
 	{
-		ID:             toolspec.ToolShell,
-		Aliases:        []string{"bash", "bash_command", "shell_command"},
-		Description:    "Execute a shell command in the user's environment and device.",
-		DefaultEnabled: true,
-		Contract: localContract(
-			LocalRuntimeBuilderShell,
-			RequestExposure{Enabled: true},
-			transcript.ToolPresentationShell,
-			transcript.ToolCallRenderBehaviorShell,
-			false,
-			shellToolCallMeta(toolspec.ToolShell),
-			formatGenericToolResult,
-		),
-		Schema: json.RawMessage(`{
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "command": {
-      "type": "string",
-      "description": "Command line to execute in login shell."
-    },
-    "timeout_seconds": {
-      "type": "integer",
-      "description": "Optional timeout in seconds (max 3600)."
-    },
-    "workdir": {
-      "type": "string",
-      "description": "Optional working directory, otherwise - cwd."
-    }
-  }
-}`),
-	},
-	{
 		ID:             toolspec.ToolExecCommand,
-		Aliases:        nil,
+		Aliases:        []string{"bash", "bash_command", "shell", "shell_command"},
 		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
 		DefaultEnabled: true,
 		Contract: localContract(

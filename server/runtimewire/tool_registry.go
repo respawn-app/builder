@@ -25,7 +25,6 @@ type Logger interface {
 type LocalToolRuntimeContext struct {
 	WorkspaceRoot                   string
 	OwnerSessionID                  string
-	ShellDefaultTimeout             time.Duration
 	ShellOutputMaxChars             int
 	AllowNonCwdEdits                bool
 	SupportsVision                  bool
@@ -40,8 +39,6 @@ type LocalToolRuntimeContext struct {
 
 func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext) (tools.Handler, error) {
 	switch def.LocalRuntimeBuilder() {
-	case tools.LocalRuntimeBuilderShell:
-		return shelltool.New(ctx.WorkspaceRoot, ctx.ShellOutputMaxChars, shelltool.WithDefaultTimeout(ctx.ShellDefaultTimeout)), nil
 	case tools.LocalRuntimeBuilderExecCommand:
 		if ctx.BackgroundShellManager == nil {
 			return nil, fmt.Errorf("exec_command background manager is unavailable")
@@ -94,7 +91,7 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 	}
 }
 
-func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -109,7 +106,6 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 	ctx := LocalToolRuntimeContext{
 		WorkspaceRoot:                workspaceRoot,
 		OwnerSessionID:               ownerSessionID,
-		ShellDefaultTimeout:          shellDefaultTimeout,
 		ShellOutputMaxChars:          shellOutputMaxChars,
 		AllowNonCwdEdits:             allowNonCwdEdits,
 		SupportsVision:               supportsVision,

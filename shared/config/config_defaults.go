@@ -17,7 +17,6 @@ const (
 	defaultTheme                         = theme.Auto
 	defaultModelContextWindow            = 272_000
 	defaultModelTimeoutSeconds           = 400
-	defaultShellTimeoutSeconds           = 300
 	defaultMinimumExecToBgSec            = 15
 	defaultShellOutputMaxChars           = 16_000
 	defaultBGShellsOutput                = "default"
@@ -199,7 +198,7 @@ func writeToolLines(builder *strings.Builder, enabledTools map[toolspec.ID]bool)
 		if !ok {
 			configured = defaults[id]
 		}
-		writeDefaultLines(builder, []defaultConfigLine{{Path: []string{"tools", string(id)}, Value: configured, Commented: configured == defaults[id]}})
+		writeDefaultLines(builder, []defaultConfigLine{{Path: []string{"tools", toolspec.ConfigName(id)}, Value: configured, Commented: configured == defaults[id]}})
 	}
 }
 

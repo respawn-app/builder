@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	DefaultShellTimeoutSeconds = 300
-	InlineMetaSeparator        = "\x1f"
-	defaultToolCallFallback    = "tool call"
+	InlineMetaSeparator     = "\x1f"
+	defaultToolCallFallback = "tool call"
 )
 
 type RuntimeAvailability string
@@ -58,10 +57,9 @@ type HostedExecution struct {
 }
 
 type ToolCallContext struct {
-	WorkingDir                 string
-	DefaultShellTimeoutSeconds int
-	DefaultShellPath           string
-	GOOS                       string
+	WorkingDir       string
+	DefaultShellPath string
+	GOOS             string
 }
 
 type TranscriptContract struct {
@@ -75,7 +73,6 @@ type TranscriptContract struct {
 type LocalRuntimeBuilder string
 
 const (
-	LocalRuntimeBuilderShell                LocalRuntimeBuilder = "shell"
 	LocalRuntimeBuilderExecCommand          LocalRuntimeBuilder = "exec_command"
 	LocalRuntimeBuilderWriteStdin           LocalRuntimeBuilder = "write_stdin"
 	LocalRuntimeBuilderViewImage            LocalRuntimeBuilder = "view_image"

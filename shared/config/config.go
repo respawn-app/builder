@@ -53,14 +53,12 @@ type LoadOptions struct {
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
-	ShellTimeoutSeconds int
 	Tools               string
 	OpenAIBaseURL       string
 }
 
 type Timeouts struct {
 	ModelRequestSeconds int
-	ShellDefaultSeconds int
 }
 
 type Settings struct {

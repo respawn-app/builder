@@ -31,7 +31,7 @@ func (f fakeHandler) Call(_ context.Context, c tools.Call) (tools.Result, error)
 func TestCallExecutesSubtoolsInParallelAndPreservesDeclaredOrder(t *testing.T) {
 	var reg *tools.Registry
 	reg = tools.NewRegistry(
-		fakeHandler{id: toolspec.ToolShell, delay: 40 * time.Millisecond},
+		fakeHandler{id: toolspec.ToolExecCommand, delay: 40 * time.Millisecond},
 		fakeHandler{id: toolspec.ToolPatch, delay: 1 * time.Millisecond},
 		New(func() *tools.Registry { return reg }),
 	)
@@ -80,7 +80,7 @@ func TestCallExecutesSubtoolsInParallelAndPreservesDeclaredOrder(t *testing.T) {
 func TestCallRejectsInvalidRecipientNamespace(t *testing.T) {
 	var reg *tools.Registry
 	reg = tools.NewRegistry(
-		fakeHandler{id: toolspec.ToolShell},
+		fakeHandler{id: toolspec.ToolExecCommand},
 		New(func() *tools.Registry { return reg }),
 	)
 	tool := New(func() *tools.Registry { return reg })

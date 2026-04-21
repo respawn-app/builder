@@ -163,7 +163,7 @@ type runtimeClientBlockingTool struct {
 	release chan struct{}
 }
 
-func (runtimeClientBlockingTool) Name() toolspec.ID { return toolspec.ToolShell }
+func (runtimeClientBlockingTool) Name() toolspec.ID { return toolspec.ToolExecCommand }
 
 func (t runtimeClientBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
@@ -413,7 +413,7 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 	fakeLLM := &runtimeClientFakeLLM{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{

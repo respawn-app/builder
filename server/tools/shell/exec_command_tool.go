@@ -14,6 +14,7 @@ import (
 
 type execCommandInput struct {
 	Cmd             string `json:"cmd"`
+	Command         string `json:"command,omitempty"`
 	Workdir         string `json:"workdir,omitempty"`
 	Shell           string `json:"shell,omitempty"`
 	Login           *bool  `json:"login,omitempty"`
@@ -62,6 +63,9 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 		return tools.ErrorResultWith(c, fmt.Sprintf("invalid input: %v", err), marshalNoHTMLEscape), nil
 	}
 	cmdText := strings.TrimSpace(in.Cmd)
+	if cmdText == "" {
+		cmdText = strings.TrimSpace(in.Command)
+	}
 	if cmdText == "" {
 		return tools.ErrorResultWith(c, "cmd is required", marshalNoHTMLEscape), nil
 	}

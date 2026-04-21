@@ -1,11 +1,13 @@
 package toolspec
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type ID string
 
 const (
-	ToolShell                ID = "shell"
 	ToolExecCommand          ID = "exec_command"
 	ToolWriteStdin           ID = "write_stdin"
 	ToolViewImage            ID = "view_image"
@@ -21,7 +23,6 @@ var catalogIDs = []ID{
 	ToolExecCommand,
 	ToolMultiToolUseParallel,
 	ToolPatch,
-	ToolShell,
 	ToolTriggerHandoff,
 	ToolViewImage,
 	ToolWebSearch,
@@ -32,7 +33,6 @@ var defaultEnabledIDs = []ID{
 	ToolAskQuestion,
 	ToolExecCommand,
 	ToolPatch,
-	ToolShell,
 	ToolViewImage,
 	ToolWebSearch,
 	ToolWriteStdin,
@@ -40,15 +40,29 @@ var defaultEnabledIDs = []ID{
 
 var parseAliases = map[string]ID{
 	"ask_question":            ToolAskQuestion,
-	"bash":                    ToolShell,
-	"bash_command":            ToolShell,
+	"bash":                    ToolExecCommand,
+	"bash_command":            ToolExecCommand,
 	"exec_command":            ToolExecCommand,
 	"multi_tool_use_parallel": ToolMultiToolUseParallel,
 	"parallel":                ToolMultiToolUseParallel,
 	"patch":                   ToolPatch,
 	"read_image":              ToolViewImage,
-	"shell":                   ToolShell,
-	"shell_command":           ToolShell,
+	"shell":                   ToolExecCommand,
+	"shell_command":           ToolExecCommand,
+	"trigger_handoff":         ToolTriggerHandoff,
+	"view_image":              ToolViewImage,
+	"web_search":              ToolWebSearch,
+	"write_stdin":             ToolWriteStdin,
+}
+
+var configAliases = map[string]ID{
+	"ask_question":            ToolAskQuestion,
+	"exec_command":            ToolExecCommand,
+	"multi_tool_use_parallel": ToolMultiToolUseParallel,
+	"parallel":                ToolMultiToolUseParallel,
+	"patch":                   ToolPatch,
+	"read_image":              ToolViewImage,
+	"shell":                   ToolExecCommand,
 	"trigger_handoff":         ToolTriggerHandoff,
 	"view_image":              ToolViewImage,
 	"web_search":              ToolWebSearch,
@@ -61,8 +75,20 @@ func init() {
 }
 
 func ParseID(v string) (ID, bool) {
-	id, ok := parseAliases[v]
+	id, ok := parseAliases[strings.TrimSpace(v)]
 	return id, ok
+}
+
+func ParseConfigID(v string) (ID, bool) {
+	id, ok := configAliases[strings.TrimSpace(v)]
+	return id, ok
+}
+
+func ConfigName(id ID) string {
+	if id == ToolExecCommand {
+		return "shell"
+	}
+	return string(id)
 }
 
 func CatalogIDs() []ID {

@@ -47,7 +47,6 @@ func runPromptOverridesFromOptions(opts Options) serverapi.RunPromptOverrides {
 		ThinkingLevel:       strings.TrimSpace(opts.ThinkingLevel),
 		Theme:               strings.TrimSpace(opts.Theme),
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               strings.TrimSpace(opts.Tools),
 		OpenAIBaseURL:       strings.TrimSpace(opts.OpenAIBaseURL),
 	}

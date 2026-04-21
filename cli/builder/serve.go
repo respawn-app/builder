@@ -73,7 +73,6 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   effectiveShellTimeout(*flags),
 		Tools:                 flags.Tools,
 		OpenAIBaseURL:         flags.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,

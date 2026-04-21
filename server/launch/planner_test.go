@@ -160,6 +160,7 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 
 func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", workspace)
@@ -173,11 +174,11 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 			ThinkingLevel: "low",
 			Theme:         "dark",
 			EnabledTools: map[toolspec.ID]bool{
-				toolspec.ToolShell: true,
+				toolspec.ToolExecCommand: true,
 			},
-			Timeouts: config.Timeouts{ModelRequestSeconds: 100, ShellDefaultSeconds: 200},
+			Timeouts: config.Timeouts{ModelRequestSeconds: 100},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "base-model",
 		WorkspaceRoot:       workspace,
 	}
@@ -187,7 +188,6 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 		ThinkingLevel:       "medium",
 		Theme:               "light",
 		ModelTimeoutSeconds: 12,
-		ShellTimeoutSeconds: 34,
 		Tools:               "shell,patch",
 		OpenAIBaseURL:       "http://override.local/v1",
 	})
@@ -206,10 +206,10 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 	if updated.ActiveSettings.Theme != "light" {
 		t.Fatalf("theme = %q, want light", updated.ActiveSettings.Theme)
 	}
-	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 12 || updated.ActiveSettings.Timeouts.ShellDefaultSeconds != 34 {
-		t.Fatalf("timeouts = %+v, want 12/34", updated.ActiveSettings.Timeouts)
+	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 12 {
+		t.Fatalf("timeouts = %+v, want model_request_seconds=12", updated.ActiveSettings.Timeouts)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolPatch || updated.EnabledTools[1] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolExecCommand || updated.EnabledTools[1] != toolspec.ToolPatch {
 		t.Fatalf("enabled tools = %+v, want patch+shell", updated.EnabledTools)
 	}
 	if updated.ActiveSettings.OpenAIBaseURL != "http://override.local/v1" {
@@ -225,6 +225,7 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 
 func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", workspace)
@@ -236,10 +237,10 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 		ActiveSettings: config.Settings{
 			Model: "gpt-5.4",
 			EnabledTools: map[toolspec.ID]bool{
-				toolspec.ToolShell: true,
+				toolspec.ToolExecCommand: true,
 			},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
 		WorkspaceRoot:       workspace,
 	}
@@ -251,13 +252,14 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolMultiToolUseParallel || updated.EnabledTools[1] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolExecCommand || updated.EnabledTools[1] != toolspec.ToolMultiToolUseParallel {
 		t.Fatalf("enabled tools = %+v, want multi_tool_use_parallel+shell", updated.EnabledTools)
 	}
 }
 
 func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", workspace)
@@ -269,10 +271,10 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 		ActiveSettings: config.Settings{
 			Model: "gpt-5.4",
 			EnabledTools: map[toolspec.ID]bool{
-				toolspec.ToolShell: true,
+				toolspec.ToolExecCommand: true,
 			},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
 		WorkspaceRoot:       workspace,
 		Source: config.SourceReport{Sources: map[string]string{
@@ -289,7 +291,7 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("enabled tools = %+v, want shell only", updated.EnabledTools)
 	}
 	if updated.Source.Sources["tools.multi_tool_use_parallel"] != "cli" {

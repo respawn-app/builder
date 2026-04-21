@@ -35,8 +35,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *te
 	registry, _, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolWebSearch},
-		5*time.Second,
+		[]toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolWebSearch},
 		15*time.Second,
 		16_000,
 		false,
@@ -52,7 +51,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *te
 	if len(defs) != 1 {
 		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != toolspec.ToolShell {
+	if defs[0].ID != toolspec.ToolExecCommand {
 		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
 	}
 }
@@ -66,7 +65,6 @@ func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
 	ctx := localToolRuntimeContext{
 		workspaceRoot:          workspace,
 		ownerSessionID:         "session-1",
-		shellDefaultTimeout:    5 * time.Second,
 		shellOutputMaxChars:    16_000,
 		allowNonCwdEdits:       false,
 		supportsVision:         true,
@@ -105,8 +103,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	registry, _, _, err := buildToolRegistry(
 		workspace,
 		"",
-		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolMultiToolUseParallel},
-		5*time.Second,
+		[]toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolMultiToolUseParallel},
 		15*time.Second,
 		16_000,
 		false,
@@ -122,7 +119,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	if len(defs) != 2 {
 		t.Fatalf("expected 2 local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != toolspec.ToolMultiToolUseParallel || defs[1].ID != toolspec.ToolShell {
+	if defs[0].ID != toolspec.ToolExecCommand || defs[1].ID != toolspec.ToolMultiToolUseParallel {
 		t.Fatalf("unexpected runtime tool definitions: %+v", defs)
 	}
 }
@@ -134,7 +131,6 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 		workspace,
 		"",
 		[]toolspec.ID{toolspec.ToolViewImage},
-		5*time.Second,
 		15*time.Second,
 		16_000,
 		false,
@@ -173,7 +169,6 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		workspace,
 		"",
 		[]toolspec.ID{toolspec.ToolViewImage},
-		5*time.Second,
 		15*time.Second,
 		16_000,
 		false,
@@ -256,7 +251,6 @@ func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePat
 		workspace,
 		"",
 		[]toolspec.ID{toolspec.ToolViewImage},
-		5*time.Second,
 		15*time.Second,
 		16_000,
 		true,
@@ -353,7 +347,7 @@ func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
 		t.Fatalf("close wiring: %v", err)
 	}
 
-	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []toolspec.ID{toolspec.ToolExecCommand}, 5*time.Second, 15*time.Second, 16_000, false, true, nil, manager); err != nil {
+	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []toolspec.ID{toolspec.ToolExecCommand}, 15*time.Second, 16_000, false, true, nil, manager); err != nil {
 		t.Fatalf("expected shared background manager to remain usable after wiring close: %v", err)
 	}
 }
@@ -665,7 +659,6 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 		workspace,
 		"session-owner-1",
 		[]toolspec.ID{toolspec.ToolExecCommand},
-		5*time.Second,
 		250*time.Millisecond,
 		16_000,
 		false,

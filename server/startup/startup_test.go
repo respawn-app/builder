@@ -162,7 +162,6 @@ func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 		ThinkingLevel:         "high",
 		Theme:                 "dark",
 		ModelTimeoutSeconds:   45,
-		ShellTimeoutSeconds:   30,
 		Tools:                 "shell,patch",
 		OpenAIBaseURL:         "http://example.test/v1",
 		OpenAIBaseURLExplicit: true,
@@ -180,7 +179,7 @@ func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	if req.LoadOptions.Model != "gpt-5" || req.LoadOptions.ProviderOverride != "openai" || req.LoadOptions.ThinkingLevel != "high" {
 		t.Fatalf("unexpected model/provider/thinking mapping: %+v", req.LoadOptions)
 	}
-	if req.LoadOptions.Theme != "dark" || req.LoadOptions.ModelTimeoutSeconds != 45 || req.LoadOptions.ShellTimeoutSeconds != 30 {
+	if req.LoadOptions.Theme != "dark" || req.LoadOptions.ModelTimeoutSeconds != 45 {
 		t.Fatalf("unexpected theme/timeout mapping: %+v", req.LoadOptions)
 	}
 	if req.LoadOptions.Tools != "shell,patch" {

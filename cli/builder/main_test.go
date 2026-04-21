@@ -139,7 +139,6 @@ func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
 		"--thinking-level", "high",
 		"--theme", "dark",
 		"--model-timeout-seconds", "45",
-		"--shell-timeout-seconds", "30",
 		"--tools", "shell,patch",
 		"--openai-base-url", "http://example.test/v1",
 	}
@@ -152,7 +151,7 @@ func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
 	if got.SessionID != "session-123" || got.Model != "gpt-5" || got.ProviderOverride != "openai" || got.ThinkingLevel != "high" || got.Theme != "dark" {
 		t.Fatalf("unexpected interactive option mapping: %+v", got)
 	}
-	if got.ModelTimeoutSeconds != 45 || got.ShellTimeoutSeconds != 30 {
+	if got.ModelTimeoutSeconds != 45 {
 		t.Fatalf("unexpected timeout mapping: %+v", got)
 	}
 	if got.Tools != "shell,patch" {
@@ -233,9 +232,6 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	if got.SessionID != "" {
 		t.Fatalf("expected empty session id for serve request, got %q", got.SessionID)
 	}
-	if got.ShellTimeoutSeconds != 0 {
-		t.Fatalf("shell timeout = %d, want 0", got.ShellTimeoutSeconds)
-	}
 }
 
 func TestServeSubcommandRejectsSessionFlags(t *testing.T) {
@@ -299,7 +295,6 @@ func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
 		"--thinking-level", "medium",
 		"--theme", "light",
 		"--model-timeout-seconds", "12",
-		"--shell-timeout-seconds", "34",
 		"--tools", "shell",
 		"--openai-base-url", "http://run.example/v1",
 		"--timeout", "2m",
@@ -317,7 +312,7 @@ func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
 	if gotOpts.SessionID != "session-456" || gotOpts.Model != "gpt-5-mini" || gotOpts.ProviderOverride != "openai" || gotOpts.ThinkingLevel != "medium" || gotOpts.Theme != "light" {
 		t.Fatalf("unexpected run option mapping: %+v", gotOpts)
 	}
-	if gotOpts.ModelTimeoutSeconds != 12 || gotOpts.ShellTimeoutSeconds != 34 {
+	if gotOpts.ModelTimeoutSeconds != 12 {
 		t.Fatalf("unexpected timeout mapping: %+v", gotOpts)
 	}
 	if gotOpts.Tools != "shell" {

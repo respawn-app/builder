@@ -16,7 +16,7 @@
 
 ## Core Runtime And Tools
 
-- Core tools: `shell`, `view_image`, `patch`, `ask_question`.
+- Core tools: `exec_command`, `write_stdin`, `view_image`, `patch`, `ask_question`.
 - Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
 - Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
@@ -25,38 +25,37 @@
 - If one parallel call fails, in-flight calls are allowed to finish before returning ordered results.
 - Ordered-result buffering is strict and uncapped in v1.
 
-## Shell Tool
+## Command Execution Tool
 
+- `exec_command` is the sole shell-command execution surface; the legacy `shell` tool is removed from future design decisions.
 - Runs in the user login shell.
-- Stateless per call (no persistent shell process state between calls).
 - Executes in non-TTY mode (pipes, not PTY).
 - Uses direct shell invocation only (no runtime command parsing/AST preprocessing).
 - Inherits parent environment and adds non-interactive hints.
 - Merges stdout/stderr into one stream without origin tags.
-- Default timeout is 5 minutes.
+- Default timeout follows `exec_command` runtime defaults.
 - Per-call timeout override is allowed up to 1 hour.
 - Non-zero exit is recoverable (does not auto-abort the turn).
 - No automatic retry for shell process-launch failures.
 - Interrupt escalation is `SIGINT` then `SIGKILL` after 10s grace.
-- Shell output semantic post-processing is built into Builder, not delegated to shell wrappers. It applies after command execution and base sanitization, not before execution.
-- `raw` is a first-class public parameter on both `shell` and `exec_command`; default is processed output, `raw=true` bypasses semantic post-processing while keeping transport hygiene/safety truncation.
-- Built-in shell post-processors run before the optional user-defined hook.
-- User shell post-process hook is configured as a path to an executable/script; Builder sends JSON on stdin and expects JSON on stdout.
-- User shell post-process hook receives both original sanitized output and Builder's current built-in-processed output so it can either add on top or replace.
+- Command output semantic post-processing is built into Builder, not delegated to shell wrappers. It applies after command execution and base sanitization, not before execution.
+- `raw` is a first-class public parameter on `exec_command`; default is processed output, `raw=true` bypasses semantic post-processing while keeping transport hygiene/safety truncation.
+- Built-in post-processors run before the optional user-defined hook.
+- User post-process hook is configured as a path to an executable/script; Builder sends JSON on stdin and expects JSON on stdout.
+- User post-process hook receives both original sanitized output and Builder's current built-in-processed output so it can either add on top or replace.
 - Builder does not hard-block the user hook on irreversible commands; hook responsibility stays with the user. Built-in Builder processors still target read-only/reversible command families by policy.
-- Shell semantic post-processing is configured under a dedicated `[shell]` config table.
+- Command post-processing is configured under a dedicated `[shell]` config table.
 - `[shell].postprocessing_mode` is the global mode switch and uses explicit values: `none | builtin | user | all`.
 - Per-call `raw=true` still bypasses semantic shaping regardless of global mode.
-- User hook timeout is derived from the shell command timeout and counts as part of overall shell execution time rather than as a separate independent knob.
+- User hook timeout is derived from the command timeout and counts as part of overall command execution time rather than as a separate independent knob.
 - Built-in processors may run on both success and failure; each processor decides based on exit code.
-- Shell tool JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
-- Built-in shell processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
-- User-facing docs for shell post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
-- Hook failure warnings may surface directly in shell tool call results in v1; if surfaced, they should use a dedicated structured warning field rather than prepended prose. Warning deduplication is optional in v1.
-- The same post-processing pipeline applies to `shell` and `exec_command` inline output in v1.
+- `exec_command` result JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
+- Built-in processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
+- User-facing docs for command post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
+- Hook failure warnings may surface directly in `exec_command` results in v1; if surfaced, they should use a dedicated structured warning field rather than prepended prose. Warning deduplication is optional in v1.
 - If an `exec_command` backgrounds, its selected processing mode persists with that process session for later `write_stdin` polls and completion notices.
 - The first built-in processor in v1 is intentionally trivial: direct simple `go test ...` commands collapse successful output to the exact token `PASS`; failures fall back to unprocessed output.
-- Foreground `shell` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.
+- Foreground `exec_command` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.
 - Background shell processes (`exec_command` / `write_stdin`) are app-global, not session-scoped.
 - Background process ids are app-global within one app instance; owner session metadata is advisory for routing notices/history, not an access-control boundary.
 - `/ps` may surface and operate on background processes started from other sessions in the same app instance; this is intentional in v1 to preserve operator visibility/control of long-running jobs.
