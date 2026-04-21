@@ -1514,7 +1514,7 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 
 	waitForSubmitResult(t, roundTripTimeout, submitDone)
 	waitForTestCondition(t, roundTripTimeout, "detail mode keeps deferred final visible", func() bool {
-		detail := stripANSIAndTrimRight(model.View())
+		detail := stripANSIAndTrimRight(model.view.DetailProjection(true, true).Render(tui.TranscriptDivider))
 		return strings.Contains(detail, "foreground done")
 	})
 
