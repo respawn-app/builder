@@ -356,8 +356,8 @@ func TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWork
 	// websocket connection. Flood both event count and payload size so CI cannot hide the gap behind
 	// socket buffering and timing luck.
 	const floodPromptCount = 320
-	floodPromptText := strings.Repeat("flood the lagging subscriber ", 96)
-	floodReplyText := strings.Repeat("flood reply ", 96)
+	floodPromptText := strings.Repeat("flood the lagging subscriber ", 192)
+	floodReplyText := strings.Repeat("flood reply ", 192)
 	replies := make([]string, 0, floodPromptCount+1)
 	for i := 0; i < floodPromptCount; i++ {
 		replies = append(replies, floodReplyText)
@@ -2044,7 +2044,7 @@ func waitForSessionActivitySubscriptionEvent(t *testing.T, sub serverapi.Session
 
 func waitForSessionActivityGap(t *testing.T, sub serverapi.SessionActivitySubscription) error {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	for {
 		_, err := sub.Next(ctx)
