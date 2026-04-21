@@ -952,6 +952,54 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	}
 }
 
+func TestOnboardingSpinnerTickDoesNotRescheduleOutsideLoadingOrFinalize(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.state.imports.pending = false
+	model.syncScreen(true)
+	if model.currentScreen.Kind == onboardingScreenLoading {
+		t.Fatalf("expected non-loading onboarding screen, got %q", model.currentScreen.Kind)
+	}
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected spinner tick to advance frame even when stopping animation")
+	}
+	if cmd != nil {
+		t.Fatalf("did not expect spinner tick to reschedule on %q screen", updated.currentScreen.Kind)
+	}
+}
+
+func TestOnboardingSpinnerTickReschedulesWhileLoading(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenLoading}
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected loading spinner tick to advance frame")
+	}
+	if cmd == nil {
+		t.Fatal("expected loading spinner tick to reschedule")
+	}
+}
+
+func TestOnboardingSpinnerTickReschedulesWhileFinalizing(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.state.imports.pending = false
+	model.syncScreen(true)
+	model.finalizing = true
+	tickAt := model.spinnerClock.anchor.Add(spinnerTickInterval)
+	next, cmd := model.Update(onboardingSpinnerTickMsg{at: tickAt})
+	updated := next.(*onboardingModel)
+	if updated.spinnerFrame == 0 {
+		t.Fatal("expected finalizing spinner tick to advance frame")
+	}
+	if cmd == nil {
+		t.Fatal("expected finalizing spinner tick to reschedule")
+	}
+}
+
 func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

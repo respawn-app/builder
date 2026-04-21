@@ -127,6 +127,10 @@ func tickOnboardingSpinner(delay time.Duration) tea.Cmd {
 	})
 }
 
+func (m *onboardingModel) shouldAnimateSpinner() bool {
+	return m.finalizing || m.currentScreen.Kind == onboardingScreenLoading
+}
+
 func (m *onboardingModel) activeTheme() string {
 	if m.currentScreen.ThemePreview && m.currentScreen.Kind == onboardingScreenChoice && m.cursor >= 0 && m.cursor < len(m.currentScreen.Options) {
 		if optionTheme := strings.TrimSpace(m.currentScreen.Options[m.cursor].ID); optionTheme == "light" || optionTheme == "dark" {
@@ -191,9 +195,12 @@ func (m *onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case onboardingSpinnerTickMsg:
 		m.spinnerFrame = m.spinnerClock.Frame(typed.at, len(pendingToolSpinner.Frames), spinnerTickInterval)
+		if !m.shouldAnimateSpinner() {
+			return m, nil
+		}
 		return m, tickOnboardingSpinner(m.spinnerClock.NextDelay(typed.at, spinnerTickInterval))
 	case tea.KeyMsg:
-		if m.finalizing || m.currentScreen.Kind == onboardingScreenLoading {
+		if m.shouldAnimateSpinner() {
 			switch typed.Type {
 			case tea.KeyCtrlC, tea.KeyEsc:
 				m.canceled = true
