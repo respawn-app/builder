@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -324,6 +325,20 @@ func newSettingsRegistry() settingsRegistry {
 			"BUILDER_CACHE_WARNING_MODE",
 			nil,
 			normalizeCacheWarningMode,
+			settingDocOptions{}),
+		newStringSetting("worktrees.base_dir", filepath.Join(DefaultPersistence, "worktrees"),
+			func(state *settingsState, value string) { state.Settings.Worktrees.BaseDir = value },
+			func(state settingsState) string { return state.Settings.Worktrees.BaseDir },
+			"",
+			nil,
+			nil,
+			settingDocOptions{}),
+		newStringSetting("worktrees.setup_script", "",
+			func(state *settingsState, value string) { state.Settings.Worktrees.SetupScript = value },
+			func(state settingsState) string { return state.Settings.Worktrees.SetupScript },
+			"",
+			nil,
+			nil,
 			settingDocOptions{}),
 		newStringSetting("reviewer.frequency", defaultReviewerFrequency,
 			func(state *settingsState, value string) { state.Settings.Reviewer.Frequency = value },

@@ -1,0 +1,229 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"unicode"
+
+	"builder/shared/clientui"
+	"builder/shared/serverapi"
+	"github.com/google/uuid"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (c uiInputController) handleWorktreeCommand(args string) (tea.Model, tea.Cmd) {
+	m := c.model
+	if m.worktreeClient == nil {
+		errText := "worktree client is unavailable"
+		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+	}
+	parts := strings.Fields(strings.TrimSpace(args))
+	if len(parts) == 0 {
+		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{})
+	}
+	subcommand := strings.ToLower(strings.TrimSpace(parts[0]))
+	switch subcommand {
+	case "status":
+		if len(parts) != 1 {
+			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+		}
+		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{})
+	case "new", "create":
+		if len(parts) != 1 {
+			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+		}
+		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{OpenCreate: true})
+	case "switch":
+		if len(parts) != 2 {
+			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+		}
+		return c.handleWorktreeSwitchCommand(parts[1])
+	case "delete", "remove", "rm":
+		if len(parts) > 2 {
+			return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+		}
+		token := ""
+		if len(parts) == 2 {
+			token = parts[1]
+		}
+		return m, c.startWorktreeOverlayCmd(uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: token})
+	default:
+		return m, c.appendErrorFeedbackWithStatus(worktreeUsage(), c.showErrorStatus(worktreeUsage()))
+	}
+}
+
+func (c uiInputController) handleWorktreeSwitchCommand(token string) (tea.Model, tea.Cmd) {
+	m := c.model
+	resolved, err := m.resolveWorktreeToken(token)
+	if err != nil {
+		errText := formatSubmissionError(err)
+		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+	}
+	resp, err := runWorktreeMutation(m, func(leaseID string) (serverapi.WorktreeSwitchResponse, error) {
+		return m.worktreeClient.SwitchWorktree(context.Background(), serverapi.WorktreeSwitchRequest{
+			ClientRequestID:   uuid.NewString(),
+			SessionID:         m.sessionID,
+			ControllerLeaseID: leaseID,
+			WorktreeID:        resolved.WorktreeID,
+		})
+	})
+	if err != nil {
+		errText := formatSubmissionError(err)
+		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
+	}
+	m.applyExecutionTargetChange(resp.Target)
+	status := "Switched to " + worktreeDisplayName(resp.Worktree)
+	return m, tea.Batch(c.appendSystemFeedbackWithStatus(formatWorktreeSwitch(resp), c.showSuccessStatus(status)), m.requestRuntimeMainViewRefresh())
+}
+
+func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListResponse, error) {
+	if m == nil || m.worktreeClient == nil {
+		return serverapi.WorktreeListResponse{}, fmt.Errorf("worktree client is unavailable")
+	}
+	return m.worktreeClient.ListWorktrees(context.Background(), serverapi.WorktreeListRequest{SessionID: m.sessionID})
+}
+
+func (m *uiModel) resolveWorktreeToken(token string) (serverapi.WorktreeView, error) {
+	resp, err := m.listWorktreesForCurrentSession()
+	if err != nil {
+		return serverapi.WorktreeView{}, err
+	}
+	return resolveWorktreeTokenFromEntries(resp.Worktrees, token)
+}
+
+func runWorktreeMutation[T any](m *uiModel, call func(controllerLeaseID string) (T, error)) (T, error) {
+	var zero T
+	client, ok := m.runtimeClient().(*sessionRuntimeClient)
+	if !ok || client == nil {
+		return zero, errors.New("controller lease is unavailable")
+	}
+	ctx, cancel := client.controlContext()
+	defer cancel()
+	return retryRuntimeControlCall(ctx, client.controllerLeaseIDValue, client.recoverControllerLease, call)
+}
+
+func (m *uiModel) applyExecutionTargetChange(target clientui.SessionExecutionTarget) {
+	if m == nil {
+		return
+	}
+	refreshed := m.refreshRuntimeSessionView()
+	if strings.TrimSpace(refreshed.ExecutionTarget.EffectiveWorkdir) != "" {
+		target = refreshed.ExecutionTarget
+	}
+	m.statusConfig.WorkspaceRoot = strings.TrimSpace(target.EffectiveWorkdir)
+	m.statusRepository = newMemoryUIStatusRepository()
+	m.clearPathReferenceState()
+	if m.pathReferenceSearch != nil && strings.TrimSpace(m.statusConfig.WorkspaceRoot) != "" {
+		m.pathReferenceSearch.StartPrewarm(strings.TrimSpace(m.statusConfig.WorkspaceRoot))
+	}
+}
+
+func (m *uiModel) suggestedWorktreeSessionName() string {
+	if trimmed := strings.TrimSpace(m.sessionName); trimmed != "" {
+		return trimmed
+	}
+	if client := m.runtimeClient(); client != nil {
+		return strings.TrimSpace(client.SessionView().SessionName)
+	}
+	return ""
+}
+
+func isWorktreeMutationCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "new", "create", "switch", "delete", "remove", "rm":
+		return true
+	default:
+		return false
+	}
+}
+
+func worktreeUsage() string {
+	return "Usage: /wt | /wt create | /wt delete [target] | /wt switch <target>"
+}
+
+func formatWorktreeCreate(resp serverapi.WorktreeCreateResponse) string {
+	status := fmt.Sprintf("Created %s at %s", worktreeDisplayName(resp.Worktree), resp.Worktree.CanonicalRoot)
+	if resp.CreatedBranch {
+		status += fmt.Sprintf("\nCreated branch: %s", fallbackValue(resp.Worktree.BranchName, "unknown"))
+	}
+	if resp.SetupScheduled {
+		status += "\nSetup script started in background."
+	}
+	return status
+}
+
+func formatWorktreeSwitch(resp serverapi.WorktreeSwitchResponse) string {
+	return fmt.Sprintf("Switched to %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
+}
+
+func formatWorktreeDelete(resp serverapi.WorktreeDeleteResponse) string {
+	message := fmt.Sprintf("Deleted %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
+	if details := strings.TrimSpace(resp.BranchCleanupMessage); details != "" {
+		message += "\n" + details
+	}
+	return message
+}
+
+func worktreeDisplayName(item serverapi.WorktreeView) string {
+	if trimmed := strings.TrimSpace(item.DisplayName); trimmed != "" {
+		return trimmed
+	}
+	if item.IsMain {
+		return "main"
+	}
+	if trimmed := strings.TrimSpace(item.BranchName); trimmed != "" {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(item.CanonicalRoot); trimmed != "" {
+		return filepath.Base(trimmed)
+	}
+	return strings.TrimSpace(item.WorktreeID)
+}
+
+func fallbackValue(value string, fallback string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return fallback
+}
+
+func sanitizeWorktreeBranchSuggestion(raw string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(raw))
+	if trimmed == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range trimmed {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(r)
+			lastDash = false
+		case r == '/' || r == '-' || r == '_':
+			if builder.Len() == 0 || lastDash {
+				continue
+			}
+			builder.WriteRune('-')
+			lastDash = true
+		default:
+			if builder.Len() == 0 || lastDash {
+				continue
+			}
+			builder.WriteRune('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(builder.String(), "-/")
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+	return result
+}
+
+func worktreeDeleteCanAutoDeleteBranch(item serverapi.WorktreeView) bool {
+	return item.BuilderManaged && item.CreatedBranch && strings.TrimSpace(item.BranchName) != ""
+}

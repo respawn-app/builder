@@ -26,6 +26,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	}
+	if inputState.Mode == uiInputModeWorktree {
+		next, cmd := c.handleWorktreeOverlayKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
 	if inputState.Mode == uiInputModeProcessList {
 		next, cmd := c.handleProcessListKey(msg)
 		next.(*uiModel).syncViewport()

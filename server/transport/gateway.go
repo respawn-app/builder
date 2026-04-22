@@ -291,6 +291,34 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			}
 			return g.core.SessionLifecycleClient().ResolveTransition(ctx, params)
 		})
+	case protocol.MethodWorktreeList:
+		return decodeAndHandle(req, func(params serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.WorktreeListResponse{}, err
+			}
+			return g.core.WorktreeClient().ListWorktrees(ctx, params)
+		})
+	case protocol.MethodWorktreeCreate:
+		return decodeAndHandle(req, func(params serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.WorktreeCreateResponse{}, err
+			}
+			return g.core.WorktreeClient().CreateWorktree(ctx, params)
+		})
+	case protocol.MethodWorktreeSwitch:
+		return decodeAndHandle(req, func(params serverapi.WorktreeSwitchRequest) (serverapi.WorktreeSwitchResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.WorktreeSwitchResponse{}, err
+			}
+			return g.core.WorktreeClient().SwitchWorktree(ctx, params)
+		})
+	case protocol.MethodWorktreeDelete:
+		return decodeAndHandle(req, func(params serverapi.WorktreeDeleteRequest) (serverapi.WorktreeDeleteResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.WorktreeDeleteResponse{}, err
+			}
+			return g.core.WorktreeClient().DeleteWorktree(ctx, params)
+		})
 	case protocol.MethodSessionRuntimeActivate:
 		return decodeAndHandle(req, func(params serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {

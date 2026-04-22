@@ -23,6 +23,7 @@ const (
 	ActionSetAutoCompaction Action = "set_auto_compaction"
 	ActionStatus            Action = "status"
 	ActionProcesses         Action = "processes"
+	ActionWorktree          Action = "worktree"
 	ActionCopy              Action = "copy"
 	ActionBack              Action = "back"
 	ActionUnhandled         Action = "unhandled"
@@ -58,10 +59,11 @@ type registeredCommand struct {
 
 type Registry struct {
 	handlers map[string]registeredCommand
+	aliases  map[string]string
 }
 
 func NewRegistry() *Registry {
-	return &Registry{handlers: map[string]registeredCommand{}}
+	return &Registry{handlers: map[string]registeredCommand{}, aliases: map[string]string{}}
 }
 
 func NewDefaultRegistry() *Registry {
@@ -105,6 +107,10 @@ func NewDefaultRegistry() *Registry {
 	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}
 	})
+	r.RegisterWithOptions("worktree", "Manage git worktrees (usage: /worktree [create|switch|delete] ...)", RegisterOptions{}, func(args string) Result {
+		return Result{Handled: true, Action: ActionWorktree, Args: strings.TrimSpace(args)}
+	})
+	r.RegisterAlias("wt", "worktree")
 	r.RegisterWithOptions("copy", "Copy the last model final answer to the system clipboard", RegisterOptions{RunWhileBusy: true}, func(string) Result {
 		return Result{Handled: true, Action: ActionCopy}
 	})
@@ -140,17 +146,29 @@ func (r *Registry) RegisterWithOptions(name string, description string, options 
 	if r == nil || h == nil {
 		return
 	}
-	k := strings.ToLower(strings.TrimSpace(name))
+	k := normalizeCommandName(name)
 	if k == "" {
 		return
-	}
-	if strings.IndexFunc(k, unicode.IsSpace) >= 0 {
-		panic("slash command names must not contain whitespace")
 	}
 	r.handlers[k] = registeredCommand{
 		command: Command{Name: k, Description: strings.TrimSpace(description), RunWhileBusy: options.RunWhileBusy},
 		handler: h,
 	}
+}
+
+func (r *Registry) RegisterAlias(alias string, target string) {
+	if r == nil {
+		return
+	}
+	aliasKey := normalizeCommandName(alias)
+	targetKey := normalizeCommandName(target)
+	if aliasKey == "" || targetKey == "" {
+		return
+	}
+	if aliasKey == targetKey {
+		return
+	}
+	r.aliases[aliasKey] = targetKey
 }
 
 func (r *Registry) Commands() []Command {
@@ -231,7 +249,7 @@ func (r *Registry) Execute(raw string) Result {
 	if name == "" {
 		return Result{Handled: false, Action: ActionUnhandled}
 	}
-	registered, exists := r.handlers[name]
+	registered, exists := r.lookupRegistered(name)
 	if !exists {
 		return Result{Handled: false, Action: ActionUnhandled}
 	}
@@ -245,9 +263,46 @@ func (r *Registry) Command(raw string) (Command, bool) {
 	if !ok || name == "" {
 		return Command{}, false
 	}
-	registered, exists := r.handlers[name]
+	registered, exists := r.lookupRegistered(name)
 	if !exists {
 		return Command{}, false
 	}
 	return registered.command, true
+}
+
+func (r *Registry) lookupRegistered(name string) (registeredCommand, bool) {
+	if r == nil {
+		return registeredCommand{}, false
+	}
+	resolvedName := r.resolveAlias(name)
+	registered, exists := r.handlers[resolvedName]
+	if !exists {
+		return registeredCommand{}, false
+	}
+	return registered, true
+}
+
+func (r *Registry) resolveAlias(name string) string {
+	if r == nil {
+		return ""
+	}
+	normalized := normalizeCommandName(name)
+	if normalized == "" {
+		return ""
+	}
+	if target, ok := r.aliases[normalized]; ok {
+		return target
+	}
+	return normalized
+}
+
+func normalizeCommandName(name string) string {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return ""
+	}
+	if strings.IndexFunc(normalized, unicode.IsSpace) >= 0 {
+		panic("slash command names must not contain whitespace")
+	}
+	return normalized
 }

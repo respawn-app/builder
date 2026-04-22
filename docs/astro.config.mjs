@@ -41,6 +41,10 @@ export default defineConfig({
           link: '/slash-commands/',
         },
         {
+          label: 'Worktrees',
+          link: '/worktrees/',
+        },
+        {
           label: 'Subagents / Headless',
           link: '/headless/',
         },

@@ -12,7 +12,10 @@ import (
 	"builder/server/auth"
 	"builder/server/llm"
 	"builder/server/metadata"
+	"builder/server/registry"
+	"builder/server/runprompt"
 	"builder/server/session"
+	sessionruntime "builder/server/sessionruntime"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
@@ -383,6 +386,164 @@ func TestServiceResolveTransitionForkRollbackResolvesTranscriptEntryIndex(t *tes
 	}
 	if resp.InitialPrompt != "edited prompt" {
 		t.Fatalf("initial prompt = %q, want %q", resp.InitialPrompt, "edited prompt")
+	}
+}
+
+func TestServiceResolveTransitionForkRollbackPreservesExecutionTarget(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	cfg, metadataStore, binding, sess := createAuthoritativeSessionLifecycleSession(t, workspaceRoot)
+	if _, err := sess.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleAssistant, Content: "a2"}); err != nil {
+		t.Fatalf("append second assistant message: %v", err)
+	}
+
+	worktreeRoot := filepath.Join(t.TempDir(), "feature-a")
+	if err := os.MkdirAll(filepath.Join(worktreeRoot, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir worktree pkg: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(context.Background(), metadata.WorktreeRecord{
+		ID:            "wt-1",
+		WorkspaceID:   binding.WorkspaceID,
+		CanonicalRoot: worktreeRoot,
+		DisplayName:   "feature-a",
+		Availability:  "available",
+		IsMain:        false,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(context.Background(), sess.Meta().SessionID, binding.WorkspaceID, "wt-1", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
+	}
+
+	service := NewGlobalService(cfg.PersistenceRoot, nil, nil, metadataStore.AuthoritativeSessionStoreOptions()...).WithControllerLeaseVerifier(noopSessionLifecycleLeaseVerifier{})
+	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         sess.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Transition: serverapi.SessionTransition{
+			Action:               "fork_rollback",
+			InitialPrompt:        "edited prompt",
+			ForkUserMessageIndex: 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveTransition: %v", err)
+	}
+
+	target, err := metadataStore.ResolveSessionExecutionTarget(context.Background(), resp.NextSessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if target.WorktreeID != "wt-1" {
+		t.Fatalf("fork target worktree id = %q, want wt-1", target.WorktreeID)
+	}
+	if target.WorktreeRoot != canonicalWorktreeRoot {
+		t.Fatalf("fork target worktree root = %q, want %q", target.WorktreeRoot, canonicalWorktreeRoot)
+	}
+	if target.CwdRelpath != "pkg" {
+		t.Fatalf("fork target cwd_relpath = %q, want pkg", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != filepath.Join(canonicalWorktreeRoot, "pkg") {
+		t.Fatalf("fork effective workdir = %q, want %q", target.EffectiveWorkdir, filepath.Join(canonicalWorktreeRoot, "pkg"))
+	}
+}
+
+func TestServiceResolveTransitionForkRollbackActivatesChildInPreservedWorktree(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	cfg, metadataStore, binding, sess := createAuthoritativeSessionLifecycleSession(t, workspaceRoot)
+	if _, err := sess.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+	if _, err := sess.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleAssistant, Content: "a2"}); err != nil {
+		t.Fatalf("append second assistant message: %v", err)
+	}
+
+	worktreeRoot := filepath.Join(t.TempDir(), "feature-a")
+	if err := os.MkdirAll(filepath.Join(worktreeRoot, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir worktree pkg: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(context.Background(), metadata.WorktreeRecord{
+		ID:            "wt-1",
+		WorkspaceID:   binding.WorkspaceID,
+		CanonicalRoot: worktreeRoot,
+		DisplayName:   "feature-a",
+		Availability:  "available",
+		IsMain:        false,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(context.Background(), sess.Meta().SessionID, binding.WorkspaceID, "wt-1", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
+	}
+
+	lifecycle := NewGlobalService(cfg.PersistenceRoot, nil, nil, metadataStore.AuthoritativeSessionStoreOptions()...).WithControllerLeaseVerifier(noopSessionLifecycleLeaseVerifier{})
+	resolved, err := lifecycle.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         sess.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Transition: serverapi.SessionTransition{
+			Action:               "fork_rollback",
+			InitialPrompt:        "edited prompt",
+			ForkUserMessageIndex: 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveTransition: %v", err)
+	}
+
+	runtimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, nil, nil, nil, nil, nil, registry.NewSessionStoreRegistry(), metadataStore.AuthoritativeSessionStoreOptions()...)
+	activateSettings := cfg.Settings
+	activateSettings.Model = "gpt-5.4"
+	activateSettings.OpenAIBaseURL = "http://127.0.0.1:1/v1"
+	activateReq := sessionruntime.NewActivateRequest("activate-1", resolved.NextSessionID, activateSettings, nil, config.SourceReport{})
+	activateResp, err := runtimeService.ActivateSessionRuntime(context.Background(), activateReq)
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime: %v", err)
+	}
+	if _, err := runtimeService.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "release-1",
+		SessionID:       resolved.NextSessionID,
+		LeaseID:         activateResp.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+
+	childStore, err := session.OpenByID(cfg.PersistenceRoot, resolved.NextSessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("OpenByID child: %v", err)
+	}
+	logBody, err := os.ReadFile(filepath.Join(childStore.Dir(), runprompt.RunLogFileName))
+	if err != nil {
+		t.Fatalf("ReadFile steps.log: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	wantWorkdir := filepath.Join(canonicalWorktreeRoot, "pkg")
+	if !strings.Contains(string(logBody), "app.interactive.start") {
+		t.Fatalf("expected activation log entry, got %q", string(logBody))
+	}
+	if !strings.Contains(string(logBody), "workdir="+wantWorkdir) {
+		t.Fatalf("expected activation workdir %q in log, got %q", wantWorkdir, string(logBody))
 	}
 }
 

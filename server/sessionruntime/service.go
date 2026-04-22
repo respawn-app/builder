@@ -48,6 +48,7 @@ type runtimeHandle struct {
 	activationErr       error
 	takeover            *runtimeTakeover
 	ready               chan struct{}
+	rebind              func(string) error
 	close               func()
 }
 
@@ -197,6 +198,10 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		_ = wiring.Close()
 		_ = logger.Close()
 	}
+	handle.rebind = nil
+	if wiring.LocalTools != nil {
+		handle.rebind = wiring.LocalTools.Rebind
+	}
 	s.completeActivation(handle, leaseID, cleanup)
 	cleanup = nil
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
@@ -294,6 +299,78 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 		return invalidControllerLeaseError(trimmedSessionID)
 	}
 	return nil
+}
+
+func (s *Service) RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedRoot == "" {
+		return errors.New("workspace root is required")
+	}
+	if err := s.RequireControllerLease(ctx, sessionID, leaseID); err != nil {
+		return err
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if current == nil || current != handle {
+		s.mu.Unlock()
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	rebind := current.rebind
+	s.mu.Unlock()
+	if rebind == nil {
+		return nil
+	}
+	return rebind(trimmedRoot)
+}
+
+func (s *Service) RecordWorktreeTransition(ctx context.Context, sessionID string, leaseID string, state session.WorktreeReminderState) error {
+	if err := s.RequireControllerLease(ctx, sessionID, leaseID); err != nil {
+		return err
+	}
+	store, err := s.resolveStore(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	normalized, err := normalizeWorktreeReminderState(state)
+	if err != nil {
+		return err
+	}
+	return store.SetWorktreeReminderState(&normalized)
+}
+
+func normalizeWorktreeReminderState(state session.WorktreeReminderState) (session.WorktreeReminderState, error) {
+	state.Mode = session.WorktreeReminderMode(strings.TrimSpace(string(state.Mode)))
+	switch state.Mode {
+	case session.WorktreeReminderModeEnter, session.WorktreeReminderModeExit:
+	default:
+		return session.WorktreeReminderState{}, errors.New("worktree reminder mode is required")
+	}
+	state.Branch = strings.TrimSpace(state.Branch)
+	state.WorktreePath = strings.TrimSpace(state.WorktreePath)
+	state.WorkspaceRoot = strings.TrimSpace(state.WorkspaceRoot)
+	state.EffectiveCwd = strings.TrimSpace(state.EffectiveCwd)
+	if state.WorkspaceRoot == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder workspace root is required")
+	}
+	if state.EffectiveCwd == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder effective cwd is required")
+	}
+	if state.Mode == session.WorktreeReminderModeEnter && state.WorktreePath == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder worktree path is required for enter mode")
+	}
+	state.HasIssuedInGeneration = false
+	state.IssuedCompactionCount = 0
+	return state, nil
 }
 
 func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {

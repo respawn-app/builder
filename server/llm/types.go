@@ -59,6 +59,8 @@ const (
 	MessageTypeManualCompactionCarryover MessageType = "manual_compaction_carryover"
 	MessageTypeHeadlessMode              MessageType = "headless_mode"
 	MessageTypeHeadlessModeExit          MessageType = "headless_mode_exit"
+	MessageTypeWorktreeMode              MessageType = "worktree_mode"
+	MessageTypeWorktreeModeExit          MessageType = "worktree_mode_exit"
 )
 
 type Message struct {

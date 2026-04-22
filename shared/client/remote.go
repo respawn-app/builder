@@ -186,6 +186,26 @@ func (c *Remote) ResolveTransition(ctx context.Context, req serverapi.SessionRes
 	return resp, c.call(ctx, protocol.MethodSessionResolveTransition, req, &resp)
 }
 
+func (c *Remote) ListWorktrees(ctx context.Context, req serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
+	var resp serverapi.WorktreeListResponse
+	return resp, c.call(ctx, protocol.MethodWorktreeList, req, &resp)
+}
+
+func (c *Remote) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
+	var resp serverapi.WorktreeCreateResponse
+	return resp, c.call(ctx, protocol.MethodWorktreeCreate, req, &resp)
+}
+
+func (c *Remote) SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwitchRequest) (serverapi.WorktreeSwitchResponse, error) {
+	var resp serverapi.WorktreeSwitchResponse
+	return resp, c.call(ctx, protocol.MethodWorktreeSwitch, req, &resp)
+}
+
+func (c *Remote) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDeleteRequest) (serverapi.WorktreeDeleteResponse, error) {
+	var resp serverapi.WorktreeDeleteResponse
+	return resp, c.call(ctx, protocol.MethodWorktreeDelete, req, &resp)
+}
+
 func (c *Remote) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	var resp serverapi.RunGetResponse
 	return resp, c.call(ctx, protocol.MethodRunGet, req, &resp)

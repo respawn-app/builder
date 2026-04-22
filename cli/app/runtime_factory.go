@@ -33,6 +33,7 @@ type runtimeWiring struct {
 	runtimeClient         clientui.RuntimeClient
 	promptControl         client.PromptControlClient
 	runtimeControls       client.RuntimeControlClient
+	worktrees             client.WorktreeClient
 	processControls       client.ProcessControlClient
 	processOutput         client.ProcessOutputClient
 	processViews          client.ProcessViewClient

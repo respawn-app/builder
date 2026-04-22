@@ -892,6 +892,68 @@ func TestResolveSessionExecutionTargetUsesMetadataAuthority(t *testing.T) {
 	}
 }
 
+func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-a")
+	worktreeSubdir := filepath.Join(worktreeRoot, "pkg")
+	if err := os.MkdirAll(worktreeSubdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeSubdir: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:            "worktree-a",
+		WorkspaceID:   binding.WorkspaceID,
+		CanonicalRoot: canonicalWorktreeRoot,
+		DisplayName:   filepath.Base(canonicalWorktreeRoot),
+		Availability:  "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	if err := store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, binding.WorkspaceID, "worktree-a", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
+	}
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	if err := reopened.SetName("hello"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	target, err := store.ResolveSessionExecutionTarget(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorktreeID != "worktree-a" {
+		t.Fatalf("worktree id = %q, want worktree-a", target.WorktreeID)
+	}
+	if target.WorktreeRoot != canonicalWorktreeRoot {
+		t.Fatalf("worktree root = %q, want %q", target.WorktreeRoot, canonicalWorktreeRoot)
+	}
+	if target.CwdRelpath != "pkg" {
+		t.Fatalf("cwd relpath = %q, want pkg", target.CwdRelpath)
+	}
+	canonicalWorktreeSubdir, err := config.CanonicalWorkspaceRoot(worktreeSubdir)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot worktreeSubdir: %v", err)
+	}
+	if target.EffectiveWorkdir != canonicalWorktreeSubdir {
+		t.Fatalf("effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalWorktreeSubdir)
+	}
+}
+
 func TestResolvePersistedSessionUsesReboundWorkspaceRoot(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)
