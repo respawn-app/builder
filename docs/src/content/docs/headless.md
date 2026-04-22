@@ -21,12 +21,20 @@ Continue an existing headless session:
 builder run --continue <session-id> "follow-up"
 ```
 
+Use the built-in fast subagent role:
+
+```bash
+builder run --fast "scan the repo and list likely migration breakpoints"
+```
+
 ## Session Behavior
 
 - Headless runs use the normal Builder session store and persistence model.
 - A new unnamed headless session is auto-named `<session-id> subagent`.
 - Continuing a session reuses the saved session state.
 - `--workspace` and the usual model/config override flags still work in headless mode.
+- `--agent <role>` selects a named subagent role from `[subagents.<role>]` in `~/.builder/config.toml`.
+- `--fast` is sugar for `--agent fast`.
 
 ## Workspace Binding
 
@@ -67,11 +75,13 @@ JSON mode emits exactly one final object on `stdout`.
   "session_name": "...",
   "continue_id": "...",
   "continue_command": "builder run --continue ... \"follow-up\"",
+  "warnings": ["..."],
   "duration_ms": 1234
 }
 ```
 
 On failure, JSON mode emits `status: "error"` and an `error` object instead of `result`.
+If a selected subagent role emits startup warnings, `final-text` prints them above the model response and JSON mode returns them in `warnings`.
 
 ---
 
@@ -83,6 +93,17 @@ Supported run-specific flags:
 | `--output-mode` | `final-text` or `json`. Default is `final-text`. |
 | `--progress-mode` | `quiet` or `stderr`. Default is `quiet`. |
 | `--continue` | Continue a previous session by id. |
+| `--agent` | Select a named subagent role from `config.toml`. |
+| `--fast` | Shortcut for the built-in `fast` subagent role. |
+
+## Subagent Roles
+
+Headless runs can select a file-defined subagent role with `--agent <role>`.
+
+- Roles are configured under `[subagents.<role>]` in `~/.builder/config.toml`.
+- Subagent roles inherit the main config and then override only the keys you set in that role table.
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile and enables `priority_request_mode`.
+- If `fast` ends up identical to the main agent config, Builder emits a warning so the calling agent can suggest tuning the config later.
 
 
 ## Non-Interactive Constraint

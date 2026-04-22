@@ -1673,7 +1673,7 @@ func TestSubmitUserMessage_ExposesViewImageToolForUnlistedVisionModelWithOverrid
 	}}}
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolViewImage}), Config{
-		Model:             "gpt-4o-2026-01-15",
+		Model:             "gpt-4.1-2026-01-15",
 		ModelCapabilities: session.LockedModelCapabilities{SupportsVisionInputs: true},
 		EnabledTools:      []toolspec.ID{toolspec.ToolViewImage},
 	})

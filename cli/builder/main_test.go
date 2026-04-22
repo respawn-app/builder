@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -323,6 +324,96 @@ func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
 	}
 }
 
+func TestRunSubcommandMapsFastFlagToAgentRole(t *testing.T) {
+	original := runPromptApp
+	t.Cleanup(func() {
+		runPromptApp = original
+	})
+	var gotOpts app.Options
+	runPromptApp = func(ctx context.Context, opts app.Options, prompt string, timeout time.Duration, progress io.Writer) (app.RunPromptResult, error) {
+		gotOpts = opts
+		return app.RunPromptResult{Result: "done"}, nil
+	}
+
+	originalStdout := os.Stdout
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create stdout temp file: %v", err)
+	}
+	os.Stdout = stdoutFile
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		_ = stdoutFile.Close()
+	})
+
+	if code := rootCommand([]string{"run", "--fast", "hello"}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if gotOpts.AgentRole != config.BuiltInSubagentRoleFast {
+		t.Fatalf("agent role = %q, want fast", gotOpts.AgentRole)
+	}
+}
+
+func TestRunSubcommandJSONModeKeepsWarningsInJSONOnly(t *testing.T) {
+	original := runPromptApp
+	t.Cleanup(func() {
+		runPromptApp = original
+	})
+	runPromptApp = func(ctx context.Context, opts app.Options, prompt string, timeout time.Duration, progress io.Writer) (app.RunPromptResult, error) {
+		return app.RunPromptResult{Result: "done", Warnings: []string{"warning one"}}, nil
+	}
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create stdout temp file: %v", err)
+	}
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr temp file: %v", err)
+	}
+	os.Stdout = stdoutFile
+	os.Stderr = stderrFile
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
+	})
+
+	if code := rootCommand([]string{"run", "--output-mode=json", "hello"}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if _, err := stdoutFile.Seek(0, 0); err != nil {
+		t.Fatalf("seek stdout: %v", err)
+	}
+	data, err := io.ReadAll(stdoutFile)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if strings.Contains(string(data), "warning one\n\n") {
+		t.Fatalf("expected stdout to stay json-only, got %q", string(data))
+	}
+	var decoded runJSONResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode json output: %v; raw=%q", err, string(data))
+	}
+	if len(decoded.Warnings) != 1 || decoded.Warnings[0] != "warning one" {
+		t.Fatalf("unexpected warnings: %+v", decoded.Warnings)
+	}
+	if _, err := stderrFile.Seek(0, 0); err != nil {
+		t.Fatalf("seek stderr: %v", err)
+	}
+	stderrData, err := io.ReadAll(stderrFile)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if strings.TrimSpace(string(stderrData)) != "" {
+		t.Fatalf("stderr = %q, want empty", string(stderrData))
+	}
+}
+
 func TestRequireInteractiveTerminalAllowsForce(t *testing.T) {
 	if err := requireInteractiveTerminal(strings.NewReader(""), &bytes.Buffer{}, true); err != nil {
 		t.Fatalf("require interactive terminal with force: %v", err)
@@ -453,10 +544,32 @@ func TestBuildRunContinueCommandAndHint(t *testing.T) {
 
 func TestEmitRunFinalTextIncludesContinuationHint(t *testing.T) {
 	var out bytes.Buffer
-	emitRunFinalText(&out, "done", "To continue this run, execute `"+selfcmd.ContinueRunCommand("session-123")+"`.")
+	emitRunFinalText(&out, nil, "done", "To continue this run, execute `"+selfcmd.ContinueRunCommand("session-123")+"`.")
 	got := out.String()
 	if !strings.Contains(got, "done\n\nTo continue this run") {
 		t.Fatalf("unexpected final-text output: %q", got)
+	}
+}
+
+func TestEmitRunFinalTextPrintsWarningsAboveResult(t *testing.T) {
+	var out bytes.Buffer
+	emitRunFinalText(&out, []string{"warning one"}, "done", "")
+	got := out.String()
+	if !strings.HasPrefix(got, "warning one\n\ndone\n") {
+		t.Fatalf("unexpected final-text output: %q", got)
+	}
+}
+
+func TestEffectiveRunAgentRoleRejectsConflictingFastFlag(t *testing.T) {
+	if _, err := effectiveRunAgentRole("worker", true); err == nil {
+		t.Fatal("expected conflicting fast role error")
+	}
+	role, err := effectiveRunAgentRole("fast", true)
+	if err != nil {
+		t.Fatalf("effectiveRunAgentRole: %v", err)
+	}
+	if role != config.BuiltInSubagentRoleFast {
+		t.Fatalf("role = %q, want fast", role)
 	}
 }
 

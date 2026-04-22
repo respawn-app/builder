@@ -16,6 +16,7 @@ type RunPromptRequest struct {
 }
 
 type RunPromptOverrides struct {
+	AgentRole           string
 	Model               string
 	ProviderOverride    string
 	ThinkingLevel       string
@@ -26,6 +27,17 @@ type RunPromptOverrides struct {
 }
 
 func (o RunPromptOverrides) HasAny() bool {
+	return strings.TrimSpace(o.AgentRole) != "" ||
+		strings.TrimSpace(o.Model) != "" ||
+		strings.TrimSpace(o.ProviderOverride) != "" ||
+		strings.TrimSpace(o.ThinkingLevel) != "" ||
+		strings.TrimSpace(o.Theme) != "" ||
+		o.ModelTimeoutSeconds > 0 ||
+		strings.TrimSpace(o.Tools) != "" ||
+		strings.TrimSpace(o.OpenAIBaseURL) != ""
+}
+
+func (o RunPromptOverrides) HasConfigOverrides() bool {
 	return strings.TrimSpace(o.Model) != "" ||
 		strings.TrimSpace(o.ProviderOverride) != "" ||
 		strings.TrimSpace(o.ThinkingLevel) != "" ||
@@ -40,6 +52,7 @@ type RunPromptResponse struct {
 	SessionName string
 	Result      string
 	Duration    time.Duration
+	Warnings    []string
 }
 
 type RunPromptProgress struct {
@@ -75,6 +88,7 @@ type PromptSessionRuntime interface {
 	SessionID() string
 	SessionName() string
 	DroppedEvents() uint64
+	Warnings() []string
 	Logf(format string, args ...any)
 	Close() error
 }
@@ -132,6 +146,7 @@ func (s *PromptService) RunPrompt(ctx context.Context, req RunPromptRequest, pro
 		SessionName: runtimeHandle.SessionName(),
 		Result:      assistant.Content,
 		Duration:    duration,
+		Warnings:    append([]string(nil), runtimeHandle.Warnings()...),
 	}
 	if dropped := runtimeHandle.DroppedEvents(); dropped > 0 {
 		runtimeHandle.Logf("runtime.event.drop.total=%d", dropped)

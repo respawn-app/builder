@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/server/auth"
 	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -183,16 +184,19 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 		WorkspaceRoot:       workspace,
 	}
 
-	updated, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
 		Model:               "gpt-5-mini",
 		ThinkingLevel:       "medium",
 		Theme:               "light",
 		ModelTimeoutSeconds: 12,
 		Tools:               "shell,patch",
 		OpenAIBaseURL:       "http://override.local/v1",
-	})
+	}, auth.EmptyState())
 	if err != nil {
 		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
 	}
 	if updated.ActiveSettings.Model != "gpt-5-mini" {
 		t.Fatalf("model = %q, want gpt-5-mini", updated.ActiveSettings.Model)
@@ -245,9 +249,12 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 		WorkspaceRoot:       workspace,
 	}
 
-	updated, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.3-codex"})
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.3-codex"}, auth.EmptyState())
 	if err != nil {
 		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
 	}
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
@@ -283,9 +290,12 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 		}},
 	}
 
-	updated, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.3-codex"})
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.3-codex"}, auth.EmptyState())
 	if err != nil {
 		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
 	}
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
@@ -295,6 +305,358 @@ func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t
 	}
 	if updated.Source.Sources["tools.shell"] != "cli" {
 		t.Fatalf("tool source = %q, want cli", updated.Source.Sources["tools.shell"])
+	}
+}
+
+func TestApplyRunPromptOverridesFastRoleWarnsWhenHeuristicDoesNothing(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-5.4\"\nopenai_base_url = \"https://example.test/v1\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: config.BuiltInSubagentRoleFast}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if updated.ActiveSettings.Model != loaded.Settings.Model {
+		t.Fatalf("model = %q, want %q", updated.ActiveSettings.Model, loaded.Settings.Model)
+	}
+	if len(warnings) != 1 || warnings[0] != fastRoleSameAsMainWarning {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+}
+
+func TestApplyRunPromptOverridesFastRoleAppliesBuiltInHeuristics(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: config.BuiltInSubagentRoleFast}, auth.State{Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}}})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.4-mini" {
+		t.Fatalf("model = %q, want gpt-5.4-mini", updated.ActiveSettings.Model)
+	}
+	if !updated.ActiveSettings.PriorityRequestMode {
+		t.Fatal("expected priority request mode enabled for fast role")
+	}
+	if updated.ActiveSettings.Reviewer.Model != "gpt-5.4-mini" {
+		t.Fatalf("reviewer model = %q, want gpt-5.4-mini", updated.ActiveSettings.Reviewer.Model)
+	}
+	if updated.ActiveSettings.ModelContextWindow != 272_000 {
+		t.Fatalf("context window = %d, want 272000", updated.ActiveSettings.ModelContextWindow)
+	}
+	if updated.ConfiguredModelName != "gpt-5.4-mini" {
+		t.Fatalf("configured model = %q, want gpt-5.4-mini", updated.ConfiguredModelName)
+	}
+}
+
+func TestApplyRunPromptOverridesFastRoleWarnsWhenExplicitRoleMatchesBase(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"thinking_level = \"medium\"",
+		"",
+		"[subagents.fast]",
+		"model = \"gpt-5.4\"",
+		"thinking_level = \"medium\"",
+		"priority_request_mode = false",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: config.BuiltInSubagentRoleFast}, auth.State{Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}}})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if updated.ActiveSettings.Model != loaded.Settings.Model || updated.ActiveSettings.ThinkingLevel != loaded.Settings.ThinkingLevel {
+		t.Fatalf("expected explicit fast role to match base settings, got %+v vs %+v", updated.ActiveSettings, loaded.Settings)
+	}
+	if len(warnings) != 1 || warnings[0] != fastRoleSameAsMainWarning {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+}
+
+func TestApplyRunPromptOverridesSubagentProviderOverrideCanInheritBaseModel(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"my-team-alias\"",
+		"",
+		"[subagents.worker]",
+		"provider_override = \"openai\"",
+		"openai_base_url = \"https://api.openai.com/v1\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: "worker"}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "my-team-alias" {
+		t.Fatalf("model = %q, want my-team-alias", updated.ActiveSettings.Model)
+	}
+	if updated.ActiveSettings.ProviderOverride != "openai" {
+		t.Fatalf("provider override = %q, want openai", updated.ActiveSettings.ProviderOverride)
+	}
+	if updated.ActiveSettings.OpenAIBaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("openai base url = %q, want https://api.openai.com/v1", updated.ActiveSettings.OpenAIBaseURL)
+	}
+}
+
+func TestApplyRunPromptOverridesRoleModelOverrideRecomputesContextBudget(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"model_context_window = 272000",
+		"context_compaction_threshold_tokens = 258400",
+		"pre_submit_compaction_lead_tokens = 35000",
+		"",
+		"[subagents.fast]",
+		"model = \"gpt-5.3-codex-spark\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: config.BuiltInSubagentRoleFast}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("model = %q, want gpt-5.3-codex-spark", updated.ActiveSettings.Model)
+	}
+	if updated.ActiveSettings.ModelContextWindow != 128_000 {
+		t.Fatalf("context window = %d, want 128000", updated.ActiveSettings.ModelContextWindow)
+	}
+	if updated.ActiveSettings.ContextCompactionThresholdTokens != 121_600 {
+		t.Fatalf("compaction threshold = %d, want 121600", updated.ActiveSettings.ContextCompactionThresholdTokens)
+	}
+	if updated.ActiveSettings.PreSubmitCompactionLeadTokens != 35_000 {
+		t.Fatalf("pre-submit lead = %d, want 35000", updated.ActiveSettings.PreSubmitCompactionLeadTokens)
+	}
+}
+
+func TestApplyRunPromptOverridesRoleModelOverrideKeepsExplicitContextWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"model_context_window = 272000",
+		"context_compaction_threshold_tokens = 258400",
+		"pre_submit_compaction_lead_tokens = 35000",
+		"",
+		"[subagents.fast]",
+		"model = \"gpt-5.3-codex-spark\"",
+		"model_context_window = 100000",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: config.BuiltInSubagentRoleFast}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.ModelContextWindow != 100_000 {
+		t.Fatalf("context window = %d, want 100000", updated.ActiveSettings.ModelContextWindow)
+	}
+	if updated.ActiveSettings.ContextCompactionThresholdTokens != 95_000 {
+		t.Fatalf("compaction threshold = %d, want 95000", updated.ActiveSettings.ContextCompactionThresholdTokens)
+	}
+	if updated.ActiveSettings.PreSubmitCompactionLeadTokens != 35_000 {
+		t.Fatalf("pre-submit lead = %d, want 35000", updated.ActiveSettings.PreSubmitCompactionLeadTokens)
+	}
+}
+
+func TestApplyRunPromptOverridesFastRoleUsesCLIProviderOverrideForHeuristic(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"openai_base_url = \"https://example.test/v1\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
+		AgentRole:     config.BuiltInSubagentRoleFast,
+		ProviderOverride: "openai",
+		OpenAIBaseURL: "https://api.openai.com/v1",
+	}, auth.State{Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}}})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.4-mini" {
+		t.Fatalf("model = %q, want gpt-5.4-mini", updated.ActiveSettings.Model)
+	}
+	if !updated.ActiveSettings.PriorityRequestMode {
+		t.Fatal("expected priority request mode enabled")
 	}
 }
 

@@ -169,6 +169,12 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "# ask_question = true") {
 		t.Fatalf("expected default config to include commented default tool values, got %q", string(settingsBytes))
 	}
+	if !strings.Contains(string(settingsBytes), "[subagents.fast]") {
+		t.Fatalf("expected default config to include built-in fast subagent section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "gpt-5.4-mini") {
+		t.Fatalf("expected default config to document built-in fast model heuristic, got %q", string(settingsBytes))
+	}
 	if strings.Contains(string(settingsBytes), "[model_capabilities]") || strings.Contains(string(settingsBytes), "[provider_capabilities]") {
 		t.Fatalf("expected default config to omit capability sections without overrides, got %q", string(settingsBytes))
 	}
@@ -233,6 +239,114 @@ func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	}
 	if strings.Contains(toml, "This JSON block mirrors") {
 		t.Fatalf("expected onboarding config to omit mirrored JSON block, got %q", toml)
+	}
+	if !strings.Contains(toml, "[subagents.fast]") {
+		t.Fatalf("expected onboarding config to include built-in fast subagent section, got %q", toml)
+	}
+}
+
+func TestLoadSubagentRoleFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"model = \"gpt-5.4-mini\"",
+		"thinking_level = \"low\"",
+		"",
+		"[subagents.fast.tools]",
+		"patch = false",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	role, ok := cfg.Settings.Subagents[BuiltInSubagentRoleFast]
+	if !ok {
+		t.Fatalf("expected fast subagent role, got %+v", cfg.Settings.Subagents)
+	}
+	if role.Settings.Model != "gpt-5.4-mini" {
+		t.Fatalf("role model = %q, want gpt-5.4-mini", role.Settings.Model)
+	}
+	if role.Settings.ThinkingLevel != "low" {
+		t.Fatalf("role thinking = %q, want low", role.Settings.ThinkingLevel)
+	}
+	if role.Settings.EnabledTools[toolspec.ToolPatch] {
+		t.Fatalf("expected fast role patch tool disabled, got %+v", role.Settings.EnabledTools)
+	}
+	if role.Sources["model"] != "file" || role.Sources["thinking_level"] != "file" || role.Sources["tools.patch"] != "file" {
+		t.Fatalf("unexpected role sources: %+v", role.Sources)
+	}
+	if _, exists := role.Sources["reviewer.model"]; exists {
+		t.Fatalf("did not expect inherited reviewer model to be marked explicit, got %+v", role.Sources)
+	}
+}
+
+func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"thinking_level = \"low\"",
+		"",
+		"[subagents.fast.subagents.worker]",
+		"thinking_level = \"high\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected nested subagents table to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown settings key(s): subagents.fast.subagents") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"thinking_level = \"low\"",
+		"unknown_toggle = true",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected unknown subagent key to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown settings key(s): subagents.fast.unknown_toggle") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

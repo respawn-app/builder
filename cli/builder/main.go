@@ -16,6 +16,7 @@ import (
 	"builder/cli/app"
 	"builder/cli/selfcmd"
 	"builder/shared/buildinfo"
+	"builder/shared/config"
 	"golang.org/x/term"
 )
 
@@ -41,6 +42,7 @@ type runJSONResult struct {
 	SessionName string        `json:"session_name,omitempty"`
 	ContinueID  string        `json:"continue_id,omitempty"`
 	ContinueCmd string        `json:"continue_command,omitempty"`
+	Warnings    []string      `json:"warnings,omitempty"`
 	DurationMS  int64         `json:"duration_ms"`
 	Error       *runJSONError `json:"error,omitempty"`
 }
@@ -217,6 +219,8 @@ func runSubcommand(args []string) int {
 	runFS := flag.NewFlagSet("builder run", flag.ContinueOnError)
 	runFS.SetOutput(os.Stderr)
 	flags := registerCommonFlags(runFS)
+	agentRoleRaw := runFS.String("agent", "", "subagent role override")
+	fastRole := runFS.Bool("fast", false, "use the built-in fast subagent role")
 	timeoutRaw := runFS.String("timeout", "", "optional timeout duration (e.g. 30s, 2m); default is no timeout")
 	outputModeRaw := runFS.String("output-mode", string(runOutputModeFinalText), "output mode: final-text|json")
 	progressModeRaw := runFS.String("progress-mode", string(runProgressModeQuiet), "progress mode: quiet|stderr")
@@ -237,6 +241,11 @@ func runSubcommand(args []string) int {
 	outputMode, err := parseRunOutputMode(*outputModeRaw)
 	if err != nil {
 		emitRunUsageError(usageOutputMode, err.Error())
+		return 2
+	}
+	agentRole, err := effectiveRunAgentRole(*agentRoleRaw, *fastRole)
+	if err != nil {
+		emitRunUsageError(outputMode, err.Error())
 		return 2
 	}
 
@@ -269,6 +278,7 @@ func runSubcommand(args []string) int {
 		WorkspaceRoot:         flags.WorkspaceRoot,
 		WorkspaceRootExplicit: flags.WorkspaceExplicit,
 		SessionID:             sessionID,
+		AgentRole:             agentRole,
 		Model:                 flags.Model,
 		ProviderOverride:      flags.ProviderOverride,
 		ThinkingLevel:         flags.ThinkingLevel,
@@ -296,6 +306,7 @@ func runSubcommand(args []string) int {
 				SessionName: result.SessionName,
 				ContinueID:  continueID,
 				ContinueCmd: continueCmd,
+				Warnings:    append([]string(nil), result.Warnings...),
 				DurationMS:  result.Duration.Milliseconds(),
 				Error: &runJSONError{
 					Code:    code,
@@ -303,6 +314,7 @@ func runSubcommand(args []string) int {
 				},
 			})
 		} else {
+			emitWarnings(os.Stderr, result.Warnings)
 			fmt.Fprintln(os.Stderr, runErr)
 			if continueHint != "" {
 				fmt.Fprintln(os.Stderr)
@@ -322,10 +334,11 @@ func runSubcommand(args []string) int {
 			SessionName: result.SessionName,
 			ContinueID:  continueID,
 			ContinueCmd: continueCmd,
+			Warnings:    append([]string(nil), result.Warnings...),
 			DurationMS:  result.Duration.Milliseconds(),
 		})
 	} else {
-		emitRunFinalText(os.Stdout, result.Result, continueHint)
+		emitRunFinalText(os.Stdout, result.Warnings, result.Result, continueHint)
 	}
 	return 0
 }
@@ -440,10 +453,11 @@ func emitRunUsageError(mode runOutputMode, message string) {
 	_, _ = fmt.Fprintln(os.Stderr, message)
 }
 
-func emitRunFinalText(w io.Writer, result string, continueHint string) {
+func emitRunFinalText(w io.Writer, warnings []string, result string, continueHint string) {
 	if w == nil {
 		return
 	}
+	emitWarnings(w, warnings)
 	trimmedResult := strings.TrimRight(result, "\n")
 	trimmedHint := strings.TrimSpace(continueHint)
 	switch {
@@ -454,6 +468,34 @@ func emitRunFinalText(w io.Writer, result string, continueHint string) {
 	case trimmedHint != "":
 		_, _ = fmt.Fprintln(w, trimmedHint)
 	}
+}
+
+func emitWarnings(w io.Writer, warnings []string) {
+	if w == nil || len(warnings) == 0 {
+		return
+	}
+	for _, warning := range warnings {
+		trimmed := strings.TrimSpace(warning)
+		if trimmed == "" {
+			continue
+		}
+		_, _ = fmt.Fprintln(w, trimmed)
+	}
+	_, _ = fmt.Fprintln(w)
+}
+
+func effectiveRunAgentRole(raw string, fast bool) (string, error) {
+	normalized := config.NormalizeSubagentRole(raw)
+	if strings.TrimSpace(raw) != "" && normalized == "" {
+		return "", fmt.Errorf("invalid --agent value %q", raw)
+	}
+	if fast {
+		if normalized != "" && normalized != config.BuiltInSubagentRoleFast {
+			return "", fmt.Errorf("--fast conflicts with --agent %q", raw)
+		}
+		return config.BuiltInSubagentRoleFast, nil
+	}
+	return normalized, nil
 }
 
 func buildRunContinueCommand(sessionID string) string {

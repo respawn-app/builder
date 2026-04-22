@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"builder/server/auth"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/client"
@@ -92,9 +93,39 @@ func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
 	}, nil
 }
 
-func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides) (SessionPlan, error) {
+func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides, authState auth.State) (SessionPlan, []string, error) {
 	if !overrides.HasAny() {
-		return plan, nil
+		return plan, nil, nil
+	}
+	var warnings []string
+	next := plan
+	roleName := config.NormalizeSubagentRole(overrides.AgentRole)
+	if roleName != "" {
+		providerBase := cloneSettings(plan.ActiveSettings)
+		if value := strings.TrimSpace(overrides.ProviderOverride); value != "" {
+			providerBase.ProviderOverride = value
+		}
+		if value := strings.TrimSpace(overrides.OpenAIBaseURL); value != "" {
+			providerBase.OpenAIBaseURL = value
+		}
+		resolved, warning, err := resolveSubagentSettings(plan.ActiveSettings, providerBase, plan.Source.Sources, roleName, authState, !plan.ModelContractLocked)
+		if err != nil {
+			return SessionPlan{}, nil, err
+		}
+		next.ActiveSettings = resolved
+		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
+			return SessionPlan{}, nil, err
+		}
+		if !plan.ModelContractLocked {
+			next.ConfiguredModelName = resolved.Model
+		}
+		next.EnabledTools = ActiveToolIDs(next.ActiveSettings, next.Source, plan.Store.Meta().Locked)
+		if strings.TrimSpace(warning) != "" {
+			warnings = append(warnings, warning)
+		}
+	}
+	if !overrides.HasConfigOverrides() {
+		return next, warnings, nil
 	}
 	loaded, err := config.Load(plan.WorkspaceRoot, config.LoadOptions{
 		Model:               strings.TrimSpace(overrides.Model),
@@ -106,9 +137,8 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		OpenAIBaseURL:       strings.TrimSpace(overrides.OpenAIBaseURL),
 	})
 	if err != nil {
-		return SessionPlan{}, err
+		return SessionPlan{}, nil, err
 	}
-	next := plan
 	locked := plan.Store.Meta().Locked
 	mergedSource := mergeOverrideSources(plan.Source, loaded.Source)
 	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
@@ -138,11 +168,11 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
 		next.ActiveSettings.OpenAIBaseURL = loaded.Settings.OpenAIBaseURL
 		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
-			return SessionPlan{}, err
+			return SessionPlan{}, nil, err
 		}
 	}
 	next.Source = mergedSource
-	return next, nil
+	return next, warnings, nil
 }
 
 func mergeOverrideSources(base config.SourceReport, override config.SourceReport) config.SourceReport {

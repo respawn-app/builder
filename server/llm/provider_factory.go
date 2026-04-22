@@ -148,16 +148,11 @@ func providerContracts() []ProviderContract {
 			ModelContracts: []ModelCapabilityContract{
 				{Model: "gpt-5", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: true},
 				{Model: "gpt-5.4", ContextWindowTokens: 272_000, LargeContextWindowTokens: 1_000_000, SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: true},
+				{Model: "gpt-5.4-mini", ContextWindowTokens: 272_000, LargeContextWindowTokens: 400_000, SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: true},
+				{Model: "gpt-5.4-nano", ContextWindowTokens: 272_000, LargeContextWindowTokens: 400_000, SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: false},
 				{Model: "gpt-5.3-codex", ContextWindowTokens: 400_000, SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: true},
 				{Model: "gpt-5.3-codex-spark", ContextWindowTokens: 128_000, SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsVerbosity: true, SupportedVerbosityLevels: []string{"low", "medium", "high"}, SupportsVisionInputs: false},
 				{Model: "gpt-4.1", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "gpt-4o", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "gpt-4o-mini", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "o1", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "o3", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "o3-mini", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "o4", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
-				{Model: "o4-mini", SupportsReasoningEffort: true, SupportedReasoningEfforts: []string{"low", "medium", "high"}, SupportsReasoningSummary: true, SupportsVisionInputs: true},
 			},
 		},
 	}
@@ -305,11 +300,6 @@ func matchOpenAIModelFamily(model string) bool {
 	}
 	if strings.HasPrefix(normalizedModel, "gpt-") {
 		return true
-	}
-	for _, prefix := range []string{"o1", "o3", "o4"} {
-		if normalizedModel == prefix || strings.HasPrefix(normalizedModel, prefix+"-") {
-			return true
-		}
 	}
 	return false
 }
