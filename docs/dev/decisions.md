@@ -458,12 +458,15 @@
 ## Headless Mode
 
 - `builder run "prompt"` is the supported headless subagent interface.
+- Headless subagent roles are selected with `builder run --agent <role> "prompt"`; `--fast` is sugar for the built-in `fast` role.
+- Subagent roles are configured as file-only `[subagents.<role>]` tables in `~/.builder/config.toml` and inherit the main config unless overridden.
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups it heuristically switches to a smaller/faster profile and enables `priority_request_mode`; if it resolves to the same config as the main agent, Builder returns a warning so the caller can suggest tuning later.
 - Executes a single non-interactive prompt with existing runtime/session persistence.
 - Creates/resumes normal sessions and auto-names unnamed sessions `<session-id> subagent`.
 - Default timeout is infinite; `--timeout` can bound execution.
 - Output modes are explicit: default `--output-mode=final-text`, optional `--output-mode=json`.
-- JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata when available.
-- Final-text mode emits the final assistant text to `stdout`, optionally followed by a continue hint.
+- JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata and startup `warnings` when available.
+- Final-text mode emits startup warnings first, then the final assistant text, and optionally a continue hint.
 - Progress is quiet by default and is emitted to `stderr` only when `--progress-mode=stderr`.
 
 ## Release Engineering

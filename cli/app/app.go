@@ -16,6 +16,7 @@ type Options struct {
 	WorkspaceRoot         string
 	WorkspaceRootExplicit bool
 	SessionID             string
+	AgentRole             string
 	Model                 string
 	ProviderOverride      string
 	ThinkingLevel         string

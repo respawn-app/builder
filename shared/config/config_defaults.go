@@ -135,8 +135,20 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 			writeDefaultLines(&out, []defaultConfigLine{line})
 		}
 	}
+	writeBuiltInSubagentSections(&out)
 	writeSkillTogglesSection(&out, state.Settings.SkillToggles)
 	return out.String()
+}
+
+func writeBuiltInSubagentSections(builder *strings.Builder) {
+	if builder == nil {
+		return
+	}
+	builder.WriteString("\n[subagents.fast]\n")
+	builder.WriteString("# inherits all main settings unless overridden\n")
+	builder.WriteString("# model = \"gpt-5.4-mini\" # built-in heuristic on exact OpenAI first-party setups\n")
+	builder.WriteString("# priority_request_mode = true # built-in heuristic on exact OpenAI first-party setups\n")
+	builder.WriteString("# model_context_window = 272000 # conservative default; larger API-key windows can be added later\n")
 }
 
 func filterRenderedLines(lines []defaultConfigLine, omittedKeys map[string]bool) []defaultConfigLine {

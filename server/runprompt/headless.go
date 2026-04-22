@@ -48,13 +48,22 @@ type headlessPromptLauncher struct {
 	boot HeadlessBootstrap
 }
 
-func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
+func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
 	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir, StoreOptions: l.boot.StoreOptions}
 	plan, err := planner.PlanSession(launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
 	if err != nil {
 		return nil, err
 	}
-	plan, err = launch.ApplyRunPromptOverrides(plan, req.Overrides)
+	authState := auth.EmptyState()
+	if l.boot.AuthManager != nil {
+		var authErr error
+		authState, authErr = l.boot.AuthManager.CurrentState(ctx)
+		if authErr != nil {
+			return nil, authErr
+		}
+	}
+	warnings := []string(nil)
+	plan, warnings, err = launch.ApplyRunPromptOverrides(plan, req.Overrides, authState)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +71,7 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req se
 	if err != nil {
 		return nil, err
 	}
-	return &headlessPromptRuntime{plan: runtimePlan}, nil
+	return &headlessPromptRuntime{plan: runtimePlan, warnings: warnings}, nil
 }
 
 type headlessRuntimePlan struct {
@@ -141,6 +150,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 
 type headlessPromptRuntime struct {
 	plan *headlessRuntimePlan
+	warnings []string
 }
 
 func (r *headlessPromptRuntime) SubmitUserMessage(ctx context.Context, prompt string) (serverapi.PromptAssistantMessage, error) {
@@ -150,6 +160,12 @@ func (r *headlessPromptRuntime) SubmitUserMessage(ctx context.Context, prompt st
 
 func (r *headlessPromptRuntime) SessionID() string   { return r.plan.engine.SessionID() }
 func (r *headlessPromptRuntime) SessionName() string { return r.plan.engine.SessionName() }
+func (r *headlessPromptRuntime) Warnings() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.warnings...)
+}
 func (r *headlessPromptRuntime) DroppedEvents() uint64 {
 	return r.plan.eventBridge.Dropped()
 }

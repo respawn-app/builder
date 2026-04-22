@@ -72,6 +72,11 @@ type ShellSettings struct {
 	PostprocessHook    string
 }
 
+type SubagentRole struct {
+	Settings Settings
+	Sources  map[string]string
+}
+
 type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
@@ -104,6 +109,7 @@ type Settings struct {
 	Shell                            ShellSettings
 	CacheWarningMode                 CacheWarningMode
 	Reviewer                         ReviewerSettings
+	Subagents                        map[string]SubagentRole
 }
 
 type ModelCapabilitiesOverride struct {

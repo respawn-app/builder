@@ -69,6 +69,11 @@ postprocessing_mode = "builtin"
 frequency = "edits"
 timeout_seconds = 60
 verbose_output = false # show in ongoing transcript
+
+[subagents.fast]
+# inherits the main config unless overridden
+# model = "gpt-5.4-mini"
+# priority_request_mode = true
 ```
 
 `server_host` and `server_port` stay the durable TCP source of truth. On Unix platforms Builder may also derive a same-machine Unix domain socket for faster local RPC, but that socket is automatic local state only: there is no extra config knob, explicit `server_host` or `server_port` overrides still dial configured TCP, LAN/remote clients still use configured TCP, and health/readiness stay on configured HTTP/TCP.
@@ -86,6 +91,8 @@ These flags overlay settings at startup.
 | `--model-timeout-seconds` | `timeouts.model_request_seconds` | |
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
+
+`builder run` also accepts the headless-only selectors `--agent <role>` and `--fast`, which choose a subagent role rather than directly overriding one config key.
 
 
 ## Reference
@@ -182,6 +189,28 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
+
+### Subagents
+
+`[subagents.<role>]` is a file-only table for named headless subagent roles.
+
+```toml
+[subagents.fast]
+model = "gpt-5.4-mini"
+thinking_level = "low"
+
+[subagents.fast.tools]
+patch = false
+```
+
+- Select a role with `builder run --agent <role> "..."`.
+- `builder run --fast "..."` is sugar for `--agent fast`.
+- Subagent roles inherit the main config and then apply only the keys set in that role table.
+- Roles may use the same setting keys as the main config, including nested sections like `[subagents.<role>.tools]`, `[subagents.<role>.timeouts]`, and `[subagents.<role>.reviewer]`.
+- Nested subagent tables are not allowed.
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster profile and enables `priority_request_mode`.
+- If `fast` resolves to the same settings as the main agent, Builder emits a warning so the caller can suggest config tuning later.
+- Builder may keep some legacy built-in model ids for compatibility even after they disappear from current external OpenAI/Codex catalogs. Verify availability with your actual provider before copying a model id into a subagent role.
 
 ### Skills
 

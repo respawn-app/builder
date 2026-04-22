@@ -527,14 +527,7 @@ func applyOnboardingModel(state *onboardingFlowState, value string) error {
 		return fmt.Errorf("model must not be empty")
 	}
 	state.settings.Model = model
-	meta, ok := llm.LookupModelMetadata(model)
-	if ok && meta.ContextWindowTokens > 0 {
-		state.settings.ModelContextWindow = meta.ContextWindowTokens
-		state.settings.ContextCompactionThresholdTokens = meta.ContextWindowTokens * 95 / 100
-	} else {
-		state.settings.ModelContextWindow = state.baselineSettings.ModelContextWindow
-		state.settings.ContextCompactionThresholdTokens = state.baselineSettings.ContextCompactionThresholdTokens
-	}
+	llm.ApplyDerivedModelContextBudget(&state.settings, model, state.baselineSettings.ModelContextWindow, state.baselineSettings.ContextCompactionThresholdTokens)
 	if !llm.SupportsVerbosityModel(model) {
 		state.settings.ModelVerbosity = config.ModelVerbosity("")
 	} else if strings.TrimSpace(string(state.settings.ModelVerbosity)) == "" {
