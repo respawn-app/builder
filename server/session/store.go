@@ -339,6 +339,23 @@ func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
 	return s.observePersistence(snapshot)
 }
 
+func (s *Store) SetWorktreeReminderState(state *WorktreeReminderState) error {
+	nextState := cloneWorktreeReminderState(state)
+	s.mu.Lock()
+	if worktreeReminderStatesEqual(s.meta.WorktreeReminder, nextState) && (!s.persisted || s.hasDurableMetadataLocked()) {
+		s.mu.Unlock()
+		return nil
+	}
+	s.meta.WorktreeReminder = nextState
+	s.meta.UpdatedAt = time.Now().UTC()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
+}
+
 func (s *Store) SetUsageState(state *UsageState) error {
 	s.mu.Lock()
 

@@ -45,3 +45,23 @@ func preparePersistenceRoot(path string) (string, error) {
 	}
 	return absRoot, nil
 }
+
+func prepareWorktreeBaseDir(persistenceRoot string, path string) (string, error) {
+	raw := strings.TrimSpace(path)
+	if raw == "" {
+		raw = filepath.Join(persistenceRoot, "worktrees")
+	}
+	expanded, err := expandTildePath(raw)
+	if err != nil {
+		return "", fmt.Errorf("expand worktree base dir: %w", err)
+	}
+	resolved := expanded
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(persistenceRoot, resolved)
+	}
+	absRoot, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree base dir: %w", err)
+	}
+	return absRoot, nil
+}

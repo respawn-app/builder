@@ -86,6 +86,13 @@ func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool)
 		if len(args) > 0 && m.processClient == nil {
 			return "background process client is unavailable", true
 		}
+	case commands.ActionWorktree:
+		if m.busy {
+			return "cannot run /worktree while model is working", true
+		}
+		if m.worktreeClient == nil {
+			return "worktree client is unavailable", true
+		}
 	}
 	return "", false
 }

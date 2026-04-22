@@ -59,6 +59,11 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if _, _, err := EnsureManagedRGConfigFile(); err != nil {
 		return App{}, err
 	}
+	absWorktreeBaseDir, err := prepareWorktreeBaseDir(absPersistenceRoot, state.Settings.Worktrees.BaseDir)
+	if err != nil {
+		return App{}, err
+	}
+	state.Settings.Worktrees.BaseDir = absWorktreeBaseDir
 
 	return App{
 		AppName:         DefaultAppName,

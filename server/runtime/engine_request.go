@@ -15,11 +15,11 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
-func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
-	return e.buildRequestWithExtraItems(ctx, nil, allowTools)
+func (e *Engine) buildRequest(ctx context.Context, stepID string, allowTools bool) (llm.Request, error) {
+	return e.buildRequestWithExtraItems(ctx, stepID, nil, allowTools)
 }
 
-func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.ResponseItem, allowTools bool) (llm.Request, error) {
+func (e *Engine) buildRequestWithExtraItems(ctx context.Context, stepID string, extra []llm.ResponseItem, allowTools bool) (llm.Request, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return llm.Request{}, err
@@ -32,7 +32,14 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 		requestTools = []llm.Tool{}
 	}
 
-	items := e.snapshotItems()
+	items := filterHistoricalWorktreeReminderItems(e.snapshotItems())
+	worktreeReminderItems, err := e.buildWorktreeReminderRequestItems(stepID)
+	if err != nil {
+		return llm.Request{}, err
+	}
+	if len(worktreeReminderItems) > 0 {
+		items = append(items, llm.CloneResponseItems(worktreeReminderItems)...)
+	}
 	if len(extra) > 0 {
 		items = append(items, llm.CloneResponseItems(extra)...)
 	}

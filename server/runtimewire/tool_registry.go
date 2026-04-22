@@ -35,6 +35,12 @@ type LocalToolRuntimeContext struct {
 	ViewImageOutsideWorkspaceLogger readimagetool.OutsideWorkspaceAuditLogger
 }
 
+type LocalToolRegistryBinding struct {
+	registry *tools.Registry
+	ctx      LocalToolRuntimeContext
+	enabled  []toolspec.ID
+}
+
 func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext) (tools.Handler, error) {
 	switch def.LocalRuntimeBuilder() {
 	case tools.LocalRuntimeBuilderExecCommand:
@@ -84,7 +90,55 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 	}
 }
 
-func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func (b *LocalToolRegistryBinding) Registry() *tools.Registry {
+	if b == nil {
+		return nil
+	}
+	return b.registry
+}
+
+func (b *LocalToolRegistryBinding) Rebind(workspaceRoot string) error {
+	if b == nil {
+		return fmt.Errorf("local tool registry binding is required")
+	}
+	b.ctx.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
+	return b.rebuild()
+}
+
+func (b *LocalToolRegistryBinding) rebuild() error {
+	if b == nil {
+		return fmt.Errorf("local tool registry binding is required")
+	}
+	if b.registry == nil {
+		b.registry = tools.NewRegistry()
+	}
+	handlers := make([]tools.Handler, 0, len(b.enabled))
+	enabledSet := make(map[toolspec.ID]struct{}, len(b.enabled))
+	for _, id := range b.enabled {
+		enabledSet[id] = struct{}{}
+	}
+	for _, id := range tools.CatalogIDs() {
+		if _, ok := enabledSet[id]; !ok {
+			continue
+		}
+		def, ok := tools.DefinitionFor(id)
+		if !ok {
+			return fmt.Errorf("missing tool definition for %q", id)
+		}
+		if !def.AvailableInLocalRuntime() {
+			continue
+		}
+		handler, err := BuildLocalRuntimeHandler(def, b.ctx)
+		if err != nil {
+			return wrapSessionWorkspaceRetargetHint(b.ctx.OwnerSessionID, b.ctx.WorkspaceRoot, err)
+		}
+		handlers = append(handlers, handler)
+	}
+	b.registry.ReplaceHandlers(handlers...)
+	return nil
+}
+
+func NewLocalToolRegistryBinding(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*LocalToolRegistryBinding, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -96,6 +150,7 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 	background.SetMinimumExecToBgTime(minimumExecToBgTime)
 	patchOutsideWorkspaceApprover := NewOutsideWorkspaceApprover(broker, "editing")
 	readOutsideWorkspaceApprover := NewOutsideWorkspaceApprover(broker, "reading")
+	registry := tools.NewRegistry()
 	ctx := LocalToolRuntimeContext{
 		WorkspaceRoot:                workspaceRoot,
 		OwnerSessionID:               ownerSessionID,
@@ -119,30 +174,34 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 			)
 		}),
 	}
-	enabledSet := make(map[toolspec.ID]struct{}, len(enabled))
-	for _, id := range enabled {
-		enabledSet[id] = struct{}{}
+	binding := &LocalToolRegistryBinding{
+		registry: registry,
+		ctx:      ctx,
+		enabled:  append([]toolspec.ID(nil), enabled...),
 	}
-	handlers := make([]tools.Handler, 0, len(enabledSet))
-	for _, id := range tools.CatalogIDs() {
-		if _, ok := enabledSet[id]; !ok {
-			continue
-		}
-		def, ok := tools.DefinitionFor(id)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("missing tool definition for %q", id)
-		}
-		if !def.AvailableInLocalRuntime() {
-			continue
-		}
-		handler, err := BuildLocalRuntimeHandler(def, ctx)
-		if err != nil {
-			return nil, nil, nil, wrapSessionWorkspaceRetargetHint(ctx.OwnerSessionID, ctx.WorkspaceRoot, err)
-		}
-		handlers = append(handlers, handler)
+	if err := binding.rebuild(); err != nil {
+		return nil, nil, nil, err
 	}
-	registry := tools.NewRegistry(handlers...)
-	return registry, broker, background, nil
+	return binding, broker, background, nil
+}
+
+func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+	binding, broker, background, err := NewLocalToolRegistryBinding(
+		workspaceRoot,
+		ownerSessionID,
+		enabled,
+		minimumExecToBgTime,
+		shellOutputMaxChars,
+		allowNonCwdEdits,
+		supportsVision,
+		logger,
+		background,
+		triggerHandoffController,
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return binding.Registry(), broker, background, nil
 }
 
 func wrapSessionWorkspaceRetargetHint(sessionID string, workspaceRoot string, err error) error {

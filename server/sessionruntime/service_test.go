@@ -544,6 +544,64 @@ func TestRequireControllerLeaseRejectsReplacedHandleAfterReadyWait(t *testing.T)
 	}
 }
 
+func TestRecordWorktreeTransitionPersistsPendingReminderState(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+	}
+	close(handle.ready)
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	err = fixture.service.RecordWorktreeTransition(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID, session.WorktreeReminderState{
+		Mode:                  session.WorktreeReminderModeEnter,
+		Branch:                " feature/worktree ",
+		WorktreePath:          " /tmp/worktree-a ",
+		WorkspaceRoot:         " /tmp/workspace ",
+		EffectiveCwd:          " /tmp/worktree-a/pkg ",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 9,
+	})
+	if err != nil {
+		t.Fatalf("RecordWorktreeTransition: %v", err)
+	}
+
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("resolveStore: %v", err)
+	}
+	state := resolved.Meta().WorktreeReminder
+	if state == nil {
+		t.Fatal("expected persisted worktree reminder state")
+	}
+	if state.Mode != session.WorktreeReminderModeEnter {
+		t.Fatalf("mode = %q, want enter", state.Mode)
+	}
+	if state.Branch != "feature/worktree" {
+		t.Fatalf("branch = %q, want feature/worktree", state.Branch)
+	}
+	if state.WorktreePath != "/tmp/worktree-a" {
+		t.Fatalf("worktree path = %q, want /tmp/worktree-a", state.WorktreePath)
+	}
+	if state.WorkspaceRoot != "/tmp/workspace" {
+		t.Fatalf("workspace root = %q, want /tmp/workspace", state.WorkspaceRoot)
+	}
+	if state.EffectiveCwd != "/tmp/worktree-a/pkg" {
+		t.Fatalf("effective cwd = %q, want /tmp/worktree-a/pkg", state.EffectiveCwd)
+	}
+	if state.HasIssuedInGeneration {
+		t.Fatal("expected reminder issuance reset for new transition")
+	}
+	if state.IssuedCompactionCount != 0 {
+		t.Fatalf("issued compaction count = %d, want 0", state.IssuedCompactionCount)
+	}
+}
+
 func TestResolveStoreFallsBackThroughMetadataAuthority(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)

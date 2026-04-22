@@ -35,6 +35,7 @@ import (
 	"builder/server/storagemigration"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/server/worktree"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -73,6 +74,7 @@ type Core struct {
 	sessionViews     client.SessionViewClient
 	sessionLifecycle client.SessionLifecycleClient
 	sessionActivity  client.SessionActivityClient
+	worktrees        client.WorktreeClient
 	runPrompt        client.RunPromptClient
 }
 
@@ -134,6 +136,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
+	worktreeService := worktree.NewService(metadataStore, nil, runtimeRegistry, sessionRuntimeService, runtimeSupport.Background, runtimeControlService, worktree.ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir, SetupScript: cfg.Settings.Worktrees.SetupScript})
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
@@ -167,6 +170,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
+		worktrees:        client.NewLoopbackWorktreeClient(worktreeService),
 		runPrompt:        unregisteredRunPromptClient{},
 	}
 	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
@@ -583,6 +587,13 @@ func (s *Core) SessionLifecycleClient() client.SessionLifecycleClient {
 		return nil
 	}
 	return s.sessionLifecycle
+}
+
+func (s *Core) WorktreeClient() client.WorktreeClient {
+	if s == nil {
+		return nil
+	}
+	return s.worktrees
 }
 
 func (s *Core) RegisterSessionStore(store *session.Store) {

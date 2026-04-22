@@ -117,6 +117,12 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Shell.PostprocessHook != "" {
 		t.Fatalf("default shell.postprocess_hook mismatch: %q", cfg.Settings.Shell.PostprocessHook)
 	}
+	if got := cfg.Settings.Worktrees.BaseDir; got != filepath.Join(cfg.PersistenceRoot, "worktrees") {
+		t.Fatalf("default worktrees.base_dir mismatch: %q", got)
+	}
+	if cfg.Settings.Worktrees.SetupScript != "" {
+		t.Fatalf("expected default worktrees.setup_script empty, got %q", cfg.Settings.Worktrees.SetupScript)
+	}
 	if cfg.Settings.Reviewer.Frequency != defaultReviewerFrequency {
 		t.Fatalf("expected default reviewer.frequency=%s, got %q", defaultReviewerFrequency, cfg.Settings.Reviewer.Frequency)
 	}
@@ -144,6 +150,15 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsBytes), "# pre_submit_compaction_lead_tokens = 35000") {
 		t.Fatalf("expected default config to expose pre-submit runway default, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "[worktrees]") {
+		t.Fatalf("expected default config to include worktrees section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# base_dir = \"~/.builder/worktrees\"") {
+		t.Fatalf("expected default config to expose worktrees.base_dir, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# setup_script = \"\"") {
+		t.Fatalf("expected default config to expose worktrees.setup_script, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "thinking_level = \"low\"") {
 		t.Fatalf("expected default config not to hardcode reviewer thinking inheritance, got %q", string(settingsBytes))
@@ -229,6 +244,7 @@ func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	for _, want := range []string{
 		"# provider_override = \"\"",
 		"# openai_base_url = \"\"",
+		"[worktrees]",
 		"[reviewer]",
 		"[timeouts]",
 		"[tools]",
@@ -347,6 +363,42 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown settings key(s): subagents.fast.unknown_toggle") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configText := strings.Join([]string{
+		"persistence_root = \"~/custom-builder\"",
+		"",
+		"[worktrees]",
+		"base_dir = \"managed/worktrees\"",
+		"setup_script = \"scripts/setup-worktree.sh\"",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-builder"); got != want {
+		t.Fatalf("persistence root = %q, want %q", got, want)
+	}
+	if got, want := cfg.Settings.Worktrees.BaseDir, filepath.Join(cfg.PersistenceRoot, "managed", "worktrees"); got != want {
+		t.Fatalf("worktrees.base_dir = %q, want %q", got, want)
+	}
+	if got := cfg.Settings.Worktrees.SetupScript; got != "scripts/setup-worktree.sh" {
+		t.Fatalf("worktrees.setup_script = %q, want scripts/setup-worktree.sh", got)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/server/session"
 )
 
 type metaContextKind uint8
@@ -22,6 +23,8 @@ const (
 	metaContextKindEnvironment
 	metaContextKindHeadless
 	metaContextKindHeadlessExit
+	metaContextKindWorktree
+	metaContextKindWorktreeExit
 )
 
 type metaContextClassification struct {
@@ -49,13 +52,17 @@ type metaContextBuildResult struct {
 	Environment   []llm.Message
 	Headless      []llm.Message
 	HeadlessExit  []llm.Message
+	Worktree      []llm.Message
+	WorktreeExit  []llm.Message
 }
 
 func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
-	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit))
+	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit)+len(r.Worktree)+len(r.WorktreeExit))
 	out = append(out, r.OrderedBaseMessages()...)
 	out = append(out, r.Headless...)
 	out = append(out, r.HeadlessExit...)
+	out = append(out, r.Worktree...)
+	out = append(out, r.WorktreeExit...)
 	return out
 }
 
@@ -215,6 +222,22 @@ func headlessModeExitMetaMessage() (llm.Message, bool) {
 	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: content}, true
 }
 
+func worktreeModeMetaMessage(state session.WorktreeReminderState) (llm.Message, bool) {
+	content := prompts.RenderWorktreeModePrompt(state.Branch, state.EffectiveCwd, state.WorktreePath, state.WorkspaceRoot)
+	if strings.TrimSpace(content) == "" {
+		return llm.Message{}, false
+	}
+	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeMode, Content: content}, true
+}
+
+func worktreeModeExitMetaMessage(state session.WorktreeReminderState) (llm.Message, bool) {
+	content := prompts.RenderWorktreeModeExitPrompt(state.Branch, state.EffectiveCwd, state.WorktreePath, state.WorkspaceRoot)
+	if strings.TrimSpace(content) == "" {
+		return llm.Message{}, false
+	}
+	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeModeExit, Content: content}, true
+}
+
 func skillDiscoveryWarningTexts(issues []skillDiscoveryIssue) []string {
 	if len(issues) == 0 {
 		return nil
@@ -242,6 +265,8 @@ type metaContextCollector struct {
 	environment         *llm.Message
 	headless            *llm.Message
 	headlessExit        *llm.Message
+	worktree            *llm.Message
+	worktreeExit        *llm.Message
 	warnings            []string
 }
 
@@ -314,6 +339,10 @@ func (c *metaContextCollector) slot(kind metaContextKind) **llm.Message {
 		return &c.headless
 	case metaContextKindHeadlessExit:
 		return &c.headlessExit
+	case metaContextKindWorktree:
+		return &c.worktree
+	case metaContextKindWorktreeExit:
+		return &c.worktreeExit
 	default:
 		return nil
 	}
@@ -344,6 +373,12 @@ func (c *metaContextCollector) result() metaContextBuildResult {
 	}
 	if c.headlessExit != nil {
 		result.HeadlessExit = []llm.Message{*c.headlessExit}
+	}
+	if c.worktree != nil {
+		result.Worktree = []llm.Message{*c.worktree}
+	}
+	if c.worktreeExit != nil {
+		result.WorktreeExit = []llm.Message{*c.worktreeExit}
 	}
 	return result
 }
@@ -385,6 +420,10 @@ func classifyMetaContextMessage(message llm.Message) (metaContextClassification,
 		return metaContextClassification{kind: metaContextKindHeadless, key: "headless", messageType: llm.MessageTypeHeadlessMode}, true
 	case llm.MessageTypeHeadlessModeExit:
 		return metaContextClassification{kind: metaContextKindHeadlessExit, key: "headless_exit", messageType: llm.MessageTypeHeadlessModeExit}, true
+	case llm.MessageTypeWorktreeMode:
+		return metaContextClassification{kind: metaContextKindWorktree, key: "worktree", messageType: llm.MessageTypeWorktreeMode}, true
+	case llm.MessageTypeWorktreeModeExit:
+		return metaContextClassification{kind: metaContextKindWorktreeExit, key: "worktree_exit", messageType: llm.MessageTypeWorktreeModeExit}, true
 	}
 	return metaContextClassification{}, false
 }

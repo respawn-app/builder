@@ -100,6 +100,12 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/copy"); got.Action != ActionCopy {
 		t.Fatalf("expected ActionCopy, got %+v", got)
 	}
+	if command, ok := r.Command("/wt"); !ok || command.Name != "worktree" || command.RunWhileBusy {
+		t.Fatalf("expected /wt alias to resolve to /worktree, got %+v, ok=%v", command, ok)
+	}
+	if got := r.Execute("/wt list"); got.Action != ActionWorktree || got.Args != "list" {
+		t.Fatalf("expected /wt alias to execute worktree action, got %+v", got)
+	}
 	if got := r.Execute("/back"); got.Action != ActionBack {
 		t.Fatalf("expected ActionBack, got %+v", got)
 	}
@@ -178,6 +184,20 @@ func TestMatchReturnsBestSubstringFirst(t *testing.T) {
 	}
 	if matches[0].Name != "copy" {
 		t.Fatalf("expected best match first, got %q", matches[0].Name)
+	}
+}
+
+func TestHiddenAliasesDoNotAppearInVisibleCommandLists(t *testing.T) {
+	r := NewDefaultRegistry()
+	for _, command := range r.Commands() {
+		if command.Name == "wt" {
+			t.Fatal("expected /wt alias to stay hidden from visible command list")
+		}
+	}
+	for _, command := range r.Match("wt") {
+		if command.Name == "wt" {
+			t.Fatal("expected /wt alias to stay hidden from visible match list")
+		}
 	}
 }
 

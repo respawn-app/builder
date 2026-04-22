@@ -53,6 +53,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIBackgroundManager(wiring.background),
 		WithUITurnQueueHook(wiring.turnQueueHook),
 		WithUIProcessClient(newUIProcessClientWithReads(wiring.background, wiring.processViews, wiring.processControls)),
+		WithUIWorktreeClient(wiring.worktrees),
 		WithUIPromptHistory(wiring.promptHistory),
 		WithUIStartupSubmit(initialPrompt),
 		WithUIInitialInput(initialInput),

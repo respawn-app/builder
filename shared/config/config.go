@@ -26,6 +26,11 @@ type CacheWarningMode string
 type ModelVerbosity string
 type ShellPostprocessingMode string
 
+type WorktreeSettings struct {
+	BaseDir     string
+	SetupScript string
+}
+
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
 	TUIAlternateScreenAlways TUIAlternateScreenPolicy = "always"
@@ -108,6 +113,7 @@ type Settings struct {
 	BGShellsOutput                   BGShellsOutputMode
 	Shell                            ShellSettings
 	CacheWarningMode                 CacheWarningMode
+	Worktrees                        WorktreeSettings
 	Reviewer                         ReviewerSettings
 	Subagents                        map[string]SubagentRole
 }
@@ -202,6 +208,10 @@ func MigrationBackupsRoot(cfg App) string {
 
 func MigrationsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, "migrations")
+}
+
+func WorktreesRoot(cfg App) string {
+	return cfg.Settings.Worktrees.BaseDir
 }
 
 func ServerListenAddress(cfg App) string {

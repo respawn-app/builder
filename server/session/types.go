@@ -50,6 +50,23 @@ type UsageState struct {
 	TotalCachedInputTokens  int  `json:"total_cached_input_tokens,omitempty"`
 }
 
+type WorktreeReminderMode string
+
+const (
+	WorktreeReminderModeEnter WorktreeReminderMode = "enter"
+	WorktreeReminderModeExit  WorktreeReminderMode = "exit"
+)
+
+type WorktreeReminderState struct {
+	Mode                    WorktreeReminderMode `json:"mode,omitempty"`
+	Branch                  string               `json:"branch,omitempty"`
+	WorktreePath            string               `json:"worktree_path,omitempty"`
+	WorkspaceRoot           string               `json:"workspace_root,omitempty"`
+	EffectiveCwd            string               `json:"effective_cwd,omitempty"`
+	HasIssuedInGeneration   bool                 `json:"has_issued_in_generation,omitempty"`
+	IssuedCompactionCount   int                  `json:"issued_compaction_count,omitempty"`
+}
+
 type Meta struct {
 	SessionID                    string               `json:"session_id"`
 	Name                         string               `json:"name,omitempty"`
@@ -66,6 +83,7 @@ type Meta struct {
 	InFlightStep                 bool                 `json:"in_flight_step"`
 	AgentsInjected               bool                 `json:"agents_injected"`
 	CompactionSoonReminderIssued bool                 `json:"compaction_soon_reminder_issued,omitempty"`
+	WorktreeReminder             *WorktreeReminderState `json:"worktree_reminder,omitempty"`
 	UsageState                   *UsageState          `json:"usage_state,omitempty"`
 	Locked                       *LockedContract      `json:"locked,omitempty"`
 }

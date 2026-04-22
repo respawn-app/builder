@@ -80,6 +80,9 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		}
 		next, cmd := c.runProcessAction(action, id)
 		return next, sequenceCmds(prefixCmd, cmd)
+	case commands.ActionWorktree:
+		next, cmd := c.handleWorktreeCommand(commandResult.Args)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionCopy:
 		next, cmd := c.handleCopyCommand()
 		return next, sequenceCmds(prefixCmd, cmd)
