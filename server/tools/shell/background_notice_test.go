@@ -267,7 +267,7 @@ func TestFormatExecResponseBlankOutputUsesNoOutput(t *testing.T) {
 	exitCode := 1
 	text := formatExecResponse(ExecResult{ExitCode: &exitCode, Output: " \n\t "})
 
-	if !strings.Contains(text, "Process exited with code 1") {
+	if !strings.Contains(text, "Exit code 1, output:") {
 		t.Fatalf("expected exit code line, got %q", text)
 	}
 	if !strings.Contains(text, "\nNo output") {

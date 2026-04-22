@@ -1233,7 +1233,7 @@ func TestDetailExecCommandEmptyOutputRendersNoOutput(t *testing.T) {
 	if !ok {
 		t.Fatal("expected exec_command definition")
 	}
-	raw, err := json.Marshal("Process exited with code 0\nNo output")
+	raw, err := json.Marshal("Exit code 0, output:\nNo output")
 	if err != nil {
 		t.Fatalf("marshal exec result: %v", err)
 	}
@@ -1254,7 +1254,7 @@ func TestDetailExecCommandEmptyOutputRendersNoOutput(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	view := plainTranscript(m.View())
-	if !strings.Contains(view, "Process exited with code 0") {
+	if !strings.Contains(view, "Exit code 0, output:") {
 		t.Fatalf("expected exit code line in detail view, got %q", view)
 	}
 	if !strings.Contains(view, "No output") {

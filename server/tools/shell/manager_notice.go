@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -352,7 +353,7 @@ func formatExecResponse(result ExecResult) string {
 		sections = append(sections, formatBackgroundTransitionLine(result.SessionID, output != ""))
 	}
 	if result.ExitCode != nil {
-		sections = append(sections, fmt.Sprintf("Process exited with code %d", *result.ExitCode))
+		sections = append(sections, fmt.Sprintf("Exit code %s, output:", strconv.Itoa(*result.ExitCode)))
 	} else if strings.TrimSpace(result.SessionID) != "" && !result.MovedToBackground {
 		sections = append(sections, fmt.Sprintf("Process running with session ID %s", result.SessionID))
 	}
@@ -361,9 +362,6 @@ func formatExecResponse(result ExecResult) string {
 	}
 	if result.Backgrounded && result.ExitCode != nil && strings.TrimSpace(result.OutputPath) != "" {
 		sections = append(sections, fmt.Sprintf("Log file: %s", result.OutputPath))
-	}
-	if result.Truncated {
-		sections = append(sections, fmt.Sprintf("Original token count: %d", approxTokenCount(result.OriginalChars)))
 	}
 	if output == "" {
 		sections = append(sections, noOutputText)

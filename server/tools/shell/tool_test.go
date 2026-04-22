@@ -403,7 +403,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
 	pollText := decodeStringToolOutput(t, pollResult)
-	if !strings.Contains(pollText, "Process exited with code 0") {
+	if !strings.Contains(pollText, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in poll output, got %q", pollText)
 	}
 	if !strings.Contains(pollText, "Wall time:") {
@@ -569,7 +569,7 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected command to stay foreground after clamp, got %q", text)
 	}
-	if !strings.Contains(text, "Process exited with code 0") {
+	if !strings.Contains(text, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "done") {
@@ -802,7 +802,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
 	}
 	stdinText := decodeStringToolOutput(t, stdinResult)
-	if !strings.Contains(stdinText, "Process exited with code 0") {
+	if !strings.Contains(stdinText, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in stdin output, got %q", stdinText)
 	}
 	if !strings.Contains(stdinText, "Wall time:") {
@@ -954,7 +954,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 	if strings.Contains(text, "Log file:") {
 		t.Fatalf("did not expect log file for foreground shell, got %q", text)
 	}
-	if !strings.Contains(text, "Process exited with code 0") {
+	if !strings.Contains(text, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "eof") {

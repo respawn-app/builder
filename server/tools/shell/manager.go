@@ -205,13 +205,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		if err != nil {
 			return ExecResult{}, err
 		}
-		display, truncated, removed := truncate(processed.Output, maxOutputChars)
+		display, _, _ := truncate(processed.Output, maxOutputChars)
 		result.ExitCode = cloneIntPtr(snapshot.ExitCode)
 		result.Output = display
 		result.SemanticProcessed = processed.Processed
-		result.OriginalChars = len(processed.Output)
-		result.Truncated = truncated
-		result.TruncationBytes = removed
 		m.releaseEntry(id)
 		return result, nil
 	}
@@ -219,15 +216,12 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if err != nil {
 		return ExecResult{}, err
 	}
-	display, truncated, removed := truncateBackgroundOutput(processed.Output, maxOutputChars)
+	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
 	result.Running = true
 	result.Backgrounded = true
 	result.MovedToBackground = true
 	result.Output = display
 	result.SemanticProcessed = processed.Processed
-	result.OriginalChars = len(processed.Output)
-	result.Truncated = truncated
-	result.TruncationBytes = removed
 	m.emitEvent(Event{Type: EventBackgrounded, Snapshot: snapshot})
 	return result, nil
 }
@@ -288,7 +282,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 			return ExecResult{}, err
 		}
 	}
-	display, truncated, removed := truncateBackgroundOutput(processed.Output, maxOutputChars)
+	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
 	if snapshot.Backgrounded && snapshot.ExitCode != nil {
 		entry.markCompletionNoticeConsumed()
 	}
@@ -298,9 +292,6 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		Output:            display,
 		OutputPath:        snapshot.LogPath,
 		SemanticProcessed: processed.Processed,
-		OriginalChars:     len(processed.Output),
-		Truncated:         truncated,
-		TruncationBytes:   removed,
 		Running:           snapshot.Running,
 		Backgrounded:      snapshot.Backgrounded,
 		ExitCode:          cloneIntPtr(snapshot.ExitCode),

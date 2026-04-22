@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"builder/shared/tokenutil"
 )
 
 const (
@@ -87,9 +85,6 @@ type ExecResult struct {
 	ExitCode          *int
 	Running           bool
 	Backgrounded      bool
-	OriginalChars     int
-	Truncated         bool
-	TruncationBytes   int
 	MovedToBackground bool
 	SemanticProcessed bool
 }
@@ -377,10 +372,6 @@ func waitForEntryDone(entry *processEntry, timeout time.Duration) bool {
 	case <-timer.C:
 		return false
 	}
-}
-
-func approxTokenCount(chars int) int {
-	return tokenutil.ApproxTokenCount(chars)
 }
 
 func countOutputLines(text string) int {
