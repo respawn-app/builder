@@ -18,6 +18,7 @@ type worktreeCommandTestClient struct {
 	listErr         error
 	listCtx         context.Context
 	listRequests    []serverapi.WorktreeListRequest
+	resolveCtx      context.Context
 	resolveResp     serverapi.WorktreeCreateTargetResolveResponse
 	resolveErr      error
 	createResp      serverapi.WorktreeCreateResponse
@@ -39,7 +40,8 @@ func (c *worktreeCommandTestClient) ListWorktrees(ctx context.Context, req serve
 	return c.listResp, c.listErr
 }
 
-func (c *worktreeCommandTestClient) ResolveWorktreeCreateTarget(_ context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+func (c *worktreeCommandTestClient) ResolveWorktreeCreateTarget(ctx context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+	c.resolveCtx = ctx
 	c.resolveRequests = append(c.resolveRequests, req)
 	if c.resolveErr != nil {
 		return serverapi.WorktreeCreateTargetResolveResponse{}, c.resolveErr
@@ -556,6 +558,36 @@ func TestWorktreeCreateDialogClearsResolveErrorWhenTargetBecomesEmpty(t *testing
 	}
 	if updated.worktrees.create.resolution.Kind != "" {
 		t.Fatalf("expected empty resolution after clearing input, got %+v", updated.worktrees.create.resolution)
+	}
+}
+
+func TestWorktreeCreateDialogSubmitResolvesTargetWithBoundedContext(t *testing.T) {
+	client := &worktreeCommandTestClient{
+		listResp:    testMainWorktreeListResponse(),
+		resolveResp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "main", Kind: serverapi.WorktreeCreateTargetResolutionKindExistingBranch}},
+		createResp:  serverapi.WorktreeCreateResponse{Target: clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"}, Worktree: serverapi.WorktreeView{WorktreeID: "wt-main", DisplayName: "main", CanonicalRoot: "/repo"}},
+	}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree create"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	updated.worktrees.create.branchTarget.SetValue("main")
+	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
+	updated.worktrees.create.action = uiWorktreeCreateActionCreate
+	updated.worktrees.create.syncFocus()
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	if client.resolveCtx == nil {
+		t.Fatal("expected resolve context recorded")
+	}
+	if _, ok := client.resolveCtx.Deadline(); !ok {
+		t.Fatal("expected bounded resolve context deadline")
+	}
+	if len(client.createRequests) != 1 {
+		t.Fatalf("expected one create request after async resolution, got %+v", client.createRequests)
 	}
 }
 

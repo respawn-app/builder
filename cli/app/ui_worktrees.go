@@ -57,15 +57,16 @@ const (
 )
 
 type uiWorktreeCreateDialogState struct {
-	baseRef      textinput.Model
-	branchTarget textinput.Model
-	focus        uiWorktreeCreateField
-	action       uiWorktreeCreateAction
-	errorText    string
-	submitting   bool
-	resolving    bool
-	resolveToken uint64
-	resolution   serverapi.WorktreeCreateTargetResolution
+	baseRef       textinput.Model
+	branchTarget  textinput.Model
+	focus         uiWorktreeCreateField
+	action        uiWorktreeCreateAction
+	errorText     string
+	submitting    bool
+	resolving     bool
+	submitPending bool
+	resolveToken  uint64
+	resolution    serverapi.WorktreeCreateTargetResolution
 }
 
 type uiWorktreeDeleteAction uint8
@@ -430,6 +431,7 @@ func (m *uiModel) scheduleWorktreeCreateTargetResolution() tea.Cmd {
 	token := dialog.resolveToken
 	dialog.resolution = serverapi.WorktreeCreateTargetResolution{}
 	dialog.resolving = query != ""
+	dialog.submitPending = false
 	dialog.syncFocus()
 	if query == "" {
 		return nil
@@ -444,21 +446,20 @@ func (m *uiModel) worktreeCreateTargetResolveCmd(query string, token uint64) tea
 		return nil
 	}
 	return func() tea.Msg {
-		resp, err := m.worktreeClient.ResolveWorktreeCreateTarget(context.Background(), serverapi.WorktreeCreateTargetResolveRequest{SessionID: m.sessionID, Target: query})
+		ctx, cancel := m.worktreeResolveContext()
+		defer cancel()
+		resp, err := m.worktreeClient.ResolveWorktreeCreateTarget(ctx, serverapi.WorktreeCreateTargetResolveRequest{SessionID: m.sessionID, Target: query})
 		return worktreeCreateTargetResolveDoneMsg{token: token, query: query, resp: resp, err: err}
 	}
 }
 
-func (m *uiModel) resolveCurrentWorktreeCreateTarget() (serverapi.WorktreeCreateTargetResolution, error) {
-	if m == nil || m.worktreeClient == nil {
-		return serverapi.WorktreeCreateTargetResolution{}, fmt.Errorf("worktree client is unavailable")
+func (m *uiModel) worktreeResolveContext() (context.Context, context.CancelFunc) {
+	if m != nil {
+		if client, ok := m.runtimeClient().(*sessionRuntimeClient); ok && client != nil {
+			return client.controlContext()
+		}
 	}
-	query := strings.TrimSpace(m.worktrees.create.branchTarget.Value())
-	resp, err := m.worktreeClient.ResolveWorktreeCreateTarget(context.Background(), serverapi.WorktreeCreateTargetResolveRequest{SessionID: m.sessionID, Target: query})
-	if err != nil {
-		return serverapi.WorktreeCreateTargetResolution{}, err
-	}
-	return resp.Resolution, nil
+	return context.WithTimeout(context.Background(), uiRuntimeControlTimeout)
 }
 
 func (m *uiModel) worktreeRowCount() int {
@@ -913,20 +914,18 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 				m.closeWorktreeDialog()
 				return m, nil
 			}
-			resolution, err := m.resolveCurrentWorktreeCreateTarget()
-			if err != nil {
-				dialog.errorText = formatSubmissionError(err)
+			query := strings.TrimSpace(dialog.branchTarget.Value())
+			if query == "" {
+				dialog.errorText = "Branch or ref is required"
 				return m, nil
 			}
-			dialog.resolution = resolution
-			dialog.resolving = false
+			dialog.errorText = ""
+			dialog.resolution = serverapi.WorktreeCreateTargetResolution{}
+			dialog.resolving = true
+			dialog.submitPending = true
+			dialog.resolveToken++
 			dialog.syncFocus()
-			req, err := dialog.request(resolution.Kind)
-			if err != nil {
-				dialog.errorText = err.Error()
-				return m, nil
-			}
-			return m, m.worktreeCreateCmd(req)
+			return m, m.worktreeCreateTargetResolveCmd(query, dialog.resolveToken)
 		default:
 			dialog.moveFocus(1)
 			return m, nil
