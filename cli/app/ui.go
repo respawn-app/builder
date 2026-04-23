@@ -1146,6 +1146,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		query := strings.TrimSpace(m.worktrees.create.branchTarget.Value())
 		if query == "" {
 			m.worktrees.create.resolving = false
+			m.worktrees.create.submitPending = false
 			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
 			m.worktrees.create.errorText = ""
 			m.worktrees.create.syncFocus()
@@ -1164,6 +1165,8 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.worktrees.create.resolving = false
+		submitPending := m.worktrees.create.submitPending
+		m.worktrees.create.submitPending = false
 		if msg.err != nil {
 			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
 			m.worktrees.create.errorText = formatSubmissionError(msg.err)
@@ -1175,6 +1178,15 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.worktrees.create.resolution = msg.resp.Resolution
 		m.worktrees.create.syncFocus()
 		m.syncViewport()
+		if submitPending {
+			req, err := m.worktrees.create.request(msg.resp.Resolution.Kind)
+			if err != nil {
+				m.worktrees.create.errorText = err.Error()
+				m.syncViewport()
+				return m, nil
+			}
+			return m, m.worktreeCreateCmd(req)
+		}
 		return m, nil
 	case processListRefreshTickMsg:
 		if !m.processList.isOpen() {
