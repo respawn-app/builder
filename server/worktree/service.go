@@ -403,22 +403,27 @@ func (s *Service) beginMutation(ctx context.Context, sessionID string, leaseID s
 		}
 		return nil, sessionWorkspaceContext{}, err
 	}
-	workspaceCtx, err := s.resolveSessionWorkspaceContext(ctx, sessionID)
-	if err != nil {
-		release.Release()
-		return nil, sessionWorkspaceContext{}, err
-	}
-	workspaceLease := s.acquireWorkspaceMutationLock(workspaceCtx.workspaceID)
-	workspaceCtx, err = s.resolveSessionWorkspaceContext(ctx, sessionID)
-	if err != nil {
+	for {
+		workspaceCtx, err := s.resolveSessionWorkspaceContext(ctx, sessionID)
+		if err != nil {
+			release.Release()
+			return nil, sessionWorkspaceContext{}, err
+		}
+		workspaceLease := s.acquireWorkspaceMutationLock(workspaceCtx.workspaceID)
+		lockedWorkspaceCtx, err := s.resolveSessionWorkspaceContext(ctx, sessionID)
+		if err != nil {
+			workspaceLease.Release()
+			release.Release()
+			return nil, sessionWorkspaceContext{}, err
+		}
+		if strings.TrimSpace(lockedWorkspaceCtx.workspaceID) == strings.TrimSpace(workspaceCtx.workspaceID) {
+			return primaryrun.LeaseFunc(func() {
+				workspaceLease.Release()
+				release.Release()
+			}), lockedWorkspaceCtx, nil
+		}
 		workspaceLease.Release()
-		release.Release()
-		return nil, sessionWorkspaceContext{}, err
 	}
-	return primaryrun.LeaseFunc(func() {
-		workspaceLease.Release()
-		release.Release()
-	}), workspaceCtx, nil
 }
 
 func (s *Service) acquireWorkspaceMutationLock(workspaceID string) primaryrun.Lease {

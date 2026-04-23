@@ -850,6 +850,96 @@ func TestBeginMutationSerializesMutationsByWorkspace(t *testing.T) {
 	result.release.Release()
 }
 
+func TestBeginMutationReacquiresWorkspaceLockWhenSessionWorkspaceChanges(t *testing.T) {
+	env := newServiceTestEnv(t)
+	secondWorkspace := t.TempDir()
+	initGitRepo(t, secondWorkspace)
+	secondCfg, err := config.Load(secondWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load second workspace: %v", err)
+	}
+	secondBinding, err := env.store.RegisterWorkspaceBinding(env.ctx, secondCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding second workspace: %v", err)
+	}
+	secondSession := createServiceTestSession(t, env.store, secondCfg, secondBinding)
+
+	firstWorkspaceLock := env.service.acquireWorkspaceMutationLock(env.binding.WorkspaceID)
+	firstLockReleased := false
+	defer func() {
+		if !firstLockReleased {
+			firstWorkspaceLock.Release()
+		}
+	}()
+
+	type mutationResult struct {
+		release      primaryrun.Lease
+		workspaceCtx sessionWorkspaceContext
+		err          error
+	}
+	firstCh := make(chan mutationResult, 1)
+	go func() {
+		release, workspaceCtx, err := env.service.beginMutation(env.ctx, env.session.Meta().SessionID, env.leaseID)
+		firstCh <- mutationResult{release: release, workspaceCtx: workspaceCtx, err: err}
+	}()
+
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, env.session.Meta().SessionID, secondBinding.WorkspaceID, "", "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID second workspace: %v", err)
+	}
+	firstWorkspaceLock.Release()
+	firstLockReleased = true
+
+	var first mutationResult
+	select {
+	case first = <-firstCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for first mutation")
+	}
+	if first.err != nil {
+		t.Fatalf("beginMutation first: %v", first.err)
+	}
+	if first.release == nil {
+		t.Fatal("expected first mutation lease")
+	}
+	if first.workspaceCtx.workspaceID != secondBinding.WorkspaceID {
+		first.release.Release()
+		t.Fatalf("first mutation workspace id = %q, want %q", first.workspaceCtx.workspaceID, secondBinding.WorkspaceID)
+	}
+
+	secondCh := make(chan mutationResult, 1)
+	go func() {
+		release, workspaceCtx, err := env.service.beginMutation(env.ctx, secondSession.Meta().SessionID, "lease-2")
+		secondCh <- mutationResult{release: release, workspaceCtx: workspaceCtx, err: err}
+	}()
+	select {
+	case result := <-secondCh:
+		if result.release != nil {
+			result.release.Release()
+		}
+		first.release.Release()
+		t.Fatalf("expected second mutation to block on reacquired workspace lock, got %+v", result)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	first.release.Release()
+	select {
+	case result := <-secondCh:
+		if result.err != nil {
+			t.Fatalf("beginMutation second: %v", result.err)
+		}
+		if result.release == nil {
+			t.Fatal("expected second mutation lease")
+		}
+		if result.workspaceCtx.workspaceID != secondBinding.WorkspaceID {
+			result.release.Release()
+			t.Fatalf("second mutation workspace id = %q, want %q", result.workspaceCtx.workspaceID, secondBinding.WorkspaceID)
+		}
+		result.release.Release()
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for second mutation")
+	}
+}
+
 func TestRetargetSessionsFromMissingWorktreeRollsBackActiveSessionMetadataOnRuntimeError(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/missing-runtime-error")
