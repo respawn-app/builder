@@ -326,13 +326,19 @@ func newSettingsRegistry() settingsRegistry {
 			nil,
 			normalizeCacheWarningMode,
 			settingDocOptions{}),
-		newStringSetting("worktrees.base_dir", filepath.Join(DefaultPersistence, "worktrees"),
+		newStringSetting("worktrees.base_dir", "",
 			func(state *settingsState, value string) { state.Settings.Worktrees.BaseDir = value },
 			func(state settingsState) string { return state.Settings.Worktrees.BaseDir },
 			"",
 			nil,
 			nil,
-			settingDocOptions{}),
+			settingDocOptions{defaultValue: func(state settingsState) any {
+				base := strings.TrimSpace(state.PersistenceRoot)
+				if base == "" {
+					base = DefaultPersistence
+				}
+				return filepath.Join(base, "worktrees")
+			}}),
 		newStringSetting("worktrees.setup_script", "",
 			func(state *settingsState, value string) { state.Settings.Worktrees.SetupScript = value },
 			func(state settingsState) string { return state.Settings.Worktrees.SetupScript },

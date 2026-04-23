@@ -402,6 +402,32 @@ func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 	}
 }
 
+func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configText := "persistence_root = \"~/custom-builder\"\n"
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-builder"); got != want {
+		t.Fatalf("persistence root = %q, want %q", got, want)
+	}
+	if got, want := cfg.Settings.Worktrees.BaseDir, filepath.Join(cfg.PersistenceRoot, "worktrees"); got != want {
+		t.Fatalf("worktrees.base_dir = %q, want %q", got, want)
+	}
+}
+
 func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
