@@ -340,14 +340,16 @@ func utf8EncodeRune(dst []byte, r rune) int {
 func formatExecResponse(result ExecResult) string {
 	sections := make([]string, 0, 6)
 	output := strings.TrimSpace(result.Output)
-	if result.SemanticProcessed && result.ExitCode != nil && *result.ExitCode == 0 && !result.MovedToBackground {
-		if output == "" {
-			return noOutputText
-		}
-		return output
-	}
 	if strings.TrimSpace(result.Warning) != "" {
 		sections = append(sections, result.Warning)
+	}
+	if result.SemanticProcessed && result.ExitCode != nil && *result.ExitCode == 0 && !result.MovedToBackground {
+		if output == "" {
+			sections = append(sections, noOutputText)
+			return strings.Join(sections, "\n")
+		}
+		sections = append(sections, output)
+		return strings.Join(sections, "\n")
 	}
 	if result.MovedToBackground {
 		sections = append(sections, formatBackgroundTransitionLine(result.SessionID, output != ""))

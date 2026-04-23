@@ -3,6 +3,7 @@ package launch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -99,6 +100,9 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	var warnings []string
 	next := plan
+	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentRole(trimmedRole) == "" {
+		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
+	}
 	roleName := config.NormalizeSubagentRole(overrides.AgentRole)
 	if roleName != "" {
 		providerBase := cloneSettings(plan.ActiveSettings)

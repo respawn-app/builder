@@ -905,6 +905,14 @@ func parseSubagentRole(raw settingsFile, settingsPath string, roleKey string) (S
 	if len(explicitSources) == 0 {
 		explicitSources = nil
 	}
+	if explicitSources != nil {
+		if _, exists := explicitSources["persistence_root"]; exists {
+			return SubagentRole{}, fmt.Errorf("invalid subagents.%s: persistence_root is not supported in subagent roles", roleKey)
+		}
+	}
+	if err := validateSubagentRoleState(roleState, explicitSources); err != nil {
+		return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+	}
 	roleState.Settings.Subagents = nil
 	return SubagentRole{Settings: roleState.Settings, Sources: explicitSources}, nil
 }

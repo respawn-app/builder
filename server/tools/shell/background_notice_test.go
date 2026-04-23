@@ -311,3 +311,17 @@ func TestFormatExecResponseBackgroundTransitionWithoutOutputPreservesNoOutput(t 
 		t.Fatalf("did not expect output header for blank background output, got %q", text)
 	}
 }
+
+func TestFormatExecResponseSemanticSuccessPreservesWarnings(t *testing.T) {
+	exitCode := 0
+	text := formatExecResponse(ExecResult{
+		ExitCode:          &exitCode,
+		SemanticProcessed: true,
+		Output:            "PASS",
+		Warning:           "hook warning",
+	})
+
+	if text != "hook warning\nPASS" {
+		t.Fatalf("unexpected semantic response text: %q", text)
+	}
+}

@@ -951,7 +951,6 @@ func TestRunPromptFastRoleUsesRoleLevelProviderSettingsForHeuristics(t *testing.
 	}
 	contents := strings.Join([]string{
 		"model = \"gpt-5.4\"",
-		"openai_base_url = \"https://example.test/v1\"",
 		"",
 		"[subagents.fast]",
 		"provider_override = \"openai\"",
@@ -978,7 +977,7 @@ func TestRunPromptFastRoleUsesRoleLevelProviderSettingsForHeuristics(t *testing.
 	}))
 	defer server.Close()
 
-	contents += "\nopenai_base_url = \"" + server.URL + "\"\n"
+	contents = "openai_base_url = \"" + server.URL + "\"\n" + contents + "\n"
 	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

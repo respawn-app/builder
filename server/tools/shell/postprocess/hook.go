@@ -5,10 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"builder/shared/toolspec"
+)
+
+const (
+	hookTimeout        = 5 * time.Second
+	maxHookOutputBytes = 32 * 1024
 )
 
 type hookRequest struct {
@@ -50,12 +57,15 @@ func (r *Runner) applyHook(ctx context.Context, req Request, originalOutput stri
 		return Result{Output: currentOutput, Warning: "command postprocess hook request encode failed"}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, hookPath)
+	timeoutCtx, cancel := context.WithTimeout(ctx, hookTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(timeoutCtx, hookPath)
 	cmd.Stdin = bytes.NewReader(payload)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newLimitedBuffer(maxHookOutputBytes)
+	stderr := newLimitedBuffer(maxHookOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
@@ -73,6 +83,49 @@ func (r *Runner) applyHook(ctx context.Context, req Request, originalOutput stri
 	}
 	return Result{Output: response.ReplacedOutput, Processed: true, ProcessorID: "user/hook"}, nil
 }
+
+type limitedBuffer struct {
+	buffer    bytes.Buffer
+	remaining int64
+	truncated bool
+}
+
+func newLimitedBuffer(limit int64) *limitedBuffer {
+	if limit <= 0 {
+		limit = maxHookOutputBytes
+	}
+	return &limitedBuffer{remaining: limit}
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	written := len(p)
+	if b.remaining <= 0 {
+		b.truncated = true
+		return written, nil
+	}
+	chunk := p
+	if int64(len(chunk)) > b.remaining {
+		chunk = chunk[:int(b.remaining)]
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(chunk)
+	b.remaining -= int64(len(chunk))
+	return written, nil
+}
+
+func (b *limitedBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
+}
+
+func (b *limitedBuffer) String() string {
+	text := b.buffer.String()
+	if b.truncated {
+		return text + "\n[hook output truncated]"
+	}
+	return text
+}
+
+var _ io.Writer = (*limitedBuffer)(nil)
 
 func hookFailureWarning(err error, stderr string) string {
 	trimmed := strings.TrimSpace(stderr)
