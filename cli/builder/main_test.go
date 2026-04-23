@@ -8,6 +8,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -21,15 +22,9 @@ import (
 
 type stubServeServer struct {
 	serveErr error
-	cfg      config.App
-	project  string
 }
 
 func (s *stubServeServer) Close() error { return nil }
-func (s *stubServeServer) Config() config.App {
-	return s.cfg
-}
-func (s *stubServeServer) ProjectID() string { return s.project }
 func (s *stubServeServer) Serve(context.Context) error {
 	return s.serveErr
 }
@@ -61,8 +56,45 @@ func TestRootCommandHelpReturnsZero(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder:") || !strings.Contains(got, "builder project [path]") || !strings.Contains(got, "builder project create --path <server-path> --name <project-name>") || !strings.Contains(got, "builder attach --project <project-id> <server-path>") || !strings.Contains(got, "builder rebind <session-id> <new-path>") {
+	if !strings.Contains(got, "Usage of builder:") ||
+		!strings.Contains(got, "What This Does:") ||
+		!strings.Contains(got, "builder attach [--project <project-id>] [path]") ||
+		!strings.Contains(got, "builder <command> --help") {
 		t.Fatalf("stderr = %q, want root usage with binding commands", got)
+	}
+}
+
+func TestRunSubcommandHelpReturnsZero(t *testing.T) {
+	originalStderr := os.Stderr
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr temp file: %v", err)
+	}
+	os.Stderr = stderrFile
+	t.Cleanup(func() {
+		os.Stderr = originalStderr
+		_ = stderrFile.Close()
+	})
+
+	if code := rootCommand([]string{"run", "--help"}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if _, err := stderrFile.Seek(0, 0); err != nil {
+		t.Fatalf("seek stderr: %v", err)
+	}
+	data, err := io.ReadAll(stderrFile)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "Usage of builder run:") ||
+		!strings.Contains(got, "Execute one headless prompt") ||
+		!strings.Contains(got, "--agent <role>") ||
+		!strings.Contains(got, "builder run --fast --output-mode=json") {
+		t.Fatalf("stderr = %q, want expanded run help", got)
+	}
+	if !strings.Contains(got, "Flags:") {
+		t.Fatalf("stderr = %q, want flags section", got)
 	}
 }
 
@@ -197,11 +229,7 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	startServeServer = func(_ context.Context, req serverstartup.Request, _ serverstartup.AuthHandler, _ serverstartup.OnboardingHandler) (serveCommandServer, error) {
 		called = true
 		got = req
-		return &stubServeServer{
-			serveErr: context.Canceled,
-			cfg:      config.App{WorkspaceRoot: "/tmp/work"},
-			project:  "project-123",
-		}, nil
+		return &stubServeServer{serveErr: context.Canceled}, nil
 	}
 	newServeStartupHandlers = func() (serverstartup.AuthHandler, serverstartup.OnboardingHandler) {
 		return nil, nil
@@ -224,7 +252,7 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
 		t.Fatalf("unexpected base url mapping: %+v", got)
 	}
-	if !strings.Contains(stderr.String(), "Builder server started for workspace") {
+	if !strings.Contains(stderr.String(), "Server started, Ctrl+C to stop") {
 		t.Fatalf("stderr = %q, want serve startup message", stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -248,8 +276,23 @@ func TestServeSubcommandRejectsSessionFlags(t *testing.T) {
 	if code := rootCommand([]string{"serve", "--session", "session-123"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr.String(), "does not accept --session or --continue") {
-		t.Fatalf("stderr = %q, want serve session rejection", stderr.String())
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -session") {
+		t.Fatalf("stderr = %q, want undefined session flag rejection", stderr.String())
+	}
+}
+
+func TestServeSubcommandHelpExplainsDaemonUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := serveSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder serve:") ||
+		!strings.Contains(got, "Start the Builder app server") ||
+		!strings.Contains(got, "does not accept `--session` or `--continue`") ||
+		!strings.Contains(got, "Flags:") {
+		t.Fatalf("stderr = %q, want expanded serve help", got)
 	}
 }
 
@@ -322,6 +365,88 @@ func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
 	if gotOpts.OpenAIBaseURL != "http://run.example/v1" || !gotOpts.OpenAIBaseURLExplicit {
 		t.Fatalf("unexpected base url mapping: %+v", gotOpts)
 	}
+}
+
+func TestHelpSubcommandsRenderInSubprocess(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		contains []string
+	}{
+		{name: "project", args: []string{"project", "--help"}, contains: []string{"Usage of builder project:", "What This Does:"}},
+		{name: "attach", args: []string{"attach", "--help"}, contains: []string{"Usage of builder attach:", "How Project Selection Works:"}},
+		{name: "rebind", args: []string{"rebind", "--help"}, contains: []string{"Usage of builder rebind:", "Requirements:"}},
+		{name: "serve", args: []string{"serve", "--help"}, contains: []string{"Usage of builder serve:", "Flags:"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], append([]string{"-test.run=TestHelperProcessRootCommand", "--"}, tc.args...)...)
+			cmd.Env = append(os.Environ(), "BUILDER_ROOT_HELPER_PROCESS=1")
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if err != nil {
+				t.Fatalf("subprocess run: %v stderr=%q", err, stderr.String())
+			}
+			output := stdout.String() + stderr.String()
+			for _, want := range tc.contains {
+				if !strings.Contains(output, want) {
+					t.Fatalf("output = %q, want substring %q", output, want)
+				}
+			}
+		})
+	}
+}
+
+func TestServeSubcommandStartupMessageRendersInSubprocess(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcessRootCommand", "--", "serve")
+	cmd.Env = append(os.Environ(),
+		"BUILDER_ROOT_HELPER_PROCESS=1",
+		"BUILDER_ROOT_HELPER_STUB_SERVE=1",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() != 130 {
+			t.Fatalf("subprocess exit code = %d, want 130 stderr=%q", exitErr.ExitCode(), stderr.String())
+		}
+	} else if err != nil {
+		t.Fatalf("subprocess run: %v stderr=%q", err, stderr.String())
+	} else {
+		t.Fatal("expected subprocess to exit with code 130")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	lines := strings.FieldsFunc(strings.TrimSpace(stderr.String()), func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 || lines[0] != "Server started, Ctrl+C to stop" {
+		t.Fatalf("stderr = %q, want only startup line", stderr.String())
+	}
+}
+
+func TestHelperProcessRootCommand(t *testing.T) {
+	if os.Getenv("BUILDER_ROOT_HELPER_PROCESS") != "1" {
+		return
+	}
+	if os.Getenv("BUILDER_ROOT_HELPER_STUB_SERVE") == "1" {
+		startServeServer = func(_ context.Context, _ serverstartup.Request, _ serverstartup.AuthHandler, _ serverstartup.OnboardingHandler) (serveCommandServer, error) {
+			return &stubServeServer{serveErr: context.Canceled}, nil
+		}
+		newServeStartupHandlers = func() (serverstartup.AuthHandler, serverstartup.OnboardingHandler) {
+			return nil, nil
+		}
+	}
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" {
+			os.Exit(rootCommand(args[i+1:], strings.NewReader(""), os.Stdout, os.Stderr))
+		}
+	}
+	os.Exit(2)
 }
 
 func TestRunSubcommandMapsFastFlagToAgentRole(t *testing.T) {
@@ -522,7 +647,7 @@ func TestEffectiveSessionIDPrefersContinueAlias(t *testing.T) {
 
 func TestRegisterCommonFlagsDoesNotExposeRemovedBashTimeoutAlias(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	registerCommonFlags(fs)
+	registerCommonFlags(fs, true)
 	if fs.Lookup("bash-timeout-seconds") != nil {
 		t.Fatal("expected removed --bash-timeout-seconds flag to be absent")
 	}
@@ -575,7 +700,7 @@ func TestEffectiveRunAgentRoleRejectsConflictingFastFlag(t *testing.T) {
 
 func TestMarkExplicitCommonFlagsTracksOnlyParsedFlags(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	flags := registerCommonFlags(fs)
+	flags := registerCommonFlags(fs, true)
 	if err := fs.Parse([]string{"--workspace", "/tmp/w", "--openai-base-url=http://local/v1", "prompt"}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
@@ -590,7 +715,7 @@ func TestMarkExplicitCommonFlagsTracksOnlyParsedFlags(t *testing.T) {
 
 func TestMarkExplicitCommonFlagsIgnoresFlagTextInsidePrompt(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	flags := registerCommonFlags(fs)
+	flags := registerCommonFlags(fs, true)
 	prompt := "please keep --workspace unchanged and ignore --openai-base-url"
 	if err := fs.Parse([]string{"--continue", "session-123", prompt}); err != nil {
 		t.Fatalf("parse flags: %v", err)
