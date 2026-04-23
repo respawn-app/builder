@@ -13,13 +13,10 @@ import (
 
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
-	"builder/shared/config"
 )
 
 type serveCommandServer interface {
 	Close() error
-	Config() config.App
-	ProjectID() string
 	Serve(ctx context.Context) error
 }
 
@@ -39,7 +36,8 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	serveFS := flag.NewFlagSet("builder serve", flag.ContinueOnError)
 	serveFS.SetOutput(stderr)
-	flags := registerCommonFlags(serveFS)
+	serveFS.Usage = func() { writeServeUsage(serveFS) }
+	flags := registerCommonFlags(serveFS, false)
 	if err := serveFS.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -47,15 +45,6 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 2
 	}
 	markExplicitCommonFlags(serveFS, flags)
-	sessionID, err := effectiveSessionID(*flags)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	if sessionID != "" {
-		fmt.Fprintln(stderr, "`builder serve` does not accept --session or --continue")
-		return 2
-	}
 	if remaining := serveFS.Args(); len(remaining) > 0 {
 		fmt.Fprintf(stderr, "unexpected arguments: %s\n", strings.Join(remaining, " "))
 		serveFS.Usage()
@@ -85,7 +74,7 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	defer func() { _ = server.Close() }()
-	_, _ = fmt.Fprintf(stderr, "Builder server started for workspace %s (project %s). Press Ctrl+C to stop.\n", server.Config().WorkspaceRoot, server.ProjectID())
+	_, _ = fmt.Fprintln(stderr, "Server started, Ctrl+C to stop")
 	if err := server.Serve(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return 130

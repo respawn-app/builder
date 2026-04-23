@@ -44,15 +44,39 @@ Use these CLI helpers to inspect or repair workspace bindings:
 
 ```bash
 builder project [path]
+builder project list
+builder project create --path <server-path> --name <project-name>
 builder attach [path]
 builder attach --project <project-id> [path]
 builder rebind <session-id> <new-path>
+builder serve [flags]
 ```
 
-- `builder project` prints the project id for the bound workspace at `path` or `cwd`.
-- `builder attach [path]` attaches another workspace to the project already bound to `cwd`.
-- `builder attach --project <project-id> [path]` skips the `cwd` lookup and attaches explicitly.
+- `builder project [path]` prints the project id bound to `path` or the current directory.
+- `builder project list` lists projects known to the current server. Output columns are project id, display name, and root path.
+- `builder project create --path <server-path> --name <project-name>` creates a project and binds its first workspace root.
+- `builder attach [path]` attaches another workspace to the project already bound to the current working directory.
+- `builder attach --project <project-id> [path]` skips current-directory lookup and uses the explicit project id instead.
 - `builder rebind <session-id> <new-path>` retargets one session to a different workspace root.
+- `builder serve` starts the Builder app server and keeps serving until interrupted.
+
+Path rules:
+
+- In local loopback mode, command paths are local filesystem paths.
+- Against a remote daemon, paths passed to `project create` or `attach` must be visible on the server machine.
+- `builder serve --workspace` chooses the startup workspace root for config resolution.
+
+Examples:
+
+```bash
+builder project
+builder project list
+builder project create --path /srv/repos/app --name app
+builder attach ../other-checkout
+builder attach --project <project-id> /srv/repos/other-checkout
+builder rebind <session-id> ../moved-workspace
+builder serve --workspace /srv/repos/app --model gpt-5.4-mini
+```
 
 For the full list of shared overrides, see [Configuration](../config/).
 

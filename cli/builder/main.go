@@ -106,7 +106,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	rootFS.Usage = func() { writeRootUsage(rootFS) }
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
-	flags := registerCommonFlags(rootFS)
+	flags := registerCommonFlags(rootFS, true)
 	if err := rootFS.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -160,35 +160,6 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	return 0
 }
 
-func writeRootUsage(fs *flag.FlagSet) {
-	if fs == nil {
-		return
-	}
-	out := fs.Output()
-	_, _ = fmt.Fprintln(out, "Usage of builder:")
-	_, _ = fmt.Fprintln(out, "  builder [flags]")
-	_, _ = fmt.Fprintln(out, "  builder run [flags] <prompt>")
-	_, _ = fmt.Fprintln(out, "  builder serve [flags]")
-	_, _ = fmt.Fprintln(out, "  builder project [path]")
-	_, _ = fmt.Fprintln(out, "  builder project list")
-	_, _ = fmt.Fprintln(out, "  builder project create --path <server-path> --name <project-name>")
-	_, _ = fmt.Fprintln(out, "  builder attach [path]")
-	_, _ = fmt.Fprintln(out, "  builder attach --project <project-id> <server-path>")
-	_, _ = fmt.Fprintln(out, "  builder rebind <session-id> <new-path>")
-	_, _ = fmt.Fprintln(out)
-	_, _ = fmt.Fprintln(out, "Commands:")
-	_, _ = fmt.Fprintln(out, "  run      Execute a headless prompt against the current workspace")
-	_, _ = fmt.Fprintln(out, "  serve    Start the configured app server")
-	_, _ = fmt.Fprintln(out, "  project  Print the project id bound to a workspace path; for remote daemons the path is server-visible")
-	_, _ = fmt.Fprintln(out, "  project list    List projects on the configured server")
-	_, _ = fmt.Fprintln(out, "  project create  Create a project for a server-visible workspace path")
-	_, _ = fmt.Fprintln(out, "  attach   Attach a workspace path to the current project; with --project the path is server-visible")
-	_, _ = fmt.Fprintln(out, "  rebind   Retarget one session to a different workspace root")
-	_, _ = fmt.Fprintln(out)
-	_, _ = fmt.Fprintln(out, "Flags:")
-	fs.PrintDefaults()
-}
-
 func requireInteractiveTerminal(stdin io.Reader, stdout io.Writer, force bool) error {
 	if force {
 		return nil
@@ -218,7 +189,8 @@ func isTerminalWriter(w io.Writer) bool {
 func runSubcommand(args []string) int {
 	runFS := flag.NewFlagSet("builder run", flag.ContinueOnError)
 	runFS.SetOutput(os.Stderr)
-	flags := registerCommonFlags(runFS)
+	runFS.Usage = func() { writeRunUsage(runFS) }
+	flags := registerCommonFlags(runFS, true)
 	agentRoleRaw := runFS.String("agent", "", "subagent role override")
 	fastRole := runFS.Bool("fast", false, "use the built-in fast subagent role")
 	timeoutRaw := runFS.String("timeout", "", "optional timeout duration (e.g. 30s, 2m); default is no timeout")
@@ -343,11 +315,13 @@ func runSubcommand(args []string) int {
 	return 0
 }
 
-func registerCommonFlags(fs *flag.FlagSet) *commonFlags {
+func registerCommonFlags(fs *flag.FlagSet, includeSession bool) *commonFlags {
 	flags := &commonFlags{}
 	fs.StringVar(&flags.WorkspaceRoot, "workspace", ".", "workspace root")
-	fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
-	fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
+	if includeSession {
+		fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
+		fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
+	}
 	fs.StringVar(&flags.Model, "model", "", "model name override")
 	fs.StringVar(&flags.ProviderOverride, "provider-override", "", "provider override for custom/alias model names")
 	fs.StringVar(&flags.ThinkingLevel, "thinking-level", "", "thinking level override (low|medium|high|xhigh)")
