@@ -1024,24 +1024,27 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 	if err != nil {
 		return err
 	}
-	metadataJSON, err := marshalJSON(map[string]any{
-		"workspace_root":                  snapshot.Meta.WorkspaceRoot,
-		"workspace_container":             snapshot.Meta.WorkspaceContainer,
-		"compaction_soon_reminder_issued": snapshot.Meta.CompactionSoonReminderIssued,
-		"worktree_reminder":               snapshot.Meta.WorktreeReminder,
-	})
-	if err != nil {
-		return err
-	}
+	persistedWorktreeReminder := snapshot.Meta.WorktreeReminder
 	worktreeID := sql.NullString{}
 	cwdRelpath := "."
 	if existingTarget, targetErr := s.queries.GetSessionExecutionTargetByID(ctx, strings.TrimSpace(snapshot.Meta.SessionID)); targetErr == nil {
 		if strings.TrimSpace(existingTarget.WorkspaceID) == binding.WorkspaceID {
 			worktreeID = existingTarget.WorktreeID
 			cwdRelpath = normalizeSessionCwdRelpath(existingTarget.CwdRelpath)
+		} else {
+			persistedWorktreeReminder = nil
 		}
 	} else if !errors.Is(targetErr, sql.ErrNoRows) {
 		return fmt.Errorf("get existing session execution target: %w", targetErr)
+	}
+	metadataJSON, err := marshalJSON(map[string]any{
+		"workspace_root":                  snapshot.Meta.WorkspaceRoot,
+		"workspace_container":             snapshot.Meta.WorkspaceContainer,
+		"compaction_soon_reminder_issued": snapshot.Meta.CompactionSoonReminderIssued,
+		"worktree_reminder":               persistedWorktreeReminder,
+	})
+	if err != nil {
+		return err
 	}
 	return s.queries.UpsertSession(ctx, sqlitegen.UpsertSessionParams{
 		ID:                 snapshot.Meta.SessionID,

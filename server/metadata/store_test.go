@@ -391,6 +391,15 @@ func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
 	if err := store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, bindingA.WorkspaceID, "worktree-a", "pkg"); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID before retarget: %v", err)
 	}
+	if err := sess.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/a",
+		WorktreePath:  canonicalWorktreeRootA,
+		WorkspaceRoot: cfg.WorkspaceRoot,
+		EffectiveCwd:  filepath.Join(canonicalWorktreeRootA, "pkg"),
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState before retarget: %v", err)
+	}
 
 	retargeted, err := store.RetargetSessionWorkspace(ctx, sess.Meta().SessionID, workspaceB)
 	if err != nil {
@@ -447,6 +456,9 @@ func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
 	}
 	if reopened.Meta().WorkspaceRoot != canonicalWorkspaceB {
 		t.Fatalf("reopened workspace root = %q, want %q", reopened.Meta().WorkspaceRoot, canonicalWorkspaceB)
+	}
+	if reopened.Meta().WorktreeReminder != nil {
+		t.Fatalf("expected stale worktree reminder cleared after workspace retarget, got %+v", reopened.Meta().WorktreeReminder)
 	}
 }
 
