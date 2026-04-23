@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultModel                         = "gpt-5.4"
+	defaultModel                         = "gpt-5.5"
 	defaultThinkingLevel                 = "medium"
 	defaultModelVerbosity                = ModelVerbosityMedium
 	defaultTheme                         = theme.Auto
