@@ -191,6 +191,11 @@ func (c *Remote) ListWorktrees(ctx context.Context, req serverapi.WorktreeListRe
 	return resp, c.call(ctx, protocol.MethodWorktreeList, req, &resp)
 }
 
+func (c *Remote) ResolveWorktreeCreateTarget(ctx context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+	var resp serverapi.WorktreeCreateTargetResolveResponse
+	return resp, c.call(ctx, protocol.MethodWorktreeCreateTargetResolve, req, &resp)
+}
+
 func (c *Remote) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
 	var resp serverapi.WorktreeCreateResponse
 	return resp, c.call(ctx, protocol.MethodWorktreeCreate, req, &resp)

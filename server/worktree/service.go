@@ -113,6 +113,25 @@ func (s *Service) ListWorktrees(ctx context.Context, req serverapi.WorktreeListR
 	return serverapi.WorktreeListResponse{Target: workspaceCtx.target, Worktrees: mapSyncedWorktrees(synced, workspaceCtx.target)}, nil
 }
 
+func (s *Service) ResolveWorktreeCreateTarget(ctx context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorktreeCreateTargetResolveResponse{}, err
+	}
+	workspaceCtx, err := s.resolveSessionWorkspaceContext(ctx, req.SessionID)
+	if err != nil {
+		return serverapi.WorktreeCreateTargetResolveResponse{}, err
+	}
+	resolution, err := s.git.ResolveCreateTarget(ctx, workspaceCtx.workspaceRoot, req.Target)
+	if err != nil {
+		return serverapi.WorktreeCreateTargetResolveResponse{}, err
+	}
+	return serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{
+		Input:       resolution.Input,
+		Kind:        serverapi.WorktreeCreateTargetResolutionKind(resolution.Kind),
+		ResolvedRef: resolution.ResolvedRef,
+	}}, nil
+}
+
 func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.WorktreeCreateResponse{}, err

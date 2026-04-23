@@ -91,24 +91,27 @@ Ambiguous selectors fail with an explicit disambiguation list. No fuzzy destruct
 
 The create flow collects and validates:
 
-- base ref/commitish to branch from, defaulting to current HEAD
-- whether to create a new branch
-- branch name when creating a branch
+- a single `branch or ref` target field
+- base ref/commitish to branch from, defaulting to current `HEAD` when Builder will create a new branch
 - target worktree directory path
 
 Defaults:
 
-- Suggested branch name comes from sanitized session name when present.
-- Fallback branch suggestion comes from the current branch name.
+- Suggested target name comes from sanitized session name when present.
+- If there is no valid session-name suggestion, the `branch or ref` field stays blank and the user must choose one explicitly.
 - Suggested worktree directory name derives from the final branch slug.
 - Worktree base directory is configurable via `worktrees.base_dir`.
 - Default base directory lives under Builder's persistence root.
 - If the configured base directory does not exist, Builder creates it.
 - If the default target path already exists, Builder auto-picks a unique suffixed path.
 
-Branch creation is explicit in the flow. Builder must not hide this behind branch heuristics.
+Resolution rules:
 
-If the user chooses not to create a branch, the flow requires an existing branch/ref selection.
+- if the typed target resolves to an existing local branch, Builder reuses that branch
+- if the typed target resolves to another valid ref/commit-ish, Builder creates the worktree detached at that ref
+- otherwise Builder creates a new branch from `Base ref`
+
+The dialog must surface this resolution live in the UI rather than hiding it behind submit-time heuristics.
 
 If the target branch is already checked out in another worktree, Builder fails with a clear error and asks the user to choose another branch/name.
 

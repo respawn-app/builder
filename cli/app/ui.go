@@ -15,6 +15,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"builder/shared/theme"
 	"builder/shared/transcriptdiag"
 
@@ -587,8 +588,8 @@ type uiModel struct {
 	pendingCSIShiftEnterAt time.Time
 	pendingCSIShiftEnter   bool
 
-	rollback     uiRollbackState
-	worktrees    uiWorktreeOverlayState
+	rollback  uiRollbackState
+	worktrees uiWorktreeOverlayState
 }
 
 func (m *uiModel) isInputLocked() bool {
@@ -1049,7 +1050,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.worktrees.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
-			return m, tea.Batch(m.setTransientStatusWithKind(m.worktrees.errorText, uiStatusNoticeError), m.ensureSpinnerTicking())
+			return m, m.ensureSpinnerTicking()
 		}
 		m.worktrees.errorText = ""
 		m.applyWorktreeListResponse(msg.resp)
@@ -1065,7 +1066,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.worktrees.create.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
-			return m, tea.Batch(m.setTransientStatusWithKind(m.worktrees.create.errorText, uiStatusNoticeError), m.ensureSpinnerTicking())
+			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
 		overlayCmd := m.popWorktreeOverlayIfNeeded()
@@ -1085,7 +1086,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.worktrees.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
-			return m, tea.Batch(m.setTransientStatusWithKind(m.worktrees.errorText, uiStatusNoticeError), m.ensureSpinnerTicking())
+			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
 		overlayCmd := m.popWorktreeOverlayIfNeeded()
@@ -1103,7 +1104,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.worktrees.deleteConfirm.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
-			return m, tea.Batch(m.setTransientStatusWithKind(m.worktrees.deleteConfirm.errorText, uiStatusNoticeError), m.ensureSpinnerTicking())
+			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
 		m.closeWorktreeDialog()
@@ -1112,6 +1113,43 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeDelete(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
 		m.syncViewport()
 		return m, tea.Batch(feedbackCmd, m.requestWorktreeListCmd(), m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
+	case worktreeCreateTargetResolveDebounceMsg:
+		if !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate || msg.token != m.worktrees.create.resolveToken {
+			m.syncViewport()
+			return m, nil
+		}
+		query := strings.TrimSpace(m.worktrees.create.branchTarget.Value())
+		if query == "" {
+			m.worktrees.create.resolving = false
+			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
+			m.worktrees.create.syncFocus()
+			m.syncViewport()
+			return m, nil
+		}
+		m.syncViewport()
+		return m, m.worktreeCreateTargetResolveCmd(query, msg.token)
+	case worktreeCreateTargetResolveDoneMsg:
+		if !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate || msg.token != m.worktrees.create.resolveToken {
+			m.syncViewport()
+			return m, nil
+		}
+		if strings.TrimSpace(m.worktrees.create.branchTarget.Value()) != strings.TrimSpace(msg.query) {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.create.resolving = false
+		if msg.err != nil {
+			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
+			m.worktrees.create.errorText = formatSubmissionError(msg.err)
+			m.worktrees.create.syncFocus()
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.create.errorText = ""
+		m.worktrees.create.resolution = msg.resp.Resolution
+		m.worktrees.create.syncFocus()
+		m.syncViewport()
+		return m, nil
 	case processListRefreshTickMsg:
 		if !m.processList.isOpen() {
 			m.syncViewport()

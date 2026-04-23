@@ -2,28 +2,57 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 type stubGitCommandRunner struct {
-	output  []byte
-	err     error
-	dir     string
-	args    []string
-	outputs map[string][]byte
+	output    []byte
+	err       error
+	exitCode  int
+	dir       string
+	args      []string
+	outputs   map[string][]byte
+	errors    map[string]error
+	exitCodes map[string]int
 }
 
 func (s *stubGitCommandRunner) Output(_ context.Context, dir string, args ...string) ([]byte, error) {
+	output, exitCode, err := s.Run(context.Background(), dir, args...)
+	if err != nil {
+		return nil, formatGitRunError(exitCode, err, output, args...)
+	}
+	return output, nil
+}
+
+func (s *stubGitCommandRunner) Run(_ context.Context, dir string, args ...string) ([]byte, int, error) {
 	s.dir = dir
 	s.args = append([]string(nil), args...)
+	key := strings.Join(args, "\x00")
+	output := append([]byte(nil), s.output...)
 	if s.outputs != nil {
-		if output, ok := s.outputs[strings.Join(args, "\x00")]; ok {
-			return append([]byte(nil), output...), s.err
+		if specific, ok := s.outputs[key]; ok {
+			output = append([]byte(nil), specific...)
 		}
 	}
-	return append([]byte(nil), s.output...), s.err
+	err := s.err
+	if s.errors != nil {
+		if specific, ok := s.errors[key]; ok {
+			err = specific
+		}
+	}
+	exitCode := s.exitCode
+	if s.exitCodes != nil {
+		if specific, ok := s.exitCodes[key]; ok {
+			exitCode = specific
+		}
+	}
+	if err != nil && exitCode == 0 {
+		exitCode = 1
+	}
+	return output, exitCode, err
 }
 
 func TestGitInspectorListParsesPorcelainTopology(t *testing.T) {
@@ -108,6 +137,56 @@ func TestGitInspectorAddUsesExistingRefWithoutCreatingBranch(t *testing.T) {
 	}
 	if got, want := runner.dir, canonicalTestPath(t, workspaceRoot); got != want {
 		t.Fatalf("git dir=%q want=%q", got, want)
+	}
+}
+
+func TestGitInspectorResolveCreateTargetClassifiesExistingBranch(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{outputs: map[string][]byte{
+		strings.Join([]string{"for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/main"}, "\x00"): []byte("main\n"),
+	}}
+	inspector := NewGitInspector(runner)
+	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "main")
+	if err != nil {
+		t.Fatalf("ResolveCreateTarget: %v", err)
+	}
+	if resolution.Kind != CreateTargetResolutionKindExistingBranch || resolution.ResolvedRef != "main" {
+		t.Fatalf("unexpected resolution: %+v", resolution)
+	}
+}
+
+func TestGitInspectorResolveCreateTargetClassifiesDetachedRef(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{outputs: map[string][]byte{
+		strings.Join([]string{"rev-parse", "--verify", "--quiet", "HEAD^{object}"}, "\x00"): []byte("abc123\n"),
+	}}
+	inspector := NewGitInspector(runner)
+	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "HEAD")
+	if err != nil {
+		t.Fatalf("ResolveCreateTarget: %v", err)
+	}
+	if resolution.Kind != CreateTargetResolutionKindDetachedRef || resolution.ResolvedRef != "abc123" {
+		t.Fatalf("unexpected resolution: %+v", resolution)
+	}
+}
+
+func TestGitInspectorResolveCreateTargetClassifiesNewBranch(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{
+		errors: map[string]error{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"): errors.New("exit status 1"),
+		},
+		exitCodes: map[string]int{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"): 1,
+		},
+	}
+	inspector := NewGitInspector(runner)
+	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "feature/new")
+	if err != nil {
+		t.Fatalf("ResolveCreateTarget: %v", err)
+	}
+	if resolution.Kind != CreateTargetResolutionKindNewBranch {
+		t.Fatalf("unexpected resolution: %+v", resolution)
 	}
 }
 

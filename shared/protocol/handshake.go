@@ -30,6 +30,7 @@ const (
 	MethodSessionRuntimeActivate                   = "session.runtime.activate"
 	MethodSessionRuntimeRelease                    = "session.runtime.release"
 	MethodWorktreeList                             = "worktree.list"
+	MethodWorktreeCreateTargetResolve              = "worktree.create_target.resolve"
 	MethodWorktreeCreate                           = "worktree.create"
 	MethodWorktreeSwitch                           = "worktree.switch"
 	MethodWorktreeDelete                           = "worktree.delete"

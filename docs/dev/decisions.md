@@ -397,7 +397,10 @@
 - Worktree-management planning and implementation use `workspace` terminology only; older `repo` references are stale.
 - Planned `/worktree` management keeps session identity stable and changes only the shared session execution target `(workspace_id, worktree_id?, cwd_relpath)`.
 - The first `/worktree` slice does not introduce a separate teleport-root abstraction; execution-target switching plus explicit worktree/origin status is sufficient.
-- The shipped `/worktree` create UX is flow-only: `/worktree`, `/worktree new`, and `/worktree create` all enter the explicit base-ref/new-vs-existing/path flow. The raw `/worktree create <branch> [path]` bypass is intentionally unsupported.
+- The shipped `/worktree` create UX is flow-only: `/worktree`, `/worktree new`, and `/worktree create` all enter a single smart-target create dialog. The raw `/worktree create <branch> [path]` bypass is intentionally unsupported.
+- The create dialog only auto-suggests a target name from the sanitized session name. If that yields nothing, the `Branch or ref` field stays blank; it must not fall back to the current branch, main branch, or a generic placeholder name.
+- The create dialog has no explicit `new branch` / `existing ref` selector. Builder resolves the typed `Branch or ref` asynchronously and shows a live badge: `new branch`, `existing branch`, or `detached ref`.
+- In the create dialog, `Branch or ref` appears before `Base ref`; `Base ref` still defaults to `HEAD`, is treated as the less-frequently changed field, and is only relevant when Builder will create a new branch.
 - Worktree transitions append an immediate user-visible local note and also maintain a lazy typed developer-context reminder for the next model submission; the latest pending reminder always wins before submit and may reappear after compaction generation changes.
 - Git remains the source of truth for worktree topology; Builder stores only additive metadata and blocks deleting a worktree that is still targeted by another session.
 - Existing non-Builder git worktrees remain manageable from Builder in the first slice, but should be visually marked where feasible.
