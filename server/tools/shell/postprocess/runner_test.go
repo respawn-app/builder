@@ -210,7 +210,8 @@ func writeHookScript(t *testing.T, contents string) string {
 }
 
 func TestRunnerAllModeAccumulatesWarnings(t *testing.T) {
-	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: "~/missing-hook"})
+	missingHookPath := filepath.Join(t.TempDir(), "missing-hook")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: missingHookPath})
 	runner.processors = []Processor{warningProcessor{}}
 	result, err := runner.Apply(context.Background(), Request{
 		ToolName:    toolspec.ToolExecCommand,
