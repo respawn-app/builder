@@ -382,27 +382,36 @@ func (s *Service) SyncExecutionTarget(ctx context.Context, sessionID string, tar
 	if trimmedWorkdir == "" {
 		return errors.New("execution target effective workdir is required")
 	}
+	var normalizedReminder *session.WorktreeReminderState
 	if reminder != nil {
-		store, err := s.resolveStore(ctx, trimmedSessionID)
-		if err != nil {
-			return err
-		}
 		normalized, err := normalizeWorktreeReminderState(*reminder)
 		if err != nil {
 			return err
 		}
-		if err := store.SetWorktreeReminderState(&normalized); err != nil {
-			return err
-		}
+		normalizedReminder = &normalized
 	}
 	handle, err := s.activeRuntimeHandle(ctx, trimmedSessionID)
 	if err != nil {
 		return err
 	}
 	if handle == nil || handle.rebind == nil {
+		return s.persistWorktreeReminderState(ctx, trimmedSessionID, normalizedReminder)
+	}
+	if err := handle.rebind(trimmedWorkdir); err != nil {
+		return err
+	}
+	return s.persistWorktreeReminderState(ctx, trimmedSessionID, normalizedReminder)
+}
+
+func (s *Service) persistWorktreeReminderState(ctx context.Context, sessionID string, reminder *session.WorktreeReminderState) error {
+	if reminder == nil {
 		return nil
 	}
-	return handle.rebind(trimmedWorkdir)
+	store, err := s.resolveStore(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	return store.SetWorktreeReminderState(reminder)
 }
 
 func normalizeWorktreeReminderState(state session.WorktreeReminderState) (session.WorktreeReminderState, error) {
