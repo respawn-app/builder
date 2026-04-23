@@ -660,9 +660,9 @@ func resolveWorktreeTokenFromEntries(entries []serverapi.WorktreeView, token str
 			return strings.TrimSpace(item.BranchName) == token || (token == "main" && item.IsMain)
 		},
 	}
-	uniqueMatches := make(map[string]serverapi.WorktreeView, len(entries))
-	orderedKeys := make([]string, 0, len(entries))
 	for _, matcher := range matchers {
+		uniqueMatches := make(map[string]serverapi.WorktreeView, len(entries))
+		orderedKeys := make([]string, 0, len(entries))
 		for _, item := range entries {
 			if !matcher(item, trimmedToken) {
 				continue
@@ -674,16 +674,16 @@ func resolveWorktreeTokenFromEntries(entries []serverapi.WorktreeView, token str
 			uniqueMatches[key] = item
 			orderedKeys = append(orderedKeys, key)
 		}
-	}
-	if len(orderedKeys) == 1 {
-		return uniqueMatches[orderedKeys[0]], nil
-	}
-	if len(orderedKeys) > 1 {
-		names := make([]string, 0, len(orderedKeys))
-		for _, key := range orderedKeys {
-			names = append(names, worktreeDisplayName(uniqueMatches[key]))
+		if len(orderedKeys) == 1 {
+			return uniqueMatches[orderedKeys[0]], nil
 		}
-		return serverapi.WorktreeView{}, fmt.Errorf("worktree %q is ambiguous: %s", trimmedToken, strings.Join(names, ", "))
+		if len(orderedKeys) > 1 {
+			names := make([]string, 0, len(orderedKeys))
+			for _, key := range orderedKeys {
+				names = append(names, worktreeDisplayName(uniqueMatches[key]))
+			}
+			return serverapi.WorktreeView{}, fmt.Errorf("worktree %q is ambiguous: %s", trimmedToken, strings.Join(names, ", "))
+		}
 	}
 	return serverapi.WorktreeView{}, fmt.Errorf("worktree %q not found", trimmedToken)
 }

@@ -122,6 +122,9 @@ func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot st
 	refOutput, refExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
 	if err != nil {
 		if refExit == 1 {
+			if !validBranchName {
+				return CreateTargetResolution{}, fmt.Errorf("target %q is not a valid branch name or resolvable ref", trimmedTarget)
+			}
 			return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindNewBranch}, nil
 		}
 		return CreateTargetResolution{}, formatGitRunError(refExit, err, refOutput, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
@@ -134,7 +137,10 @@ func (i *GitInspector) isValidBranchName(ctx context.Context, workspaceRoot stri
 	if err == nil {
 		return true, nil
 	}
-	if exitCode != 0 {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if exitCode > 0 {
 		return false, nil
 	}
 	return false, formatGitRunError(exitCode, err, output, "check-ref-format", "--branch", branchName)

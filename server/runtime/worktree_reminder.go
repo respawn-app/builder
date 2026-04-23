@@ -7,28 +7,43 @@ import (
 	"builder/server/session"
 )
 
-func (e *Engine) buildWorktreeReminderRequestItems(stepID string) ([]llm.ResponseItem, error) {
+type preparedWorktreeReminder struct {
+	stepID  string
+	message llm.Message
+	state   session.WorktreeReminderState
+}
+
+func (e *Engine) prepareWorktreeReminderRequestItems(stepID string) ([]llm.ResponseItem, *preparedWorktreeReminder, error) {
 	state := cloneRuntimeWorktreeReminderState(e.store.Meta().WorktreeReminder)
 	if !shouldInjectWorktreeReminder(state, e.compactionCountSnapshot()) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	message, ok := worktreeReminderMessage(*state)
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 	items := llm.ItemsFromMessages([]llm.Message{message})
 	if strings.TrimSpace(stepID) == "" {
-		return items, nil
-	}
-	if err := e.appendMessage(stepID, message); err != nil {
-		return nil, err
+		return items, nil, nil
 	}
 	state.HasIssuedInGeneration = true
 	state.IssuedCompactionCount = e.compactionCountSnapshot()
-	if err := e.store.SetWorktreeReminderState(state); err != nil {
-		return nil, err
+	return items, &preparedWorktreeReminder{
+		stepID:  stepID,
+		message: message,
+		state:   *state,
+	}, nil
+}
+
+func (e *Engine) commitPreparedWorktreeReminder(reminder *preparedWorktreeReminder) error {
+	if reminder == nil {
+		return nil
 	}
-	return items, nil
+	if err := e.appendMessage(reminder.stepID, reminder.message); err != nil {
+		return err
+	}
+	state := reminder.state
+	return e.store.SetWorktreeReminderState(&state)
 }
 
 func filterHistoricalWorktreeReminderItems(items []llm.ResponseItem) []llm.ResponseItem {

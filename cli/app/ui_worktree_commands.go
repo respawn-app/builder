@@ -84,7 +84,13 @@ func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListRespon
 	if m == nil || m.worktreeClient == nil {
 		return serverapi.WorktreeListResponse{}, fmt.Errorf("worktree client is unavailable")
 	}
-	return m.worktreeClient.ListWorktrees(context.Background(), serverapi.WorktreeListRequest{SessionID: m.sessionID})
+	client, ok := m.runtimeClient().(*sessionRuntimeClient)
+	if !ok || client == nil {
+		return serverapi.WorktreeListResponse{}, errors.New("controller lease is unavailable")
+	}
+	ctx, cancel := client.controlContext()
+	defer cancel()
+	return m.worktreeClient.ListWorktrees(ctx, serverapi.WorktreeListRequest{SessionID: m.sessionID})
 }
 
 func (m *uiModel) resolveWorktreeToken(token string) (serverapi.WorktreeView, error) {
@@ -143,7 +149,7 @@ func isWorktreeMutationCommand(command string) bool {
 }
 
 func worktreeUsage() string {
-	return "Usage: /wt | /wt create | /wt delete [target] | /wt switch <target>"
+	return "Usage: /wt | /wt status | /wt create | /wt new | /wt delete [target] | /wt remove [target] | /wt rm [target] | /wt switch <target>"
 }
 
 func formatWorktreeCreate(resp serverapi.WorktreeCreateResponse) string {

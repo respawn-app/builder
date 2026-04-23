@@ -15,14 +15,35 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
+type requestBuildPlan struct {
+	Request                  llm.Request
+	PreparedWorktreeReminder *preparedWorktreeReminder
+}
+
 func (e *Engine) buildRequest(ctx context.Context, stepID string, allowTools bool) (llm.Request, error) {
-	return e.buildRequestWithExtraItems(ctx, stepID, nil, allowTools)
+	plan, err := e.buildRequestPlan(ctx, stepID, allowTools)
+	if err != nil {
+		return llm.Request{}, err
+	}
+	return plan.Request, nil
 }
 
 func (e *Engine) buildRequestWithExtraItems(ctx context.Context, stepID string, extra []llm.ResponseItem, allowTools bool) (llm.Request, error) {
-	locked, err := e.ensureLocked()
+	plan, err := e.buildRequestPlanWithExtraItems(ctx, stepID, extra, allowTools)
 	if err != nil {
 		return llm.Request{}, err
+	}
+	return plan.Request, nil
+}
+
+func (e *Engine) buildRequestPlan(ctx context.Context, stepID string, allowTools bool) (requestBuildPlan, error) {
+	return e.buildRequestPlanWithExtraItems(ctx, stepID, nil, allowTools)
+}
+
+func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID string, extra []llm.ResponseItem, allowTools bool) (requestBuildPlan, error) {
+	locked, err := e.ensureLocked()
+	if err != nil {
+		return requestBuildPlan{}, err
 	}
 
 	var requestTools []llm.Tool
@@ -33,9 +54,9 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, stepID string, 
 	}
 
 	items := filterHistoricalWorktreeReminderItems(e.snapshotItems())
-	worktreeReminderItems, err := e.buildWorktreeReminderRequestItems(stepID)
+	worktreeReminderItems, preparedWorktreeReminder, err := e.prepareWorktreeReminderRequestItems(stepID)
 	if err != nil {
-		return llm.Request{}, err
+		return requestBuildPlan{}, err
 	}
 	if len(worktreeReminderItems) > 0 {
 		items = append(items, llm.CloneResponseItems(worktreeReminderItems)...)
@@ -47,7 +68,7 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, stepID string, 
 
 	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, requestTools)
 	if err != nil {
-		return llm.Request{}, err
+		return requestBuildPlan{}, err
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
@@ -61,11 +82,11 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, stepID string, 
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
 		if nativeErr != nil {
-			return llm.Request{}, nativeErr
+			return requestBuildPlan{}, nativeErr
 		}
 		req.EnableNativeWebSearch = nativeWebSearch
 	}
-	return req, nil
+	return requestBuildPlan{Request: req, PreparedWorktreeReminder: preparedWorktreeReminder}, nil
 }
 
 func (e *Engine) supportsPromptCacheKey(ctx context.Context) bool {

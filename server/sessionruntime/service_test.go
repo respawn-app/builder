@@ -624,6 +624,21 @@ func TestEnsureCurrentControllerLeaseLockedRejectsReplacedHandle(t *testing.T) {
 	}
 }
 
+func TestActiveRuntimeHandleReturnsActivationError(t *testing.T) {
+	activationErr := errors.New("activation failed")
+	handle := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", activationErr: activationErr, ready: make(chan struct{})}
+	close(handle.ready)
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+
+	resolved, err := svc.activeRuntimeHandle(context.Background(), "session-1")
+	if !errors.Is(err, activationErr) {
+		t.Fatalf("activeRuntimeHandle error = %v, want %v", err, activationErr)
+	}
+	if resolved != nil {
+		t.Fatalf("activeRuntimeHandle returned handle %+v, want nil", resolved)
+	}
+}
+
 func TestSyncExecutionTargetPersistsReminderWithoutActiveRuntime(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 

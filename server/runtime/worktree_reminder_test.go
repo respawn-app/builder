@@ -126,6 +126,69 @@ func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
 	}
 }
 
+func TestSubmitUserMessageDoesNotConsumeWorktreeReminderAfterModelFailure(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/retry",
+		WorktreePath:  "/tmp/wt-retry",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-retry",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+
+	failingClient := &hookClient{beforeReturn: func() error { return context.DeadlineExceeded }}
+	eng, err := New(store, failingClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err == nil {
+		t.Fatal("expected submit failure")
+	}
+	state := store.Meta().WorktreeReminder
+	if state == nil || state.HasIssuedInGeneration || state.IssuedCompactionCount != 0 {
+		t.Fatalf("unexpected reminder state after failed submit: %+v", state)
+	}
+
+	successClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	eng.llm = successClient
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "continue again"); err != nil {
+		t.Fatalf("submit retry: %v", err)
+	}
+	if len(successClient.calls) != 1 {
+		t.Fatalf("expected one successful retry call, got %d", len(successClient.calls))
+	}
+	reminderCount := 0
+	for _, msg := range requestMessages(successClient.calls[0]) {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeWorktreeMode {
+			reminderCount++
+		}
+	}
+	if reminderCount != 1 {
+		t.Fatalf("expected reminder reinjected after failed submit, got %d messages=%+v", reminderCount, requestMessages(successClient.calls[0]))
+	}
+}
+
 func TestSubmitUserMessageUsesLatestPendingWorktreeReminder(t *testing.T) {
 	prevPrompt := prompts.WorktreeModePrompt
 	prompts.WorktreeModePrompt = "enter {{branch}}"

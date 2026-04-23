@@ -16,6 +16,7 @@ import (
 type worktreeCommandTestClient struct {
 	listResp        serverapi.WorktreeListResponse
 	listErr         error
+	listCtx         context.Context
 	resolveResp     serverapi.WorktreeCreateTargetResolveResponse
 	resolveErr      error
 	createResp      serverapi.WorktreeCreateResponse
@@ -31,7 +32,8 @@ type worktreeCommandTestClient struct {
 	leaseFailures   map[string]int
 }
 
-func (c *worktreeCommandTestClient) ListWorktrees(context.Context, serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
+func (c *worktreeCommandTestClient) ListWorktrees(ctx context.Context, _ serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
+	c.listCtx = ctx
 	return c.listResp, c.listErr
 }
 
@@ -257,6 +259,44 @@ func TestWorktreeCreateDialogBlankTargetSkipsDisabledBaseRef(t *testing.T) {
 	updated = next.(*uiModel)
 	if updated.worktrees.create.focus != uiWorktreeCreateFieldActions {
 		t.Fatalf("focus after down = %v, want actions", updated.worktrees.create.focus)
+	}
+}
+
+func TestListWorktreesForCurrentSessionUsesBoundedControlContext(t *testing.T) {
+	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
+	m := newWorktreeTestModel(t, client)
+
+	if _, err := m.listWorktreesForCurrentSession(); err != nil {
+		t.Fatalf("listWorktreesForCurrentSession: %v", err)
+	}
+	if client.listCtx == nil {
+		t.Fatal("expected list context recorded")
+	}
+	if _, ok := client.listCtx.Deadline(); !ok {
+		t.Fatal("expected bounded control context deadline")
+	}
+}
+
+func TestWorktreeUsageIncludesAcceptedAliases(t *testing.T) {
+	usage := worktreeUsage()
+	for _, token := range []string{"status", "new", "remove", "rm"} {
+		if !strings.Contains(usage, token) {
+			t.Fatalf("expected usage to include %q, got %q", token, usage)
+		}
+	}
+}
+
+func TestResolveWorktreeTokenFromEntriesUsesMatcherPrecedence(t *testing.T) {
+	entries := []serverapi.WorktreeView{
+		{WorktreeID: "wt-1", DisplayName: "feature", CanonicalRoot: "/wt/feature-display"},
+		{WorktreeID: "wt-2", DisplayName: "other", BranchName: "feature", CanonicalRoot: "/wt/feature-branch"},
+	}
+	resolved, err := resolveWorktreeTokenFromEntries(entries, "feature")
+	if err != nil {
+		t.Fatalf("resolveWorktreeTokenFromEntries: %v", err)
+	}
+	if resolved.WorktreeID != "wt-1" {
+		t.Fatalf("resolved worktree id = %q, want wt-1", resolved.WorktreeID)
 	}
 }
 
@@ -676,7 +716,7 @@ func TestWorktreeDeleteTargetResolutionErrorRendersLocallyWithoutStatusLineMirro
 	assertWorktreeOverlayLocalErrorOnly(t, updated, []string{`worktree "missing" not found`}, []string{`worktree "missing" not found`})
 }
 
-func TestWorktreeSwitchCommandRejectsCrossFieldTokenCollisions(t *testing.T) {
+func TestWorktreeSwitchCommandPrefersDisplayNameMatchBeforeBranchMatch(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees,
 		serverapi.WorktreeView{WorktreeID: "wt-display", DisplayName: "shared", CanonicalRoot: "/wt/shared-display", BranchName: "feature/display"},
@@ -687,17 +727,17 @@ func TestWorktreeSwitchCommandRejectsCrossFieldTokenCollisions(t *testing.T) {
 	m.input = "/wt switch shared"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	_ = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if len(client.switchRequests) != 0 {
-		t.Fatalf("expected no switch request on ambiguous token, got %+v", client.switchRequests)
+	if len(client.switchRequests) != 1 {
+		t.Fatalf("expected one switch request, got %+v", client.switchRequests)
 	}
-	if !strings.Contains(updated.transientStatus, `worktree "shared" is ambiguous`) {
-		t.Fatalf("expected ambiguous switch error, got %q", updated.transientStatus)
+	if client.switchRequests[0].WorktreeID != "wt-display" {
+		t.Fatalf("switch target = %q, want wt-display", client.switchRequests[0].WorktreeID)
 	}
 }
 
-func TestWorktreeDeleteTargetResolutionRejectsCrossFieldTokenCollisions(t *testing.T) {
+func TestWorktreeDeleteTargetResolutionPrefersDisplayNameMatchBeforeBranchMatch(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees,
 		serverapi.WorktreeView{WorktreeID: "wt-display", DisplayName: "shared", CanonicalRoot: "/wt/shared-display", BranchName: "feature/display"},
@@ -710,13 +750,15 @@ func TestWorktreeDeleteTargetResolutionRejectsCrossFieldTokenCollisions(t *testi
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if updated.worktrees.phase != uiWorktreeOverlayPhaseList {
-		t.Fatalf("phase = %q, want list", updated.worktrees.phase)
+	if updated.worktrees.phase != uiWorktreeOverlayPhaseDeleteConfirm {
+		t.Fatalf("phase = %q, want delete_confirm", updated.worktrees.phase)
 	}
-	if !strings.Contains(updated.worktrees.errorText, `worktree "shared" is ambiguous`) {
-		t.Fatalf("expected ambiguous delete error, got %q", updated.worktrees.errorText)
+	if updated.worktrees.deleteConfirm.target.WorktreeID != "wt-display" {
+		t.Fatalf("delete target = %q, want wt-display", updated.worktrees.deleteConfirm.target.WorktreeID)
 	}
-	assertWorktreeOverlayLocalErrorOnly(t, updated, []string{`worktree "shared" is ambiguous`}, []string{`worktree "shared" is ambiguous`})
+	if strings.TrimSpace(updated.worktrees.errorText) != "" {
+		t.Fatalf("expected no list error, got %q", updated.worktrees.errorText)
+	}
 }
 
 func TestWorktreeOverlayCreateErrorSuppressesPreexistingStatusNotice(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -96,21 +97,35 @@ func (s *serviceTestProcessSource) List() []shelltool.Snapshot {
 }
 
 type serviceTestLocalNotes struct {
-	mu    sync.Mutex
-	texts []string
+	mu             sync.Mutex
+	texts          []string
+	sessionTexts   []string
+	appendLocalErr error
 }
 
 func (n *serviceTestLocalNotes) AppendLocalEntry(_ context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
+	if n.appendLocalErr != nil {
+		return n.appendLocalErr
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.texts = append(n.texts, req.Text)
 	return nil
 }
 
+func (n *serviceTestLocalNotes) AppendSessionEntry(_ context.Context, _ string, _ string, text string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.sessionTexts = append(n.sessionTexts, text)
+	return nil
+}
+
 func (n *serviceTestLocalNotes) snapshot() []string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return append([]string(nil), n.texts...)
+	combined := append([]string(nil), n.texts...)
+	combined = append(combined, n.sessionTexts...)
+	return combined
 }
 
 type serviceTestEnv struct {
@@ -678,7 +693,6 @@ func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testin
 	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
 	}
-	time.Sleep(2 * time.Millisecond)
 	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, env.session.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID active session: %v", err)
 	}
@@ -710,6 +724,40 @@ func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testin
 	}
 	if len(env.runtime.reminderCalls) != 2 {
 		t.Fatalf("expected reminder for both sessions, got %+v", env.runtime.reminderCalls)
+	}
+}
+
+func TestNextAvailableWorktreeRootFailsAfterCollisionCap(t *testing.T) {
+	baseRoot := filepath.Join(t.TempDir(), "collision")
+	for idx := 0; idx < 1024; idx++ {
+		candidate := baseRoot
+		if idx > 0 {
+			candidate = baseRoot + "-" + strconv.Itoa(idx+1)
+		}
+		if err := os.MkdirAll(candidate, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", candidate, err)
+		}
+	}
+
+	_, err := nextAvailableWorktreeRoot(baseRoot)
+	if err == nil || !strings.Contains(err.Error(), "after 1024 attempts") {
+		t.Fatalf("nextAvailableWorktreeRoot error = %v, want capped collision error", err)
+	}
+}
+
+func TestRunSetupScriptAppendsLeaseAgnosticCompletionNote(t *testing.T) {
+	notes := &serviceTestLocalNotes{appendLocalErr: serverapi.ErrInvalidControllerLease}
+	service := &Service{localNotes: notes}
+	worktreeRoot := filepath.Join(t.TempDir(), "wt")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktree root: %v", err)
+	}
+	scriptPath := filepath.Join(t.TempDir(), "setup.sh")
+	writeExecutableFile(t, scriptPath, "#!/bin/sh\nexit 0\n")
+
+	service.runSetupScript(scriptPath, "session-1", setupScriptPayload{WorktreeRoot: worktreeRoot})
+	if got := notes.snapshot(); len(got) != 1 || !strings.Contains(got[0], "Worktree setup complete for "+worktreeRoot) {
+		t.Fatalf("expected lease-agnostic setup completion note, got %+v", got)
 	}
 }
 
