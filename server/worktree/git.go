@@ -106,12 +106,18 @@ func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot st
 	if trimmedTarget == "" {
 		return CreateTargetResolution{}, fmt.Errorf("target is required")
 	}
-	branchOutput, branchExit, err := i.runner.Run(ctx, canonicalRoot, "for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/"+trimmedTarget)
+	validBranchName, err := i.isValidBranchName(ctx, canonicalRoot, trimmedTarget)
 	if err != nil {
-		return CreateTargetResolution{}, formatGitRunError(branchExit, err, branchOutput, "for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/"+trimmedTarget)
+		return CreateTargetResolution{}, err
 	}
-	if resolvedBranch := strings.TrimSpace(string(branchOutput)); resolvedBranch != "" {
-		return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindExistingBranch, ResolvedRef: resolvedBranch}, nil
+	if validBranchName {
+		branchOutput, branchExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+trimmedTarget+"^{object}")
+		if err == nil {
+			return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindExistingBranch, ResolvedRef: trimmedTarget}, nil
+		}
+		if branchExit != 1 {
+			return CreateTargetResolution{}, formatGitRunError(branchExit, err, branchOutput, "rev-parse", "--verify", "--quiet", "refs/heads/"+trimmedTarget+"^{object}")
+		}
 	}
 	refOutput, refExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
 	if err != nil {
@@ -121,6 +127,17 @@ func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot st
 		return CreateTargetResolution{}, formatGitRunError(refExit, err, refOutput, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
 	}
 	return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindDetachedRef, ResolvedRef: strings.TrimSpace(string(refOutput))}, nil
+}
+
+func (i *GitInspector) isValidBranchName(ctx context.Context, workspaceRoot string, branchName string) (bool, error) {
+	output, exitCode, err := i.runner.Run(ctx, workspaceRoot, "check-ref-format", "--branch", branchName)
+	if err == nil {
+		return true, nil
+	}
+	if exitCode != 0 {
+		return false, nil
+	}
+	return false, formatGitRunError(exitCode, err, output, "check-ref-format", "--branch", branchName)
 }
 
 func (i *GitInspector) Add(ctx context.Context, workspaceRoot string, worktreeRoot string, spec CreateSpec) (bool, error) {

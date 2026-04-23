@@ -80,6 +80,16 @@ func (c *dormantTranscriptCache) get(ctx context.Context, store *session.Store) 
 	return built, nil
 }
 
+func (c *dormantTranscriptCache) clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.entries)
+	c.clock = 0
+}
+
 func (c *dormantTranscriptCache) nextStampLocked() uint64 {
 	c.clock++
 	return c.clock

@@ -717,11 +717,11 @@ func (m *uiModel) worktreeCreateCmd(req serverapi.WorktreeCreateRequest) tea.Cmd
 	m.worktrees.create.errorText = ""
 	m.worktrees.create.submitting = true
 	return func() tea.Msg {
-		resp, err := runWorktreeMutation(m, func(leaseID string) (serverapi.WorktreeCreateResponse, error) {
+		resp, err := runWorktreeMutation(m, func(ctx context.Context, leaseID string) (serverapi.WorktreeCreateResponse, error) {
 			req.ClientRequestID = uuid.NewString()
 			req.SessionID = m.sessionID
 			req.ControllerLeaseID = leaseID
-			return m.worktreeClient.CreateWorktree(context.Background(), req)
+			return m.worktreeClient.CreateWorktree(ctx, req)
 		})
 		return worktreeCreateDoneMsg{token: token, resp: resp, err: err}
 	}
@@ -735,8 +735,8 @@ func (m *uiModel) worktreeSwitchCmd(target serverapi.WorktreeView) tea.Cmd {
 	token := m.worktrees.mutationToken
 	m.worktrees.errorText = ""
 	return func() tea.Msg {
-		resp, err := runWorktreeMutation(m, func(leaseID string) (serverapi.WorktreeSwitchResponse, error) {
-			return m.worktreeClient.SwitchWorktree(context.Background(), serverapi.WorktreeSwitchRequest{
+		resp, err := runWorktreeMutation(m, func(ctx context.Context, leaseID string) (serverapi.WorktreeSwitchResponse, error) {
+			return m.worktreeClient.SwitchWorktree(ctx, serverapi.WorktreeSwitchRequest{
 				ClientRequestID:   uuid.NewString(),
 				SessionID:         m.sessionID,
 				ControllerLeaseID: leaseID,
@@ -756,8 +756,8 @@ func (m *uiModel) worktreeDeleteCmd(target serverapi.WorktreeView, deleteBranch 
 	m.worktrees.deleteConfirm.errorText = ""
 	m.worktrees.deleteConfirm.submitting = true
 	return func() tea.Msg {
-		resp, err := runWorktreeMutation(m, func(leaseID string) (serverapi.WorktreeDeleteResponse, error) {
-			return m.worktreeClient.DeleteWorktree(context.Background(), serverapi.WorktreeDeleteRequest{
+		resp, err := runWorktreeMutation(m, func(ctx context.Context, leaseID string) (serverapi.WorktreeDeleteResponse, error) {
+			return m.worktreeClient.DeleteWorktree(ctx, serverapi.WorktreeDeleteRequest{
 				ClientRequestID:   uuid.NewString(),
 				SessionID:         m.sessionID,
 				ControllerLeaseID: leaseID,
@@ -1058,8 +1058,8 @@ func renderWorktreeCreateRow(selected bool, width int, theme string, style uiSty
 	if selected {
 		line = line.Background(p.modeBg)
 	}
-	titleStyle := line.Copy().Foreground(p.primary).Bold(true)
-	railStyle := line.Copy().Foreground(p.primary).Bold(true)
+	titleStyle := line.Foreground(p.primary).Bold(true)
+	railStyle := line.Foreground(p.primary).Bold(true)
 	rail := " "
 	sep := ""
 	if selected {
@@ -1081,9 +1081,9 @@ func renderWorktreeEntry(item serverapi.WorktreeView, selected bool, width int, 
 	if selected {
 		line = line.Background(p.modeBg)
 	}
-	titleStyle := line.Copy().Bold(true)
-	railStyle := line.Copy().Foreground(p.primary).Bold(true)
-	metaStyle := line.Copy().Foreground(p.muted).Faint(true)
+	titleStyle := line.Bold(true)
+	railStyle := line.Foreground(p.primary).Bold(true)
+	metaStyle := line.Foreground(p.muted).Faint(true)
 	rail := " "
 	sep := ""
 	if selected {
@@ -1110,7 +1110,7 @@ func renderWorktreeBadges(item serverapi.WorktreeView, selected bool, theme stri
 		base = base.Background(p.modeBg)
 	}
 	badge := func(text string, fg lipgloss.TerminalColor) string {
-		return base.Copy().Foreground(fg).Bold(true).Render("[" + text + "]")
+		return base.Foreground(fg).Bold(true).Render("[" + text + "]")
 	}
 	if item.IsCurrent {
 		badges = append(badges, badge("current", p.secondary))
@@ -1263,11 +1263,11 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	if dialog.focus == uiWorktreeCreateFieldBranchTarget {
 		rowStyle = rowStyle.Background(p.modeBg)
 	}
-	labelStyle := rowStyle.Copy().Foreground(p.primary).Bold(true)
+	labelStyle := rowStyle.Foreground(p.primary).Bold(true)
 	if dialog.focus != uiWorktreeCreateFieldBranchTarget {
-		labelStyle = rowStyle.Copy().Foreground(p.foreground)
+		labelStyle = rowStyle.Foreground(p.foreground)
 	}
-	badgeStyle := rowStyle.Copy().Foreground(p.muted).Faint(true)
+	badgeStyle := rowStyle.Foreground(p.muted).Faint(true)
 	badgeText := ""
 	switch {
 	case strings.TrimSpace(dialog.branchTarget.Value()) == "":
@@ -1275,17 +1275,17 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	case dialog.resolving:
 		badgeText = ""
 	case dialog.resolution.Kind == serverapi.WorktreeCreateTargetResolutionKindNewBranch:
-		badgeStyle = rowStyle.Copy().Foreground(p.secondary).Bold(true)
+		badgeStyle = rowStyle.Foreground(p.secondary).Bold(true)
 		badgeText = "✔︎ new branch"
 	case dialog.resolution.Kind == serverapi.WorktreeCreateTargetResolutionKindExistingBranch:
-		badgeStyle = rowStyle.Copy().Foreground(statusAmberColor()).Bold(true)
+		badgeStyle = rowStyle.Foreground(statusAmberColor()).Bold(true)
 		badgeText = "∴ existing branch"
 	case dialog.resolution.Kind == serverapi.WorktreeCreateTargetResolutionKindDetachedRef:
-		badgeStyle = rowStyle.Copy().Foreground(statusAmberColor()).Bold(true)
+		badgeStyle = rowStyle.Foreground(statusAmberColor()).Bold(true)
 		badgeText = "∴ detached ref"
 	}
-	lineStyle := rowStyle.Copy().Foreground(p.foreground)
-	borderStyle := rowStyle.Copy().Foreground(p.muted).Faint(true)
+	lineStyle := rowStyle.Foreground(p.foreground)
+	borderStyle := rowStyle.Foreground(p.muted).Faint(true)
 	spec := uiEditableInputRenderSpec{Prefix: "› ", Text: dialog.branchTarget.Value(), CursorIndex: dialog.branchTarget.Position(), RenderCursor: dialog.focus == uiWorktreeCreateFieldBranchTarget}
 	lines := []string{labelStyle.Render(padANSIRight("Branch or ref", width))}
 	lines = append(lines, badgeStyle.Render(padANSIRight(truncateQueuedMessageLine(badgeText, width), width)))
@@ -1299,23 +1299,23 @@ func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label
 	if focused {
 		rowStyle = rowStyle.Background(p.modeBg)
 	}
-	labelStyle := rowStyle.Copy().Foreground(p.primary).Bold(true)
+	labelStyle := rowStyle.Foreground(p.primary).Bold(true)
 	if !focused {
-		labelStyle = rowStyle.Copy().Foreground(p.foreground)
+		labelStyle = rowStyle.Foreground(p.foreground)
 	}
 	if !enabled {
-		labelStyle = rowStyle.Copy().Foreground(p.muted).Faint(true)
+		labelStyle = rowStyle.Foreground(p.muted).Faint(true)
 	}
-	lineStyle := rowStyle.Copy().Foreground(p.foreground)
-	borderStyle := rowStyle.Copy().Foreground(p.muted).Faint(true)
+	lineStyle := rowStyle.Foreground(p.foreground)
+	borderStyle := rowStyle.Foreground(p.muted).Faint(true)
 	if !enabled {
-		lineStyle = rowStyle.Copy().Foreground(p.muted).Faint(true)
+		lineStyle = rowStyle.Foreground(p.muted).Faint(true)
 	}
 	spec := uiEditableInputRenderSpec{Prefix: "› ", Text: value, CursorIndex: cursor, RenderCursor: focused && enabled}
 	contentWidth := max(1, width)
 	lines := []string{labelStyle.Render(padANSIRight(truncateQueuedMessageLine(label, contentWidth), contentWidth))}
 	if strings.TrimSpace(helper) != "" {
-		helperStyle := rowStyle.Copy().Foreground(p.muted).Faint(true)
+		helperStyle := rowStyle.Foreground(p.muted).Faint(true)
 		lines = append(lines, helperStyle.Render(padANSIRight(truncateQueuedMessageLine(helper, contentWidth), contentWidth)))
 	}
 	lines = append(lines, renderFramedEditableInputLines(contentWidth, 1, spec, lineStyle, borderStyle)...)
@@ -1432,8 +1432,8 @@ func renderWorktreeCreateActionGroup(width int, theme string, dialog uiWorktreeC
 	if focused {
 		rowStyle = rowStyle.Background(p.modeBg)
 	}
-	selectedStyle := rowStyle.Copy().Foreground(p.primary).Bold(true)
-	defaultStyle := rowStyle.Copy().Foreground(p.muted).Faint(true)
+	selectedStyle := rowStyle.Foreground(p.primary).Bold(true)
+	defaultStyle := rowStyle.Foreground(p.muted).Faint(true)
 	return []string{renderUIChoiceGroupLineStyled(width, uiChoiceGroupKindButton, []uiChoiceOption{{Label: "Create"}, {Label: "Cancel"}}, int(dialog.action), selectedStyle, defaultStyle)}
 }
 

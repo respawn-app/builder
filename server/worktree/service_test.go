@@ -620,6 +620,99 @@ func TestDeleteWorktreeRebindsCurrentSessionToMainBeforeRemoval(t *testing.T) {
 	}
 }
 
+func TestBeginMutationSerializesMutationsByWorkspace(t *testing.T) {
+	env := newServiceTestEnv(t)
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+
+	firstRelease, _, err := env.service.beginMutation(env.ctx, env.session.Meta().SessionID, env.leaseID)
+	if err != nil {
+		t.Fatalf("beginMutation first: %v", err)
+	}
+	firstReleased := false
+	t.Cleanup(func() {
+		if !firstReleased {
+			firstRelease.Release()
+		}
+	})
+
+	type mutationResult struct {
+		release primaryrun.Lease
+		err     error
+	}
+	resultCh := make(chan mutationResult, 1)
+	go func() {
+		release, _, err := env.service.beginMutation(env.ctx, otherSession.Meta().SessionID, "lease-2")
+		resultCh <- mutationResult{release: release, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		if result.release != nil {
+			result.release.Release()
+		}
+		t.Fatalf("expected second mutation to wait for workspace lock, got err=%v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	firstRelease.Release()
+	firstReleased = true
+	var result mutationResult
+	select {
+	case result = <-resultCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for second mutation")
+	}
+	if result.err != nil {
+		t.Fatalf("beginMutation second: %v", result.err)
+	}
+	if result.release == nil {
+		t.Fatal("expected second mutation lease")
+	}
+	result.release.Release()
+}
+
+func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/missing-runtime-error")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, env.session.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID active session: %v", err)
+	}
+	record, err := env.store.GetWorktreeRecordByID(env.ctx, created.WorktreeID)
+	if err != nil {
+		t.Fatalf("GetWorktreeRecordByID: %v", err)
+	}
+	env.runtime.rebindErrRoot = env.workspaceRoot
+	env.runtime.rebindErr = errors.New("runtime rebind failed")
+	env.runtime.activeSessions = map[string]bool{env.session.Meta().SessionID: true}
+	env.runtime.rebindCalls = nil
+	env.runtime.reminderCalls = nil
+
+	err = env.service.retargetSessionsFromMissingWorktree(env.ctx, env.binding.WorkspaceID, env.workspaceRoot, record)
+	if err == nil || !strings.Contains(err.Error(), "runtime rebind failed") {
+		t.Fatalf("retargetSessionsFromMissingWorktree error = %v, want runtime rebind failed", err)
+	}
+	for _, sessionID := range []string{env.session.Meta().SessionID, otherSession.Meta().SessionID} {
+		target, resolveErr := env.store.ResolveSessionExecutionTarget(env.ctx, sessionID)
+		if resolveErr != nil {
+			t.Fatalf("ResolveSessionExecutionTarget %s: %v", sessionID, resolveErr)
+		}
+		if target.WorktreeID != "" || target.EffectiveWorkdir != env.workspaceRoot {
+			t.Fatalf("expected session %s retargeted to main workspace, got %+v", sessionID, target)
+		}
+	}
+	if len(env.runtime.rebindCalls) != 1 {
+		t.Fatalf("expected one active runtime rebind attempt, got %+v", env.runtime.rebindCalls)
+	}
+	if len(env.runtime.reminderCalls) != 2 {
+		t.Fatalf("expected reminder for both sessions, got %+v", env.runtime.reminderCalls)
+	}
+}
+
 func newServiceTestEnv(t *testing.T) *serviceTestEnv {
 	t.Helper()
 	ctx := context.Background()
@@ -759,7 +852,8 @@ func waitForSetupPayload(t *testing.T, path string) setupScriptPayload {
 		}
 		var payload setupScriptPayload
 		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("json.Unmarshal payload: %v", err)
+			time.Sleep(20 * time.Millisecond)
+			continue
 		}
 		return payload
 	}

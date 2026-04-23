@@ -19,7 +19,7 @@ Builder manages git worktrees for the current session. Creating or switching a w
 
 If `target` is omitted, Builder opens delete confirmation for the current worktree. The main workspace worktree cannot be deleted.
 
-`Delete + Branch` is available when the worktree has a branch name. Builder can preselect it for Builder-managed worktrees it created from a new branch.
+`Delete + Branch` is available when the worktree has a branch name. Builder preselects this option for Builder-managed worktrees it created from a new branch.
 
 Deletion is blocked when another session targets that worktree or when background processes are running inside it.
 

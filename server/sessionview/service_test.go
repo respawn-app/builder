@@ -310,6 +310,38 @@ func TestServiceGetSessionTranscriptPageUsesConfiguredCacheWarningModeForDormant
 	}
 }
 
+func TestServiceWithCacheWarningModeInvalidatesDormantCache(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "cache_warning", cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix}); err != nil {
+		t.Fatalf("append cache warning: %v", err)
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
+
+	first, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Window: clientui.TranscriptWindowOngoingTail})
+	if err != nil {
+		t.Fatalf("get dormant transcript page default: %v", err)
+	}
+	if got := first.Transcript.Entries[0].Visibility; got != clientui.EntryVisibilityDetailOnly {
+		t.Fatalf("default cache warning visibility = %q, want %q", got, clientui.EntryVisibilityDetailOnly)
+	}
+
+	secondSvc := svc.WithCacheWarningMode(config.CacheWarningModeVerbose)
+	if secondSvc != svc {
+		t.Fatal("expected WithCacheWarningMode to mutate service in place")
+	}
+	second, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Window: clientui.TranscriptWindowOngoingTail})
+	if err != nil {
+		t.Fatalf("get dormant transcript page verbose: %v", err)
+	}
+	if got := second.Transcript.Entries[0].Visibility; got != clientui.EntryVisibilityAll {
+		t.Fatalf("verbose cache warning visibility = %q, want %q", got, clientui.EntryVisibilityAll)
+	}
+}
+
 func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

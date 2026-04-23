@@ -184,6 +184,46 @@ func TestLocalToolRegistryBindingRebindUpdatesExecCommandRoot(t *testing.T) {
 	}
 }
 
+func TestNewLocalToolRegistryBindingRejectsEmptyWorkspaceRoot(t *testing.T) {
+	_, _, _, err := NewLocalToolRegistryBinding(
+		"   ",
+		"",
+		[]toolspec.ID{toolspec.ToolExecCommand},
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+		nil,
+	)
+	if err == nil || err.Error() != "workspace root is required" {
+		t.Fatalf("new local tool registry binding error = %v, want workspace root is required", err)
+	}
+}
+
+func TestLocalToolRegistryBindingRebindRejectsEmptyWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	binding, _, _, err := NewLocalToolRegistryBinding(
+		root,
+		"",
+		[]toolspec.ID{toolspec.ToolExecCommand},
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new local tool registry binding: %v", err)
+	}
+	if err := binding.Rebind("   "); err == nil || err.Error() != "workspace root is required" {
+		t.Fatalf("rebind error = %v, want workspace root is required", err)
+	}
+}
+
 func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T) {
 	root := t.TempDir()
 	storeA, err := session.Create(root, "ws-a", root)
