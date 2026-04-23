@@ -169,7 +169,7 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
 		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
 	}
-	if !strings.Contains(string(settingsBytes), "# model = \"gpt-5.5\" # inherited from main model unless overridden") {
+	if !strings.Contains(string(settingsBytes), "# model = \""+defaultModel+"\" # inherited from main model unless overridden") {
 		t.Fatalf("expected default config to show inherited reviewer model line, got %q", string(settingsBytes))
 	}
 	if !strings.Contains(string(settingsBytes), "[tools]") {
@@ -699,7 +699,7 @@ func TestWriteSettingsFileForOnboardingPreservesModelWhenProviderOverrideIsSet(t
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
 	}
-	if !strings.Contains(string(contents), "model = \"gpt-5.5\"") {
+	if !strings.Contains(string(contents), "model = \""+settings.Model+"\"") {
 		t.Fatalf("expected onboarding settings to preserve explicit model with provider_override, got %q", string(contents))
 	}
 	if !strings.Contains(string(contents), "provider_override = \"openai\"") {
