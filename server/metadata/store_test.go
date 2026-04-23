@@ -1045,6 +1045,48 @@ func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T
 	}
 }
 
+func TestUpdateSessionExecutionTargetByIDRejectsCrossWorkspaceWorktree(t *testing.T) {
+	ctx := context.Background()
+	store, cfgA, bindingA := newMetadataTestStore(t)
+	workspaceB := t.TempDir()
+	cfgB, err := config.Load(workspaceB, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspaceB: %v", err)
+	}
+	bindingB, err := store.RegisterWorkspaceBinding(ctx, cfgB.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding workspaceB: %v", err)
+	}
+	projectSessionsDir := config.ProjectSessionsRoot(cfgA, bindingA.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfgA.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfgB.WorkspaceRoot, "wt-b")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeRoot: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-b",
+		WorkspaceID:     bindingB.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+
+	err = store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, bindingA.WorkspaceID, "worktree-b", ".")
+	if err == nil || err.Error() != "worktree \"worktree-b\" does not belong to workspace \""+bindingA.WorkspaceID+"\"" {
+		t.Fatalf("UpdateSessionExecutionTargetByID error = %v", err)
+	}
+}
+
 func TestUpsertWorktreeRecordRejectsMissingRequiredFields(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)

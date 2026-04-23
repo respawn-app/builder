@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+type canceledGitCommandRunner struct{}
+
+func (canceledGitCommandRunner) Output(context.Context, string, ...string) ([]byte, error) {
+	return nil, context.Canceled
+}
+
+func (canceledGitCommandRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, int, error) {
+	return nil, -1, ctx.Err()
+}
+
 type stubGitCommandRunner struct {
 	output    []byte
 	err       error
@@ -219,6 +229,38 @@ func TestGitInspectorResolveCreateTargetClassifiesNewBranch(t *testing.T) {
 	}
 	if resolution.Kind != CreateTargetResolutionKindNewBranch {
 		t.Fatalf("unexpected resolution: %+v", resolution)
+	}
+}
+
+func TestGitInspectorResolveCreateTargetRejectsInvalidBranchName(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{
+		errors: map[string]error{
+			strings.Join([]string{"check-ref-format", "--branch", "feature..bad"}, "\x00"):              errors.New("exit status 128"),
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature..bad^{object}"}, "\x00"): errors.New("exit status 1"),
+		},
+		exitCodes: map[string]int{
+			strings.Join([]string{"check-ref-format", "--branch", "feature..bad"}, "\x00"):              128,
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature..bad^{object}"}, "\x00"): 1,
+		},
+	}
+	inspector := NewGitInspector(runner)
+	_, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "feature..bad")
+	if err == nil || err.Error() != "target \"feature..bad\" is not a valid branch name or resolvable ref" {
+		t.Fatalf("ResolveCreateTarget error = %v", err)
+	}
+}
+
+func TestGitInspectorIsValidBranchNamePropagatesContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	inspector := NewGitInspector(canceledGitCommandRunner{})
+	valid, err := inspector.isValidBranchName(ctx, t.TempDir(), "feature/canceled")
+	if valid {
+		t.Fatal("expected invalid branch result on cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("isValidBranchName error = %v, want context canceled", err)
 	}
 }
 

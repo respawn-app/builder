@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"builder/server/runtime"
 	"builder/server/runtimeview"
@@ -31,6 +32,7 @@ type Service struct {
 	runtimes         RuntimeResolver
 	targets          ExecutionTargetResolver
 	dormant          *dormantTranscriptCache
+	cacheWarningMu   sync.RWMutex
 	cacheWarningMode config.CacheWarningMode
 }
 
@@ -52,11 +54,29 @@ func (s *Service) WithCacheWarningMode(mode config.CacheWarningMode) *Service {
 		return nil
 	}
 	normalized := normalizeServiceCacheWarningMode(mode)
-	if s.cacheWarningMode != normalized && s.dormant != nil {
+	if s.cacheWarningModeValue() != normalized && s.dormant != nil {
 		s.dormant.clear()
 	}
-	s.cacheWarningMode = normalized
+	s.setCacheWarningMode(normalized)
 	return s
+}
+
+func (s *Service) cacheWarningModeValue() config.CacheWarningMode {
+	if s == nil {
+		return config.CacheWarningModeDefault
+	}
+	s.cacheWarningMu.RLock()
+	defer s.cacheWarningMu.RUnlock()
+	return s.cacheWarningMode
+}
+
+func (s *Service) setCacheWarningMode(mode config.CacheWarningMode) {
+	if s == nil {
+		return
+	}
+	s.cacheWarningMu.Lock()
+	defer s.cacheWarningMu.Unlock()
+	s.cacheWarningMode = mode
 }
 
 func normalizeServiceCacheWarningMode(mode config.CacheWarningMode) config.CacheWarningMode {
@@ -263,7 +283,7 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 	if page, ok := entry.transcriptPageCoveredByTail(meta, freshness, clientui.TranscriptPageRequest{Offset: offset, Limit: limit}); ok {
 		return page, nil
 	}
-	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: s.cacheWarningMode})
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: s.cacheWarningModeValue()})
 	if err != nil {
 		return clientui.TranscriptPage{}, err
 	}
@@ -302,7 +322,7 @@ func (s *Service) buildDormantTranscriptCacheEntry(ctx context.Context, store *s
 	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{
 		TrackOngoingTail: true,
 		TailLimit:        runtimeview.OngoingTailEntryLimit,
-		CacheWarningMode: s.cacheWarningMode,
+		CacheWarningMode: s.cacheWarningModeValue(),
 	})
 	if err != nil {
 		return dormantTranscriptCacheEntry{}, err

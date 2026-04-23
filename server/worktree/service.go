@@ -38,6 +38,7 @@ type processSource interface {
 
 type localEntryAppender interface {
 	AppendLocalEntry(ctx context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error
+	AppendSessionEntry(ctx context.Context, sessionID string, role string, text string) error
 }
 
 type ServiceOptions struct {
@@ -718,7 +719,8 @@ func nextAvailableWorktreeRoot(baseRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for idx := 0; ; idx++ {
+	const maxCollisionSuffixAttempts = 1024
+	for idx := 0; idx < maxCollisionSuffixAttempts; idx++ {
 		candidate := canonicalBase
 		if idx > 0 {
 			candidate = fmt.Sprintf("%s-%d", canonicalBase, idx+1)
@@ -729,6 +731,7 @@ func nextAvailableWorktreeRoot(baseRoot string) (string, error) {
 			return "", err
 		}
 	}
+	return "", fmt.Errorf("no available worktree root under %q after %d attempts", canonicalBase, maxCollisionSuffixAttempts)
 }
 
 func (s *Service) scheduleSetupScript(workspaceCtx sessionWorkspaceContext, leaseID string, created syncedWorktree, branchName string, createdBranch bool) bool {
@@ -751,16 +754,16 @@ func (s *Service) scheduleSetupScript(workspaceCtx sessionWorkspaceContext, leas
 		WorktreeID:          created.record.ID,
 		CreatedBranch:       createdBranch,
 	}
-	go s.runSetupScript(scriptPath, workspaceCtx.sessionID, leaseID, payload)
+	go s.runSetupScript(scriptPath, workspaceCtx.sessionID, payload)
 	return true
 }
 
-func (s *Service) runSetupScript(scriptPath string, sessionID string, leaseID string, payload setupScriptPayload) {
+func (s *Service) runSetupScript(scriptPath string, sessionID string, payload setupScriptPayload) {
 	ctx, cancel := context.WithTimeout(context.Background(), setupScriptTimeout)
 	defer cancel()
 	body, err := json.Marshal(payload)
 	if err != nil {
-		s.appendLocalNote(context.Background(), sessionID, leaseID, fmt.Sprintf("Worktree setup script failed before start: %v", err))
+		s.appendSessionNote(context.Background(), sessionID, fmt.Sprintf("Worktree setup script failed before start: %v", err))
 		return
 	}
 	cmd := exec.CommandContext(ctx, scriptPath, payload.SourceWorkspaceRoot, payload.BranchName, payload.WorktreeRoot)
@@ -779,18 +782,18 @@ func (s *Service) runSetupScript(scriptPath string, sessionID string, leaseID st
 	)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
-		s.appendLocalNote(context.Background(), sessionID, leaseID, fmt.Sprintf("Worktree setup complete for %s", payload.WorktreeRoot))
+		s.appendSessionNote(context.Background(), sessionID, fmt.Sprintf("Worktree setup complete for %s", payload.WorktreeRoot))
 		return
 	}
 	detail := strings.TrimSpace(string(output))
 	if ctx.Err() != nil {
-		s.appendLocalNote(context.Background(), sessionID, leaseID, fmt.Sprintf("Worktree setup timed out for %s", payload.WorktreeRoot))
+		s.appendSessionNote(context.Background(), sessionID, fmt.Sprintf("Worktree setup timed out for %s", payload.WorktreeRoot))
 		return
 	}
 	if detail == "" {
 		detail = err.Error()
 	}
-	s.appendLocalNote(context.Background(), sessionID, leaseID, fmt.Sprintf("Worktree setup failed for %s: %s", payload.WorktreeRoot, detail))
+	s.appendSessionNote(context.Background(), sessionID, fmt.Sprintf("Worktree setup failed for %s: %s", payload.WorktreeRoot, detail))
 }
 
 func (s *Service) appendLocalNote(ctx context.Context, sessionID string, leaseID string, text string) {
@@ -805,6 +808,14 @@ func (s *Service) appendLocalNote(ctx context.Context, sessionID string, leaseID
 		Role:              "system",
 		Text:              trimmedText,
 	})
+}
+
+func (s *Service) appendSessionNote(ctx context.Context, sessionID string, text string) {
+	trimmedText := strings.TrimSpace(text)
+	if s == nil || s.localNotes == nil || trimmedText == "" {
+		return
+	}
+	_ = s.localNotes.AppendSessionEntry(ctx, strings.TrimSpace(sessionID), "system", trimmedText)
 }
 
 func mapSyncedWorktrees(items []syncedWorktree, target clientui.SessionExecutionTarget) []serverapi.WorktreeView {

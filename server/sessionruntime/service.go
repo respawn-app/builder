@@ -470,8 +470,11 @@ func (s *Service) activeRuntimeHandle(ctx context.Context, sessionID string) (*r
 	s.mu.Lock()
 	current := s.handles[trimmedSessionID]
 	s.mu.Unlock()
-	if current == nil || current != handle || current.activationErr != nil {
+	if current == nil || current != handle {
 		return nil, nil
+	}
+	if current.activationErr != nil {
+		return nil, current.activationErr
 	}
 	return current, nil
 }

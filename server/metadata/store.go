@@ -340,9 +340,20 @@ func (s *Store) UpdateSessionExecutionTargetByID(ctx context.Context, sessionID 
 	if s == nil || s.queries == nil {
 		return errors.New("metadata store is required")
 	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	trimmedWorktreeID := strings.TrimSpace(worktreeID)
+	if trimmedWorktreeID != "" {
+		record, err := s.GetWorktreeRecordByID(ctx, trimmedWorktreeID)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(record.WorkspaceID) != trimmedWorkspaceID {
+			return fmt.Errorf("worktree %q does not belong to workspace %q", trimmedWorktreeID, trimmedWorkspaceID)
+		}
+	}
 	params := sqlitegen.UpdateSessionExecutionTargetByIDParams{
-		WorkspaceID:     strings.TrimSpace(workspaceID),
-		WorktreeID:      sql.NullString{String: strings.TrimSpace(worktreeID), Valid: strings.TrimSpace(worktreeID) != ""},
+		WorkspaceID:     trimmedWorkspaceID,
+		WorktreeID:      sql.NullString{String: trimmedWorktreeID, Valid: trimmedWorktreeID != ""},
 		CwdRelpath:      normalizeSessionCwdRelpath(cwdRelpath),
 		UpdatedAtUnixMs: time.Now().UTC().UnixMilli(),
 		SessionID:       strings.TrimSpace(sessionID),
