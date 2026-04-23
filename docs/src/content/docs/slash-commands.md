@@ -29,6 +29,8 @@ description: Available slash commands, how their input is parsed, and how file-b
 | `/init <instructions>` | optional free-form text | Use the built-in workspace creation prompt. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
 
+Canonical forms only. Some commands also accept aliases.
+
 ## Input Behavior
 
 - `Enter` runs the selected command immediately, even when the name is only partially typed.
@@ -49,7 +51,5 @@ To add a custom prompt, create a Markdown file in one of these directories:
 - `~/.builder/prompts`
 - `~/.builder/commands`
 
-The command id is derived from the filename as `prompt:<normalized_base_name>`. 
+The command id is derived from the filename as `prompt:<normalized_base_name>`.
 Duplicate command ids are deduplicated by first match, so repo-scoped commands override global command.
-
-For the worktree UI and workflow guide, see [Worktrees](../worktrees/).

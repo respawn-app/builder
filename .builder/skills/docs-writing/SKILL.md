@@ -41,6 +41,15 @@ Bad: "builder creates a database table to track worktrees"; "builder sesolves lo
 - Do not document guesses, opinions, or future-facing caveats such as `will be supported`, `likely never`.
 - Public docs should describe shipped behavior and stable constraints.
 
+### 8. Assume an expert reader
+- Do not explain generic UI conventions, obvious command shapes, or labels the user can already see.
+- Avoid describing page layout, button placement, row contents, badges, or standard keys like `Enter`, arrows, `Esc`, `q`, `PgUp`, `PgDn` unless Builder behaves unexpectedly.
+- Do not add action columns or prose for self-explanatory commands.
+- Document only non-obvious semantics: matching rules, side effects, defaults, blockers, failure behavior, and configuration.
+- Owner pages must not have page-tour, layout, or keybinding sections unless the UI itself is unusual enough that the interaction is not discoverable.
+- Do not document autofill logic, suggestion logic, field enable/disable rules, or defaulting algorithms unless they create a non-obvious operator-visible constraint.
+- Do not document visible defaults, autofill, or prefilled values unless the user must know them to operate safely or avoid destructive behavior.
+
 ## Bad vs good
 
 ### Temporal wording
@@ -61,11 +70,17 @@ Bad: "builder creates a database table to track worktrees"; "builder sesolves lo
 - Bad: repeating `--fast` semantics in quickstart, config, and headless with the same full paragraph.
 - Good: let `headless.md` own run-mode semantics; other pages mention only that `--fast` selects the built-in fast subagent role.
 
+### Obvious UI
+- Bad: a table row `| /wt | Open the Worktrees page |`.
+- Good: list only the command forms when the syntax already explains the action.
+- Bad: explaining that `Enter` confirms or that a page shows badges already visible on screen.
+- Good: explain how worktree target matching works, what delete blocks on, and where managed worktrees are created.
+
 ## Page patterns
 
 ### Behavior page
 - Short overview.
-- How to invoke or use it.
+- How to invoke or use it, but only when syntax alone is insufficient.
 - Key semantics and defaults.
 - Failure behavior only if operator-relevant.
 - One minimal example.
