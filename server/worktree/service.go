@@ -25,6 +25,8 @@ import (
 
 const setupScriptTimeout = 20 * time.Second
 
+const rollbackSessionTargetTimeout = 5 * time.Second
+
 type runtimeController interface {
 	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
 	RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error
@@ -545,10 +547,19 @@ func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionW
 }
 
 func (s *Service) rollbackSessionTarget(ctx context.Context, workspaceCtx sessionWorkspaceContext, leaseID string, previousTarget clientui.SessionExecutionTarget) {
-	_ = s.metadata.UpdateSessionExecutionTargetByID(ctx, workspaceCtx.sessionID, workspaceCtx.workspaceID, previousTarget.WorktreeID, previousTarget.CwdRelpath)
+	rollbackCtx, cancel := liveRollbackContext(ctx)
+	defer cancel()
+	_ = s.metadata.UpdateSessionExecutionTargetByID(rollbackCtx, workspaceCtx.sessionID, workspaceCtx.workspaceID, previousTarget.WorktreeID, previousTarget.CwdRelpath)
 	if strings.TrimSpace(previousTarget.EffectiveWorkdir) != "" {
-		_ = s.runtime.RebindLocalTools(context.Background(), workspaceCtx.sessionID, leaseID, previousTarget.EffectiveWorkdir)
+		_ = s.runtime.RebindLocalTools(rollbackCtx, workspaceCtx.sessionID, leaseID, previousTarget.EffectiveWorkdir)
 	}
+}
+
+func liveRollbackContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		return context.WithTimeout(context.Background(), rollbackSessionTargetTimeout)
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), rollbackSessionTargetTimeout)
 }
 
 func worktreeReminderStateForTransition(previous *syncedWorktree, previousTarget clientui.SessionExecutionTarget, next syncedWorktree, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, bool) {

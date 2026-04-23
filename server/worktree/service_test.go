@@ -31,6 +31,7 @@ type serviceTestRuntime struct {
 	activeSessions map[string]bool
 	rebindErr      error
 	rebindErrRoot  string
+	rebindHook     func(context.Context, string, string, string)
 	requireErr     error
 	controllerSeen bool
 }
@@ -49,7 +50,10 @@ func (r *serviceTestRuntime) RequireControllerLease(_ context.Context, sessionID
 	return r.requireErr
 }
 
-func (r *serviceTestRuntime) RebindLocalTools(_ context.Context, sessionID string, leaseID string, workspaceRoot string) error {
+func (r *serviceTestRuntime) RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error {
+	if r.rebindHook != nil {
+		r.rebindHook(ctx, sessionID, leaseID, workspaceRoot)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rebindCalls = append(r.rebindCalls, serviceRuntimeCall{sessionID: sessionID, leaseID: leaseID, root: workspaceRoot})
@@ -560,6 +564,60 @@ func TestSwitchWorktreeRollsBackExecutionTargetWhenRebindFails(t *testing.T) {
 	}
 	if finalTarget.WorktreeID != "" || finalTarget.EffectiveWorkdir != env.workspaceRoot {
 		t.Fatalf("expected execution target rollback to main workspace, got %+v", finalTarget)
+	}
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no local notes on failed switch, got %+v", notes)
+	}
+}
+
+func TestSwitchWorktreeRollsBackExecutionTargetWhenRequestContextCancelsDuringRebindFailure(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/rebind-canceled")
+	main := findMainWorktreeView(t, mustListWorktrees(t, env).Worktrees)
+	if _, err := env.service.SwitchWorktree(env.ctx, serverapi.WorktreeSwitchRequest{
+		ClientRequestID:   "req-switch-reset-main-canceled",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        main.WorktreeID,
+	}); err != nil {
+		t.Fatalf("SwitchWorktree main reset: %v", err)
+	}
+	env.localNotes = &serviceTestLocalNotes{}
+	env.service.localNotes = env.localNotes
+
+	ctx, cancel := context.WithCancel(env.ctx)
+	env.runtime.rebindErrRoot = created.CanonicalRoot
+	env.runtime.rebindHook = func(rebindCtx context.Context, _ string, _ string, workspaceRoot string) {
+		if err := rebindCtx.Err(); err != nil {
+			t.Fatalf("unexpected rebind context canceled before rollback trigger: %v", err)
+		}
+		if strings.TrimSpace(workspaceRoot) == strings.TrimSpace(created.CanonicalRoot) {
+			cancel()
+		}
+	}
+	env.runtime.rebindErr = errors.New("boom")
+
+	_, err := env.service.SwitchWorktree(ctx, serverapi.WorktreeSwitchRequest{
+		ClientRequestID:   "req-switch-fail-canceled",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("SwitchWorktree error = %v, want rebind failure", err)
+	}
+	finalTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, env.session.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if finalTarget.WorktreeID != "" || finalTarget.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected execution target rollback to main workspace, got %+v", finalTarget)
+	}
+	if got := env.runtime.rebindCalls[len(env.runtime.rebindCalls)-1].root; got != env.workspaceRoot {
+		t.Fatalf("expected final rollback rebind to main workspace, got %q calls=%+v", got, env.runtime.rebindCalls)
+	}
+	if err := ctx.Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected request context canceled, got %v", err)
 	}
 	if notes := env.localNotes.snapshot(); len(notes) != 0 {
 		t.Fatalf("expected no local notes on failed switch, got %+v", notes)
