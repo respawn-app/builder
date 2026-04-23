@@ -90,7 +90,7 @@ func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListRespon
 	}
 	ctx, cancel := client.controlContext()
 	defer cancel()
-	return m.worktreeClient.ListWorktrees(ctx, serverapi.WorktreeListRequest{SessionID: m.sessionID})
+	return m.worktreeClient.ListWorktrees(ctx, serverapi.WorktreeListRequest{SessionID: m.sessionID, ControllerLeaseID: client.controllerLeaseIDValue()})
 }
 
 func (m *uiModel) resolveWorktreeToken(token string) (serverapi.WorktreeView, error) {

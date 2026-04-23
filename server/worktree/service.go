@@ -112,12 +112,11 @@ func (s *Service) ListWorktrees(ctx context.Context, req serverapi.WorktreeListR
 	if err := req.Validate(); err != nil {
 		return serverapi.WorktreeListResponse{}, err
 	}
-	workspaceCtx, err := s.resolveSessionWorkspaceContext(ctx, req.SessionID)
+	release, workspaceCtx, err := s.beginMutation(ctx, req.SessionID, req.ControllerLeaseID)
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
 	}
-	workspaceLease := s.acquireWorkspaceMutationLock(workspaceCtx.workspaceID)
-	defer workspaceLease.Release()
+	defer release.Release()
 	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
