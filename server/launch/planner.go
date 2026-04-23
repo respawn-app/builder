@@ -100,11 +100,13 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	var warnings []string
 	next := plan
+	shouldPersistContinuation := false
 	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentRole(trimmedRole) == "" {
 		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
 	}
 	roleName := config.NormalizeSubagentRole(overrides.AgentRole)
 	if roleName != "" {
+		shouldPersistContinuation = true
 		providerBase := cloneSettings(plan.ActiveSettings)
 		if value := strings.TrimSpace(overrides.ProviderOverride); value != "" {
 			providerBase.ProviderOverride = value
@@ -117,9 +119,6 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 			return SessionPlan{}, nil, err
 		}
 		next.ActiveSettings = resolved
-		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
-			return SessionPlan{}, nil, err
-		}
 		if !plan.ModelContractLocked {
 			next.ConfiguredModelName = resolved.Model
 		}
@@ -179,12 +178,15 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		}
 	}
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
+		shouldPersistContinuation = true
 		next.ActiveSettings.OpenAIBaseURL = loaded.Settings.OpenAIBaseURL
+	}
+	next.Source = mergedSource
+	if shouldPersistContinuation {
 		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
 			return SessionPlan{}, nil, err
 		}
 	}
-	next.Source = mergedSource
 	return next, warnings, nil
 }
 
