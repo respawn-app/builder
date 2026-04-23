@@ -31,7 +31,7 @@ func reviewerSuggestionsStructuredOutput() *llm.StructuredOutput {
 func (e *Engine) buildReviewerRequest(ctx context.Context, reviewerClient llm.Client) (llm.Request, error) {
 	reviewerCfg := e.reviewerRequestConfigSnapshot()
 	messages := llm.MessagesFromItems(sanitizeItemsForLLM(e.snapshotItems()))
-	reviewerMessages, err := buildReviewerRequestMessagesWithNow(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode, e.cfg.DisabledSkills, e.reviewerMetaTimestamp())
+	reviewerMessages, err := buildReviewerRequestMessagesWithBuilder(messages, newActiveMetaContextBuilder(e.store.Meta(), e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, e.reviewerMetaTimestamp()), e.cfg.HeadlessMode)
 	if err != nil {
 		return llm.Request{}, err
 	}

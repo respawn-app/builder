@@ -230,6 +230,19 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	}
 }
 
+func TestRunSetupScriptDoesNotAppendSuccessNote(t *testing.T) {
+	notes := &serviceTestLocalNotes{}
+	service := &Service{localNotes: notes}
+	scriptPath := filepath.Join(t.TempDir(), "setup.sh")
+	writeExecutableFile(t, scriptPath, "#!/bin/sh\nexit 0\n")
+
+	service.runSetupScript(scriptPath, "session-1", setupScriptPayload{WorktreeRoot: t.TempDir()})
+
+	if got := notes.snapshot(); len(got) != 0 {
+		t.Fatalf("expected no setup success note, got %+v", got)
+	}
+}
+
 func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	env := newServiceTestEnv(t)
 	runGit(t, env.workspaceRoot, "branch", "feature/existing-ref")
@@ -742,22 +755,6 @@ func TestNextAvailableWorktreeRootFailsAfterCollisionCap(t *testing.T) {
 	_, err := nextAvailableWorktreeRoot(baseRoot)
 	if err == nil || !strings.Contains(err.Error(), "after 1024 attempts") {
 		t.Fatalf("nextAvailableWorktreeRoot error = %v, want capped collision error", err)
-	}
-}
-
-func TestRunSetupScriptAppendsLeaseAgnosticCompletionNote(t *testing.T) {
-	notes := &serviceTestLocalNotes{appendLocalErr: serverapi.ErrInvalidControllerLease}
-	service := &Service{localNotes: notes}
-	worktreeRoot := filepath.Join(t.TempDir(), "wt")
-	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
-		t.Fatalf("MkdirAll worktree root: %v", err)
-	}
-	scriptPath := filepath.Join(t.TempDir(), "setup.sh")
-	writeExecutableFile(t, scriptPath, "#!/bin/sh\nexit 0\n")
-
-	service.runSetupScript(scriptPath, "session-1", setupScriptPayload{WorktreeRoot: worktreeRoot})
-	if got := notes.snapshot(); len(got) != 1 || !strings.Contains(got[0], "Worktree setup complete for "+worktreeRoot) {
-		t.Fatalf("expected lease-agnostic setup completion note, got %+v", got)
 	}
 }
 

@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +14,77 @@ import (
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
+
+func TestFirstMetaInjectionUsesPendingWorktreeCWD(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}} {{cwd}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	worktree := t.TempDir()
+	worktreeSubdir := filepath.Join(worktree, "pkg")
+	if err := os.MkdirAll(worktreeSubdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktree subdir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(workspace, agentsFileName), "stale workspace instruction")
+	writeTestFile(t, filepath.Join(worktree, agentsFileName), "active worktree instruction")
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/new",
+		WorktreePath:  worktree,
+		WorkspaceRoot: workspace,
+		EffectiveCwd:  worktreeSubdir,
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "start in the new worktree"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	messages := requestMessages(client.calls[0])
+	if len(messages) < 3 {
+		t.Fatalf("expected environment, agents, and user messages, got %+v", messages)
+	}
+	envMsg := messages[0]
+	if envMsg.Role != llm.RoleDeveloper || envMsg.MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment context first, got %+v", envMsg)
+	}
+	if !strings.Contains(envMsg.Content, "\nCWD: "+worktreeSubdir+"\n") {
+		t.Fatalf("expected environment cwd to use pending worktree subdir %q, got %q", worktreeSubdir, envMsg.Content)
+	}
+	if strings.Contains(envMsg.Content, "\nCWD: "+workspace+"\n") {
+		t.Fatalf("expected environment cwd not to use stale workspace %q, got %q", workspace, envMsg.Content)
+	}
+	agentsMsg := messages[1]
+	if agentsMsg.Role != llm.RoleDeveloper || agentsMsg.MessageType != llm.MessageTypeAgentsMD || !strings.Contains(agentsMsg.Content, "source: "+filepath.Join(worktree, agentsFileName)) {
+		t.Fatalf("expected active worktree AGENTS context second, got %+v", agentsMsg)
+	}
+	if strings.Contains(agentsMsg.Content, "stale workspace instruction") {
+		t.Fatalf("expected stale workspace AGENTS context to be excluded, got %q", agentsMsg.Content)
+	}
+}
 
 func TestSubmitUserMessageInjectsPendingWorktreeEnterReminder(t *testing.T) {
 	prevPrompt := prompts.WorktreeModePrompt

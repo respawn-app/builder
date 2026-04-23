@@ -264,7 +264,7 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	if meta.AgentsInjected {
 		return nil
 	}
-	builder := newMetaContextBuilder(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	builder := newActiveMetaContextBuilder(meta, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		IncludeAgents:        true,
 		IncludeSkills:        true,
@@ -290,4 +290,40 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	}
 
 	return e.store.MarkAgentsInjected()
+}
+
+func newActiveMetaContextBuilder(meta session.Meta, model, thinkingLevel string, disabledSkills map[string]bool, now time.Time) metaContextBuilder {
+	roots := activeMetaContextRootsForMeta(meta)
+	return newMetaContextBuilder(roots.discoveryRoot, model, thinkingLevel, disabledSkills, now).withEnvironmentCWD(roots.environmentCWD)
+}
+
+type activeMetaContextRoots struct {
+	discoveryRoot  string
+	environmentCWD string
+}
+
+func activeMetaContextRootsForMeta(meta session.Meta) activeMetaContextRoots {
+	workspaceRoot := strings.TrimSpace(meta.WorkspaceRoot)
+	roots := activeMetaContextRoots{discoveryRoot: workspaceRoot, environmentCWD: workspaceRoot}
+	state := cloneRuntimeWorktreeReminderState(meta.WorktreeReminder)
+	if state == nil {
+		return roots
+	}
+
+	switch state.Mode {
+	case session.WorktreeReminderModeEnter:
+		if state.WorktreePath != "" {
+			roots.discoveryRoot = state.WorktreePath
+		}
+	case session.WorktreeReminderModeExit:
+		if state.WorkspaceRoot != "" {
+			roots.discoveryRoot = state.WorkspaceRoot
+		}
+	}
+	if state.EffectiveCwd != "" {
+		roots.environmentCWD = state.EffectiveCwd
+	} else {
+		roots.environmentCWD = roots.discoveryRoot
+	}
+	return roots
 }
