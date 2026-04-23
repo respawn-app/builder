@@ -11,6 +11,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/config"
 
@@ -651,6 +652,55 @@ func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
 	}
 	if client.loadRequests[0].Window != clientui.TranscriptWindowOngoingTail {
 		t.Fatalf("startup hydration window = %q, want ongoing_tail", client.loadRequests[0].Window)
+	}
+}
+
+func TestStartupHydrationKeepsDefaultCacheWarningDetailOnly(t *testing.T) {
+	warningText := cachewarn.Text(cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix})
+	client := &startupTranscriptRuntimeClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Offset:       0,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "assistant", Text: "latest answer"},
+				{Role: "cache_warning", Text: warningText, Visibility: clientui.EntryVisibilityDetailOnly},
+			},
+		},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	updated := next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected startup native history replay command")
+	}
+	seededOngoing := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if !strings.Contains(seededOngoing, "latest answer") {
+		t.Fatalf("expected assistant answer visible in ongoing startup seed, got %q", seededOngoing)
+	}
+	if strings.Contains(seededOngoing, warningText) {
+		t.Fatalf("expected default cache warning hidden in ongoing startup seed, got %q", seededOngoing)
+	}
+
+	hydrationMsg, ok := updated.startupCmds[0]().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %T", updated.startupCmds[0]())
+	}
+	hydrated := updateUIModel(t, updated, hydrationMsg)
+	hydratedOngoing := stripANSIAndTrimRight(hydrated.view.OngoingSnapshot())
+	if !strings.Contains(hydratedOngoing, "latest answer") {
+		t.Fatalf("expected assistant answer visible after hydration, got %q", hydratedOngoing)
+	}
+	if strings.Contains(hydratedOngoing, warningText) {
+		t.Fatalf("expected default cache warning hidden after hydration, got %q", hydratedOngoing)
+	}
+
+	detail := updateUIModel(t, hydrated, tea.KeyMsg{Type: tea.KeyCtrlT})
+	detailView := stripANSIAndTrimRight(detail.view.View())
+	if !containsInOrder(detailView, "latest answer", warningText) {
+		t.Fatalf("expected assistant answer plus cache warning in detail after hydration, got %q", detailView)
 	}
 }
 

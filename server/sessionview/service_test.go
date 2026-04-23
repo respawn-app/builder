@@ -15,7 +15,9 @@ import (
 	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
 )
@@ -270,6 +272,41 @@ func TestServiceGetSessionTranscriptPageUsesIncrementalOngoingTailForDormantSess
 	}
 	if got := resp.Transcript.Entries[0].Text; got != "reply-558" {
 		t.Fatalf("first entry = %q, want reply-558", got)
+	}
+}
+
+func TestServiceGetSessionTranscriptPageUsesConfiguredCacheWarningModeForDormantTail(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "cache_warning", cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix}); err != nil {
+		t.Fatalf("append cache warning: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		mode config.CacheWarningMode
+		want clientui.EntryVisibility
+	}{
+		{name: "default", mode: config.CacheWarningModeDefault, want: clientui.EntryVisibilityDetailOnly},
+		{name: "verbose", mode: config.CacheWarningModeVerbose, want: clientui.EntryVisibilityAll},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(NewStaticSessionResolver(store), nil, nil).WithCacheWarningMode(tt.mode)
+			resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Window: clientui.TranscriptWindowOngoingTail})
+			if err != nil {
+				t.Fatalf("get dormant transcript page: %v", err)
+			}
+			if len(resp.Transcript.Entries) != 1 {
+				t.Fatalf("entry count = %d, want 1", len(resp.Transcript.Entries))
+			}
+			if got := resp.Transcript.Entries[0].Visibility; got != tt.want {
+				t.Fatalf("cache warning visibility = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
