@@ -208,7 +208,7 @@ Pre-rendered styled lines must go through ANSI-aware width handling.
 ### Height strategy
 - Assume the user may only see the top section at first.
 - Put high-value sections first.
-- Make long screens scrollable.
+- Make all screens scrollable.
 - Do not assume the entire screen fits at once.
 
 ## Loading and caching

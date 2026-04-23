@@ -30,9 +30,13 @@ Supported auth options:
 
 - OpenAI/Codex subscription OAuth via the startup sign-in picker.
 - OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and builder will use it with your permission.
-- Continue without Builder auth. This is intended for custom or local OpenAI-compatible setups configured via `openai_base_url`.
 
 You can switch later with `/login`.
+
+::: note
+Anthropic or Gemini subscriptions will not be supported until that becomes legal.
+Non-openai model support for now is nominal and WIP.
+:::
 
 ## Main Workflows
 
@@ -44,7 +48,7 @@ You can switch later with `/login`.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
 - Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
-- `/name` will set your session name in the picker and terminal title.
+- `/name <new-name>` will set your session name in the picker and terminal title.
 - `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it. **Going above 100% will cost more and degrade model performance**.
 - Run `/status` to get detailed info about the session.
 
@@ -54,7 +58,7 @@ For the full command reference, see [Slash Commands](../slash-commands/).
 
 Builder reads settings from `~/.builder/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](../config/) page.
 
-## Skills And Custom Commands
+## Skills and Slash Commands
 
 On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout. Runtime discovery still reads Builder directories only.
 
@@ -70,7 +74,6 @@ You can disable individual skills for new sessions in `~/.builder/config.toml`:
 apiresult = false
 ```
 Changes will take effect when you start a new sesssion.
-
 
 Builder discovers custom slash commands from Markdown files in:
 

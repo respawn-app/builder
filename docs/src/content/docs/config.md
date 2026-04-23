@@ -44,8 +44,8 @@ model_verbosity = "medium" # or "low"
 theme = "auto" # or light / dark
 web_search = "native"
 compaction_mode = "local" # or "native" (if supported)
-cache_warning_mode = "default" # detail-only unwanted model cache invalidations; or "verbose" / "off"
-server_host = "127.0.0.1"
+cache_warning_mode = "default" # cache invalidation messages; or "verbose" / "off"
+server_host = "127.0.0.1" # builder local server config
 server_port = 53082
 
 [timeouts]
@@ -56,11 +56,11 @@ shell = true
 patch = true
 view_image = true
 web_search = true
-trigger_handoff = false
+trigger_handoff = true # proactive compaction by the model
 
 [shell]
-postprocessing_mode = "builtin"
-# postprocess_hook = "~/.builder/shell_postprocess_hook"
+postprocessing_mode = "all" # shell output token optimizations by Builder, or "all" | "none" | "user"
+# postprocess_hook = "~/.builder/shell_postprocess_hook" # custom postprocess_hook, see docs
 
 [skills]
 "skill name" = true
@@ -70,13 +70,11 @@ frequency = "edits"
 timeout_seconds = 60
 verbose_output = false # show in ongoing transcript
 
+# custom subagent roles config, fast is the default one, always provided
 [subagents.fast]
-# inherits the main config unless overridden
 # model = "gpt-5.4-mini"
 # priority_request_mode = true
 ```
-
-`server_host` and `server_port` stay the durable TCP source of truth. On Unix platforms Builder may also derive a same-machine Unix domain socket for faster local RPC, but that socket is automatic local state only: there is no extra config knob, explicit `server_host` or `server_port` overrides still dial configured TCP, LAN/remote clients still use configured TCP, and health/readiness stay on configured HTTP/TCP.
 
 ## CLI Overrides
 
@@ -92,8 +90,8 @@ These flags overlay settings at startup.
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
 
-`builder run` also accepts the headless-only selectors `--agent <role>` and `--fast`, which choose a subagent role rather than directly overriding one config key.
 
+`builder run` also accepts the headless-only selectors `--agent <role>` and `--fast`, which choose a subagent role rather than directly overriding one config key.
 
 ## Reference
 
@@ -135,7 +133,9 @@ These flags overlay settings at startup.
 | --- | --- | --- | --- | --- | --- |
 | `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `--model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
 
+
 ### Supervisor
+Configure the supervisor agent that oversees model changes.
 
 | Key | Type | Default | Env | Description |
 | --- | --- | --- | --- | --- |
@@ -192,7 +192,8 @@ Notes:
 
 ### Subagents
 
-`[subagents.<role>]` is a file-only table for named headless subagent roles.
+`[subagents.<role>]` is a file-only table for named headless subagent roles. Fast is always-present, but you can add custom agents here.
+Subagent roles inherit the main config and then override only the keys set in that role table.
 
 ```toml
 [subagents.fast]
@@ -203,14 +204,7 @@ thinking_level = "low"
 patch = false
 ```
 
-- Select a role with `builder run --agent <role> "..."`.
-- `builder run --fast "..."` is sugar for `--agent fast`.
-- Subagent roles inherit the main config and then apply only the keys set in that role table.
-- Roles may use the same setting keys as the main config, including nested sections like `[subagents.<role>.tools]`, `[subagents.<role>.timeouts]`, and `[subagents.<role>.reviewer]`.
-- Nested subagent tables are not allowed.
-- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster profile and enables `priority_request_mode`.
-- If `fast` resolves to the same settings as the main agent, Builder emits a warning so the caller can suggest config tuning later.
-- Builder may keep some legacy built-in model ids for compatibility even after they disappear from current external OpenAI/Codex catalogs. Verify availability with your actual provider before copying a model id into a subagent role.
+More info on the [Subagents page](../headless.md).
 
 ### Skills
 
