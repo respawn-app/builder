@@ -15,6 +15,12 @@ func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
 		c.restorePendingInjectedIntoInput()
+		if isInterruptedRuntimeError(err) {
+			m.activity = uiActivityInterrupted
+			m.logf("step.interrupted")
+			m.syncViewport()
+			return nil
+		}
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
 		appendCmd := m.appendOperatorErrorFeedback(detailErr)

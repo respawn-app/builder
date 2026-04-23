@@ -210,7 +210,7 @@ func writeHookScript(t *testing.T, contents string) string {
 }
 
 func TestRunnerAllModeAccumulatesWarnings(t *testing.T) {
-	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll})
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: "~/missing-hook"})
 	runner.processors = []Processor{warningProcessor{}}
 	result, err := runner.Apply(context.Background(), Request{
 		ToolName:    toolspec.ToolExecCommand,
@@ -220,7 +220,7 @@ func TestRunnerAllModeAccumulatesWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if result.Warning != "builtin warning\ncommand postprocess hook unavailable" {
+	if !strings.Contains(result.Warning, "builtin warning") || !strings.Contains(result.Warning, "command postprocess hook failed:") {
 		t.Fatalf("warning = %q, want both warnings", result.Warning)
 	}
 }

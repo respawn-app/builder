@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -143,6 +144,13 @@ func formatSubmissionError(err error) string {
 		return fmt.Sprintf("openai status %d\nresponse body:\n%s", statusErr.StatusCode, body)
 	}
 	return err.Error()
+}
+
+func isInterruptedRuntimeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, errSubmissionInterrupted) || errors.Is(err, context.Canceled)
 }
 
 func parseUserShellCommand(text string) (string, bool) {
