@@ -24,6 +24,14 @@ The settings file is always:
 ~/.builder/config.toml
 ```
 
+Builder also installs a user-editable ripgrep config at:
+
+```text
+~/.builder/rg.conf
+```
+
+Builder creates `~/.builder/rg.conf` when missing and exports it to shell tools via `RIPGREP_CONFIG_PATH` only when you have not already set `RIPGREP_CONFIG_PATH` yourself.
+
 Changing `persistence_root` does not move `config.toml`. `persistence_root` controls where Builder stores its database & auth state. The default is `~/.builder`.
 
 
@@ -42,7 +50,6 @@ server_port = 53082
 
 [timeouts]
 model_request_seconds = 400
-shell_default_seconds = 300
 
 [tools]
 shell = true
@@ -51,6 +58,10 @@ view_image = true
 web_search = true
 trigger_handoff = false
 
+[shell]
+postprocessing_mode = "builtin"
+# postprocess_hook = "~/.builder/shell_postprocess_hook"
+
 [skills]
 "skill name" = true
 
@@ -58,6 +69,11 @@ trigger_handoff = false
 frequency = "edits"
 timeout_seconds = 60
 verbose_output = false # show in ongoing transcript
+
+[subagents.fast]
+# inherits the main config unless overridden
+# model = "gpt-5.4-mini"
+# priority_request_mode = true
 ```
 
 `server_host` and `server_port` stay the durable TCP source of truth. On Unix platforms Builder may also derive a same-machine Unix domain socket for faster local RPC, but that socket is automatic local state only: there is no extra config knob, explicit `server_host` or `server_port` overrides still dial configured TCP, LAN/remote clients still use configured TCP, and health/readiness stay on configured HTTP/TCP.
@@ -73,9 +89,10 @@ These flags overlay settings at startup.
 | `--thinking-level` | `thinking_level` | |
 | `--theme` | `theme` | |
 | `--model-timeout-seconds` | `timeouts.model_request_seconds` | |
-| `--shell-timeout-seconds` | `timeouts.shell_default_seconds` | |
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
+
+`builder run` also accepts the headless-only selectors `--agent <role>` and `--fast`, which choose a subagent role rather than directly overriding one config key.
 
 
 ## Reference
@@ -103,11 +120,13 @@ These flags overlay settings at startup.
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
 | `context_compaction_threshold_tokens` | int | `258400` | `BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS` |  | Auto-compaction threshold. Must be `> 0`, `< model_context_window`, and at least `50%` of `model_context_window`. The default is derived from the default context window. |
 | `pre_submit_compaction_lead_tokens` | int | `35000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Fixed pre-submit runway reserve before auto-compaction. Builder compacts before sending the next user prompt once (`context_compaction_threshold_tokens` - this threshold) is reached. |
-| `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Minimum `exec_command` yield time before it moves to background and lets Builder manage it asynchronously. Lower values are clamped up. Use if model frequently expects your commands to complete fast, they background, and force model to poll for them. |
+| `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Default floor for `exec_command` yield time before it moves to background and lets Builder manage it asynchronously. Must be `> 0`. Use if model frequently expects your commands to complete fast, they background, and force model to poll for them. |
 | `compaction_mode` | string | `local` | `BUILDER_COMPACTION_MODE` |  | Allowed: `native`, `local`, `none`. `native` prefers provider-native compaction and falls back to local compaction. `local` always uses local summary compaction. `none` disables auto-compaction and makes manual compaction fail. |
 | `cache_warning_mode` | string | `default` | `BUILDER_CACHE_WARNING_MODE` |  | Prompt-cache warning policy. Allowed: `off`, `default`, `verbose`. `default` catches unwanted invalidations and keeps them in detail mode. `verbose` includes everything from `default`, surfaces cache warnings in ongoing mode too, and a broader range of warnings. |
 | `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices before they are truncated. |
 | `bg_shells_output` | string | `default` | `BUILDER_BG_SHELLS_OUTPUT` |  | Background-shell output mode (injection of shell outputs into model context). Allowed: `default`, `verbose`, `concise`. Verbose dumps all output into the main agent's model. Concise forces it to read output files. Default outputs truncated previews + gives a file path. |
+| `shell.postprocessing_mode` | string | `builtin` | `BUILDER_SHELL_POSTPROCESSING_MODE` |  | Semantic post-processing mode for `exec_command`. Allowed: `none`, `builtin`, `user`, `all`. `builtin` enables Builder processors only. `all` runs Builder processors first, then your hook. |
+| `shell.postprocess_hook` | string | `""` | `BUILDER_SHELL_POSTPROCESS_HOOK` |  | Optional executable/script path for a single local command post-processing hook. Builder sends JSON on stdin and expects JSON on stdout. |
 | `persistence_root` | string | `~/.builder` | `BUILDER_PERSISTENCE_ROOT` |  | Root for auth, session, and workspace index storage. Does not change the location of `~/.builder/config.toml`. |
 
 ### Timeouts
@@ -115,7 +134,6 @@ These flags overlay settings at startup.
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
 | `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `--model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
-| `timeouts.shell_default_seconds` | int | `300` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` | `--shell-timeout-seconds` | Default timeout for shell tool calls. Must be `> 0`. |
 
 ### Supervisor
 
@@ -161,8 +179,7 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 | Key | Default | What enabling it exposes |
 | --- | --- | --- |
 | `tools.ask_question` | `true` | Tool to ask interactive questions |
-| `tools.exec_command` | `true` | The primary shell tool |
-| `tools.multi_tool_use_parallel` | Model-derived | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
+| `tools.shell` | `true` | The primary shell tool. Internally this maps to `exec_command`. |
 | `tools.patch` | `true` | The edit tool |
 | `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
@@ -172,7 +189,28 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
-- `multi_tool_use_parallel` tool is only needed for Codex models (because they are post-trained on it). All other models default to that tool being disabled.
+
+### Subagents
+
+`[subagents.<role>]` is a file-only table for named headless subagent roles.
+
+```toml
+[subagents.fast]
+model = "gpt-5.4-mini"
+thinking_level = "low"
+
+[subagents.fast.tools]
+patch = false
+```
+
+- Select a role with `builder run --agent <role> "..."`.
+- `builder run --fast "..."` is sugar for `--agent fast`.
+- Subagent roles inherit the main config and then apply only the keys set in that role table.
+- Roles may use the same setting keys as the main config, including nested sections like `[subagents.<role>.tools]`, `[subagents.<role>.timeouts]`, and `[subagents.<role>.reviewer]`.
+- Nested subagent tables are not allowed.
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster profile and enables `priority_request_mode`.
+- If `fast` resolves to the same settings as the main agent, Builder emits a warning so the caller can suggest config tuning later.
+- Builder may keep some legacy built-in model ids for compatibility even after they disappear from current external OpenAI/Codex catalogs. Verify availability with your actual provider before copying a model id into a subagent role.
 
 ### Skills
 

@@ -28,6 +28,14 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected config file to stay absent, got err=%v", err)
 	}
+	rgConfigPath := filepath.Join(home, ".builder", managedRGConfigName)
+	rgConfigBytes, err := os.ReadFile(rgConfigPath)
+	if err != nil {
+		t.Fatalf("read managed rg config: %v", err)
+	}
+	if string(rgConfigBytes) != managedRGConfigContents {
+		t.Fatalf("managed rg config contents mismatch: %q", string(rgConfigBytes))
+	}
 	if cfg.Source.CreatedDefaultConfig {
 		t.Fatalf("expected CreatedDefaultConfig=false")
 	}
@@ -64,17 +72,11 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
 		t.Fatalf("expected sessions root to exist: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[toolspec.ToolShell] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[toolspec.ToolExecCommand] || !cfg.Settings.EnabledTools[toolspec.ToolViewImage] || !cfg.Settings.EnabledTools[toolspec.ToolPatch] || !cfg.Settings.EnabledTools[toolspec.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
-	}
-	if cfg.Settings.EnabledTools[toolspec.ToolMultiToolUseParallel] {
-		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", toolspec.ToolMultiToolUseParallel)
 	}
 	if cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
 		t.Fatalf("expected %s disabled in static defaults", toolspec.ToolTriggerHandoff)
-	}
-	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
-		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolMultiToolUseParallel, got)
 	}
 	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
 		t.Fatalf("expected untouched %s source to remain default, got %q", toolspec.ToolTriggerHandoff, got)
@@ -108,6 +110,12 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.BGShellsOutput != BGShellsOutputDefault {
 		t.Fatalf("default bg_shells_output mismatch: %q", cfg.Settings.BGShellsOutput)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeBuiltin {
+		t.Fatalf("default shell.postprocessing_mode mismatch: %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "" {
+		t.Fatalf("default shell.postprocess_hook mismatch: %q", cfg.Settings.Shell.PostprocessHook)
 	}
 	if cfg.Settings.Reviewer.Frequency != defaultReviewerFrequency {
 		t.Fatalf("expected default reviewer.frequency=%s, got %q", defaultReviewerFrequency, cfg.Settings.Reviewer.Frequency)
@@ -152,14 +160,61 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "[tools]") {
 		t.Fatalf("expected default config to include tools section, got %q", string(settingsBytes))
 	}
+	if !strings.Contains(string(settingsBytes), "[shell]") {
+		t.Fatalf("expected default config to include shell section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# postprocessing_mode = \"builtin\"") {
+		t.Fatalf("expected default config to expose shell.postprocessing_mode, got %q", string(settingsBytes))
+	}
 	if !strings.Contains(string(settingsBytes), "# ask_question = true") {
 		t.Fatalf("expected default config to include commented default tool values, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "[subagents.fast]") {
+		t.Fatalf("expected default config to include built-in fast subagent section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "gpt-5.4-mini") {
+		t.Fatalf("expected default config to document built-in fast model heuristic, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "[model_capabilities]") || strings.Contains(string(settingsBytes), "[provider_capabilities]") {
 		t.Fatalf("expected default config to omit capability sections without overrides, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "This JSON block mirrors") {
 		t.Fatalf("expected default config to omit mirrored JSON block, got %q", string(settingsBytes))
+	}
+}
+
+func TestEnsureManagedRGConfigFilePreservesExistingContents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := ResolveManagedRGConfigPath()
+	if err != nil {
+		t.Fatalf("resolve managed rg config path: %v", err)
+	}
+	if err := ensureSettingsDir(path); err != nil {
+		t.Fatalf("ensure settings dir: %v", err)
+	}
+	const existing = "--max-columns=80\n"
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing managed rg config: %v", err)
+	}
+
+	createdPath, created, err := EnsureManagedRGConfigFile()
+	if err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+	if created {
+		t.Fatal("expected existing managed rg config not to be replaced")
+	}
+	if createdPath != path {
+		t.Fatalf("managed rg config path = %q, want %q", createdPath, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read managed rg config: %v", err)
+	}
+	if string(data) != existing {
+		t.Fatalf("managed rg config contents = %q, want %q", string(data), existing)
 	}
 }
 
@@ -184,6 +239,168 @@ func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	}
 	if strings.Contains(toml, "This JSON block mirrors") {
 		t.Fatalf("expected onboarding config to omit mirrored JSON block, got %q", toml)
+	}
+	if !strings.Contains(toml, "[subagents.fast]") {
+		t.Fatalf("expected onboarding config to include built-in fast subagent section, got %q", toml)
+	}
+}
+
+func TestLoadSubagentRoleFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"model = \"gpt-5.4-mini\"",
+		"thinking_level = \"low\"",
+		"",
+		"[subagents.fast.tools]",
+		"patch = false",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	role, ok := cfg.Settings.Subagents[BuiltInSubagentRoleFast]
+	if !ok {
+		t.Fatalf("expected fast subagent role, got %+v", cfg.Settings.Subagents)
+	}
+	if role.Settings.Model != "gpt-5.4-mini" {
+		t.Fatalf("role model = %q, want gpt-5.4-mini", role.Settings.Model)
+	}
+	if role.Settings.ThinkingLevel != "low" {
+		t.Fatalf("role thinking = %q, want low", role.Settings.ThinkingLevel)
+	}
+	if role.Settings.EnabledTools[toolspec.ToolPatch] {
+		t.Fatalf("expected fast role patch tool disabled, got %+v", role.Settings.EnabledTools)
+	}
+	if role.Sources["model"] != "file" || role.Sources["thinking_level"] != "file" || role.Sources["tools.patch"] != "file" {
+		t.Fatalf("unexpected role sources: %+v", role.Sources)
+	}
+	if _, exists := role.Sources["reviewer.model"]; exists {
+		t.Fatalf("did not expect inherited reviewer model to be marked explicit, got %+v", role.Sources)
+	}
+}
+
+func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"thinking_level = \"low\"",
+		"",
+		"[subagents.fast.subagents.worker]",
+		"thinking_level = \"high\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected nested subagents table to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown settings key(s): subagents.fast.subagents") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"thinking_level = \"low\"",
+		"unknown_toggle = true",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected unknown subagent key to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown settings key(s): subagents.fast.unknown_toggle") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"provider_override = \"bogus\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected invalid subagent role values to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid subagents.fast") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSubagentRoleRejectsPersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"persistence_root = \"/tmp/custom\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected persistence_root in subagent role to fail")
+	}
+	if !strings.Contains(err.Error(), "persistence_root is not supported in subagent roles") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -1355,7 +1572,6 @@ ask_question = true
 
 [timeouts]
 model_request_seconds = 45
-shell_default_seconds = 50
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -1531,6 +1747,61 @@ func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
 	}
 }
 
+func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[shell]\npostprocessing_mode = \"all\"\npostprocess_hook = \"/tmp/file-hook\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeAll {
+		t.Fatalf("expected file shell.postprocessing_mode=all, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/file-hook" {
+		t.Fatalf("expected file shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "file" {
+		t.Fatalf("expected shell.postprocessing_mode source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "file" {
+		t.Fatalf("expected shell.postprocess_hook source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "user")
+	t.Setenv("BUILDER_SHELL_POSTPROCESS_HOOK", "/tmp/env-hook")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeUser {
+		t.Fatalf("expected env shell.postprocessing_mode=user, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/env-hook" {
+		t.Fatalf("expected env shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "env" {
+		t.Fatalf("expected shell.postprocessing_mode source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "env" {
+		t.Fatalf("expected shell.postprocess_hook source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid shell.postprocessing_mode")
+	}
+}
+
 func TestLoadAcceptsCustomThinkingLevel(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -1630,8 +1901,6 @@ func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
-	t.Setenv("BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS", "234")
-
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -1639,14 +1908,8 @@ func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 	if cfg.Settings.Timeouts.ModelRequestSeconds != 123 {
 		t.Fatalf("expected canonical env model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
 	}
-	if cfg.Settings.Timeouts.ShellDefaultSeconds != 234 {
-		t.Fatalf("expected canonical env shell timeout, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
-	}
 	if got := cfg.Source.Sources["timeouts.model_request_seconds"]; got != "env" {
 		t.Fatalf("expected timeouts.model_request_seconds source env, got %q", got)
-	}
-	if got := cfg.Source.Sources["timeouts.shell_default_seconds"]; got != "env" {
-		t.Fatalf("expected timeouts.shell_default_seconds source env, got %q", got)
 	}
 }
 

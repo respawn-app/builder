@@ -44,7 +44,7 @@ type runtimeControlFakeClient struct {
 
 type fakeShellHandler struct{}
 
-func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolShell }
+func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolExecCommand }
 
 func (fakeShellHandler) Call(context.Context, tools.Call) (tools.Result, error) {
 	return tools.Result{Output: json.RawMessage(`{"output":"ok","exit_code":0,"truncated":false}`)}, nil

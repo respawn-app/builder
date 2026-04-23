@@ -153,9 +153,9 @@ func TestPersistedTranscriptScanEnrichesToolResultFromCompletion(t *testing.T) {
 		t.Fatalf("marshal tool output: %v", err)
 	}
 	events := []session.Event{
-		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(toolOutput)}),
-		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
-		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell)}),
+		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(toolOutput)}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolExecCommand)}),
 	}
 	for _, evt := range events {
 		if err := scan.ApplyPersistedEvent(evt); err != nil {
@@ -178,8 +178,8 @@ func TestPersistedTranscriptScanEnrichesToolResultFromCompletion(t *testing.T) {
 func TestPersistedTranscriptScanSynthesizesCompletedToolResultWithoutToolMessage(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
 	events := []session.Event{
-		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, Content: "working", ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
-		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`)}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, Content: "working", ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
+		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolExecCommand), "is_error": false, "output": json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`)}),
 	}
 	for _, evt := range events {
 		if err := scan.ApplyPersistedEvent(evt); err != nil {
@@ -202,7 +202,7 @@ func TestPersistedTranscriptScanSynthesizesCompletedToolResultWithoutToolMessage
 func TestFormatPersistedToolCallBuildsFallbackMetadata(t *testing.T) {
 	entry := formatPersistedToolCall(llm.ToolCall{
 		ID:    "call-1",
-		Name:  string(toolspec.ToolShell),
+		Name:  string(toolspec.ToolExecCommand),
 		Input: json.RawMessage(`{"command":"pwd"}`),
 	})
 	if entry.Role != "tool_call" {

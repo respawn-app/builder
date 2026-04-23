@@ -17,10 +17,10 @@ const (
 	defaultTheme                         = theme.Auto
 	defaultModelContextWindow            = 272_000
 	defaultModelTimeoutSeconds           = 400
-	defaultShellTimeoutSeconds           = 300
 	defaultMinimumExecToBgSec            = 15
 	defaultShellOutputMaxChars           = 16_000
 	defaultBGShellsOutput                = "default"
+	defaultShellPostprocessingMode       = ShellPostprocessingModeBuiltin
 	defaultCacheWarningMode              = CacheWarningModeDefault
 	defaultCompactionThreshold           = defaultModelContextWindow * 95 / 100
 	defaultPreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
@@ -119,6 +119,11 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 		out.WriteString("\n[tools]\n")
 		writeToolLines(&out, state.Settings.EnabledTools)
 	}
+	shellLines := annotateRenderedLines(filterDefaultLines(lines, "shell"), filterDefaultLines(defaultLines, "shell"), nil)
+	if len(shellLines) > 0 {
+		out.WriteString("\n[shell]\n")
+		writeDefaultLines(&out, shellLines)
+	}
 	if len(timeoutLines) > 0 {
 		out.WriteString("\n[timeouts]\n")
 		writeDefaultLines(&out, timeoutLines)
@@ -130,8 +135,20 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 			writeDefaultLines(&out, []defaultConfigLine{line})
 		}
 	}
+	writeBuiltInSubagentSections(&out)
 	writeSkillTogglesSection(&out, state.Settings.SkillToggles)
 	return out.String()
+}
+
+func writeBuiltInSubagentSections(builder *strings.Builder) {
+	if builder == nil {
+		return
+	}
+	builder.WriteString("\n[subagents.fast]\n")
+	builder.WriteString("# inherits all main settings unless overridden\n")
+	builder.WriteString("# model = \"gpt-5.4-mini\" # built-in heuristic on exact OpenAI first-party setups\n")
+	builder.WriteString("# priority_request_mode = true # built-in heuristic on exact OpenAI first-party setups\n")
+	builder.WriteString("# model_context_window = 272000 # conservative default; larger API-key windows can be added later\n")
 }
 
 func filterRenderedLines(lines []defaultConfigLine, omittedKeys map[string]bool) []defaultConfigLine {
@@ -199,7 +216,7 @@ func writeToolLines(builder *strings.Builder, enabledTools map[toolspec.ID]bool)
 		if !ok {
 			configured = defaults[id]
 		}
-		writeDefaultLines(builder, []defaultConfigLine{{Path: []string{"tools", string(id)}, Value: configured, Commented: configured == defaults[id]}})
+		writeDefaultLines(builder, []defaultConfigLine{{Path: []string{"tools", toolspec.ConfigName(id)}, Value: configured, Commented: configured == defaults[id]}})
 	}
 }
 

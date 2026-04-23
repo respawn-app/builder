@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/server/tools"
+	"builder/server/tools/shell/postprocess"
+	"builder/shared/config"
 	"builder/shared/toolspec"
 )
 
@@ -64,6 +69,15 @@ func assertBackgroundTransitionMessageWithOutput(t *testing.T, text, sessionID s
 	}
 }
 
+func writeExecutableScript(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hook.sh")
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	return path
+}
+
 func newBackgroundTestManager(t *testing.T) *Manager {
 	t.Helper()
 	manager, err := NewManager(WithMinimumExecToBgTime(250*time.Millisecond), WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond))
@@ -88,104 +102,6 @@ func envSliceToMap(t *testing.T, in []string) map[string]string {
 		out[key] = value
 	}
 	return out
-}
-
-func TestShellRunsAndMergesOutput(t *testing.T) {
-	tool := New(".", 10_000)
-	input, _ := json.Marshal(map[string]any{"command": "echo out && echo err 1>&2"})
-
-	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: toolspec.ToolShell, Input: input})
-	if err != nil {
-		t.Fatalf("call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected error result: %s", string(result.Output))
-	}
-
-	var payload struct {
-		ExitCode int    `json:"exit_code"`
-		Output   string `json:"output"`
-	}
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode output: %v", err)
-	}
-	if payload.ExitCode != 0 {
-		t.Fatalf("exit code = %d, want 0", payload.ExitCode)
-	}
-	if !strings.Contains(payload.Output, "out") || !strings.Contains(payload.Output, "err") {
-		t.Fatalf("merged output missing stdout/stderr: %q", payload.Output)
-	}
-}
-
-func TestShellAcceptsCmdAlias(t *testing.T) {
-	tool := New(".", 10_000)
-	input, _ := json.Marshal(map[string]any{"cmd": "echo from-cmd"})
-
-	result, err := tool.Call(context.Background(), tools.Call{ID: "cmd-alias", Name: toolspec.ToolShell, Input: input})
-	if err != nil {
-		t.Fatalf("call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected error result: %s", string(result.Output))
-	}
-
-	var payload struct {
-		ExitCode int    `json:"exit_code"`
-		Output   string `json:"output"`
-	}
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode output: %v", err)
-	}
-	if payload.ExitCode != 0 {
-		t.Fatalf("exit code = %d, want 0", payload.ExitCode)
-	}
-	if !strings.Contains(payload.Output, "from-cmd") {
-		t.Fatalf("expected cmd alias output, got %q", payload.Output)
-	}
-}
-
-func TestShellOutputJSONDoesNotEscapeOperators(t *testing.T) {
-	tool := New(".", 10_000)
-	input, _ := json.Marshal(map[string]any{"command": "printf 'a => b < c & d\\n'"})
-
-	result, err := tool.Call(context.Background(), tools.Call{ID: "operators", Name: toolspec.ToolShell, Input: input})
-	if err != nil {
-		t.Fatalf("call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected error result: %s", string(result.Output))
-	}
-
-	raw := string(result.Output)
-	if strings.Contains(raw, `\u003e`) || strings.Contains(raw, `\u003c`) || strings.Contains(raw, `\u0026`) {
-		t.Fatalf("expected unescaped operators in JSON payload, got %q", raw)
-	}
-	if !strings.Contains(raw, "=>") || !strings.Contains(raw, "<") || !strings.Contains(raw, "&") {
-		t.Fatalf("expected decoded operators in JSON payload, got %q", raw)
-	}
-}
-
-func TestShellTimeout(t *testing.T) {
-	tool := New(".", 10_000)
-	input, _ := json.Marshal(map[string]any{"command": "sleep 2", "timeout_seconds": 1})
-
-	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: toolspec.ToolShell, Input: input})
-	if err != nil {
-		t.Fatalf("call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected launch error: %s", string(result.Output))
-	}
-
-	var payload struct {
-		ExitCode int `json:"exit_code"`
-	}
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode output: %v", err)
-	}
-	if payload.ExitCode != 124 {
-		t.Fatalf("exit code = %d, want 124 timeout", payload.ExitCode)
-	}
 }
 
 func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
@@ -214,6 +130,33 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
+	}
+}
+
+func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.EnsureManagedRGConfigFile(); err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+
+	env := envSliceToMap(t, enrichEnv([]string{"KEEP=1"}))
+	want := filepath.Join(home, ".builder", "rg.conf")
+	if env["RIPGREP_CONFIG_PATH"] != want {
+		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want %q", env["RIPGREP_CONFIG_PATH"], want)
+	}
+}
+
+func TestEnrichEnvKeepsUserRIPGREPConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.EnsureManagedRGConfigFile(); err != nil {
+		t.Fatalf("ensure managed rg config file: %v", err)
+	}
+
+	env := envSliceToMap(t, enrichEnv([]string{"RIPGREP_CONFIG_PATH=/tmp/user-rg.conf"}))
+	if env["RIPGREP_CONFIG_PATH"] != "/tmp/user-rg.conf" {
+		t.Fatalf("RIPGREP_CONFIG_PATH = %q, want /tmp/user-rg.conf", env["RIPGREP_CONFIG_PATH"])
 	}
 }
 
@@ -441,7 +384,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
 	pollText := decodeStringToolOutput(t, pollResult)
-	if !strings.Contains(pollText, "Process exited with code 0") {
+	if !strings.Contains(pollText, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in poll output, got %q", pollText)
 	}
 	if !strings.Contains(pollText, "Wall time:") {
@@ -454,6 +397,102 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("expected command output in poll output, got %q", pollText)
 	}
 	waitForManagerCount(t, manager, 0, time.Second)
+}
+
+func TestExecCommandAppliesUserHookOutput(t *testing.T) {
+	workspace := t.TempDir()
+	hookPath := writeExecutableScript(t, "#!/bin/sh\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
+	manager, err := NewManager(
+		WithMinimumExecToBgTime(250*time.Millisecond),
+		WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond),
+		WithPostprocessor(postprocess.NewRunner(postprocess.Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})),
+	)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "printf raw",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 5_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "hooked", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if got := decodeStringToolOutput(t, result); got != "HOOKED" {
+		t.Fatalf("output = %q, want HOOKED", got)
+	}
+}
+
+func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 0.35; printf done"},
+		DisplayCommand: "delayed-done",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded result, got %+v", result)
+	}
+	logPath := result.OutputPath
+	backupPath := logPath + ".bak"
+	sessionID, err := strconv.Atoi(result.SessionID)
+	if err != nil {
+		t.Fatalf("parse session id: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	if err := os.Rename(logPath, backupPath); err != nil {
+		t.Fatalf("rename log away: %v", err)
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    sessionID,
+		"yield_time_ms": 20,
+	})
+	first, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-1", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("first write_stdin call error: %v", err)
+	}
+	if first.IsError {
+		t.Fatalf("unexpected first write_stdin error: %s", string(first.Output))
+	}
+	firstText := decodeStringToolOutput(t, first)
+	if !strings.Contains(firstText, "failed to read full output log") {
+		t.Fatalf("expected full-log warning, got %q", firstText)
+	}
+
+	if err := os.Rename(backupPath, logPath); err != nil {
+		t.Fatalf("restore log: %v", err)
+	}
+	second, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("second write_stdin call error: %v", err)
+	}
+	if second.IsError {
+		t.Fatalf("unexpected second write_stdin error: %s", string(second.Output))
+	}
+	secondText := decodeStringToolOutput(t, second)
+	if strings.Contains(secondText, "failed to read full output log") {
+		t.Fatalf("did not expect warning after log restored, got %q", secondText)
+	}
+	if !strings.Contains(secondText, "done") {
+		t.Fatalf("expected restored full output, got %q", secondText)
+	}
 }
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
@@ -485,7 +524,7 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected command to stay foreground after clamp, got %q", text)
 	}
-	if !strings.Contains(text, "Process exited with code 0") {
+	if !strings.Contains(text, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "done") {
@@ -718,7 +757,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
 	}
 	stdinText := decodeStringToolOutput(t, stdinResult)
-	if !strings.Contains(stdinText, "Process exited with code 0") {
+	if !strings.Contains(stdinText, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in stdin output, got %q", stdinText)
 	}
 	if !strings.Contains(stdinText, "Wall time:") {
@@ -870,7 +909,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 	if strings.Contains(text, "Log file:") {
 		t.Fatalf("did not expect log file for foreground shell, got %q", text)
 	}
-	if !strings.Contains(text, "Process exited with code 0") {
+	if !strings.Contains(text, "Exit code 0, output:") {
 		t.Fatalf("expected exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "eof") {

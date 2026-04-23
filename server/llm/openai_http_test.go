@@ -482,7 +482,7 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
-			Name:   string(toolspec.ToolShell),
+			Name:   string(toolspec.ToolExecCommand),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
 		},
 	})
@@ -723,6 +723,48 @@ func TestBuildPayload_AddsNativeWebSearchToolWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_OAuthCodexKeepsRequestedToolNamesAndParallelFlag(t *testing.T) {
+	transport := NewHTTPTransport(oauthStaticAuth{})
+	mode := openAIAuthMode{IsOAuth: true, AccountID: "acc-1"}
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model: "gpt-5.4",
+		Tools: []Tool{
+			{Name: string(toolspec.ToolExecCommand), Description: "shell", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+			{Name: string(toolspec.ToolPatch), Description: "patch", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+		},
+	}, mode, requireProviderCapabilities(t, transport, mode))
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if got, ok := jsonPayload["parallel_tool_calls"].(bool); !ok || !got {
+		t.Fatalf("expected parallel_tool_calls=true, got %#v", jsonPayload["parallel_tool_calls"])
+	}
+	tools, ok := jsonPayload["tools"].([]any)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("expected two function tools, got %#v", jsonPayload["tools"])
+	}
+	names := make([]string, 0, len(tools))
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("expected tool object, got %#v", raw)
+		}
+		if got := tool["type"]; got != "function" {
+			t.Fatalf("expected function tool, got %#v", got)
+		}
+		name, ok := tool["name"].(string)
+		if !ok {
+			t.Fatalf("expected function name, got %#v", tool["name"])
+		}
+		names = append(names, name)
+	}
+	if !reflect.DeepEqual(names, []string{string(toolspec.ToolExecCommand), string(toolspec.ToolPatch)}) {
+		t.Fatalf("tool names = %+v, want raw requested names only", names)
+	}
+}
+
 func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{
@@ -851,7 +893,7 @@ func TestBuildPayload_AppliesConfiguredModelVerbosityForSupportedModels(t *testi
 func TestBuildPayload_IgnoresConfiguredModelVerbosityForUnsupportedModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.ModelVerbosity = "high"
-	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-4o"}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-4.1"}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}

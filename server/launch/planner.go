@@ -3,11 +3,12 @@ package launch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"builder/server/llm"
+	"builder/server/auth"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/client"
@@ -93,9 +94,49 @@ func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
 	}, nil
 }
 
-func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides) (SessionPlan, error) {
+func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides, authState auth.State) (SessionPlan, []string, error) {
 	if !overrides.HasAny() {
-		return plan, nil
+		return plan, nil, nil
+	}
+	var warnings []string
+	next := plan
+	shouldPersistContinuation := false
+	persistContinuation := func() error {
+		return next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL})
+	}
+	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentRole(trimmedRole) == "" {
+		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
+	}
+	roleName := config.NormalizeSubagentRole(overrides.AgentRole)
+	if roleName != "" {
+		shouldPersistContinuation = true
+		providerBase := cloneSettings(plan.ActiveSettings)
+		if value := strings.TrimSpace(overrides.ProviderOverride); value != "" {
+			providerBase.ProviderOverride = value
+		}
+		if value := strings.TrimSpace(overrides.OpenAIBaseURL); value != "" {
+			providerBase.OpenAIBaseURL = value
+		}
+		resolved, warning, err := resolveSubagentSettings(plan.ActiveSettings, providerBase, plan.Source.Sources, roleName, authState, !plan.ModelContractLocked)
+		if err != nil {
+			return SessionPlan{}, nil, err
+		}
+		next.ActiveSettings = resolved
+		if !plan.ModelContractLocked {
+			next.ConfiguredModelName = resolved.Model
+		}
+		next.EnabledTools = ActiveToolIDs(next.ActiveSettings, next.Source, plan.Store.Meta().Locked)
+		if strings.TrimSpace(warning) != "" {
+			warnings = append(warnings, warning)
+		}
+	}
+	if !overrides.HasConfigOverrides() {
+		if shouldPersistContinuation {
+			if err := persistContinuation(); err != nil {
+				return SessionPlan{}, nil, err
+			}
+		}
+		return next, warnings, nil
 	}
 	loaded, err := config.Load(plan.WorkspaceRoot, config.LoadOptions{
 		Model:               strings.TrimSpace(overrides.Model),
@@ -103,18 +144,25 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		ThinkingLevel:       strings.TrimSpace(overrides.ThinkingLevel),
 		Theme:               strings.TrimSpace(overrides.Theme),
 		ModelTimeoutSeconds: overrides.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: overrides.ShellTimeoutSeconds,
 		Tools:               strings.TrimSpace(overrides.Tools),
 		OpenAIBaseURL:       strings.TrimSpace(overrides.OpenAIBaseURL),
 	})
 	if err != nil {
-		return SessionPlan{}, err
+		return SessionPlan{}, nil, err
 	}
-	next := plan
 	locked := plan.Store.Meta().Locked
 	mergedSource := mergeOverrideSources(plan.Source, loaded.Source)
 	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
+		originalModel := strings.TrimSpace(next.ActiveSettings.Model)
+		explicitSources := map[string]string{}
+		for key, source := range mergedSource.Sources {
+			if strings.TrimSpace(source) == "" || strings.TrimSpace(source) == "default" {
+				continue
+			}
+			explicitSources[key] = source
+		}
 		next.ActiveSettings.Model = loaded.Settings.Model
+		applyDerivedModelContextBudgetOverrides(&next.ActiveSettings, explicitSources, originalModel, true)
 		next.ConfiguredModelName = loaded.Settings.Model
 	}
 	if strings.TrimSpace(overrides.ProviderOverride) != "" {
@@ -129,9 +177,6 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	if overrides.ModelTimeoutSeconds > 0 {
 		next.ActiveSettings.Timeouts.ModelRequestSeconds = loaded.Settings.Timeouts.ModelRequestSeconds
 	}
-	if overrides.ShellTimeoutSeconds > 0 {
-		next.ActiveSettings.Timeouts.ShellDefaultSeconds = loaded.Settings.Timeouts.ShellDefaultSeconds
-	}
 	if locked == nil {
 		if strings.TrimSpace(overrides.Tools) != "" {
 			next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
@@ -141,13 +186,16 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		}
 	}
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
+		shouldPersistContinuation = true
 		next.ActiveSettings.OpenAIBaseURL = loaded.Settings.OpenAIBaseURL
-		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
-			return SessionPlan{}, err
-		}
 	}
 	next.Source = mergedSource
-	return next, nil
+	if shouldPersistContinuation {
+		if err := persistContinuation(); err != nil {
+			return SessionPlan{}, nil, err
+		}
+	}
+	return next, warnings, nil
 }
 
 func mergeOverrideSources(base config.SourceReport, override config.SourceReport) config.SourceReport {
@@ -293,25 +341,7 @@ func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked 
 		}
 		return DedupeSortToolIDs(ids)
 	}
-	ids := config.EnabledToolIDs(settings)
-	sourceKind := strings.TrimSpace(source.Sources["tools."+string(toolspec.ToolMultiToolUseParallel)])
-	if sourceKind != "" && sourceKind != "default" {
-		return DedupeSortToolIDs(ids)
-	}
-	enabled := map[toolspec.ID]bool{}
-	for _, id := range ids {
-		enabled[id] = true
-	}
-	if llm.SupportsMultiToolUseParallelModel(settings.Model) {
-		enabled[toolspec.ToolMultiToolUseParallel] = true
-	} else {
-		delete(enabled, toolspec.ToolMultiToolUseParallel)
-	}
-	resolved := make([]toolspec.ID, 0, len(enabled))
-	for id := range enabled {
-		resolved = append(resolved, id)
-	}
-	return DedupeSortToolIDs(resolved)
+	return DedupeSortToolIDs(config.EnabledToolIDs(settings))
 }
 
 func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {

@@ -15,16 +15,15 @@ import (
 // provider capability flags, and model metadata.
 
 type ModelCapabilityContract struct {
-	Model                        string
-	ContextWindowTokens          int
-	LargeContextWindowTokens     int
-	SupportsReasoningEffort      bool
-	SupportedReasoningEfforts    []string
-	SupportsReasoningSummary     bool
-	SupportsVerbosity            bool
-	SupportedVerbosityLevels     []string
-	SupportsVisionInputs         bool
-	SupportsMultiToolUseParallel bool
+	Model                     string
+	ContextWindowTokens       int
+	LargeContextWindowTokens  int
+	SupportsReasoningEffort   bool
+	SupportedReasoningEfforts []string
+	SupportsReasoningSummary  bool
+	SupportsVerbosity         bool
+	SupportedVerbosityLevels  []string
+	SupportsVisionInputs      bool
 }
 
 func lookupProviderContract(provider Provider) (ProviderContract, bool) {

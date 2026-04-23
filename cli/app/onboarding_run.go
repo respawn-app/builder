@@ -68,26 +68,7 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 }
 
 func onboardingProviderCapabilities(authState auth.State, settings config.Settings) (llm.ProviderCapabilities, error) {
-	providerID := strings.TrimSpace(settings.ProviderOverride)
-	if providerID == "" {
-		switch authState.Method.Type {
-		case auth.MethodOAuth:
-			providerID = "chatgpt-codex"
-		case auth.MethodAPIKey, auth.MethodNone:
-			if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
-				if llm.IsOpenAIFirstPartyBaseURL(settings.OpenAIBaseURL) {
-					providerID = "openai"
-				} else {
-					providerID = "openai-compatible"
-				}
-			} else {
-				providerID = "openai"
-			}
-		default:
-			providerID = "openai"
-		}
-	}
-	return llm.InferProviderCapabilities(providerID)
+	return llm.ProviderCapabilitiesForSettings(authState, settings)
 }
 
 func filepathDir(path string) string {

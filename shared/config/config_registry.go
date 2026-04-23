@@ -37,6 +37,7 @@ type registrySetting interface {
 type fileKeyTree struct {
 	children        map[string]*fileKeyTree
 	dynamicChildren func(string) bool
+	dynamicTemplate *fileKeyTree
 }
 
 type settingsRegistry struct {
@@ -65,6 +66,7 @@ type scalarSetting[T any] struct {
 
 type toolsSetting struct{}
 type skillsSetting struct{}
+type subagentsSetting struct{}
 
 var configRegistry = newSettingsRegistry()
 
@@ -287,12 +289,6 @@ func newSettingsRegistry() settingsRegistry {
 			"BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS",
 			func(opts LoadOptions) (int, bool, error) { return positiveCLIInt(opts.ModelTimeoutSeconds) },
 			settingDocOptions{}),
-		newIntSetting("timeouts.shell_default_seconds", defaultShellTimeoutSeconds,
-			func(state *settingsState, value int) { state.Settings.Timeouts.ShellDefaultSeconds = value },
-			func(state settingsState) int { return state.Settings.Timeouts.ShellDefaultSeconds },
-			"BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS",
-			func(opts LoadOptions) (int, bool, error) { return positiveCLIInt(opts.ShellTimeoutSeconds) },
-			settingDocOptions{}),
 		newIntSetting("shell_output_max_chars", defaultShellOutputMaxChars,
 			func(state *settingsState, value int) { state.Settings.ShellOutputMaxChars = value },
 			func(state settingsState) int { return state.Settings.ShellOutputMaxChars },
@@ -303,6 +299,22 @@ func newSettingsRegistry() settingsRegistry {
 			func(state *settingsState, value BGShellsOutputMode) { state.Settings.BGShellsOutput = value },
 			func(state settingsState) BGShellsOutputMode { return state.Settings.BGShellsOutput },
 			"BUILDER_BG_SHELLS_OUTPUT",
+			nil,
+			nil,
+			settingDocOptions{}),
+		newStringSetting("shell.postprocessing_mode", ShellPostprocessingMode(defaultShellPostprocessingMode),
+			func(state *settingsState, value ShellPostprocessingMode) {
+				state.Settings.Shell.PostprocessingMode = value
+			},
+			func(state settingsState) ShellPostprocessingMode { return state.Settings.Shell.PostprocessingMode },
+			"BUILDER_SHELL_POSTPROCESSING_MODE",
+			nil,
+			normalizeShellPostprocessingMode,
+			settingDocOptions{}),
+		newStringSetting("shell.postprocess_hook", "",
+			func(state *settingsState, value string) { state.Settings.Shell.PostprocessHook = value },
+			func(state settingsState) string { return state.Settings.Shell.PostprocessHook },
+			"BUILDER_SHELL_POSTPROCESS_HOOK",
 			nil,
 			nil,
 			settingDocOptions{}),
@@ -355,6 +367,7 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) bool { return state.Settings.Reviewer.VerboseOutput },
 			"BUILDER_REVIEWER_VERBOSE_OUTPUT",
 			settingDocOptions{}),
+		subagentsSetting{},
 		newStringSetting("persistence_root", DefaultPersistence,
 			func(state *settingsState, value string) { state.PersistenceRoot = value },
 			func(state settingsState) string { return state.PersistenceRoot },
@@ -384,6 +397,7 @@ func newSettingsRegistry() settingsRegistry {
 			validateShellOutputMaxChars,
 			validateMinimumExecToBgSeconds,
 			validateBGShellsOutput,
+			validateShellPostprocessing,
 			validateCacheWarningMode,
 			validateContextWindow,
 			validateCompactionMode,
@@ -395,6 +409,7 @@ func newSettingsRegistry() settingsRegistry {
 	for _, setting := range registry.settings {
 		setting.registerFileKeys(registry.fileKeys)
 	}
+	registerSubagentFileKeys(registry.fileKeys, registry.settings)
 	return registry
 }
 
@@ -668,7 +683,7 @@ func (toolsSetting) applyFile(raw settingsFile, settingsPath string, state *sett
 		return err
 	}
 	for key, rawValue := range table {
-		id, valid := toolspec.ParseID(strings.TrimSpace(key))
+		id, valid := toolspec.ParseConfigID(strings.TrimSpace(key))
 		if !valid {
 			return fmt.Errorf("invalid tools key in %s: %q", settingsPath, key)
 		}
@@ -716,15 +731,15 @@ func (toolsSetting) applyCLI(opts LoadOptions, state *settingsState, sources map
 
 func (toolsSetting) registerFileKeys(tree *fileKeyTree) {
 	tree.allowDynamicChildren([]string{"tools"}, func(key string) bool {
-		_, ok := toolspec.ParseID(strings.TrimSpace(key))
+		_, ok := toolspec.ParseConfigID(strings.TrimSpace(key))
 		return ok
-	})
+	}, nil)
 }
 
 func (toolsSetting) appendDefaultPayload(payload map[string]any, state settingsState) {
 	toolDefaults := map[string]bool{}
 	for _, id := range toolspec.CatalogIDs() {
-		toolDefaults[string(id)] = state.Settings.EnabledTools[id]
+		toolDefaults[toolspec.ConfigName(id)] = state.Settings.EnabledTools[id]
 	}
 	payload["tools"] = toolDefaults
 }
@@ -732,7 +747,7 @@ func (toolsSetting) appendDefaultPayload(payload map[string]any, state settingsS
 func (toolsSetting) appendDefaultLines(lines *[]defaultConfigLine, state settingsState) {
 	for _, id := range toolspec.CatalogIDs() {
 		*lines = append(*lines, defaultConfigLine{
-			Path:  []string{"tools", string(id)},
+			Path:  []string{"tools", toolspec.ConfigName(id)},
 			Value: state.Settings.EnabledTools[id],
 		})
 	}
@@ -786,12 +801,132 @@ func (skillsSetting) applyCLI(LoadOptions, *settingsState, map[string]string) er
 func (skillsSetting) registerFileKeys(tree *fileKeyTree) {
 	tree.allowDynamicChildren([]string{"skills"}, func(key string) bool {
 		return normalizeSkillToggleKey(key) != ""
-	})
+	}, nil)
 }
 
 func (skillsSetting) appendDefaultPayload(map[string]any, settingsState) {}
 
 func (skillsSetting) appendDefaultLines(*[]defaultConfigLine, settingsState) {}
+
+func (subagentsSetting) applyDefault(state *settingsState) {
+	state.Settings.Subagents = map[string]SubagentRole{}
+}
+
+func (subagentsSetting) initSources(map[string]string) {}
+
+func (subagentsSetting) applyFile(raw settingsFile, settingsPath string, state *settingsState, _ map[string]string) error {
+	table, ok, err := lookupFileTable(raw, []string{"subagents"})
+	if err != nil || !ok {
+		return err
+	}
+	keys := make([]string, 0, len(table))
+	for key := range table {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	seen := make(map[string]string, len(keys))
+	for _, key := range keys {
+		rawValue := table[key]
+		normalized := normalizeSubagentRoleKey(key)
+		if normalized == "" {
+			return fmt.Errorf("invalid subagents key in %s: %q", settingsPath, key)
+		}
+		if priorKey, exists := seen[normalized]; exists {
+			return fmt.Errorf("duplicate subagents keys in %s: %q and %q both normalize to %q", settingsPath, priorKey, key, normalized)
+		}
+		roleTable, ok := asSettingsFile(rawValue)
+		if !ok {
+			return invalidSettingsTypeError([]string{"subagents", key}, "table")
+		}
+		role, err := parseSubagentRole(roleTable, settingsPath, key)
+		if err != nil {
+			return err
+		}
+		seen[normalized] = key
+		state.Settings.Subagents[normalized] = role
+	}
+	return nil
+}
+
+func (subagentsSetting) applyEnv(envLookup, *settingsState, map[string]string) error {
+	return nil
+}
+
+func (subagentsSetting) applyCLI(LoadOptions, *settingsState, map[string]string) error {
+	return nil
+}
+
+func (subagentsSetting) registerFileKeys(*fileKeyTree) {}
+
+func (subagentsSetting) appendDefaultPayload(map[string]any, settingsState) {}
+
+func (subagentsSetting) appendDefaultLines(*[]defaultConfigLine, settingsState) {}
+
+func registerSubagentFileKeys(tree *fileKeyTree, settings []registrySetting) {
+	if tree == nil {
+		return
+	}
+	template := newFileKeyTree()
+	for _, setting := range settings {
+		if _, ok := setting.(subagentsSetting); ok {
+			continue
+		}
+		setting.registerFileKeys(template)
+	}
+	tree.allowDynamicChildren([]string{"subagents"}, func(key string) bool {
+		return normalizeSubagentRoleKey(key) != ""
+	}, template)
+}
+
+func parseSubagentRole(raw settingsFile, settingsPath string, roleKey string) (SubagentRole, error) {
+	if _, exists := raw["subagents"]; exists {
+		return SubagentRole{}, fmt.Errorf("subagents.%s cannot define nested subagents", roleKey)
+	}
+	if err := validateSettingsFileKeys(raw, subagentRoleKeyTree(configRegistry.settings)); err != nil {
+		return SubagentRole{}, err
+	}
+	roleState := configRegistry.defaultState()
+	roleSources := configRegistry.defaultSourceMap()
+	for _, setting := range configRegistry.settings {
+		if _, ok := setting.(subagentsSetting); ok {
+			continue
+		}
+		if err := setting.applyFile(raw, settingsPath, &roleState, roleSources); err != nil {
+			return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+		}
+	}
+	explicitSources := map[string]string{}
+	for key, source := range roleSources {
+		if strings.TrimSpace(source) != "file" {
+			continue
+		}
+		explicitSources[key] = source
+	}
+	if len(explicitSources) == 0 {
+		explicitSources = nil
+	}
+	if explicitSources != nil {
+		if _, exists := explicitSources["persistence_root"]; exists {
+			return SubagentRole{}, fmt.Errorf("invalid subagents.%s: persistence_root is not supported in subagent roles", roleKey)
+		}
+	}
+	if err := validateSubagentRoleState(roleState, explicitSources); err != nil {
+		return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+	}
+	roleState.Settings.Subagents = nil
+	return SubagentRole{Settings: roleState.Settings, Sources: explicitSources}, nil
+}
+
+func subagentRoleKeyTree(settings []registrySetting) *fileKeyTree {
+	tree := newFileKeyTree()
+	for _, setting := range settings {
+		if _, ok := setting.(subagentsSetting); ok {
+			continue
+		}
+		setting.registerFileKeys(tree)
+	}
+	return tree
+}
 
 func newFileKeyTree() *fileKeyTree {
 	return &fileKeyTree{children: map[string]*fileKeyTree{}}
@@ -813,12 +948,13 @@ func (t *fileKeyTree) allowPath(path []string) {
 	}
 }
 
-func (t *fileKeyTree) allowDynamicChildren(path []string, allow func(string) bool) {
+func (t *fileKeyTree) allowDynamicChildren(path []string, allow func(string) bool, template *fileKeyTree) {
 	current := t
 	for _, part := range path {
 		current = current.ensureChild(part)
 	}
 	current.dynamicChildren = allow
+	current.dynamicTemplate = template
 }
 
 func validateSettingsFileKeys(raw settingsFile, tree *fileKeyTree) error {
@@ -836,7 +972,11 @@ func validateSettingsFileKeys(raw settingsFile, tree *fileKeyTree) error {
 			child, ok := node.children[key]
 			if !ok {
 				if node.dynamicChildren != nil && node.dynamicChildren(key) {
-					child = newFileKeyTree()
+					if node.dynamicTemplate != nil {
+						child = node.dynamicTemplate
+					} else {
+						child = newFileKeyTree()
+					}
 				} else {
 					unknown = append(unknown, strings.Join(path, "."))
 					continue
@@ -977,7 +1117,7 @@ func splitSettingKey(key string) []string {
 }
 
 func toolSourceKey(id toolspec.ID) string {
-	return "tools." + string(id)
+	return "tools." + toolspec.ConfigName(id)
 }
 
 func skillSourceKey(name string) string {
@@ -1035,6 +1175,8 @@ func renderTOMLValue(value any) string {
 	case CompactionMode:
 		return strconv.Quote(string(v))
 	case BGShellsOutputMode:
+		return strconv.Quote(string(v))
+	case ShellPostprocessingMode:
 		return strconv.Quote(string(v))
 	default:
 		return strconv.Quote(fmt.Sprintf("%v", v))

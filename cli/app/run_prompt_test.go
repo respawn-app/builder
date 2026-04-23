@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"sync/atomic"
@@ -934,6 +935,71 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	}
 	if !sawAssistant {
 		t.Fatal("expected persisted final assistant message in event log")
+	}
+}
+
+func TestRunPromptFastRoleUsesRoleLevelProviderSettingsForHeuristics(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"provider_override = \"openai\"",
+	}, "\n")
+
+	requestBodies := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		requestBodies <- payload
+		testopenai.WriteCompletedResponseStream(w, "fast via role provider", 11, 7)
+	}))
+	defer server.Close()
+
+	contents = "openai_base_url = \"" + server.URL + "\"\n" + contents + "\n"
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		AgentRole:             config.BuiltInSubagentRoleFast,
+	}, "hello from user", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "fast via role provider" {
+		t.Fatalf("result = %q, want %q", result.Result, "fast via role provider")
+	}
+	payload := <-requestBodies
+	if got := payload["model"]; got != "gpt-5.4-mini" {
+		t.Fatalf("model payload = %#v, want gpt-5.4-mini", got)
+	}
+	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, result.SessionID)
+	if store.Meta().Continuation == nil || store.Meta().Continuation.OpenAIBaseURL != server.URL {
+		t.Fatalf("unexpected continuation context: %+v", store.Meta().Continuation)
 	}
 }
 

@@ -24,7 +24,7 @@ func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(tc.command), tc.command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(tc.command), tc.command)
 			if hint == nil {
 				t.Fatalf("expected render hint for command %q", tc.command)
 			}
@@ -50,7 +50,7 @@ func TestDetectShellRenderHintDefaultsToShellForGeneralCommands(t *testing.T) {
 
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(command), command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(command), command)
 			if hint == nil {
 				t.Fatalf("expected shell render hint for command %q", command)
 			}
@@ -98,7 +98,7 @@ func TestDetectShellRenderHintFallsBackToWindowsCommandDialect(t *testing.T) {
 	command := `copy /y C:\Users\nek\src.txt C:\Temp\dst.txt`
 	hint := detectShellRenderHint(
 		ToolCallContext{GOOS: "windows"},
-		toolspec.ToolShell,
+		toolspec.ToolExecCommand,
 		shellCommandRaw(command),
 		command,
 	)
@@ -124,7 +124,7 @@ func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 
 	for _, command := range tests {
 		t.Run(command, func(t *testing.T) {
-			hint := detectShellRenderHint(ctx, toolspec.ToolShell, shellCommandRaw(command), command)
+			hint := detectShellRenderHint(ctx, toolspec.ToolExecCommand, shellCommandRaw(command), command)
 			if hint == nil {
 				t.Fatalf("expected fallback shell hint for command %q", command)
 			}

@@ -56,6 +56,9 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if err != nil {
 		return App{}, err
 	}
+	if _, _, err := EnsureManagedRGConfigFile(); err != nil {
+		return App{}, err
+	}
 
 	return App{
 		AppName:         DefaultAppName,

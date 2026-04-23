@@ -183,7 +183,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		c.restorePendingInjectedIntoInput()
 		c.restoreSubmittedTextIntoInput(msg.submittedText)
 		c.restoreQueuedMessagesIntoInput()
-		if errors.Is(msg.err, errSubmissionInterrupted) {
+		if isInterruptedRuntimeError(msg.err) {
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
@@ -265,6 +265,12 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
 		c.restoreQueuedMessagesIntoInput()
+		if isInterruptedRuntimeError(msg.err) {
+			m.activity = uiActivityInterrupted
+			m.logf("step.interrupted")
+			m.syncViewport()
+			return m, nil
+		}
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		appendCmd := m.appendOperatorErrorFeedback(detailErr)
@@ -316,6 +322,12 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
 		c.restoreQueuedMessagesIntoInput()
+		if isInterruptedRuntimeError(msg.err) {
+			m.activity = uiActivityInterrupted
+			m.logf("step.interrupted")
+			m.syncViewport()
+			return m, nil
+		}
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		appendCmd := m.appendOperatorErrorFeedback(detailErr)
@@ -332,6 +344,12 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
 		c.restorePendingInjectedIntoInput()
+		if isInterruptedRuntimeError(err) {
+			m.activity = uiActivityInterrupted
+			m.logf("step.interrupted")
+			m.syncViewport()
+			return m, nil
+		}
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
 		appendCmd := m.appendOperatorErrorFeedback(detailErr)

@@ -39,6 +39,7 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("builder project", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { writeProjectUsage(fs) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -66,6 +67,7 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 func projectListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder project list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { writeProjectListUsage(fs) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -90,6 +92,7 @@ func projectListSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 func projectCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder project create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { writeProjectCreateUsage(fs) }
 	name := fs.String("name", "", "project display name")
 	path := fs.String("path", "", "server-visible workspace path")
 	if err := fs.Parse(args); err != nil {
@@ -114,6 +117,7 @@ func projectCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) 
 func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder attach", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { writeAttachUsage(fs) }
 	projectID := fs.String("project", "", "explicit project id override")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -142,6 +146,7 @@ func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder rebind", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() { writeRebindUsage(fs) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

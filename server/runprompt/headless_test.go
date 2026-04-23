@@ -187,7 +187,7 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := store.MarkModelDispatchLocked(session.LockedContract{Model: "locked-model", EnabledTools: []string{string(toolspec.ToolShell)}}); err != nil {
+	if err := store.MarkModelDispatchLocked(session.LockedContract{Model: "locked-model", EnabledTools: []string{string(toolspec.ToolExecCommand)}}); err != nil {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected tool payload: %#v", toolsPayload[0])
 		}
-		if got := toolPayload["name"]; got != string(toolspec.ToolShell) {
+		if got := toolPayload["name"]; got != string(toolspec.ToolExecCommand) {
 			t.Fatalf("expected locked shell tool, got %#v", got)
 		}
 	case <-time.After(time.Second):

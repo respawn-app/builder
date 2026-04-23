@@ -18,6 +18,7 @@ type RunPromptResult struct {
 	SessionName string
 	Result      string
 	Duration    time.Duration
+	Warnings    []string
 }
 
 func runPrompt(ctx context.Context, client client.RunPromptClient, opts Options, initialSessionID, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
@@ -33,6 +34,7 @@ func runPrompt(ctx context.Context, client client.RunPromptClient, opts Options,
 		SessionName: response.SessionName,
 		Result:      response.Result,
 		Duration:    response.Duration,
+		Warnings:    append([]string(nil), response.Warnings...),
 	}
 	if err != nil {
 		return result, err
@@ -42,12 +44,12 @@ func runPrompt(ctx context.Context, client client.RunPromptClient, opts Options,
 
 func runPromptOverridesFromOptions(opts Options) serverapi.RunPromptOverrides {
 	return serverapi.RunPromptOverrides{
+		AgentRole:           strings.TrimSpace(opts.AgentRole),
 		Model:               strings.TrimSpace(opts.Model),
 		ProviderOverride:    strings.TrimSpace(opts.ProviderOverride),
 		ThinkingLevel:       strings.TrimSpace(opts.ThinkingLevel),
 		Theme:               strings.TrimSpace(opts.Theme),
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               strings.TrimSpace(opts.Tools),
 		OpenAIBaseURL:       strings.TrimSpace(opts.OpenAIBaseURL),
 	}

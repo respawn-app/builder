@@ -287,9 +287,6 @@ func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sess
 	if sourceIsCLI(sources, "timeouts.model_request_seconds") {
 		plan.ActiveSettings.Timeouts.ModelRequestSeconds = cfg.Settings.Timeouts.ModelRequestSeconds
 	}
-	if sourceIsCLI(sources, "timeouts.shell_default_seconds") {
-		plan.ActiveSettings.Timeouts.ShellDefaultSeconds = cfg.Settings.Timeouts.ShellDefaultSeconds
-	}
 	if sourceIsCLI(sources, "openai_base_url") {
 		plan.ActiveSettings.OpenAIBaseURL = cfg.Settings.OpenAIBaseURL
 	}
@@ -313,7 +310,7 @@ func sourceIsCLI(sources map[string]string, key string) bool {
 
 func hasCLIToolOverride(source config.SourceReport) bool {
 	for _, id := range tools.CatalogIDs() {
-		if sourceIsCLI(source.Sources, "tools."+string(id)) {
+		if sourceIsCLI(source.Sources, "tools."+toolspec.ConfigName(id)) {
 			return true
 		}
 	}

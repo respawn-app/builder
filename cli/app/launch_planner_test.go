@@ -408,10 +408,10 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 		ActiveSettings: config.Settings{
 			Model:         "server-model",
 			ThinkingLevel: "low",
-			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolShell: true},
-			Timeouts:      config.Timeouts{ModelRequestSeconds: 20, ShellDefaultSeconds: 30},
+			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
+			Timeouts:      config.Timeouts{ModelRequestSeconds: 20},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "server-model",
 		Source:              config.SourceReport{Sources: map[string]string{"model": "file"}},
 		StatusConfig:        uiStatusConfig{},
@@ -420,7 +420,7 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 		Model:         "local-model",
 		ThinkingLevel: "high",
 		EnabledTools:  map[toolspec.ID]bool{toolspec.ToolPatch: true},
-		Timeouts:      config.Timeouts{ModelRequestSeconds: 99, ShellDefaultSeconds: 77},
+		Timeouts:      config.Timeouts{ModelRequestSeconds: 99},
 	}, Source: config.SourceReport{Sources: map[string]string{
 		"model":                          "env",
 		"thinking_level":                 "env",
@@ -436,7 +436,7 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 	if updated.ActiveSettings.ThinkingLevel != "low" {
 		t.Fatalf("expected server thinking level preserved, got %q", updated.ActiveSettings.ThinkingLevel)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected server tools preserved, got %+v", updated.EnabledTools)
 	}
 	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 20 {
@@ -452,9 +452,9 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 		ActiveSettings: config.Settings{
 			Model:         "locked-model",
 			ThinkingLevel: "medium",
-			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolShell: true},
+			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "locked-model",
 		ModelContractLocked: true,
 		StatusConfig:        uiStatusConfig{},
@@ -472,8 +472,43 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 	if updated.ActiveSettings.Model != "locked-model" || updated.ConfiguredModelName != "locked-model" {
 		t.Fatalf("expected locked model preserved, got %+v", updated.ActiveSettings)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected locked tools preserved, got %+v", updated.EnabledTools)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanAppliesCLIToolOverrideWithoutModelOverride(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "gpt-5.4",
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
+		},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: "gpt-5.4",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.patch": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "gpt-5.4",
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: false, toolspec.ToolPatch: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":       "file",
+		"tools.shell": "cli",
+		"tools.patch": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.EnabledTools[toolspec.ToolExecCommand] {
+		t.Fatalf("expected shell disabled by cli override, got %+v", updated.ActiveSettings.EnabledTools)
+	}
+	if !updated.ActiveSettings.EnabledTools[toolspec.ToolPatch] {
+		t.Fatalf("expected patch enabled by cli override, got %+v", updated.ActiveSettings.EnabledTools)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolPatch {
+		t.Fatalf("expected patch-only enabled tools, got %+v", updated.EnabledTools)
+	}
+	if updated.Source.Sources["tools.shell"] != "cli" || updated.Source.Sources["tools.patch"] != "cli" {
+		t.Fatalf("expected cli tool sources preserved, got %+v", updated.Source.Sources)
 	}
 }
 
@@ -481,27 +516,26 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 	plan := sessionLaunchPlan{
 		ActiveSettings: config.Settings{
 			Model:        "gpt-5.4",
-			EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
-		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
-		EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
-		"model":                         "cli",
-		"tools.shell":                   "default",
-		"tools.multi_tool_use_parallel": "default",
+		"model":       "cli",
+		"tools.shell": "default",
 	}}}
 
 	updated := applyCLIOverridesToSessionPlan(plan, cfg)
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolMultiToolUseParallel || updated.EnabledTools[1] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected recomputed tools for overridden model, got %+v", updated.EnabledTools)
 	}
 }
@@ -510,27 +544,26 @@ func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrid
 	plan := sessionLaunchPlan{
 		ActiveSettings: config.Settings{
 			Model:        "gpt-5.4",
-			EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 		},
-		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ConfiguredModelName: "gpt-5.4",
-		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
-		EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
-		"model":                         "cli",
-		"tools.shell":                   "cli",
-		"tools.multi_tool_use_parallel": "cli",
+		"model":       "cli",
+		"tools.shell": "cli",
 	}}}
 
 	updated := applyCLIOverridesToSessionPlan(plan, cfg)
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected explicit cli tools to suppress model defaults, got %+v", updated.EnabledTools)
 	}
 }
