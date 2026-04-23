@@ -33,7 +33,7 @@ func TestRunnerBuiltinGoTestSuccessCollapsesToPass(t *testing.T) {
 	}
 }
 
-func TestRunnerBuiltinGoTestPreservesBenchmarkAndCoverageOutput(t *testing.T) {
+func TestRunnerBuiltinGoTestPreservesDetailedOutput(t *testing.T) {
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
 	exitCode := 0
 	tests := []struct {
@@ -53,6 +53,12 @@ func TestRunnerBuiltinGoTestPreservesBenchmarkAndCoverageOutput(t *testing.T) {
 			commandText: "go test -cover ./...",
 			parsedArgs:  []string{"go", "test", "-cover", "./..."},
 			output:      "PASS\ncoverage: 81.2% of statements\nok\texample.com/postprocess\t0.123s\n",
+		},
+		{
+			name:        "json",
+			commandText: "go test -json ./...",
+			parsedArgs:  []string{"go", "test", "-json", "./..."},
+			output:      "{\"Time\":\"2026-04-23T00:00:00Z\",\"Action\":\"pass\",\"Package\":\"example.com/postprocess\"}\n",
 		},
 	}
 
@@ -210,7 +216,8 @@ func writeHookScript(t *testing.T, contents string) string {
 }
 
 func TestRunnerAllModeAccumulatesWarnings(t *testing.T) {
-	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: "~/missing-hook"})
+	missingHookPath := filepath.Join(t.TempDir(), "missing-hook")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: missingHookPath})
 	runner.processors = []Processor{warningProcessor{}}
 	result, err := runner.Apply(context.Background(), Request{
 		ToolName:    toolspec.ToolExecCommand,

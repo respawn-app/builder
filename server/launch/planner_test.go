@@ -686,6 +686,113 @@ func TestApplyRunPromptOverridesFastRoleUsesCLIProviderOverrideForHeuristic(t *t
 	}
 }
 
+func TestApplyRunPromptOverridesFailedConfigOverrideDoesNotPersistContinuation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"openai_base_url = \"https://base.example/v1\"",
+		"",
+		"[subagents.worker]",
+		"provider_override = \"openai\"",
+		"openai_base_url = \"https://worker.example/v1\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: loaded.Settings.OpenAIBaseURL}); err != nil {
+		t.Fatalf("seed continuation: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	_, _, err = ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
+		AgentRole: "worker",
+		Tools:     "not-a-tool",
+	}, auth.EmptyState())
+	if err == nil {
+		t.Fatal("expected invalid tools override to fail")
+	}
+	got := store.Meta().Continuation
+	if got == nil || got.OpenAIBaseURL != "https://base.example/v1" {
+		t.Fatalf("continuation = %+v, want unchanged base url", got)
+	}
+}
+
+func TestApplyRunPromptOverridesRoleOnlyOverridePersistsContinuation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"openai_base_url = \"https://base.example/v1\"",
+		"",
+		"[subagents.worker]",
+		"provider_override = \"openai\"",
+		"openai_base_url = \"https://worker.example/v1\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: loaded.Settings.OpenAIBaseURL}); err != nil {
+		t.Fatalf("seed continuation: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: "worker"}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.OpenAIBaseURL != "https://worker.example/v1" {
+		t.Fatalf("openai base url = %q, want worker override", updated.ActiveSettings.OpenAIBaseURL)
+	}
+	got := store.Meta().Continuation
+	if got == nil || got.OpenAIBaseURL != "https://worker.example/v1" {
+		t.Fatalf("continuation = %+v, want worker base url", got)
+	}
+}
+
 func TestApplyRunPromptOverridesCLIModelOverrideRecomputesBudgetAfterFastRole(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
