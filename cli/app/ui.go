@@ -1091,6 +1091,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
+		m.worktrees.switchPending = false
 		if msg.err != nil {
 			if !m.worktrees.isOpen() {
 				status := formatSubmissionError(msg.err)
