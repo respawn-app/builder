@@ -642,9 +642,9 @@ func TestApplyRunPromptOverridesFastRoleUsesCLIProviderOverrideForHeuristic(t *t
 	}
 
 	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
-		AgentRole:     config.BuiltInSubagentRoleFast,
+		AgentRole:        config.BuiltInSubagentRoleFast,
 		ProviderOverride: "openai",
-		OpenAIBaseURL: "https://api.openai.com/v1",
+		OpenAIBaseURL:    "https://api.openai.com/v1",
 	}, auth.State{Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}}})
 	if err != nil {
 		t.Fatalf("ApplyRunPromptOverrides: %v", err)

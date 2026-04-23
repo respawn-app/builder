@@ -149,7 +149,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 }
 
 type headlessPromptRuntime struct {
-	plan *headlessRuntimePlan
+	plan     *headlessRuntimePlan
 	warnings []string
 }
 
