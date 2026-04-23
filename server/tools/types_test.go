@@ -22,13 +22,13 @@ func (s stubHandler) Call(_ context.Context, c Call) (Result, error) {
 func TestRegistryDefinitionsFollowCentralCatalog(t *testing.T) {
 	r := NewRegistry(
 		stubHandler{id: toolspec.ToolPatch},
-		stubHandler{id: toolspec.ToolShell},
+		stubHandler{id: toolspec.ToolExecCommand},
 	)
 	defs := r.Definitions()
 	if len(defs) != 2 {
 		t.Fatalf("definitions count=%d want 2", len(defs))
 	}
-	if defs[0].ID != toolspec.ToolPatch || defs[1].ID != toolspec.ToolShell {
+	if defs[0].ID != toolspec.ToolPatch || defs[1].ID != toolspec.ToolExecCommand {
 		t.Fatalf("definition order mismatch: %+v", defs)
 	}
 	if len(defs[0].Schema) == 0 || len(defs[1].Schema) == 0 {
@@ -75,18 +75,18 @@ func TestDefaultEnabledToolIDsIncludesWebSearchAndViewImage(t *testing.T) {
 }
 
 func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
-	shell, ok := DefinitionFor(toolspec.ToolShell)
+	execTool, ok := DefinitionFor(toolspec.ToolExecCommand)
 	if !ok {
-		t.Fatalf("expected %s definition", toolspec.ToolShell)
+		t.Fatalf("expected %s definition", toolspec.ToolExecCommand)
 	}
-	if !shell.AvailableInLocalRuntime() {
-		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolShell)
+	if !execTool.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolExecCommand)
 	}
-	if shell.LocalRuntimeBuilder() != LocalRuntimeBuilderShell {
-		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolShell, shell.LocalRuntimeBuilder())
+	if execTool.LocalRuntimeBuilder() != LocalRuntimeBuilderExecCommand {
+		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolExecCommand, execTool.LocalRuntimeBuilder())
 	}
-	if !shell.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed without vision", toolspec.ToolShell)
+	if !execTool.ExposedToModelRequest(RequestExposureContext{}) {
+		t.Fatalf("expected %s to be request-exposed without vision", toolspec.ToolExecCommand)
 	}
 
 	viewImage, ok := DefinitionFor(toolspec.ToolViewImage)
@@ -104,14 +104,6 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	}
 	if !viewImage.ExposedToModelRequest(RequestExposureContext{SupportsVision: true}) {
 		t.Fatalf("expected %s to be request-exposed with vision support", toolspec.ToolViewImage)
-	}
-
-	parallel, ok := DefinitionFor(toolspec.ToolMultiToolUseParallel)
-	if !ok {
-		t.Fatalf("expected %s definition", toolspec.ToolMultiToolUseParallel)
-	}
-	if !parallel.ExposedToModelRequest(RequestExposureContext{}) {
-		t.Fatalf("expected %s to be request-exposed when enabled", toolspec.ToolMultiToolUseParallel)
 	}
 
 	triggerHandoff, ok := DefinitionFor(toolspec.ToolTriggerHandoff)
@@ -150,8 +142,8 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 }
 
 func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
-	shell, _ := DefinitionFor(toolspec.ToolShell)
-	shellMeta := shell.BuildToolCallMeta(ToolCallContext{DefaultShellTimeoutSeconds: DefaultShellTimeoutSeconds, DefaultShellPath: "/bin/zsh", GOOS: "darwin"}, json.RawMessage(`{"command":"pwd"}`))
+	execTool, _ := DefinitionFor(toolspec.ToolExecCommand)
+	shellMeta := execTool.BuildToolCallMeta(ToolCallContext{DefaultShellPath: "/bin/zsh", GOOS: "darwin"}, json.RawMessage(`{"command":"pwd"}`))
 	if !shellMeta.IsShell || shellMeta.Presentation != "shell" {
 		t.Fatalf("expected shell contract to mark shell presentation, got %+v", shellMeta)
 	}
@@ -161,8 +153,8 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	if shellMeta.Command != "pwd" || shellMeta.CompactText != "pwd" {
 		t.Fatalf("unexpected shell transcript metadata: %+v", shellMeta)
 	}
-	if shellMeta.InlineMeta != "timeout: 5m" || shellMeta.TimeoutLabel != "timeout: 5m" {
-		t.Fatalf("expected shell timeout metadata, got %+v", shellMeta)
+	if shellMeta.InlineMeta != "" || shellMeta.TimeoutLabel != "" {
+		t.Fatalf("did not expect timeout metadata on exec_command, got %+v", shellMeta)
 	}
 	if shellMeta.RenderHint == nil || shellMeta.RenderHint.Kind != transcript.ToolRenderKindShell || shellMeta.RenderHint.ShellDialect != transcript.ToolShellDialectPosix {
 		t.Fatalf("expected shell render hint with posix dialect, got %+v", shellMeta.RenderHint)
@@ -212,9 +204,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 }
 
 func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
-	shell, _ := DefinitionFor(toolspec.ToolShell)
-	got := shell.FormatToolResult(Result{
-		Name:   toolspec.ToolShell,
+	execTool, _ := DefinitionFor(toolspec.ToolExecCommand)
+	got := execTool.FormatToolResult(Result{
+		Name:   toolspec.ToolExecCommand,
 		Output: json.RawMessage(`{"output":" \n\t ","exit_code":0,"truncated":false}`),
 	})
 

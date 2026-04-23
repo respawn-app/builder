@@ -1,6 +1,10 @@
 package llm
 
-import "strings"
+import (
+	"strings"
+
+	"builder/shared/config"
+)
 
 type ModelMetadata struct {
 	ContextWindowTokens      int
@@ -56,13 +60,6 @@ func SupportsVisionInputsModel(model string) bool {
 	return ok && contract.SupportsVisionInputs
 }
 
-// SupportsMultiToolUseParallelModel reports whether the model benefits from the
-// Codex-style parallel tool wrapper compatibility schema.
-func SupportsMultiToolUseParallelModel(model string) bool {
-	contract, ok := LookupModelCapabilityContract(model)
-	return ok && contract.SupportsMultiToolUseParallel
-}
-
 // SupportsVerbosityModel reports whether Responses API text verbosity should be
 // sent for the given model identifier. Unknown models default to false because
 // unsupported verbosity fields can hard-fail requests.
@@ -87,6 +84,19 @@ func LookupModelMetadata(model string) (ModelMetadata, bool) {
 		ContextWindowTokens:      contract.ContextWindowTokens,
 		LargeContextWindowTokens: contract.LargeContextWindowTokens,
 	}, contract.ContextWindowTokens > 0 || contract.LargeContextWindowTokens > 0
+}
+
+func ApplyDerivedModelContextBudget(settings *config.Settings, model string, fallbackWindow, fallbackThreshold int) {
+	if settings == nil {
+		return
+	}
+	if meta, ok := LookupModelMetadata(model); ok && meta.ContextWindowTokens > 0 {
+		settings.ModelContextWindow = meta.ContextWindowTokens
+		settings.ContextCompactionThresholdTokens = meta.ContextWindowTokens * 95 / 100
+		return
+	}
+	settings.ModelContextWindow = fallbackWindow
+	settings.ContextCompactionThresholdTokens = fallbackThreshold
 }
 
 func SupportedThinkingLevelsModel(model string) []string {

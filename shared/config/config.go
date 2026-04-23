@@ -24,6 +24,7 @@ type CompactionMode string
 type BGShellsOutputMode string
 type CacheWarningMode string
 type ModelVerbosity string
+type ShellPostprocessingMode string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
@@ -45,6 +46,11 @@ const (
 	ModelVerbosityLow    ModelVerbosity = "low"
 	ModelVerbosityMedium ModelVerbosity = "medium"
 	ModelVerbosityHigh   ModelVerbosity = "high"
+
+	ShellPostprocessingModeNone    ShellPostprocessingMode = "none"
+	ShellPostprocessingModeBuiltin ShellPostprocessingMode = "builtin"
+	ShellPostprocessingModeUser    ShellPostprocessingMode = "user"
+	ShellPostprocessingModeAll     ShellPostprocessingMode = "all"
 )
 
 type LoadOptions struct {
@@ -53,14 +59,22 @@ type LoadOptions struct {
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
-	ShellTimeoutSeconds int
 	Tools               string
 	OpenAIBaseURL       string
 }
 
 type Timeouts struct {
 	ModelRequestSeconds int
-	ShellDefaultSeconds int
+}
+
+type ShellSettings struct {
+	PostprocessingMode ShellPostprocessingMode
+	PostprocessHook    string
+}
+
+type SubagentRole struct {
+	Settings Settings
+	Sources  map[string]string
 }
 
 type Settings struct {
@@ -92,8 +106,10 @@ type Settings struct {
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
 	BGShellsOutput                   BGShellsOutputMode
+	Shell                            ShellSettings
 	CacheWarningMode                 CacheWarningMode
 	Reviewer                         ReviewerSettings
+	Subagents                        map[string]SubagentRole
 }
 
 type ModelCapabilitiesOverride struct {

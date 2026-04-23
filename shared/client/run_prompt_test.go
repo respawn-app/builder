@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"builder/shared/serverapi"
@@ -20,7 +21,7 @@ func TestLoopbackRunPromptClientDelegatesToService(t *testing.T) {
 	if svc.request.Prompt != "hello" {
 		t.Fatalf("service request prompt = %q, want hello", svc.request.Prompt)
 	}
-	if result != svc.response {
+	if !reflect.DeepEqual(result, svc.response) {
 		t.Fatalf("result = %+v, want %+v", result, svc.response)
 	}
 }

@@ -51,7 +51,6 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		workspaceRoot,
 		store.Meta().SessionID,
 		enabledTools,
-		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
 		time.Duration(active.MinimumExecToBgSeconds)*time.Second,
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,

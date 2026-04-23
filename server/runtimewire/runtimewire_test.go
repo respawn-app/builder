@@ -31,8 +31,7 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 	registry, _, _, err := BuildToolRegistry(
 		workspace,
 		"",
-		[]toolspec.ID{toolspec.ToolShell, toolspec.ToolWebSearch},
-		5*time.Second,
+		[]toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolWebSearch},
 		15*time.Second,
 		16_000,
 		false,
@@ -49,8 +48,8 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 	if len(defs) != 1 {
 		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
 	}
-	if defs[0].ID != toolspec.ToolShell {
-		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
+	if defs[0].ID != toolspec.ToolExecCommand {
+		t.Fatalf("expected exec_command runtime tool definition, got %+v", defs[0])
 	}
 }
 
@@ -67,7 +66,6 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		workspace,
 		"",
 		[]toolspec.ID{toolspec.ToolViewImage},
-		5*time.Second,
 		15*time.Second,
 		16_000,
 		false,
@@ -129,7 +127,6 @@ func TestBuildToolRegistryMissingWorkspaceRootSuggestsRebind(t *testing.T) {
 				missingWorkspace,
 				sessionID,
 				[]toolspec.ID{tt.tool},
-				5*time.Second,
 				15*time.Second,
 				16_000,
 				false,
@@ -358,10 +355,9 @@ func TestNewRuntimeWiringRejectsEmptyModelAfterBypassingConfigDefaults(t *testin
 			ModelContextWindow: 272_000,
 			Timeouts: config.Timeouts{
 				ModelRequestSeconds: 1,
-				ShellDefaultSeconds: 1,
 			},
 		},
-		[]toolspec.ID{toolspec.ToolShell},
+		[]toolspec.ID{toolspec.ToolExecCommand},
 		root,
 		auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, nil),
 		nil,

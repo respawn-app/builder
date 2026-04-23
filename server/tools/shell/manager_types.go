@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"builder/shared/tokenutil"
 )
 
 const (
@@ -37,6 +35,7 @@ type Event struct {
 	Type             EventType
 	Snapshot         Snapshot
 	Preview          string
+	PreviewProcessed bool
 	Removed          int
 	NoticeSuppressed bool
 }
@@ -74,6 +73,7 @@ type ExecRequest struct {
 	YieldTime      time.Duration
 	MaxOutputChars int
 	KeepStdinOpen  bool
+	Raw            bool
 }
 
 type ExecResult struct {
@@ -85,10 +85,8 @@ type ExecResult struct {
 	ExitCode          *int
 	Running           bool
 	Backgrounded      bool
-	OriginalChars     int
-	Truncated         bool
-	TruncationBytes   int
 	MovedToBackground bool
+	SemanticProcessed bool
 }
 
 type BackgroundNoticeSummary struct {
@@ -138,6 +136,7 @@ type processEntry struct {
 	ownerStepID    string
 	command        string
 	workdir        string
+	raw            bool
 	startedAt      time.Time
 	finishedAt     time.Time
 	exitCode       *int
@@ -373,10 +372,6 @@ func waitForEntryDone(entry *processEntry, timeout time.Duration) bool {
 	case <-timer.C:
 		return false
 	}
-}
-
-func approxTokenCount(chars int) int {
-	return tokenutil.ApproxTokenCount(chars)
 }
 
 func countOutputLines(text string) int {

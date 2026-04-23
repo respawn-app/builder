@@ -22,7 +22,7 @@ func TestSubmitUserMessageDoesNotEmitCommittedConversationUpdatedAfterFlushedUse
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 	events := make([]Event, 0, 16)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -46,7 +46,7 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 	client := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -55,7 +55,7 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 		},
 	}}
 	events := make([]Event, 0, 32)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -107,7 +107,7 @@ func TestHostedToolOnlyTurnEmitsCommittedConversationUpdatedBeforeFollowUpAssist
 	}
 	events := make([]Event, 0, 24)
 	autoCompactionEnabled := false
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		WebSearchMode:         "native",
 		EnabledTools:          []toolspec.ID{toolspec.ToolWebSearch},
@@ -166,7 +166,7 @@ func TestHostedToolOnlyMissingPhaseTurnEmitsCommittedConversationUpdatedAfterHos
 	}
 	events := make([]Event, 0, 24)
 	autoCompactionEnabled := false
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		WebSearchMode:         "native",
 		EnabledTools:          []toolspec.ID{toolspec.ToolWebSearch},
@@ -209,7 +209,7 @@ func TestReviewerTranscriptPathsUseRichEventsWithoutCommittedConversationUpdated
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 	events := make([]Event, 0, 48)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",

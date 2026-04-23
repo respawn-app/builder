@@ -13,6 +13,122 @@ func validateSettings(v Settings, sources map[string]string) error {
 	return configRegistry.validate(settingsState{Settings: v}, sources)
 }
 
+func validateSubagentRoleState(state settingsState, sources map[string]string) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	candidate := state
+	inheritReviewerDefaults(&candidate.Settings)
+
+	checks := []struct {
+		enabled bool
+		check   settingsValidator
+	}{
+		{enabled: hasExplicitSource(sources, "model"), check: validateModelNotEmpty},
+		{enabled: hasExplicitSource(sources, "provider_override"), check: validateProviderOverrideValue},
+		{enabled: hasExplicitSource(sources, "provider_override", "openai_base_url"), check: validateOpenAIBaseURL},
+		{enabled: hasExplicitPrefix(sources, "provider_capabilities."), check: validateProviderCapabilitiesProviderID},
+		{enabled: hasExplicitSource(sources, "model_verbosity"), check: validateModelVerbosity},
+		{enabled: hasExplicitSource(sources, "theme"), check: validateTheme},
+		{enabled: hasExplicitSource(sources, "tui_alternate_screen"), check: validateTUIAlternateScreen},
+		{enabled: hasExplicitSource(sources, "notification_method"), check: validateNotificationMethod},
+		{enabled: hasExplicitSource(sources, "server_host"), check: validateServerHost},
+		{enabled: hasExplicitSource(sources, "server_port"), check: validateServerPort},
+		{enabled: hasExplicitSource(sources, "web_search"), check: validateWebSearch},
+		{enabled: hasExplicitSource(sources, "timeouts.model_request_seconds"), check: validateTimeouts},
+		{enabled: hasExplicitSource(sources, "shell_output_max_chars"), check: validateShellOutputMaxChars},
+		{enabled: hasExplicitSource(sources, "minimum_exec_to_bg_seconds"), check: validateMinimumExecToBgSeconds},
+		{enabled: hasExplicitSource(sources, "bg_shells_output"), check: validateBGShellsOutput},
+		{enabled: hasExplicitSource(sources, "shell.postprocessing_mode", "shell.postprocess_hook"), check: validateShellPostprocessing},
+		{enabled: hasExplicitSource(sources, "cache_warning_mode"), check: validateCacheWarningMode},
+		{enabled: hasExplicitSource(sources, "compaction_mode"), check: validateCompactionMode},
+		{enabled: hasExplicitPrefix(sources, "reviewer."), check: validateReviewer},
+	}
+	for _, check := range checks {
+		if !check.enabled {
+			continue
+		}
+		if err := check.check(candidate, sources); err != nil {
+			return err
+		}
+	}
+	if err := validateSubagentRoleContext(candidate, sources); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSubagentRoleContext(state settingsState, sources map[string]string) error {
+	hasWindow := hasExplicitSource(sources, "model_context_window")
+	hasThreshold := hasExplicitSource(sources, "context_compaction_threshold_tokens")
+	hasLead := hasExplicitSource(sources, "pre_submit_compaction_lead_tokens")
+	if !hasWindow && !hasThreshold && !hasLead {
+		return nil
+	}
+	if hasWindow && state.Settings.ModelContextWindow <= 0 {
+		return fmt.Errorf("model_context_window must be > 0")
+	}
+	if hasThreshold && state.Settings.ContextCompactionThresholdTokens <= 0 {
+		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
+	}
+	if hasLead && state.Settings.PreSubmitCompactionLeadTokens <= 0 {
+		return fmt.Errorf("pre_submit_compaction_lead_tokens must be > 0")
+	}
+	if !hasWindow || !hasThreshold {
+		return nil
+	}
+	if state.Settings.ContextCompactionThresholdTokens >= state.Settings.ModelContextWindow {
+		return fmt.Errorf("context_compaction_threshold_tokens must be < model_context_window")
+	}
+	minimumThreshold := compaction.MinimumThresholdTokens(state.Settings.ModelContextWindow)
+	if state.Settings.ContextCompactionThresholdTokens < minimumThreshold {
+		return fmt.Errorf(
+			"context_compaction_threshold_tokens must be >= %d (%d%% of model_context_window=%d)",
+			minimumThreshold,
+			compaction.MinimumWindowPercent,
+			state.Settings.ModelContextWindow,
+		)
+	}
+	if !hasLead {
+		return nil
+	}
+	effectivePreSubmitThreshold := compaction.EffectivePreSubmitThresholdTokens(
+		state.Settings.ContextCompactionThresholdTokens,
+		state.Settings.PreSubmitCompactionLeadTokens,
+	)
+	if effectivePreSubmitThreshold < minimumThreshold {
+		return fmt.Errorf(
+			"pre_submit_compaction_lead_tokens makes the effective pre-submit threshold %d, below %d (%d%% of model_context_window=%d)",
+			effectivePreSubmitThreshold,
+			minimumThreshold,
+			compaction.MinimumWindowPercent,
+			state.Settings.ModelContextWindow,
+		)
+	}
+	return nil
+}
+
+func hasExplicitSource(sources map[string]string, keys ...string) bool {
+	for _, key := range keys {
+		if strings.TrimSpace(sources[key]) == "file" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExplicitPrefix(sources map[string]string, prefix string) bool {
+	for key, source := range sources {
+		if strings.TrimSpace(source) != "file" {
+			continue
+		}
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateModelNotEmpty(state settingsState, _ map[string]string) error {
 	if strings.TrimSpace(state.Settings.Model) == "" {
 		return errors.New("settings model must not be empty")
@@ -125,9 +241,6 @@ func validateTimeouts(state settingsState, _ map[string]string) error {
 	if state.Settings.Timeouts.ModelRequestSeconds <= 0 {
 		return fmt.Errorf("timeouts.model_request_seconds must be > 0")
 	}
-	if state.Settings.Timeouts.ShellDefaultSeconds <= 0 {
-		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
-	}
 	return nil
 }
 
@@ -151,6 +264,15 @@ func validateBGShellsOutput(state settingsState, _ map[string]string) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid bg_shells_output %q (expected default|verbose|concise)", state.Settings.BGShellsOutput)
+	}
+}
+
+func validateShellPostprocessing(state settingsState, _ map[string]string) error {
+	switch normalizeShellPostprocessingMode(string(state.Settings.Shell.PostprocessingMode)) {
+	case ShellPostprocessingModeNone, ShellPostprocessingModeBuiltin, ShellPostprocessingModeUser, ShellPostprocessingModeAll:
+		return nil
+	default:
+		return fmt.Errorf("invalid shell.postprocessing_mode %q (expected none|builtin|user|all)", state.Settings.Shell.PostprocessingMode)
 	}
 }
 
@@ -262,6 +384,21 @@ func normalizeCacheWarningMode(raw string) CacheWarningMode {
 		return CacheWarningModeVerbose
 	default:
 		return CacheWarningMode(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeShellPostprocessingMode(raw string) ShellPostprocessingMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "none":
+		return ShellPostprocessingModeNone
+	case "builtin":
+		return ShellPostprocessingModeBuiltin
+	case "user":
+		return ShellPostprocessingModeUser
+	case "all":
+		return ShellPostprocessingModeAll
+	default:
+		return ShellPostprocessingMode(strings.TrimSpace(raw))
 	}
 }
 

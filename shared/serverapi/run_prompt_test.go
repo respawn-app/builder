@@ -39,6 +39,7 @@ func TestPromptServiceRunsPromptThroughPreparedRuntime(t *testing.T) {
 			sessionID:   "session-1",
 			sessionName: "session one",
 			assistant:   PromptAssistantMessage{Content: "done"},
+			warnings:    []string{"warning one"},
 		},
 	}
 	service := NewPromptService(launcher)
@@ -68,6 +69,9 @@ func TestPromptServiceRunsPromptThroughPreparedRuntime(t *testing.T) {
 	}
 	if result.SessionID != "session-1" || result.SessionName != "session one" || result.Result != "done" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "warning one" {
+		t.Fatalf("unexpected warnings: %+v", result.Warnings)
 	}
 	if len(progresses) != 1 || progresses[0].Kind != RunPromptProgressKindStatus {
 		t.Fatalf("unexpected progress events: %+v", progresses)
@@ -151,6 +155,7 @@ type stubPromptSessionRuntime struct {
 	assistant   PromptAssistantMessage
 	err         error
 	dropped     uint64
+	warnings    []string
 	prompt      string
 	closed      bool
 	logs        []string
@@ -175,6 +180,10 @@ func (s *stubPromptSessionRuntime) SessionName() string {
 
 func (s *stubPromptSessionRuntime) DroppedEvents() uint64 {
 	return s.dropped
+}
+
+func (s *stubPromptSessionRuntime) Warnings() []string {
+	return append([]string(nil), s.warnings...)
 }
 
 func (s *stubPromptSessionRuntime) Logf(format string, args ...any) {

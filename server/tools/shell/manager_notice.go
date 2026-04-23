@@ -92,6 +92,20 @@ func effectiveBackgroundOutputMode(exitCode *int, successMode BackgroundOutputMo
 }
 
 func backgroundNoticePreview(evt Event, maxChars int, mode BackgroundOutputMode) (string, int, bool) {
+	if evt.PreviewProcessed {
+		if mode == BackgroundOutputConcise {
+			return "", 0, false
+		}
+		preview := strings.TrimSpace(evt.Preview)
+		if preview == "" {
+			return "", 0, false
+		}
+		if mode == BackgroundOutputVerbose {
+			return preview, countOutputLines(preview), false
+		}
+		display, truncated, _ := truncateBackgroundOutput(preview, maxChars)
+		return display, countOutputLines(preview), truncated
+	}
 	if strings.TrimSpace(evt.Snapshot.LogPath) != "" {
 		preview, lineCount, truncated, err := readBackgroundSummaryFromFile(evt.Snapshot.LogPath, maxChars, mode)
 		if err == nil {
@@ -328,11 +342,19 @@ func formatExecResponse(result ExecResult) string {
 	if strings.TrimSpace(result.Warning) != "" {
 		sections = append(sections, result.Warning)
 	}
+	if result.SemanticProcessed && result.ExitCode != nil && *result.ExitCode == 0 && !result.MovedToBackground {
+		if output == "" {
+			sections = append(sections, noOutputText)
+			return strings.Join(sections, "\n")
+		}
+		sections = append(sections, output)
+		return strings.Join(sections, "\n")
+	}
 	if result.MovedToBackground {
 		sections = append(sections, formatBackgroundTransitionLine(result.SessionID, output != ""))
 	}
 	if result.ExitCode != nil {
-		sections = append(sections, fmt.Sprintf("Process exited with code %d", *result.ExitCode))
+		sections = append(sections, fmt.Sprintf("Exit code %d, output:", *result.ExitCode))
 	} else if strings.TrimSpace(result.SessionID) != "" && !result.MovedToBackground {
 		sections = append(sections, fmt.Sprintf("Process running with session ID %s", result.SessionID))
 	}
@@ -341,9 +363,6 @@ func formatExecResponse(result ExecResult) string {
 	}
 	if result.Backgrounded && result.ExitCode != nil && strings.TrimSpace(result.OutputPath) != "" {
 		sections = append(sections, fmt.Sprintf("Log file: %s", result.OutputPath))
-	}
-	if result.Truncated {
-		sections = append(sections, fmt.Sprintf("Original token count: %d", approxTokenCount(result.OriginalChars)))
 	}
 	if output == "" {
 		sections = append(sections, noOutputText)

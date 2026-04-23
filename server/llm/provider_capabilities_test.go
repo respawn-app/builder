@@ -4,7 +4,9 @@ import (
 	"errors"
 	"testing"
 
+	"builder/server/auth"
 	"builder/server/session"
+	"builder/shared/config"
 )
 
 func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
@@ -33,6 +35,73 @@ func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
 
 func TestInferProviderCapabilities_UnknownProviderFailsExplicitly(t *testing.T) {
 	_, err := InferProviderCapabilities("custom-provider")
+	if !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestProviderCapabilitiesForSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		auth     auth.State
+		settings config.Settings
+		wantID   string
+	}{
+		{
+			name:     "explicit capability override wins",
+			settings: config.Settings{ProviderCapabilities: config.ProviderCapabilitiesOverride{ProviderID: "openai-compatible", SupportsResponsesAPI: true}},
+			wantID:   "openai-compatible",
+		},
+		{
+			name:     "explicit provider override wins",
+			settings: config.Settings{ProviderOverride: "anthropic"},
+			wantID:   "anthropic",
+		},
+		{
+			name:     "oauth defaults to chatgpt codex",
+			auth:     auth.State{Method: auth.Method{Type: auth.MethodOAuth}},
+			settings: config.Settings{},
+			wantID:   "chatgpt-codex",
+		},
+		{
+			name:     "api key with first party base url stays openai",
+			auth:     auth.State{Method: auth.Method{Type: auth.MethodAPIKey}},
+			settings: config.Settings{OpenAIBaseURL: "https://api.openai.com/v1"},
+			wantID:   "openai",
+		},
+		{
+			name:     "api key with compatible base url uses openai compatible",
+			auth:     auth.State{Method: auth.Method{Type: auth.MethodAPIKey}},
+			settings: config.Settings{OpenAIBaseURL: "https://example.test/v1"},
+			wantID:   "openai-compatible",
+		},
+		{
+			name:     "none auth with no override falls back to openai",
+			auth:     auth.State{Method: auth.Method{Type: auth.MethodNone}},
+			settings: config.Settings{},
+			wantID:   "openai",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ProviderCapabilitiesForSettings(tt.auth, tt.settings)
+			if err != nil {
+				t.Fatalf("ProviderCapabilitiesForSettings: %v", err)
+			}
+			want, err := InferProviderCapabilities(tt.wantID)
+			if err != nil {
+				t.Fatalf("InferProviderCapabilities(%q): %v", tt.wantID, err)
+			}
+			if got != want {
+				t.Fatalf("capabilities = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestProviderCapabilitiesForSettingsRejectsUnsupportedProviderOverride(t *testing.T) {
+	_, err := ProviderCapabilitiesForSettings(auth.EmptyState(), config.Settings{ProviderOverride: "custom-provider"})
 	if !errors.Is(err, ErrUnsupportedProvider) {
 		t.Fatalf("expected unsupported provider error, got %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,6 +228,48 @@ func TestProjectSubcommandPrintsBoundProjectID(t *testing.T) {
 	}
 }
 
+func TestProjectSubcommandHelpExplainsLookupAndSubcommands(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := projectSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder project:") ||
+		!strings.Contains(got, "builder project [path]") ||
+		!strings.Contains(got, "builder project list") ||
+		!strings.Contains(got, "For local loopback mode") {
+		t.Fatalf("stderr = %q, want expanded project help", got)
+	}
+}
+
+func TestProjectListSubcommandHelpExplainsColumns(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := projectListSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder project list:") ||
+		!strings.Contains(got, "Output columns are") {
+		t.Fatalf("stderr = %q, want project list help", got)
+	}
+}
+
+func TestProjectCreateSubcommandHelpExplainsServerVisiblePath(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := projectCreateSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder project create:") ||
+		!strings.Contains(got, "must be visible to the Builder server") ||
+		!strings.Contains(got, "Flags:") {
+		t.Fatalf("stderr = %q, want project create help", got)
+	}
+}
+
 func TestProjectSubcommandTreatsNestedDirectoryAsUnregistered(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -416,6 +459,21 @@ func TestAttachSubcommandWithoutProjectGuidanceFailsWhenCurrentWorkspaceUnregist
 	}
 }
 
+func TestAttachSubcommandHelpExplainsProjectInference(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := attachSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder attach:") ||
+		!strings.Contains(got, "Without `--project`") ||
+		!strings.Contains(got, "Against a remote daemon") ||
+		!strings.Contains(got, "Flags:") {
+		t.Fatalf("stderr = %q, want expanded attach help", got)
+	}
+}
+
 func TestAttachSubcommandRejectsUnknownExplicitProjectIDCleanly(t *testing.T) {
 	home := t.TempDir()
 	target := t.TempDir()
@@ -577,6 +635,20 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	}
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <session-id> and <new-path>")) {
 		t.Fatalf("stderr = %q, want usage guidance", got)
+	}
+}
+
+func TestRebindSubcommandHelpExplainsRetargeting(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rebindSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder rebind:") ||
+		!strings.Contains(got, "Retarget one session") ||
+		!strings.Contains(got, "must not already be bound") {
+		t.Fatalf("stderr = %q, want expanded rebind help", got)
 	}
 }
 

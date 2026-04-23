@@ -151,7 +151,6 @@ func loadSessionServerConfig(opts Options) (config.App, error) {
 		ThinkingLevel:       opts.ThinkingLevel,
 		Theme:               opts.Theme,
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               opts.Tools,
 		OpenAIBaseURL:       opts.OpenAIBaseURL,
 	})

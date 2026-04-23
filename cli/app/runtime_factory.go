@@ -172,11 +172,9 @@ func configSourceLines(src config.SourceReport) []string {
 type localToolRuntimeContext struct {
 	workspaceRoot                   string
 	ownerSessionID                  string
-	shellDefaultTimeout             time.Duration
 	shellOutputMaxChars             int
 	allowNonCwdEdits                bool
 	supportsVision                  bool
-	registryProvider                func() *tools.Registry
 	askQuestionBroker               *askquestion.Broker
 	backgroundShellManager          *shelltool.Manager
 	triggerHandoffController        func() triggerhandofftool.Controller
@@ -189,11 +187,9 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 	return runtimewire.BuildLocalRuntimeHandler(def, runtimewire.LocalToolRuntimeContext{
 		WorkspaceRoot:                   ctx.workspaceRoot,
 		OwnerSessionID:                  ctx.ownerSessionID,
-		ShellDefaultTimeout:             ctx.shellDefaultTimeout,
 		ShellOutputMaxChars:             ctx.shellOutputMaxChars,
 		AllowNonCwdEdits:                ctx.allowNonCwdEdits,
 		SupportsVision:                  ctx.supportsVision,
-		RegistryProvider:                ctx.registryProvider,
 		AskQuestionBroker:               ctx.askQuestionBroker,
 		BackgroundShellManager:          ctx.backgroundShellManager,
 		TriggerHandoffController:        ctx.triggerHandoffController,
@@ -203,12 +199,11 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 	})
 }
 
-func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	return runtimewire.BuildToolRegistry(
 		workspaceRoot,
 		ownerSessionID,
 		enabled,
-		shellDefaultTimeout,
 		minimumExecToBgTime,
 		shellOutputMaxChars,
 		allowNonCwdEdits,

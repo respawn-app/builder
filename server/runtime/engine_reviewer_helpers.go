@@ -40,7 +40,28 @@ func parseReviewerSuggestionsObject(content string) []string {
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 		return nil
 	}
-	return payload.Suggestions
+	return sanitizeReviewerSuggestions(payload.Suggestions)
+}
+
+func sanitizeReviewerSuggestions(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, suggestion := range in {
+		trimmed := strings.TrimSpace(suggestion)
+		if trimmed == "" {
+			continue
+		}
+		if strings.EqualFold(trimmed, reviewerNoopToken) {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {

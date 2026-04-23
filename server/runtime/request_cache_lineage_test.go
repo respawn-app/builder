@@ -321,7 +321,7 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
 		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolShell}})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolExecCommand}})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -356,8 +356,8 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 	if got, want := req.FastMode, eng.FastModeEnabled(); got != want {
 		t.Fatalf("FastMode = %v, want %v", got, want)
 	}
-	if len(req.Tools) != 1 || req.Tools[0].Name != string(toolspec.ToolShell) {
-		t.Fatalf("Tools = %+v, want shell tool contract", req.Tools)
+	if len(req.Tools) != 1 || req.Tools[0].Name != string(toolspec.ToolExecCommand) {
+		t.Fatalf("Tools = %+v, want exec_command tool contract", req.Tools)
 	}
 }
 

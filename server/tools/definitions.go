@@ -19,41 +19,8 @@ type CatalogEntry struct {
 
 var catalogEntries = []CatalogEntry{
 	{
-		ID:             toolspec.ToolShell,
-		Aliases:        []string{"bash", "bash_command", "shell_command"},
-		Description:    "Execute a shell command in the user's environment and device.",
-		DefaultEnabled: true,
-		Contract: localContract(
-			LocalRuntimeBuilderShell,
-			RequestExposure{Enabled: true},
-			transcript.ToolPresentationShell,
-			transcript.ToolCallRenderBehaviorShell,
-			false,
-			shellToolCallMeta(toolspec.ToolShell),
-			formatGenericToolResult,
-		),
-		Schema: json.RawMessage(`{
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "command": {
-      "type": "string",
-      "description": "Command line to execute in login shell."
-    },
-    "timeout_seconds": {
-      "type": "integer",
-      "description": "Optional timeout in seconds (max 3600)."
-    },
-    "workdir": {
-      "type": "string",
-      "description": "Optional working directory, otherwise - cwd."
-    }
-  }
-}`),
-	},
-	{
 		ID:             toolspec.ToolExecCommand,
-		Aliases:        nil,
+		Aliases:        []string{"bash", "bash_command", "shell", "shell_command"},
 		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
 		DefaultEnabled: true,
 		Contract: localContract(
@@ -89,6 +56,10 @@ var catalogEntries = []CatalogEntry{
     "tty": {
       "type": "boolean",
       "description": "Whether to keep stdin open for follow-up write_stdin calls. Defaults to false."
+    },
+    "raw": {
+      "type": "boolean",
+      "description": "Bypasses semantic command post-processing while keeping normal sanitization and truncation behavior. Defaults to false."
     },
     "yield_time_ms": {
       "type": "integer",
@@ -288,47 +259,6 @@ var catalogEntries = []CatalogEntry{
       "type": "array",
       "description": "Optional blocklist of domains to exclude low-quality or irrelevant sources.",
       "items": {"type": "string"}
-    }
-  }
-}`),
-	},
-	{
-		ID:             toolspec.ToolMultiToolUseParallel,
-		Aliases:        []string{"parallel"},
-		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
-		DefaultEnabled: false,
-		Contract: localContract(
-			LocalRuntimeBuilderMultiToolUseParallel,
-			RequestExposure{Enabled: true},
-			transcript.ToolPresentationDefault,
-			transcript.ToolCallRenderBehaviorDefault,
-			false,
-			defaultToolCallMeta(toolspec.ToolMultiToolUseParallel),
-			formatGenericToolResult,
-		),
-		Schema: json.RawMessage(`{
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["tool_uses"],
-  "properties": {
-    "tool_uses": {
-      "type": "array",
-      "description": "The tools to be executed in parallel. NOTE: only functions tools are permitted",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["recipient_name", "parameters"],
-        "properties": {
-          "recipient_name": {
-            "type": "string",
-            "description": "The name of the tool to use. The format must be functions.<function_name>."
-          },
-          "parameters": {
-            "type": "object",
-            "description": "The parameters to pass to the tool. Ensure these are valid according to that tool's own specifications."
-          }
-        }
-      }
     }
   }
 }`),

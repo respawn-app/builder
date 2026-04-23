@@ -45,10 +45,9 @@ func transcriptToolCallMeta(call llm.ToolCall, workingDir string) *transcript.To
 		return meta
 	}
 	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
-		WorkingDir:                 workingDir,
-		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-		DefaultShellPath:           currentTranscriptDefaultShellPath(),
-		GOOS:                       goruntime.GOOS,
+		WorkingDir:       workingDir,
+		DefaultShellPath: currentTranscriptDefaultShellPath(),
+		GOOS:             goruntime.GOOS,
 	}, call.Input)
 	return &built
 }

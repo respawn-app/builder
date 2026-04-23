@@ -1248,7 +1248,7 @@ func TestProjectedRuntimeBatchesPreserveImmediateLiveEventsAndLaterCommittedAppe
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}}),
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
 	}
 	next, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
 	m = next.(*uiModel)
@@ -1269,7 +1269,7 @@ func TestProjectedRuntimeBatchesPreserveImmediateLiveEventsAndLaterCommittedAppe
 	}
 
 	secondBatch := []clientui.Event{
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: []byte("/tmp")}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: []byte("/tmp")}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}}),
 	}
 	next, cmd = m.Update(runtimeEventBatchMsg{events: secondBatch})
@@ -1302,14 +1302,14 @@ func TestProjectedRuntimeBatchPreservesQueuedUserFlushBetweenToolCompletionAndAs
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	firstBatch := []clientui.Event{
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
 	}
 	next, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
 	m = next.(*uiModel)
 	_ = collectCmdMessages(t, cmd)
 
 	secondBatch := []clientui.Event{
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: []byte("/tmp")}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: toolspec.ToolExecCommand, Output: []byte("/tmp")}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "steer now"}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}}),
 	}

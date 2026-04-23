@@ -34,6 +34,10 @@ func NormalizeSettingsForPersistence(settings Settings) (Settings, error) {
 	return normalized, nil
 }
 
+func ValidateSettingsWithSources(settings Settings, sources map[string]string) error {
+	return validateSettings(settings, sources)
+}
+
 func parseEnabledToolsCSV(raw string) ([]toolspec.ID, error) {
 	parts := strings.Split(raw, ",")
 	seen := map[toolspec.ID]bool{}
@@ -43,7 +47,7 @@ func parseEnabledToolsCSV(raw string) ([]toolspec.ID, error) {
 		if name == "" {
 			continue
 		}
-		id, ok := toolspec.ParseID(name)
+		id, ok := toolspec.ParseConfigID(name)
 		if !ok {
 			return nil, fmt.Errorf("unknown tool %q", name)
 		}

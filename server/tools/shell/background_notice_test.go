@@ -79,6 +79,27 @@ func TestSummarizeBackgroundEventVerboseSuccessIncludesFullOutput(t *testing.T) 
 	}
 }
 
+func TestSummarizeBackgroundEventUsesProcessedPreviewWhenAvailable(t *testing.T) {
+	exitCode := 0
+	summary := SummarizeBackgroundEvent(Event{
+		Type: EventCompleted,
+		Snapshot: Snapshot{
+			ID:       "1000",
+			State:    "completed",
+			ExitCode: &exitCode,
+		},
+		Preview:          "PASS",
+		PreviewProcessed: true,
+	}, BackgroundNoticeOptions{MaxChars: 80, SuccessOutputMode: BackgroundOutputDefault})
+
+	if !strings.Contains(summary.DetailText, "Output:\nPASS") {
+		t.Fatalf("expected processed preview in summary, got %q", summary.DetailText)
+	}
+	if summary.LineCount != 1 {
+		t.Fatalf("expected processed preview line count 1, got %d", summary.LineCount)
+	}
+}
+
 func TestSummarizeBackgroundEventConciseSuccessOmitsOutputSection(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "1000.log")
 	if err := os.WriteFile(logPath, []byte("alpha\n"), 0o644); err != nil {
@@ -246,7 +267,7 @@ func TestFormatExecResponseBlankOutputUsesNoOutput(t *testing.T) {
 	exitCode := 1
 	text := formatExecResponse(ExecResult{ExitCode: &exitCode, Output: " \n\t "})
 
-	if !strings.Contains(text, "Process exited with code 1") {
+	if !strings.Contains(text, "Exit code 1, output:") {
 		t.Fatalf("expected exit code line, got %q", text)
 	}
 	if !strings.Contains(text, "\nNo output") {
@@ -288,5 +309,19 @@ func TestFormatExecResponseBackgroundTransitionWithoutOutputPreservesNoOutput(t 
 	}
 	if strings.Contains(text, "Output:") {
 		t.Fatalf("did not expect output header for blank background output, got %q", text)
+	}
+}
+
+func TestFormatExecResponseSemanticSuccessPreservesWarnings(t *testing.T) {
+	exitCode := 0
+	text := formatExecResponse(ExecResult{
+		ExitCode:          &exitCode,
+		SemanticProcessed: true,
+		Output:            "PASS",
+		Warning:           "hook warning",
+	})
+
+	if text != "hook warning\nPASS" {
+		t.Fatalf("unexpected semantic response text: %q", text)
 	}
 }

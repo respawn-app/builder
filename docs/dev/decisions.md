@@ -16,28 +16,41 @@
 
 ## Core Runtime And Tools
 
-- Core tools: `shell`, `view_image`, `patch`, `ask_question`.
+- Core tools: `exec_command`, `write_stdin`, `view_image`, `patch`, `ask_question`.
 - Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
-- Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
-- Tool execution concurrency inside a model step is unbounded.
-- Parallel call results are always returned in model-declared order.
-- If one parallel call fails, in-flight calls are allowed to finish before returning ordered results.
-- Ordered-result buffering is strict and uncapped in v1.
 
-## Shell Tool
+## Command Execution Tool
 
+- `exec_command` is the sole shell-command execution surface; the legacy `shell` tool is removed from future design decisions.
 - Runs in the user login shell.
-- Stateless per call (no persistent shell process state between calls).
 - Executes in non-TTY mode (pipes, not PTY).
 - Uses direct shell invocation only (no runtime command parsing/AST preprocessing).
 - Inherits parent environment and adds non-interactive hints.
 - Merges stdout/stderr into one stream without origin tags.
-- Default timeout is 5 minutes.
-- Per-call timeout override is allowed up to 1 hour.
+- Command execution has no explicit timeout. `yield_time_ms` only controls when Builder returns control and backgrounds the process.
+- Command lifetime is unlimited. `yield_time_ms` only controls when Builder returns control and backgrounds the process.
 - Non-zero exit is recoverable (does not auto-abort the turn).
 - No automatic retry for shell process-launch failures.
 - Interrupt escalation is `SIGINT` then `SIGKILL` after 10s grace.
+- Command output semantic post-processing is built into Builder, not delegated to shell wrappers. It applies after command execution and base sanitization, not before execution.
+- `raw` is a first-class public parameter on `exec_command`; default is processed output, `raw=true` bypasses semantic post-processing while keeping transport hygiene/safety truncation.
+- Built-in post-processors run before the optional user-defined hook.
+- User post-process hook is configured as a path to an executable/script; Builder sends JSON on stdin and expects JSON on stdout.
+- User post-process hook receives both original sanitized output and Builder's current built-in-processed output so it can either add on top or replace.
+- Builder does not hard-block the user hook on irreversible commands; hook responsibility stays with the user. Built-in Builder processors still target read-only/reversible command families by policy.
+- Command post-processing is configured under a dedicated `[shell]` config table.
+- `[shell].postprocessing_mode` is the global mode switch and uses explicit values: `none | builtin | user | all`.
+- Per-call `raw=true` still bypasses semantic shaping regardless of global mode.
+- User hook has no separate timeout knob; it follows the same unlimited command lifetime and parent tool-call cancellation semantics.
+- Built-in processors may run on both success and failure; each processor decides based on exit code.
+- `exec_command` result JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
+- Built-in processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
+- User-facing docs for command post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
+- Hook failures must not change the provider-facing command-output envelope in v1. Warning surfacing, if any, stays plain-text-compatible and warning deduplication is optional.
+- If an `exec_command` backgrounds, its selected processing mode persists with that process session for later `write_stdin` polls and completion notices.
+- The first built-in processor in v1 is intentionally trivial: direct simple `go test ...` commands collapse successful output to the exact token `PASS`; failures fall back to unprocessed output.
+- Foreground `exec_command` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.
 - Background shell processes (`exec_command` / `write_stdin`) are app-global, not session-scoped.
 - Background process ids are app-global within one app instance; owner session metadata is advisory for routing notices/history, not an access-control boundary.
 - `/ps` may surface and operate on background processes started from other sessions in the same app instance; this is intentional in v1 to preserve operator visibility/control of long-running jobs.
@@ -379,6 +392,21 @@
 - If no sessions exist, startup goes directly to new-session setup.
 - In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or explicitly attach the current workspace to an existing project. Outside that flow, the CLI remains workspace-first.
 
+## Worktree Management
+
+- Worktree-management planning and implementation use `workspace` terminology only; older `repo` references are stale.
+- Planned `/worktree` management keeps session identity stable and changes only the shared session execution target `(workspace_id, worktree_id?, cwd_relpath)`.
+- The first `/worktree` slice does not introduce a separate teleport-root abstraction; execution-target switching plus explicit worktree/origin status is sufficient.
+- Worktree transitions append an immediate user-visible local note and also maintain a lazy typed developer-context reminder for the next model submission; the latest pending reminder always wins before submit and may reappear after compaction generation changes.
+- Git remains the source of truth for worktree topology; Builder stores only additive metadata and blocks deleting a worktree that is still targeted by another session.
+- Existing non-Builder git worktrees remain manageable from Builder in the first slice, but should be visually marked where feasible.
+- Worktree delete is rebind-first cleanup: if the current session targets the worktree, Builder first moves it back to the main workspace, then performs remaining git cleanup even if the worktree directory was already removed manually.
+- Worktree delete is also blocked while background shell processes still run under that worktree.
+- Automatic branch cleanup after worktree delete is conservative and best-effort; safe delete is allowed, force delete is not part of the first slice.
+- New worktrees default under `worktrees.base_dir`, rooted under Builder persistence state by default; Builder creates missing base directories and auto-picks unique suffixed paths on collisions.
+- Live worktree retarget should rebind runtime-local tool handlers to the new effective root rather than leaving tools pinned to the original startup workspace.
+- The optional post-create worktree setup script is configured by `worktrees.setup_script`, runs asynchronously after new-worktree creation only, and receives both positional args and stdin JSON plus mirrored env vars; failure or timeout surfaces as transcript-local error info and does not undo the created worktree or session switch.
+
 ## Slash Commands
 
 - Leading slash input enters command mode when first non-space char is `/`.
@@ -430,12 +458,15 @@
 ## Headless Mode
 
 - `builder run "prompt"` is the supported headless subagent interface.
+- Headless subagent roles are selected with `builder run --agent <role> "prompt"`; `--fast` is sugar for the built-in `fast` role.
+- Subagent roles are configured as file-only `[subagents.<role>]` tables in `~/.builder/config.toml` and inherit the main config unless overridden.
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups it heuristically switches to a smaller/faster profile and enables `priority_request_mode`; if it resolves to the same config as the main agent, Builder returns a warning so the caller can suggest tuning later.
 - Executes a single non-interactive prompt with existing runtime/session persistence.
 - Creates/resumes normal sessions and auto-names unnamed sessions `<session-id> subagent`.
 - Default timeout is infinite; `--timeout` can bound execution.
 - Output modes are explicit: default `--output-mode=final-text`, optional `--output-mode=json`.
-- JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata when available.
-- Final-text mode emits the final assistant text to `stdout`, optionally followed by a continue hint.
+- JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata and startup `warnings` when available.
+- Final-text mode emits startup warnings first, then the final assistant text, and optionally a continue hint.
 - Progress is quiet by default and is emitted to `stderr` only when `--progress-mode=stderr`.
 
 ## Release Engineering

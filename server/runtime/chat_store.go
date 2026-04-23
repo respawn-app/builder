@@ -12,10 +12,6 @@ import (
 	"sync"
 )
 
-const (
-	defaultShellTimeoutSecond = tools.DefaultShellTimeoutSeconds
-)
-
 type ChatEntry struct {
 	Visibility  transcript.EntryVisibility
 	Role        string

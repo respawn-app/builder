@@ -437,7 +437,6 @@ func buildServeArgs(workspaceRoot string, opts Options) []string {
 	appendStringFlag("--thinking-level", opts.ThinkingLevel)
 	appendStringFlag("--theme", opts.Theme)
 	appendIntFlag("--model-timeout-seconds", opts.ModelTimeoutSeconds)
-	appendIntFlag("--shell-timeout-seconds", opts.ShellTimeoutSeconds)
 	appendStringFlag("--tools", opts.Tools)
 	appendStringFlag("--openai-base-url", opts.OpenAIBaseURL)
 	return args

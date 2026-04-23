@@ -1561,7 +1561,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	if plan.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", plan.ActiveSettings.Model)
 	}
-	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != toolspec.ToolShell {
+	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("enabled tools = %+v, want only shell", plan.EnabledTools)
 	}
 

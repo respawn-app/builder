@@ -13,7 +13,7 @@ func TestTranscriptEntriesFromEventBuildsToolCallFallbackWithoutPresentation(t *
 		Kind: EventToolCallStarted,
 		ToolCall: &llm.ToolCall{
 			ID:    "call-1",
-			Name:  "shell",
+			Name:  string(toolspec.ToolExecCommand),
 			Input: json.RawMessage(`{"command":"pwd"}`),
 		},
 	})
@@ -38,7 +38,7 @@ func TestTranscriptEntriesFromEventBuildsToolCallFallbackWithoutPresentation(t *
 func TestNormalizeToolCallForTranscriptRepairsMalformedPresentation(t *testing.T) {
 	normalized := normalizeToolCallForTranscript(llm.ToolCall{
 		ID:           "call-1",
-		Name:         "shell",
+		Name:         string(toolspec.ToolExecCommand),
 		Presentation: json.RawMessage(`{"broken":`),
 		Input:        json.RawMessage(`{"command":"pwd"}`),
 	}, "/tmp")
@@ -63,7 +63,7 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			name: "ordinary shell result",
 			result: tools.Result{
 				CallID: "call-shell-1",
-				Name:   toolspec.ToolShell,
+				Name:   toolspec.ToolExecCommand,
 				Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 			},
 		},

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"builder/server/tools/shell/postprocess"
+	"builder/shared/config"
 )
 
 type Manager struct {
@@ -21,6 +24,7 @@ type Manager struct {
 	minimumExecToBgTime time.Duration
 	closeGracePeriod    time.Duration
 	closeWaitTimeout    time.Duration
+	postprocessor       *postprocess.Runner
 	closed              bool
 }
 
@@ -45,6 +49,12 @@ func WithCloseTimeouts(gracePeriod, waitTimeout time.Duration) ManagerOption {
 	}
 }
 
+func WithPostprocessor(runner *postprocess.Runner) ManagerOption {
+	return func(m *Manager) {
+		m.postprocessor = runner
+	}
+}
+
 func NewManager(opts ...ManagerOption) (*Manager, error) {
 	tempDir, err := os.MkdirTemp("", backgroundLogDirPrefix)
 	if err != nil {
@@ -57,6 +67,7 @@ func NewManager(opts ...ManagerOption) (*Manager, error) {
 		minimumExecToBgTime: defaultMinimumExecToBgTime,
 		closeGracePeriod:    closeGracePeriod,
 		closeWaitTimeout:    closeWaitTimeout,
+		postprocessor:       postprocess.NewRunner(postprocess.Settings{Mode: config.ShellPostprocessingModeBuiltin}),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -125,6 +136,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		ownerStepID:    strings.TrimSpace(req.OwnerStepID),
 		command:        strings.TrimSpace(req.DisplayCommand),
 		workdir:        workdir,
+		raw:            req.Raw,
 		startedAt:      time.Now().UTC(),
 		lastUpdatedAt:  time.Now().UTC(),
 		state:          "starting",
@@ -189,23 +201,29 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	}
 	snapshot, backgrounded := entry.transitionToBackground()
 	if !backgrounded {
-		display, truncated, removed := truncate(sanitized, maxOutputChars)
+		processed, err := m.applyPostprocessing(ctx, entry, sanitized, snapshot.ExitCode, false, maxOutputChars)
+		if err != nil {
+			return ExecResult{}, err
+		}
+		display, _, _ := truncate(processed.Output, maxOutputChars)
 		result.ExitCode = cloneIntPtr(snapshot.ExitCode)
 		result.Output = display
-		result.OriginalChars = len(sanitized)
-		result.Truncated = truncated
-		result.TruncationBytes = removed
+		result.Warning = processed.Warning
+		result.SemanticProcessed = processed.Processed
 		m.releaseEntry(id)
 		return result, nil
 	}
-	display, truncated, removed := truncateBackgroundOutput(sanitized, maxOutputChars)
+	processed, err := m.applyPostprocessing(ctx, entry, sanitized, nil, true, maxOutputChars)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
 	result.Running = true
 	result.Backgrounded = true
 	result.MovedToBackground = true
 	result.Output = display
-	result.OriginalChars = len(sanitized)
-	result.Truncated = truncated
-	result.TruncationBytes = removed
+	result.Warning = processed.Warning
+	result.SemanticProcessed = processed.Processed
 	m.emitEvent(Event{Type: EventBackgrounded, Snapshot: snapshot})
 	return result, nil
 }
@@ -247,23 +265,56 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		return ExecResult{}, err
 	}
 	snapshot := entry.snapshot()
-	sanitized := sanitizeOutput(string(output))
-	display, truncated, removed := truncateBackgroundOutput(sanitized, maxOutputChars)
-	if snapshot.Backgrounded && snapshot.ExitCode != nil {
+	consumedCompletion := false
+	warning := ""
+	var processed postprocess.Result
+	if snapshot.Backgrounded && snapshot.ExitCode != nil && !entry.completionNoticeConsumed() {
+		fullOutput, readErr := readSanitizedOutputFile(snapshot.LogPath)
+		if readErr == nil {
+			processed, err = m.applyPostprocessing(ctx, entry, fullOutput, snapshot.ExitCode, true, maxOutputChars)
+			if err != nil {
+				return ExecResult{}, err
+			}
+			consumedCompletion = true
+		} else {
+			warning = appendWarning(warning, fmt.Sprintf("failed to read full output log: %v", readErr))
+		}
+	}
+	if !consumedCompletion {
+		sanitized := sanitizeOutput(string(output))
+		processed, err = m.applyPostprocessing(ctx, entry, sanitized, snapshot.ExitCode, snapshot.Backgrounded, maxOutputChars)
+		if err != nil {
+			return ExecResult{}, err
+		}
+	}
+	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
+	if snapshot.Backgrounded && snapshot.ExitCode != nil && consumedCompletion {
 		entry.markCompletionNoticeConsumed()
 	}
 	return ExecResult{
-		SessionID:       id,
-		WallTime:        time.Since(start),
-		Output:          display,
-		OutputPath:      snapshot.LogPath,
-		OriginalChars:   len(sanitized),
-		Truncated:       truncated,
-		TruncationBytes: removed,
-		Running:         snapshot.Running,
-		Backgrounded:    snapshot.Backgrounded,
-		ExitCode:        cloneIntPtr(snapshot.ExitCode),
+		SessionID:         id,
+		WallTime:          time.Since(start),
+		Warning:           appendWarning(warning, processed.Warning),
+		Output:            display,
+		OutputPath:        snapshot.LogPath,
+		SemanticProcessed: processed.Processed,
+		Running:           snapshot.Running,
+		Backgrounded:      snapshot.Backgrounded,
+		ExitCode:          cloneIntPtr(snapshot.ExitCode),
 	}, nil
+}
+
+func appendWarning(existing string, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	switch {
+	case existing == "":
+		return next
+	case next == "":
+		return existing
+	default:
+		return existing + "\n" + next
+	}
 }
 
 func (m *Manager) Kill(id string) error {

@@ -14,10 +14,12 @@ import (
 
 type execCommandInput struct {
 	Cmd             string `json:"cmd"`
+	Command         string `json:"command,omitempty"`
 	Workdir         string `json:"workdir,omitempty"`
 	Shell           string `json:"shell,omitempty"`
 	Login           *bool  `json:"login,omitempty"`
 	TTY             bool   `json:"tty,omitempty"`
+	Raw             bool   `json:"raw,omitempty"`
 	YieldTimeMS     *int   `json:"yield_time_ms,omitempty"`
 	MaxOutputTokens *int   `json:"max_output_tokens,omitempty"`
 }
@@ -63,6 +65,9 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 	}
 	cmdText := strings.TrimSpace(in.Cmd)
 	if cmdText == "" {
+		cmdText = strings.TrimSpace(in.Command)
+	}
+	if cmdText == "" {
 		return tools.ErrorResultWith(c, "cmd is required", marshalNoHTMLEscape), nil
 	}
 	workdir := ResolveWorkdir(t.workspaceRoot, in.Workdir)
@@ -98,6 +103,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 		YieldTime:      yieldTime,
 		MaxOutputChars: maxChars,
 		KeepStdinOpen:  in.TTY,
+		Raw:            in.Raw,
 	})
 	if err != nil {
 		return tools.ErrorResultWith(c, fmt.Sprintf("exec_command failed: %v", err), marshalNoHTMLEscape), nil

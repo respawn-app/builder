@@ -80,7 +80,7 @@ func TestExclusiveStepLifecycleRejectsConcurrentRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestExclusiveStepLifecycleSnapshotTracksActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestExclusiveStepLifecycleEmitsCompletedRunStatePayloads(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -246,7 +246,7 @@ func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -318,7 +318,7 @@ func TestExclusiveStepLifecyclePersistsPanicsAsFailedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testi
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestExclusiveStepLifecycleCanEmitRunStateWithoutPersistingDurableRun(t *tes
 		t.Fatalf("create store: %v", err)
 	}
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
@@ -456,7 +456,7 @@ func TestExclusiveStepLifecycleInterruptSkipsStaleRunCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestExclusiveStepLifecycleClearsInFlightBeforeSchedulingBackground(t *testi
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestBackgroundNoticeSchedulerSchedulesAfterBusyStepEnds(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "background done", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestContextCompactorUsesExclusiveStepLifecycle(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
