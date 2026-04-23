@@ -497,6 +497,10 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 		record, found := existingByRoot[canonicalRoot]
 		if !found {
 			record = metadata.WorktreeRecord{ID: "worktree-" + uuid.NewString(), WorkspaceID: strings.TrimSpace(workspaceID), CreatedAt: now}
+		} else if shouldResetWorktreeProvenance(record, gitEntry) {
+			record.BuilderManaged = false
+			record.CreatedBranch = false
+			record.OriginSessionID = ""
 		}
 		record.WorkspaceID = strings.TrimSpace(workspaceID)
 		record.CanonicalRoot = canonicalRoot
@@ -557,7 +561,8 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 		return err
 	}
 	type pendingRuntimeSync struct {
-		sessionID string
+		sessionID      string
+		previousTarget clientui.SessionExecutionTarget
 	}
 	pending := make([]pendingRuntimeSync, 0, len(blockers))
 	collected := make([]error, 0)
@@ -575,7 +580,7 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 			appendErr(blocker.SessionID, err)
 			continue
 		}
-		pending = append(pending, pendingRuntimeSync{sessionID: blocker.SessionID})
+		pending = append(pending, pendingRuntimeSync{sessionID: blocker.SessionID, previousTarget: previousTarget})
 	}
 	for _, item := range pending {
 		nextTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, item.sessionID)
@@ -589,11 +594,42 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 			continue
 		}
 		if err := s.runtime.SyncExecutionTarget(ctx, item.sessionID, nextTarget, &reminder); err != nil {
+			rollbackCtx, cancel := liveRollbackContext(ctx)
+			rollbackErr := s.metadata.UpdateSessionExecutionTargetByID(rollbackCtx, item.sessionID, trimmedWorkspaceID, item.previousTarget.WorktreeID, item.previousTarget.CwdRelpath)
+			cancel()
+			if rollbackErr != nil {
+				appendErr(item.sessionID, errors.Join(err, fmt.Errorf("rollback execution target after runtime sync failure: %w", rollbackErr)))
+				continue
+			}
 			appendErr(item.sessionID, err)
 			continue
 		}
 	}
 	return errors.Join(collected...)
+}
+
+func shouldResetWorktreeProvenance(record metadata.WorktreeRecord, gitEntry GitWorktree) bool {
+	if !record.BuilderManaged && !record.CreatedBranch && strings.TrimSpace(record.OriginSessionID) == "" {
+		return false
+	}
+	if gitEntry.Detached || (strings.TrimSpace(gitEntry.BranchRef) == "" && !gitEntry.IsMain) {
+		return true
+	}
+	previousGit, err := worktreeGitMetadataFromRecord(record)
+	if err != nil {
+		return false
+	}
+	if !worktreeHasStableIdentity(previousGit) {
+		return false
+	}
+	if previousGit.IsMain != gitEntry.IsMain || previousGit.Detached != gitEntry.Detached || previousGit.Bare != gitEntry.Bare {
+		return true
+	}
+	return strings.TrimSpace(previousGit.BranchRef) != strings.TrimSpace(gitEntry.BranchRef)
+}
+
+func worktreeHasStableIdentity(entry GitWorktree) bool {
+	return strings.TrimSpace(entry.BranchRef) != "" || strings.TrimSpace(entry.HeadOID) != "" || entry.Detached || entry.IsMain || entry.Bare
 }
 
 func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionWorkspaceContext, leaseID string, previous *syncedWorktree, next syncedWorktree, emitNote bool) (clientui.SessionExecutionTarget, error) {
