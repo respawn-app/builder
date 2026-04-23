@@ -284,6 +284,26 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	}
 }
 
+func TestSyncWorkspaceClearsStaleBuilderProvenanceWhenRootIsReused(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/provenance-stale")
+
+	runGit(t, env.workspaceRoot, "worktree", "remove", "--force", created.CanonicalRoot)
+	runGit(t, env.workspaceRoot, "worktree", "add", "--detach", created.CanonicalRoot, "HEAD")
+
+	worktrees := mustListWorktrees(t, env).Worktrees
+	for _, worktree := range worktrees {
+		if strings.TrimSpace(worktree.CanonicalRoot) != strings.TrimSpace(created.CanonicalRoot) {
+			continue
+		}
+		if worktree.BuilderManaged || worktree.CreatedBranch || strings.TrimSpace(worktree.OriginSessionID) != "" {
+			t.Fatalf("expected stale builder provenance cleared for reused root, got %+v", worktree)
+		}
+		return
+	}
+	t.Fatalf("expected reused worktree root %q in %+v", created.CanonicalRoot, worktrees)
+}
+
 func TestResolveWorktreeCreateTargetClassifiesBranchDetachedRefAndNewBranch(t *testing.T) {
 	env := newServiceTestEnv(t)
 	runGit(t, env.workspaceRoot, "branch", "feature/existing-ref")
@@ -830,7 +850,7 @@ func TestBeginMutationSerializesMutationsByWorkspace(t *testing.T) {
 	result.release.Release()
 }
 
-func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testing.T) {
+func TestRetargetSessionsFromMissingWorktreeRollsBackActiveSessionMetadataOnRuntimeError(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/missing-runtime-error")
 	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
@@ -844,6 +864,10 @@ func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testin
 	if err != nil {
 		t.Fatalf("GetWorktreeRecordByID: %v", err)
 	}
+	activeTargetBefore, err := env.store.ResolveSessionExecutionTarget(env.ctx, env.session.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget active before: %v", err)
+	}
 	env.runtime.rebindErrRoot = env.workspaceRoot
 	env.runtime.rebindErr = errors.New("runtime rebind failed")
 	env.runtime.activeSessions = map[string]bool{env.session.Meta().SessionID: true}
@@ -854,14 +878,19 @@ func TestRetargetSessionsFromMissingWorktreeContinuesAfterRuntimeError(t *testin
 	if err == nil || !strings.Contains(err.Error(), "runtime rebind failed") {
 		t.Fatalf("retargetSessionsFromMissingWorktree error = %v, want runtime rebind failed", err)
 	}
-	for _, sessionID := range []string{env.session.Meta().SessionID, otherSession.Meta().SessionID} {
-		target, resolveErr := env.store.ResolveSessionExecutionTarget(env.ctx, sessionID)
-		if resolveErr != nil {
-			t.Fatalf("ResolveSessionExecutionTarget %s: %v", sessionID, resolveErr)
-		}
-		if target.WorktreeID != "" || target.EffectiveWorkdir != env.workspaceRoot {
-			t.Fatalf("expected session %s retargeted to main workspace, got %+v", sessionID, target)
-		}
+	activeTargetAfter, err := env.store.ResolveSessionExecutionTarget(env.ctx, env.session.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget active after: %v", err)
+	}
+	if activeTargetAfter.WorktreeID != activeTargetBefore.WorktreeID || activeTargetAfter.EffectiveWorkdir != activeTargetBefore.EffectiveWorkdir {
+		t.Fatalf("expected active session target rolled back after runtime failure, before=%+v after=%+v", activeTargetBefore, activeTargetAfter)
+	}
+	otherTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, otherSession.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget other session: %v", err)
+	}
+	if otherTarget.WorktreeID != "" || otherTarget.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected inactive session retargeted to main workspace, got %+v", otherTarget)
 	}
 	if len(env.runtime.rebindCalls) != 1 {
 		t.Fatalf("expected one active runtime rebind attempt, got %+v", env.runtime.rebindCalls)
