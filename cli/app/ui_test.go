@@ -3186,6 +3186,35 @@ func TestPreSubmitCheckErrorRestoresQueuedDraftsIntoInput(t *testing.T) {
 	}
 }
 
+func TestPreSubmitCheckCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.preSubmitCheckToken = 1
+	m.activity = uiActivityRunning
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
+		token: 1,
+		text:  "submitted",
+		err:   context.Canceled,
+	})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected pre-submit cancellation to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("did not expect transcript error entry, got %+v", updated.transcriptEntries)
+	}
+}
+
 func TestCompactFailureRestoresQueuedDraftsIntoInput(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
@@ -3201,6 +3230,31 @@ func TestCompactFailureRestoresQueuedDraftsIntoInput(t *testing.T) {
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+}
+
+func TestCompactCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(compactDoneMsg{err: context.Canceled})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected compaction cancellation to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("did not expect transcript error entry, got %+v", updated.transcriptEntries)
 	}
 }
 
@@ -3243,6 +3297,24 @@ func TestCompactDoneSurfacesQueuedRuntimeWorkProbeFailure(t *testing.T) {
 	}
 	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || !strings.Contains(client.appendedText, "daemon stalled") {
 		t.Fatalf("expected runtime error entry with probe failure, role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
+func TestCompactDoneSuppressesQueuedRuntimeWorkProbeCancellation(t *testing.T) {
+	client := &runtimeControlFakeClient{hasQueuedUserWorkErr: context.Canceled}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+
+	next, _ := m.Update(compactDoneMsg{})
+	updated := next.(*uiModel)
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity after queued runtime work probe cancellation, got %v", updated.activity)
+	}
+	if client.appendedRole != "" || client.appendedText != "" {
+		t.Fatalf("did not expect appended runtime error entry, role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
 
