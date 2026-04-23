@@ -310,7 +310,7 @@ func sourceIsCLI(sources map[string]string, key string) bool {
 
 func hasCLIToolOverride(source config.SourceReport) bool {
 	for _, id := range tools.CatalogIDs() {
-		if sourceIsCLI(source.Sources, "tools."+string(id)) {
+		if sourceIsCLI(source.Sources, "tools."+toolspec.ConfigName(id)) {
 			return true
 		}
 	}

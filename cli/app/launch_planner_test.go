@@ -477,6 +477,41 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 	}
 }
 
+func TestApplyCLIOverridesToSessionPlanAppliesCLIToolOverrideWithoutModelOverride(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "gpt-5.4",
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
+		},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: "gpt-5.4",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.patch": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "gpt-5.4",
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: false, toolspec.ToolPatch: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":       "file",
+		"tools.shell": "cli",
+		"tools.patch": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.EnabledTools[toolspec.ToolExecCommand] {
+		t.Fatalf("expected shell disabled by cli override, got %+v", updated.ActiveSettings.EnabledTools)
+	}
+	if !updated.ActiveSettings.EnabledTools[toolspec.ToolPatch] {
+		t.Fatalf("expected patch enabled by cli override, got %+v", updated.ActiveSettings.EnabledTools)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolPatch {
+		t.Fatalf("expected patch-only enabled tools, got %+v", updated.EnabledTools)
+	}
+	if updated.Source.Sources["tools.shell"] != "cli" || updated.Source.Sources["tools.patch"] != "cli" {
+		t.Fatalf("expected cli tool sources preserved, got %+v", updated.Source.Sources)
+	}
+}
+
 func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride(t *testing.T) {
 	plan := sessionLaunchPlan{
 		ActiveSettings: config.Settings{
