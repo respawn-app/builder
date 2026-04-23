@@ -45,12 +45,6 @@ var HeadlessModePrompt string
 //go:embed headless_mode_exit_prompt.md
 var HeadlessModeExitPrompt string
 
-//go:embed worktree_mode_prompt.md
-var WorktreeModePrompt string
-
-//go:embed worktree_mode_exit_prompt.md
-var WorktreeModeExitPrompt string
-
 func MainSystemPrompt(includeToolPreambles bool) string {
 	base := renderRunCommand(strings.TrimSpace(SystemPrompt))
 	if !includeToolPreambles {
