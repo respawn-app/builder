@@ -77,4 +77,4 @@ Hook **must** return JSON like:
 
 If `processed` is `false`, Builder treats the hook as a no-op.
 
-If the hook path is missing, invalid, times out, or returns invalid JSON, builder falls-back to next available option (built-in or none)
+If the hook path is missing, invalid, times out, or returns invalid JSON, Builder falls back to the next available option (built-in or none).
