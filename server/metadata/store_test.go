@@ -906,11 +906,11 @@ func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T
 		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
 	}
 	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
-		ID:            "worktree-a",
-		WorkspaceID:   binding.WorkspaceID,
-		CanonicalRoot: canonicalWorktreeRoot,
-		DisplayName:   filepath.Base(canonicalWorktreeRoot),
-		Availability:  "available",
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
 		GitMetadataJSON: `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertWorktreeRecord: %v", err)

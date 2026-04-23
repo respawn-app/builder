@@ -2,6 +2,7 @@ package sessionlifecycle
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -255,6 +256,9 @@ func (s *Service) preserveForkExecutionTarget(ctx context.Context, parentSession
 	defer func() { _ = metadataStore.Close() }()
 	target, err := metadataStore.ResolveSessionExecutionTarget(ctx, trimmedParentID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, session.ErrSessionNotFound) {
+			return nil
+		}
 		return err
 	}
 	return metadataStore.UpdateSessionExecutionTargetByID(ctx, trimmedChildID, target.WorkspaceID, target.WorktreeID, target.CwdRelpath)

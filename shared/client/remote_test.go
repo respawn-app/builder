@@ -248,6 +248,52 @@ func TestRemoteDeleteWorktreeCarriesDeleteBranchFlagAndResponseFields(t *testing
 	}
 }
 
+func TestRemoteResolveWorktreeCreateTargetCarriesMethodAndPayload(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			t.Fatalf("receive handshake: %v", err)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			t.Fatalf("send handshake response: %v", err)
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			t.Fatalf("receive worktree resolve: %v", err)
+		}
+		if req.Method != protocol.MethodWorktreeCreateTargetResolve {
+			t.Fatalf("method = %q, want %q", req.Method, protocol.MethodWorktreeCreateTargetResolve)
+		}
+		var params serverapi.WorktreeCreateTargetResolveRequest
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			t.Fatalf("unmarshal resolve params: %v", err)
+		}
+		if params.SessionID != "session-1" || params.Target != "HEAD~1" {
+			t.Fatalf("unexpected resolve params: %+v", params)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.WorktreeCreateTargetResolveResponse{
+			Resolution: serverapi.WorktreeCreateTargetResolution{Input: "HEAD~1", Kind: serverapi.WorktreeCreateTargetResolutionKindDetachedRef, ResolvedRef: "abc123"},
+		})); err != nil {
+			t.Fatalf("send resolve response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	resp, err := remote.ResolveWorktreeCreateTarget(context.Background(), serverapi.WorktreeCreateTargetResolveRequest{SessionID: "session-1", Target: "HEAD~1"})
+	if err != nil {
+		t.Fatalf("ResolveWorktreeCreateTarget: %v", err)
+	}
+	if resp.Resolution.Kind != serverapi.WorktreeCreateTargetResolutionKindDetachedRef || resp.Resolution.ResolvedRef != "abc123" {
+		t.Fatalf("unexpected resolve response: %+v", resp)
+	}
+}
+
 func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWithAssistantDeltaProgress(t *testing.T) {
 	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
 		defer func() { _ = ws.Close() }()

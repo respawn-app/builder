@@ -107,6 +107,9 @@ func (l uiViewLayout) renderStatusNotice(available int) string {
 	text := strings.TrimSpace(m.runtimeDisconnectStatusText())
 	kind := uiStatusNoticeError
 	if text == "" {
+		if strings.TrimSpace(m.worktrees.visibleErrorText()) != "" {
+			return ""
+		}
 		text = strings.TrimSpace(m.transientStatus)
 		kind = m.transientStatusKind
 	}
@@ -126,6 +129,9 @@ func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string
 		return statusNoticeStyle(l.model.theme, uiStatusNoticeNeutral).Render(text)
 	}
 	if l.model.runtimeDisconnectStatusVisible() {
+		return ""
+	}
+	if strings.TrimSpace(l.model.worktrees.visibleErrorText()) != "" {
 		return ""
 	}
 	if strings.TrimSpace(l.model.transientStatus) != "" {

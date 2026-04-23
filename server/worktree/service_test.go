@@ -229,6 +229,35 @@ func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	}
 }
 
+func TestResolveWorktreeCreateTargetClassifiesBranchDetachedRefAndNewBranch(t *testing.T) {
+	env := newServiceTestEnv(t)
+	runGit(t, env.workspaceRoot, "branch", "feature/existing-ref")
+
+	existing, err := env.service.ResolveWorktreeCreateTarget(env.ctx, serverapi.WorktreeCreateTargetResolveRequest{SessionID: env.session.Meta().SessionID, Target: "feature/existing-ref"})
+	if err != nil {
+		t.Fatalf("ResolveWorktreeCreateTarget existing: %v", err)
+	}
+	if existing.Resolution.Kind != serverapi.WorktreeCreateTargetResolutionKindExistingBranch {
+		t.Fatalf("existing kind = %q, want existing_branch", existing.Resolution.Kind)
+	}
+
+	detached, err := env.service.ResolveWorktreeCreateTarget(env.ctx, serverapi.WorktreeCreateTargetResolveRequest{SessionID: env.session.Meta().SessionID, Target: "HEAD"})
+	if err != nil {
+		t.Fatalf("ResolveWorktreeCreateTarget detached: %v", err)
+	}
+	if detached.Resolution.Kind != serverapi.WorktreeCreateTargetResolutionKindDetachedRef {
+		t.Fatalf("detached kind = %q, want detached_ref", detached.Resolution.Kind)
+	}
+
+	newBranch, err := env.service.ResolveWorktreeCreateTarget(env.ctx, serverapi.WorktreeCreateTargetResolveRequest{SessionID: env.session.Meta().SessionID, Target: "feature/new-branch"})
+	if err != nil {
+		t.Fatalf("ResolveWorktreeCreateTarget new branch: %v", err)
+	}
+	if newBranch.Resolution.Kind != serverapi.WorktreeCreateTargetResolutionKindNewBranch {
+		t.Fatalf("new branch kind = %q, want new_branch", newBranch.Resolution.Kind)
+	}
+}
+
 func TestDeleteWorktreeKeepsExistingBranchUnlessExplicitlyRequested(t *testing.T) {
 	env := newServiceTestEnv(t)
 	runGit(t, env.workspaceRoot, "branch", "feature/shared-branch")

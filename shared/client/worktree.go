@@ -9,6 +9,7 @@ import (
 
 type WorktreeClient interface {
 	ListWorktrees(ctx context.Context, req serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error)
+	ResolveWorktreeCreateTarget(ctx context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error)
 	CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error)
 	SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwitchRequest) (serverapi.WorktreeSwitchResponse, error)
 	DeleteWorktree(ctx context.Context, req serverapi.WorktreeDeleteRequest) (serverapi.WorktreeDeleteResponse, error)
@@ -27,6 +28,13 @@ func (c *loopbackWorktreeClient) ListWorktrees(ctx context.Context, req serverap
 		return serverapi.WorktreeListResponse{}, errors.New("worktree service is required")
 	}
 	return c.service.ListWorktrees(ctx, req)
+}
+
+func (c *loopbackWorktreeClient) ResolveWorktreeCreateTarget(ctx context.Context, req serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorktreeCreateTargetResolveResponse{}, errors.New("worktree service is required")
+	}
+	return c.service.ResolveWorktreeCreateTarget(ctx, req)
 }
 
 func (c *loopbackWorktreeClient) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {

@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -28,8 +29,23 @@ type CreateSpec struct {
 	BranchName   string
 }
 
+type CreateTargetResolutionKind string
+
+const (
+	CreateTargetResolutionKindNewBranch      CreateTargetResolutionKind = "new_branch"
+	CreateTargetResolutionKindExistingBranch CreateTargetResolutionKind = "existing_branch"
+	CreateTargetResolutionKindDetachedRef    CreateTargetResolutionKind = "detached_ref"
+)
+
+type CreateTargetResolution struct {
+	Input       string
+	Kind        CreateTargetResolutionKind
+	ResolvedRef string
+}
+
 type gitCommandRunner interface {
 	Output(ctx context.Context, dir string, args ...string) ([]byte, error)
+	Run(ctx context.Context, dir string, args ...string) ([]byte, int, error)
 }
 
 type GitInspector struct {
@@ -75,6 +91,35 @@ func (i *GitInspector) BranchExists(ctx context.Context, workspaceRoot string, b
 		return false, err
 	}
 	return strings.TrimSpace(string(output)) != "", nil
+}
+
+func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot string, rawTarget string) (CreateTargetResolution, error) {
+	if i == nil {
+		return CreateTargetResolution{}, fmt.Errorf("git inspector is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return CreateTargetResolution{}, err
+	}
+	trimmedTarget := strings.TrimSpace(rawTarget)
+	if trimmedTarget == "" {
+		return CreateTargetResolution{}, fmt.Errorf("target is required")
+	}
+	branchOutput, branchExit, err := i.runner.Run(ctx, canonicalRoot, "for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/"+trimmedTarget)
+	if err != nil {
+		return CreateTargetResolution{}, formatGitRunError(branchExit, err, branchOutput, "for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/"+trimmedTarget)
+	}
+	if resolvedBranch := strings.TrimSpace(string(branchOutput)); resolvedBranch != "" {
+		return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindExistingBranch, ResolvedRef: resolvedBranch}, nil
+	}
+	refOutput, refExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
+	if err != nil {
+		if refExit == 1 {
+			return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindNewBranch}, nil
+		}
+		return CreateTargetResolution{}, formatGitRunError(refExit, err, refOutput, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
+	}
+	return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindDetachedRef, ResolvedRef: strings.TrimSpace(string(refOutput))}, nil
 }
 
 func (i *GitInspector) Add(ctx context.Context, workspaceRoot string, worktreeRoot string, spec CreateSpec) (bool, error) {
@@ -196,18 +241,38 @@ func normalizeCreateSpec(spec CreateSpec) (CreateSpec, error) {
 type execGitCommandRunner struct{}
 
 func (execGitCommandRunner) Output(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	output, exitCode, err := execGitCommandRunner{}.Run(ctx, dir, args...)
+	if err != nil {
+		return nil, formatGitRunError(exitCode, err, output, args...)
+	}
+	return output, nil
+}
+
+func (execGitCommandRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 	argv := append([]string(nil), args...)
 	cmd := exec.CommandContext(ctx, "git", argv...)
 	cmd.Dir = strings.TrimSpace(dir)
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed == "" {
-			return nil, fmt.Errorf("git %s: %w", strings.Join(argv, " "), err)
-		}
-		return nil, fmt.Errorf("git %s: %s", strings.Join(argv, " "), trimmed)
+	if err == nil {
+		return output, 0, nil
 	}
-	return output, nil
+	exitCode := -1
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	return output, exitCode, err
+}
+
+func formatGitRunError(exitCode int, err error, output []byte, args ...string) error {
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	if exitCode < 0 {
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), trimmed)
+	}
+	return fmt.Errorf("git %s: %s", strings.Join(args, " "), trimmed)
 }
 
 func parseGitWorktreeListPorcelain(body string, workspaceRoot string) ([]GitWorktree, error) {

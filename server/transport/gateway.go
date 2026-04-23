@@ -298,6 +298,13 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			}
 			return g.core.WorktreeClient().ListWorktrees(ctx, params)
 		})
+	case protocol.MethodWorktreeCreateTargetResolve:
+		return decodeAndHandle(req, func(params serverapi.WorktreeCreateTargetResolveRequest) (serverapi.WorktreeCreateTargetResolveResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.WorktreeCreateTargetResolveResponse{}, err
+			}
+			return g.core.WorktreeClient().ResolveWorktreeCreateTarget(ctx, params)
+		})
 	case protocol.MethodWorktreeCreate:
 		return decodeAndHandle(req, func(params serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
 			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {

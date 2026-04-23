@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1238,6 +1240,59 @@ func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *
 	if entry.ToolCall == nil || !entry.ToolCall.IsShell || entry.ToolCall.Command != "pwd" {
 		t.Fatalf("expected recovered shell metadata, got %+v", entry.ToolCall)
 	}
+}
+
+func TestGatewayRemoteResolveWorktreeCreateTarget(t *testing.T) {
+	appCore, server := newGatewayTestServer(t)
+	defer server.Close()
+	initGatewayGitWorkspace(t, appCore.Config().WorkspaceRoot)
+
+	store := createGatewayAuthoritativeSession(t, appCore)
+	appCore.RegisterSessionStore(store)
+
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], appCore.ProjectID())
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	resp, err := remote.ResolveWorktreeCreateTarget(context.Background(), serverapi.WorktreeCreateTargetResolveRequest{
+		SessionID: store.Meta().SessionID,
+		Target:    "HEAD",
+	})
+	if err != nil {
+		t.Fatalf("ResolveWorktreeCreateTarget: %v", err)
+	}
+	if resp.Resolution.Kind != serverapi.WorktreeCreateTargetResolutionKindDetachedRef {
+		t.Fatalf("resolution kind = %q, want detached_ref", resp.Resolution.Kind)
+	}
+	if strings.TrimSpace(resp.Resolution.ResolvedRef) == "" {
+		t.Fatalf("expected resolved ref oid, got %+v", resp.Resolution)
+	}
+}
+
+func initGatewayGitWorkspace(t *testing.T, workspaceRoot string) {
+	t.Helper()
+	runGatewayGit(t, workspaceRoot, "init", "-b", "main")
+	runGatewayGit(t, workspaceRoot, "config", "user.email", "builder-test@example.com")
+	runGatewayGit(t, workspaceRoot, "config", "user.name", "Builder Test")
+	readmePath := filepath.Join(workspaceRoot, "README.md")
+	if err := os.WriteFile(readmePath, []byte("gateway test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile README.md: %v", err)
+	}
+	runGatewayGit(t, workspaceRoot, "add", "README.md")
+	runGatewayGit(t, workspaceRoot, "commit", "-m", "init")
+}
+
+func runGatewayGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
 }
 
 func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testing.T) {

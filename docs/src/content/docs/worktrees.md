@@ -1,9 +1,9 @@
 ---
 title: Worktrees
-description: Manage git worktrees from Builder with a dedicated UI, direct switch shortcuts, and model awareness of the active worktree.
+description: Manage git worktrees from Builder with a dedicated full-screen UI, direct switch shortcuts, and model awareness of the active worktree.
 ---
 
-Builder can manage git worktrees directly. Use this when you want to split work into isolated checkouts without manually juggling separate Builder sessions or separate terminal roots.
+Builder can manage git worktrees directly. Use this when you want isolated checkouts without manually juggling separate Builder sessions or separate terminal roots. Run `/wt` to get started.
 
 ## What Builder Does
 
@@ -12,7 +12,7 @@ Builder can manage git worktrees directly. Use this when you want to split work 
 - Tells the agent which worktree it is in, so follow-up actions happen in the correct checkout.
 - Shows worktree management in a dedicated full-screen page instead of writing menus or confirmations into transcript scrollback.
 
-In practice, that means you can move a running session into another worktree and continue working there without starting over.
+In practice, that means you can move a running session into another worktree and continue there without starting over.
 
 ## Open The Worktrees Page
 
@@ -34,7 +34,7 @@ The page contains:
 
 - A top `Create worktree` row.
 - A paginated list of known worktrees.
-- A one-line muted path for each worktree.
+- A muted one-line path for each worktree.
 - Compact badges such as `current`, `main`, `branch:<name>`, `detached`, and `external`.
 
 ## Main Actions
@@ -55,28 +55,49 @@ On the `Worktrees` page:
 
 Open the page with `/wt`, select `Create worktree`, or press `c`.
 
-The create dialog lets you set:
+The create dialog shows one form with all fields visible.
 
-- `Base ref`: the starting point for a new branch. `HEAD` is the normal default.
-- `Branch mode`: create a new branch or reuse an existing branch/ref.
-- `Branch name` or `Existing branch/ref`: depends on the selected branch mode.
-- `Path`: optional. Leave it blank to let Builder choose the default location.
+`Branch or ref`
 
-Use `Tab` / `Shift+Tab` or arrow keys to move through the dialog, then confirm with `Enter` on `Create`.
+- Builder only auto-suggests a target name from the sanitized session name.
+- If there is no valid session-name suggestion, the field stays blank and you must choose one explicitly.
+- Builder does not fall back to the current branch, `main`, or a generic placeholder.
+- Builder resolves what you typed asynchronously and shows a live badge:
+  - `✔︎ new branch`
+  - `∴ existing branch`
+  - `∴ detached ref`
 
-After a successful create, Builder switches the session into the new worktree and closes the page.
+`Base ref`
+
+- Shown when Builder will create a new branch from the typed target.
+- Rendered after `Branch or ref` because `HEAD` is usually left unchanged.
+- `HEAD` is the normal default.
+
+`Path`
+
+- The current UI does not expose a path field.
+- Builder chooses the worktree location from its configured defaults.
+
+Navigation:
+
+- `Up` / `Down` or `Tab` / `Shift+Tab` move between form sections.
+- `Left` / `Right` change the selected action.
+- `Enter` activates the current section.
+- `Esc` goes back to the list.
+
+After a successful create, Builder switches the session into the new worktree and closes the dialog.
 
 ## Delete A Worktree
 
 Open the page with `/wt`, select a worktree, then press `d`.
 
-Delete confirmation is shown in a dedicated confirmation UI. It does not use transcript text prompts.
+Delete confirmation is shown in dedicated confirmation UI. It does not use transcript text prompts.
 
 Depending on the selected worktree, Builder may offer:
 
-- `Delete`: remove the worktree.
-- `Delete + Branch`: remove the worktree and also attempt branch cleanup.
-- `Cancel`: go back.
+- `Cancel`
+- `Delete`
+- `Delete + Branch`
 
 After a successful delete, the page stays open and refreshes so you can keep managing remaining worktrees.
 
@@ -91,8 +112,6 @@ You can still use one-shot commands when they are faster than opening the page.
 ```
 
 `<target>` can match a worktree id, path, display name, or branch name when that resolves uniquely.
-
-This is useful when you already know exactly where you want to go.
 
 ### Open delete confirmation for a specific target
 
@@ -114,7 +133,7 @@ This opens the create dialog immediately.
 
 There is no dedicated list subcommand.
 
-Use `/wt` to open the Worktrees page.
+Use `/wt` to open the `Worktrees` page.
 
 ## Agent Awareness
 
@@ -137,4 +156,4 @@ Use worktrees when you want to:
 - let one Builder session keep progressing while you open another code path elsewhere,
 - or move the current session into a fresh branch without losing its context.
 
-If you want the full slash-command reference, see [Slash Commands](../slash-commands/).
+For the full slash-command reference, see [Slash Commands](../slash-commands/).

@@ -38,6 +38,29 @@ type WorktreeListResponse struct {
 	Worktrees []WorktreeView                  `json:"worktrees"`
 }
 
+type WorktreeCreateTargetResolutionKind string
+
+const (
+	WorktreeCreateTargetResolutionKindNewBranch      WorktreeCreateTargetResolutionKind = "new_branch"
+	WorktreeCreateTargetResolutionKindExistingBranch WorktreeCreateTargetResolutionKind = "existing_branch"
+	WorktreeCreateTargetResolutionKindDetachedRef    WorktreeCreateTargetResolutionKind = "detached_ref"
+)
+
+type WorktreeCreateTargetResolution struct {
+	Input       string                             `json:"input"`
+	Kind        WorktreeCreateTargetResolutionKind `json:"kind"`
+	ResolvedRef string                             `json:"resolved_ref,omitempty"`
+}
+
+type WorktreeCreateTargetResolveRequest struct {
+	SessionID string `json:"session_id"`
+	Target    string `json:"target"`
+}
+
+type WorktreeCreateTargetResolveResponse struct {
+	Resolution WorktreeCreateTargetResolution `json:"resolution"`
+}
+
 type WorktreeCreateRequest struct {
 	ClientRequestID   string `json:"client_request_id"`
 	SessionID         string `json:"session_id"`
@@ -84,6 +107,7 @@ type WorktreeDeleteResponse struct {
 
 type WorktreeService interface {
 	ListWorktrees(ctx context.Context, req WorktreeListRequest) (WorktreeListResponse, error)
+	ResolveWorktreeCreateTarget(ctx context.Context, req WorktreeCreateTargetResolveRequest) (WorktreeCreateTargetResolveResponse, error)
 	CreateWorktree(ctx context.Context, req WorktreeCreateRequest) (WorktreeCreateResponse, error)
 	SwitchWorktree(ctx context.Context, req WorktreeSwitchRequest) (WorktreeSwitchResponse, error)
 	DeleteWorktree(ctx context.Context, req WorktreeDeleteRequest) (WorktreeDeleteResponse, error)
@@ -91,6 +115,16 @@ type WorktreeService interface {
 
 func (r WorktreeListRequest) Validate() error {
 	return validateRequiredSessionID(r.SessionID)
+}
+
+func (r WorktreeCreateTargetResolveRequest) Validate() error {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.Target) == "" {
+		return errors.New("target is required")
+	}
+	return nil
 }
 
 func (r WorktreeCreateRequest) Validate() error {
