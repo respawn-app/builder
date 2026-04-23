@@ -228,7 +228,9 @@ func applyDerivedModelContextBudgetOverrides(settings *config.Settings, explicit
 		return
 	}
 	if _, ok := explicitSources["model_context_window"]; !ok {
-		llm.ApplyDerivedModelContextBudget(settings, settings.Model, settings.ModelContextWindow, settings.ContextCompactionThresholdTokens)
+		if meta, ok := llm.LookupModelMetadata(settings.Model); ok && meta.ContextWindowTokens > 0 {
+			settings.ModelContextWindow = meta.ContextWindowTokens
+		}
 	}
 	if _, ok := explicitSources["context_compaction_threshold_tokens"]; !ok && settings.ModelContextWindow > 0 {
 		settings.ContextCompactionThresholdTokens = settings.ModelContextWindow * 95 / 100

@@ -737,6 +737,56 @@ func TestApplyRunPromptOverridesCLIModelOverrideRecomputesBudgetAfterFastRole(t 
 	}
 }
 
+func TestApplyRunPromptOverridesCLIModelOverridePreservesExplicitThreshold(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"context_compaction_threshold_tokens = 180000",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.4-mini"}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.4-mini" {
+		t.Fatalf("model = %q, want gpt-5.4-mini", updated.ActiveSettings.Model)
+	}
+	if updated.ActiveSettings.ModelContextWindow != 272_000 {
+		t.Fatalf("context window = %d, want 272000", updated.ActiveSettings.ModelContextWindow)
+	}
+	if updated.ActiveSettings.ContextCompactionThresholdTokens != 180_000 {
+		t.Fatalf("compaction threshold = %d, want 180000", updated.ActiveSettings.ContextCompactionThresholdTokens)
+	}
+}
+
 func TestPlannerInteractivePickerReopensSelectedSessionWithinActiveContainer(t *testing.T) {
 	root := t.TempDir()
 	containerA := filepath.Join(root, "sessions", "workspace-a")
