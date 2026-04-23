@@ -17,6 +17,7 @@ type worktreeCommandTestClient struct {
 	listResp        serverapi.WorktreeListResponse
 	listErr         error
 	listCtx         context.Context
+	listRequests    []serverapi.WorktreeListRequest
 	resolveResp     serverapi.WorktreeCreateTargetResolveResponse
 	resolveErr      error
 	createResp      serverapi.WorktreeCreateResponse
@@ -32,8 +33,9 @@ type worktreeCommandTestClient struct {
 	leaseFailures   map[string]int
 }
 
-func (c *worktreeCommandTestClient) ListWorktrees(ctx context.Context, _ serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
+func (c *worktreeCommandTestClient) ListWorktrees(ctx context.Context, req serverapi.WorktreeListRequest) (serverapi.WorktreeListResponse, error) {
 	c.listCtx = ctx
+	c.listRequests = append(c.listRequests, req)
 	return c.listResp, c.listErr
 }
 
@@ -274,6 +276,12 @@ func TestListWorktreesForCurrentSessionUsesBoundedControlContext(t *testing.T) {
 	}
 	if _, ok := client.listCtx.Deadline(); !ok {
 		t.Fatal("expected bounded control context deadline")
+	}
+	if len(client.listRequests) != 1 {
+		t.Fatalf("expected one list request, got %+v", client.listRequests)
+	}
+	if client.listRequests[0].ControllerLeaseID != "lease-1" {
+		t.Fatalf("controller lease id = %q, want lease-1", client.listRequests[0].ControllerLeaseID)
 	}
 }
 

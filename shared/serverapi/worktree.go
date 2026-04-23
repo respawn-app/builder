@@ -30,7 +30,8 @@ type WorktreeView struct {
 }
 
 type WorktreeListRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id"`
 }
 
 type WorktreeListResponse struct {
@@ -114,7 +115,10 @@ type WorktreeService interface {
 }
 
 func (r WorktreeListRequest) Validate() error {
-	return validateRequiredSessionID(r.SessionID)
+	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+		return err
+	}
+	return validateControllerLeaseID(r.ControllerLeaseID)
 }
 
 func (r WorktreeCreateTargetResolveRequest) Validate() error {

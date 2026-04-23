@@ -86,9 +86,14 @@ func (r *serviceTestRuntime) SyncExecutionTarget(_ context.Context, sessionID st
 	return nil
 }
 
-type serviceTestGate struct{}
+type serviceTestGate struct {
+	err error
+}
 
-func (serviceTestGate) AcquirePrimaryRun(string) (primaryrun.Lease, error) {
+func (g serviceTestGate) AcquirePrimaryRun(string) (primaryrun.Lease, error) {
+	if g.err != nil {
+		return nil, g.err
+	}
 	return primaryrun.LeaseFunc(func() {}), nil
 }
 
@@ -452,6 +457,32 @@ func TestSwitchWorktreeClampsCwdAndAppendsLocalNote(t *testing.T) {
 	}
 }
 
+func TestListWorktreesRequiresControllerLease(t *testing.T) {
+	env := newServiceTestEnv(t)
+	env.runtime.requireErr = serverapi.ErrInvalidControllerLease
+
+	_, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+	})
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ListWorktrees error = %v, want ErrInvalidControllerLease", err)
+	}
+}
+
+func TestListWorktreesRequiresIdlePrimaryRun(t *testing.T) {
+	env := newServiceTestEnv(t)
+	env.service.gate = serviceTestGate{err: primaryrun.ErrActivePrimaryRun}
+
+	_, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+	})
+	if !errors.Is(err, serverapi.ErrWorktreeMutationRequiresIdle) {
+		t.Fatalf("ListWorktrees error = %v, want ErrWorktreeMutationRequiresIdle", err)
+	}
+}
+
 func TestListWorktreesRetargetsMissingCurrentWorktreeBeforePruning(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/missing-current")
@@ -469,7 +500,7 @@ func TestListWorktreesRetargetsMissingCurrentWorktreeBeforePruning(t *testing.T)
 	env.runtime.reminderCalls = nil
 	runGit(t, env.workspaceRoot, "worktree", "remove", "--force", created.CanonicalRoot)
 
-	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID})
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID})
 	if err != nil {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
@@ -1008,7 +1039,7 @@ func mustCreateWorktree(t *testing.T, env *serviceTestEnv, branchName string) se
 
 func mustListWorktrees(t *testing.T, env *serviceTestEnv) serverapi.WorktreeListResponse {
 	t.Helper()
-	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID})
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID})
 	if err != nil {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
