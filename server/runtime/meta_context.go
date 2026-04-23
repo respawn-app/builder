@@ -80,6 +80,7 @@ func (r metaContextBuildResult) OrderedInjectionMessages() []llm.Message {
 
 type metaContextBuilder struct {
 	workspaceRoot  string
+	environmentCWD string
 	model          string
 	thinkingLevel  string
 	disabledSkills map[string]bool
@@ -87,13 +88,22 @@ type metaContextBuilder struct {
 }
 
 func newMetaContextBuilder(workspaceRoot, model, thinkingLevel string, disabledSkills map[string]bool, now time.Time) metaContextBuilder {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
 	return metaContextBuilder{
-		workspaceRoot:  strings.TrimSpace(workspaceRoot),
+		workspaceRoot:  trimmedRoot,
+		environmentCWD: trimmedRoot,
 		model:          strings.TrimSpace(model),
 		thinkingLevel:  strings.TrimSpace(thinkingLevel),
 		disabledSkills: normalizedDisabledSkills(disabledSkills),
 		now:            now,
 	}
+}
+
+func (b metaContextBuilder) withEnvironmentCWD(cwd string) metaContextBuilder {
+	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
+		b.environmentCWD = trimmed
+	}
+	return b
 }
 
 func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuildResult, error) {
@@ -130,7 +140,7 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 	}
 
 	if opts.IncludeEnvironment {
-		environmentMessage, err := environmentContextMessage(b.workspaceRoot, b.model, b.timestamp())
+		environmentMessage, err := environmentContextMessage(b.environmentCWD, b.model, b.timestamp())
 		if err != nil {
 			return metaContextBuildResult{}, err
 		}

@@ -48,3 +48,4 @@ docs/tmp/
 
 # Local runtime state
 .junie/
+.env

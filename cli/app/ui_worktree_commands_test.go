@@ -826,8 +826,11 @@ func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 		t.Fatalf("unexpected switch requests: %+v", client.switchRequests)
 	}
 	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
-	if !strings.Contains(plain, "Switched to main") {
-		t.Fatalf("expected switch note in transcript, got %q", plain)
+	if strings.Contains(plain, "Switched to main") || strings.Contains(plain, "Current workdir:") {
+		t.Fatalf("expected no synthetic switch transcript feedback, got %q", plain)
+	}
+	if status := worktreeStatusLine(updated); !strings.Contains(status, "Switched to main") {
+		t.Fatalf("expected switch status, got %q", status)
 	}
 }
 
@@ -878,14 +881,22 @@ func TestWorktreeCreateDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
 	next, _ := m.Update(worktreeCreateDoneMsg{
 		token: 8,
 		resp: serverapi.WorktreeCreateResponse{
-			Target:   clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/new-feature"},
-			Worktree: serverapi.WorktreeView{WorktreeID: "wt-new", DisplayName: "new-feature", CanonicalRoot: "/wt/new-feature"},
+			Target:         clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/new-feature"},
+			Worktree:       serverapi.WorktreeView{WorktreeID: "wt-new", DisplayName: "new-feature", CanonicalRoot: "/wt/new-feature", BranchName: "feature/new"},
+			CreatedBranch:  true,
+			SetupScheduled: true,
 		},
 	})
 	updated := next.(*uiModel)
 
 	if got := updated.statusConfig.WorkspaceRoot; got != "/wt/new-feature" {
 		t.Fatalf("status workspace root = %q, want created worktree root", got)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	for _, unwanted := range []string{"Created new-feature at", "Created branch:", "Setup script started"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected no synthetic create transcript feedback %q, got %q", unwanted, plain)
+		}
 	}
 }
 

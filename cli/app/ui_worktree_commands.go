@@ -77,7 +77,7 @@ func (c uiInputController) handleWorktreeSwitchCommand(token string) (tea.Model,
 	}
 	m.applyExecutionTargetChange(resp.Target)
 	status := "Switched to " + worktreeDisplayName(resp.Worktree)
-	return m, tea.Batch(c.appendSystemFeedbackWithStatus(formatWorktreeSwitch(resp), c.showSuccessStatus(status)), m.requestRuntimeMainViewRefresh())
+	return m, tea.Batch(c.showSuccessStatus(status), m.requestRuntimeMainViewRefresh())
 }
 
 func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListResponse, error) {
@@ -146,21 +146,6 @@ func worktreeUsage() string {
 	return "Usage: /wt | /wt create | /wt delete [target] | /wt switch <target>"
 }
 
-func formatWorktreeCreate(resp serverapi.WorktreeCreateResponse) string {
-	status := fmt.Sprintf("Created %s at %s", worktreeDisplayName(resp.Worktree), resp.Worktree.CanonicalRoot)
-	if resp.CreatedBranch {
-		status += fmt.Sprintf("\nCreated branch: %s", fallbackValue(resp.Worktree.BranchName, "unknown"))
-	}
-	if resp.SetupScheduled {
-		status += "\nSetup script started in background."
-	}
-	return status
-}
-
-func formatWorktreeSwitch(resp serverapi.WorktreeSwitchResponse) string {
-	return fmt.Sprintf("Switched to %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
-}
-
 func formatWorktreeDelete(resp serverapi.WorktreeDeleteResponse) string {
 	message := fmt.Sprintf("Deleted %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
 	if details := strings.TrimSpace(resp.BranchCleanupMessage); details != "" {
@@ -183,13 +168,6 @@ func worktreeDisplayName(item serverapi.WorktreeView) string {
 		return filepath.Base(trimmed)
 	}
 	return strings.TrimSpace(item.WorktreeID)
-}
-
-func fallbackValue(value string, fallback string) string {
-	if trimmed := strings.TrimSpace(value); trimmed != "" {
-		return trimmed
-	}
-	return fallback
 }
 
 func sanitizeWorktreeBranchSuggestion(raw string) string {
