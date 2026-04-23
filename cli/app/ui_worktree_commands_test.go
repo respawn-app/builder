@@ -530,6 +530,35 @@ func TestWorktreeCreateDialogTypingAfterResolveErrorClearsErrorAndShowsBadge(t *
 	}
 }
 
+func TestWorktreeCreateDialogClearsResolveErrorWhenTargetBecomesEmpty(t *testing.T) {
+	client := &worktreeCommandTestClient{
+		listResp:   testMainWorktreeListResponse(),
+		resolveErr: errors.New("resolve failed: bad repo state"),
+	}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree create"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	if updated.worktrees.create.errorText == "" {
+		t.Fatal("expected resolve error before clearing input")
+	}
+
+	updated.worktrees.create.branchTarget.SetValue("")
+	next, _ = updated.Update(worktreeCreateTargetResolveDebounceMsg{token: updated.worktrees.create.resolveToken})
+	updated = next.(*uiModel)
+
+	if updated.worktrees.create.errorText != "" {
+		t.Fatalf("expected resolve error cleared for empty input, got %q", updated.worktrees.create.errorText)
+	}
+	if updated.worktrees.create.resolution.Kind != "" {
+		t.Fatalf("expected empty resolution after clearing input, got %+v", updated.worktrees.create.resolution)
+	}
+}
+
 func TestWorktreeCreateDialogLayoutStaysStableAcrossResolutionStates(t *testing.T) {
 	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
 	m := newWorktreeTestModel(t, client)
@@ -893,6 +922,25 @@ func TestApplyExecutionTargetChangePreservesMutationTargetWhenRefreshFails(t *te
 			},
 		},
 		err: errors.New("temporary refresh failure"),
+	}
+	m := newProjectedTestUIModel(runtimeClient, nil, nil, WithUISessionID("session-1"))
+	m.statusConfig.WorkspaceRoot = "/repo/stale"
+
+	m.applyExecutionTargetChange(clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/feature-a"})
+
+	if got := m.statusConfig.WorkspaceRoot; got != "/wt/feature-a" {
+		t.Fatalf("status workspace root = %q, want mutation target", got)
+	}
+}
+
+func TestApplyExecutionTargetChangeIgnoresStaleRefreshTarget(t *testing.T) {
+	runtimeClient := &runtimeControlFakeClient{
+		mainView: clientui.RuntimeMainView{
+			Session: clientui.RuntimeSessionView{
+				SessionID:       "session-1",
+				ExecutionTarget: clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo/stale"},
+			},
+		},
 	}
 	m := newProjectedTestUIModel(runtimeClient, nil, nil, WithUISessionID("session-1"))
 	m.statusConfig.WorkspaceRoot = "/repo/stale"

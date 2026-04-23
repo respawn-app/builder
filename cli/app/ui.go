@@ -1147,6 +1147,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if query == "" {
 			m.worktrees.create.resolving = false
 			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
+			m.worktrees.create.errorText = ""
 			m.worktrees.create.syncFocus()
 			m.syncViewport()
 			return m, nil

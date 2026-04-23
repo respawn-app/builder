@@ -54,10 +54,11 @@ func (s *Service) WithCacheWarningMode(mode config.CacheWarningMode) *Service {
 		return nil
 	}
 	normalized := normalizeServiceCacheWarningMode(mode)
-	if s.cacheWarningModeValue() != normalized && s.dormant != nil {
+	changed := s.cacheWarningModeValue() != normalized
+	s.setCacheWarningMode(normalized)
+	if changed && s.dormant != nil {
 		s.dormant.clear()
 	}
-	s.setCacheWarningMode(normalized)
 	return s
 }
 

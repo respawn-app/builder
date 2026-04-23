@@ -655,6 +655,48 @@ func TestSwitchWorktreeRollsBackExecutionTargetWhenRequestContextCancelsDuringRe
 	}
 }
 
+func TestCreateWorktreeCleansUpCreatedStateWhenPostCreateSwitchFails(t *testing.T) {
+	env := newServiceTestEnv(t)
+	expectedRoot, err := env.service.resolveRequestedWorktreeRoot("", env.binding.WorkspaceID, CreateSpec{CreateBranch: true, BranchName: "feature/create-rollback"})
+	if err != nil {
+		t.Fatalf("resolveRequestedWorktreeRoot: %v", err)
+	}
+	env.runtime.rebindErr = errors.New("boom")
+
+	_, err = env.service.CreateWorktree(env.ctx, serverapi.WorktreeCreateRequest{
+		ClientRequestID:   "req-create-rollback",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		CreateBranch:      true,
+		BranchName:        "feature/create-rollback",
+	})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("CreateWorktree error = %v, want rebind failure", err)
+	}
+	if _, statErr := os.Stat(expectedRoot); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected failed create worktree root removed, stat err=%v", statErr)
+	}
+	if got := runGit(t, env.workspaceRoot, "branch", "--list", "feature/create-rollback"); strings.Contains(got, "feature/create-rollback") {
+		t.Fatalf("expected created branch cleaned up after failed create, got %q", got)
+	}
+	records, err := env.store.ListWorktreeRecordsByWorkspaceID(env.ctx, env.binding.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListWorktreeRecordsByWorkspaceID: %v", err)
+	}
+	for _, record := range records {
+		if strings.TrimSpace(record.CanonicalRoot) == strings.TrimSpace(expectedRoot) {
+			t.Fatalf("expected failed create worktree record removed, got %+v", record)
+		}
+	}
+	finalTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, env.session.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if finalTarget.WorktreeID != "" || finalTarget.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected session target unchanged after failed create, got %+v", finalTarget)
+	}
+}
+
 func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/delete-blocked-session")

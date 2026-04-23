@@ -251,6 +251,36 @@ func TestGitInspectorResolveCreateTargetRejectsInvalidBranchName(t *testing.T) {
 	}
 }
 
+func TestGitInspectorBranchExistsUsesExactRefLookup(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{
+		errors: map[string]error{
+			strings.Join([]string{"show-ref", "--verify", "--quiet", "refs/heads/feature/*"}, "\x00"): errors.New("exit status 1"),
+		},
+		exitCodes: map[string]int{
+			strings.Join([]string{"show-ref", "--verify", "--quiet", "refs/heads/feature/*"}, "\x00"): 1,
+		},
+	}
+	inspector := NewGitInspector(runner)
+	exists, err := inspector.BranchExists(context.Background(), workspaceRoot, "feature/*")
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if exists {
+		t.Fatal("expected exact-ref lookup to treat glob-like branch as absent")
+	}
+	if got, want := runner.args, []string{"show-ref", "--verify", "--quiet", "refs/heads/feature/*"}; !equalStrings(got, want) {
+		t.Fatalf("git args=%v want=%v", got, want)
+	}
+}
+
+func TestFormatGitRunErrorWrapsNegativeExitCause(t *testing.T) {
+	err := formatGitRunError(-1, context.Canceled, []byte("killed"), "worktree", "list")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected wrapped context cancellation, got %v", err)
+	}
+}
+
 func TestGitInspectorIsValidBranchNamePropagatesContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
