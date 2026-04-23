@@ -851,6 +851,63 @@ func TestApplyExecutionTargetChangePreservesMutationTargetWhenRefreshFails(t *te
 	}
 }
 
+func TestWorktreeSwitchDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
+	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
+	m.worktrees.mutationToken = 7
+	m.statusConfig.WorkspaceRoot = "/repo"
+
+	next, _ := m.Update(worktreeSwitchDoneMsg{
+		token: 7,
+		resp: serverapi.WorktreeSwitchResponse{
+			Target:   clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/feature-a"},
+			Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
+		},
+	})
+	updated := next.(*uiModel)
+
+	if got := updated.statusConfig.WorkspaceRoot; got != "/wt/feature-a" {
+		t.Fatalf("status workspace root = %q, want switched worktree root", got)
+	}
+}
+
+func TestWorktreeCreateDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
+	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
+	m.worktrees.mutationToken = 8
+	m.statusConfig.WorkspaceRoot = "/repo"
+
+	next, _ := m.Update(worktreeCreateDoneMsg{
+		token: 8,
+		resp: serverapi.WorktreeCreateResponse{
+			Target:   clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/new-feature"},
+			Worktree: serverapi.WorktreeView{WorktreeID: "wt-new", DisplayName: "new-feature", CanonicalRoot: "/wt/new-feature"},
+		},
+	})
+	updated := next.(*uiModel)
+
+	if got := updated.statusConfig.WorkspaceRoot; got != "/wt/new-feature" {
+		t.Fatalf("status workspace root = %q, want created worktree root", got)
+	}
+}
+
+func TestWorktreeDeleteDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
+	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
+	m.worktrees.mutationToken = 9
+	m.statusConfig.WorkspaceRoot = "/wt/feature-a"
+
+	next, _ := m.Update(worktreeDeleteDoneMsg{
+		token: 9,
+		resp: serverapi.WorktreeDeleteResponse{
+			Target:   clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"},
+			Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
+		},
+	})
+	updated := next.(*uiModel)
+
+	if got := updated.statusConfig.WorkspaceRoot; got != "/repo" {
+		t.Fatalf("status workspace root = %q, want main workspace root", got)
+	}
+}
+
 func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees, serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a", BranchName: "feature/a"})
