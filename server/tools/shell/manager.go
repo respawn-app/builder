@@ -208,6 +208,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		display, _, _ := truncate(processed.Output, maxOutputChars)
 		result.ExitCode = cloneIntPtr(snapshot.ExitCode)
 		result.Output = display
+		result.Warning = processed.Warning
 		result.SemanticProcessed = processed.Processed
 		m.releaseEntry(id)
 		return result, nil
@@ -221,6 +222,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	result.Backgrounded = true
 	result.MovedToBackground = true
 	result.Output = display
+	result.Warning = processed.Warning
 	result.SemanticProcessed = processed.Processed
 	m.emitEvent(Event{Type: EventBackgrounded, Snapshot: snapshot})
 	return result, nil
@@ -264,6 +266,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	}
 	snapshot := entry.snapshot()
 	consumedCompletion := false
+	warning := ""
 	var processed postprocess.Result
 	if snapshot.Backgrounded && snapshot.ExitCode != nil && !entry.completionNoticeConsumed() {
 		fullOutput, readErr := readSanitizedOutputFile(snapshot.LogPath)
@@ -273,6 +276,8 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 				return ExecResult{}, err
 			}
 			consumedCompletion = true
+		} else {
+			warning = appendWarning(warning, fmt.Sprintf("failed to read full output log: %v", readErr))
 		}
 	}
 	if !consumedCompletion {
@@ -283,12 +288,13 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		}
 	}
 	display, _, _ := truncateBackgroundOutput(processed.Output, maxOutputChars)
-	if snapshot.Backgrounded && snapshot.ExitCode != nil {
+	if snapshot.Backgrounded && snapshot.ExitCode != nil && consumedCompletion {
 		entry.markCompletionNoticeConsumed()
 	}
 	return ExecResult{
 		SessionID:         id,
 		WallTime:          time.Since(start),
+		Warning:           appendWarning(warning, processed.Warning),
 		Output:            display,
 		OutputPath:        snapshot.LogPath,
 		SemanticProcessed: processed.Processed,
@@ -296,6 +302,19 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		Backgrounded:      snapshot.Backgrounded,
 		ExitCode:          cloneIntPtr(snapshot.ExitCode),
 	}, nil
+}
+
+func appendWarning(existing string, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	switch {
+	case existing == "":
+		return next
+	case next == "":
+		return existing
+	default:
+		return existing + "\n" + next
+	}
 }
 
 func (m *Manager) Kill(id string) error {

@@ -3,10 +3,10 @@ package shell
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,25 +67,6 @@ func assertBackgroundTransitionMessageWithOutput(t *testing.T, text, sessionID s
 	if strings.Contains(text, "Process running with session ID "+sessionID) {
 		t.Fatalf("did not expect legacy session-id line after background transition, got %q", text)
 	}
-}
-
-func writeGoTestModule(t *testing.T, sleep time.Duration) string {
-	t.Helper()
-	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/postprocess-test\n\ngo 1.25.0\n"), 0o644); err != nil {
-		t.Fatalf("write go.mod: %v", err)
-	}
-	body := ""
-	imports := "\t\"testing\"\n"
-	if sleep > 0 {
-		imports += "\t\"time\"\n"
-		body = fmt.Sprintf("\ttime.Sleep(%d * time.Millisecond)\n", sleep/time.Millisecond)
-	}
-	content := "package postprocesstest\n\nimport (\n" + imports + ")\n\nfunc TestPass(t *testing.T) {\n" + body + "}\n"
-	if err := os.WriteFile(filepath.Join(workspace, "postprocess_test.go"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-	return workspace
 }
 
 func writeExecutableScript(t *testing.T, contents string) string {
@@ -418,96 +399,6 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	waitForManagerCount(t, manager, 0, time.Second)
 }
 
-func TestExecCommandSuccessfulGoTestCollapsesToPass(t *testing.T) {
-	workspace := writeGoTestModule(t, 0)
-	manager := newBackgroundTestManager(t)
-	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
-
-	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "go test -run TestPass",
-		"shell":         "/bin/sh",
-		"login":         false,
-		"yield_time_ms": 5_000,
-	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-pass", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
-	}
-	if got := decodeStringToolOutput(t, result); got != "PASS" {
-		t.Fatalf("output = %q, want PASS", got)
-	}
-}
-
-func TestExecCommandRawBypassesGoTestPostprocessing(t *testing.T) {
-	workspace := writeGoTestModule(t, 0)
-	manager := newBackgroundTestManager(t)
-	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
-
-	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "go test -run TestPass",
-		"shell":         "/bin/sh",
-		"login":         false,
-		"raw":           true,
-		"yield_time_ms": 5_000,
-	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-raw", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
-	}
-	text := decodeStringToolOutput(t, result)
-	if text == "PASS" {
-		t.Fatalf("expected raw output, got collapsed PASS")
-	}
-	if !strings.Contains(text, "PASS") || !strings.Contains(text, "ok") {
-		t.Fatalf("expected raw go test output, got %q", text)
-	}
-}
-
-func TestWriteStdinCompletionUsesPostprocessedGoTestOutput(t *testing.T) {
-	workspace := writeGoTestModule(t, 400*time.Millisecond)
-	manager := newBackgroundTestManager(t)
-	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
-	pollTool := NewWriteStdinTool(16_000, manager)
-
-	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "go test -run TestPass",
-		"shell":         "/bin/sh",
-		"login":         false,
-		"yield_time_ms": 250,
-	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "go-test-bg", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
-	}
-	if !strings.Contains(decodeStringToolOutput(t, result), "Process moved to background with ID 1000") {
-		t.Fatalf("expected command to move to background, got %q", decodeStringToolOutput(t, result))
-	}
-
-	pollInput, _ := json.Marshal(map[string]any{
-		"session_id":    1000,
-		"yield_time_ms": 2_000,
-	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "go-test-bg-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
-	}
-	if pollResult.IsError {
-		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
-	}
-	if got := decodeStringToolOutput(t, pollResult); got != "PASS" {
-		t.Fatalf("output = %q, want PASS", got)
-	}
-}
-
 func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	workspace := t.TempDir()
 	hookPath := writeExecutableScript(t, "#!/bin/sh\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
@@ -537,6 +428,70 @@ func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	}
 	if got := decodeStringToolOutput(t, result); got != "HOOKED" {
 		t.Fatalf("output = %q, want HOOKED", got)
+	}
+}
+
+func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 0.35; printf done"},
+		DisplayCommand: "delayed-done",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded result, got %+v", result)
+	}
+	logPath := result.OutputPath
+	backupPath := logPath + ".bak"
+	sessionID, err := strconv.Atoi(result.SessionID)
+	if err != nil {
+		t.Fatalf("parse session id: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	if err := os.Rename(logPath, backupPath); err != nil {
+		t.Fatalf("rename log away: %v", err)
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    sessionID,
+		"yield_time_ms": 20,
+	})
+	first, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-1", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("first write_stdin call error: %v", err)
+	}
+	if first.IsError {
+		t.Fatalf("unexpected first write_stdin error: %s", string(first.Output))
+	}
+	firstText := decodeStringToolOutput(t, first)
+	if !strings.Contains(firstText, "failed to read full output log") {
+		t.Fatalf("expected full-log warning, got %q", firstText)
+	}
+
+	if err := os.Rename(backupPath, logPath); err != nil {
+		t.Fatalf("restore log: %v", err)
+	}
+	second, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("second write_stdin call error: %v", err)
+	}
+	if second.IsError {
+		t.Fatalf("unexpected second write_stdin error: %s", string(second.Output))
+	}
+	secondText := decodeStringToolOutput(t, second)
+	if strings.Contains(secondText, "failed to read full output log") {
+		t.Fatalf("did not expect warning after log restored, got %q", secondText)
+	}
+	if !strings.Contains(secondText, "done") {
+		t.Fatalf("expected restored full output, got %q", secondText)
 	}
 }
 

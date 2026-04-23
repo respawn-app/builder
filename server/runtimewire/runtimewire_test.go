@@ -49,7 +49,7 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
 	}
 	if defs[0].ID != toolspec.ToolExecCommand {
-		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
+		t.Fatalf("expected exec_command runtime tool definition, got %+v", defs[0])
 	}
 }
 

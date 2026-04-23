@@ -350,6 +350,60 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"provider_override = \"bogus\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected invalid subagent role values to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid subagents.fast") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadSubagentRoleRejectsPersistenceRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.4\"",
+		"",
+		"[subagents.fast]",
+		"persistence_root = \"/tmp/custom\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected persistence_root in subagent role to fail")
+	}
+	if !strings.Contains(err.Error(), "persistence_root is not supported in subagent roles") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSettingsTOMLForOnboardingMatchesRequestedShape(t *testing.T) {
 	settings := defaultSettings()
 	settings.Model = "Custom_selected_during_onboarding_hence_uncommented"

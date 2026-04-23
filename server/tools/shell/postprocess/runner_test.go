@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"builder/shared/config"
@@ -17,7 +18,7 @@ func TestRunnerBuiltinGoTestSuccessCollapsesToPass(t *testing.T) {
 		ToolName:    toolspec.ToolExecCommand,
 		CommandText: "go test ./...",
 		ExitCode:    &exitCode,
-		Output:      "raw go test output",
+		Output:      "PASS\nok\texample.com/postprocess\t0.123s\n",
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -27,6 +28,52 @@ func TestRunnerBuiltinGoTestSuccessCollapsesToPass(t *testing.T) {
 	}
 	if result.Output != "PASS" {
 		t.Fatalf("output = %q, want PASS", result.Output)
+	}
+}
+
+func TestRunnerBuiltinGoTestPreservesBenchmarkAndCoverageOutput(t *testing.T) {
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
+	exitCode := 0
+	tests := []struct {
+		name        string
+		commandText string
+		parsedArgs  []string
+		output      string
+	}{
+		{
+			name:        "benchmark",
+			commandText: "go test -bench=. ./...",
+			parsedArgs:  []string{"go", "test", "-bench=.", "./..."},
+			output:      "PASS\nBenchmarkFoo\t100\t123 ns/op\nok\texample.com/postprocess\t0.123s\n",
+		},
+		{
+			name:        "coverage",
+			commandText: "go test -cover ./...",
+			parsedArgs:  []string{"go", "test", "-cover", "./..."},
+			output:      "PASS\ncoverage: 81.2% of statements\nok\texample.com/postprocess\t0.123s\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := runner.Apply(context.Background(), Request{
+				ToolName:    toolspec.ToolExecCommand,
+				CommandText: tt.commandText,
+				ParsedArgs:  tt.parsedArgs,
+				CommandName: "go",
+				ExitCode:    &exitCode,
+				Output:      tt.output,
+			})
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			if result.Processed {
+				t.Fatalf("expected %s output to bypass collapse", tt.name)
+			}
+			if result.Output != tt.output {
+				t.Fatalf("output = %q, want original output", result.Output)
+			}
+		})
 	}
 }
 
@@ -78,7 +125,7 @@ func TestRunnerAllModeFallsBackToBuiltinWhenHookFails(t *testing.T) {
 		ToolName:    toolspec.ToolExecCommand,
 		CommandText: "go test ./...",
 		ExitCode:    &exitCode,
-		Output:      "raw go test output",
+		Output:      "PASS\nok\texample.com/postprocess\t0.123s\n",
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -107,6 +154,44 @@ func TestRunnerUserModeBrokenHookFallsBackToOriginal(t *testing.T) {
 	}
 	if result.Output != "hi" {
 		t.Fatalf("output = %q, want hi", result.Output)
+	}
+}
+
+func TestRunnerUserHookCancellationPropagates(t *testing.T) {
+	hookPath := writeHookScript(t, "#!/bin/sh\nsleep 5\n")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := runner.Apply(ctx, Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandText: "printf hi",
+		Output:      "hi",
+	})
+	if err == nil {
+		t.Fatal("expected canceled context to propagate")
+	}
+	if err != context.Canceled {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunnerUserHookFailureWarningTruncatesStderr(t *testing.T) {
+	hookPath := writeHookScript(t, "#!/bin/sh\ni=0\nwhile [ \"$i\" -lt 5000 ]; do\n  printf 'xxxxxxxxxx' 1>&2\n  i=$((i + 1))\ndone\nexit 1\n")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandText: "printf hi",
+		Output:      "hi",
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !strings.Contains(result.Warning, "[hook output truncated]") {
+		t.Fatalf("expected truncated stderr marker, got %q", result.Warning)
+	}
+	if len(result.Warning) > maxHookOutputBytes+512 {
+		t.Fatalf("expected bounded warning length, got %d", len(result.Warning))
 	}
 }
 

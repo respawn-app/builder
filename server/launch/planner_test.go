@@ -227,6 +227,32 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 	}
 }
 
+func TestApplyRunPromptOverridesRejectsInvalidAgentRole(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      config.Settings{Model: "gpt-5.4"},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: "gpt-5.4",
+		WorkspaceRoot:       workspace,
+	}
+
+	_, _, err = ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: "fast!"}, auth.EmptyState())
+	if err == nil {
+		t.Fatal("expected invalid agent role to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid agent role") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", t.TempDir())

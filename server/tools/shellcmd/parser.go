@@ -27,7 +27,7 @@ func ParseSimpleCommand(command string) ([]string, bool) {
 	args := make([]string, 0, len(callExpr.Args))
 	for _, arg := range callExpr.Args {
 		literal, ok := literalWord(arg)
-		if !ok || literal == "" {
+		if !ok || (len(args) == 0 && literal == "") {
 			return nil, false
 		}
 		args = append(args, literal)

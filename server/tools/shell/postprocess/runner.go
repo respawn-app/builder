@@ -2,6 +2,7 @@ package postprocess
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,10 @@ func (r *Runner) Apply(ctx context.Context, req Request) (Result, error) {
 
 	mode := effectiveMode(r.mode)
 	if mode == config.ShellPostprocessingModeBuiltin || mode == config.ShellPostprocessingModeAll {
-		builtin := r.applyBuiltins(ctx, request)
+		builtin, err := r.applyBuiltins(ctx, request)
+		if err != nil {
+			return Result{}, err
+		}
 		if builtin.Processed {
 			current = builtin.Output
 			processed = true
@@ -102,20 +106,23 @@ func (r *Runner) Apply(ctx context.Context, req Request) (Result, error) {
 	return Result{Output: current, Processed: processed, ProcessorID: processorID, Warning: warning}, nil
 }
 
-func (r *Runner) applyBuiltins(ctx context.Context, req Request) Result {
+func (r *Runner) applyBuiltins(ctx context.Context, req Request) (Result, error) {
 	for _, processor := range r.processors {
 		if processor == nil {
 			continue
 		}
 		result, err := processor.Process(ctx, req)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return Result{}, err
+			}
 			continue
 		}
 		if result.Processed {
-			return result
+			return result, nil
 		}
 	}
-	return Result{Output: req.Output}
+	return Result{Output: req.Output}, nil
 }
 
 func effectiveMode(mode config.ShellPostprocessingMode) config.ShellPostprocessingMode {
