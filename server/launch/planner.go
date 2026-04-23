@@ -101,6 +101,9 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	var warnings []string
 	next := plan
 	shouldPersistContinuation := false
+	persistContinuation := func() error {
+		return next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL})
+	}
 	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentRole(trimmedRole) == "" {
 		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
 	}
@@ -128,6 +131,11 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		}
 	}
 	if !overrides.HasConfigOverrides() {
+		if shouldPersistContinuation {
+			if err := persistContinuation(); err != nil {
+				return SessionPlan{}, nil, err
+			}
+		}
 		return next, warnings, nil
 	}
 	loaded, err := config.Load(plan.WorkspaceRoot, config.LoadOptions{
@@ -183,7 +191,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	next.Source = mergedSource
 	if shouldPersistContinuation {
-		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
+		if err := persistContinuation(); err != nil {
 			return SessionPlan{}, nil, err
 		}
 	}
