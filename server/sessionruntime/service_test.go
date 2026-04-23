@@ -704,6 +704,41 @@ func TestSyncExecutionTargetRebindsActiveRuntime(t *testing.T) {
 	}
 }
 
+func TestSyncExecutionTargetDoesNotPersistReminderWhenActiveRuntimeRebindFails(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   "lease-1",
+		ready:               make(chan struct{}),
+		rebind: func(string) error {
+			return errors.New("rebind failed")
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	err := fixture.service.SyncExecutionTarget(context.Background(), fixture.store.Meta().SessionID, clientui.SessionExecutionTarget{
+		EffectiveWorkdir: "/tmp/workspace/pkg",
+	}, &session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeExit,
+		Branch:        "feature/worktree",
+		WorktreePath:  "/tmp/worktree-a",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/workspace",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rebind failed") {
+		t.Fatalf("SyncExecutionTarget error = %v, want rebind failure", err)
+	}
+
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("resolveStore: %v", err)
+	}
+	if state := resolved.Meta().WorktreeReminder; state != nil {
+		t.Fatalf("expected reminder state not persisted after failed rebind, got %+v", state)
+	}
+}
+
 func TestResolveStoreFallsBackThroughMetadataAuthority(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
