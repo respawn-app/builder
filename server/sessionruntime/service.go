@@ -348,6 +348,38 @@ func (s *Service) RecordWorktreeTransition(ctx context.Context, sessionID string
 	return store.SetWorktreeReminderState(&normalized)
 }
 
+func (s *Service) SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedWorkdir := strings.TrimSpace(target.EffectiveWorkdir)
+	if trimmedSessionID == "" {
+		return errors.New("session id is required")
+	}
+	if trimmedWorkdir == "" {
+		return errors.New("execution target effective workdir is required")
+	}
+	if reminder != nil {
+		store, err := s.resolveStore(ctx, trimmedSessionID)
+		if err != nil {
+			return err
+		}
+		normalized, err := normalizeWorktreeReminderState(*reminder)
+		if err != nil {
+			return err
+		}
+		if err := store.SetWorktreeReminderState(&normalized); err != nil {
+			return err
+		}
+	}
+	handle, err := s.activeRuntimeHandle(ctx, trimmedSessionID)
+	if err != nil {
+		return err
+	}
+	if handle == nil || handle.rebind == nil {
+		return nil
+	}
+	return handle.rebind(trimmedWorkdir)
+}
+
 func normalizeWorktreeReminderState(state session.WorktreeReminderState) (session.WorktreeReminderState, error) {
 	state.Mode = session.WorktreeReminderMode(strings.TrimSpace(string(state.Mode)))
 	switch state.Mode {
@@ -397,6 +429,26 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 		s.sessionStores.RegisterStore(store)
 	}
 	return store, nil
+}
+
+func (s *Service) activeRuntimeHandle(ctx context.Context, sessionID string) (*runtimeHandle, error) {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return nil, nil
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if current == nil || current != handle || current.activationErr != nil {
+		return nil, nil
+	}
+	return current, nil
 }
 
 // Phase 2 temporarily allows many attached readers, but exactly one controlling
