@@ -80,6 +80,16 @@ type sessionWorkspaceContext struct {
 	sessionID     string
 }
 
+type failedCreateCleanup struct {
+	active        bool
+	workspaceID   string
+	workspaceRoot string
+	worktreeRoot  string
+	worktreeID    string
+	branchName    string
+	createdBranch bool
+}
+
 type setupScriptPayload struct {
 	SourceWorkspaceRoot string `json:"source_workspace_root"`
 	BranchName          string `json:"branch_name"`
@@ -147,7 +157,7 @@ func (s *Service) ResolveWorktreeCreateTarget(ctx context.Context, req serverapi
 	}}, nil
 }
 
-func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (serverapi.WorktreeCreateResponse, error) {
+func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCreateRequest) (resp serverapi.WorktreeCreateResponse, err error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
@@ -160,6 +170,19 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 		return serverapi.WorktreeCreateResponse{}, err
 	}
 	defer release.Release()
+	cleanup := failedCreateCleanup{
+		workspaceID:   workspaceCtx.workspaceID,
+		workspaceRoot: workspaceCtx.workspaceRoot,
+		branchName:    strings.TrimSpace(createSpec.BranchName),
+	}
+	defer func() {
+		if err == nil || !cleanup.active {
+			return
+		}
+		if cleanupErr := s.cleanupFailedCreate(ctx, cleanup); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
 	worktreeRoot, err := s.resolveRequestedWorktreeRoot(req.RootPath, workspaceCtx.workspaceID, createSpec)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
@@ -168,12 +191,16 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
+	cleanup.active = true
+	cleanup.worktreeRoot = strings.TrimSpace(worktreeRoot)
+	cleanup.createdBranch = createdBranch
 	// Re-canonicalize after creation because the now-existing path may resolve symlinked
 	// parent segments differently than the pre-create non-existent target path.
 	worktreeRoot, err = config.CanonicalWorkspaceRoot(worktreeRoot)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
+	cleanup.worktreeRoot = strings.TrimSpace(worktreeRoot)
 	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
@@ -186,6 +213,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 	created.record.CreatedBranch = createdBranch
 	created.record.OriginSessionID = workspaceCtx.sessionID
 	created.record.UpdatedAt = time.Now().UTC()
+	cleanup.worktreeID = strings.TrimSpace(created.record.ID)
 	if err := s.metadata.UpsertWorktreeRecord(ctx, created.record); err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
@@ -199,7 +227,63 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 	createdView.BuilderManaged = true
 	createdView.CreatedBranch = createdBranch
 	createdView.OriginSessionID = workspaceCtx.sessionID
+	cleanup.active = false
 	return serverapi.WorktreeCreateResponse{Target: nextTarget, Worktree: createdView, CreatedBranch: createdBranch, SetupScheduled: setupScheduled}, nil
+}
+
+func (s *Service) cleanupFailedCreate(ctx context.Context, cleanup failedCreateCleanup) error {
+	if s == nil || s.metadata == nil || s.git == nil || !cleanup.active {
+		return nil
+	}
+	cleanupCtx, cancel := liveRollbackContext(ctx)
+	defer cancel()
+	var collected []error
+	if strings.TrimSpace(cleanup.worktreeRoot) != "" {
+		if err := s.git.Remove(cleanupCtx, cleanup.workspaceRoot, cleanup.worktreeRoot); err != nil {
+			collected = append(collected, fmt.Errorf("remove failed worktree %q: %w", cleanup.worktreeRoot, err))
+		}
+	}
+	if err := s.deleteWorktreeRecordForCleanup(cleanupCtx, cleanup.workspaceID, cleanup.worktreeID, cleanup.worktreeRoot); err != nil {
+		collected = append(collected, err)
+	}
+	if cleanup.createdBranch && strings.TrimSpace(cleanup.branchName) != "" {
+		if err := s.git.DeleteBranch(cleanupCtx, cleanup.workspaceRoot, cleanup.branchName); err != nil {
+			collected = append(collected, fmt.Errorf("delete created branch %q for failed worktree create: %w", cleanup.branchName, err))
+		}
+	}
+	return errors.Join(collected...)
+}
+
+func (s *Service) deleteWorktreeRecordForCleanup(ctx context.Context, workspaceID string, worktreeID string, worktreeRoot string) error {
+	if s == nil || s.metadata == nil {
+		return nil
+	}
+	trimmedID := strings.TrimSpace(worktreeID)
+	if trimmedID != "" {
+		if err := s.metadata.DeleteWorktreeRecordByID(ctx, trimmedID); err != nil {
+			return fmt.Errorf("delete failed worktree record %q: %w", trimmedID, err)
+		}
+		return nil
+	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	trimmedWorktreeRoot := strings.TrimSpace(worktreeRoot)
+	if trimmedWorkspaceID == "" || trimmedWorktreeRoot == "" {
+		return nil
+	}
+	records, err := s.metadata.ListWorktreeRecordsByWorkspaceID(ctx, trimmedWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("list worktree records for failed create cleanup: %w", err)
+	}
+	var collected []error
+	for _, record := range records {
+		if strings.TrimSpace(record.CanonicalRoot) != trimmedWorktreeRoot {
+			continue
+		}
+		if err := s.metadata.DeleteWorktreeRecordByID(ctx, record.ID); err != nil {
+			collected = append(collected, fmt.Errorf("delete failed worktree record %q: %w", record.ID, err))
+		}
+	}
+	return errors.Join(collected...)
 }
 
 func (s *Service) SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwitchRequest) (serverapi.WorktreeSwitchResponse, error) {

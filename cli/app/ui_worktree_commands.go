@@ -118,9 +118,6 @@ func (m *uiModel) applyExecutionTargetChange(target clientui.SessionExecutionTar
 	if m == nil {
 		return
 	}
-	if refreshed, ok := m.tryRefreshRuntimeSessionView(); ok && strings.TrimSpace(refreshed.ExecutionTarget.EffectiveWorkdir) != "" {
-		target = refreshed.ExecutionTarget
-	}
 	m.statusConfig.WorkspaceRoot = strings.TrimSpace(target.EffectiveWorkdir)
 	m.statusRepository = newMemoryUIStatusRepository()
 	m.clearPathReferenceState()

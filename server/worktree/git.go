@@ -87,11 +87,17 @@ func (i *GitInspector) BranchExists(ctx context.Context, workspaceRoot string, b
 	if trimmedBranch == "" {
 		return false, fmt.Errorf("branch name is required")
 	}
-	output, err := i.runner.Output(ctx, canonicalRoot, "branch", "--list", "--format=%(refname:short)", trimmedBranch)
-	if err != nil {
-		return false, err
+	_, exitCode, err := i.runner.Run(ctx, canonicalRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+trimmedBranch)
+	if err == nil {
+		return true, nil
 	}
-	return strings.TrimSpace(string(output)) != "", nil
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if exitCode == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot string, rawTarget string) (CreateTargetResolution, error) {
@@ -314,7 +320,7 @@ func formatGitRunError(exitCode int, err error, output []byte, args ...string) e
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	if exitCode < 0 {
-		return fmt.Errorf("git %s: %s", strings.Join(args, " "), trimmed)
+		return fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), trimmed, err)
 	}
 	return fmt.Errorf("git %s: %s", strings.Join(args, " "), trimmed)
 }
