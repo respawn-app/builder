@@ -35,7 +35,7 @@ Public docs should be stable, terse, standalone, and user-facing. Document the p
 ### 6. Prefer user-visible behavior over internals
 - Include mechanics only when they change usage, configuration, output, failure mode, or compatibility.
 - Omit architecture-validation notes, internal rollout notes, and implementation details that do not change user action.
-Bad: "builder creates a database table to track worktrees"; "builder sesolves local directories and symlinks first, then root folder files".
+Bad: "builder creates a database table to track worktrees"; "builder resolves local directories and symlinks first, then root folder files".
 
 ### 7. Avoid roadmap, editorial, and legal speculation
 - Do not document guesses, opinions, or future-facing caveats such as `will be supported`, `likely never`.
