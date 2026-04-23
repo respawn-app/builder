@@ -2,8 +2,10 @@ package postprocess
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -171,8 +173,8 @@ func TestRunnerUserHookCancellationPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected canceled context to propagate")
 	}
-	if err != context.Canceled {
-		t.Fatalf("err = %v, want context.Canceled", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want errors.Is(..., context.Canceled)", err)
 	}
 }
 
@@ -197,9 +199,36 @@ func TestRunnerUserHookFailureWarningTruncatesStderr(t *testing.T) {
 
 func writeHookScript(t *testing.T, contents string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("hook tests require POSIX shell")
+	}
 	path := filepath.Join(t.TempDir(), "hook.sh")
 	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
 		t.Fatalf("write hook: %v", err)
 	}
 	return path
+}
+
+func TestRunnerAllModeAccumulatesWarnings(t *testing.T) {
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll})
+	runner.processors = []Processor{warningProcessor{}}
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandText: "printf hi",
+		Output:      "hi",
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Warning != "builtin warning\ncommand postprocess hook unavailable" {
+		t.Fatalf("warning = %q, want both warnings", result.Warning)
+	}
+}
+
+type warningProcessor struct{}
+
+func (warningProcessor) ID() string { return "test/warning" }
+
+func (warningProcessor) Process(context.Context, Request) (Result, error) {
+	return Result{Output: "hi", Warning: "builtin warning"}, nil
 }
