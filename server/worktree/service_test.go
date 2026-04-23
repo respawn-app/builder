@@ -215,6 +215,19 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	}
 }
 
+func TestRunSetupScriptDoesNotAppendSuccessNote(t *testing.T) {
+	notes := &serviceTestLocalNotes{}
+	service := &Service{localNotes: notes}
+	scriptPath := filepath.Join(t.TempDir(), "setup.sh")
+	writeExecutableFile(t, scriptPath, "#!/bin/sh\nexit 0\n")
+
+	service.runSetupScript(scriptPath, "session-1", "lease-1", setupScriptPayload{WorktreeRoot: t.TempDir()})
+
+	if got := notes.snapshot(); len(got) != 0 {
+		t.Fatalf("expected no setup success note, got %+v", got)
+	}
+}
+
 func TestCreateWorktreeAllowsExistingRefWithoutCreatingBranch(t *testing.T) {
 	env := newServiceTestEnv(t)
 	runGit(t, env.workspaceRoot, "branch", "feature/existing-ref")
