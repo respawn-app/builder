@@ -17,6 +17,7 @@ import (
 	"builder/server/primaryrun"
 	"builder/server/session"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -26,6 +27,7 @@ type serviceTestRuntime struct {
 	requireCalls   []serviceRuntimeCall
 	rebindCalls    []serviceRuntimeCall
 	reminderCalls  []session.WorktreeReminderState
+	activeSessions map[string]bool
 	rebindErr      error
 	rebindErrRoot  string
 	requireErr     error
@@ -60,6 +62,22 @@ func (r *serviceTestRuntime) RecordWorktreeTransition(_ context.Context, _ strin
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reminderCalls = append(r.reminderCalls, state)
+	return nil
+}
+
+func (r *serviceTestRuntime) SyncExecutionTarget(_ context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reminder != nil {
+		r.reminderCalls = append(r.reminderCalls, *reminder)
+	}
+	if !r.activeSessions[strings.TrimSpace(sessionID)] {
+		return nil
+	}
+	r.rebindCalls = append(r.rebindCalls, serviceRuntimeCall{sessionID: sessionID, root: strings.TrimSpace(target.EffectiveWorkdir)})
+	if r.rebindErr != nil && (strings.TrimSpace(r.rebindErrRoot) == "" || strings.TrimSpace(r.rebindErrRoot) == strings.TrimSpace(target.EffectiveWorkdir)) {
+		return r.rebindErr
+	}
 	return nil
 }
 
@@ -405,12 +423,18 @@ func TestSwitchWorktreeClampsCwdAndAppendsLocalNote(t *testing.T) {
 func TestListWorktreesRetargetsMissingCurrentWorktreeBeforePruning(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/missing-current")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
 	if err := os.MkdirAll(filepath.Join(created.CanonicalRoot, "pkg"), 0o755); err != nil {
 		t.Fatalf("MkdirAll pkg: %v", err)
 	}
 	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, env.session.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "pkg"); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
 	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+	env.runtime.rebindCalls = nil
+	env.runtime.reminderCalls = nil
 	runGit(t, env.workspaceRoot, "worktree", "remove", "--force", created.CanonicalRoot)
 
 	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID})
@@ -446,6 +470,33 @@ func TestListWorktreesRetargetsMissingCurrentWorktreeBeforePruning(t *testing.T)
 	}
 	if resolved.EffectiveWorkdir != env.workspaceRoot {
 		t.Fatalf("stored effective workdir = %q, want %q", resolved.EffectiveWorkdir, env.workspaceRoot)
+	}
+	otherTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, otherSession.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget other session: %v", err)
+	}
+	if otherTarget.WorktreeID != "" || otherTarget.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected other session retargeted to main workspace, got %+v", otherTarget)
+	}
+	if len(env.runtime.rebindCalls) != 1 {
+		t.Fatalf("expected exactly one active-runtime rebind, got %+v", env.runtime.rebindCalls)
+	}
+	if got := env.runtime.rebindCalls[0]; got.sessionID != env.session.Meta().SessionID || got.root != env.workspaceRoot {
+		t.Fatalf("unexpected active-runtime rebind call: %+v", got)
+	}
+	if len(env.runtime.reminderCalls) != 2 {
+		t.Fatalf("expected reminder for each retargeted session, got %+v", env.runtime.reminderCalls)
+	}
+	for _, reminder := range env.runtime.reminderCalls {
+		if reminder.Mode != session.WorktreeReminderModeExit {
+			t.Fatalf("reminder mode = %q, want exit", reminder.Mode)
+		}
+		if reminder.WorktreePath != created.CanonicalRoot {
+			t.Fatalf("reminder worktree path = %q, want %q", reminder.WorktreePath, created.CanonicalRoot)
+		}
+		if reminder.EffectiveCwd != env.workspaceRoot {
+			t.Fatalf("reminder effective cwd = %q, want %q", reminder.EffectiveCwd, env.workspaceRoot)
+		}
 	}
 }
 
@@ -595,6 +646,7 @@ func newServiceTestEnv(t *testing.T) *serviceTestEnv {
 	}
 	sess := createServiceTestSession(t, store, cfg, binding)
 	runtime := &serviceTestRuntime{}
+	runtime.activeSessions = map[string]bool{sess.Meta().SessionID: true}
 	processes := &serviceTestProcessSource{}
 	localNotes := &serviceTestLocalNotes{}
 	service := NewService(store, nil, serviceTestGate{}, runtime, processes, localNotes, ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir})

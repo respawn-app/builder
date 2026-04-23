@@ -28,6 +28,7 @@ type runtimeController interface {
 	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
 	RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error
 	RecordWorktreeTransition(ctx context.Context, sessionID string, leaseID string, state session.WorktreeReminderState) error
+	SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error
 }
 
 type processSource interface {
@@ -376,7 +377,7 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 		if _, ok := seenRoots[strings.TrimSpace(record.CanonicalRoot)]; ok {
 			continue
 		}
-		if err := s.retargetSessionsFromMissingWorktree(ctx, strings.TrimSpace(workspaceID), strings.TrimSpace(workspaceRoot), record.ID); err != nil {
+		if err := s.retargetSessionsFromMissingWorktree(ctx, strings.TrimSpace(workspaceID), strings.TrimSpace(workspaceRoot), record); err != nil {
 			return nil, err
 		}
 		if err := s.metadata.DeleteWorktreeRecordByID(ctx, record.ID); err != nil {
@@ -402,13 +403,13 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	return synced, nil
 }
 
-func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktreeID string) error {
+func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord) error {
 	if s == nil || s.metadata == nil {
 		return errors.New("metadata store is required")
 	}
 	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
-	trimmedWorktreeID := strings.TrimSpace(worktreeID)
+	trimmedWorktreeID := strings.TrimSpace(worktree.ID)
 	if trimmedWorkspaceID == "" || trimmedWorkspaceRoot == "" || trimmedWorktreeID == "" {
 		return nil
 	}
@@ -417,12 +418,23 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 		return err
 	}
 	for _, blocker := range blockers {
-		target, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
+		previousTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
 		if err != nil {
 			return err
 		}
-		cwdRelpath := clampCwdRelpath(target.CwdRelpath, trimmedWorkspaceRoot)
+		cwdRelpath := clampCwdRelpath(previousTarget.CwdRelpath, trimmedWorkspaceRoot)
 		if err := s.metadata.UpdateSessionExecutionTargetByID(ctx, blocker.SessionID, trimmedWorkspaceID, "", cwdRelpath); err != nil {
+			return err
+		}
+		nextTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
+		if err != nil {
+			return err
+		}
+		reminder, err := worktreeReminderStateForMissingWorktree(worktree, nextTarget)
+		if err != nil {
+			return err
+		}
+		if err := s.runtime.SyncExecutionTarget(ctx, blocker.SessionID, nextTarget, &reminder); err != nil {
 			return err
 		}
 	}
@@ -489,6 +501,36 @@ func worktreeReminderStateForTransition(previous *syncedWorktree, previousTarget
 		WorkspaceRoot: strings.TrimSpace(nextTarget.WorkspaceRoot),
 		EffectiveCwd:  strings.TrimSpace(nextTarget.EffectiveWorkdir),
 	}, true
+}
+
+func worktreeReminderStateForMissingWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
+	gitMetadata, err := worktreeGitMetadataFromRecord(worktree)
+	if err != nil {
+		return session.WorktreeReminderState{}, err
+	}
+	branchName := strings.TrimSpace(gitMetadata.BranchName)
+	if branchName == "" {
+		branchName = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(gitMetadata.BranchRef), "refs/heads/"))
+	}
+	return session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeExit,
+		Branch:        branchName,
+		WorktreePath:  strings.TrimSpace(worktree.CanonicalRoot),
+		WorkspaceRoot: strings.TrimSpace(nextTarget.WorkspaceRoot),
+		EffectiveCwd:  strings.TrimSpace(nextTarget.EffectiveWorkdir),
+	}, nil
+}
+
+func worktreeGitMetadataFromRecord(worktree metadata.WorktreeRecord) (GitWorktree, error) {
+	metadataJSON := strings.TrimSpace(worktree.GitMetadataJSON)
+	if metadataJSON == "" {
+		return GitWorktree{}, nil
+	}
+	var gitMetadata GitWorktree
+	if err := json.Unmarshal([]byte(metadataJSON), &gitMetadata); err != nil {
+		return GitWorktree{}, fmt.Errorf("decode git worktree metadata: %w", err)
+	}
+	return gitMetadata, nil
 }
 
 func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID string, worktreeID string, worktreeRoot string) error {

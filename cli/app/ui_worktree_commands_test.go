@@ -831,6 +831,26 @@ func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 	}
 }
 
+func TestApplyExecutionTargetChangePreservesMutationTargetWhenRefreshFails(t *testing.T) {
+	runtimeClient := &runtimeControlFakeClient{
+		mainView: clientui.RuntimeMainView{
+			Session: clientui.RuntimeSessionView{
+				SessionID:       "session-1",
+				ExecutionTarget: clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo/stale"},
+			},
+		},
+		err: errors.New("temporary refresh failure"),
+	}
+	m := newProjectedTestUIModel(runtimeClient, nil, nil, WithUISessionID("session-1"))
+	m.statusConfig.WorkspaceRoot = "/repo/stale"
+
+	m.applyExecutionTargetChange(clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/feature-a"})
+
+	if got := m.statusConfig.WorkspaceRoot; got != "/wt/feature-a" {
+		t.Fatalf("status workspace root = %q, want mutation target", got)
+	}
+}
+
 func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees, serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a", BranchName: "feature/a"})
