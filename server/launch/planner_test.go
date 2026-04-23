@@ -686,6 +686,57 @@ func TestApplyRunPromptOverridesFastRoleUsesCLIProviderOverrideForHeuristic(t *t
 	}
 }
 
+func TestApplyRunPromptOverridesCLIModelOverrideRecomputesBudgetAfterFastRole(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
+		AgentRole: config.BuiltInSubagentRoleFast,
+		Model:     "gpt-5.3-codex-spark",
+	}, auth.State{Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}}})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("model = %q, want gpt-5.3-codex-spark", updated.ActiveSettings.Model)
+	}
+	if updated.ConfiguredModelName != "gpt-5.3-codex-spark" {
+		t.Fatalf("configured model = %q, want gpt-5.3-codex-spark", updated.ConfiguredModelName)
+	}
+	if updated.ActiveSettings.ModelContextWindow != 128_000 {
+		t.Fatalf("context window = %d, want 128000", updated.ActiveSettings.ModelContextWindow)
+	}
+	if updated.ActiveSettings.ContextCompactionThresholdTokens != 121_600 {
+		t.Fatalf("compaction threshold = %d, want 121600", updated.ActiveSettings.ContextCompactionThresholdTokens)
+	}
+	if updated.ActiveSettings.PreSubmitCompactionLeadTokens != 35_000 {
+		t.Fatalf("pre-submit lead = %d, want 35000", updated.ActiveSettings.PreSubmitCompactionLeadTokens)
+	}
+	if !updated.ActiveSettings.PriorityRequestMode {
+		t.Fatal("expected fast-role priority mode to stay enabled")
+	}
+}
+
 func TestPlannerInteractivePickerReopensSelectedSessionWithinActiveContainer(t *testing.T) {
 	root := t.TempDir()
 	containerA := filepath.Join(root, "sessions", "workspace-a")

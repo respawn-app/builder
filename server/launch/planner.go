@@ -146,7 +146,16 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	locked := plan.Store.Meta().Locked
 	mergedSource := mergeOverrideSources(plan.Source, loaded.Source)
 	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
+		originalModel := strings.TrimSpace(next.ActiveSettings.Model)
+		explicitSources := map[string]string{}
+		for key, source := range mergedSource.Sources {
+			if strings.TrimSpace(source) == "" || strings.TrimSpace(source) == "default" {
+				continue
+			}
+			explicitSources[key] = source
+		}
 		next.ActiveSettings.Model = loaded.Settings.Model
+		applyDerivedModelContextBudgetOverrides(&next.ActiveSettings, explicitSources, originalModel, true)
 		next.ConfiguredModelName = loaded.Settings.Model
 	}
 	if strings.TrimSpace(overrides.ProviderOverride) != "" {

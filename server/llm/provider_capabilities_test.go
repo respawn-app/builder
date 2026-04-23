@@ -100,6 +100,13 @@ func TestProviderCapabilitiesForSettings(t *testing.T) {
 	}
 }
 
+func TestProviderCapabilitiesForSettingsRejectsUnsupportedProviderOverride(t *testing.T) {
+	_, err := ProviderCapabilitiesForSettings(auth.EmptyState(), config.Settings{ProviderOverride: "custom-provider"})
+	if !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
 func TestResolveOpenAITransportProviderVariant_DefaultLoopbackAndRemoteCompatibleBaseURL(t *testing.T) {
 	if got, err := resolveOpenAITransportProviderVariant("", openAIAuthMode{}); err != nil || got != "openai" {
 		t.Fatalf("expected default base url to resolve openai variant, got variant=%q err=%v", got, err)

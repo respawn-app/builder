@@ -83,9 +83,7 @@ func (r *Runner) Apply(ctx context.Context, req Request) (Result, error) {
 			processed = true
 			processorID = builtin.ProcessorID
 		}
-		if strings.TrimSpace(builtin.Warning) != "" {
-			warning = builtin.Warning
-		}
+		warning = joinWarnings(warning, builtin.Warning)
 	}
 
 	if mode == config.ShellPostprocessingModeUser || mode == config.ShellPostprocessingModeAll {
@@ -93,9 +91,7 @@ func (r *Runner) Apply(ctx context.Context, req Request) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		if strings.TrimSpace(hook.Warning) != "" {
-			warning = hook.Warning
-		}
+		warning = joinWarnings(warning, hook.Warning)
 		if hook.Processed {
 			current = hook.Output
 			processed = true
@@ -107,6 +103,7 @@ func (r *Runner) Apply(ctx context.Context, req Request) (Result, error) {
 }
 
 func (r *Runner) applyBuiltins(ctx context.Context, req Request) (Result, error) {
+	warning := ""
 	for _, processor := range r.processors {
 		if processor == nil {
 			continue
@@ -118,11 +115,13 @@ func (r *Runner) applyBuiltins(ctx context.Context, req Request) (Result, error)
 			}
 			continue
 		}
+		warning = joinWarnings(warning, result.Warning)
 		if result.Processed {
+			result.Warning = warning
 			return result, nil
 		}
 	}
-	return Result{Output: req.Output}, nil
+	return Result{Output: req.Output, Warning: warning}, nil
 }
 
 func effectiveMode(mode config.ShellPostprocessingMode) config.ShellPostprocessingMode {
@@ -172,4 +171,17 @@ func resolveHookPath(raw string) (string, bool) {
 		return "", false
 	}
 	return abs, true
+}
+
+func joinWarnings(existing string, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	switch {
+	case existing == "":
+		return next
+	case next == "":
+		return existing
+	default:
+		return existing + "\n" + next
+	}
 }
