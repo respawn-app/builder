@@ -987,6 +987,7 @@ func TestApplyExecutionTargetChangeIgnoresStaleRefreshTarget(t *testing.T) {
 func TestWorktreeSwitchDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
 	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
 	m.worktrees.mutationToken = 7
+	m.worktrees.switchPending = true
 	m.statusConfig.WorkspaceRoot = "/repo"
 
 	next, _ := m.Update(worktreeSwitchDoneMsg{
@@ -998,6 +999,51 @@ func TestWorktreeSwitchDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
 	})
 	updated := next.(*uiModel)
 
+	if got := updated.statusConfig.WorkspaceRoot; got != "/wt/feature-a" {
+		t.Fatalf("status workspace root = %q, want switched worktree root", got)
+	}
+	if updated.worktrees.switchPending {
+		t.Fatal("expected switchPending cleared after switch completion")
+	}
+}
+
+func TestWorktreeOverlayStaysOpenWhileSwitchIsPending(t *testing.T) {
+	client := &worktreeCommandTestClient{switchResp: serverapi.WorktreeSwitchResponse{
+		Target:   clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/feature-a"},
+		Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
+	}}
+	m := newWorktreeTestModel(t, client)
+	m.worktrees.open = true
+	m.worktrees.phase = uiWorktreeOverlayPhaseList
+	m.worktrees.entries = []serverapi.WorktreeView{{
+		WorktreeID:    "wt-feature",
+		DisplayName:   "feature-a",
+		CanonicalRoot: "/wt/feature-a",
+	}}
+	m.worktrees.selection = 1
+	m.setInputMode(uiInputModeWorktree)
+
+	next, switchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.worktrees.switchPending {
+		t.Fatal("expected switchPending set after switch command")
+	}
+
+	next, closeCmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.worktrees.isOpen() {
+		t.Fatal("expected overlay to stay open while switch pending")
+	}
+	if closeCmd != nil {
+		if msgs := collectCmdMessages(t, closeCmd); len(msgs) != 0 {
+			t.Fatalf("expected no close command output while switch pending, got %+v", msgs)
+		}
+	}
+
+	for _, msg := range collectCmdMessages(t, switchCmd) {
+		next, cmd := updated.Update(msg)
+		updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	}
 	if got := updated.statusConfig.WorkspaceRoot; got != "/wt/feature-a" {
 		t.Fatalf("status workspace root = %q, want switched worktree root", got)
 	}

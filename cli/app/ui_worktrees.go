@@ -96,6 +96,7 @@ type uiWorktreeOverlayState struct {
 	errorText          string
 	refreshToken       uint64
 	mutationToken      uint64
+	switchPending      bool
 	selectedID         string
 	intent             uiWorktreeOpenIntent
 	create             uiWorktreeCreateDialogState
@@ -342,6 +343,9 @@ func (m *uiModel) openWorktreeOverlay(intent uiWorktreeOpenIntent) {
 
 func (m *uiModel) closeWorktreeOverlay() {
 	if m == nil {
+		return
+	}
+	if m.worktrees.switchPending {
 		return
 	}
 	m.worktrees = uiWorktreeOverlayState{}
@@ -733,6 +737,7 @@ func (m *uiModel) worktreeSwitchCmd(target serverapi.WorktreeView) tea.Cmd {
 		return nil
 	}
 	m.worktrees.mutationToken++
+	m.worktrees.switchPending = true
 	token := m.worktrees.mutationToken
 	m.worktrees.errorText = ""
 	return func() tea.Msg {
@@ -783,6 +788,9 @@ func (c uiInputController) startWorktreeOverlayCmd(intent uiWorktreeOpenIntent) 
 
 func (c uiInputController) stopWorktreeOverlayCmd() tea.Cmd {
 	m := c.model
+	if m.worktrees.switchPending {
+		return nil
+	}
 	overlayCmd := m.popWorktreeOverlayIfNeeded()
 	m.closeWorktreeOverlay()
 	spinnerCmd := m.ensureSpinnerTicking()
