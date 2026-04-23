@@ -101,7 +101,11 @@ func (b *LocalToolRegistryBinding) Rebind(workspaceRoot string) error {
 	if b == nil {
 		return fmt.Errorf("local tool registry binding is required")
 	}
-	b.ctx.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedRoot == "" {
+		return fmt.Errorf("workspace root is required")
+	}
+	b.ctx.WorkspaceRoot = trimmedRoot
 	return b.rebuild()
 }
 
@@ -139,6 +143,10 @@ func (b *LocalToolRegistryBinding) rebuild() error {
 }
 
 func NewLocalToolRegistryBinding(workspaceRoot string, ownerSessionID string, enabled []toolspec.ID, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*LocalToolRegistryBinding, *askquestion.Broker, *shelltool.Manager, error) {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedRoot == "" {
+		return nil, nil, nil, fmt.Errorf("workspace root is required")
+	}
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -152,7 +160,7 @@ func NewLocalToolRegistryBinding(workspaceRoot string, ownerSessionID string, en
 	readOutsideWorkspaceApprover := NewOutsideWorkspaceApprover(broker, "reading")
 	registry := tools.NewRegistry()
 	ctx := LocalToolRuntimeContext{
-		WorkspaceRoot:                workspaceRoot,
+		WorkspaceRoot:                trimmedRoot,
 		OwnerSessionID:               ownerSessionID,
 		ShellOutputMaxChars:          shellOutputMaxChars,
 		AllowNonCwdEdits:             allowNonCwdEdits,

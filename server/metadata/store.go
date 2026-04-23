@@ -282,6 +282,18 @@ func (s *Store) UpsertWorktreeRecord(ctx context.Context, record WorktreeRecord)
 	if s == nil || s.queries == nil {
 		return errors.New("metadata store is required")
 	}
+	if strings.TrimSpace(record.ID) == "" {
+		return errors.New("worktree id is required")
+	}
+	if strings.TrimSpace(record.WorkspaceID) == "" {
+		return errors.New("workspace id is required")
+	}
+	if strings.TrimSpace(record.DisplayName) == "" {
+		return errors.New("worktree display name is required")
+	}
+	if strings.TrimSpace(record.Availability) == "" {
+		return errors.New("worktree availability is required")
+	}
 	now := time.Now().UTC()
 	createdAt := record.CreatedAt
 	if createdAt.IsZero() {

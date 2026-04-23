@@ -603,6 +603,27 @@ func TestRecordWorktreeTransitionPersistsPendingReminderState(t *testing.T) {
 	}
 }
 
+func TestEnsureCurrentControllerLeaseLockedRejectsChangedLease(t *testing.T) {
+	handle := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+
+	err := svc.ensureCurrentControllerLeaseLocked("session-1", "lease-2", handle)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ensureCurrentControllerLeaseLocked error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestEnsureCurrentControllerLeaseLockedRejectsReplacedHandle(t *testing.T) {
+	original := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	replacement := &runtimeHandle{controllerRequestID: "req-2", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": replacement}}
+
+	err := svc.ensureCurrentControllerLeaseLocked("session-1", "lease-1", original)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ensureCurrentControllerLeaseLocked error = %v, want invalid controller lease", err)
+	}
+}
+
 func TestSyncExecutionTargetPersistsReminderWithoutActiveRuntime(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 

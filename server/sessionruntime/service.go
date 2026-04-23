@@ -303,6 +303,7 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 
 func (s *Service) RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error {
 	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
 	if trimmedRoot == "" {
 		return errors.New("workspace root is required")
 	}
@@ -321,9 +322,9 @@ func (s *Service) RebindLocalTools(ctx context.Context, sessionID string, leaseI
 	}
 	s.mu.Lock()
 	current := s.handles[trimmedSessionID]
-	if current == nil || current != handle {
+	if err := s.ensureCurrentControllerLeaseLocked(trimmedSessionID, trimmedLeaseID, handle); err != nil {
 		s.mu.Unlock()
-		return invalidControllerLeaseError(trimmedSessionID)
+		return err
 	}
 	rebind := current.rebind
 	s.mu.Unlock()
@@ -337,7 +338,9 @@ func (s *Service) RecordWorktreeTransition(ctx context.Context, sessionID string
 	if err := s.RequireControllerLease(ctx, sessionID, leaseID); err != nil {
 		return err
 	}
-	store, err := s.resolveStore(ctx, strings.TrimSpace(sessionID))
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	store, err := s.resolveStore(ctx, trimmedSessionID)
 	if err != nil {
 		return err
 	}
@@ -345,7 +348,29 @@ func (s *Service) RecordWorktreeTransition(ctx context.Context, sessionID string
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	if err := s.ensureCurrentControllerLeaseLocked(trimmedSessionID, trimmedLeaseID, nil); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Unlock()
 	return store.SetWorktreeReminderState(&normalized)
+}
+
+func (s *Service) ensureCurrentControllerLeaseLocked(sessionID string, leaseID string, handle *runtimeHandle) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	current := s.handles[trimmedSessionID]
+	if current == nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if handle != nil && current != handle {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if strings.TrimSpace(current.controllerLeaseID) != trimmedLeaseID {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	return nil
 }
 
 func (s *Service) SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error {

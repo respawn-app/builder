@@ -1045,6 +1045,39 @@ func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T
 	}
 }
 
+func TestUpsertWorktreeRecordRejectsMissingRequiredFields(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	baseRecord := WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   filepath.Join(cfg.WorkspaceRoot, "wt-a"),
+		DisplayName:     "wt-a",
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}
+	tests := []struct {
+		name   string
+		mutate func(*WorktreeRecord)
+		want   string
+	}{
+		{name: "id", mutate: func(record *WorktreeRecord) { record.ID = "  " }, want: "worktree id is required"},
+		{name: "workspace id", mutate: func(record *WorktreeRecord) { record.WorkspaceID = "  " }, want: "workspace id is required"},
+		{name: "display name", mutate: func(record *WorktreeRecord) { record.DisplayName = "  " }, want: "worktree display name is required"},
+		{name: "availability", mutate: func(record *WorktreeRecord) { record.Availability = "  " }, want: "worktree availability is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := baseRecord
+			tt.mutate(&record)
+			err := store.UpsertWorktreeRecord(ctx, record)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("UpsertWorktreeRecord error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolvePersistedSessionUsesReboundWorkspaceRoot(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)

@@ -143,7 +143,7 @@ func TestGitInspectorAddUsesExistingRefWithoutCreatingBranch(t *testing.T) {
 func TestGitInspectorResolveCreateTargetClassifiesExistingBranch(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	runner := &stubGitCommandRunner{outputs: map[string][]byte{
-		strings.Join([]string{"for-each-ref", "--format=%(refname:short)", "--count=1", "refs/heads/main"}, "\x00"): []byte("main\n"),
+		strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/main^{object}"}, "\x00"): []byte("abc123\n"),
 	}}
 	inspector := NewGitInspector(runner)
 	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "main")
@@ -155,11 +155,41 @@ func TestGitInspectorResolveCreateTargetClassifiesExistingBranch(t *testing.T) {
 	}
 }
 
+func TestGitInspectorResolveCreateTargetTreatsPrefixOnlyBranchAsNewBranch(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	runner := &stubGitCommandRunner{
+		errors: map[string]error{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/feature^{object}"}, "\x00"): errors.New("exit status 1"),
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature^{object}"}, "\x00"):            errors.New("exit status 1"),
+		},
+		exitCodes: map[string]int{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/feature^{object}"}, "\x00"): 1,
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature^{object}"}, "\x00"):            1,
+		},
+	}
+	inspector := NewGitInspector(runner)
+	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "feature")
+	if err != nil {
+		t.Fatalf("ResolveCreateTarget: %v", err)
+	}
+	if resolution.Kind != CreateTargetResolutionKindNewBranch {
+		t.Fatalf("unexpected resolution: %+v", resolution)
+	}
+}
+
 func TestGitInspectorResolveCreateTargetClassifiesDetachedRef(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
-	runner := &stubGitCommandRunner{outputs: map[string][]byte{
-		strings.Join([]string{"rev-parse", "--verify", "--quiet", "HEAD^{object}"}, "\x00"): []byte("abc123\n"),
-	}}
+	runner := &stubGitCommandRunner{
+		outputs: map[string][]byte{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "HEAD^{object}"}, "\x00"): []byte("abc123\n"),
+		},
+		errors: map[string]error{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/HEAD^{object}"}, "\x00"): errors.New("exit status 1"),
+		},
+		exitCodes: map[string]int{
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/HEAD^{object}"}, "\x00"): 1,
+		},
+	}
 	inspector := NewGitInspector(runner)
 	resolution, err := inspector.ResolveCreateTarget(context.Background(), workspaceRoot, "HEAD")
 	if err != nil {
@@ -174,10 +204,12 @@ func TestGitInspectorResolveCreateTargetClassifiesNewBranch(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	runner := &stubGitCommandRunner{
 		errors: map[string]error{
-			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"): errors.New("exit status 1"),
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/feature/new^{object}"}, "\x00"): errors.New("exit status 1"),
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"):            errors.New("exit status 1"),
 		},
 		exitCodes: map[string]int{
-			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"): 1,
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "refs/heads/feature/new^{object}"}, "\x00"): 1,
+			strings.Join([]string{"rev-parse", "--verify", "--quiet", "feature/new^{object}"}, "\x00"):            1,
 		},
 	}
 	inspector := NewGitInspector(runner)

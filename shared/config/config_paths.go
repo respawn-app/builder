@@ -63,5 +63,8 @@ func prepareWorktreeBaseDir(persistenceRoot string, path string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree base dir: %w", err)
 	}
+	if err := os.MkdirAll(absRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create worktree base dir: %w", err)
+	}
 	return absRoot, nil
 }

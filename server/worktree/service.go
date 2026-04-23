@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"builder/server/metadata"
@@ -22,7 +23,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const setupScriptTimeout = 10 * time.Second
+const setupScriptTimeout = 20 * time.Second
 
 type runtimeController interface {
 	RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error
@@ -53,6 +54,14 @@ type Service struct {
 	localNotes  localEntryAppender
 	baseDir     string
 	setupScript string
+
+	workspaceMu    sync.Mutex
+	workspaceLocks map[string]*workspaceMutationLock
+}
+
+type workspaceMutationLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type syncedWorktree struct {
@@ -84,14 +93,15 @@ func NewService(metadataStore *metadata.Store, gitInspector *GitInspector, gate 
 		gitInspector = NewGitInspector(nil)
 	}
 	return &Service{
-		metadata:    metadataStore,
-		git:         gitInspector,
-		gate:        gate,
-		runtime:     runtime,
-		processes:   processes,
-		localNotes:  localNotes,
-		baseDir:     strings.TrimSpace(opts.BaseDir),
-		setupScript: strings.TrimSpace(opts.SetupScript),
+		metadata:       metadataStore,
+		git:            gitInspector,
+		gate:           gate,
+		runtime:        runtime,
+		processes:      processes,
+		localNotes:     localNotes,
+		baseDir:        strings.TrimSpace(opts.BaseDir),
+		setupScript:    strings.TrimSpace(opts.SetupScript),
+		workspaceLocks: make(map[string]*workspaceMutationLock),
 	}
 }
 
@@ -103,6 +113,8 @@ func (s *Service) ListWorktrees(ctx context.Context, req serverapi.WorktreeListR
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
 	}
+	workspaceLease := s.acquireWorkspaceMutationLock(workspaceCtx.workspaceID)
+	defer workspaceLease.Release()
 	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
@@ -310,7 +322,48 @@ func (s *Service) beginMutation(ctx context.Context, sessionID string, leaseID s
 		release.Release()
 		return nil, sessionWorkspaceContext{}, err
 	}
-	return release, workspaceCtx, nil
+	workspaceLease := s.acquireWorkspaceMutationLock(workspaceCtx.workspaceID)
+	workspaceCtx, err = s.resolveSessionWorkspaceContext(ctx, sessionID)
+	if err != nil {
+		workspaceLease.Release()
+		release.Release()
+		return nil, sessionWorkspaceContext{}, err
+	}
+	return primaryrun.LeaseFunc(func() {
+		workspaceLease.Release()
+		release.Release()
+	}), workspaceCtx, nil
+}
+
+func (s *Service) acquireWorkspaceMutationLock(workspaceID string) primaryrun.Lease {
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if s == nil || trimmedWorkspaceID == "" {
+		return primaryrun.LeaseFunc(func() {})
+	}
+	s.workspaceMu.Lock()
+	if s.workspaceLocks == nil {
+		s.workspaceLocks = make(map[string]*workspaceMutationLock)
+	}
+	lock := s.workspaceLocks[trimmedWorkspaceID]
+	if lock == nil {
+		lock = &workspaceMutationLock{}
+		s.workspaceLocks[trimmedWorkspaceID] = lock
+	}
+	lock.refs++
+	s.workspaceMu.Unlock()
+	lock.mu.Lock()
+	var once sync.Once
+	return primaryrun.LeaseFunc(func() {
+		once.Do(func() {
+			lock.mu.Unlock()
+			s.workspaceMu.Lock()
+			defer s.workspaceMu.Unlock()
+			lock.refs--
+			if lock.refs == 0 {
+				delete(s.workspaceLocks, trimmedWorkspaceID)
+			}
+		})
+	})
 }
 
 func (s *Service) resolveSessionWorkspaceContext(ctx context.Context, sessionID string) (sessionWorkspaceContext, error) {
@@ -404,8 +457,8 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 }
 
 func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord) error {
-	if s == nil || s.metadata == nil {
-		return errors.New("metadata store is required")
+	if s == nil || s.metadata == nil || s.runtime == nil {
+		return errors.New("worktree service dependencies are required")
 	}
 	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
 	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
@@ -417,28 +470,44 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 	if err != nil {
 		return err
 	}
+	type pendingRuntimeSync struct {
+		sessionID string
+	}
+	pending := make([]pendingRuntimeSync, 0, len(blockers))
+	collected := make([]error, 0)
+	appendErr := func(sessionID string, err error) {
+		collected = append(collected, fmt.Errorf("retarget session %q from missing worktree %q: %w", strings.TrimSpace(sessionID), trimmedWorktreeID, err))
+	}
 	for _, blocker := range blockers {
 		previousTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
 		if err != nil {
-			return err
+			appendErr(blocker.SessionID, err)
+			continue
 		}
 		cwdRelpath := clampCwdRelpath(previousTarget.CwdRelpath, trimmedWorkspaceRoot)
 		if err := s.metadata.UpdateSessionExecutionTargetByID(ctx, blocker.SessionID, trimmedWorkspaceID, "", cwdRelpath); err != nil {
-			return err
+			appendErr(blocker.SessionID, err)
+			continue
 		}
-		nextTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
+		pending = append(pending, pendingRuntimeSync{sessionID: blocker.SessionID})
+	}
+	for _, item := range pending {
+		nextTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, item.sessionID)
 		if err != nil {
-			return err
+			appendErr(item.sessionID, err)
+			continue
 		}
 		reminder, err := worktreeReminderStateForMissingWorktree(worktree, nextTarget)
 		if err != nil {
-			return err
+			appendErr(item.sessionID, err)
+			continue
 		}
-		if err := s.runtime.SyncExecutionTarget(ctx, blocker.SessionID, nextTarget, &reminder); err != nil {
-			return err
+		if err := s.runtime.SyncExecutionTarget(ctx, item.sessionID, nextTarget, &reminder); err != nil {
+			appendErr(item.sessionID, err)
+			continue
 		}
 	}
-	return nil
+	return errors.Join(collected...)
 }
 
 func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionWorkspaceContext, leaseID string, previous *syncedWorktree, next syncedWorktree, emitNote bool) (clientui.SessionExecutionTarget, error) {

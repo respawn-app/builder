@@ -33,9 +33,9 @@ Supported auth options:
 
 You can switch later with `/login`.
 
-::: note
+:::note
 Anthropic or Gemini subscriptions will not be supported until that becomes legal.
-Non-openai model support for now is nominal and WIP.
+Non-OpenAI model support is limited.
 :::
 
 ## Main Workflows
@@ -89,4 +89,4 @@ Each top-level `.md` file becomes a `/prompt:<name>` command.
 - Use `/supervisor` to toggle its invocation for the current session. Initial value is config's `reviewer.frequency`, and default is after code edits. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 
 By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](../config/) page contains instructions on how to change supervisor model.
-Running OSS models or smaller models like `gpt5.4-mini` seems to give almost the same results while keeping costs low.
+Running OSS models or smaller models like `gpt-5.4-mini` seems to give almost the same results while keeping costs low.

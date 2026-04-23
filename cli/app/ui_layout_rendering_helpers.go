@@ -127,19 +127,19 @@ func renderEditableInputLineWithCursor(line string, width int, cursorCol int, li
 		if cursorCol < displayCol+rw {
 			prefix := string(runes[:index])
 			suffix := string(runes[index+1:])
-			return lineStyle.Render(prefix) + lineStyle.Copy().Reverse(true).Render(string(r)) + lineStyle.Render(padANSIRight(suffix, width-displayCol-rw))
+			return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(r)) + lineStyle.Render(padANSIRight(suffix, width-displayCol-rw))
 		}
 		displayCol += rw
 	}
 	if displayCol < width {
-		return lineStyle.Render(line) + lineStyle.Copy().Reverse(true).Render(" ") + lineStyle.Render(strings.Repeat(" ", max(0, width-displayCol-1)))
+		return lineStyle.Render(line) + lineStyle.Reverse(true).Render(" ") + lineStyle.Render(strings.Repeat(" ", max(0, width-displayCol-1)))
 	}
 	if len(runes) == 0 {
-		return lineStyle.Copy().Reverse(true).Render(" ")
+		return lineStyle.Reverse(true).Render(" ")
 	}
 	last := len(runes) - 1
 	prefix := string(runes[:last])
-	return lineStyle.Render(prefix) + lineStyle.Copy().Reverse(true).Render(string(runes[last]))
+	return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(runes[last]))
 }
 
 func editableInputCursorLine(width int, spec uiEditableInputRenderSpec) int {

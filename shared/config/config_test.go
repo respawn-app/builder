@@ -169,7 +169,7 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
 		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
 	}
-	if !strings.Contains(string(settingsBytes), "# model = \"gpt-5.4\" # inherited from main model unless overridden") {
+	if !strings.Contains(string(settingsBytes), "# model = \"gpt-5.5\" # inherited from main model unless overridden") {
 		t.Fatalf("expected default config to show inherited reviewer model line, got %q", string(settingsBytes))
 	}
 	if !strings.Contains(string(settingsBytes), "[tools]") {
@@ -270,7 +270,7 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	contents := strings.Join([]string{
-		"model = \"gpt-5.4\"",
+		"model = \"gpt-5.5\"",
 		"",
 		"[subagents.fast]",
 		"model = \"gpt-5.4-mini\"",
@@ -317,7 +317,7 @@ func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	contents := strings.Join([]string{
-		"model = \"gpt-5.4\"",
+		"model = \"gpt-5.5\"",
 		"",
 		"[subagents.fast]",
 		"thinking_level = \"low\"",
@@ -347,7 +347,7 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	contents := strings.Join([]string{
-		"model = \"gpt-5.4\"",
+		"model = \"gpt-5.5\"",
 		"",
 		"[subagents.fast]",
 		"thinking_level = \"low\"",
@@ -428,6 +428,37 @@ func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
 	}
 }
 
+func TestLoadCreatesWorktreeBaseDir(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configText := strings.Join([]string{
+		"persistence_root = \"~/custom-builder\"",
+		"",
+		"[worktrees]",
+		"base_dir = \"managed/worktrees\"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	info, err := os.Stat(cfg.Settings.Worktrees.BaseDir)
+	if err != nil {
+		t.Fatalf("stat worktree base dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected worktree base dir, got mode %v", info.Mode())
+	}
+}
+
 func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -437,7 +468,7 @@ func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	contents := strings.Join([]string{
-		"model = \"gpt-5.4\"",
+		"model = \"gpt-5.5\"",
 		"",
 		"[subagents.fast]",
 		"provider_override = \"bogus\"",
@@ -464,7 +495,7 @@ func TestLoadSubagentRoleRejectsPersistenceRoot(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	contents := strings.Join([]string{
-		"model = \"gpt-5.4\"",
+		"model = \"gpt-5.5\"",
 		"",
 		"[subagents.fast]",
 		"persistence_root = \"/tmp/custom\"",
@@ -668,7 +699,7 @@ func TestWriteSettingsFileForOnboardingPreservesModelWhenProviderOverrideIsSet(t
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
 	}
-	if !strings.Contains(string(contents), "model = \"gpt-5.4\"") {
+	if !strings.Contains(string(contents), "model = \"gpt-5.5\"") {
 		t.Fatalf("expected onboarding settings to preserve explicit model with provider_override, got %q", string(contents))
 	}
 	if !strings.Contains(string(contents), "provider_override = \"openai\"") {
@@ -790,7 +821,7 @@ func TestLoadCapabilityOverridesFromFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.4"
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.5"
 
 [model_capabilities]
 supports_reasoning_effort = true
@@ -1938,7 +1969,7 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 
 func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInheritance(t *testing.T) {
 	settings := defaultSettings()
-	settings.Model = "gpt-5.4"
+	settings.Model = "gpt-5.5"
 	settings.ThinkingLevel = ""
 	settings.Reviewer = ReviewerSettings{
 		Frequency:      "edits",
@@ -1952,7 +1983,7 @@ func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInher
 	if err != nil {
 		t.Fatalf("normalize settings for persistence: %v", err)
 	}
-	if normalized.Reviewer.Model != "gpt-5.4" {
+	if normalized.Reviewer.Model != "gpt-5.5" {
 		t.Fatalf("expected reviewer model to inherit main model, got %q", normalized.Reviewer.Model)
 	}
 	if normalized.Reviewer.ThinkingLevel != "" {

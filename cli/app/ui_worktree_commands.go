@@ -63,8 +63,8 @@ func (c uiInputController) handleWorktreeSwitchCommand(token string) (tea.Model,
 		errText := formatSubmissionError(err)
 		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
-	resp, err := runWorktreeMutation(m, func(leaseID string) (serverapi.WorktreeSwitchResponse, error) {
-		return m.worktreeClient.SwitchWorktree(context.Background(), serverapi.WorktreeSwitchRequest{
+	resp, err := runWorktreeMutation(m, func(ctx context.Context, leaseID string) (serverapi.WorktreeSwitchResponse, error) {
+		return m.worktreeClient.SwitchWorktree(ctx, serverapi.WorktreeSwitchRequest{
 			ClientRequestID:   uuid.NewString(),
 			SessionID:         m.sessionID,
 			ControllerLeaseID: leaseID,
@@ -95,7 +95,7 @@ func (m *uiModel) resolveWorktreeToken(token string) (serverapi.WorktreeView, er
 	return resolveWorktreeTokenFromEntries(resp.Worktrees, token)
 }
 
-func runWorktreeMutation[T any](m *uiModel, call func(controllerLeaseID string) (T, error)) (T, error) {
+func runWorktreeMutation[T any](m *uiModel, call func(ctx context.Context, controllerLeaseID string) (T, error)) (T, error) {
 	var zero T
 	client, ok := m.runtimeClient().(*sessionRuntimeClient)
 	if !ok || client == nil {
@@ -103,7 +103,9 @@ func runWorktreeMutation[T any](m *uiModel, call func(controllerLeaseID string) 
 	}
 	ctx, cancel := client.controlContext()
 	defer cancel()
-	return retryRuntimeControlCall(ctx, client.controllerLeaseIDValue, client.recoverControllerLease, call)
+	return retryRuntimeControlCall(ctx, client.controllerLeaseIDValue, client.recoverControllerLease, func(controllerLeaseID string) (T, error) {
+		return call(ctx, controllerLeaseID)
+	})
 }
 
 func (m *uiModel) applyExecutionTargetChange(target clientui.SessionExecutionTarget) {
