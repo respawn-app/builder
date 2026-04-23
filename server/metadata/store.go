@@ -1005,6 +1005,7 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		"workspace_root":                  snapshot.Meta.WorkspaceRoot,
 		"workspace_container":             snapshot.Meta.WorkspaceContainer,
 		"compaction_soon_reminder_issued": snapshot.Meta.CompactionSoonReminderIssued,
+		"worktree_reminder":               snapshot.Meta.WorktreeReminder,
 	})
 	if err != nil {
 		return err
@@ -1012,8 +1013,10 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 	worktreeID := sql.NullString{}
 	cwdRelpath := "."
 	if existingTarget, targetErr := s.queries.GetSessionExecutionTargetByID(ctx, strings.TrimSpace(snapshot.Meta.SessionID)); targetErr == nil {
-		worktreeID = existingTarget.WorktreeID
-		cwdRelpath = normalizeSessionCwdRelpath(existingTarget.CwdRelpath)
+		if strings.TrimSpace(existingTarget.WorkspaceID) == binding.WorkspaceID {
+			worktreeID = existingTarget.WorktreeID
+			cwdRelpath = normalizeSessionCwdRelpath(existingTarget.CwdRelpath)
+		}
 	} else if !errors.Is(targetErr, sql.ErrNoRows) {
 		return fmt.Errorf("get existing session execution target: %w", targetErr)
 	}
@@ -1107,9 +1110,10 @@ func defaultJSONObject(value string) string {
 
 func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Meta, error) {
 	metadataPayload := struct {
-		WorkspaceRoot                string `json:"workspace_root"`
-		WorkspaceContainer           string `json:"workspace_container"`
-		CompactionSoonReminderIssued bool   `json:"compaction_soon_reminder_issued"`
+		WorkspaceRoot                string                         `json:"workspace_root"`
+		WorkspaceContainer           string                         `json:"workspace_container"`
+		CompactionSoonReminderIssued bool                           `json:"compaction_soon_reminder_issued"`
+		WorktreeReminder             *session.WorktreeReminderState `json:"worktree_reminder"`
 	}{}
 	if err := unmarshalStoredJSON(row.MetadataJson, &metadataPayload); err != nil {
 		return session.Meta{}, fmt.Errorf("decode session metadata json: %w", err)
@@ -1161,6 +1165,7 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 		InFlightStep:                 row.InFlightStep != 0,
 		AgentsInjected:               row.AgentsInjected != 0,
 		CompactionSoonReminderIssued: metadataPayload.CompactionSoonReminderIssued,
+		WorktreeReminder:             metadataPayload.WorktreeReminder,
 		UsageState:                   usageState,
 		Locked:                       locked,
 	}, nil
