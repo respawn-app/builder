@@ -676,6 +676,49 @@ func TestWorktreeDeleteTargetResolutionErrorRendersLocallyWithoutStatusLineMirro
 	assertWorktreeOverlayLocalErrorOnly(t, updated, []string{`worktree "missing" not found`}, []string{`worktree "missing" not found`})
 }
 
+func TestWorktreeSwitchCommandRejectsCrossFieldTokenCollisions(t *testing.T) {
+	resp := testMainWorktreeListResponse()
+	resp.Worktrees = append(resp.Worktrees,
+		serverapi.WorktreeView{WorktreeID: "wt-display", DisplayName: "shared", CanonicalRoot: "/wt/shared-display", BranchName: "feature/display"},
+		serverapi.WorktreeView{WorktreeID: "wt-branch", DisplayName: "other", CanonicalRoot: "/wt/shared-branch", BranchName: "shared"},
+	)
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/wt switch shared"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	if len(client.switchRequests) != 0 {
+		t.Fatalf("expected no switch request on ambiguous token, got %+v", client.switchRequests)
+	}
+	if !strings.Contains(updated.transientStatus, `worktree "shared" is ambiguous`) {
+		t.Fatalf("expected ambiguous switch error, got %q", updated.transientStatus)
+	}
+}
+
+func TestWorktreeDeleteTargetResolutionRejectsCrossFieldTokenCollisions(t *testing.T) {
+	resp := testMainWorktreeListResponse()
+	resp.Worktrees = append(resp.Worktrees,
+		serverapi.WorktreeView{WorktreeID: "wt-display", DisplayName: "shared", CanonicalRoot: "/wt/shared-display", BranchName: "feature/display"},
+		serverapi.WorktreeView{WorktreeID: "wt-branch", DisplayName: "other", CanonicalRoot: "/wt/shared-branch", BranchName: "shared"},
+	)
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/wt delete shared"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	if updated.worktrees.phase != uiWorktreeOverlayPhaseList {
+		t.Fatalf("phase = %q, want list", updated.worktrees.phase)
+	}
+	if !strings.Contains(updated.worktrees.errorText, `worktree "shared" is ambiguous`) {
+		t.Fatalf("expected ambiguous delete error, got %q", updated.worktrees.errorText)
+	}
+	assertWorktreeOverlayLocalErrorOnly(t, updated, []string{`worktree "shared" is ambiguous`}, []string{`worktree "shared" is ambiguous`})
+}
+
 func TestWorktreeOverlayCreateErrorSuppressesPreexistingStatusNotice(t *testing.T) {
 	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse(), createErr: errors.New("create failed")}
 	m := newWorktreeTestModel(t, client)
