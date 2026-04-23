@@ -4365,14 +4365,19 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 }
 
 func TestParseReviewerSuggestionsObjectSupportsStructuredPayload(t *testing.T) {
-	suggestions := parseReviewerSuggestionsObject(`{"suggestions":["one","two","one"," "]}`)
-	if len(suggestions) != 4 || suggestions[0] != "one" || suggestions[1] != "two" || suggestions[2] != "one" || suggestions[3] != " " {
+	suggestions := parseReviewerSuggestionsObject(`{"suggestions":["one"," two ","one"," ","NO_OP","no_op"]}`)
+	if len(suggestions) != 3 || suggestions[0] != "one" || suggestions[1] != "two" || suggestions[2] != "one" {
 		t.Fatalf("unexpected suggestions from object payload: %+v", suggestions)
 	}
 
-	suggestions = parseReviewerSuggestionsObject(`["a","b"]`)
+	suggestions = parseReviewerSuggestionsObject(`[" ","NO_OP"]`)
 	if len(suggestions) != 0 {
 		t.Fatalf("expected invalid non-object payload to be ignored, got %+v", suggestions)
+	}
+
+	suggestions = parseReviewerSuggestionsObject("")
+	if len(suggestions) != 0 {
+		t.Fatalf("expected empty payload to be ignored, got %+v", suggestions)
 	}
 
 	suggestions = parseReviewerSuggestionsObject(`not-json`)
