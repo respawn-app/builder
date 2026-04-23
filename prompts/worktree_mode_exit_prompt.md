@@ -1,8 +1,6 @@
 The user moved this established conversation out of a git worktree and back to the main workspace.
 
-Your execution target changed again. Use the main workspace location for all subsequent filesystem, shell, git, and code-editing actions.
-
-Current workspace context:
+New workspace context:
 
 - Effective cwd: {{cwd}}
 - Main workspace root: {{workspace_root}}

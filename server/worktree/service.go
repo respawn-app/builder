@@ -782,7 +782,6 @@ func (s *Service) runSetupScript(scriptPath string, sessionID string, payload se
 	)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
-		s.appendSessionNote(context.Background(), sessionID, fmt.Sprintf("Worktree setup complete for %s", payload.WorktreeRoot))
 		return
 	}
 	detail := strings.TrimSpace(string(output))

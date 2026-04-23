@@ -1083,7 +1083,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.resp.SetupScheduled {
 			status += " and started setup"
 		}
-		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeCreate(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
+		feedbackCmd := m.setTransientStatusWithKind(status, uiStatusNoticeSuccess)
 		m.syncViewport()
 		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeSwitchDoneMsg:
@@ -1108,7 +1108,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeWorktreeOverlay()
 		}
 		status := "Switched to " + worktreeDisplayName(msg.resp.Worktree)
-		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeSwitch(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
+		feedbackCmd := m.setTransientStatusWithKind(status, uiStatusNoticeSuccess)
 		m.syncViewport()
 		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeDeleteDoneMsg:
