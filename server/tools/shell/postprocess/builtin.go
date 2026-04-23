@@ -40,6 +40,8 @@ func goTestRequiresDetailedOutput(args []string) bool {
 			return true
 		case trimmed == "-cover", strings.HasPrefix(trimmed, "-cover="), strings.HasPrefix(trimmed, "--cover="), strings.HasPrefix(trimmed, "-coverprofile="), strings.HasPrefix(trimmed, "-covermode="), strings.HasPrefix(trimmed, "-coverpkg="):
 			return true
+		case trimmed == "-json", trimmed == "--json":
+			return true
 		}
 	}
 	return false
