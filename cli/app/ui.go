@@ -1058,19 +1058,27 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, tea.Batch(cmd, m.ensureSpinnerTicking())
 	case worktreeCreateDoneMsg:
-		if !m.worktrees.isOpen() || msg.token != m.worktrees.mutationToken {
+		if msg.token != m.worktrees.mutationToken {
 			m.syncViewport()
 			return m, nil
 		}
 		m.worktrees.create.submitting = false
 		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
 			m.worktrees.create.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
 			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
-		overlayCmd := m.popWorktreeOverlayIfNeeded()
-		m.closeWorktreeOverlay()
+		var overlayCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			overlayCmd = m.popWorktreeOverlayIfNeeded()
+			m.closeWorktreeOverlay()
+		}
 		status := "Created worktree " + worktreeDisplayName(msg.resp.Worktree)
 		if msg.resp.SetupScheduled {
 			status += " and started setup"
@@ -1079,40 +1087,57 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeSwitchDoneMsg:
-		if !m.worktrees.isOpen() || msg.token != m.worktrees.mutationToken {
+		if msg.token != m.worktrees.mutationToken {
 			m.syncViewport()
 			return m, nil
 		}
 		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
 			m.worktrees.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
 			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
-		overlayCmd := m.popWorktreeOverlayIfNeeded()
-		m.closeWorktreeOverlay()
+		var overlayCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			overlayCmd = m.popWorktreeOverlayIfNeeded()
+			m.closeWorktreeOverlay()
+		}
 		status := "Switched to " + worktreeDisplayName(msg.resp.Worktree)
 		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeSwitch(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
 		m.syncViewport()
 		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeDeleteDoneMsg:
-		if !m.worktrees.isOpen() || msg.token != m.worktrees.mutationToken {
+		if msg.token != m.worktrees.mutationToken {
 			m.syncViewport()
 			return m, nil
 		}
 		m.worktrees.deleteConfirm.submitting = false
 		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
 			m.worktrees.deleteConfirm.errorText = formatSubmissionError(msg.err)
 			m.syncViewport()
 			return m, m.ensureSpinnerTicking()
 		}
 		m.applyExecutionTargetChange(msg.resp.Target)
-		m.closeWorktreeDialog()
-		m.worktrees.selectedID = worktreeCreateRowID
+		var listCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			m.closeWorktreeDialog()
+			m.worktrees.selectedID = worktreeCreateRowID
+			listCmd = m.requestWorktreeListCmd()
+		}
 		status := "Deleted worktree " + worktreeDisplayName(msg.resp.Worktree)
 		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeDelete(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
 		m.syncViewport()
-		return m, tea.Batch(feedbackCmd, m.requestWorktreeListCmd(), m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
+		return m, tea.Batch(feedbackCmd, listCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeCreateTargetResolveDebounceMsg:
 		if !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate || msg.token != m.worktrees.create.resolveToken {
 			m.syncViewport()
