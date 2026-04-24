@@ -1617,6 +1617,19 @@ func waitRuntimeConnectionStateChange(ch <-chan runtimeConnectionStateChangedMsg
 	}
 }
 
+func waitRuntimeLeaseRecoveryWarning(ch <-chan runtimeLeaseRecoveryWarningMsg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 func (m *uiModel) handleRuntimeEvent(evt clientui.Event) {
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
 }

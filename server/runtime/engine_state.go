@@ -102,13 +102,24 @@ func (e *Engine) AppendLocalEntry(role, text string) {
 	e.AppendLocalEntryWithOngoingText(role, text, "")
 }
 
+func (e *Engine) AppendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
+	e.appendLocalEntry(storedLocalEntry{
+		Visibility: transcript.NormalizeEntryVisibility(visibility),
+		Role:       strings.TrimSpace(role),
+		Text:       strings.TrimSpace(text),
+	})
+}
+
 func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
-	entry := storedLocalEntry{
+	e.appendLocalEntry(storedLocalEntry{
 		Visibility:  transcript.EntryVisibilityAuto,
 		Role:        strings.TrimSpace(role),
 		Text:        strings.TrimSpace(text),
 		OngoingText: strings.TrimSpace(ongoingText),
-	}
+	})
+}
+
+func (e *Engine) appendLocalEntry(entry storedLocalEntry) {
 	if entry.Role == "" || entry.Text == "" {
 		return
 	}

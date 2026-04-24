@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"builder/server/registry"
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
+	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/sessionview"
 	"builder/server/tools"
@@ -21,6 +23,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type countingSessionViewClient struct {
@@ -83,6 +86,23 @@ func (c *blockingCountingSessionViewClient) GetSessionTranscriptPage(ctx context
 
 func (*blockingCountingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	return serverapi.RunGetResponse{}, nil
+}
+
+type mutableRuntimeResolver struct {
+	mu     sync.Mutex
+	engine *runtime.Engine
+}
+
+func (r *mutableRuntimeResolver) Set(engine *runtime.Engine) {
+	r.mu.Lock()
+	r.engine = engine
+	r.mu.Unlock()
+}
+
+func (r *mutableRuntimeResolver) ResolveRuntime(context.Context, string) (*runtime.Engine, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.engine, nil
 }
 
 type flakySessionViewClient struct {
@@ -954,6 +974,7 @@ func TestRuntimeClientSetFastModeEnabledPreservesCachedMainViewOnError(t *testin
 type leaseRetryRuntimeControlClient struct {
 	mu             sync.Mutex
 	firstSubmitErr error
+	appendErr      error
 	submitLeaseID  []string
 	localEntries   []serverapi.RuntimeAppendLocalEntryRequest
 }
@@ -992,9 +1013,9 @@ func (c *leaseRetryRuntimeControlClient) SetAutoCompactionEnabled(context.Contex
 
 func (c *leaseRetryRuntimeControlClient) AppendLocalEntry(_ context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.localEntries = append(c.localEntries, req)
-	c.mu.Unlock()
-	return nil
+	return c.appendErr
 }
 
 func (c *leaseRetryRuntimeControlClient) ShouldCompactBeforeUserMessage(context.Context, serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
@@ -1115,7 +1136,97 @@ func TestRuntimeClientSubmitUserMessageRecoversRuntimeUnavailable(t *testing.T) 
 		t.Fatalf("warning entry count = %d, want 1", len(entries))
 	}
 	entry := entries[0]
-	if entry.ControllerLeaseID != "lease-new" || entry.Role != "warning" || entry.Text != runtimeLeaseRecoveryWarningText {
+	if entry.ControllerLeaseID != "lease-new" || entry.Role != "warning" || entry.Text != runtimeLeaseRecoveryWarningText || entry.Visibility != string(clientui.EntryVisibilityAll) {
 		t.Fatalf("warning entry = %+v, want new lease warning", entry)
+	}
+}
+
+func TestRuntimeClientLeaseRecoveryWarningFailureDoesNotBlockSubmit(t *testing.T) {
+	controls := &leaseRetryRuntimeControlClient{firstSubmitErr: serverapi.ErrRuntimeUnavailable, appendErr: serverapi.ErrRuntimeUnavailable}
+	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
+	warnings := make(chan string, 1)
+	runtimeClient.SetLeaseRecoveryWarningObserver(func(text string) { warnings <- text })
+	leaseManager := newControllerLeaseManager("lease-old")
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) { return "lease-new", nil })
+	runtimeClient.SetControllerLeaseManager(leaseManager)
+
+	message, err := runtimeClient.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "recovered" {
+		t.Fatalf("SubmitUserMessage message = %q, want recovered", message)
+	}
+	if got := controls.submitLeaseIDs(); !reflect.DeepEqual(got, []string{"lease-old", "lease-new"}) {
+		t.Fatalf("submit lease ids = %+v, want [lease-old lease-new]", got)
+	}
+	if entries := controls.appendedLocalEntries(); len(entries) != 1 {
+		t.Fatalf("warning append attempts = %d, want 1", len(entries))
+	}
+	select {
+	case warning := <-warnings:
+		if warning != runtimeLeaseRecoveryWarningText {
+			t.Fatalf("warning = %q, want lease recovery warning", warning)
+		}
+	default:
+		t.Fatal("expected warning fallback notification")
+	}
+}
+
+func TestRuntimeClientServerRestartFirstPromptRecoversAndWarnsOngoing(t *testing.T) {
+	runtimeEvents := make(chan clientui.Event, 128)
+	store, err := session.Create(t.TempDir(), "workspace-x", t.TempDir())
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	client := &runtimeClientFakeLLM{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
+		Model: "gpt-5",
+		OnEvent: func(evt runtime.Event) {
+			runtimeEvents <- runtimeview.EventFromRuntime(evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	resolver := &mutableRuntimeResolver{}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(resolver, nil))
+	runtimeClient := newUIRuntimeClientWithReads(store.Meta().SessionID, &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
+	leaseManager := newControllerLeaseManager("lease-old")
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
+		resolver.Set(engine)
+		return "lease-new", nil
+	})
+	runtimeClient.SetControllerLeaseManager(leaseManager)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
+	sized, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = sized.(*uiModel)
+
+	message, err := runtimeClient.SubmitUserMessage(context.Background(), "hello after restart")
+	if err != nil {
+		t.Fatalf("submitRuntimeUserMessage: %v", err)
+	}
+	if message != "done" {
+		t.Fatalf("submitRuntimeUserMessage message = %q, want done", message)
+	}
+
+	updated := model
+	eventCount := 0
+	flushText := ""
+	for len(runtimeEvents) > 0 {
+		msg := <-runtimeEvents
+		eventCount++
+		next, cmd := updated.Update(runtimeEventMsg{event: msg})
+		updated = next.(*uiModel)
+		flushText += collectNativeHistoryFlushText(collectCmdMessages(t, cmd))
+	}
+	if !strings.Contains(flushText, runtimeLeaseRecoveryWarningText) {
+		t.Fatalf("expected ongoing warning flush, events=%d entries=%+v flush=%q", eventCount, updated.transcriptEntries, flushText)
+	}
+	if strings.Contains(flushText, "runtime for session") {
+		t.Fatalf("did not expect runtime unavailable error in ongoing flush, got %q", flushText)
 	}
 }

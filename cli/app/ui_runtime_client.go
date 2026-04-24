@@ -34,6 +34,7 @@ type sessionRuntimeClient struct {
 	diagLogf                func(string)
 	transcriptDiagnostics   bool
 	connectionStateObserver func(error)
+	leaseRecoveryWarning    func(string)
 
 	mu                        sync.RWMutex
 	mainView                  clientui.RuntimeMainView
@@ -134,21 +135,26 @@ func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	c.appendLeaseRecoveryWarning(ctx, leaseID)
+	c.appendLeaseRecoveryWarning(leaseID)
 	return nil
 }
 
-func (c *sessionRuntimeClient) appendLeaseRecoveryWarning(ctx context.Context, controllerLeaseID string) {
+func (c *sessionRuntimeClient) appendLeaseRecoveryWarning(controllerLeaseID string) {
 	if c == nil || c.controls == nil {
 		return
 	}
-	_ = c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{
+	warningCtx, cancel := c.controlContext()
+	defer cancel()
+	if err := c.controls.AppendLocalEntry(warningCtx, serverapi.RuntimeAppendLocalEntryRequest{
 		ClientRequestID:   uuid.NewString(),
 		SessionID:         c.sessionID,
 		ControllerLeaseID: controllerLeaseID,
 		Role:              "warning",
 		Text:              runtimeLeaseRecoveryWarningText,
-	})
+		Visibility:        string(clientui.EntryVisibilityAll),
+	}); err != nil {
+		c.notifyLeaseRecoveryWarning(runtimeLeaseRecoveryWarningText)
+	}
 }
 
 func isRecoverableRuntimeControlError(err error) bool {
@@ -205,6 +211,15 @@ func (c *sessionRuntimeClient) SetConnectionStateObserver(observer func(error)) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.connectionStateObserver = observer
+}
+
+func (c *sessionRuntimeClient) SetLeaseRecoveryWarningObserver(observer func(string)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.leaseRecoveryWarning = observer
 }
 
 func (c *sessionRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -459,6 +474,19 @@ func (c *sessionRuntimeClient) notifyConnectionState(err error) {
 		return
 	}
 	observer(err)
+}
+
+func (c *sessionRuntimeClient) notifyLeaseRecoveryWarning(text string) {
+	if c == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	c.mu.RLock()
+	observer := c.leaseRecoveryWarning
+	c.mu.RUnlock()
+	if observer == nil {
+		return
+	}
+	observer(text)
 }
 
 func (c *sessionRuntimeClient) logTranscriptDiag(line string) {
