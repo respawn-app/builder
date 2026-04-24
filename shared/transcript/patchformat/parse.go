@@ -78,7 +78,7 @@ func Parse(src string) (Document, error) {
 				up.Changes = append(up.Changes, ChangeLine{Kind: rune(p), Content: n[1:]})
 				s.next()
 			}
-			if len(up.Changes) == 0 {
+			if len(up.Changes) == 0 && strings.TrimSpace(up.MoveTo) == "" {
 				return Document{}, fmt.Errorf("update file hunk for path %q is empty", path)
 			}
 			doc.Hunks = append(doc.Hunks, up)

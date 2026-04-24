@@ -73,6 +73,20 @@ func TestFormatUsesMoveTargetForRenderedPaths(t *testing.T) {
 	}
 }
 
+func TestParseAllowsMoveOnlyUpdateFile(t *testing.T) {
+	doc, err := Parse("*** Begin Patch\n*** Update File: src.txt\n*** Move to: dest.txt\n*** End Patch\n")
+	if err != nil {
+		t.Fatalf("parse patch: %v", err)
+	}
+	update, ok := doc.Hunks[0].(UpdateFile)
+	if !ok {
+		t.Fatalf("expected update hunk, got %+v", doc.Hunks)
+	}
+	if update.Path != "src.txt" || update.MoveTo != "dest.txt" || len(update.Changes) != 0 {
+		t.Fatalf("unexpected move-only update hunk: %+v", update)
+	}
+}
+
 func TestFormatPreservesRelativeOutsideWorkspacePath(t *testing.T) {
 	doc, err := Parse("*** Begin Patch\n*** Add File: ../outside.go\n+package outside\n*** End Patch\n")
 	if err != nil {

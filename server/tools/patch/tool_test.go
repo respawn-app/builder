@@ -383,6 +383,34 @@ func TestUpdateFileRejectsEmptyHunk(t *testing.T) {
 	}
 }
 
+func TestUpdateFileAllowsMoveOnlyHunk(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "move-only", "*** Begin Patch\n*** Update File: src.txt\n*** Move to: dst.txt\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+	if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected source removed, stat err=%v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read destination: %v", err)
+	}
+	if string(data) != "content\n" {
+		t.Fatalf("unexpected destination contents: %q", data)
+	}
+}
+
 func TestAddFileInNewDirectory(t *testing.T) {
 	dir := t.TempDir()
 	tool, err := New(dir, true)
