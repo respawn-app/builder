@@ -238,6 +238,27 @@ func (s *Service) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeApp
 	return err
 }
 
+func (s *Service) AppendSessionEntry(ctx context.Context, sessionID string, role string, text string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedRole := strings.TrimSpace(role)
+	trimmedText := strings.TrimSpace(text)
+	if trimmedSessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if trimmedRole == "" {
+		return fmt.Errorf("role is required")
+	}
+	if trimmedText == "" {
+		return fmt.Errorf("text is required")
+	}
+	engine, err := s.resolve(ctx, trimmedSessionID)
+	if err != nil {
+		return err
+	}
+	engine.AppendLocalEntry(trimmedRole, trimmedText)
+	return nil
+}
+
 func (s *Service) ShouldCompactBeforeUserMessage(ctx context.Context, req serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeShouldCompactBeforeUserMessageResponse{}, err

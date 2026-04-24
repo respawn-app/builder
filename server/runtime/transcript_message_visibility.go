@@ -35,7 +35,9 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		llm.MessageTypeSkills,
 		llm.MessageTypeEnvironment,
 		llm.MessageTypeHeadlessMode,
-		llm.MessageTypeHeadlessModeExit:
+		llm.MessageTypeHeadlessModeExit,
+		llm.MessageTypeWorktreeMode,
+		llm.MessageTypeWorktreeModeExit:
 		return detailOnlyDeveloperContextEntry(msg.Content), true
 	case llm.MessageTypeCompactionSummary:
 		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true

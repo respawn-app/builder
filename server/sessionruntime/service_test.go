@@ -12,6 +12,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/registry"
 	"builder/server/session"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -541,6 +542,200 @@ func TestRequireControllerLeaseRejectsReplacedHandleAfterReadyWait(t *testing.T)
 	err := <-errCh
 	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
 		t.Fatalf("RequireControllerLease error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestRecordWorktreeTransitionPersistsPendingReminderState(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+	}
+	close(handle.ready)
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	err = fixture.service.RecordWorktreeTransition(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID, session.WorktreeReminderState{
+		Mode:                  session.WorktreeReminderModeEnter,
+		Branch:                " feature/worktree ",
+		WorktreePath:          " /tmp/worktree-a ",
+		WorkspaceRoot:         " /tmp/workspace ",
+		EffectiveCwd:          " /tmp/worktree-a/pkg ",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 9,
+	})
+	if err != nil {
+		t.Fatalf("RecordWorktreeTransition: %v", err)
+	}
+
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("resolveStore: %v", err)
+	}
+	state := resolved.Meta().WorktreeReminder
+	if state == nil {
+		t.Fatal("expected persisted worktree reminder state")
+	}
+	if state.Mode != session.WorktreeReminderModeEnter {
+		t.Fatalf("mode = %q, want enter", state.Mode)
+	}
+	if state.Branch != "feature/worktree" {
+		t.Fatalf("branch = %q, want feature/worktree", state.Branch)
+	}
+	if state.WorktreePath != "/tmp/worktree-a" {
+		t.Fatalf("worktree path = %q, want /tmp/worktree-a", state.WorktreePath)
+	}
+	if state.WorkspaceRoot != "/tmp/workspace" {
+		t.Fatalf("workspace root = %q, want /tmp/workspace", state.WorkspaceRoot)
+	}
+	if state.EffectiveCwd != "/tmp/worktree-a/pkg" {
+		t.Fatalf("effective cwd = %q, want /tmp/worktree-a/pkg", state.EffectiveCwd)
+	}
+	if state.HasIssuedInGeneration {
+		t.Fatal("expected reminder issuance reset for new transition")
+	}
+	if state.IssuedCompactionCount != 0 {
+		t.Fatalf("issued compaction count = %d, want 0", state.IssuedCompactionCount)
+	}
+}
+
+func TestEnsureCurrentControllerLeaseLockedRejectsChangedLease(t *testing.T) {
+	handle := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+
+	err := svc.ensureCurrentControllerLeaseLocked("session-1", "lease-2", handle)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ensureCurrentControllerLeaseLocked error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestEnsureCurrentControllerLeaseLockedRejectsReplacedHandle(t *testing.T) {
+	original := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	replacement := &runtimeHandle{controllerRequestID: "req-2", controllerLeaseID: "lease-1", ready: make(chan struct{})}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": replacement}}
+
+	err := svc.ensureCurrentControllerLeaseLocked("session-1", "lease-1", original)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("ensureCurrentControllerLeaseLocked error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestActiveRuntimeHandleReturnsActivationError(t *testing.T) {
+	activationErr := errors.New("activation failed")
+	handle := &runtimeHandle{controllerRequestID: "req-1", controllerLeaseID: "lease-1", activationErr: activationErr, ready: make(chan struct{})}
+	close(handle.ready)
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+
+	resolved, err := svc.activeRuntimeHandle(context.Background(), "session-1")
+	if !errors.Is(err, activationErr) {
+		t.Fatalf("activeRuntimeHandle error = %v, want %v", err, activationErr)
+	}
+	if resolved != nil {
+		t.Fatalf("activeRuntimeHandle returned handle %+v, want nil", resolved)
+	}
+}
+
+func TestSyncExecutionTargetPersistsReminderWithoutActiveRuntime(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+
+	err := fixture.service.SyncExecutionTarget(context.Background(), fixture.store.Meta().SessionID, clientui.SessionExecutionTarget{
+		WorkspaceRoot:    " /tmp/workspace ",
+		EffectiveWorkdir: " /tmp/workspace ",
+	}, &session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeExit,
+		Branch:        " feature/worktree ",
+		WorktreePath:  " /tmp/worktree-a ",
+		WorkspaceRoot: " /tmp/workspace ",
+		EffectiveCwd:  " /tmp/workspace ",
+	})
+	if err != nil {
+		t.Fatalf("SyncExecutionTarget: %v", err)
+	}
+
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("resolveStore: %v", err)
+	}
+	state := resolved.Meta().WorktreeReminder
+	if state == nil {
+		t.Fatal("expected persisted worktree reminder state")
+	}
+	if state.Mode != session.WorktreeReminderModeExit {
+		t.Fatalf("mode = %q, want exit", state.Mode)
+	}
+	if state.Branch != "feature/worktree" {
+		t.Fatalf("branch = %q, want feature/worktree", state.Branch)
+	}
+	if state.WorktreePath != "/tmp/worktree-a" {
+		t.Fatalf("worktree path = %q, want /tmp/worktree-a", state.WorktreePath)
+	}
+	if state.EffectiveCwd != "/tmp/workspace" {
+		t.Fatalf("effective cwd = %q, want /tmp/workspace", state.EffectiveCwd)
+	}
+}
+
+func TestSyncExecutionTargetRebindsActiveRuntime(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	reboundRoot := ""
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   "lease-1",
+		ready:               make(chan struct{}),
+		rebind: func(root string) error {
+			reboundRoot = root
+			return nil
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	err := fixture.service.SyncExecutionTarget(context.Background(), fixture.store.Meta().SessionID, clientui.SessionExecutionTarget{
+		EffectiveWorkdir: " /tmp/workspace/pkg ",
+	}, nil)
+	if err != nil {
+		t.Fatalf("SyncExecutionTarget: %v", err)
+	}
+	if reboundRoot != "/tmp/workspace/pkg" {
+		t.Fatalf("rebound root = %q, want /tmp/workspace/pkg", reboundRoot)
+	}
+}
+
+func TestSyncExecutionTargetDoesNotPersistReminderWhenActiveRuntimeRebindFails(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   "lease-1",
+		ready:               make(chan struct{}),
+		rebind: func(string) error {
+			return errors.New("rebind failed")
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
+
+	err := fixture.service.SyncExecutionTarget(context.Background(), fixture.store.Meta().SessionID, clientui.SessionExecutionTarget{
+		EffectiveWorkdir: "/tmp/workspace/pkg",
+	}, &session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeExit,
+		Branch:        "feature/worktree",
+		WorktreePath:  "/tmp/worktree-a",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/workspace",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rebind failed") {
+		t.Fatalf("SyncExecutionTarget error = %v, want rebind failure", err)
+	}
+
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("resolveStore: %v", err)
+	}
+	if state := resolved.Meta().WorktreeReminder; state != nil {
+		t.Fatalf("expected reminder state not persisted after failed rebind, got %+v", state)
 	}
 }
 

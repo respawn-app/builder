@@ -49,6 +49,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
 	child.meta.AgentsInjected = parentMeta.AgentsInjected
 	child.meta.CompactionSoonReminderIssued = reminderIssuedFromReplayEvents(replay)
+	child.meta.WorktreeReminder = forkedWorktreeReminderState(parentMeta.WorktreeReminder)
 	child.meta.UsageState = nil
 	child.meta.ParentSessionID = parentMeta.SessionID
 	child.meta.Name = strings.TrimSpace(forkName)
@@ -84,6 +85,31 @@ func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
 	}
 	copyContext := *in
 	return &copyContext
+}
+
+func cloneWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderState {
+	if in == nil {
+		return nil
+	}
+	copyState := *in
+	return &copyState
+}
+
+func forkedWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderState {
+	copyState := cloneWorktreeReminderState(in)
+	if copyState == nil {
+		return nil
+	}
+	copyState.HasIssuedInGeneration = false
+	copyState.IssuedCompactionCount = 0
+	return copyState
+}
+
+func worktreeReminderStatesEqual(a, b *WorktreeReminderState) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func reminderIssuedFromReplayEvents(events []ReplayEvent) bool {

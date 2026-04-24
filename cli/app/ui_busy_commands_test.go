@@ -27,6 +27,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 		"autocompaction": true,
 		"status":         true,
 		"ps":             true,
+		"worktree":       false,
 		"copy":           true,
 		"back":           false,
 		"review":         false,
@@ -100,6 +101,11 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			name:               "init is blocked on enter while busy",
 			input:              "/init starter repo",
 			wantStatusContains: "cannot run /init while model is working",
+		},
+		{
+			name:               "worktree is blocked on enter while busy",
+			input:              "/worktree list",
+			wantStatusContains: "cannot run /worktree while model is working",
 		},
 	}
 
@@ -193,6 +199,12 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 			input:              "/ps kill proc-1",
 			wantInput:          "/ps kill proc-1",
 			wantStatusContains: "background process client is unavailable",
+		},
+		{
+			name:               "worktree is rejected while busy",
+			input:              "/worktree list",
+			wantInput:          "/worktree list",
+			wantStatusContains: "cannot run /worktree while model is working",
 		},
 	}
 

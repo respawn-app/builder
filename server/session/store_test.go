@@ -683,6 +683,49 @@ func TestForkAtUserMessageDerivesReminderIssuedFromReplayedHistory(t *testing.T)
 	})
 }
 
+func TestForkAtUserMessageResetsWorktreeReminderGenerationFlags(t *testing.T) {
+	parent, err := Create(t.TempDir(), "ws", t.TempDir())
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append first user: %v", err)
+	}
+	if err := parent.SetWorktreeReminderState(&WorktreeReminderState{
+		Mode:                  WorktreeReminderModeEnter,
+		Branch:                "feature/fork",
+		WorktreePath:          "/tmp/wt-fork",
+		WorkspaceRoot:         "/tmp/workspace",
+		EffectiveCwd:          "/tmp/wt-fork",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 7,
+	}); err != nil {
+		t.Fatalf("persist worktree reminder state: %v", err)
+	}
+	if _, err := parent.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "u2"}); err != nil {
+		t.Fatalf("append second user: %v", err)
+	}
+
+	forked, err := ForkAtUserMessage(parent, 2, "forked")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	state := forked.Meta().WorktreeReminder
+	if state == nil {
+		t.Fatal("expected forked worktree reminder state")
+	}
+	if state.Mode != WorktreeReminderModeEnter || state.Branch != "feature/fork" {
+		t.Fatalf("unexpected forked reminder payload: %+v", state)
+	}
+	if state.HasIssuedInGeneration || state.IssuedCompactionCount != 0 {
+		t.Fatalf("expected forked reminder generation flags reset, got %+v", state)
+	}
+	parentState := parent.Meta().WorktreeReminder
+	if parentState == nil || !parentState.HasIssuedInGeneration || parentState.IssuedCompactionCount != 7 {
+		t.Fatalf("expected parent reminder state unchanged, got %+v", parentState)
+	}
+}
+
 func TestSetParentSessionIDPersists(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")

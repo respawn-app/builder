@@ -1,0 +1,422 @@
+package worktree
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"builder/shared/config"
+)
+
+type GitWorktree struct {
+	Root           string
+	HeadOID        string
+	BranchRef      string
+	BranchName     string
+	Detached       bool
+	Bare           bool
+	LockedReason   string
+	PrunableReason string
+	IsMain         bool
+}
+
+type CreateSpec struct {
+	BaseRef      string
+	CreateBranch bool
+	BranchName   string
+}
+
+type CreateTargetResolutionKind string
+
+const (
+	CreateTargetResolutionKindNewBranch      CreateTargetResolutionKind = "new_branch"
+	CreateTargetResolutionKindExistingBranch CreateTargetResolutionKind = "existing_branch"
+	CreateTargetResolutionKindDetachedRef    CreateTargetResolutionKind = "detached_ref"
+)
+
+type CreateTargetResolution struct {
+	Input       string
+	Kind        CreateTargetResolutionKind
+	ResolvedRef string
+}
+
+type gitCommandRunner interface {
+	Output(ctx context.Context, dir string, args ...string) ([]byte, error)
+	Run(ctx context.Context, dir string, args ...string) ([]byte, int, error)
+}
+
+type GitInspector struct {
+	runner gitCommandRunner
+}
+
+func NewGitInspector(runner gitCommandRunner) *GitInspector {
+	if runner == nil {
+		runner = execGitCommandRunner{}
+	}
+	return &GitInspector{runner: runner}
+}
+
+func (i *GitInspector) List(ctx context.Context, workspaceRoot string) ([]GitWorktree, error) {
+	if i == nil {
+		return nil, fmt.Errorf("git inspector is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	output, err := i.runner.Output(ctx, canonicalRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseGitWorktreeListPorcelain(string(output), canonicalRoot)
+}
+
+func (i *GitInspector) BranchExists(ctx context.Context, workspaceRoot string, branchName string) (bool, error) {
+	if i == nil {
+		return false, fmt.Errorf("git inspector is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return false, err
+	}
+	trimmedBranch := strings.TrimSpace(branchName)
+	if trimmedBranch == "" {
+		return false, fmt.Errorf("branch name is required")
+	}
+	_, exitCode, err := i.runner.Run(ctx, canonicalRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+trimmedBranch)
+	if err == nil {
+		return true, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if exitCode == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+func (i *GitInspector) ResolveCreateTarget(ctx context.Context, workspaceRoot string, rawTarget string) (CreateTargetResolution, error) {
+	if i == nil {
+		return CreateTargetResolution{}, fmt.Errorf("git inspector is required")
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return CreateTargetResolution{}, err
+	}
+	trimmedTarget := strings.TrimSpace(rawTarget)
+	if trimmedTarget == "" {
+		return CreateTargetResolution{}, fmt.Errorf("target is required")
+	}
+	validBranchName, err := i.isValidBranchName(ctx, canonicalRoot, trimmedTarget)
+	if err != nil {
+		return CreateTargetResolution{}, err
+	}
+	if validBranchName {
+		branchOutput, branchExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+trimmedTarget+"^{object}")
+		if err == nil {
+			return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindExistingBranch, ResolvedRef: trimmedTarget}, nil
+		}
+		if branchExit != 1 {
+			return CreateTargetResolution{}, formatGitRunError(branchExit, err, branchOutput, "rev-parse", "--verify", "--quiet", "refs/heads/"+trimmedTarget+"^{object}")
+		}
+	}
+	refOutput, refExit, err := i.runner.Run(ctx, canonicalRoot, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
+	if err != nil {
+		if refExit == 1 {
+			if !validBranchName {
+				return CreateTargetResolution{}, fmt.Errorf("target %q is not a valid branch name or resolvable ref", trimmedTarget)
+			}
+			return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindNewBranch}, nil
+		}
+		return CreateTargetResolution{}, formatGitRunError(refExit, err, refOutput, "rev-parse", "--verify", "--quiet", trimmedTarget+"^{object}")
+	}
+	return CreateTargetResolution{Input: trimmedTarget, Kind: CreateTargetResolutionKindDetachedRef, ResolvedRef: strings.TrimSpace(string(refOutput))}, nil
+}
+
+func (i *GitInspector) isValidBranchName(ctx context.Context, workspaceRoot string, branchName string) (bool, error) {
+	output, exitCode, err := i.runner.Run(ctx, workspaceRoot, "check-ref-format", "--branch", branchName)
+	if err == nil {
+		return true, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if exitCode > 0 {
+		return false, nil
+	}
+	return false, formatGitRunError(exitCode, err, output, "check-ref-format", "--branch", branchName)
+}
+
+func (i *GitInspector) Add(ctx context.Context, workspaceRoot string, worktreeRoot string, spec CreateSpec) (bool, error) {
+	if i == nil {
+		return false, fmt.Errorf("git inspector is required")
+	}
+	canonicalWorkspaceRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return false, err
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		return false, err
+	}
+	normalized, err := normalizeCreateSpec(spec)
+	if err != nil {
+		return false, err
+	}
+	args := []string{"worktree", "add"}
+	if normalized.CreateBranch {
+		args = append(args, "-b", normalized.BranchName, canonicalWorktreeRoot)
+		if normalized.BaseRef != "" {
+			args = append(args, normalized.BaseRef)
+		}
+	} else {
+		args = append(args, canonicalWorktreeRoot, normalized.BaseRef)
+	}
+	if _, err := i.runner.Output(ctx, canonicalWorkspaceRoot, args...); err != nil {
+		return false, err
+	}
+	return normalized.CreateBranch, nil
+}
+
+func (i *GitInspector) Remove(ctx context.Context, workspaceRoot string, worktreeRoot string) error {
+	if i == nil {
+		return fmt.Errorf("git inspector is required")
+	}
+	canonicalWorkspaceRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return err
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		return err
+	}
+	_, err = i.runner.Output(ctx, canonicalWorkspaceRoot, "worktree", "remove", canonicalWorktreeRoot)
+	return err
+}
+
+func (i *GitInspector) Prune(ctx context.Context, workspaceRoot string) error {
+	if i == nil {
+		return fmt.Errorf("git inspector is required")
+	}
+	canonicalWorkspaceRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return err
+	}
+	_, err = i.runner.Output(ctx, canonicalWorkspaceRoot, "worktree", "prune")
+	return err
+}
+
+func (i *GitInspector) DeleteBranch(ctx context.Context, workspaceRoot string, branchName string) error {
+	if i == nil {
+		return fmt.Errorf("git inspector is required")
+	}
+	canonicalWorkspaceRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return err
+	}
+	trimmedBranch := strings.TrimSpace(branchName)
+	if trimmedBranch == "" {
+		return fmt.Errorf("branch name is required")
+	}
+	_, err = i.runner.Output(ctx, canonicalWorkspaceRoot, "branch", "-d", trimmedBranch)
+	return err
+}
+
+func defaultWorktreeRoot(baseDir string, workspaceID string, pathSeed string) (string, error) {
+	trimmedBaseDir := strings.TrimSpace(baseDir)
+	if trimmedBaseDir == "" {
+		return "", fmt.Errorf("worktree base dir is required")
+	}
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if trimmedWorkspaceID == "" {
+		return "", fmt.Errorf("workspace id is required")
+	}
+	trimmedSeed := strings.TrimSpace(pathSeed)
+	if trimmedSeed == "" {
+		return "", fmt.Errorf("worktree path seed is required")
+	}
+	relativeBranchPath := filepath.Clean(filepath.FromSlash(trimmedSeed))
+	if relativeBranchPath == "." || filepath.IsAbs(relativeBranchPath) || relativeBranchPath == ".." || strings.HasPrefix(relativeBranchPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("worktree path seed %q cannot be mapped to worktree path", trimmedSeed)
+	}
+	return config.CanonicalWorkspaceRoot(filepath.Join(trimmedBaseDir, trimmedWorkspaceID, relativeBranchPath))
+}
+
+func normalizeCreateSpec(spec CreateSpec) (CreateSpec, error) {
+	baseRef := strings.TrimSpace(spec.BaseRef)
+	branchName := strings.TrimSpace(spec.BranchName)
+	if spec.CreateBranch {
+		if branchName == "" {
+			return CreateSpec{}, fmt.Errorf("branch name is required when create_branch=true")
+		}
+		if baseRef == "" {
+			baseRef = "HEAD"
+		}
+		return CreateSpec{BaseRef: baseRef, CreateBranch: true, BranchName: branchName}, nil
+	}
+	if baseRef == "" {
+		return CreateSpec{}, fmt.Errorf("base ref is required when create_branch=false")
+	}
+	if branchName != "" {
+		return CreateSpec{}, fmt.Errorf("branch name must be empty when create_branch=false")
+	}
+	return CreateSpec{BaseRef: baseRef, CreateBranch: false}, nil
+}
+
+type execGitCommandRunner struct{}
+
+func (execGitCommandRunner) Output(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	output, exitCode, err := execGitCommandRunner{}.Run(ctx, dir, args...)
+	if err != nil {
+		return nil, formatGitRunError(exitCode, err, output, args...)
+	}
+	return output, nil
+}
+
+func (execGitCommandRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	argv := append([]string(nil), args...)
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd.Dir = strings.TrimSpace(dir)
+	cmd.Env = sanitizedGitCommandEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return output, 0, nil
+	}
+	exitCode := -1
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	return output, exitCode, err
+}
+
+func sanitizedGitCommandEnv(base []string) []string {
+	filtered := make([]string, 0, len(base))
+	for _, entry := range base {
+		key := entry
+		if idx := strings.IndexByte(entry, '='); idx >= 0 {
+			key = entry[:idx]
+		}
+		switch key {
+		case "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR", "GIT_GLOB_PATHSPECS", "GIT_GRAFT_FILE", "GIT_ICASE_PATHSPECS", "GIT_IMPLICIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_INTERNAL_SUPER_PREFIX", "GIT_LITERAL_PATHSPECS", "GIT_NAMESPACE", "GIT_NOGLOB_PATHSPECS", "GIT_NO_REPLACE_OBJECTS", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE", "GIT_WORK_TREE":
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
+func formatGitRunError(exitCode int, err error, output []byte, args ...string) error {
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	if exitCode < 0 {
+		return fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), trimmed, err)
+	}
+	return fmt.Errorf("git %s: %s", strings.Join(args, " "), trimmed)
+}
+
+func parseGitWorktreeListPorcelain(body string, workspaceRoot string) ([]GitWorktree, error) {
+	canonicalWorkspaceRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	entries := make([]GitWorktree, 0, 4)
+	current := GitWorktree{}
+	haveCurrent := false
+	flush := func() error {
+		if !haveCurrent {
+			return nil
+		}
+		if strings.TrimSpace(current.Root) == "" {
+			return fmt.Errorf("git worktree entry missing root")
+		}
+		canonicalRoot, err := config.CanonicalWorkspaceRoot(current.Root)
+		if err != nil {
+			return err
+		}
+		current.Root = canonicalRoot
+		current.IsMain = canonicalRoot == canonicalWorkspaceRoot
+		entries = append(entries, current)
+		current = GitWorktree{}
+		haveCurrent = false
+		return nil
+	}
+	for _, rawLine := range lines {
+		line := strings.TrimRight(rawLine, "\r")
+		if strings.TrimSpace(line) == "" {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		key, value, hasValue := strings.Cut(line, " ")
+		if !hasValue {
+			value = ""
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "worktree":
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			current = GitWorktree{Root: value}
+			haveCurrent = true
+		case "HEAD":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree HEAD entry without worktree root")
+			}
+			current.HeadOID = value
+		case "branch":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree branch entry without worktree root")
+			}
+			current.BranchRef = value
+			current.BranchName = shortBranchName(value)
+		case "detached":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree detached entry without worktree root")
+			}
+			current.Detached = true
+		case "bare":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree bare entry without worktree root")
+			}
+			current.Bare = true
+		case "locked":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree locked entry without worktree root")
+			}
+			current.LockedReason = value
+		case "prunable":
+			if !haveCurrent {
+				return nil, fmt.Errorf("git worktree prunable entry without worktree root")
+			}
+			current.PrunableReason = value
+		default:
+			return nil, fmt.Errorf("unsupported git worktree porcelain key %q", strings.TrimSpace(key))
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func shortBranchName(ref string) string {
+	trimmed := strings.TrimSpace(ref)
+	if strings.HasPrefix(trimmed, "refs/heads/") {
+		return strings.TrimPrefix(trimmed, "refs/heads/")
+	}
+	return trimmed
+}

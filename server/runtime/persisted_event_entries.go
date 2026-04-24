@@ -13,9 +13,10 @@ import (
 )
 
 // VisibleChatEntriesFromPersistedEvent decodes transcript-visible entries from
-// one persisted event. The bool result is true when the event replaces visible
-// transcript history instead of appending to it.
-func VisibleChatEntriesFromPersistedEvent(evt session.Event) ([]ChatEntry, bool, error) {
+// one persisted event using the provided cache-warning visibility mode.
+// Callers that replay persisted transcript state must pass the active mode
+// instead of assuming defaults.
+func VisibleChatEntriesFromPersistedEvent(evt session.Event, cacheWarningMode config.CacheWarningMode) ([]ChatEntry, bool, error) {
 	switch strings.TrimSpace(evt.Kind) {
 	case "message":
 		var msg llm.Message
@@ -47,7 +48,7 @@ func VisibleChatEntriesFromPersistedEvent(evt session.Event) ([]ChatEntry, bool,
 		return []ChatEntry{*chatEntry}, false, nil
 	case sessionEventCacheWarning:
 		chat := newChatStore()
-		if err := applyPersistedCacheWarningToChat(chat, evt.Payload, config.CacheWarningModeDefault); err != nil {
+		if err := applyPersistedCacheWarningToChat(chat, evt.Payload, cacheWarningMode); err != nil {
 			return nil, false, err
 		}
 		return chat.snapshot().Entries, false, nil

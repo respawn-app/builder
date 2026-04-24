@@ -41,6 +41,7 @@ type embeddedServer interface {
 	SessionLifecycleClient() client.SessionLifecycleClient
 	SessionRuntimeClient() client.SessionRuntimeClient
 	SessionViewClient() client.SessionViewClient
+	WorktreeClient() client.WorktreeClient
 	PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	Reauthenticate(ctx context.Context, interactor authInteractor) error
 }
@@ -205,6 +206,13 @@ func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
 	return s.inner.SessionViewClient()
 }
 
+func (s *embeddedAppServer) WorktreeClient() client.WorktreeClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.WorktreeClient()
+}
+
 func (s *embeddedAppServer) SessionActivityClient() client.SessionActivityClient {
 	if s == nil || s.inner == nil {
 		return nil
@@ -360,6 +368,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		runtimeClient:         runtimeClient,
 		promptControl:         server.PromptControlClient(),
 		runtimeControls:       server.RuntimeControlClient(),
+		worktrees:             server.WorktreeClient(),
 		processControls:       server.ProcessControlClient(),
 		processOutput:         server.ProcessOutputClient(),
 		processViews:          server.ProcessViewClient(),

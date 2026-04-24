@@ -88,7 +88,7 @@ func (m *uiModel) shouldAnimateSpinner() bool {
 	if m == nil {
 		return false
 	}
-	return m.busy || m.reviewerRunning || m.processListHasRunningEntries()
+	return m.busy || m.reviewerRunning || m.processListHasRunningEntries() || m.worktrees.loading || m.worktrees.create.submitting || m.worktrees.deleteConfirm.submitting
 }
 
 func (m *uiModel) ensureSpinnerTicking() tea.Cmd {

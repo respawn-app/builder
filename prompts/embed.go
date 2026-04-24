@@ -45,6 +45,12 @@ var HeadlessModePrompt string
 //go:embed headless_mode_exit_prompt.md
 var HeadlessModeExitPrompt string
 
+//go:embed worktree_mode_prompt.md
+var WorktreeModePrompt string
+
+//go:embed worktree_mode_exit_prompt.md
+var WorktreeModeExitPrompt string
+
 func MainSystemPrompt(includeToolPreambles bool) string {
 	base := renderRunCommand(strings.TrimSpace(SystemPrompt))
 	if !includeToolPreambles {
@@ -71,8 +77,37 @@ func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 	return strings.TrimSpace(CompactionSoonReminderPrompt)
 }
 
+func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) string {
+	return renderWorktreePrompt(WorktreeModePrompt, map[string]string{
+		"{{branch}}":         strings.TrimSpace(branch),
+		"{{cwd}}":            strings.TrimSpace(cwd),
+		"{{worktree_path}}":  strings.TrimSpace(worktreePath),
+		"{{workspace_root}}": strings.TrimSpace(workspaceRoot),
+	})
+}
+
+func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot string) string {
+	return renderWorktreePrompt(WorktreeModeExitPrompt, map[string]string{
+		"{{branch}}":         strings.TrimSpace(branch),
+		"{{cwd}}":            strings.TrimSpace(cwd),
+		"{{worktree_path}}":  strings.TrimSpace(worktreePath),
+		"{{workspace_root}}": strings.TrimSpace(workspaceRoot),
+	})
+}
+
 func renderRunCommand(text string) string {
 	return renderRunCommandWithPrefix(text, selfcmd.RunCommandPrefix())
+}
+
+func renderWorktreePrompt(template string, replacements map[string]string) string {
+	text := strings.TrimSpace(template)
+	if text == "" {
+		return ""
+	}
+	for placeholder, value := range replacements {
+		text = strings.ReplaceAll(text, placeholder, value)
+	}
+	return text
 }
 
 func renderRunCommandWithPrefix(text, prefix string) string {

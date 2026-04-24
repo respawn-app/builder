@@ -45,6 +45,27 @@ func TestRegistryRejectsUnknownToolDefinition(t *testing.T) {
 	_ = NewRegistry(stubHandler{id: toolspec.ID("unknown_tool")})
 }
 
+func TestRegistryReplaceHandlersSwapsDefinitionsAtomically(t *testing.T) {
+	r := NewRegistry(stubHandler{id: toolspec.ToolExecCommand})
+	if defs := r.Definitions(); len(defs) != 1 || defs[0].ID != toolspec.ToolExecCommand {
+		t.Fatalf("unexpected initial definitions: %+v", defs)
+	}
+	r.ReplaceHandlers(stubHandler{id: toolspec.ToolPatch}, stubHandler{id: toolspec.ToolWriteStdin})
+	defs := r.Definitions()
+	if len(defs) != 2 {
+		t.Fatalf("definitions count=%d want 2", len(defs))
+	}
+	if defs[0].ID != toolspec.ToolPatch || defs[1].ID != toolspec.ToolWriteStdin {
+		t.Fatalf("definition order mismatch after replace: %+v", defs)
+	}
+	if _, ok := r.Get(toolspec.ToolExecCommand); ok {
+		t.Fatal("expected exec_command handler to be removed after replace")
+	}
+	if _, ok := r.Get(toolspec.ToolPatch); !ok {
+		t.Fatal("expected patch handler after replace")
+	}
+}
+
 func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
 	for id, def := range definitions {
 		var schema map[string]any

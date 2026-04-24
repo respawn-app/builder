@@ -214,7 +214,7 @@ func TestBuildRequest_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	req, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestBuildRequest_UsesBasePromptCacheKeyBeforeFirstCompactionWhenProviderSup
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	req, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestBuildRequest_RotatesPromptCacheKeyWithRequestSessionIDAfterCompaction(t
 		t.Fatalf("new engine: %v", err)
 	}
 	eng.compactionCount = 1
-	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	req, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestBuildRequest_RotatesPromptCacheKeyFromPersistedCompactionOnReopen(t *te
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	req, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestOpenAIResponsesPayload_UsesExpectedCacheKeyShapesAcrossConversationSupe
 	}
 	payloadOptions := llm.OpenAIResponsesPayloadOptions{Capabilities: client.caps}
 
-	beforeReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
+	beforeReq, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
 	if err != nil {
 		t.Fatalf("build before request: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestOpenAIResponsesPayload_UsesExpectedCacheKeyShapesAcrossConversationSupe
 	}
 
 	eng.compactionCount = 1
-	conversationReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
+	conversationReq, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
 	if err != nil {
 		t.Fatalf("build conversation request: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestOpenAIResponsesPayload_UsesExpectedCacheKeyShapesAcrossConversationSupe
 	if err != nil {
 		t.Fatalf("new reopened engine: %v", err)
 	}
-	reopenedReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
+	reopenedReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
 	if err != nil {
 		t.Fatalf("build reopened request: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 		return capturedRequests[len(capturedRequests)-1]
 	}
 
-	mainBeforeReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
+	mainBeforeReq, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
 	if err != nil {
 		t.Fatalf("build main before request: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 	}
 
 	eng.compactionCount = 1
-	mainAfterReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "after"}}, true)
+	mainAfterReq, err := eng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "after"}}, true)
 	if err != nil {
 		t.Fatalf("build main after request: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConve
 	if err != nil {
 		t.Fatalf("new reopened engine: %v", err)
 	}
-	reopenedMainReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "reopened"}}, true)
+	reopenedMainReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "reopened"}}, true)
 	if err != nil {
 		t.Fatalf("build reopened main request: %v", err)
 	}

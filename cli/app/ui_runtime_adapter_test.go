@@ -319,6 +319,30 @@ func TestHandleProjectedRuntimeEventAppendsCompactionCacheWarningTranscriptEntry
 	}
 }
 
+func TestHandleProjectedRuntimeEventKeepsDefaultCacheWarningOutOfOngoingMode(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+
+	warning := cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix}
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:                   runtime.EventCacheWarning,
+		StepID:                 "step-1",
+		CacheWarningVisibility: transcript.EntryVisibilityDetailOnly,
+		CacheWarning:           &warning,
+	}))
+
+	ongoing := stripANSIPreserve(m.view.OngoingSnapshot())
+	if strings.Contains(ongoing, cachewarn.Text(warning)) {
+		t.Fatalf("expected default cache warning hidden in ongoing mode, got %q", ongoing)
+	}
+
+	detail := updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	detailView := stripANSIPreserve(detail.view.View())
+	if !strings.Contains(detailView, cachewarn.Text(warning)) {
+		t.Fatalf("expected default cache warning visible in detail mode, got %q", detailView)
+	}
+}
+
 func TestRuntimeEventBatchCoalescesCommittedNativeFlushAndPreservesOrder(t *testing.T) {
 	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),

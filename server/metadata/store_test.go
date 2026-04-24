@@ -370,6 +370,36 @@ func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
 	if err := sess.SetName("incident triage"); err != nil {
 		t.Fatalf("SetName: %v", err)
 	}
+	worktreeRootA := filepath.Join(cfg.WorkspaceRoot, "wt-a")
+	if err := os.MkdirAll(worktreeRootA, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeRootA: %v", err)
+	}
+	canonicalWorktreeRootA, err := config.CanonicalWorkspaceRoot(worktreeRootA)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot worktreeRootA: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     bindingA.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRootA,
+		DisplayName:     filepath.Base(canonicalWorktreeRootA),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, bindingA.WorkspaceID, "worktree-a", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID before retarget: %v", err)
+	}
+	if err := sess.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/a",
+		WorktreePath:  canonicalWorktreeRootA,
+		WorkspaceRoot: cfg.WorkspaceRoot,
+		EffectiveCwd:  filepath.Join(canonicalWorktreeRootA, "pkg"),
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState before retarget: %v", err)
+	}
 
 	retargeted, err := store.RetargetSessionWorkspace(ctx, sess.Meta().SessionID, workspaceB)
 	if err != nil {
@@ -404,6 +434,21 @@ func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
 	if target.WorkspaceRoot != canonicalWorkspaceB {
 		t.Fatalf("target workspace root = %q, want %q", target.WorkspaceRoot, canonicalWorkspaceB)
 	}
+	if target.WorktreeID != "" {
+		t.Fatalf("target worktree id = %q, want empty after workspace retarget", target.WorktreeID)
+	}
+	if target.CwdRelpath != "." {
+		t.Fatalf("target cwd relpath = %q, want . after workspace retarget", target.CwdRelpath)
+	}
+	if target.WorktreeRoot != "" {
+		t.Fatalf("target worktree root = %q, want empty after workspace retarget", target.WorktreeRoot)
+	}
+	if target.EffectiveWorkdir != canonicalWorkspaceB {
+		t.Fatalf("target effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalWorkspaceB)
+	}
+	if target.EffectiveWorkdir == filepath.Join(canonicalWorktreeRootA, "pkg") {
+		t.Fatalf("target effective workdir leaked previous worktree path %q", target.EffectiveWorkdir)
+	}
 
 	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
 	if err != nil {
@@ -411,6 +456,64 @@ func TestRetargetSessionWorkspaceAttachesTargetAndUpdatesSession(t *testing.T) {
 	}
 	if reopened.Meta().WorkspaceRoot != canonicalWorkspaceB {
 		t.Fatalf("reopened workspace root = %q, want %q", reopened.Meta().WorkspaceRoot, canonicalWorkspaceB)
+	}
+	if reopened.Meta().WorktreeReminder != nil {
+		t.Fatalf("expected stale worktree reminder cleared after workspace retarget, got %+v", reopened.Meta().WorktreeReminder)
+	}
+}
+
+func TestResolvePersistedSessionPreservesWorktreeReminderStateFromMetadata(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	reminder := &session.WorktreeReminderState{
+		Mode:                  session.WorktreeReminderModeEnter,
+		Branch:                "feature/reminder",
+		WorktreePath:          "/tmp/wt-reminder",
+		WorkspaceRoot:         cfg.WorkspaceRoot,
+		EffectiveCwd:          "/tmp/wt-reminder/pkg",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 7,
+	}
+	if err := sess.SetWorktreeReminderState(reminder); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	state := reopened.Meta().WorktreeReminder
+	if state == nil {
+		t.Fatal("expected persisted worktree reminder state")
+	}
+	if *state != *reminder {
+		t.Fatalf("worktree reminder = %+v, want %+v", *state, *reminder)
 	}
 }
 
@@ -889,6 +992,143 @@ func TestResolveSessionExecutionTargetUsesMetadataAuthority(t *testing.T) {
 	}
 	if target.EffectiveWorkdir != canonicalRoot {
 		t.Fatalf("effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalRoot)
+	}
+}
+
+func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-a")
+	worktreeSubdir := filepath.Join(worktreeRoot, "pkg")
+	if err := os.MkdirAll(worktreeSubdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeSubdir: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	if err := store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, binding.WorkspaceID, "worktree-a", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
+	}
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	if err := reopened.SetName("hello"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	target, err := store.ResolveSessionExecutionTarget(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorktreeID != "worktree-a" {
+		t.Fatalf("worktree id = %q, want worktree-a", target.WorktreeID)
+	}
+	if target.WorktreeRoot != canonicalWorktreeRoot {
+		t.Fatalf("worktree root = %q, want %q", target.WorktreeRoot, canonicalWorktreeRoot)
+	}
+	if target.CwdRelpath != "pkg" {
+		t.Fatalf("cwd relpath = %q, want pkg", target.CwdRelpath)
+	}
+	canonicalWorktreeSubdir, err := config.CanonicalWorkspaceRoot(worktreeSubdir)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot worktreeSubdir: %v", err)
+	}
+	if target.EffectiveWorkdir != canonicalWorktreeSubdir {
+		t.Fatalf("effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalWorktreeSubdir)
+	}
+}
+
+func TestUpdateSessionExecutionTargetByIDRejectsCrossWorkspaceWorktree(t *testing.T) {
+	ctx := context.Background()
+	store, cfgA, bindingA := newMetadataTestStore(t)
+	workspaceB := t.TempDir()
+	cfgB, err := config.Load(workspaceB, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspaceB: %v", err)
+	}
+	bindingB, err := store.RegisterWorkspaceBinding(ctx, cfgB.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding workspaceB: %v", err)
+	}
+	projectSessionsDir := config.ProjectSessionsRoot(cfgA, bindingA.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfgA.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfgB.WorkspaceRoot, "wt-b")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeRoot: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-b",
+		WorkspaceID:     bindingB.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+
+	err = store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, bindingA.WorkspaceID, "worktree-b", ".")
+	if err == nil || err.Error() != "worktree \"worktree-b\" does not belong to workspace \""+bindingA.WorkspaceID+"\"" {
+		t.Fatalf("UpdateSessionExecutionTargetByID error = %v", err)
+	}
+}
+
+func TestUpsertWorktreeRecordRejectsMissingRequiredFields(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	baseRecord := WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   filepath.Join(cfg.WorkspaceRoot, "wt-a"),
+		DisplayName:     "wt-a",
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}
+	tests := []struct {
+		name   string
+		mutate func(*WorktreeRecord)
+		want   string
+	}{
+		{name: "id", mutate: func(record *WorktreeRecord) { record.ID = "  " }, want: "worktree id is required"},
+		{name: "workspace id", mutate: func(record *WorktreeRecord) { record.WorkspaceID = "  " }, want: "workspace id is required"},
+		{name: "display name", mutate: func(record *WorktreeRecord) { record.DisplayName = "  " }, want: "worktree display name is required"},
+		{name: "availability", mutate: func(record *WorktreeRecord) { record.Availability = "  " }, want: "worktree availability is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := baseRecord
+			tt.mutate(&record)
+			err := store.UpsertWorktreeRecord(ctx, record)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("UpsertWorktreeRecord error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

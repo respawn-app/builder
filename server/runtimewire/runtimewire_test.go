@@ -149,6 +149,81 @@ func TestBuildToolRegistryMissingWorkspaceRootSuggestsRebind(t *testing.T) {
 	}
 }
 
+func TestLocalToolRegistryBindingRebindUpdatesExecCommandRoot(t *testing.T) {
+	rootA := filepath.Join(t.TempDir(), "workspace-a")
+	rootB := filepath.Join(t.TempDir(), "workspace-b")
+	if err := os.MkdirAll(rootA, 0o755); err != nil {
+		t.Fatalf("mkdir rootA: %v", err)
+	}
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatalf("mkdir rootB: %v", err)
+	}
+	binding, _, _, err := NewLocalToolRegistryBinding(
+		rootA,
+		"",
+		[]toolspec.ID{toolspec.ToolExecCommand},
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new local tool registry binding: %v", err)
+	}
+	if got := shellPwdOutput(t, binding.Registry()); got != canonicalPathForTest(t, rootA) {
+		t.Fatalf("pwd before rebind = %q, want %q", got, canonicalPathForTest(t, rootA))
+	}
+	if err := binding.Rebind(rootB); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if got := shellPwdOutput(t, binding.Registry()); got != canonicalPathForTest(t, rootB) {
+		t.Fatalf("pwd after rebind = %q, want %q", got, canonicalPathForTest(t, rootB))
+	}
+}
+
+func TestNewLocalToolRegistryBindingRejectsEmptyWorkspaceRoot(t *testing.T) {
+	_, _, _, err := NewLocalToolRegistryBinding(
+		"   ",
+		"",
+		[]toolspec.ID{toolspec.ToolExecCommand},
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+		nil,
+	)
+	if err == nil || err.Error() != "workspace root is required" {
+		t.Fatalf("new local tool registry binding error = %v, want workspace root is required", err)
+	}
+}
+
+func TestLocalToolRegistryBindingRebindRejectsEmptyWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	binding, _, _, err := NewLocalToolRegistryBinding(
+		root,
+		"",
+		[]toolspec.ID{toolspec.ToolExecCommand},
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("new local tool registry binding: %v", err)
+	}
+	if err := binding.Rebind("   "); err == nil || err.Error() != "workspace root is required" {
+		t.Fatalf("rebind error = %v, want workspace root is required", err)
+	}
+}
+
 func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T) {
 	root := t.TempDir()
 	storeA, err := session.Create(root, "ws-a", root)
@@ -414,6 +489,36 @@ func outsideNonTempDir(t *testing.T) string {
 	}
 	t.Skip("unable to create non-temporary outside directory for test")
 	return ""
+}
+
+func shellPwdOutput(t *testing.T, registry *tools.Registry) string {
+	t.Helper()
+	handler, ok := registry.Get(toolspec.ToolExecCommand)
+	if !ok {
+		t.Fatal("expected exec_command handler")
+	}
+	result, err := handler.Call(context.Background(), tools.Call{ID: "call-pwd", Name: toolspec.ToolExecCommand, Input: json.RawMessage(`{"command":"pwd"}`)})
+	if err != nil {
+		t.Fatalf("exec_command call: %v", err)
+	}
+	var payload string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode exec_command output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(payload), "\n")
+	if len(lines) == 0 {
+		t.Fatalf("expected exec_command output, got %q", payload)
+	}
+	return canonicalPathForTest(t, strings.TrimSpace(lines[len(lines)-1]))
+}
+
+func canonicalPathForTest(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("canonicalize path %q: %v", path, err)
+	}
+	return filepath.Clean(canonical)
 }
 
 type busyToggleFakeClient struct {

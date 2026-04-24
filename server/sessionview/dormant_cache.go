@@ -9,6 +9,7 @@ import (
 	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/shared/clientui"
+	"builder/shared/config"
 )
 
 const dormantTranscriptCacheMaxEntries = 16
@@ -79,6 +80,16 @@ func (c *dormantTranscriptCache) get(ctx context.Context, store *session.Store) 
 	return built, nil
 }
 
+func (c *dormantTranscriptCache) clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.entries)
+	c.clock = 0
+}
+
 func (c *dormantTranscriptCache) nextStampLocked() uint64 {
 	c.clock++
 	return c.clock
@@ -116,7 +127,11 @@ func (e dormantTranscriptCacheEntry) matchesStore(store *session.Store, meta ses
 
 func buildDormantTranscriptCacheEntry(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 	meta := store.Meta()
-	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{TrackOngoingTail: true, TailLimit: runtimeview.OngoingTailEntryLimit})
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{
+		TrackOngoingTail: true,
+		TailLimit:        runtimeview.OngoingTailEntryLimit,
+		CacheWarningMode: config.CacheWarningModeDefault,
+	})
 	if err != nil {
 		return dormantTranscriptCacheEntry{}, err
 	}

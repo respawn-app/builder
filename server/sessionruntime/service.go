@@ -48,6 +48,7 @@ type runtimeHandle struct {
 	activationErr       error
 	takeover            *runtimeTakeover
 	ready               chan struct{}
+	rebind              func(string) error
 	close               func()
 }
 
@@ -197,6 +198,10 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		_ = wiring.Close()
 		_ = logger.Close()
 	}
+	handle.rebind = nil
+	if wiring.LocalTools != nil {
+		handle.rebind = wiring.LocalTools.Rebind
+	}
 	s.completeActivation(handle, leaseID, cleanup)
 	cleanup = nil
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
@@ -296,6 +301,144 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	return nil
 }
 
+func (s *Service) RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if trimmedRoot == "" {
+		return errors.New("workspace root is required")
+	}
+	if err := s.RequireControllerLease(ctx, sessionID, leaseID); err != nil {
+		return err
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	if err := s.ensureCurrentControllerLeaseLocked(trimmedSessionID, trimmedLeaseID, handle); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	rebind := current.rebind
+	s.mu.Unlock()
+	if rebind == nil {
+		return nil
+	}
+	return rebind(trimmedRoot)
+}
+
+func (s *Service) RecordWorktreeTransition(ctx context.Context, sessionID string, leaseID string, state session.WorktreeReminderState) error {
+	if err := s.RequireControllerLease(ctx, sessionID, leaseID); err != nil {
+		return err
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	store, err := s.resolveStore(ctx, trimmedSessionID)
+	if err != nil {
+		return err
+	}
+	normalized, err := normalizeWorktreeReminderState(state)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if err := s.ensureCurrentControllerLeaseLocked(trimmedSessionID, trimmedLeaseID, nil); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Unlock()
+	return store.SetWorktreeReminderState(&normalized)
+}
+
+func (s *Service) ensureCurrentControllerLeaseLocked(sessionID string, leaseID string, handle *runtimeHandle) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	current := s.handles[trimmedSessionID]
+	if current == nil {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if handle != nil && current != handle {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	if strings.TrimSpace(current.controllerLeaseID) != trimmedLeaseID {
+		return invalidControllerLeaseError(trimmedSessionID)
+	}
+	return nil
+}
+
+func (s *Service) SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedWorkdir := strings.TrimSpace(target.EffectiveWorkdir)
+	if trimmedSessionID == "" {
+		return errors.New("session id is required")
+	}
+	if trimmedWorkdir == "" {
+		return errors.New("execution target effective workdir is required")
+	}
+	var normalizedReminder *session.WorktreeReminderState
+	if reminder != nil {
+		normalized, err := normalizeWorktreeReminderState(*reminder)
+		if err != nil {
+			return err
+		}
+		normalizedReminder = &normalized
+	}
+	handle, err := s.activeRuntimeHandle(ctx, trimmedSessionID)
+	if err != nil {
+		return err
+	}
+	if handle == nil || handle.rebind == nil {
+		return s.persistWorktreeReminderState(ctx, trimmedSessionID, normalizedReminder)
+	}
+	if err := handle.rebind(trimmedWorkdir); err != nil {
+		return err
+	}
+	return s.persistWorktreeReminderState(ctx, trimmedSessionID, normalizedReminder)
+}
+
+func (s *Service) persistWorktreeReminderState(ctx context.Context, sessionID string, reminder *session.WorktreeReminderState) error {
+	if reminder == nil {
+		return nil
+	}
+	store, err := s.resolveStore(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	return store.SetWorktreeReminderState(reminder)
+}
+
+func normalizeWorktreeReminderState(state session.WorktreeReminderState) (session.WorktreeReminderState, error) {
+	state.Mode = session.WorktreeReminderMode(strings.TrimSpace(string(state.Mode)))
+	switch state.Mode {
+	case session.WorktreeReminderModeEnter, session.WorktreeReminderModeExit:
+	default:
+		return session.WorktreeReminderState{}, errors.New("worktree reminder mode is required")
+	}
+	state.Branch = strings.TrimSpace(state.Branch)
+	state.WorktreePath = strings.TrimSpace(state.WorktreePath)
+	state.WorkspaceRoot = strings.TrimSpace(state.WorkspaceRoot)
+	state.EffectiveCwd = strings.TrimSpace(state.EffectiveCwd)
+	if state.WorkspaceRoot == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder workspace root is required")
+	}
+	if state.EffectiveCwd == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder effective cwd is required")
+	}
+	if state.Mode == session.WorktreeReminderModeEnter && state.WorktreePath == "" {
+		return session.WorktreeReminderState{}, errors.New("worktree reminder worktree path is required for enter mode")
+	}
+	state.HasIssuedInGeneration = false
+	state.IssuedCompactionCount = 0
+	return state, nil
+}
+
 func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -320,6 +463,29 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 		s.sessionStores.RegisterStore(store)
 	}
 	return store, nil
+}
+
+func (s *Service) activeRuntimeHandle(ctx context.Context, sessionID string) (*runtimeHandle, error) {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return nil, nil
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	current := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if current == nil || current != handle {
+		return nil, nil
+	}
+	if current.activationErr != nil {
+		return nil, current.activationErr
+	}
+	return current, nil
 }
 
 // Phase 2 temporarily allows many attached readers, but exactly one controlling

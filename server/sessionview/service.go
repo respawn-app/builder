@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/shared/clientui"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 )
 
@@ -26,14 +28,67 @@ type ExecutionTargetResolver interface {
 }
 
 type Service struct {
-	sessions SessionStoreResolver
-	runtimes RuntimeResolver
-	targets  ExecutionTargetResolver
-	dormant  *dormantTranscriptCache
+	sessions         SessionStoreResolver
+	runtimes         RuntimeResolver
+	targets          ExecutionTargetResolver
+	dormant          *dormantTranscriptCache
+	cacheWarningMu   sync.RWMutex
+	cacheWarningMode config.CacheWarningMode
 }
 
 func NewService(sessions SessionStoreResolver, runtimes RuntimeResolver, targets ExecutionTargetResolver) *Service {
-	return &Service{sessions: sessions, runtimes: runtimes, targets: targets, dormant: newDormantTranscriptCache(nil)}
+	svc := &Service{
+		sessions:         sessions,
+		runtimes:         runtimes,
+		targets:          targets,
+		cacheWarningMode: config.CacheWarningModeDefault,
+	}
+	svc.dormant = newDormantTranscriptCache(func(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+		return svc.buildDormantTranscriptCacheEntry(ctx, store)
+	})
+	return svc
+}
+
+func (s *Service) WithCacheWarningMode(mode config.CacheWarningMode) *Service {
+	if s == nil {
+		return nil
+	}
+	normalized := normalizeServiceCacheWarningMode(mode)
+	changed := s.cacheWarningModeValue() != normalized
+	s.setCacheWarningMode(normalized)
+	if changed && s.dormant != nil {
+		s.dormant.clear()
+	}
+	return s
+}
+
+func (s *Service) cacheWarningModeValue() config.CacheWarningMode {
+	if s == nil {
+		return config.CacheWarningModeDefault
+	}
+	s.cacheWarningMu.RLock()
+	defer s.cacheWarningMu.RUnlock()
+	return s.cacheWarningMode
+}
+
+func (s *Service) setCacheWarningMode(mode config.CacheWarningMode) {
+	if s == nil {
+		return
+	}
+	s.cacheWarningMu.Lock()
+	defer s.cacheWarningMu.Unlock()
+	s.cacheWarningMode = mode
+}
+
+func normalizeServiceCacheWarningMode(mode config.CacheWarningMode) config.CacheWarningMode {
+	switch strings.ToLower(strings.TrimSpace(string(mode))) {
+	case string(config.CacheWarningModeOff):
+		return config.CacheWarningModeOff
+	case string(config.CacheWarningModeVerbose):
+		return config.CacheWarningModeVerbose
+	default:
+		return config.CacheWarningModeDefault
+	}
 }
 
 type staticSessionResolver struct {
@@ -229,7 +284,7 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 	if page, ok := entry.transcriptPageCoveredByTail(meta, freshness, clientui.TranscriptPageRequest{Offset: offset, Limit: limit}); ok {
 		return page, nil
 	}
-	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit})
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: s.cacheWarningModeValue()})
 	if err != nil {
 		return clientui.TranscriptPage{}, err
 	}
@@ -261,6 +316,35 @@ func scanDormantTranscript(ctx context.Context, store *session.Store, req runtim
 		return nil, err
 	}
 	return scan, nil
+}
+
+func (s *Service) buildDormantTranscriptCacheEntry(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
+	meta := store.Meta()
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{
+		TrackOngoingTail: true,
+		TailLimit:        runtimeview.OngoingTailEntryLimit,
+		CacheWarningMode: s.cacheWarningModeValue(),
+	})
+	if err != nil {
+		return dormantTranscriptCacheEntry{}, err
+	}
+	var activeRun *clientui.RunView
+	latestRun, err := store.LatestRun()
+	if err != nil {
+		return dormantTranscriptCacheEntry{}, err
+	}
+	if latestRun != nil && latestRun.Status == session.RunStatusRunning {
+		activeRun = runtimeview.RunViewFromSessionRecord(meta.SessionID, latestRun)
+	}
+	return dormantTranscriptCacheEntry{
+		sessionDir:                   store.Dir(),
+		sessionID:                    meta.SessionID,
+		revision:                     meta.LastSequence,
+		totalEntries:                 scan.TotalEntries(),
+		lastCommittedAssistantAnswer: scan.LastCommittedAssistantFinalAnswer(),
+		ongoingTail:                  scan.OngoingTailSnapshot(),
+		activeRun:                    activeRun,
+	}, nil
 }
 
 var _ serverapi.SessionViewService = (*Service)(nil)

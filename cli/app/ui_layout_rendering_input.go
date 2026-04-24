@@ -17,6 +17,9 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	if inputState.Mode == uiInputModeProcessList {
 		return []string{padRight("", width)}
 	}
+	if inputState.Mode == uiInputModeWorktree {
+		return []string{padRight("", width)}
+	}
 	if inputState.Mode == uiInputModeRollbackSelection {
 		return nil
 	}

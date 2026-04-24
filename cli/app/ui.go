@@ -12,8 +12,10 @@ import (
 	"builder/server/session"
 	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"builder/shared/theme"
 	"builder/shared/transcriptdiag"
 
@@ -392,6 +394,12 @@ func WithUIProcessClient(client clientui.ProcessClient) UIOption {
 	}
 }
 
+func WithUIWorktreeClient(client client.WorktreeClient) UIOption {
+	return func(m *uiModel) {
+		m.worktreeClient = client
+	}
+}
+
 func WithUITurnQueueHook(hook turnQueueHook) UIOption {
 	return func(m *uiModel) {
 		m.turnQueueHook = hook
@@ -437,6 +445,7 @@ type uiModel struct {
 
 	processClient         clientui.ProcessClient
 	processClientExplicit bool
+	worktreeClient        client.WorktreeClient
 
 	runtimeEvents           <-chan clientui.Event
 	pendingRuntimeEvents    []clientui.Event
@@ -579,7 +588,8 @@ type uiModel struct {
 	pendingCSIShiftEnterAt time.Time
 	pendingCSIShiftEnter   bool
 
-	rollback uiRollbackState
+	rollback  uiRollbackState
+	worktrees uiWorktreeOverlayState
 }
 
 func (m *uiModel) isInputLocked() bool {
@@ -1031,6 +1041,154 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next, cmd := m.inputController().handleSpinnerTick(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
+	case worktreeListDoneMsg:
+		if !m.worktrees.isOpen() || msg.token != m.worktrees.refreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.loading = false
+		if msg.err != nil {
+			m.worktrees.errorText = formatSubmissionError(msg.err)
+			m.syncViewport()
+			return m, m.ensureSpinnerTicking()
+		}
+		m.worktrees.errorText = ""
+		m.applyWorktreeListResponse(msg.resp)
+		cmd := m.applyWorktreeIntent()
+		m.syncViewport()
+		return m, tea.Batch(cmd, m.ensureSpinnerTicking())
+	case worktreeCreateDoneMsg:
+		if msg.token != m.worktrees.mutationToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.create.submitting = false
+		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
+			m.worktrees.create.errorText = formatSubmissionError(msg.err)
+			m.syncViewport()
+			return m, m.ensureSpinnerTicking()
+		}
+		m.applyExecutionTargetChange(msg.resp.Target)
+		var overlayCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			overlayCmd = m.popWorktreeOverlayIfNeeded()
+			m.closeWorktreeOverlay()
+		}
+		status := "Created worktree " + worktreeDisplayName(msg.resp.Worktree)
+		if msg.resp.SetupScheduled {
+			status += " and started setup"
+		}
+		feedbackCmd := m.setTransientStatusWithKind(status, uiStatusNoticeSuccess)
+		m.syncViewport()
+		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
+	case worktreeSwitchDoneMsg:
+		if msg.token != m.worktrees.mutationToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.switchPending = false
+		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
+			m.worktrees.errorText = formatSubmissionError(msg.err)
+			m.syncViewport()
+			return m, m.ensureSpinnerTicking()
+		}
+		m.applyExecutionTargetChange(msg.resp.Target)
+		var overlayCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			overlayCmd = m.popWorktreeOverlayIfNeeded()
+			m.closeWorktreeOverlay()
+		}
+		status := "Switched to " + worktreeDisplayName(msg.resp.Worktree)
+		feedbackCmd := m.setTransientStatusWithKind(status, uiStatusNoticeSuccess)
+		m.syncViewport()
+		return m, tea.Batch(overlayCmd, feedbackCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
+	case worktreeDeleteDoneMsg:
+		if msg.token != m.worktrees.mutationToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.deleteConfirm.submitting = false
+		if msg.err != nil {
+			if !m.worktrees.isOpen() {
+				status := formatSubmissionError(msg.err)
+				m.syncViewport()
+				return m, m.setTransientStatusWithKind(status, uiStatusNoticeError)
+			}
+			m.worktrees.deleteConfirm.errorText = formatSubmissionError(msg.err)
+			m.syncViewport()
+			return m, m.ensureSpinnerTicking()
+		}
+		m.applyExecutionTargetChange(msg.resp.Target)
+		var listCmd tea.Cmd
+		if m.worktrees.isOpen() {
+			m.closeWorktreeDialog()
+			m.worktrees.selectedID = worktreeCreateRowID
+			listCmd = m.requestWorktreeListCmd()
+		}
+		status := "Deleted worktree " + worktreeDisplayName(msg.resp.Worktree)
+		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeDelete(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
+		m.syncViewport()
+		return m, tea.Batch(feedbackCmd, listCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
+	case worktreeCreateTargetResolveDebounceMsg:
+		if !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate || msg.token != m.worktrees.create.resolveToken {
+			m.syncViewport()
+			return m, nil
+		}
+		query := strings.TrimSpace(m.worktrees.create.branchTarget.Value())
+		if query == "" {
+			m.worktrees.create.resolving = false
+			m.worktrees.create.submitPending = false
+			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
+			m.worktrees.create.errorText = ""
+			m.worktrees.create.syncFocus()
+			m.syncViewport()
+			return m, nil
+		}
+		m.syncViewport()
+		return m, m.worktreeCreateTargetResolveCmd(query, msg.token)
+	case worktreeCreateTargetResolveDoneMsg:
+		if !m.worktrees.isOpen() || m.worktrees.phase != uiWorktreeOverlayPhaseCreate || msg.token != m.worktrees.create.resolveToken {
+			m.syncViewport()
+			return m, nil
+		}
+		if strings.TrimSpace(m.worktrees.create.branchTarget.Value()) != strings.TrimSpace(msg.query) {
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.create.resolving = false
+		submitPending := m.worktrees.create.submitPending
+		m.worktrees.create.submitPending = false
+		if msg.err != nil {
+			m.worktrees.create.resolution = serverapi.WorktreeCreateTargetResolution{}
+			m.worktrees.create.errorText = formatSubmissionError(msg.err)
+			m.worktrees.create.syncFocus()
+			m.syncViewport()
+			return m, nil
+		}
+		m.worktrees.create.errorText = ""
+		m.worktrees.create.resolution = msg.resp.Resolution
+		m.worktrees.create.syncFocus()
+		m.syncViewport()
+		if submitPending {
+			req, err := m.worktrees.create.request(msg.resp.Resolution.Kind)
+			if err != nil {
+				m.worktrees.create.errorText = err.Error()
+				m.syncViewport()
+				return m, nil
+			}
+			return m, m.worktreeCreateCmd(req)
+		}
+		return m, nil
 	case processListRefreshTickMsg:
 		if !m.processList.isOpen() {
 			m.syncViewport()

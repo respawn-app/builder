@@ -69,8 +69,11 @@ func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, 
 }
 
 func buildReviewerRequestMessagesWithNow(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool, now time.Time) ([]llm.Message, error) {
+	return buildReviewerRequestMessagesWithBuilder(messages, newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, now), headless)
+}
+
+func buildReviewerRequestMessagesWithBuilder(messages []llm.Message, builder metaContextBuilder, headless bool) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitMetaContextMessages(messages)
-	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, now)
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		ExistingMessages:          metaMessages,
 		IncludeAgents:             true,

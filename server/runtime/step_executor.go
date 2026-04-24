@@ -29,10 +29,11 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return stepLoopResult{}, err
 		}
 
-		req, err := e.buildRequest(ctx, stepID, true)
+		requestPlan, err := e.buildRequestPlan(ctx, stepID, true)
 		if err != nil {
 			return stepLoopResult{}, err
 		}
+		req := requestPlan.Request
 
 		resp, err := e.generateWithRetry(
 			ctx,
@@ -50,6 +51,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			},
 		)
 		if err != nil {
+			return stepLoopResult{}, err
+		}
+		if err := e.commitPreparedWorktreeReminder(requestPlan.PreparedWorktreeReminder); err != nil {
 			return stepLoopResult{}, err
 		}
 		if err := e.recordLastUsage(resp.Usage); err != nil {
