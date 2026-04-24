@@ -1333,16 +1333,16 @@ func (l uiViewLayout) renderWorktreeDeleteDialog(width, height int, style uiStyl
 	m := l.model
 	dialog := m.worktrees.deleteConfirm
 	lines := []string{
-		style.brand.Render(truncateQueuedMessageLine("Worktrees", width)),
-		style.meta.Render(truncateQueuedMessageLine("Delete worktree", width)),
-		"",
-		style.chat.Render(truncateQueuedMessageLine("Delete "+worktreeDisplayName(dialog.target)+"?", width)),
-		style.meta.Render(truncateQueuedMessageLine(strings.TrimSpace(dialog.target.CanonicalRoot), width)),
+		style.brand.Render(truncateQueuedMessageLine("Delete "+worktreeDisplayName(dialog.target)+"?", width)),
 		"",
 	}
-	body := worktreeDeleteBodyLines(dialog.target)
+	body := worktreeDeletePreviewLines(dialog)
 	for _, line := range body {
-		lines = append(lines, style.meta.Render(truncateQueuedMessageLine(line, width)))
+		lineStyle := style.chat
+		if line.kind == worktreeDeletePreviewLineKindHeader {
+			lineStyle = lineStyle.Bold(true)
+		}
+		lines = append(lines, lineStyle.Render(truncateQueuedMessageLine(line.text, width)))
 	}
 	lines = append(lines, "", renderWorktreeDeleteButtons(width, l.model.theme, dialog))
 	if dialog.submitting {
@@ -1352,7 +1352,6 @@ func (l uiViewLayout) renderWorktreeDeleteDialog(width, height int, style uiStyl
 		lines = append(lines, "")
 		lines = append(lines, renderWorktreeErrorLines(trimmed, width, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true), worktreeOverlayMaxErrorLines)...)
 	}
-	lines = append(lines, "", style.meta.Render(truncateQueuedMessageLine("Esc back | Left/Right choose action | Enter confirm", width)))
 	return l.renderWorktreeDialogLines(lines, width, height, style)
 }
 
@@ -1394,21 +1393,39 @@ func appendOverflowEllipsis(line string, width int) string {
 	return trimmed + "…"
 }
 
-func worktreeDeleteBodyLines(target serverapi.WorktreeView) []string {
-	lines := []string{}
-	if target.Detached {
-		lines = append(lines, "Branch cleanup target: detached")
-	} else if branch := strings.TrimSpace(target.BranchName); branch != "" {
-		lines = append(lines, "Branch cleanup target: "+branch)
+type worktreeDeletePreviewLineKind uint8
+
+const (
+	worktreeDeletePreviewLineKindHeader worktreeDeletePreviewLineKind = iota
+	worktreeDeletePreviewLineKindBullet
+)
+
+type worktreeDeletePreviewLine struct {
+	kind worktreeDeletePreviewLineKind
+	text string
+}
+
+func worktreeDeletePreviewLines(dialog uiWorktreeDeleteDialogState) []worktreeDeletePreviewLine {
+	target := dialog.target
+	items := make([]worktreeDeletePreviewLine, 0, 4)
+	if worktreeDeleteWillDeleteBranch(dialog) {
+		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Local branch " + strings.TrimSpace(target.BranchName)})
 	}
-	if worktreeDeleteCanAutoDeleteBranch(target) {
-		lines = append(lines, "Builder can safely attempt branch cleanup for this worktree.")
-	} else if strings.TrimSpace(target.BranchName) != "" {
-		lines = append(lines, "Branch cleanup needs explicit confirmation for this worktree.")
-	} else {
-		lines = append(lines, "This removes the filesystem worktree.")
+	if root := strings.TrimSpace(target.CanonicalRoot); root != "" {
+		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Workspace folder at " + root})
 	}
-	return lines
+	items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Git worktree " + worktreeDisplayName(target)})
+	if len(items) == 0 {
+		return nil
+	}
+	return append([]worktreeDeletePreviewLine{{kind: worktreeDeletePreviewLineKindHeader, text: "Will delete:"}}, items...)
+}
+
+func worktreeDeleteWillDeleteBranch(dialog uiWorktreeDeleteDialogState) bool {
+	if strings.TrimSpace(dialog.target.BranchName) == "" {
+		return false
+	}
+	return dialog.selectedAction == uiWorktreeDeleteActionDeleteBranch
 }
 
 func renderWorktreeDeleteButtons(width int, theme string, dialog uiWorktreeDeleteDialogState) string {
