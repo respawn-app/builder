@@ -298,7 +298,7 @@
 - Unknown roles, unknown message types, and invalid/missing presentation metadata must stay visible and expandable. If recoverable text exists, unknown/malformed entries are visible in ongoing and detail; empty unknown/malformed entries are detail-only diagnostics. Production rendering emits diagnostics and uses deterministic fallback labels; debug mode may hard-fail only on internal detail-item invariants, not on old or unknown transcript data.
 - Detail tool calls with error results stay collapsed by default but may show compact input plus a structured error summary supplied by runtime/projection; expanding reveals full input/output.
 - Detail navigation is message-oriented: `Up`/`Down` select previous/next transcript message, `Enter` expands/collapses the selected message, and `PgUp`/`PgDn` keep page-scrolling the detail viewport.
-- Detail rows use right-aligned chevron markers only when expansion changes visible content: `▶︎` collapsed and `▼` expanded. Text truncation reserves marker width so the marker stays at the row's right edge; rows whose expanded rendering is identical to collapsed rendering show no marker.
+- Detail rows use mandatory chevron markers: `▶︎` collapsed and `▼` expanded.
 - Detail selection uses full-width selected background/fill only. It must not change foreground colors, and selected background has the lowest priority so more specific backgrounds such as patch diff add/remove or syntax backgrounds win.
 - Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
 - Style ownership is fixed by layer:
