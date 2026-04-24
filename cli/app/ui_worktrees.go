@@ -1339,8 +1339,11 @@ func (l uiViewLayout) renderWorktreeDeleteDialog(width, height int, style uiStyl
 	body := worktreeDeletePreviewLines(dialog)
 	for _, line := range body {
 		lineStyle := style.chat
-		if line.kind == worktreeDeletePreviewLineKindHeader {
+		switch line.kind {
+		case worktreeDeletePreviewLineKindHeader:
 			lineStyle = lineStyle.Bold(true)
+		case worktreeDeletePreviewLineKindWarning:
+			lineStyle = lineStyle.Foreground(statusRedColor()).Bold(true)
 		}
 		lines = append(lines, lineStyle.Render(truncateQueuedMessageLine(line.text, width)))
 	}
@@ -1398,6 +1401,7 @@ type worktreeDeletePreviewLineKind uint8
 const (
 	worktreeDeletePreviewLineKindHeader worktreeDeletePreviewLineKind = iota
 	worktreeDeletePreviewLineKindBullet
+	worktreeDeletePreviewLineKindWarning
 )
 
 type worktreeDeletePreviewLine struct {
@@ -1407,7 +1411,7 @@ type worktreeDeletePreviewLine struct {
 
 func worktreeDeletePreviewLines(dialog uiWorktreeDeleteDialogState) []worktreeDeletePreviewLine {
 	target := dialog.target
-	items := make([]worktreeDeletePreviewLine, 0, 4)
+	items := make([]worktreeDeletePreviewLine, 0, 5)
 	if worktreeDeleteWillDeleteBranch(dialog) {
 		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Local branch " + strings.TrimSpace(target.BranchName)})
 	}
@@ -1415,10 +1419,20 @@ func worktreeDeletePreviewLines(dialog uiWorktreeDeleteDialogState) []worktreeDe
 		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Workspace folder at " + root})
 	}
 	items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Git worktree " + worktreeDisplayName(target)})
+	if target.DirtyFileCount > 0 {
+		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindWarning, text: "• Drop " + pluralizeCount(target.DirtyFileCount, "modified/untracked file")})
+	}
 	if len(items) == 0 {
 		return nil
 	}
 	return append([]worktreeDeletePreviewLine{{kind: worktreeDeletePreviewLineKindHeader, text: "Will delete:"}}, items...)
+}
+
+func pluralizeCount(count int, singular string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, singular)
+	}
+	return fmt.Sprintf("%d %ss", count, singular)
 }
 
 func worktreeDeleteWillDeleteBranch(dialog uiWorktreeDeleteDialogState) bool {

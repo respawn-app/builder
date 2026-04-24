@@ -765,6 +765,40 @@ func TestDeleteWorktreeIgnoresDormantSessionsTargetingIt(t *testing.T) {
 	}
 }
 
+func TestListWorktreesReportsDirtyFileCount(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/dirty-count")
+	if err := os.WriteFile(filepath.Join(created.CanonicalRoot, "untracked.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	listed := findWorktreeByID(t, mustListWorktrees(t, env).Worktrees, created.WorktreeID)
+	if listed.DirtyFileCount != 1 {
+		t.Fatalf("dirty file count = %d, want 1", listed.DirtyFileCount)
+	}
+}
+
+func TestDeleteWorktreeForcesRemovalWhenDirty(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dirty")
+	if err := os.WriteFile(filepath.Join(created.CanonicalRoot, "untracked.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dirty",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected dirty worktree root removed, stat err=%v", err)
+	}
+}
+
 func TestDeleteWorktreeBlocksOnlyActiveSessionsTargetingIt(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/delete-mixed-session-blockers")
