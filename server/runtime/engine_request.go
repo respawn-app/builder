@@ -129,6 +129,9 @@ func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
 }
 
 func (e *Engine) systemPrompt(locked session.LockedContract) (string, error) {
+	if locked.HasSystemPrompt {
+		return strings.TrimSpace(locked.SystemPrompt), nil
+	}
 	if prompt := strings.TrimSpace(locked.SystemPrompt); prompt != "" {
 		return prompt, nil
 	}
@@ -139,13 +142,14 @@ func (e *Engine) systemPrompt(locked session.LockedContract) (string, error) {
 	if err := e.store.BackfillLockedSystemPrompt(prompt); err != nil {
 		return "", err
 	}
-	if meta := e.store.Meta(); meta.Locked != nil && strings.TrimSpace(meta.Locked.SystemPrompt) != "" {
+	if meta := e.store.Meta(); meta.Locked != nil && meta.Locked.HasSystemPrompt {
 		persisted := strings.TrimSpace(meta.Locked.SystemPrompt)
 		prompt = persisted
 	}
 	e.mu.Lock()
-	if e.locked != nil && strings.TrimSpace(e.locked.SystemPrompt) == "" {
+	if e.locked != nil && !e.locked.HasSystemPrompt {
 		e.locked.SystemPrompt = prompt
+		e.locked.HasSystemPrompt = true
 	}
 	e.mu.Unlock()
 	return prompt, nil

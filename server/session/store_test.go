@@ -309,10 +309,11 @@ func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 	if err := store.MarkModelDispatchLocked(LockedContract{
-		Model:          "gpt-5",
-		Temperature:    1,
-		MaxOutputToken: 0,
-		SystemPrompt:   "locked system prompt",
+		Model:           "gpt-5",
+		Temperature:     1,
+		MaxOutputToken:  0,
+		SystemPrompt:    "locked system prompt",
+		HasSystemPrompt: true,
 	}); err != nil {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
@@ -327,6 +328,9 @@ func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testin
 	}
 	if !strings.Contains(text, `"system_prompt": "locked system prompt"`) {
 		t.Fatalf("session metadata must persist system_prompt snapshot: %s", text)
+	}
+	if !strings.Contains(text, `"has_system_prompt": true`) {
+		t.Fatalf("session metadata must persist system_prompt marker: %s", text)
 	}
 }
 
