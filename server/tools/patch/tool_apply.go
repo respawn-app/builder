@@ -82,6 +82,11 @@ func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 
 	flush := func() error {
 		if len(current.changes) == 0 {
+			if current.endOfFile {
+				hunks = append(hunks, current)
+				current = editHunk{}
+				return nil
+			}
 			if current.header.hasPosition {
 				return malformedFailure("hunk header without changes")
 			}
