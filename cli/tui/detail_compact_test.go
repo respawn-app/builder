@@ -8,7 +8,6 @@ import (
 	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -24,7 +23,7 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	collapsed := xansi.Strip(m.View())
-	if !strings.Contains(collapsed, "$ cat large.txt") || !strings.Contains(collapsed, "▶︎") {
+	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
 		t.Fatalf("expected collapsed tool input, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -33,15 +32,15 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := xansi.Strip(m.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "▼") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
 		t.Fatalf("expected expanded tool input and output, got %q", expanded)
 	}
 }
 
 func TestCompactDetailNavigatesByMessageAndKeepsMultipleExpanded(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first user\nhidden\nhidden\nshown on expand"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first assistant\nhidden\nhidden\nshown on expand"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first user\nhidden"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first assistant\nhidden"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -110,7 +109,7 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	rendered := xansi.Strip(m.View())
-	if !strings.Contains(rendered, "$ printf 'one\\n'…") || !strings.Contains(rendered, "▶︎") {
+	if !strings.Contains(rendered, "▶︎ $ printf 'one\\n'…") {
 		t.Fatalf("expected completed shell call to stay compact, got %q", rendered)
 	}
 	if strings.Contains(rendered, "printf 'two") {
@@ -149,42 +148,9 @@ func TestCompactDetailDividersWrapExpandedRunsOnly(t *testing.T) {
 			if got := strings.Count(rendered, detailDivider()); got != tt.wantDividers {
 				t.Fatalf("divider count = %d, want %d in %q", got, tt.wantDividers, rendered)
 			}
-			if tt.forbidBetween && strings.Contains(rendered, "first entry\n"+detailDivider()+"\n❮ second entry") {
+			if tt.forbidBetween && strings.Contains(rendered, "first entry\n"+detailDivider()+"\n▼ ❮ second entry") {
 				t.Fatalf("did not expect duplicate divider between consecutive expanded entries, got %q", rendered)
 			}
 		})
-	}
-}
-
-func TestCompactDetailHidesMarkerWhenExpansionDoesNotChangeEntry(t *testing.T) {
-	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "short answer"})
-	m = updateModel(t, m, ToggleModeMsg{})
-
-	rendered := xansi.Strip(m.View())
-	if strings.Contains(rendered, "▶︎") || strings.Contains(rendered, "▼") {
-		t.Fatalf("did not expect marker for entry whose expansion is identical, got %q", rendered)
-	}
-}
-
-func TestCompactDetailRightMarkerReservesRowSpace(t *testing.T) {
-	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
-	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 24})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "abcdefghijklmnopqrstuvwxyz\n2\n3\n4"})
-	m = updateModel(t, m, ToggleModeMsg{})
-
-	line := lineContaining(m.View(), "abc")
-	if line == "" {
-		t.Fatalf("expected detail line, got %q", m.View())
-	}
-	plain := xansi.Strip(line)
-	if !strings.HasSuffix(plain, "▶︎") {
-		t.Fatalf("expected right-aligned marker, got %q", plain)
-	}
-	if strings.Contains(plain[:len(plain)-len("▶︎")], "▶︎") {
-		t.Fatalf("expected marker only at row end, got %q", plain)
-	}
-	if got := lipgloss.Width(line); got != 24 {
-		t.Fatalf("expected marker row width 24, got %d for %q", got, line)
 	}
 }
