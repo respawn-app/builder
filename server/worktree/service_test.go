@@ -765,6 +765,49 @@ func TestDeleteWorktreeIgnoresDormantSessionsTargetingIt(t *testing.T) {
 	}
 }
 
+func TestDeleteWorktreeBlocksOnlyActiveSessionsTargetingIt(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-mixed-session-blockers")
+	dormantSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	activeSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := dormantSession.SetName("dormant blocker"); err != nil {
+		t.Fatalf("SetName dormant: %v", err)
+	}
+	if err := activeSession.SetName("active blocker"); err != nil {
+		t.Fatalf("SetName active: %v", err)
+	}
+	if err := env.store.ImportSessionSnapshot(env.ctx, session.PersistedStoreSnapshot{SessionDir: dormantSession.Dir(), Meta: dormantSession.Meta()}); err != nil {
+		t.Fatalf("ImportSessionSnapshot dormant: %v", err)
+	}
+	if err := env.store.ImportSessionSnapshot(env.ctx, session.PersistedStoreSnapshot{SessionDir: activeSession.Dir(), Meta: activeSession.Meta()}); err != nil {
+		t.Fatalf("ImportSessionSnapshot active: %v", err)
+	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, dormantSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID dormant session: %v", err)
+	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, activeSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID active session: %v", err)
+	}
+	env.runtime.activeSessions[activeSession.Meta().SessionID] = true
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-mixed-session-blockers",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
+		t.Fatalf("DeleteWorktree error = %v, want ErrWorktreeBlocked", err)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "active blocker") {
+		t.Fatalf("expected active blocker in error, got %q", message)
+	}
+	if strings.Contains(message, "dormant blocker") {
+		t.Fatalf("did not expect dormant blocker in error, got %q", message)
+	}
+}
+
 func TestDeleteWorktreeBlocksWhenBackgroundProcessUsesDescendantPath(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/delete-blocked-process")
