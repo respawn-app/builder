@@ -895,6 +895,72 @@ func TestReadSystemPromptTemplateUsesGlobalFileWhenLocalMissing(t *testing.T) {
 	}
 }
 
+func TestSystemPromptSnapshotUsesStoredWorkspaceRootWhenTranscriptWorkdirIsNested(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "pkg")
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(systemDir, systemPromptFileName), "workspace root system")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: nested,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := client.calls[0].SystemPrompt; got != "workspace root system" {
+		t.Fatalf("system prompt = %q, want workspace root system", got)
+	}
+}
+
+func TestSystemPromptSnapshotFallsBackWhenHomeDirUnavailable(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("HOME", "")
+	if err := os.MkdirAll(filepath.Join(workspace, agentsGlobalDirName), 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName), "local without home")
+
+	template, sourcePath, ok, err := readSystemPromptTemplate(systemPromptSnapshotOptions{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("read system prompt template: %v", err)
+	}
+	if !ok || template != "local without home" {
+		t.Fatalf("template = %q ok=%t, want local without home true", template, ok)
+	}
+	if want := filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName); sourcePath != want {
+		t.Fatalf("source path = %q, want %q", sourcePath, want)
+	}
+	template, sourcePath, ok, err = readSystemPromptTemplate(systemPromptSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("read system prompt template without local prompt: %v", err)
+	}
+	if ok || template != "" || sourcePath != "" {
+		t.Fatalf("template = %q sourcePath=%q ok=%t, want empty fallback", template, sourcePath, ok)
+	}
+}
+
 func TestEnsureLockedWithSystemPromptAndTranscriptWorkingDirDoesNotDeadlock(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -1067,10 +1133,16 @@ func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("mark locked: %v", err)
 	}
-	client := &fakeClient{responses: []llm.Response{{
-		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
-		Usage:     llm.Usage{WindowTokens: 200000},
-	}}}
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                "gpt-5",
 		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
@@ -1093,6 +1165,15 @@ func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
 	writeTestFile(t, systemPath, "changed legacy")
 	if got := client.calls[0].SystemPrompt; got != snapshot {
 		t.Fatalf("request used changed system prompt\ngot: %q\nwant: %q", got, snapshot)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit again: %v", err)
+	}
+	if got := client.calls[1].SystemPrompt; got != snapshot {
+		t.Fatalf("second request used changed system prompt\ngot: %q\nwant: %q", got, snapshot)
+	}
+	if got := store.Meta().Locked.SystemPrompt; got != snapshot {
+		t.Fatalf("stored system prompt changed\ngot: %q\nwant: %q", got, snapshot)
 	}
 }
 

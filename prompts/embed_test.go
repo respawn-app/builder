@@ -24,9 +24,12 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptPlaceholder(t *testing.T) 
 	defaultPrompt := BaseSystemPrompt(SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
 	})
-	rendered := CustomSystemPrompt("custom\n{{.DefaultSystemPrompt}}", false, SystemPromptTemplateArgs{
+	rendered, err := RenderCustomSystemPrompt("custom\n{{.DefaultSystemPrompt}}", false, SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
 	})
+	if err != nil {
+		t.Fatalf("RenderCustomSystemPrompt: %v", err)
+	}
 	if !strings.Contains(rendered, "custom\n") {
 		t.Fatalf("expected custom prefix, got %q", rendered)
 	}

@@ -51,13 +51,21 @@ func (e *Engine) systemPromptWorkspaceRoot() string {
 }
 
 func (e *Engine) systemPromptWorkspaceRootLocked() string {
-	if trimmed := strings.TrimSpace(e.transcriptCWD); trimmed != "" {
-		return trimmed
+	activeRoot := strings.TrimSpace(e.transcriptCWD)
+	if activeRoot == "" {
+		activeRoot = strings.TrimSpace(e.cfg.TranscriptWorkingDir)
 	}
-	if trimmed := strings.TrimSpace(e.cfg.TranscriptWorkingDir); trimmed != "" {
-		return trimmed
+	persistedRoot := strings.TrimSpace(e.store.Meta().WorkspaceRoot)
+	if activeRoot == "" {
+		return persistedRoot
 	}
-	return strings.TrimSpace(e.store.Meta().WorkspaceRoot)
+	if persistedRoot == "" {
+		return activeRoot
+	}
+	if pathWithinRoot(activeRoot, persistedRoot) {
+		return persistedRoot
+	}
+	return activeRoot
 }
 
 func readSystemPromptTemplate(opts systemPromptSnapshotOptions) (string, string, bool, error) {
@@ -93,10 +101,21 @@ func systemPromptPaths(workspaceRoot string) ([]string, error) {
 		}
 		addPath(filepath.Join(absWorkspace, agentsGlobalDirName, systemPromptFileName))
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve home dir: %w", err)
+	if home, err := os.UserHomeDir(); err == nil {
+		addPath(filepath.Join(home, agentsGlobalDirName, systemPromptFileName))
 	}
-	addPath(filepath.Join(home, agentsGlobalDirName, systemPromptFileName))
 	return paths, nil
+}
+
+func pathWithinRoot(path string, root string) bool {
+	absPath, pathErr := filepath.Abs(strings.TrimSpace(path))
+	absRoot, rootErr := filepath.Abs(strings.TrimSpace(root))
+	if pathErr != nil || rootErr != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
