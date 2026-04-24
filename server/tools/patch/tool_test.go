@@ -265,6 +265,113 @@ func TestAddUpdateMove(t *testing.T) {
 	}
 }
 
+func TestUpdateFileUsesCodexStyleContextHeader(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(target, []byte("package main\n\nfunc one() {\n\tprintln(1)\n}\n\nfunc two() {\n\tprintln(2)\n}\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Update File: a.go\n@@ func two() {\n-\tprintln(2)\n+\tprintln(22)\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "ctx", Name: toolspec.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !strings.Contains(string(data), "println(22)") || strings.Contains(string(data), "println(2)\n") {
+		t.Fatalf("unexpected target contents: %q", string(data))
+	}
+}
+
+func TestUpdateFileEndOfFileMarkerAnchorsMatch(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(target, []byte("same\nend\nsame\nend\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Update File: a.txt\n@@\n same\n-end\n+finish\n*** End of File\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "eof", Name: toolspec.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "same\nend\nsame\nfinish\n" {
+		t.Fatalf("unexpected target contents: %q", string(data))
+	}
+}
+
+func TestUpdateFileAcceptsWhitespacePaddedEndOfFileMarker(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(target, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "eof-padding", "*** Begin Patch\n*** Update File: a.txt\n@@\n-one\n+ONE\n two\n  *** End of File  \n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "ONE\ntwo\n" {
+		t.Fatalf("unexpected target contents: %q", string(data))
+	}
+}
+
+func TestUpdateFileRejectsEmptyHunk(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(target, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "empty-update", "*** Begin Patch\n*** Update File: a.txt\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatal("expected empty update hunk to fail")
+	}
+	payload := toolFailurePayload(t, result)
+	if payload.Kind != "malformed_syntax" || !strings.Contains(payload.Reason, "empty") {
+		t.Fatalf("expected malformed empty hunk failure, got %+v", payload)
+	}
+}
+
 func TestAddFileInNewDirectory(t *testing.T) {
 	dir := t.TempDir()
 	tool, err := New(dir, true)

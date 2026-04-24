@@ -56,6 +56,7 @@ const (
 	MessageTypeHandoffFutureMessage      MessageType = "handoff_future_message"
 	MessageTypeReviewerFeedback          MessageType = "reviewer_feedback"
 	MessageTypeBackgroundNotice          MessageType = "background_notice"
+	MessageTypeCustomToolCallOutput      MessageType = "custom_tool_call_output"
 	MessageTypeManualCompactionCarryover MessageType = "manual_compaction_carryover"
 	MessageTypeHeadlessMode              MessageType = "headless_mode"
 	MessageTypeHeadlessModeExit          MessageType = "headless_mode_exit"
@@ -82,10 +83,30 @@ const (
 	ResponseItemTypeMessage            ResponseItemType = "message"
 	ResponseItemTypeFunctionCall       ResponseItemType = "function_call"
 	ResponseItemTypeFunctionCallOutput ResponseItemType = "function_call_output"
+	ResponseItemTypeCustomToolCall     ResponseItemType = "custom_tool_call"
+	ResponseItemTypeCustomToolOutput   ResponseItemType = "custom_tool_call_output"
 	ResponseItemTypeReasoning          ResponseItemType = "reasoning"
 	ResponseItemTypeCompaction         ResponseItemType = "compaction"
 	ResponseItemTypeOther              ResponseItemType = "other"
 )
+
+func ResponseItemTypeIsCustomToolCall(itemType ResponseItemType) bool {
+	return itemType == ResponseItemTypeCustomToolCall
+}
+
+func ToolOutputItemType(custom bool) ResponseItemType {
+	if custom {
+		return ResponseItemTypeCustomToolOutput
+	}
+	return ResponseItemTypeFunctionCallOutput
+}
+
+func ToolOutputMessageType(custom bool) MessageType {
+	if custom {
+		return MessageTypeCustomToolCallOutput
+	}
+	return ""
+}
 
 type ResponseItem struct {
 	Type             ResponseItemType `json:"type"`
@@ -101,6 +122,7 @@ type ResponseItem struct {
 	CompactContent   string           `json:"compact_content,omitempty"`
 	ToolPresentation json.RawMessage  `json:"tool_presentation,omitempty"`
 	Arguments        json.RawMessage  `json:"arguments,omitempty"`
+	CustomInput      string           `json:"custom_input,omitempty"`
 	Output           json.RawMessage  `json:"output,omitempty"`
 	ReasoningSummary []ReasoningEntry `json:"reasoning_summary,omitempty"`
 	EncryptedContent string           `json:"encrypted_content,omitempty"`
@@ -155,6 +177,21 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 				if callID == "" && strings.TrimSpace(tc.Name) == "" {
 					continue
 				}
+				if tc.Custom {
+					customInput := tc.CustomInput
+					if strings.TrimSpace(customInput) == "" {
+						customInput = stringFromJSONRaw(tc.Input)
+					}
+					out = append(out, ResponseItem{
+						Type:             ResponseItemTypeCustomToolCall,
+						ID:               callID,
+						CallID:           callID,
+						Name:             tc.Name,
+						ToolPresentation: append(json.RawMessage(nil), tc.Presentation...),
+						CustomInput:      customInput,
+					})
+					continue
+				}
 				out = append(out, ResponseItem{
 					Type:             ResponseItemTypeFunctionCall,
 					ID:               callID,
@@ -181,12 +218,8 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 			if callID == "" {
 				continue
 			}
-			out = append(out, ResponseItem{
-				Type:   ResponseItemTypeFunctionCallOutput,
-				CallID: callID,
-				Name:   msg.Name,
-				Output: normalizeToolInput(msg.Content),
-			})
+			itemType := ToolOutputItemType(msg.MessageType == MessageTypeCustomToolCallOutput)
+			out = append(out, ResponseItem{Type: itemType, CallID: callID, Name: msg.Name, Output: normalizeToolInput(msg.Content)})
 		default:
 			if strings.TrimSpace(msg.Content) == "" {
 				continue
@@ -247,6 +280,22 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				Presentation: append(json.RawMessage(nil), item.ToolPresentation...),
 				Input:        normalizeToolInput(string(item.Arguments)),
 			})
+		case ResponseItemTypeCustomToolCall:
+			if lastAssistantIdx < 0 || lastAssistantIdx >= len(out) || out[lastAssistantIdx].Role != RoleAssistant {
+				lastAssistantIdx = appendAssistant()
+			}
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				callID = strings.TrimSpace(item.ID)
+			}
+			out[lastAssistantIdx].ToolCalls = append(out[lastAssistantIdx].ToolCalls, ToolCall{
+				ID:           callID,
+				Name:         item.Name,
+				Presentation: append(json.RawMessage(nil), item.ToolPresentation...),
+				Input:        normalizeToolInput(item.CustomInput),
+				Custom:       true,
+				CustomInput:  item.CustomInput,
+			})
 		case ResponseItemTypeFunctionCallOutput:
 			callID := strings.TrimSpace(item.CallID)
 			if callID == "" {
@@ -258,6 +307,12 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				Name:       item.Name,
 				Content:    stringFromJSONRaw(item.Output),
 			})
+		case ResponseItemTypeCustomToolOutput:
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				continue
+			}
+			out = append(out, Message{Role: RoleTool, MessageType: MessageTypeCustomToolCallOutput, ToolCallID: callID, Name: item.Name, Content: stringFromJSONRaw(item.Output)})
 			lastAssistantIdx = -1
 		case ResponseItemTypeReasoning:
 			if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.EncryptedContent) == "" {
@@ -296,16 +351,46 @@ func stringFromJSONRaw(raw json.RawMessage) string {
 }
 
 type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Schema      json.RawMessage `json:"schema"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Schema      json.RawMessage   `json:"schema"`
+	Custom      *CustomToolFormat `json:"custom,omitempty"`
 }
+
+type CustomToolFormat struct {
+	Type       string `json:"type"`
+	Syntax     string `json:"syntax,omitempty"`
+	Definition string `json:"definition,omitempty"`
+}
+
+const PatchToolLarkGrammar = `start: begin_patch hunk+ end_patch
+begin_patch: "*** Begin Patch" LF
+end_patch: "*** End Patch" LF?
+
+hunk: add_hunk | delete_hunk | update_hunk
+add_hunk: "*** Add File: " filename LF add_line+
+delete_hunk: "*** Delete File: " filename LF
+update_hunk: "*** Update File: " filename LF change_move? change?
+
+filename: /(.+)/
+add_line: "+" /(.*)/ LF -> line
+
+change_move: "*** Move to: " filename LF
+change: (change_context | change_line)+ eof_line?
+change_context: ("@@" | "@@ " /(.+)/) LF
+change_line: ("+" | "-" | " ") /(.*)/ LF
+eof_line: "*** End of File" LF
+
+%import common.LF
+`
 
 type ToolCall struct {
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`
 	Presentation json.RawMessage `json:"presentation,omitempty"`
 	Input        json.RawMessage `json:"input"`
+	Custom       bool            `json:"custom,omitempty"`
+	CustomInput  string          `json:"custom_input,omitempty"`
 }
 
 type ToolResult struct {
@@ -357,6 +442,11 @@ func (r Request) Validate() error {
 		}
 		if len(r.Tools[i].Schema) > 0 && !json.Valid(r.Tools[i].Schema) {
 			return fmt.Errorf("%w: tool schema is invalid json at index %d", ErrInvalidRequest, i)
+		}
+		if r.Tools[i].Custom != nil && strings.TrimSpace(r.Tools[i].Custom.Type) == "grammar" {
+			if strings.TrimSpace(r.Tools[i].Custom.Definition) == "" {
+				return fmt.Errorf("%w: custom tool grammar definition is required at index %d", ErrInvalidRequest, i)
+			}
 		}
 	}
 	if r.StructuredOutput != nil {

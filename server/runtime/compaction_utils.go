@@ -366,7 +366,7 @@ func compactionTrimUnits(items []llm.ResponseItem) []compactionTrimUnit {
 	callUnits := make(map[string]int, len(items))
 	for idx, item := range items {
 		switch item.Type {
-		case llm.ResponseItemTypeFunctionCall:
+		case llm.ResponseItemTypeFunctionCall, llm.ResponseItemTypeCustomToolCall:
 			if !isCompactionTrimEligible(item) {
 				continue
 			}
@@ -374,7 +374,7 @@ func compactionTrimUnits(items []llm.ResponseItem) []compactionTrimUnit {
 			if callID := compactionTrimCallID(item); callID != "" {
 				callUnits[callID] = len(units) - 1
 			}
-		case llm.ResponseItemTypeFunctionCallOutput:
+		case llm.ResponseItemTypeFunctionCallOutput, llm.ResponseItemTypeCustomToolOutput:
 			callID := compactionTrimCallID(item)
 			if unitIdx, ok := callUnits[callID]; ok {
 				units[unitIdx].indexes = append(units[unitIdx].indexes, idx)

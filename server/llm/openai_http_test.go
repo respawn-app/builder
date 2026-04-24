@@ -723,14 +723,55 @@ func TestBuildPayload_AddsNativeWebSearchToolWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestBuildPayload_OAuthCodexKeepsRequestedToolNamesAndParallelFlag(t *testing.T) {
+func TestBuildPayload_SerializesPatchAsCustomGrammarTool(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model: "gpt-5",
+		Tools: []Tool{{
+			Name:        string(toolspec.ToolPatch),
+			Description: "Apply edits to files using freeform patch syntax.",
+			Custom:      &CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: \"x\""},
+		}},
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	tools, ok := jsonPayload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected one tool, got %#v", jsonPayload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected tool object, got %#v", tools[0])
+	}
+	if got := tool["type"]; got != "custom" {
+		t.Fatalf("expected custom tool type, got %#v", got)
+	}
+	if got := tool["name"]; got != string(toolspec.ToolPatch) {
+		t.Fatalf("expected patch tool name, got %#v", got)
+	}
+	if _, ok := tool["parameters"]; ok {
+		t.Fatalf("custom patch tool must not include JSON parameters: %#v", tool)
+	}
+	format, ok := tool["format"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected custom format object, got %#v", tool["format"])
+	}
+	if format["type"] != "grammar" || format["syntax"] != "lark" || format["definition"] != "start: \"x\"" {
+		t.Fatalf("unexpected custom format: %#v", format)
+	}
+}
+
+func TestBuildPayload_UsesExplicitPatchCustomGrammarTool(t *testing.T) {
 	transport := NewHTTPTransport(oauthStaticAuth{})
 	mode := openAIAuthMode{IsOAuth: true, AccountID: "acc-1"}
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model: "gpt-5.4",
 		Tools: []Tool{
 			{Name: string(toolspec.ToolExecCommand), Description: "shell", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
-			{Name: string(toolspec.ToolPatch), Description: "patch", Schema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+			{Name: string(toolspec.ToolPatch), Description: "patch", Custom: &CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: PatchToolLarkGrammar}},
 		},
 	}, mode, requireProviderCapabilities(t, transport, mode))
 	if err != nil {
@@ -743,16 +784,18 @@ func TestBuildPayload_OAuthCodexKeepsRequestedToolNamesAndParallelFlag(t *testin
 	}
 	tools, ok := jsonPayload["tools"].([]any)
 	if !ok || len(tools) != 2 {
-		t.Fatalf("expected two function tools, got %#v", jsonPayload["tools"])
+		t.Fatalf("expected two tools, got %#v", jsonPayload["tools"])
 	}
 	names := make([]string, 0, len(tools))
-	for _, raw := range tools {
+	for idx, raw := range tools {
 		tool, ok := raw.(map[string]any)
 		if !ok {
 			t.Fatalf("expected tool object, got %#v", raw)
 		}
-		if got := tool["type"]; got != "function" {
-			t.Fatalf("expected function tool, got %#v", got)
+		if idx == 0 {
+			if got := tool["type"]; got != "function" {
+				t.Fatalf("expected shell function tool, got %#v", got)
+			}
 		}
 		name, ok := tool["name"].(string)
 		if !ok {
@@ -762,6 +805,20 @@ func TestBuildPayload_OAuthCodexKeepsRequestedToolNamesAndParallelFlag(t *testin
 	}
 	if !reflect.DeepEqual(names, []string{string(toolspec.ToolExecCommand), string(toolspec.ToolPatch)}) {
 		t.Fatalf("tool names = %+v, want raw requested names only", names)
+	}
+	patchTool, ok := tools[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected patch tool object, got %#v", tools[1])
+	}
+	if got := patchTool["type"]; got != "custom" {
+		t.Fatalf("expected patch custom tool, got %#v", got)
+	}
+	format, ok := patchTool["format"].(map[string]any)
+	if !ok || format["type"] != "grammar" || format["syntax"] != "lark" {
+		t.Fatalf("expected patch grammar format, got %#v", patchTool["format"])
+	}
+	if _, ok := patchTool["parameters"]; ok {
+		t.Fatalf("custom patch tool must not include legacy JSON parameters: %#v", patchTool)
 	}
 }
 

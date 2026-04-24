@@ -141,6 +141,31 @@ func (b openAIRequestPayloadBuilder) buildTools(requestTools []Tool, enableNativ
 }
 
 func buildFunctionToolParam(tool Tool) (responses.ToolUnionParam, error) {
+	if tool.Custom != nil {
+		format := shared.CustomToolInputFormatUnionParam{}
+		switch strings.TrimSpace(tool.Custom.Type) {
+		case "grammar":
+			definition := tool.Custom.Definition
+			if strings.TrimSpace(definition) == "" {
+				return responses.ToolUnionParam{}, fmt.Errorf("custom tool grammar definition is required for %s", tool.Name)
+			}
+			syntax := strings.TrimSpace(tool.Custom.Syntax)
+			if syntax == "" {
+				syntax = "lark"
+			}
+			format = shared.CustomToolInputFormatParamOfGrammar(definition, syntax)
+		case "", "text":
+			text := shared.NewCustomToolInputFormatTextParam()
+			format = shared.CustomToolInputFormatUnionParam{OfText: &text}
+		default:
+			return responses.ToolUnionParam{}, fmt.Errorf("unsupported custom tool format %q for %s", tool.Custom.Type, tool.Name)
+		}
+		custom := responses.CustomToolParam{Name: strings.TrimSpace(tool.Name), Format: format}
+		if description := strings.TrimSpace(tool.Description); description != "" {
+			custom.Description = openai.String(description)
+		}
+		return responses.ToolUnionParam{OfCustom: &custom}, nil
+	}
 	if len(tool.Schema) > 0 && !json.Valid(tool.Schema) {
 		return responses.ToolUnionParam{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
 	}

@@ -270,6 +270,16 @@ func (t fakeTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
 }
 
+type failingTool struct {
+	name toolspec.ID
+}
+
+func (t failingTool) Name() toolspec.ID { return t.name }
+func (t failingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
+	out, _ := json.Marshal(map[string]any{"error": "failed"})
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: out, IsError: true}, nil
+}
+
 type blockingTool struct {
 	name    toolspec.ID
 	started chan struct{}
@@ -1282,7 +1292,7 @@ func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -1342,7 +1352,7 @@ func TestSetReviewerDisabledConcurrentWithBusyStepSkipsReviewerForCurrentRun(t *
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -3195,7 +3205,7 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -5854,9 +5864,10 @@ func TestReopenCarriesInterruptedShellToolAttemptIntoNextModelRequest(t *testing
 
 func TestReopenCarriesInterruptedApprovalBackedPatchToolAttemptIntoNextModelRequest(t *testing.T) {
 	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
-		ID:    "call_patch",
-		Name:  string(toolspec.ToolPatch),
-		Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: ../outside.txt\n+hello\n*** End Patch\n"}`),
+		ID:          "call_patch",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: "*** Begin Patch\n*** Add File: ../outside.txt\n+hello\n*** End Patch\n",
 	})
 }
 
@@ -5913,7 +5924,11 @@ func testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t *testing.T, c
 		switch {
 		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == call.ID && item.Name == call.Name:
 			foundPriorAttempt = true
+		case item.Type == llm.ResponseItemTypeCustomToolCall && item.CallID == call.ID && item.Name == call.Name:
+			foundPriorAttempt = true
 		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == call.ID:
+			foundUnexpectedReply = true
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == call.ID:
 			foundUnexpectedReply = true
 		}
 	}
@@ -6446,6 +6461,116 @@ func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *test
 	}
 	if client.countInputTokenCalls != 2 {
 		t.Fatalf("expected critical recount after tool completion, got %d count calls", client.countInputTokenCalls)
+	}
+}
+
+func TestCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	patchInput := "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n"
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "patching", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:          "call_patch",
+				Name:        string(toolspec.ToolPatch),
+				Custom:      true,
+				CustomInput: patchInput,
+				Input:       json.RawMessage(`{}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "apply patch")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected final message: %+v", msg)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected follow-up request after tool result, got %d", len(client.calls))
+	}
+
+	foundCustomCall := false
+	foundCustomOutput := false
+	foundFunctionOutput := false
+	for _, item := range client.calls[1].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeCustomToolCall && item.CallID == "call_patch":
+			foundCustomCall = true
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == "call_patch":
+			foundCustomOutput = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_patch":
+			foundFunctionOutput = true
+		}
+	}
+	if !foundCustomCall || !foundCustomOutput || foundFunctionOutput {
+		t.Fatalf("expected custom call/output pair only, foundCustomCall=%v foundCustomOutput=%v foundFunctionOutput=%v items=%+v", foundCustomCall, foundCustomOutput, foundFunctionOutput, client.calls[1].Items)
+	}
+}
+
+func TestFailedCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "patching", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:          "call_patch",
+				Name:        string(toolspec.ToolPatch),
+				Custom:      true,
+				CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n",
+				Input:       json.RawMessage(`{}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(failingTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "apply patch"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected follow-up request after tool result, got %d", len(client.calls))
+	}
+
+	foundCustomOutput := false
+	foundFunctionOutput := false
+	for _, item := range client.calls[1].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == "call_patch":
+			foundCustomOutput = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_patch":
+			foundFunctionOutput = true
+		}
+	}
+	if !foundCustomOutput || foundFunctionOutput {
+		t.Fatalf("expected failed custom output only, foundCustomOutput=%v foundFunctionOutput=%v items=%+v", foundCustomOutput, foundFunctionOutput, client.calls[1].Items)
 	}
 }
 

@@ -22,8 +22,9 @@ type UpdateFile struct {
 }
 
 type ChangeLine struct {
-	Kind    rune
-	Content string
+	Kind      rune
+	Content   string
+	EndOfFile bool
 }
 
 type RenderedLineKind string
