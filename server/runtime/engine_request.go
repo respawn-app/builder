@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
@@ -68,7 +67,11 @@ func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID stri
 	}
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, requestTools)
+	systemPrompt, err := e.systemPrompt(locked)
+	if err != nil {
+		return requestBuildPlan{}, err
+	}
+	req, err := llm.RequestFromLockedContract(locked, systemPrompt, items, requestTools)
 	if err != nil {
 		return requestBuildPlan{}, err
 	}
@@ -125,14 +128,31 @@ func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
 	return caps.SupportsNativeWebSearch, nil
 }
 
-func (e *Engine) systemPrompt(locked session.LockedContract) string {
-	includeToolPreambles := true
-	if locked.ToolPreambles != nil {
-		includeToolPreambles = *locked.ToolPreambles
+func (e *Engine) systemPrompt(locked session.LockedContract) (string, error) {
+	if locked.HasSystemPrompt {
+		return strings.TrimSpace(locked.SystemPrompt), nil
 	}
-	return prompts.MainSystemPrompt(includeToolPreambles, prompts.SystemPromptTemplateArgs{
-		EstimatedToolCallsForContext: e.estimatedToolCallsForLockedContext(locked),
-	})
+	if prompt := strings.TrimSpace(locked.SystemPrompt); prompt != "" {
+		return prompt, nil
+	}
+	prompt, err := e.buildSystemPromptSnapshot(locked)
+	if err != nil {
+		return "", err
+	}
+	if err := e.store.BackfillLockedSystemPrompt(prompt); err != nil {
+		return "", err
+	}
+	if meta := e.store.Meta(); meta.Locked != nil && meta.Locked.HasSystemPrompt {
+		persisted := strings.TrimSpace(meta.Locked.SystemPrompt)
+		prompt = persisted
+	}
+	e.mu.Lock()
+	if e.locked != nil && !e.locked.HasSystemPrompt {
+		e.locked.SystemPrompt = prompt
+		e.locked.HasSystemPrompt = true
+	}
+	e.mu.Unlock()
+	return prompt, nil
 }
 
 func (e *Engine) estimatedToolCallsForLockedContext(locked session.LockedContract) int {

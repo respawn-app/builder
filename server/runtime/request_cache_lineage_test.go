@@ -347,7 +347,11 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 	if got, want := req.PromptCacheScope, cachewarn.ScopeConversation; got != want {
 		t.Fatalf("PromptCacheScope = %q, want %q", got, want)
 	}
-	if got, want := req.SystemPrompt, eng.systemPrompt(locked); got != want {
+	want, err := eng.systemPrompt(locked)
+	if err != nil {
+		t.Fatalf("systemPrompt: %v", err)
+	}
+	if got := req.SystemPrompt; got != want {
 		t.Fatalf("SystemPrompt mismatch\ngot: %q\nwant: %q", got, want)
 	}
 	if got, want := req.ReasoningEffort, eng.ThinkingLevel(); got != want {
