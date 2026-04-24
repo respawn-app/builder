@@ -419,6 +419,8 @@ func protocolError(resp *protocol.ResponseError) error {
 		return errors.Join(serverapi.ErrSessionAlreadyControlled, errors.New(message))
 	case protocol.ErrCodeInvalidControllerLease:
 		return errors.Join(serverapi.ErrInvalidControllerLease, errors.New(message))
+	case protocol.ErrCodeRuntimeUnavailable:
+		return errors.Join(serverapi.ErrRuntimeUnavailable, errors.New(message))
 	case protocol.ErrCodeStreamUnavailable:
 		return errors.Join(serverapi.ErrStreamUnavailable, errors.New(message))
 	case protocol.ErrCodeStreamFailed:

@@ -952,14 +952,22 @@ func TestRuntimeClientSetFastModeEnabledPreservesCachedMainViewOnError(t *testin
 }
 
 type leaseRetryRuntimeControlClient struct {
-	mu            sync.Mutex
-	submitLeaseID []string
+	mu             sync.Mutex
+	firstSubmitErr error
+	submitLeaseID  []string
+	localEntries   []serverapi.RuntimeAppendLocalEntryRequest
 }
 
 func (c *leaseRetryRuntimeControlClient) submitLeaseIDs() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.submitLeaseID...)
+}
+
+func (c *leaseRetryRuntimeControlClient) appendedLocalEntries() []serverapi.RuntimeAppendLocalEntryRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]serverapi.RuntimeAppendLocalEntryRequest(nil), c.localEntries...)
 }
 
 func (c *leaseRetryRuntimeControlClient) SetSessionName(context.Context, serverapi.RuntimeSetSessionNameRequest) error {
@@ -982,7 +990,10 @@ func (c *leaseRetryRuntimeControlClient) SetAutoCompactionEnabled(context.Contex
 	return serverapi.RuntimeSetAutoCompactionEnabledResponse{}, nil
 }
 
-func (c *leaseRetryRuntimeControlClient) AppendLocalEntry(context.Context, serverapi.RuntimeAppendLocalEntryRequest) error {
+func (c *leaseRetryRuntimeControlClient) AppendLocalEntry(_ context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
+	c.mu.Lock()
+	c.localEntries = append(c.localEntries, req)
+	c.mu.Unlock()
 	return nil
 }
 
@@ -996,6 +1007,9 @@ func (c *leaseRetryRuntimeControlClient) SubmitUserMessage(_ context.Context, re
 	c.submitLeaseID = append(c.submitLeaseID, req.ControllerLeaseID)
 	switch req.ControllerLeaseID {
 	case "lease-old":
+		if c.firstSubmitErr != nil {
+			return serverapi.RuntimeSubmitUserMessageResponse{}, c.firstSubmitErr
+		}
 		return serverapi.RuntimeSubmitUserMessageResponse{}, serverapi.ErrInvalidControllerLease
 	case "lease-new":
 		return serverapi.RuntimeSubmitUserMessageResponse{Message: "recovered"}, nil
@@ -1066,5 +1080,42 @@ func TestRuntimeClientSubmitUserMessageRecoversInvalidControllerLease(t *testing
 	}
 	if got := controls.submitLeaseIDs(); !reflect.DeepEqual(got, []string{"lease-old", "lease-new"}) {
 		t.Fatalf("submit lease ids = %+v, want [lease-old lease-new]", got)
+	}
+}
+
+func TestRuntimeClientSubmitUserMessageRecoversRuntimeUnavailable(t *testing.T) {
+	controls := &leaseRetryRuntimeControlClient{firstSubmitErr: serverapi.ErrRuntimeUnavailable}
+	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
+	leaseManager := newControllerLeaseManager("lease-old")
+	recoveryCalls := 0
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
+		recoveryCalls++
+		return "lease-new", nil
+	})
+	runtimeClient.SetControllerLeaseManager(leaseManager)
+
+	message, err := runtimeClient.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "recovered" {
+		t.Fatalf("SubmitUserMessage message = %q, want recovered", message)
+	}
+	if recoveryCalls != 1 {
+		t.Fatalf("recovery call count = %d, want 1", recoveryCalls)
+	}
+	if got := runtimeClient.controllerLeaseIDValue(); got != "lease-new" {
+		t.Fatalf("controller lease id = %q, want lease-new", got)
+	}
+	if got := controls.submitLeaseIDs(); !reflect.DeepEqual(got, []string{"lease-old", "lease-new"}) {
+		t.Fatalf("submit lease ids = %+v, want [lease-old lease-new]", got)
+	}
+	entries := controls.appendedLocalEntries()
+	if len(entries) != 1 {
+		t.Fatalf("warning entry count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.ControllerLeaseID != "lease-new" || entry.Role != "warning" || entry.Text != runtimeLeaseRecoveryWarningText {
+		t.Fatalf("warning entry = %+v, want new lease warning", entry)
 	}
 }

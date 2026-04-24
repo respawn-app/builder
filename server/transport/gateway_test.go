@@ -55,6 +55,13 @@ func configureGatewayTestServerPort(t *testing.T) {
 
 var gatewayTestPortCounter atomic.Uint32
 
+func TestProtocolErrorMapsRuntimeUnavailable(t *testing.T) {
+	code, _ := protocolError(serverapi.ErrRuntimeUnavailable)
+	if code != protocol.ErrCodeRuntimeUnavailable {
+		t.Fatalf("protocol error code = %d, want %d", code, protocol.ErrCodeRuntimeUnavailable)
+	}
+}
+
 func newGatewayTestAuthSupport(t *testing.T, ready bool) serverbootstrap.AuthSupport {
 	t.Helper()
 	store := auth.NewMemoryStore(auth.EmptyState())
