@@ -240,17 +240,13 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
-			collapsedLines := model.detailCollapsedToolContent(blockRole, entry, resultSummary)
 			if !model.detailEntryExpanded(absoluteIndex) {
-				return model.detailWithExpandableMarker(blockRole, collapsedLines, false, model.detailToolExpandable(blockRole, collapsedLines, combined, meta, resultText))
+				return model.detailCollapsedToolLines(blockRole, entry, resultSummary)
 			}
-			var expandedLines []string
 			if meta != nil && meta.PatchRender != nil {
-				expandedLines = model.flattenPatchToolBlock(blockRole, meta, resultText)
-			} else {
-				expandedLines = model.flattenEntryWithMeta(blockRole, combined, false, meta)
+				return model.detailWithChevron(blockRole, model.flattenPatchToolBlock(blockRole, meta, resultText), true)
 			}
-			return model.detailWithExpandableMarker(blockRole, expandedLines, true, renderedLinesDiffer(collapsedLines, expandedLines))
+			return model.detailWithChevron(blockRole, model.flattenEntryWithMeta(blockRole, combined, false, meta), true)
 		},
 	}
 }
@@ -297,16 +293,14 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
+			if model.detailEntryExpanded(absoluteIndex) {
+				return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true), true)
+			}
 			collapsedAnswer := ""
 			if resultSummary != "" {
 				collapsedAnswer = resultSummary
 			}
-			collapsedLines := model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false)
-			expandedLines := model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true)
-			if model.detailEntryExpanded(absoluteIndex) {
-				return model.detailWithExpandableMarker(blockRole, expandedLines, true, renderedLinesDiffer(collapsedLines, expandedLines))
-			}
-			return model.detailWithExpandableMarker(blockRole, collapsedLines, false, renderedLinesDiffer(collapsedLines, expandedLines))
+			return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false), false)
 		},
 	}
 }
@@ -381,9 +375,8 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
-			expandable := model.detailStandardExpandable(entry, role, text, model.detailCollapsedStandardContent(entry, role, text))
 			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
-				return model.detailWithExpandableMarker(role, model.flattenEntry(role, text), true, expandable)
+				return model.detailWithChevron(role, model.flattenEntry(role, text), true)
 			}
 			return model.detailCollapsedStandardLines(entry, role, text)
 		},

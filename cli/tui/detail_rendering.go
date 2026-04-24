@@ -2,16 +2,11 @@ package tui
 
 import (
 	"strings"
-
-	"builder/shared/transcript"
-
-	"github.com/charmbracelet/lipgloss"
-	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const (
-	detailCollapsedMarker = "▶︎"
-	detailExpandedMarker  = "▼"
+	detailCollapsedMarker = "▶︎ "
+	detailExpandedMarker  = "▼ "
 )
 
 func (m Model) detailEntryExpanded(entryIndex int) bool {
@@ -26,62 +21,48 @@ func (m Model) detailEntryExpanded(entryIndex int) bool {
 }
 
 func (m Model) detailWithChevron(role string, lines []string, expanded bool) []string {
-	return m.detailWithExpandableMarker(role, lines, expanded, true)
-}
-
-func (m Model) detailWithExpandableMarker(_ string, lines []string, expanded bool, expandable bool) []string {
 	if !m.compactDetail {
 		return lines
 	}
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	if !expandable {
-		return append([]string(nil), lines...)
-	}
 	out := append([]string(nil), lines...)
 	marker := detailCollapsedMarker
 	if expanded {
 		marker = detailExpandedMarker
 	}
-	out[0] = m.appendDetailMarkerRight(out[0], marker)
+	prefixWidth := m.entryPrefixWidth(role, "")
+	if prefixWidth <= 0 {
+		out[0] = marker + out[0]
+		return out
+	}
+	plainPrefix := strings.Repeat(" ", prefixWidth)
+	if strings.HasPrefix(out[0], plainPrefix) {
+		out[0] = plainPrefix + marker + strings.TrimPrefix(out[0], plainPrefix)
+		return out
+	}
+	out[0] = marker + out[0]
 	return out
 }
 
 func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role string, text string) []string {
-	lines := m.detailCollapsedStandardContent(entry, role, text)
-	return m.detailWithExpandableMarker(role, lines, false, m.detailStandardExpandable(entry, role, text, lines))
-}
-
-func (m Model) detailCollapsedStandardContent(entry TranscriptEntry, role string, text string) []string {
 	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
-		return m.flattenEntry(role, label)
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
 	}
 	if label := strings.TrimSpace(entry.OngoingText); label != "" {
-		return m.flattenEntry(role, label)
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
 	}
 	if isThreeLinePreviewRole(role) {
-		return firstNRenderedLines(m.flattenEntry(role, text), 3)
+		return m.detailWithChevron(role, firstNRenderedLines(m.flattenEntry(role, text), 3), false)
 	}
 	if label := m.knownDetailLabel(entry, role); label != "" {
-		return m.flattenEntry(role, label)
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
 	}
-	return m.flattenEntry(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role)))
-}
-
-func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text string, collapsed []string) bool {
-	if m.detailRoleRendersFullWhenCollapsed(role) {
-		return false
-	}
-	expanded := m.flattenEntry(role, text)
-	return renderedLinesDiffer(collapsed, expanded)
+	return m.detailWithChevron(role, m.flattenEntry(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role))), false)
 }
 
 func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resultSummary string) []string {
-	return m.detailWithExpandableMarker(role, m.detailCollapsedToolContent(role, entry, resultSummary), false, true)
-}
-
-func (m Model) detailCollapsedToolContent(role string, entry TranscriptEntry, resultSummary string) []string {
 	compact := m.toolCallDisplayText(entry, role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
 	if strings.TrimSpace(compact) == "" {
 		compact = "Tool call"
@@ -89,50 +70,7 @@ func (m Model) detailCollapsedToolContent(role string, entry TranscriptEntry, re
 	if summary := strings.TrimSpace(resultSummary); summary != "" {
 		compact += "\n" + summary
 	}
-	return m.flattenEntryWithMeta(role, compact, true, entry.ToolCall)
-}
-
-func (m Model) detailToolExpandable(role string, collapsed []string, combined string, meta *transcript.ToolCallMeta, resultText string) bool {
-	var expanded []string
-	if meta != nil && meta.PatchRender != nil {
-		expanded = m.flattenPatchToolBlock(role, meta, resultText)
-	} else {
-		expanded = m.flattenEntryWithMeta(role, combined, false, meta)
-	}
-	return renderedLinesDiffer(collapsed, expanded)
-}
-
-func (m Model) appendDetailMarkerRight(line string, marker string) string {
-	width := m.viewportWidth
-	if width < 1 {
-		width = 1
-	}
-	markerWidth := lipgloss.Width(marker)
-	if markerWidth >= width {
-		return truncateRenderedLineToWidthWithEllipsis(marker, width, false)
-	}
-	textWidth := width - markerWidth - 1
-	if textWidth < 1 {
-		textWidth = 1
-	}
-	text := truncateRenderedLineToWidthWithEllipsis(line, textWidth, false)
-	gap := width - lipgloss.Width(text) - markerWidth
-	if gap < 1 {
-		gap = 1
-	}
-	return text + strings.Repeat(" ", gap) + marker
-}
-
-func renderedLinesDiffer(left []string, right []string) bool {
-	if len(left) != len(right) {
-		return true
-	}
-	for idx := range left {
-		if strings.TrimRight(xansi.Strip(left[idx]), " ") != strings.TrimRight(xansi.Strip(right[idx]), " ") {
-			return true
-		}
-	}
-	return false
+	return m.detailWithChevron(role, m.flattenEntryWithMeta(role, compact, true, entry.ToolCall), false)
 }
 
 func (m Model) knownDetailLabel(entry TranscriptEntry, role string) string {

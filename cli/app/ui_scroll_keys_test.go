@@ -79,7 +79,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 	collapsed := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(collapsed, "$ cat large.txt") || !strings.Contains(collapsed, "▶︎") {
+	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
 		t.Fatalf("expected collapsed compact tool row, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -88,7 +88,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "▼") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
 		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
 	}
 }
@@ -117,7 +117,7 @@ func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T
 	}
 	updated := next.(*uiModel)
 	expanded := stripANSIAndTrimRight(updated.view.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "▼") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
 		t.Fatalf("expected input-controller enter to expand detail even while input locked, got %q", expanded)
 	}
 	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
