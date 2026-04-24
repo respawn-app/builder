@@ -251,7 +251,7 @@ func (e *Engine) resetLocalDiagnostics() {
 }
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
-	msg = normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	msg = normalizeMessageForTranscript(msg, e.transcriptWorkingDir())
 	previousCommittedCount := e.CommittedTranscriptEntryCount()
 	if e.beforePersistMessage != nil {
 		if err := e.beforePersistMessage(msg); err != nil {
@@ -286,7 +286,7 @@ func shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg llm.Message, pr
 }
 
 func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {
-	msg = normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	msg = normalizeMessageForTranscript(msg, e.transcriptWorkingDir())
 	if e.beforePersistMessage != nil {
 		if err := e.beforePersistMessage(msg); err != nil {
 			return err

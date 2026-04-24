@@ -289,7 +289,7 @@ func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message, exe
 	if e == nil {
 		return -1, nil
 	}
-	persisted := normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	persisted := normalizeMessageForTranscript(msg, e.transcriptWorkingDir())
 	entries := VisibleChatEntriesFromMessage(persisted)
 	if len(entries) == 0 {
 		return -1, nil

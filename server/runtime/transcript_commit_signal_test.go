@@ -3,12 +3,15 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 func TestSubmitUserMessageDoesNotEmitCommittedConversationUpdatedAfterFlushedUserTurn(t *testing.T) {
@@ -73,6 +76,52 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 	}
 	if !hasEventKind(events, EventAssistantMessage) {
 		t.Fatalf("expected assistant_message event, got %+v", events)
+	}
+}
+
+func TestPatchToolCallStartedUsesTranscriptWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", "/main")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	patchText := "*** Begin Patch\n*** Add File: probe.txt\n+hello\n*** End Patch\n"
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "patching", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call-patch", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	var started *transcript.ToolCallMeta
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+		Model:                "gpt-5",
+		TranscriptWorkingDir: "/worktree",
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventToolCallStarted && evt.ToolCall != nil {
+				started = decodeToolCallMeta(*evt.ToolCall)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "apply patch"); err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if started == nil || started.PatchRender == nil {
+		t.Fatalf("expected patch render metadata, got %+v", started)
+	}
+	detail := started.PatchDetail
+	if !strings.Contains(detail, "/worktree/probe.txt") {
+		t.Fatalf("expected worktree path in patch detail, got %q", detail)
+	}
+	if strings.Contains(detail, "/main/probe.txt") {
+		t.Fatalf("did not expect main workspace path in patch detail, got %q", detail)
 	}
 }
 

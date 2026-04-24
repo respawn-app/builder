@@ -79,14 +79,31 @@ type compactionCheckpoint struct {
 
 func newChatStore() *chatStore {
 	cwd, _ := os.Getwd()
+	return newChatStoreWithCWD(cwd)
+}
+
+func newChatStoreWithCWD(cwd string) *chatStore {
 	return &chatStore{
 		toolCompletions:            make(map[string]tools.Result, 16),
 		assistantToolCalls:         make(map[string]struct{}, 16),
 		materializedToolResults:    make(map[string]struct{}, 16),
 		synthesizedToolResults:     make(map[string]struct{}, 16),
-		cwd:                        cwd,
+		cwd:                        strings.TrimSpace(cwd),
 		providerTokenEstimateDirty: true,
 	}
+}
+
+func (s *chatStore) setCWD(cwd string) {
+	if s == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(cwd)
+	if trimmed == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cwd = trimmed
 }
 
 func (s *chatStore) appendMessage(msg llm.Message) {

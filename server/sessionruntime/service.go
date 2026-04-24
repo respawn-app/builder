@@ -199,8 +199,16 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		_ = logger.Close()
 	}
 	handle.rebind = nil
-	if wiring.LocalTools != nil {
-		handle.rebind = wiring.LocalTools.Rebind
+	handle.rebind = func(workdir string) error {
+		if wiring.LocalTools != nil {
+			if err := wiring.LocalTools.Rebind(workdir); err != nil {
+				return err
+			}
+		}
+		if wiring.Engine != nil {
+			wiring.Engine.SetTranscriptWorkingDir(workdir)
+		}
+		return nil
 	}
 	s.completeActivation(handle, leaseID, cleanup)
 	cleanup = nil

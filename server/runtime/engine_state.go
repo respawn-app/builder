@@ -374,6 +374,29 @@ func (e *Engine) ParentSessionID() string {
 	return strings.TrimSpace(e.store.Meta().ParentSessionID)
 }
 
+func (e *Engine) SetTranscriptWorkingDir(workdir string) {
+	if e == nil || e.chat == nil {
+		return
+	}
+	e.chat.setCWD(workdir)
+}
+
+func (e *Engine) transcriptWorkingDir() string {
+	if e == nil || e.chat == nil {
+		return ""
+	}
+	e.chat.mu.RLock()
+	defer e.chat.mu.RUnlock()
+	return strings.TrimSpace(e.chat.cwd)
+}
+
+func transcriptWorkingDir(primary string, fallback string) string {
+	if trimmed := strings.TrimSpace(primary); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(fallback)
+}
+
 func (e *Engine) ConversationFreshness() session.ConversationFreshness {
 	return e.store.ConversationFreshness()
 }

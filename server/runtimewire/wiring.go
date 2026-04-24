@@ -138,6 +138,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		AutoCompactionEnabled:         boolRef(true),
 		HeadlessMode:                  opts.Headless,
 		ToolPreambles:                 active.ToolPreambles,
+		TranscriptWorkingDir:          workspaceRoot,
 		Reviewer: runtime.ReviewerConfig{
 			Frequency:     active.Reviewer.Frequency,
 			Model:         active.Reviewer.Model,
