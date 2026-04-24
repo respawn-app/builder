@@ -139,7 +139,7 @@ func (s *Service) ListWorktrees(ctx context.Context, req serverapi.WorktreeListR
 		return serverapi.WorktreeListResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, req.IncludeDirtyCount)
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
 	}
@@ -213,7 +213,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 		return serverapi.WorktreeCreateResponse{}, err
 	}
 	cleanup.worktreeRoot = strings.TrimSpace(worktreeRoot)
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
@@ -307,7 +307,7 @@ func (s *Service) SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwit
 		return serverapi.WorktreeSwitchResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeSwitchResponse{}, err
 	}
@@ -332,7 +332,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
@@ -362,15 +362,16 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 	if err := s.git.Prune(ctx, workspaceCtx.workspaceRoot); err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
-	synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	if registeredTarget, ok := findSyncedWorktreeByID(synced, req.WorktreeID); ok {
-		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, registeredTarget.git.DirtyFileCount > 0); err != nil {
+		dirtyCount, _ := s.git.DirtyFileCount(ctx, registeredTarget.record.CanonicalRoot)
+		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, dirtyCount > 0); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
-		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 		if err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
@@ -490,7 +491,7 @@ func (s *Service) resolveSessionWorkspaceContext(ctx context.Context, sessionID 
 	}, nil
 }
 
-func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspaceRoot string) ([]syncedWorktree, error) {
+func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspaceRoot string, includeDirtyCount bool) ([]syncedWorktree, error) {
 	if s == nil || s.metadata == nil || s.git == nil {
 		return nil, errors.New("worktree service dependencies are required")
 	}
@@ -554,11 +555,8 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	}
 	synced := make([]syncedWorktree, 0, len(gitEntries))
 	for _, gitEntry := range gitEntries {
-		if pathAvailability(gitEntry.Root) == "available" {
-			dirtyCount, err := s.git.DirtyFileCount(ctx, gitEntry.Root)
-			if err != nil {
-				return nil, err
-			}
+		if includeDirtyCount && pathAvailability(gitEntry.Root) == "available" {
+			dirtyCount, _ := s.git.DirtyFileCount(ctx, gitEntry.Root)
 			gitEntry.DirtyFileCount = dirtyCount
 		}
 		record, ok := refreshedByRoot[strings.TrimSpace(gitEntry.Root)]

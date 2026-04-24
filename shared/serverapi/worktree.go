@@ -33,6 +33,7 @@ type WorktreeView struct {
 type WorktreeListRequest struct {
 	SessionID         string `json:"session_id"`
 	ControllerLeaseID string `json:"controller_lease_id"`
+	IncludeDirtyCount bool   `json:"include_dirty_count,omitempty"`
 }
 
 type WorktreeListResponse struct {
