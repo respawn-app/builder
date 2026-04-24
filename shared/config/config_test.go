@@ -198,6 +198,69 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesWorkspaceConfigAfterEnvBeforeCLI(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_MODEL", "env-model")
+	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+		t.Fatalf("create home config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".builder"), 0o755); err != nil {
+		t.Fatalf("create workspace config dir: %v", err)
+	}
+	workspaceConfigPath := filepath.Join(workspace, ".builder", "config.toml")
+	if err := os.WriteFile(workspaceConfigPath, []byte("model = \"workspace-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{ThinkingLevel: "low"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Model != "workspace-model" {
+		t.Fatalf("model = %q, want workspace-model", cfg.Settings.Model)
+	}
+	if cfg.Settings.ThinkingLevel != "low" {
+		t.Fatalf("thinking level = %q, want cli override", cfg.Settings.ThinkingLevel)
+	}
+	if cfg.Source.SettingsPath != workspaceConfigPath || !cfg.Source.WorkspaceSettingsFileExists {
+		t.Fatalf("unexpected workspace source report: %+v", cfg.Source)
+	}
+	if cfg.Source.Sources["model"] != "file" || cfg.Source.Sources["thinking_level"] != "cli" {
+		t.Fatalf("unexpected sources: %+v", cfg.Source.Sources)
+	}
+}
+
+func TestLoadGlobalSkipsWorkspaceConfigLayer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_MODEL", "env-model")
+	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+		t.Fatalf("create home config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+
+	cfg, err := LoadGlobal(LoadOptions{})
+	if err != nil {
+		t.Fatalf("load global: %v", err)
+	}
+	if cfg.WorkspaceRoot != "" {
+		t.Fatalf("workspace root = %q, want empty", cfg.WorkspaceRoot)
+	}
+	if cfg.Settings.Model != "env-model" {
+		t.Fatalf("model = %q, want env-model", cfg.Settings.Model)
+	}
+	if cfg.Source.WorkspaceSettingsLayerEnabled || cfg.Source.WorkspaceSettingsPath != "" {
+		t.Fatalf("unexpected workspace source report: %+v", cfg.Source)
+	}
+}
+
 func TestEnsureManagedRGConfigFilePreservesExistingContents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

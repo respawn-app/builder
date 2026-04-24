@@ -84,7 +84,7 @@ func writeRunUsage(fs *flag.FlagSet) {
 		"  builder run \"summarize the unstaged changes\"",
 		"  builder run --continue <session-id> \"follow-up\"",
 		"  builder run --fast --output-mode=json \"scan the repo and return JSON\"",
-		"  builder run --workspace ../other-checkout --model gpt-5.4-mini \"review this module\"",
+		"  builder run --model gpt-5.4-mini \"review this module\"",
 	)
 	writeHelpSection(out, "Flags:")
 	fs.PrintDefaults()
@@ -218,29 +218,13 @@ func writeServeUsage(fs *flag.FlagSet) {
 		"  This is for daemon/server mode, not for running one prompt interactively.",
 	)
 	writeHelpSection(out, "Notes:",
-		"  `builder serve` does not accept `--session` or `--continue`.",
-		"  Use `--workspace` to choose the startup workspace root for config resolution.",
+		"  `builder serve` is workspace-agnostic at startup.",
+		"  Session config is resolved from each session workspace: defaults, ~/.builder, env, <workspace>/.builder.",
 	)
 	writeHelpSection(out, "Examples:",
 		"  builder serve",
-		"  builder serve --workspace /srv/repos/app --model gpt-5.4-mini",
+		"  builder project create --path /srv/repos/app --name app",
 	)
-	writeHelpSection(out, "Flags:",
-		"  -workspace string",
-		"    	workspace root (default \".\")",
-		"  -model string",
-		"    	model name override",
-		"  -provider-override string",
-		"    	provider override for custom/alias model names",
-		"  -thinking-level string",
-		"    	thinking level override (low|medium|high|xhigh)",
-		"  -theme string",
-		"    	theme override (light|dark)",
-		"  -model-timeout-seconds int",
-		"    	model request timeout override in seconds",
-		"  -tools string",
-		"    	enabled tools override as csv (e.g. shell,patch)",
-		"  -openai-base-url string",
-		"    	OpenAI-compatible base URL override",
-	)
+	writeHelpSection(out, "Flags:")
+	fs.PrintDefaults()
 }

@@ -34,6 +34,7 @@ type Planner struct {
 	ProjectViews client.ProjectViewClient
 	PickSession  SessionPicker
 	StoreOptions []session.StoreOption
+	ReloadConfig func() (config.App, error)
 }
 
 type SessionPicker func([]session.Summary) (SessionSelection, error)
@@ -63,6 +64,13 @@ type SessionPlan struct {
 }
 
 func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
+	if p.ReloadConfig != nil {
+		cfg, err := p.ReloadConfig()
+		if err != nil {
+			return SessionPlan{}, err
+		}
+		p.Config = cfg
+	}
 	store, err := p.openStore(req)
 	if err != nil {
 		return SessionPlan{}, err

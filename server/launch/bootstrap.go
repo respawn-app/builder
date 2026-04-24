@@ -29,9 +29,6 @@ func ResolveBootstrapPlan(persistenceRoot string, req BootstrapRequest) (Bootstr
 		OpenAIBaseURL:    strings.TrimSpace(req.OpenAIBaseURL),
 		UseOpenAIBaseURL: req.OpenAIBaseURLExplicit,
 	}
-	if plan.WorkspaceRoot == "" {
-		plan.WorkspaceRoot = "."
-	}
 	if strings.TrimSpace(req.SessionID) == "" {
 		return plan, nil
 	}

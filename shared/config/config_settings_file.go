@@ -20,6 +20,18 @@ func resolveSettingsFilePath() (string, error) {
 	return filepath.Join(home, ".builder", "config.toml"), nil
 }
 
+func resolveWorkspaceSettingsFilePath(workspaceRoot string) (string, error) {
+	trimmed := strings.TrimSpace(workspaceRoot)
+	if trimmed == "" {
+		return "", nil
+	}
+	absRoot, err := filepath.Abs(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	return filepath.Join(absRoot, ".builder", "config.toml"), nil
+}
+
 func settingsFileExists(path string) (bool, error) {
 	if _, err := os.Stat(path); err == nil {
 		return true, nil

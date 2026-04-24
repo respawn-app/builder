@@ -37,14 +37,12 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	serveFS := flag.NewFlagSet("builder serve", flag.ContinueOnError)
 	serveFS.SetOutput(stderr)
 	serveFS.Usage = func() { writeServeUsage(serveFS) }
-	flags := registerCommonFlags(serveFS, false)
 	if err := serveFS.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	markExplicitCommonFlags(serveFS, flags)
 	if remaining := serveFS.Args(); len(remaining) > 0 {
 		fmt.Fprintf(stderr, "unexpected arguments: %s\n", strings.Join(remaining, " "))
 		serveFS.Usage()
@@ -54,17 +52,7 @@ func serveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	defer stop()
 	authHandler, onboardingHandler := newServeStartupHandlers()
 	server, err := startServeServer(ctx, serverstartup.Request{
-		WorkspaceRoot:         flags.WorkspaceRoot,
-		WorkspaceRootExplicit: flags.WorkspaceExplicit,
-		AllowUnauthenticated:  true,
-		Model:                 flags.Model,
-		ProviderOverride:      flags.ProviderOverride,
-		ThinkingLevel:         flags.ThinkingLevel,
-		Theme:                 flags.Theme,
-		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		Tools:                 flags.Tools,
-		OpenAIBaseURL:         flags.OpenAIBaseURL,
-		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
+		AllowUnauthenticated: true,
 	}, authHandler, onboardingHandler)
 	if err != nil {
 		fmt.Fprintln(stderr, err)

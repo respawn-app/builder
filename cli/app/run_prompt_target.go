@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +27,7 @@ var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) 
 	return client.DialConfiguredRemote(ctx, cfg)
 }
 var resolveDaemonExecutablePath = daemonExecutablePath
-var buildServeArgsFunc = buildServeArgs
+var buildServeArgsFunc = func(_ string, opts Options) []string { return buildServeArgs(opts) }
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
 	if process == nil {
 		return nil
@@ -293,12 +292,8 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	if !ok {
 		return nil, nil, false, nil
 	}
-	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
-	if err != nil {
-		return nil, nil, false, err
-	}
 	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
-	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
+	args := append([]string{execPath}, buildServeArgsFunc("", opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
@@ -420,24 +415,6 @@ func daemonExecutablePath() (string, bool) {
 	return execPath, true
 }
 
-func buildServeArgs(workspaceRoot string, opts Options) []string {
-	args := []string{"serve", "--workspace", workspaceRoot}
-	appendStringFlag := func(name, value string) {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			args = append(args, name, trimmed)
-		}
-	}
-	appendIntFlag := func(name string, value int) {
-		if value > 0 {
-			args = append(args, name, strconv.Itoa(value))
-		}
-	}
-	appendStringFlag("--model", opts.Model)
-	appendStringFlag("--provider-override", opts.ProviderOverride)
-	appendStringFlag("--thinking-level", opts.ThinkingLevel)
-	appendStringFlag("--theme", opts.Theme)
-	appendIntFlag("--model-timeout-seconds", opts.ModelTimeoutSeconds)
-	appendStringFlag("--tools", opts.Tools)
-	appendStringFlag("--openai-base-url", opts.OpenAIBaseURL)
-	return args
+func buildServeArgs(opts Options) []string {
+	return []string{"serve"}
 }

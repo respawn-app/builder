@@ -150,7 +150,7 @@ func TestRootCommandForceInteractiveBypassesTerminalCheck(t *testing.T) {
 	}
 }
 
-func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
+func TestRootCommandMapsSessionFlagsToInteractiveApp(t *testing.T) {
 	original := runInteractiveApp
 	t.Cleanup(func() {
 		runInteractiveApp = original
@@ -165,36 +165,30 @@ func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
 	var stderr bytes.Buffer
 	args := []string{
 		"--force-interactive",
-		"--workspace", "/tmp/workspace",
 		"--session", "session-123",
-		"--model", "gpt-5",
-		"--provider-override", "openai",
-		"--thinking-level", "high",
-		"--theme", "dark",
-		"--model-timeout-seconds", "45",
-		"--tools", "shell,patch",
-		"--openai-base-url", "http://example.test/v1",
 	}
 	if code := rootCommand(args, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got.WorkspaceRoot != "/tmp/workspace" || !got.WorkspaceRootExplicit {
+	if got.WorkspaceRoot != "." || got.WorkspaceRootExplicit {
 		t.Fatalf("unexpected workspace mapping: %+v", got)
 	}
-	if got.SessionID != "session-123" || got.Model != "gpt-5" || got.ProviderOverride != "openai" || got.ThinkingLevel != "high" || got.Theme != "dark" {
+	if got.SessionID != "session-123" {
 		t.Fatalf("unexpected interactive option mapping: %+v", got)
-	}
-	if got.ModelTimeoutSeconds != 45 {
-		t.Fatalf("unexpected timeout mapping: %+v", got)
-	}
-	if got.Tools != "shell,patch" {
-		t.Fatalf("tools = %q, want shell,patch", got.Tools)
-	}
-	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
-		t.Fatalf("unexpected base url mapping: %+v", got)
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRootCommandRejectsRemovedStartupConfigFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--force-interactive", "--model", "gpt-5"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -model") {
+		t.Fatalf("stderr = %q, want undefined model flag rejection", stderr.String())
 	}
 }
 
@@ -237,20 +231,14 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if code := rootCommand([]string{"serve", "--workspace", "/tmp/work", "--model", "gpt-5", "--openai-base-url", "http://example.test/v1"}, strings.NewReader(""), &stdout, &stderr); code != 130 {
+	if code := rootCommand([]string{"serve"}, strings.NewReader(""), &stdout, &stderr); code != 130 {
 		t.Fatalf("exit code = %d, want 130", code)
 	}
 	if !called {
 		t.Fatal("expected serve startup path to run")
 	}
-	if got.WorkspaceRoot != "/tmp/work" || !got.WorkspaceRootExplicit {
+	if got.WorkspaceRoot != "" || got.WorkspaceRootExplicit {
 		t.Fatalf("unexpected workspace mapping: %+v", got)
-	}
-	if got.Model != "gpt-5" {
-		t.Fatalf("model = %q, want gpt-5", got.Model)
-	}
-	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
-		t.Fatalf("unexpected base url mapping: %+v", got)
 	}
 	if !strings.Contains(stderr.String(), "Server started, Ctrl+C to stop") {
 		t.Fatalf("stderr = %q, want serve startup message", stderr.String())
@@ -260,6 +248,17 @@ func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	}
 	if got.SessionID != "" {
 		t.Fatalf("expected empty session id for serve request, got %q", got.SessionID)
+	}
+}
+
+func TestServeSubcommandRejectsRemovedStartupConfigFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"serve", "--workspace", "/tmp/work"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -workspace") {
+		t.Fatalf("stderr = %q, want undefined workspace flag rejection", stderr.String())
 	}
 }
 
@@ -290,7 +289,7 @@ func TestServeSubcommandHelpExplainsDaemonUsage(t *testing.T) {
 	got := stderr.String()
 	if !strings.Contains(got, "Usage of builder serve:") ||
 		!strings.Contains(got, "Start the Builder app server") ||
-		!strings.Contains(got, "does not accept `--session` or `--continue`") ||
+		!strings.Contains(got, "workspace-agnostic at startup") ||
 		!strings.Contains(got, "Flags:") {
 		t.Fatalf("stderr = %q, want expanded serve help", got)
 	}
