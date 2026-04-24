@@ -91,6 +91,10 @@ type runtimeConnectionStateChangedMsg struct {
 	err error
 }
 
+type runtimeLeaseRecoveryWarningMsg struct {
+	text string
+}
+
 type runtimeMainViewRefreshedMsg struct {
 	token uint64
 	view  clientui.RuntimeMainView
@@ -447,11 +451,12 @@ type uiModel struct {
 	processClientExplicit bool
 	worktreeClient        client.WorktreeClient
 
-	runtimeEvents           <-chan clientui.Event
-	pendingRuntimeEvents    []clientui.Event
-	askEvents               <-chan askEvent
-	pathReferenceEvents     <-chan uiPathReferenceSearchEvent
-	runtimeConnectionEvents <-chan runtimeConnectionStateChangedMsg
+	runtimeEvents               <-chan clientui.Event
+	pendingRuntimeEvents        []clientui.Event
+	askEvents                   <-chan askEvent
+	pathReferenceEvents         <-chan uiPathReferenceSearchEvent
+	runtimeConnectionEvents     <-chan runtimeConnectionStateChangedMsg
+	runtimeLeaseRecoveryWarning <-chan runtimeLeaseRecoveryWarningMsg
 
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
@@ -655,6 +660,13 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			enqueueRuntimeConnectionStateChange(runtimeConnectionEvents, err)
 		})
 	}
+	if configurable, ok := m.engine.(interface{ SetLeaseRecoveryWarningObserver(func(string)) }); ok {
+		runtimeLeaseRecoveryWarning := make(chan runtimeLeaseRecoveryWarningMsg, 1)
+		m.runtimeLeaseRecoveryWarning = runtimeLeaseRecoveryWarning
+		configurable.SetLeaseRecoveryWarningObserver(func(text string) {
+			enqueueRuntimeLeaseRecoveryWarning(runtimeLeaseRecoveryWarning, text)
+		})
+	}
 	status := m.runtimeStatus()
 	m.reviewerMode = status.ReviewerFrequency
 	m.reviewerEnabled = status.ReviewerEnabled
@@ -839,6 +851,9 @@ func (m *uiModel) Init() tea.Cmd {
 	if m.runtimeConnectionEvents != nil {
 		cmds = append(cmds, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents))
 	}
+	if m.runtimeLeaseRecoveryWarning != nil {
+		cmds = append(cmds, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
+	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
 		cmds = append(cmds, m.inputController().startSubmissionWithPromptHistory(startupText))
@@ -963,6 +978,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.observeRuntimeRequestResult(msg.err)
 		m.syncViewport()
 		return m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents)
+	case runtimeLeaseRecoveryWarningMsg:
+		cmd := m.appendLocalEntryFallback("warning", msg.text)
+		m.syncViewport()
+		return m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
 	case runtimeMainViewRefreshedMsg:
 		cmd := m.handleRuntimeMainViewRefreshed(msg)
 		m.syncViewport()
