@@ -6523,6 +6523,54 @@ func TestCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
 	}
 }
 
+func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t *testing.T) {
+	tests := []struct {
+		name       string
+		caps       llm.ProviderCapabilities
+		wantCustom bool
+	}{
+		{
+			name:       "first party OpenAI",
+			caps:       llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true},
+			wantCustom: true,
+		},
+		{
+			name:       "OpenAI compatible fallback",
+			caps:       llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, IsOpenAIFirstParty: false},
+			wantCustom: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+			client := &fakeClient{caps: tt.caps}
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+			if _, err := eng.ensureLocked(); err != nil {
+				t.Fatalf("ensureLocked: %v", err)
+			}
+
+			requestTools := eng.requestTools()
+			if len(requestTools) != 1 {
+				t.Fatalf("request tools = %+v, want one patch tool", requestTools)
+			}
+			gotCustom := requestTools[0].Custom != nil
+			if gotCustom != tt.wantCustom {
+				t.Fatalf("patch custom tool = %v, want %v; tool=%+v", gotCustom, tt.wantCustom, requestTools[0])
+			}
+			if !tt.wantCustom && len(requestTools[0].Schema) == 0 {
+				t.Fatalf("expected function-tool schema fallback for unsupported custom tools, got %+v", requestTools[0])
+			}
+		})
+	}
+}
+
 func TestFailedCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
