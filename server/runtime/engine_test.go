@@ -1138,10 +1138,6 @@ func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
-			Usage:     llm.Usage{WindowTokens: 200000},
-		},
 	}}
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                "gpt-5",
@@ -1220,22 +1216,37 @@ func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
 	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
 		t.Fatalf("locked system prompt snapshot = %+v, want empty marked snapshot", locked)
 	}
-	data, err := os.ReadFile(filepath.Join(store.Dir(), "session.json"))
-	if err != nil {
-		t.Fatalf("read session metadata: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, `"system_prompt": ""`) || !strings.Contains(text, `"has_system_prompt": true`) {
-		t.Fatalf("session metadata must persist empty system prompt snapshot marker: %s", text)
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close engine: %v", err)
 	}
 	writeTestFile(t, systemPath, "changed")
-	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("reopened locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	}
+	reopenedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reopenedEngine, err := New(reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	if _, err := reopenedEngine.SubmitUserMessage(context.Background(), "again"); err != nil {
 		t.Fatalf("submit again: %v", err)
 	}
-	if got := client.calls[1].SystemPrompt; got != "" {
+	if got := reopenedClient.calls[0].SystemPrompt; got != "" {
 		t.Fatalf("second system prompt = %q, want empty snapshot", got)
 	}
-	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
 		t.Fatalf("stored system prompt snapshot changed: %+v", locked)
 	}
 }

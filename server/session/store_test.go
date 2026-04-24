@@ -326,11 +326,13 @@ func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testin
 	if strings.Contains(text, "tools_json") {
 		t.Fatalf("session metadata must not persist tools_json: %s", text)
 	}
-	if !strings.Contains(text, `"system_prompt": "locked system prompt"`) {
-		t.Fatalf("session metadata must persist system_prompt snapshot: %s", text)
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
 	}
-	if !strings.Contains(text, `"has_system_prompt": true`) {
-		t.Fatalf("session metadata must persist system_prompt marker: %s", text)
+	locked := opened.Meta().Locked
+	if locked == nil || locked.SystemPrompt != "locked system prompt" || !locked.HasSystemPrompt {
+		t.Fatalf("locked system prompt = %+v, want persisted snapshot marker", locked)
 	}
 }
 
