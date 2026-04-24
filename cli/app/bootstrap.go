@@ -16,14 +16,16 @@ func startEmbeddedServer(ctx context.Context, opts Options, interactor authInter
 		WorkspaceRoot:         opts.WorkspaceRoot,
 		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
 		SessionID:             opts.SessionID,
-		Model:                 opts.Model,
-		ProviderOverride:      opts.ProviderOverride,
-		ThinkingLevel:         opts.ThinkingLevel,
-		Theme:                 opts.Theme,
-		ModelTimeoutSeconds:   opts.ModelTimeoutSeconds,
-		Tools:                 opts.Tools,
 		OpenAIBaseURL:         opts.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+		LoadOptions: config.LoadOptions{
+			Model:               opts.Model,
+			ProviderOverride:    opts.ProviderOverride,
+			ThinkingLevel:       opts.ThinkingLevel,
+			Theme:               opts.Theme,
+			ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
+			Tools:               opts.Tools,
+		},
 	}, interactor, frontendOnboardingHandler{inner: interactor})
 	if err != nil {
 		return nil, err

@@ -6,8 +6,10 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 
 	"builder/server/llm"
+	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
 
@@ -46,6 +48,26 @@ func enqueueRuntimeConnectionStateChange(ch chan runtimeConnectionStateChangedMs
 		return
 	}
 	msg := runtimeConnectionStateChangedMsg{err: err}
+	select {
+	case ch <- msg:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- msg:
+	default:
+	}
+}
+
+func enqueueRuntimeLeaseRecoveryWarning(ch chan runtimeLeaseRecoveryWarningMsg, text string, visibility clientui.EntryVisibility) {
+	if ch == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	msg := runtimeLeaseRecoveryWarningMsg{text: strings.TrimSpace(text), visibility: visibility}
 	select {
 	case ch <- msg:
 		return

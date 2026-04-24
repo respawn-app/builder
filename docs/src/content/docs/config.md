@@ -9,19 +9,26 @@ Builder resolves settings in this order (higher no. = higher priority):
 
 1. Built-in defaults
 2. `~/.builder/config.toml`
-3. Environment variables
-4. CLI flags
+3. `<workspace-root>/.builder/config.toml`
+4. Environment variables
+5. `builder run` CLI flags
 
-When you `continue` a session, Builder reuses the saved workspace root and saved continuation `openai_base_url` unless you explicitly pass `--workspace` or `--openai-base-url`.
+Interactive session flows resolve workspace-local config from the session workspace root. `builder serve` starts without a workspace root and applies workspace config only when a project/session selects a workspace. `builder run` is the only entrypoint that accepts config override flags.
 
 ## Locations
 
 ### Persistence root
 
-The settings file is always:
+Global settings live at:
 
 ```text
 ~/.builder/config.toml
+```
+
+Workspace settings live at:
+
+```text
+<workspace-root>/.builder/config.toml
 ```
 
 Builder also installs a user-editable ripgrep config at:
@@ -32,13 +39,13 @@ Builder also installs a user-editable ripgrep config at:
 
 Builder creates `~/.builder/rg.conf` when missing and exports it to shell tools via `RIPGREP_CONFIG_PATH` only when you have not already set `RIPGREP_CONFIG_PATH` yourself.
 
-Changing `persistence_root` does not move `config.toml`. `persistence_root` controls where Builder stores its database & auth state. The default is `~/.builder`.
+Changing `persistence_root` does not move either config file. `persistence_root` controls where Builder stores its database & auth state. The default is `~/.builder`.
 
 
 ## Example
 
 ```toml
-model = "gpt-5.4"
+model = "gpt-5.5"
 thinking_level = "medium" # low, medium, high, xhigh
 model_verbosity = "medium" # or "low"
 theme = "auto" # or light / dark
@@ -78,17 +85,15 @@ verbose_output = false # show in ongoing transcript
 
 ## CLI Overrides
 
-These flags overlay settings at startup.
-
 | Flag | Overrides | Notes |
 | --- | --- | --- |
-| `--model` | `model` | |
-| `--provider-override` | `provider_override` | |
-| `--thinking-level` | `thinking_level` | |
-| `--theme` | `theme` | |
-| `--model-timeout-seconds` | `timeouts.model_request_seconds` | |
-| `--tools` | entire tool set | CSV replacement, not a merge |
-| `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
+| `builder run --model` | `model` | |
+| `builder run --provider-override` | `provider_override` | |
+| `builder run --thinking-level` | `thinking_level` | |
+| `builder run --theme` | `theme` | |
+| `builder run --model-timeout-seconds` | `timeouts.model_request_seconds` | |
+| `builder run --tools` | entire tool set | CSV replacement, not a merge |
+| `builder run --openai-base-url` | `openai_base_url` | Also affects continuation behavior |
 
 
 `builder run` also accepts the headless-only selectors `--agent <role>` and `--fast`, which choose a subagent role rather than directly overriding one config key.
@@ -99,10 +104,10 @@ These flags overlay settings at startup.
 
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
-| `model` | string | `gpt-5.4` | `BUILDER_MODEL` | `--model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
-| `thinking_level` | string | `medium` | `BUILDER_THINKING_LEVEL` | `--thinking-level` | Provider-specific reasoning effort string. |
+| `model` | string | `gpt-5.5` | `BUILDER_MODEL` | `builder run --model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
+| `thinking_level` | string | `medium` | `BUILDER_THINKING_LEVEL` | `builder run --thinking-level` | Provider-specific reasoning effort string. |
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
-| `theme` | string | `auto` | `BUILDER_THEME` | `--theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
+| `theme` | string | `auto` | `BUILDER_THEME` | `builder run --theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
 | `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
 | `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification backend. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
@@ -111,8 +116,8 @@ These flags overlay settings at startup.
 | `server_host` | string | `127.0.0.1` | `BUILDER_SERVER_HOST` |  | Exact TCP app-server host Builder will dial or listen on. Builder does not use discovery files or silent port rebinding. Same-machine Unix socket optimization, when supported, is derived automatically and does not override an explicit TCP target. |
 | `server_port` | int | `53082` | `BUILDER_SERVER_PORT` |  | Exact TCP app-server port Builder will dial or listen on. Must match across clients attached to the same persistence root. Same-machine Unix socket optimization, when supported, is additive only and does not override an explicit TCP target. |
 | `web_search` | string | `native` | `BUILDER_WEB_SEARCH` |  | Web search backend. Allowed: `off`, `native`. `custom` (e.g. Brave Search) is not implemented yet, on the roadmap. |
-| `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `--provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |
-| `openai_base_url` | string | `""` | `BUILDER_OPENAI_BASE_URL` | `--openai-base-url` | OpenAI-compatible base URL. Must be used with `provider_override=openai` or with no explicit provider override. Cannot be changed mid-session. |
+| `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `builder run --provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |
+| `openai_base_url` | string | `""` | `BUILDER_OPENAI_BASE_URL` | `builder run --openai-base-url` | OpenAI-compatible base URL. Must be used with `provider_override=openai` or with no explicit provider override. Cannot be changed mid-session. |
 | `store` | bool | `false` | `BUILDER_STORE` |  | Sets OpenAI Responses `store=true` for main model requests. |
 | `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets the `patch` tool edit files outside the workspace root. This is not sandboxing - model can still bypass this easily. |
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
@@ -131,7 +136,7 @@ These flags overlay settings at startup.
 
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
-| `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `--model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
+| `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `builder run --model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
 
 
 ### Supervisor
@@ -173,7 +178,7 @@ Use these only for custom providers or models.
 ### Tools
 
 `[tools]` is a per-tool boolean table in `config.toml`.
-File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behave differently: they replace the entire tool set with the CSV you provide.
+File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `builder run --tools` behave differently: they replace the entire tool set with the CSV you provide.
 
 
 | Key | Default | What enabling it exposes |

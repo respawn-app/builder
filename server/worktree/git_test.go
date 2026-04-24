@@ -128,6 +128,42 @@ func TestGitInspectorAddCreatesBranchFromHeadByDefault(t *testing.T) {
 	}
 }
 
+func TestGitInspectorDirtyFileCountUsesPorcelainStatus(t *testing.T) {
+	worktreeRoot := filepath.Join(t.TempDir(), "linked")
+	runner := &stubGitCommandRunner{outputs: map[string][]byte{
+		strings.Join([]string{"status", "--porcelain=v1", "-z"}, "\x00"): []byte(" M changed.go\x00?? new.go\x00R  renamed.go\x00old.go\x00"),
+	}}
+	inspector := NewGitInspector(runner)
+
+	count, err := inspector.DirtyFileCount(context.Background(), worktreeRoot)
+	if err != nil {
+		t.Fatalf("DirtyFileCount: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("dirty count = %d, want 3", count)
+	}
+	if got, want := runner.args, []string{"status", "--porcelain=v1", "-z"}; !equalStrings(got, want) {
+		t.Fatalf("git args=%v want=%v", got, want)
+	}
+	if got, want := runner.dir, canonicalTestPath(t, worktreeRoot); got != want {
+		t.Fatalf("git dir=%q want=%q", got, want)
+	}
+}
+
+func TestGitInspectorRemoveUsesForceWhenRequested(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	worktreeRoot := filepath.Join(t.TempDir(), "linked")
+	runner := &stubGitCommandRunner{}
+	inspector := NewGitInspector(runner)
+
+	if err := inspector.Remove(context.Background(), workspaceRoot, worktreeRoot, true); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got, want := runner.args, []string{"worktree", "remove", "--force", canonicalTestPath(t, worktreeRoot)}; !equalStrings(got, want) {
+		t.Fatalf("git args=%v want=%v", got, want)
+	}
+}
+
 func TestGitInspectorAddUsesExistingRefWithoutCreatingBranch(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	worktreeRoot := filepath.Join(t.TempDir(), "linked")

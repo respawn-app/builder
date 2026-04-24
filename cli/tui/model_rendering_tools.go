@@ -15,11 +15,19 @@ func detailDivider() string {
 }
 
 func ongoingDividerGroup(role string) string {
-	trimmed := strings.TrimSpace(role)
-	if isToolHeadlineRole(trimmed) {
+	normalized := normalizeOngoingDividerRole(role)
+	if isToolHeadlineRole(normalized) {
 		return "tool"
 	}
-	return strings.ToLower(trimmed)
+	return normalized
+}
+
+func normalizeOngoingDividerRole(role string) string {
+	normalized := strings.ToLower(strings.TrimSpace(role))
+	if normalized == "assistant_commentary" {
+		return "assistant"
+	}
+	return normalized
 }
 
 func skipInOngoing(entry TranscriptEntry) bool {

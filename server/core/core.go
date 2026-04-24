@@ -11,6 +11,7 @@ import (
 	"builder/server/askview"
 	"builder/server/auth"
 	"builder/server/authbootstrap"
+	"builder/server/authstatus"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/launch"
 	"builder/server/metadata"
@@ -61,6 +62,7 @@ type Core struct {
 	projectID        string
 	projectViews     client.ProjectViewClient
 	authBootstrap    client.AuthBootstrapClient
+	authStatus       client.AuthStatusClient
 	askViews         client.AskViewClient
 	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
@@ -99,10 +101,14 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		_ = rootLease.Close()
 		return nil, err
 	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		_ = rootLease.Close()
-		return nil, err
+	containerDir := ""
+	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
+		_, resolvedContainerDir, err := config.ResolveWorkspaceContainer(cfg)
+		if err != nil {
+			_ = rootLease.Close()
+			return nil, err
+		}
+		containerDir = resolvedContainerDir
 	}
 	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
 	if err != nil {
@@ -139,6 +145,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	worktreeService := worktree.NewService(metadataStore, nil, runtimeRegistry, sessionRuntimeService, runtimeSupport.Background, runtimeControlService, worktree.ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir, SetupScript: cfg.Settings.Worktrees.SetupScript})
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
+	authStatusService := authstatus.NewService(authSupport.AuthManager)
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
@@ -157,6 +164,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		runPromptMap:     make(map[string]client.RunPromptClient),
 		projectViews:     projectViews,
 		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
+		authStatus:       client.NewLoopbackAuthStatusClient(authStatusService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
 		processControls:  client.NewLoopbackProcessControlClient(processService),
@@ -173,25 +181,27 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		worktrees:        client.NewLoopbackWorktreeClient(worktreeService),
 		runPrompt:        unregisteredRunPromptClient{},
 	}
-	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
-	if err != nil && !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
-		_ = rootLease.Close()
-		_ = metadataStore.Close()
-		return nil, err
-	}
-	if err == nil {
-		core.projectID = binding.ProjectID
-		core.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
-		if err != nil {
+	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
+		binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+		if err != nil && !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 			_ = rootLease.Close()
 			_ = metadataStore.Close()
 			return nil, err
 		}
-		core.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
-		if err != nil {
-			_ = rootLease.Close()
-			_ = metadataStore.Close()
-			return nil, err
+		if err == nil {
+			core.projectID = binding.ProjectID
+			core.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+			if err != nil {
+				_ = rootLease.Close()
+				_ = metadataStore.Close()
+				return nil, err
+			}
+			core.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
+			if err != nil {
+				_ = rootLease.Close()
+				_ = metadataStore.Close()
+				return nil, err
+			}
 		}
 	}
 	return core, nil
@@ -300,8 +310,10 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 				Availability: availability,
 			}
 		}
-		projectCfg := s.cfg
-		projectCfg.WorkspaceRoot = binding.CanonicalRoot
+		projectCfg, err := s.configForWorkspace(binding.CanonicalRoot)
+		if err != nil {
+			return projectContext{}, err
+		}
 		return projectContext{
 			config:         projectCfg,
 			projectID:      trimmedProjectID,
@@ -316,8 +328,10 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 			if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
 				return projectContext{}, fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, trimmedProjectID)
 			}
-			projectCfg := s.cfg
-			projectCfg.WorkspaceRoot = binding.CanonicalRoot
+			projectCfg, err := s.configForWorkspace(binding.CanonicalRoot)
+			if err != nil {
+				return projectContext{}, err
+			}
 			return projectContext{
 				config:         projectCfg,
 				projectID:      trimmedProjectID,
@@ -344,14 +358,37 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 			Availability: overview.Project.Availability,
 		}
 	}
-	projectCfg := s.cfg
-	projectCfg.WorkspaceRoot = overview.Project.RootPath
+	projectCfg, err := s.configForWorkspace(overview.Project.RootPath)
+	if err != nil {
+		return projectContext{}, err
+	}
 	return projectContext{
 		config:         projectCfg,
 		projectID:      trimmedProjectID,
 		projectRoot:    overview.Project.RootPath,
 		projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
 	}, nil
+}
+
+func (s *Core) configForWorkspace(workspaceRoot string) (config.App, error) {
+	if s == nil {
+		return config.App{}, errors.New("core is required")
+	}
+	if strings.TrimSpace(s.cfg.WorkspaceRoot) != "" {
+		currentRoot, currentErr := config.CanonicalWorkspaceRoot(s.cfg.WorkspaceRoot)
+		requestedRoot, requestedErr := config.CanonicalWorkspaceRoot(workspaceRoot)
+		if currentErr == nil && requestedErr == nil && currentRoot == requestedRoot {
+			projectCfg := s.cfg
+			projectCfg.WorkspaceRoot = requestedRoot
+			return projectCfg, nil
+		}
+	}
+	projectCfg, err := config.Load(workspaceRoot, config.LoadOptions{})
+	if err != nil {
+		return config.App{}, err
+	}
+	projectCfg.PersistenceRoot = s.cfg.PersistenceRoot
+	return projectCfg, nil
 }
 
 func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) client.SessionLaunchClient {
@@ -370,6 +407,9 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 		ProjectID:    projectCtx.projectID,
 		ProjectViews: s.projectViews,
 		StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions(),
+		ReloadConfig: func() (config.App, error) {
+			return s.configForWorkspace(projectCtx.projectRoot)
+		},
 	}, s.sessionStores)
 	client := client.NewLoopbackSessionLaunchClient(service)
 	s.sessionLaunchMap[scopeKey] = client
@@ -503,6 +543,13 @@ func (s *Core) AuthBootstrapClient() client.AuthBootstrapClient {
 		return nil
 	}
 	return s.authBootstrap
+}
+
+func (s *Core) AuthStatusClient() client.AuthStatusClient {
+	if s == nil {
+		return nil
+	}
+	return s.authStatus
 }
 
 func (s *Core) AskViewClient() client.AskViewClient {

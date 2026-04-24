@@ -416,17 +416,15 @@ func parseTriggerHandoffToolCall(raw json.RawMessage) (string, string, bool) {
 }
 
 func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact string, rendered *patchformat.RenderedPatch, ok bool) {
-	var input map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &input); err != nil {
-		return "", "", nil, false
-	}
-	patchRaw, ok := input["patch"]
-	if !ok {
-		return "", "", nil, false
-	}
 	var patchText string
-	if err := json.Unmarshal(patchRaw, &patchText); err != nil {
-		return "", "", nil, false
+	if err := json.Unmarshal(raw, &patchText); err != nil {
+		var payload struct {
+			Patch string `json:"patch"`
+		}
+		if payloadErr := json.Unmarshal(raw, &payload); payloadErr != nil {
+			return "", "", nil, false
+		}
+		patchText = payload.Patch
 	}
 	trimmedPatch := strings.TrimSpace(patchText)
 	if trimmedPatch == "" {

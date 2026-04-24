@@ -156,6 +156,19 @@ func (r *RuntimeRegistry) ResolveRuntime(_ context.Context, sessionID string) (*
 	return entry.engine, nil
 }
 
+func (r *RuntimeRegistry) IsSessionRuntimeActive(sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.engines[id] != nil
+}
+
 func (r *RuntimeRegistry) PublishRuntimeEvent(sessionID string, evt runtime.Event) {
 	if r == nil {
 		return

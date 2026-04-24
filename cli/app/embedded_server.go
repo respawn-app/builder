@@ -25,6 +25,7 @@ type embeddedServer interface {
 	BindProject(ctx context.Context, projectID string) (embeddedServer, error)
 	BindProjectWorkspace(ctx context.Context, projectID string, workspaceID string) (embeddedServer, error)
 	AuthManager() *auth.Manager
+	AuthStatusClient() client.AuthStatusClient
 	ProjectID() string
 	ApprovalViewClient() client.ApprovalViewClient
 	AskViewClient() client.AskViewClient
@@ -123,6 +124,13 @@ func (s *embeddedAppServer) AuthManager() *auth.Manager {
 		return nil
 	}
 	return s.inner.AuthManager()
+}
+
+func (s *embeddedAppServer) AuthStatusClient() client.AuthStatusClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.AuthStatusClient()
 }
 
 func (s *embeddedAppServer) ProjectID() string {

@@ -33,7 +33,7 @@ func newSubmitDoneMsg(message string, submittedText string, err error) submitDon
 	return submitDoneMsg{
 		message:       message,
 		submittedText: submittedText,
-		silentFinal:   strings.TrimSpace(message) == uiNoopFinalToken,
+		silentFinal:   isNoopFinalText(message),
 		err:           err,
 	}
 }
@@ -89,6 +89,11 @@ type runtimeEventBatchMsg struct {
 
 type runtimeConnectionStateChangedMsg struct {
 	err error
+}
+
+type runtimeLeaseRecoveryWarningMsg struct {
+	text       string
+	visibility clientui.EntryVisibility
 }
 
 type runtimeMainViewRefreshedMsg struct {
@@ -447,11 +452,12 @@ type uiModel struct {
 	processClientExplicit bool
 	worktreeClient        client.WorktreeClient
 
-	runtimeEvents           <-chan clientui.Event
-	pendingRuntimeEvents    []clientui.Event
-	askEvents               <-chan askEvent
-	pathReferenceEvents     <-chan uiPathReferenceSearchEvent
-	runtimeConnectionEvents <-chan runtimeConnectionStateChangedMsg
+	runtimeEvents               <-chan clientui.Event
+	pendingRuntimeEvents        []clientui.Event
+	askEvents                   <-chan askEvent
+	pathReferenceEvents         <-chan uiPathReferenceSearchEvent
+	runtimeConnectionEvents     <-chan runtimeConnectionStateChangedMsg
+	runtimeLeaseRecoveryWarning <-chan runtimeLeaseRecoveryWarningMsg
 
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
@@ -655,6 +661,15 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			enqueueRuntimeConnectionStateChange(runtimeConnectionEvents, err)
 		})
 	}
+	if configurable, ok := m.engine.(interface {
+		SetLeaseRecoveryWarningObserver(func(string, clientui.EntryVisibility))
+	}); ok {
+		runtimeLeaseRecoveryWarning := make(chan runtimeLeaseRecoveryWarningMsg, 1)
+		m.runtimeLeaseRecoveryWarning = runtimeLeaseRecoveryWarning
+		configurable.SetLeaseRecoveryWarningObserver(func(text string, visibility clientui.EntryVisibility) {
+			enqueueRuntimeLeaseRecoveryWarning(runtimeLeaseRecoveryWarning, text, visibility)
+		})
+	}
 	status := m.runtimeStatus()
 	m.reviewerMode = status.ReviewerFrequency
 	m.reviewerEnabled = status.ReviewerEnabled
@@ -839,6 +854,9 @@ func (m *uiModel) Init() tea.Cmd {
 	if m.runtimeConnectionEvents != nil {
 		cmds = append(cmds, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents))
 	}
+	if m.runtimeLeaseRecoveryWarning != nil {
+		cmds = append(cmds, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
+	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
 		cmds = append(cmds, m.inputController().startSubmissionWithPromptHistory(startupText))
@@ -963,6 +981,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.observeRuntimeRequestResult(msg.err)
 		m.syncViewport()
 		return m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents)
+	case runtimeLeaseRecoveryWarningMsg:
+		cmd := m.appendLocalEntryFallbackWithVisibility("warning", msg.text, msg.visibility)
+		m.syncViewport()
+		return m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
 	case runtimeMainViewRefreshedMsg:
 		cmd := m.handleRuntimeMainViewRefreshed(msg)
 		m.syncViewport()
@@ -1135,8 +1157,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.worktrees.selectedID = worktreeCreateRowID
 			listCmd = m.requestWorktreeListCmd()
 		}
-		status := "Deleted worktree " + worktreeDisplayName(msg.resp.Worktree)
-		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeDelete(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
+		feedbackCmd := m.setTransientStatusWithKind(worktreeDeleteSuccessStatus(msg.resp), uiStatusNoticeSuccess)
 		m.syncViewport()
 		return m, tea.Batch(feedbackCmd, listCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeCreateTargetResolveDebounceMsg:
@@ -1329,7 +1350,7 @@ func envFlagEnabled(name string) bool {
 }
 
 func statusHasAuthData(snapshot uiStatusSnapshot) bool {
-	return strings.TrimSpace(snapshot.Auth.Summary) != "" || len(snapshot.Auth.Details) > 0 || snapshot.Subscription.Applicable || strings.TrimSpace(snapshot.Subscription.Summary) != "" || len(snapshot.Subscription.Windows) > 0
+	return snapshot.Auth.Visible || snapshot.Subscription.Applicable || strings.TrimSpace(snapshot.Subscription.Summary) != "" || len(snapshot.Subscription.Windows) > 0
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {
@@ -1415,6 +1436,14 @@ func (m *uiModel) updateTranscriptDiagnosticsMode() {
 
 func (m *uiModel) inputController() uiInputController {
 	return uiInputController{model: m}
+}
+
+func worktreeDeleteSuccessStatus(resp serverapi.WorktreeDeleteResponse) string {
+	status := "Deleted worktree " + worktreeDisplayName(resp.Worktree)
+	if cleanup := strings.TrimSpace(resp.BranchCleanupMessage); cleanup != "" {
+		status += ". " + cleanup
+	}
+	return status
 }
 
 func (m *uiModel) askController() uiAskController {

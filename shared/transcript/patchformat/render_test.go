@@ -23,6 +23,21 @@ func TestRenderFormatsSummaryAndDetailFromParsedPatch(t *testing.T) {
 	}
 }
 
+func TestParseHeredocRequiresExactEOFDelimiter(t *testing.T) {
+	patchText := "<<EOF\n*** Begin Patch\n*** Add File: eof.txt\n+MY_EOF\n*** End Patch\nEOF\n"
+	doc, err := Parse(patchText)
+	if err != nil {
+		t.Fatalf("parse patch: %v", err)
+	}
+	add, ok := doc.Hunks[0].(AddFile)
+	if !ok {
+		t.Fatalf("expected add file hunk, got %+v", doc.Hunks)
+	}
+	if len(add.Content) != 1 || add.Content[0] != "MY_EOF" {
+		t.Fatalf("expected body line ending in EOF preserved, got %+v", add.Content)
+	}
+}
+
 func TestRenderFallsBackToRawForUnparseablePatch(t *testing.T) {
 	rendered := Render("not a structured patch payload", "/workspace")
 
@@ -55,6 +70,20 @@ func TestFormatUsesMoveTargetForRenderedPaths(t *testing.T) {
 	}
 	if got := rendered.DetailText(); got != "Edited: /workspace/dest.txt\n-old\n+new" {
 		t.Fatalf("unexpected moved detail: %q", got)
+	}
+}
+
+func TestParseAllowsMoveOnlyUpdateFile(t *testing.T) {
+	doc, err := Parse("*** Begin Patch\n*** Update File: src.txt\n*** Move to: dest.txt\n*** End Patch\n")
+	if err != nil {
+		t.Fatalf("parse patch: %v", err)
+	}
+	update, ok := doc.Hunks[0].(UpdateFile)
+	if !ok {
+		t.Fatalf("expected update hunk, got %+v", doc.Hunks)
+	}
+	if update.Path != "src.txt" || update.MoveTo != "dest.txt" || len(update.Changes) != 0 {
+		t.Fatalf("unexpected move-only update hunk: %+v", update)
 	}
 }
 

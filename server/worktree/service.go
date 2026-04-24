@@ -34,6 +34,10 @@ type runtimeController interface {
 	SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error
 }
 
+type activeRuntimeSource interface {
+	IsSessionRuntimeActive(sessionID string) bool
+}
+
 type processSource interface {
 	List() []shelltool.Snapshot
 }
@@ -53,6 +57,7 @@ type Service struct {
 	git         *GitInspector
 	gate        primaryrun.Gate
 	runtime     runtimeController
+	active      activeRuntimeSource
 	processes   processSource
 	localNotes  localEntryAppender
 	baseDir     string
@@ -105,11 +110,18 @@ func NewService(metadataStore *metadata.Store, gitInspector *GitInspector, gate 
 	if gitInspector == nil {
 		gitInspector = NewGitInspector(nil)
 	}
+	var active activeRuntimeSource
+	if source, ok := gate.(activeRuntimeSource); ok {
+		active = source
+	} else if source, ok := runtime.(activeRuntimeSource); ok {
+		active = source
+	}
 	return &Service{
 		metadata:       metadataStore,
 		git:            gitInspector,
 		gate:           gate,
 		runtime:        runtime,
+		active:         active,
 		processes:      processes,
 		localNotes:     localNotes,
 		baseDir:        strings.TrimSpace(opts.BaseDir),
@@ -127,7 +139,7 @@ func (s *Service) ListWorktrees(ctx context.Context, req serverapi.WorktreeListR
 		return serverapi.WorktreeListResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, req.IncludeDirtyCount)
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err
 	}
@@ -201,7 +213,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 		return serverapi.WorktreeCreateResponse{}, err
 	}
 	cleanup.worktreeRoot = strings.TrimSpace(worktreeRoot)
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
@@ -239,7 +251,7 @@ func (s *Service) cleanupFailedCreate(ctx context.Context, cleanup failedCreateC
 	defer cancel()
 	var collected []error
 	if strings.TrimSpace(cleanup.worktreeRoot) != "" {
-		if err := s.git.Remove(cleanupCtx, cleanup.workspaceRoot, cleanup.worktreeRoot); err != nil {
+		if err := s.git.Remove(cleanupCtx, cleanup.workspaceRoot, cleanup.worktreeRoot, false); err != nil {
 			collected = append(collected, fmt.Errorf("remove failed worktree %q: %w", cleanup.worktreeRoot, err))
 		}
 	}
@@ -295,7 +307,7 @@ func (s *Service) SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwit
 		return serverapi.WorktreeSwitchResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeSwitchResponse{}, err
 	}
@@ -320,7 +332,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	defer release.Release()
-	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err := s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
@@ -339,7 +351,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		if !mainFound {
 			return serverapi.WorktreeDeleteResponse{}, fmt.Errorf("main worktree not found for workspace %q", workspaceCtx.workspaceID)
 		}
-		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree, true); err != nil {
+		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree, false); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
 		workspaceCtx, err = s.resolveSessionWorkspaceContext(ctx, workspaceCtx.sessionID)
@@ -350,15 +362,17 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 	if err := s.git.Prune(ctx, workspaceCtx.workspaceRoot); err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
-	synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+	synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	if registeredTarget, ok := findSyncedWorktreeByID(synced, req.WorktreeID); ok {
-		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot); err != nil {
+		dirtyCount, dirtyErr := s.git.DirtyFileCount(ctx, registeredTarget.record.CanonicalRoot)
+		force := dirtyCount > 0 || dirtyErr != nil
+		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, force); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
-		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
+		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
 		if err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
@@ -376,9 +390,6 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 	finalTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, workspaceCtx.sessionID)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
-	}
-	if strings.TrimSpace(branchCleanupMessage) != "" {
-		s.appendLocalNote(context.Background(), workspaceCtx.sessionID, req.ControllerLeaseID, branchCleanupMessage)
 	}
 	return serverapi.WorktreeDeleteResponse{Target: finalTarget, Worktree: worktreeViewFromSynced(targetWorktree, finalTarget), BranchDeleted: branchDeleted, BranchCleanupMessage: branchCleanupMessage}, nil
 }
@@ -478,7 +489,7 @@ func (s *Service) resolveSessionWorkspaceContext(ctx context.Context, sessionID 
 	}, nil
 }
 
-func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspaceRoot string) ([]syncedWorktree, error) {
+func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspaceRoot string, includeDirtyCount bool) ([]syncedWorktree, error) {
 	if s == nil || s.metadata == nil || s.git == nil {
 		return nil, errors.New("worktree service dependencies are required")
 	}
@@ -542,6 +553,14 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	}
 	synced := make([]syncedWorktree, 0, len(gitEntries))
 	for _, gitEntry := range gitEntries {
+		if includeDirtyCount && pathAvailability(gitEntry.Root) == "available" {
+			dirtyCount, dirtyErr := s.git.DirtyFileCount(ctx, gitEntry.Root)
+			if dirtyErr != nil {
+				gitEntry.DirtyFileCount = -1
+			} else {
+				gitEntry.DirtyFileCount = dirtyCount
+			}
+		}
 		record, ok := refreshedByRoot[strings.TrimSpace(gitEntry.Root)]
 		if !ok {
 			return nil, fmt.Errorf("synced worktree record missing for %q", gitEntry.Root)
@@ -746,6 +765,9 @@ func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID 
 	otherSessions := make([]metadata.WorktreeSessionBlocker, 0, len(blockers))
 	for _, blocker := range blockers {
 		if strings.TrimSpace(blocker.SessionID) == strings.TrimSpace(currentSessionID) {
+			continue
+		}
+		if s.active != nil && !s.active.IsSessionRuntimeActive(blocker.SessionID) {
 			continue
 		}
 		otherSessions = append(otherSessions, blocker)
@@ -975,6 +997,7 @@ func worktreeViewFromSynced(item syncedWorktree, target clientui.SessionExecutio
 		Detached:        item.git.Detached,
 		LockedReason:    item.git.LockedReason,
 		PrunableReason:  item.git.PrunableReason,
+		DirtyFileCount:  item.git.DirtyFileCount,
 		IsMain:          item.git.IsMain,
 		IsCurrent:       isCurrent,
 		BuilderManaged:  item.record.BuilderManaged,

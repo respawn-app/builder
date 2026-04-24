@@ -230,11 +230,13 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if err != nil {
 			return stepLoopResult{}, err
 		}
+		customToolCalls := customToolCallIDs(localToolCalls)
 		for _, result := range results {
 			if result.Name == toolspec.ToolPatch && !result.IsError {
 				patchEditsApplied = true
 			}
 			msg := llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}
+			msg.MessageType = llm.ToolOutputMessageType(customToolCalls[result.CallID])
 			if err := e.appendMessage(stepID, msg); err != nil {
 				return stepLoopResult{}, err
 			}
@@ -243,6 +245,19 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return stepLoopResult{}, err
 		}
 	}
+}
+
+func customToolCallIDs(calls []llm.ToolCall) map[string]bool {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(calls))
+	for _, call := range calls {
+		if call.Custom && strings.TrimSpace(call.ID) != "" {
+			out[call.ID] = true
+		}
+	}
+	return out
 }
 
 func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID string) error {
@@ -274,7 +289,7 @@ func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message, exe
 	if e == nil {
 		return -1, nil
 	}
-	persisted := normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	persisted := normalizeMessageForTranscript(msg, e.transcriptWorkingDir())
 	entries := VisibleChatEntriesFromMessage(persisted)
 	if len(entries) == 0 {
 		return -1, nil

@@ -80,7 +80,7 @@ func (c uiInputController) handleWorktreeSwitchCommand(token string) (tea.Model,
 	return m, tea.Batch(c.showSuccessStatus(status), m.requestRuntimeMainViewRefresh())
 }
 
-func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListResponse, error) {
+func (m *uiModel) listWorktreesForCurrentSession(includeDirtyCount bool) (serverapi.WorktreeListResponse, error) {
 	if m == nil || m.worktreeClient == nil {
 		return serverapi.WorktreeListResponse{}, fmt.Errorf("worktree client is unavailable")
 	}
@@ -90,11 +90,11 @@ func (m *uiModel) listWorktreesForCurrentSession() (serverapi.WorktreeListRespon
 	}
 	ctx, cancel := client.controlContext()
 	defer cancel()
-	return m.worktreeClient.ListWorktrees(ctx, serverapi.WorktreeListRequest{SessionID: m.sessionID, ControllerLeaseID: client.controllerLeaseIDValue()})
+	return m.worktreeClient.ListWorktrees(ctx, serverapi.WorktreeListRequest{SessionID: m.sessionID, ControllerLeaseID: client.controllerLeaseIDValue(), IncludeDirtyCount: includeDirtyCount})
 }
 
 func (m *uiModel) resolveWorktreeToken(token string) (serverapi.WorktreeView, error) {
-	resp, err := m.listWorktreesForCurrentSession()
+	resp, err := m.listWorktreesForCurrentSession(false)
 	if err != nil {
 		return serverapi.WorktreeView{}, err
 	}
@@ -147,14 +147,6 @@ func isWorktreeMutationCommand(command string) bool {
 
 func worktreeUsage() string {
 	return "Usage: /wt | /wt status | /wt create | /wt new | /wt delete [target] | /wt remove [target] | /wt rm [target] | /wt switch <target>"
-}
-
-func formatWorktreeDelete(resp serverapi.WorktreeDeleteResponse) string {
-	message := fmt.Sprintf("Deleted %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
-	if details := strings.TrimSpace(resp.BranchCleanupMessage); details != "" {
-		message += "\n" + details
-	}
-	return message
 }
 
 func worktreeDisplayName(item serverapi.WorktreeView) string {

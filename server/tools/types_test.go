@@ -182,7 +182,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 
 	patch, _ := DefinitionFor(toolspec.ToolPatch)
-	patchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch\n"}`))
+	patchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`"*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch\n"`))
 	if !patchMeta.OmitSuccessfulResult {
 		t.Fatalf("expected patch transcript to suppress success result append, got %+v", patchMeta)
 	}
@@ -194,6 +194,10 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 	if patchMeta.CompactText != patchMeta.PatchSummary || patchMeta.Command != patchMeta.PatchDetail {
 		t.Fatalf("expected patch aliases normalized, got %+v", patchMeta)
+	}
+	freeformPatchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`"*** Begin Patch\n*** Update File: custom.go\n-old\n+new\n*** End Patch\n"`))
+	if freeformPatchMeta.PatchSummary != "Edited: ./custom.go +1 -1" {
+		t.Fatalf("expected custom freeform patch input summary, got %+v", freeformPatchMeta)
 	}
 
 	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)

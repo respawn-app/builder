@@ -3,6 +3,7 @@ package runtime
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	"builder/server/llm"
@@ -217,6 +218,43 @@ func TestFormatPersistedToolCallBuildsFallbackMetadata(t *testing.T) {
 	}
 	if entry.ToolCall.Command != "pwd" {
 		t.Fatalf("tool command = %q, want pwd", entry.ToolCall.Command)
+	}
+}
+
+func TestPersistedTranscriptScanRendersCustomPatchToolCallFromFreeformInput(t *testing.T) {
+	patchText := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID:          "call-patch",
+			Name:        string(toolspec.ToolPatch),
+			Custom:      true,
+			CustomInput: patchText,
+		}}}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-patch", Name: string(toolspec.ToolPatch), MessageType: llm.MessageTypeCustomToolCallOutput, Content: `{}`}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if len(page.Entries) != 2 {
+		t.Fatalf("len(page.Entries) = %d, want 2 (%+v)", len(page.Entries), page.Entries)
+	}
+	call := page.Entries[0]
+	if call.Role != "tool_call" || call.ToolCallID != "call-patch" {
+		t.Fatalf("expected persisted patch tool call entry, got %+v", call)
+	}
+	if call.ToolCall == nil || call.ToolCall.PatchRender == nil {
+		t.Fatalf("expected persisted custom patch render metadata, got %+v", call.ToolCall)
+	}
+	if call.ToolCall.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+		t.Fatalf("unexpected persisted custom patch summary: %q", call.ToolCall.PatchSummary)
+	}
+	if strings.Contains(call.ToolCall.PatchSummary, "*** Begin Patch") {
+		t.Fatalf("expected persisted summary to hide raw patch, got %q", call.ToolCall.PatchSummary)
 	}
 }
 

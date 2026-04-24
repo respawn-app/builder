@@ -68,6 +68,9 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if err != nil {
 		return patchErrorResult(c, malformedFailure(err.Error())), nil
 	}
+	if len(doc.Hunks) == 0 {
+		return patchErrorResult(c, malformedFailure("No files were modified.")), nil
+	}
 	if err := t.apply(ctx, doc); err != nil {
 		return patchErrorResult(c, err), nil
 	}

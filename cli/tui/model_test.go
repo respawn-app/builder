@@ -401,6 +401,24 @@ func TestOngoingShowsCommittedAssistantAfterCommit(t *testing.T) {
 	}
 }
 
+func TestOngoingDoesNotInsertDividerBetweenCommentaryAndLiveAssistantTail(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:  "assistant",
+		Text:  "Decision: keep custom tool grammar {\"patch\": ...",
+		Phase: llm.MessagePhaseCommentary,
+	})
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "  } executor input so runtime/UI stays compatible."})
+
+	view := plainTranscript(m.View())
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("ongoing commentary continuation should not be split by divider, got %q", view)
+	}
+	if !containsInOrder(view, "Decision:", "executor input") {
+		t.Fatalf("expected committed commentary and live tail in one assistant group, got %q", view)
+	}
+}
+
 func TestOngoingAutoFollowsWhenUserIsAtBottom(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -1300,6 +1318,36 @@ func TestRenderEntryTextDoesNotShellHighlightWriteStdinPollSummary(t *testing.T)
 	expected := applyDefaultForeground("Polled session 1149 for 2s", m.palette().foregroundColor)
 	if out != expected {
 		t.Fatalf("expected write_stdin poll summary to stay plain app-foreground text, got %q want %q", out, expected)
+	}
+}
+
+func TestOngoingWriteStdinPollSummaryUsesMutedForeground(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m.viewportWidth = 16
+	line := strings.Join(m.flattenEntryWithMeta("tool_shell_success", "Polled session 1149 for 2s", true, &transcript.ToolCallMeta{
+		ToolName:   "write_stdin",
+		IsShell:    true,
+		Command:    "Polled session 1149 for 2s",
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindPlain},
+	}), "\n")
+
+	if !strings.Contains(line, ";2m") {
+		t.Fatalf("expected ongoing write_stdin poll summary to stay faint, got %q", line)
+	}
+	foreground := m.palette().foregroundColor
+	expectedContentPrefix := m.roleSymbol("tool_shell_success") + " " + "\x1b[" + strings.Join(styleParams(ansiStyleTransform{
+		DefaultForeground: &foreground,
+		ForceFaint:        true,
+	}, false), ";") + "m"
+	if !strings.HasPrefix(line, expectedContentPrefix) {
+		t.Fatalf("expected truncated poll summary to start with exact foreground+faint style, got %q want prefix %q", line, expectedContentPrefix)
+	}
+	colors := extractForegroundTrueColors(line)
+	if !containsColor(colors, m.palette().foregroundColor) {
+		t.Fatalf("expected ongoing write_stdin poll summary to use app foreground, got %q", line)
+	}
+	if containsColor(colors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing write_stdin poll summary to avoid extra-muted preview color, got %q", line)
 	}
 }
 

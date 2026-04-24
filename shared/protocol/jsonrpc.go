@@ -24,6 +24,7 @@ const (
 	ErrCodeSessionAlreadyControlled = -32016
 	ErrCodeInvalidControllerLease   = -32017
 	ErrCodeAuthRequired             = -32018
+	ErrCodeRuntimeUnavailable       = -32019
 	ErrCodePromptNotFound           = -32020
 	ErrCodePromptResolved           = -32021
 	ErrCodePromptUnsupported        = -32022

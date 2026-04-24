@@ -102,13 +102,24 @@ func (e *Engine) AppendLocalEntry(role, text string) {
 	e.AppendLocalEntryWithOngoingText(role, text, "")
 }
 
+func (e *Engine) AppendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
+	e.appendLocalEntry(storedLocalEntry{
+		Visibility: transcript.NormalizeEntryVisibility(visibility),
+		Role:       strings.TrimSpace(role),
+		Text:       strings.TrimSpace(text),
+	})
+}
+
 func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
-	entry := storedLocalEntry{
+	e.appendLocalEntry(storedLocalEntry{
 		Visibility:  transcript.EntryVisibilityAuto,
 		Role:        strings.TrimSpace(role),
 		Text:        strings.TrimSpace(text),
 		OngoingText: strings.TrimSpace(ongoingText),
-	}
+	})
+}
+
+func (e *Engine) appendLocalEntry(entry storedLocalEntry) {
 	if entry.Role == "" || entry.Text == "" {
 		return
 	}
@@ -372,6 +383,35 @@ func (e *Engine) conversationPromptCacheKey() string {
 
 func (e *Engine) ParentSessionID() string {
 	return strings.TrimSpace(e.store.Meta().ParentSessionID)
+}
+
+func (e *Engine) SetTranscriptWorkingDir(workdir string) {
+	if e == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(workdir)
+	if trimmed == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.transcriptCWD = trimmed
+}
+
+func (e *Engine) transcriptWorkingDir() string {
+	if e == nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.TrimSpace(e.transcriptCWD)
+}
+
+func transcriptWorkingDir(primary string, fallback string) string {
+	if trimmed := strings.TrimSpace(primary); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func (e *Engine) ConversationFreshness() session.ConversationFreshness {

@@ -177,6 +177,10 @@ func (h *bellHooks) OnAsk(req askquestion.Request) {
 }
 
 func (h *bellHooks) OnProjectedRuntimeEvent(evt clientui.Event) {
+	if isNoopProjectedAssistantEvent(evt) {
+		h.clearPendingTurnCompletionForSilentFinal(evt.StepID)
+		return
+	}
 	switch evt.Kind {
 	case clientui.EventToolCallStarted:
 		h.recordToolCall(evt.StepID)
@@ -213,6 +217,18 @@ func (h *bellHooks) recordTurnCompletion(stepID, assistantContent string) {
 	}
 	h.currentStep = ""
 	h.toolCalls = 0
+}
+
+func (h *bellHooks) clearPendingTurnCompletionForSilentFinal(stepID string) {
+	stepID = strings.TrimSpace(stepID)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pendingTurnCompletion = false
+	h.lastCompletionMessage = ""
+	if stepID != "" && h.currentStep == stepID {
+		h.currentStep = ""
+		h.toolCalls = 0
+	}
 }
 
 func (h *bellHooks) OnTurnQueueDrained() {

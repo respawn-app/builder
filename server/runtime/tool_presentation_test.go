@@ -1,6 +1,11 @@
 package runtime
 
-import "testing"
+import (
+	"builder/server/llm"
+	"builder/shared/toolspec"
+	"builder/shared/transcript/toolcodec"
+	"testing"
+)
 
 func TestCurrentTranscriptDefaultShellPathFallsBackToComSpec(t *testing.T) {
 	t.Setenv("SHELL", "")
@@ -8,5 +13,30 @@ func TestCurrentTranscriptDefaultShellPathFallsBackToComSpec(t *testing.T) {
 
 	if got, want := currentTranscriptDefaultShellPath(), `C:\\Windows\\System32\\cmd.exe`; got != want {
 		t.Fatalf("default shell path = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeToolCallForTranscriptUsesCustomPatchInput(t *testing.T) {
+	patchText := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
+	call := llm.ToolCall{
+		ID:          "call_patch",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: patchText,
+	}
+
+	normalized := normalizeToolCallForTranscript(call, "/workspace")
+	meta, ok := toolcodec.DecodeToolCallMeta(normalized.Presentation)
+	if !ok || meta == nil {
+		t.Fatalf("expected presentation metadata for custom patch call")
+	}
+	if !meta.HasPatchSummary() || !meta.HasPatchDetail() || meta.PatchRender == nil {
+		t.Fatalf("expected patch summary/detail/render metadata, got %+v", meta)
+	}
+	if meta.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+		t.Fatalf("unexpected custom patch summary: %q", meta.PatchSummary)
+	}
+	if meta.Command == patchText {
+		t.Fatalf("expected command to be rendered patch detail, not raw freeform payload")
 	}
 }

@@ -28,7 +28,8 @@ var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) 
 	return client.DialConfiguredRemote(ctx, cfg)
 }
 var resolveDaemonExecutablePath = daemonExecutablePath
-var buildServeArgsFunc = buildServeArgs
+var buildServeArgsFunc = func(_ string, opts Options) []string { return buildServeArgs(opts) }
+var buildServeEnvFunc = buildServeEnv
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
 	if process == nil {
 		return nil
@@ -293,17 +294,13 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	if !ok {
 		return nil, nil, false, nil
 	}
-	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
-	if err != nil {
-		return nil, nil, false, err
-	}
 	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
-	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
+	args := append([]string{execPath}, buildServeArgsFunc("", opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	cmd.Env = os.Environ()
+	cmd.Env = buildServeEnvFunc(cfg)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, false, err
 	}
@@ -420,24 +417,20 @@ func daemonExecutablePath() (string, bool) {
 	return execPath, true
 }
 
-func buildServeArgs(workspaceRoot string, opts Options) []string {
-	args := []string{"serve", "--workspace", workspaceRoot}
-	appendStringFlag := func(name, value string) {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			args = append(args, name, trimmed)
-		}
+func buildServeArgs(opts Options) []string {
+	return []string{"serve"}
+}
+
+func buildServeEnv(cfg config.App) []string {
+	env := os.Environ()
+	if strings.TrimSpace(cfg.PersistenceRoot) != "" {
+		env = append(env, "BUILDER_PERSISTENCE_ROOT="+cfg.PersistenceRoot)
 	}
-	appendIntFlag := func(name string, value int) {
-		if value > 0 {
-			args = append(args, name, strconv.Itoa(value))
-		}
+	if strings.TrimSpace(cfg.Settings.ServerHost) != "" {
+		env = append(env, "BUILDER_SERVER_HOST="+cfg.Settings.ServerHost)
 	}
-	appendStringFlag("--model", opts.Model)
-	appendStringFlag("--provider-override", opts.ProviderOverride)
-	appendStringFlag("--thinking-level", opts.ThinkingLevel)
-	appendStringFlag("--theme", opts.Theme)
-	appendIntFlag("--model-timeout-seconds", opts.ModelTimeoutSeconds)
-	appendStringFlag("--tools", opts.Tools)
-	appendStringFlag("--openai-base-url", opts.OpenAIBaseURL)
-	return args
+	if cfg.Settings.ServerPort > 0 {
+		env = append(env, "BUILDER_SERVER_PORT="+strconv.Itoa(cfg.Settings.ServerPort))
+	}
+	return env
 }

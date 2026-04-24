@@ -50,6 +50,10 @@ func (a *responseStreamAccumulator) Consume(evt responses.ResponseStreamEventUni
 		a.toolCalls.AppendArguments(evt.ItemID, evt.Delta)
 	case "response.function_call_arguments.done":
 		a.toolCalls.SetArguments(evt.ItemID, evt.Arguments)
+	case "response.custom_tool_call_input.delta":
+		a.toolCalls.AppendCustomInput(evt.ItemID, evt.Delta)
+	case "response.custom_tool_call_input.done":
+		a.toolCalls.SetCustomInput(evt.ItemID, evt.Input)
 	case "response.reasoning_summary_text.delta":
 		key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
 		a.reasoning.Append(reasoningRoleSummary, key, evt.Delta)
@@ -410,9 +414,11 @@ type toolCallAccumulator struct {
 }
 
 type toolCallState struct {
-	CallID string
-	Name   string
-	Args   strings.Builder
+	CallID   string
+	Name     string
+	Args     strings.Builder
+	Custom   strings.Builder
+	IsCustom bool
 }
 
 func newToolCallAccumulator() *toolCallAccumulator {
@@ -437,11 +443,28 @@ func (a *toolCallAccumulator) ensure(key string) *toolCallState {
 }
 
 func (a *toolCallAccumulator) UpsertFromOutput(item responses.ResponseOutputItemUnion) {
-	if item.Type != "function_call" {
+	if item.Type != "function_call" && item.Type != "custom_tool_call" {
 		return
 	}
-	call := item.AsFunctionCall()
-	key := textutil.FirstNonEmpty(strings.TrimSpace(call.CallID), strings.TrimSpace(call.ID))
+	callID := ""
+	id := ""
+	name := ""
+	args := ""
+	isCustom := item.Type == "custom_tool_call"
+	if isCustom {
+		call := item.AsCustomToolCall()
+		callID = call.CallID
+		id = call.ID
+		name = call.Name
+		args = call.Input
+	} else {
+		call := item.AsFunctionCall()
+		callID = call.CallID
+		id = call.ID
+		name = call.Name
+		args = call.Arguments
+	}
+	key := textutil.FirstNonEmpty(strings.TrimSpace(callID), strings.TrimSpace(id))
 	if key == "" {
 		return
 	}
@@ -449,16 +472,22 @@ func (a *toolCallAccumulator) UpsertFromOutput(item responses.ResponseOutputItem
 	if state == nil {
 		return
 	}
-	if v := strings.TrimSpace(call.CallID); v != "" {
+	if v := strings.TrimSpace(callID); v != "" {
 		state.CallID = v
 	}
-	if v := strings.TrimSpace(call.Name); v != "" {
+	if v := strings.TrimSpace(name); v != "" {
 		state.Name = v
 	}
-	if call.ID != "" {
-		a.itemToKey[call.ID] = key
+	if id != "" {
+		a.itemToKey[id] = key
 	}
-	if args := strings.TrimSpace(call.Arguments); args != "" {
+	if isCustom {
+		state.IsCustom = true
+		if strings.TrimSpace(args) != "" {
+			state.Custom.Reset()
+			state.Custom.WriteString(args)
+		}
+	} else if strings.TrimSpace(args) != "" {
 		state.Args.Reset()
 		state.Args.WriteString(args)
 	}
@@ -483,6 +512,27 @@ func (a *toolCallAccumulator) SetArguments(itemID, arguments string) {
 	state.Args.WriteString(arguments)
 }
 
+func (a *toolCallAccumulator) AppendCustomInput(itemID, delta string) {
+	key := textutil.FirstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
+	state := a.ensure(key)
+	if state == nil || delta == "" {
+		return
+	}
+	state.IsCustom = true
+	state.Custom.WriteString(delta)
+}
+
+func (a *toolCallAccumulator) SetCustomInput(itemID, input string) {
+	key := textutil.FirstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
+	state := a.ensure(key)
+	if state == nil {
+		return
+	}
+	state.IsCustom = true
+	state.Custom.Reset()
+	state.Custom.WriteString(input)
+}
+
 func (a *toolCallAccumulator) Merge(calls []ToolCall) {
 	for _, call := range calls {
 		key := textutil.FirstNonEmpty(strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
@@ -496,7 +546,13 @@ func (a *toolCallAccumulator) Merge(calls []ToolCall) {
 		if v := strings.TrimSpace(call.Name); v != "" {
 			state.Name = v
 		}
-		if len(call.Input) > 0 {
+		if call.Custom {
+			state.IsCustom = true
+			if call.CustomInput != "" {
+				state.Custom.Reset()
+				state.Custom.WriteString(call.CustomInput)
+			}
+		} else if len(call.Input) > 0 {
 			state.Args.Reset()
 			state.Args.WriteString(normalizeToolArguments(string(call.Input)))
 		}
@@ -514,11 +570,11 @@ func (a *toolCallAccumulator) ToToolCalls() []ToolCall {
 		if callID == "" && strings.TrimSpace(state.Name) == "" {
 			continue
 		}
-		out = append(out, ToolCall{
-			ID:    callID,
-			Name:  state.Name,
-			Input: normalizeToolInput(state.Args.String()),
-		})
+		input := normalizeToolInput(state.Args.String())
+		if state.IsCustom {
+			input = normalizeToolInput(state.Custom.String())
+		}
+		out = append(out, ToolCall{ID: callID, Name: state.Name, Input: input, Custom: state.IsCustom, CustomInput: state.Custom.String()})
 	}
 	return out
 }
@@ -533,13 +589,11 @@ func buildOutputItemsFromStream(text string, phase MessagePhase, toolCalls []Too
 		if callID == "" {
 			continue
 		}
-		items = append(items, ResponseItem{
-			Type:      ResponseItemTypeFunctionCall,
-			ID:        callID,
-			CallID:    callID,
-			Name:      call.Name,
-			Arguments: normalizeToolInput(string(call.Input)),
-		})
+		if call.Custom {
+			items = append(items, ResponseItem{Type: ResponseItemTypeCustomToolCall, ID: callID, CallID: callID, Name: call.Name, CustomInput: call.CustomInput})
+		} else {
+			items = append(items, ResponseItem{Type: ResponseItemTypeFunctionCall, ID: callID, CallID: callID, Name: call.Name, Arguments: normalizeToolInput(string(call.Input))})
+		}
 	}
 	summaries := make([]ReasoningEntry, 0, len(reasoning))
 	for _, entry := range reasoning {
@@ -645,7 +699,7 @@ func passthroughOutputItemKey(item ResponseItem) (string, bool) {
 
 func isKnownResponseOutputItemType(itemType string) bool {
 	switch strings.TrimSpace(itemType) {
-	case "message", "function_call", "reasoning", "compaction":
+	case "message", "function_call", "custom_tool_call", "reasoning", "compaction":
 		return true
 	default:
 		return false
