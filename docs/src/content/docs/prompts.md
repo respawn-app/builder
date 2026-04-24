@@ -23,7 +23,7 @@ Workspace instructions are included after global instructions. Builder injects t
 
 The workspace file takes priority. If neither file exists, Builder uses the built-in system prompt.
 
-Builder reads and renders `SYSTEM.md` once when the session sends its first model request, stores the fully rendered result in the session metadata, and reuses that snapshot for later requests. Editing `SYSTEM.md` during a session affects new sessions only.
+Builder reads and renders `SYSTEM.md` once when the session sends its first model request, stores the fully rendered result in the `system_prompt` session metadata, and reuses that snapshot for later requests. After a session has stored that snapshot, editing `SYSTEM.md` affects new sessions only. Sessions without `system_prompt` capture the current `SYSTEM.md` on their next model request.
 
 ## Placeholders
 

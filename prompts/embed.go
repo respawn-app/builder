@@ -66,14 +66,6 @@ func MainSystemPrompt(includeToolPreambles bool, args SystemPromptTemplateArgs) 
 	return WithToolPreambles(BaseSystemPrompt(args), includeToolPreambles)
 }
 
-func CustomSystemPrompt(text string, includeToolPreambles bool, args SystemPromptTemplateArgs) string {
-	rendered, err := RenderCustomSystemPrompt(text, includeToolPreambles, args)
-	if err != nil {
-		panic(err)
-	}
-	return rendered
-}
-
 func RenderCustomSystemPrompt(text string, includeToolPreambles bool, args SystemPromptTemplateArgs) (string, error) {
 	rendered, err := renderSystemPromptTemplateErr(strings.TrimSpace(text), args, BaseSystemPrompt(args))
 	if err != nil {
