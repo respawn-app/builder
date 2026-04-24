@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"builder/server/auth"
+	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -51,6 +52,39 @@ func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testin
 	}
 	if plan.WorkspaceRoot != "/tmp/workspace-a" {
 		t.Fatalf("expected workspace root passthrough, got %q", plan.WorkspaceRoot)
+	}
+}
+
+func TestPlannerHeadlessUsesDefaultGPT55ModelAndOpenAIProviderInference(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	planner := Planner{
+		Config:       cfg,
+		ContainerDir: filepath.Join(cfg.PersistenceRoot, "sessions", "workspace-a"),
+	}
+
+	plan, err := planner.PlanSession(SessionRequest{Mode: ModeHeadless})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.ActiveSettings.Model != "gpt-5.5" {
+		t.Fatalf("active model = %q, want gpt-5.5", plan.ActiveSettings.Model)
+	}
+	if plan.ConfiguredModelName != "gpt-5.5" {
+		t.Fatalf("configured model = %q, want gpt-5.5", plan.ConfiguredModelName)
+	}
+	provider, err := llm.InferProviderFromModel(plan.ActiveSettings.Model)
+	if err != nil {
+		t.Fatalf("InferProviderFromModel: %v", err)
+	}
+	if provider != llm.ProviderOpenAI {
+		t.Fatalf("provider = %q, want %q", provider, llm.ProviderOpenAI)
 	}
 }
 

@@ -780,11 +780,15 @@ func (m *onboardingModel) renderThemePreview(width int) []string {
 	palette := uiPalette(theme)
 	previewStyles := onboardingThemePreviewStyleSet(theme, width)
 	heading := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render("Preview")
+	modelLabel := strings.TrimSpace(m.state.settings.Model)
+	if modelLabel == "" {
+		modelLabel = "gpt-5"
+	}
 	statusLine := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render("builder") +
 		lipgloss.NewStyle().Foreground(palette.muted).Render(" | ") +
 		lipgloss.NewStyle().Foreground(palette.foreground).Render("ready") +
 		lipgloss.NewStyle().Foreground(palette.muted).Render(" | ") +
-		lipgloss.NewStyle().Foreground(palette.foreground).Render("gpt-5.4") +
+		lipgloss.NewStyle().Foreground(palette.foreground).Render(modelLabel) +
 		lipgloss.NewStyle().Foreground(palette.muted).Render(" | ") +
 		lipgloss.NewStyle().Foreground(palette.secondary).Bold(true).Render(theme)
 	inputLine := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render("> ") + lipgloss.NewStyle().Foreground(palette.foreground).Render("Explain this failing test")
