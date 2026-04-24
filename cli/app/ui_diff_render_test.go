@@ -39,7 +39,7 @@ func TestDetailDiffBackgroundCoversSyntaxHighlightedCodeInAppView(t *testing.T) 
 		},
 	})
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
-	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	view := m.View()
 	const addBg = "\x1b[48;2;31;42;34m"
@@ -110,7 +110,7 @@ func TestCustomPatchToolCallRendersSummaryOngoingAndHighlightedDiffDetail(t *tes
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
-	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	detailView := m.View()
 	detailPlain := ansi.Strip(detailView)
 	if !strings.Contains(detailPlain, "cli/app/ui_status.go") || !strings.Contains(detailPlain, "+    Ready bool") || !strings.Contains(detailPlain, "-    Summary string") {

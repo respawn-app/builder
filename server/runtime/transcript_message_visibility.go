@@ -92,9 +92,9 @@ func compactLabelForMessage(msg llm.Message) string {
 	case llm.MessageTypeHeadlessModeExit:
 		return "Interactive mode restored"
 	case llm.MessageTypeWorktreeMode:
-		return worktreeLabel("Switched to worktree", "Switched worktree", msg.SourcePath, msg.Content)
+		return worktreeLabel("Switched to worktree", "Switched worktree", msg.SourcePath)
 	case llm.MessageTypeWorktreeModeExit:
-		return worktreeLabel("Returned from worktree", "Returned from worktree", msg.SourcePath, msg.Content)
+		return worktreeLabel("Returned from worktree", "Returned from worktree", msg.SourcePath)
 	case llm.MessageTypeCompactionSummary:
 		return "Context compacted"
 	case llm.MessageTypeInterruption:
@@ -113,10 +113,9 @@ func compactLabelForMessage(msg llm.Message) string {
 	}
 }
 
-func worktreeLabel(prefix, fallback, sourcePath, content string) string {
+func worktreeLabel(prefix, fallback, sourcePath string) string {
 	if name := strings.TrimSpace(filepath.Base(strings.TrimSpace(sourcePath))); name != "" && name != "." && name != string(filepath.Separator) {
 		return prefix + " " + name
 	}
-	_ = content
 	return fallback
 }
