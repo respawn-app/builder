@@ -411,6 +411,30 @@ func (s *Store) MarkModelDispatchLocked(contract LockedContract) error {
 	})
 }
 
+func (s *Store) BackfillLockedContextBudget(contextWindow, contextPercent int) error {
+	if contextWindow <= 0 || contextPercent <= 0 {
+		return nil
+	}
+	return s.mutateAndPersist(func() error {
+		if s.meta.Locked == nil {
+			return nil
+		}
+		changed := false
+		if s.meta.Locked.ContextWindow <= 0 {
+			s.meta.Locked.ContextWindow = contextWindow
+			changed = true
+		}
+		if s.meta.Locked.ContextPercent <= 0 {
+			s.meta.Locked.ContextPercent = contextPercent
+			changed = true
+		}
+		if changed {
+			s.meta.UpdatedAt = time.Now().UTC()
+		}
+		return nil
+	})
+}
+
 func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 	s.mu.Lock()
 

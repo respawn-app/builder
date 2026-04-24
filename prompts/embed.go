@@ -2,12 +2,20 @@ package prompts
 
 import (
 	_ "embed"
+	"strconv"
 	"strings"
 
 	"builder/cli/selfcmd"
 )
 
-const runCommandPlaceholder = "{{builder_run_command}}"
+const (
+	runCommandPlaceholder                = "{{builder_run_command}}"
+	estimatedToolCallsContextPlaceholder = "{{estimated_tool_calls_for_context}}"
+)
+
+type SystemPromptTemplateArgs struct {
+	EstimatedToolCallsForContext int
+}
 
 //go:embed system_prompt.md
 var SystemPrompt string
@@ -51,8 +59,8 @@ var WorktreeModePrompt string
 //go:embed worktree_mode_exit_prompt.md
 var WorktreeModeExitPrompt string
 
-func MainSystemPrompt(includeToolPreambles bool) string {
-	base := renderRunCommand(strings.TrimSpace(SystemPrompt))
+func MainSystemPrompt(includeToolPreambles bool, args SystemPromptTemplateArgs) string {
+	base := renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
 	if !includeToolPreambles {
 		return base
 	}
@@ -66,8 +74,8 @@ func MainSystemPrompt(includeToolPreambles bool) string {
 	return base + "\n\n" + preambles
 }
 
-func BaseSystemPrompt() string {
-	return renderRunCommand(strings.TrimSpace(SystemPrompt))
+func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
+	return renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
 }
 
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
@@ -97,6 +105,14 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 
 func renderRunCommand(text string) string {
 	return renderRunCommandWithPrefix(text, selfcmd.RunCommandPrefix())
+}
+
+func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	rendered := renderRunCommand(text)
+	return strings.ReplaceAll(rendered, estimatedToolCallsContextPlaceholder, strconv.Itoa(args.EstimatedToolCallsForContext))
 }
 
 func renderWorktreePrompt(template string, replacements map[string]string) string {

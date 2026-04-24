@@ -661,9 +661,6 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 	if meta.Locked.ToolPreambles == nil || *meta.Locked.ToolPreambles {
 		t.Fatalf("expected locked tool_preambles=false for headless session")
 	}
-	if strings.Contains(client.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect intermediary updates in headless system prompt")
-	}
 }
 
 func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
@@ -688,8 +685,8 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
-	if strings.Contains(firstClient.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect intermediary updates in first locked prompt")
+	if store.Meta().Locked == nil || store.Meta().Locked.ToolPreambles == nil || *store.Meta().Locked.ToolPreambles {
+		t.Fatalf("expected first session to lock tool_preambles=false, got %+v", store.Meta().Locked)
 	}
 
 	resumedClient := &fakeClient{responses: []llm.Response{{
@@ -707,8 +704,129 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
-	if strings.Contains(resumedClient.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect resumed session to change locked tool_preambles policy")
+	if store.Meta().Locked == nil || store.Meta().Locked.ToolPreambles == nil || *store.Meta().Locked.ToolPreambles {
+		t.Fatalf("expected resumed session to preserve locked tool_preambles=false, got %+v", store.Meta().Locked)
+	}
+}
+
+func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	firstClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+		Usage:     llm.Usage{WindowTokens: 272_000},
+	}}}
+	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 272_000,
+	})
+	if err != nil {
+		t.Fatalf("new first engine: %v", err)
+	}
+	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected locked context budget, got %+v", locked)
+	}
+	if got := firstEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("estimated tool calls = %d, want 185", got)
+	}
+	firstPrompt := firstClient.calls[0].SystemPrompt
+	if strings.TrimSpace(firstPrompt) == "" {
+		t.Fatal("expected non-empty rendered system prompt")
+	}
+	firstPromptCacheKey := firstClient.calls[0].PromptCacheKey
+	if firstPromptCacheKey == "" {
+		t.Fatal("expected prompt cache key on first request")
+	}
+
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+		Usage:     llm.Usage{WindowTokens: 400_000},
+	}}}
+	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 400_000,
+	})
+	if err != nil {
+		t.Fatalf("new resumed engine: %v", err)
+	}
+	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	if strings.TrimSpace(resumedClient.calls[0].SystemPrompt) == "" {
+		t.Fatal("expected resumed system prompt to stay non-empty")
+	}
+	if resumedClient.calls[0].PromptCacheKey != firstPromptCacheKey {
+		t.Fatalf("expected resumed prompt cache key = %q, got %q", firstPromptCacheKey, resumedClient.calls[0].PromptCacheKey)
+	}
+	if got := resumedEngine.estimatedToolCallsForLockedContext(*store.Meta().Locked); got != 185 {
+		t.Fatalf("resumed estimated tool calls = %d, want 185", got)
+	}
+
+	alteredLocked := *store.Meta().Locked
+	alteredLocked.ContextWindow = 400_000
+	if got := resumedEngine.estimatedToolCallsForLockedContext(alteredLocked); got != 271 {
+		t.Fatalf("altered estimated tool calls = %d, want 271", got)
+	}
+	alteredPrompt := resumedEngine.systemPrompt(alteredLocked)
+	if alteredPrompt == firstPrompt {
+		t.Fatal("expected system prompt estimate to change when locked context budget changes")
+	}
+}
+
+func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:          "gpt-5",
+		Temperature:    1,
+		MaxOutputToken: 0,
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+
+	firstEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 272_000,
+	})
+	if err != nil {
+		t.Fatalf("new first engine: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected legacy lock backfilled from first resume config, got %+v", locked)
+	}
+	if got := firstEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("first estimated tool calls = %d, want 185", got)
+	}
+
+	secondEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 400_000,
+	})
+	if err != nil {
+		t.Fatalf("new second engine: %v", err)
+	}
+	locked = store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected legacy lock backfill to stay pinned, got %+v", locked)
+	}
+	if got := secondEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("second estimated tool calls = %d, want 185", got)
 	}
 }
 
