@@ -293,6 +293,13 @@
 - Ongoing preview sizing is fixed: command max `80`, file max `60`, soft-wrap allowed.
 - Ongoing line prefix is `> `.
 - Shell command previews remain syntax-highlighted in both modes; ongoing renders them with lower-contrast `preview` styling plus terminal `faint`, while detail keeps full syntax colors.
+- Detail mode is an expandable transcript inspector. Collapsed detail is the default. User and assistant messages show at most the first 3 rendered lines; tool calls show the same first input line used by ongoing previews; ask-question entries show only the question; known developer/context reminders use typed compact labels. Expanding a message reveals the full detail content for that entry.
+- Detail compact labels are metadata-first. Runtime/client projection must preserve source message type, source path, compact content/label, and tool presentation metadata where available. Legacy sessions that lack this metadata degrade by role and text-preview fallback only; Builder must not parse old prompt/reminder text to reclassify AGENTS, skills, environment, worktree, patch, or handoff messages.
+- Unknown roles, unknown message types, and invalid/missing presentation metadata must stay visible and expandable. If recoverable text exists, unknown/malformed entries are visible in ongoing and detail; empty unknown/malformed entries are detail-only diagnostics. Production rendering emits diagnostics and uses deterministic fallback labels; debug mode may hard-fail only on internal detail-item invariants, not on old or unknown transcript data.
+- Detail tool calls with error results stay collapsed by default but may show compact input plus a structured error summary supplied by runtime/projection; expanding reveals full input/output.
+- Detail navigation is message-oriented: `Up`/`Down` select previous/next transcript message, `Enter` expands/collapses the selected message, and `PgUp`/`PgDn` keep page-scrolling the detail viewport.
+- Detail rows use mandatory chevron markers: `▶︎` collapsed and `▼` expanded.
+- Detail selection uses full-width selected background/fill only. It must not change foreground colors, and selected background has the lowest priority so more specific backgrounds such as patch diff add/remove or syntax backgrounds win.
 - Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
 - Style ownership is fixed by layer:
 - Formatter config owns syntax backgrounds and formatter base foreground.
@@ -309,6 +316,7 @@
 - `OC`: visible in ongoing mode in collapsed/shortened form and visible in detail mode with full text.
 - `D`: hidden in ongoing mode and visible in detail mode.
 - `X`: hidden in both transcript modes.
+- Unknown/malformed visibility extension: entries with recoverable text are treated as `O` for operator visibility; empty unknown/malformed entries are `D` diagnostics. Known roles/message types still use the locked matrix below.
 - Locked message-type visibility:
 - `agents.md`: `D`
 - `skills`: `D`
@@ -339,7 +347,7 @@
 - Syntax-highlighted output must not emit backgrounds unless explicitly intended, such as final diff added/removed decoration.
 - Assistant text streams in ongoing mode.
 - Tool output is not streamed live; show running status and reveal on completion.
-- `detail` is a non-streaming snapshot view.
+- `detail` is a non-streaming snapshot view with UI-local expansion and selection state.
 - Mid-step entry shows latest completed snapshot only.
 - Snapshot is static while open (no live refresh indicator/action).
 - Snapshot scope is full session transcript up to latest completed step.
@@ -373,12 +381,11 @@
 - Ongoing transcript scrolling remains on `PgUp`/`PgDn`; failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
 - Main-input `@` path autocomplete uses a cached repo-relative path corpus built asynchronously from `rg --no-config --files -0 --hidden -g '!.git'`; corpus prewarming starts eagerly in the background when the UI model is created for a workspace, but it must be scheduled through Bubble Tea startup commands (`startupCmds` / `Init`) rather than unmanaged constructor goroutines. Live matching never shells out per keystroke and runs only against the in-memory cache. Query tracking is cursor-local and accepts path-safe runes inside the tracked token: Unicode letters/digits plus `/`, `.`, `_`, and `-`, so nested and hidden path references can be continued after accepting a directory completion. Hidden paths are included, `.git` is explicitly excluded, and normal ignore-file handling remains enabled so `.gitignore` junk such as `node_modules`, `.gradle`, and `build` stays out by default. Non-empty directory candidates are derived from file paths, so empty directories are intentionally excluded in v1. Corpus-build failures are retryable on later queries in the same workspace; they do not permanently disable path autocomplete for the session.
 - Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
-- Ongoing mode keeps mouse capture disabled by default to preserve native text selection behavior.
+- Ongoing mode keeps mouse capture disabled to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
-- While detail overlay is active, terminal alternate-scroll (`?1007`) is enabled to support wheel-driven transcript navigation; it is disabled again on leaving detail.
-- Mouse capture remains disabled, so text selection/copy in detail overlay stays terminal-native.
-- Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation is prioritized without taking over mouse capture.
+- Mouse handling is allowed only on alt-screen/overlay surfaces where Builder does not need strict native scrollback, native text selection, or prompt typing behavior. Detail may enable the mouse/alternate-scroll handling needed for wheel-driven transcript navigation while active, and must disable it again on leaving detail.
+- Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation and message selection are prioritized.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
