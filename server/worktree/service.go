@@ -32,6 +32,7 @@ type runtimeController interface {
 	RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error
 	RecordWorktreeTransition(ctx context.Context, sessionID string, leaseID string, state session.WorktreeReminderState) error
 	SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error
+	IsSessionRuntimeActive(sessionID string) bool
 }
 
 type processSource interface {
@@ -746,6 +747,9 @@ func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID 
 	otherSessions := make([]metadata.WorktreeSessionBlocker, 0, len(blockers))
 	for _, blocker := range blockers {
 		if strings.TrimSpace(blocker.SessionID) == strings.TrimSpace(currentSessionID) {
+			continue
+		}
+		if s.runtime != nil && !s.runtime.IsSessionRuntimeActive(blocker.SessionID) {
 			continue
 		}
 		otherSessions = append(otherSessions, blocker)
