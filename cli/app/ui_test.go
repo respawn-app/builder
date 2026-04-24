@@ -1056,7 +1056,7 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 		t.Fatalf("expected selected rollback message %q visible in detail overlay", selected)
 	}
 	mid := len(lines) / 2
-	if diff := absInt(selectedLine - mid); diff > 4 {
+	if diff := absInt(selectedLine - mid); diff > 2 {
 		t.Fatalf("expected selected rollback message near overlay center, line=%d mid=%d", selectedLine, mid)
 	}
 
@@ -1141,7 +1141,7 @@ func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
 			t.Fatalf("expected selected rollback message %q visible in overlay", selected)
 		}
 		mid := len(lines) / 2
-		if diff := absInt(selectedLine - mid); diff > 5 {
+		if diff := absInt(selectedLine - mid); diff > 3 {
 			t.Fatalf("expected selected rollback message near overlay center, line=%d mid=%d", selectedLine, mid)
 		}
 	}
@@ -3630,15 +3630,17 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 
 	width := 44
 	lines := m.renderChatPanel(width, 8, style)
-	foundDivider := false
+	expected := style.meta.Render(strings.Repeat("─", width))
+
+	found := false
 	for _, line := range lines {
-		if line == style.meta.Render(strings.Repeat("─", width)) {
-			foundDivider = true
+		if line == expected {
+			found = true
 			break
 		}
 	}
-	if foundDivider {
-		t.Fatalf("did not expect detail dividers between collapsed entries, got %q", strings.Join(lines, "\n"))
+	if !found {
+		t.Fatalf("expected full-width meta divider in chat panel, got %q", strings.Join(lines, "\n"))
 	}
 }
 
