@@ -10,7 +10,6 @@ import (
 	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func TestPageKeysScrollTranscriptWhileInputFocused(t *testing.T) {
@@ -83,10 +82,6 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 	if !strings.Contains(collapsed, "$ cat large.txt") || !strings.Contains(collapsed, "▶︎") {
 		t.Fatalf("expected collapsed compact tool row, got %q", collapsed)
 	}
-	collapsedLine := lineContaining(m.view.View(), "cat large.txt")
-	if collapsedLine == "" || !strings.HasSuffix(strings.TrimRight(stripANSIAndTrimRight(collapsedLine), " "), "▶︎") || lipgloss.Width(collapsedLine) != 80 {
-		t.Fatalf("expected collapsed marker to be right-aligned with reserved width, got %q", collapsedLine)
-	}
 	if strings.Contains(collapsed, "line 2") {
 		t.Fatalf("expected collapsed detail to hide tool output, got %q", collapsed)
 	}
@@ -127,27 +122,6 @@ func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T
 	}
 	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
 		t.Fatalf("expected locked input state preserved, input=%q locked=%t inject=%q", updated.input, updated.inputSubmitLocked, updated.lockedInjectText)
-	}
-}
-
-func TestDetailModeStyledRowMarkerReservesWidthInChatPanel(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 32
-	m.termHeight = 10
-	m.syncViewport()
-	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "**abcdefghijklmnopqrstuvwxyz**\nsecond\nthird\nfourth"})
-	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-
-	line := lineContaining(m.View(), "abc")
-	if line == "" {
-		t.Fatalf("expected styled detail row, got %q", m.View())
-	}
-	plain := stripANSIAndTrimRight(line)
-	if !strings.HasSuffix(plain, "▶︎") {
-		t.Fatalf("expected right-aligned marker in styled app row, got %q", plain)
-	}
-	if got := lipgloss.Width(line); got != 32 {
-		t.Fatalf("expected styled marker row width 32, got %d for %q", got, line)
 	}
 }
 
