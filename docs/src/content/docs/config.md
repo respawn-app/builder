@@ -38,7 +38,7 @@ Changing `persistence_root` does not move `config.toml`. `persistence_root` cont
 ## Example
 
 ```toml
-model = "gpt-5.4"
+model = "gpt-5.5"
 thinking_level = "medium" # low, medium, high, xhigh
 model_verbosity = "medium" # or "low"
 theme = "auto" # or light / dark
@@ -99,7 +99,7 @@ These flags overlay settings at startup.
 
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
-| `model` | string | `gpt-5.4` | `BUILDER_MODEL` | `--model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
+| `model` | string | `gpt-5.5` | `BUILDER_MODEL` | `--model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
 | `thinking_level` | string | `medium` | `BUILDER_THINKING_LEVEL` | `--thinking-level` | Provider-specific reasoning effort string. |
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
 | `theme` | string | `auto` | `BUILDER_THEME` | `--theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
