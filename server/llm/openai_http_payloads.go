@@ -142,12 +142,16 @@ func (b openAIRequestPayloadBuilder) buildTools(requestTools []Tool, enableNativ
 
 func buildFunctionToolParam(tool Tool) (responses.ToolUnionParam, error) {
 	if tool.Custom != nil {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			return responses.ToolUnionParam{}, fmt.Errorf("custom tool name is required")
+		}
 		format := shared.CustomToolInputFormatUnionParam{}
 		switch strings.TrimSpace(tool.Custom.Type) {
 		case "grammar":
 			definition := tool.Custom.Definition
 			if strings.TrimSpace(definition) == "" {
-				return responses.ToolUnionParam{}, fmt.Errorf("custom tool grammar definition is required for %s", tool.Name)
+				return responses.ToolUnionParam{}, fmt.Errorf("custom tool grammar definition is required for %s", name)
 			}
 			syntax := strings.TrimSpace(tool.Custom.Syntax)
 			if syntax == "" {
@@ -158,9 +162,9 @@ func buildFunctionToolParam(tool Tool) (responses.ToolUnionParam, error) {
 			text := shared.NewCustomToolInputFormatTextParam()
 			format = shared.CustomToolInputFormatUnionParam{OfText: &text}
 		default:
-			return responses.ToolUnionParam{}, fmt.Errorf("unsupported custom tool format %q for %s", tool.Custom.Type, tool.Name)
+			return responses.ToolUnionParam{}, fmt.Errorf("unsupported custom tool format %q for %s", tool.Custom.Type, name)
 		}
-		custom := responses.CustomToolParam{Name: strings.TrimSpace(tool.Name), Format: format}
+		custom := responses.CustomToolParam{Name: name, Format: format}
 		if description := strings.TrimSpace(tool.Description); description != "" {
 			custom.Description = openai.String(description)
 		}

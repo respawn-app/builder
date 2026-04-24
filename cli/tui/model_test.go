@@ -1325,6 +1325,7 @@ func TestOngoingWriteStdinPollSummaryUsesMutedForeground(t *testing.T) {
 	m := NewModel(WithTheme("dark"))
 	m.viewportWidth = 16
 	line := strings.Join(m.flattenEntryWithMeta("tool_shell_success", "Polled session 1149 for 2s", true, &transcript.ToolCallMeta{
+		ToolName:   "write_stdin",
 		IsShell:    true,
 		Command:    "Polled session 1149 for 2s",
 		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindPlain},

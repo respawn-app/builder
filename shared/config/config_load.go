@@ -9,10 +9,11 @@ import (
 )
 
 func Load(workspaceRoot string, opts LoadOptions) (App, error) {
-	if strings.TrimSpace(workspaceRoot) == "" {
+	trimmed := strings.TrimSpace(workspaceRoot)
+	if trimmed == "" {
 		return App{}, errors.New("workspace root is required")
 	}
-	return load(workspaceRoot, true, opts)
+	return load(trimmed, true, opts)
 }
 
 func LoadGlobal(opts LoadOptions) (App, error) {
@@ -21,8 +22,9 @@ func LoadGlobal(opts LoadOptions) (App, error) {
 
 func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (App, error) {
 	absWorkspace := ""
-	if strings.TrimSpace(workspaceRoot) != "" {
-		resolved, err := filepath.Abs(workspaceRoot)
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot != "" {
+		resolved, err := filepath.Abs(trimmedWorkspaceRoot)
 		if err != nil {
 			return App{}, fmt.Errorf("resolve workspace root: %w", err)
 		}
@@ -73,13 +75,13 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 	if err := configRegistry.applyFile(homeFileConfig, homeSettingsPath, &state, sources); err != nil {
 		return App{}, err
 	}
-	if err := configRegistry.applyEnv(os.LookupEnv, &state, sources); err != nil {
-		return App{}, err
-	}
 	if includeWorkspaceLayer {
 		if err := configRegistry.applyFile(workspaceFileConfig, workspaceSettingsPath, &state, sources); err != nil {
 			return App{}, err
 		}
+	}
+	if err := configRegistry.applyEnv(os.LookupEnv, &state, sources); err != nil {
+		return App{}, err
 	}
 	if err := configRegistry.applyCLI(opts, &state, sources); err != nil {
 		return App{}, err

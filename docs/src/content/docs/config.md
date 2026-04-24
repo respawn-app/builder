@@ -9,8 +9,8 @@ Builder resolves settings in this order (higher no. = higher priority):
 
 1. Built-in defaults
 2. `~/.builder/config.toml`
-3. Environment variables
-4. `<workspace-root>/.builder/config.toml`
+3. `<workspace-root>/.builder/config.toml`
+4. Environment variables
 5. `builder run` CLI flags
 
 Interactive session flows resolve workspace-local config from the session workspace root. `builder serve` starts without a workspace root and applies workspace config only when a project/session selects a workspace. `builder run` is the only entrypoint that accepts config override flags.

@@ -92,10 +92,10 @@ func Parse(src string) (Document, error) {
 
 func patchBodyLines(src string) ([]string, error) {
 	lines := splitRawLines(strings.TrimSpace(src))
-	if len(lines) >= 4 {
+	if len(lines) >= 3 {
 		first := lines[0]
 		last := lines[len(lines)-1]
-		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && strings.HasSuffix(last, "EOF") {
+		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && last == "EOF" {
 			return lines[1 : len(lines)-1], nil
 		}
 	}

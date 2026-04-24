@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,23 @@ func (t sessionRuntimeTestTool) Name() toolspec.ID { return t.name }
 func (t sessionRuntimeTestTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	out, _ := json.Marshal(map[string]string{"tool": string(t.name)})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
+}
+
+type patchDetailCapture struct {
+	mu    sync.Mutex
+	value string
+}
+
+func (c *patchDetailCapture) Set(value string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.value = value
+}
+
+func (c *patchDetailCapture) Get() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value
 }
 
 func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
@@ -749,7 +767,7 @@ func TestSyncExecutionTargetUpdatesActiveRuntimePatchTranscriptWorkdir(t *testin
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	var detail string
+	var detail patchDetailCapture
 	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(sessionRuntimeTestTool{name: toolspec.ToolPatch}), runtimepkg.Config{
 		Model:                "gpt-5",
 		TranscriptWorkingDir: "/old-worktree",
@@ -759,7 +777,7 @@ func TestSyncExecutionTargetUpdatesActiveRuntimePatchTranscriptWorkdir(t *testin
 			}
 			meta, ok := toolcodec.DecodeToolCallMeta(evt.ToolCall.Presentation)
 			if ok {
-				detail = meta.PatchDetail
+				detail.Set(meta.PatchDetail)
 			}
 		},
 	})
@@ -781,11 +799,12 @@ func TestSyncExecutionTargetUpdatesActiveRuntimePatchTranscriptWorkdir(t *testin
 	if _, err := engine.SubmitUserMessage(context.Background(), "apply patch"); err != nil {
 		t.Fatalf("SubmitUserMessage: %v", err)
 	}
-	if !strings.Contains(detail, "/new-worktree/probe.txt") {
-		t.Fatalf("expected patch detail to use retargeted workdir, got %q", detail)
+	gotDetail := detail.Get()
+	if !strings.Contains(gotDetail, "/new-worktree/probe.txt") {
+		t.Fatalf("expected patch detail to use retargeted workdir, got %q", gotDetail)
 	}
-	if strings.Contains(detail, "/old-worktree/probe.txt") {
-		t.Fatalf("did not expect old workdir in patch detail, got %q", detail)
+	if strings.Contains(gotDetail, "/old-worktree/probe.txt") {
+		t.Fatalf("did not expect old workdir in patch detail, got %q", gotDetail)
 	}
 }
 
@@ -838,7 +857,7 @@ func TestRuntimeRebindDoesNotAdvanceTranscriptWorkdirWhenLocalRebindFails(t *tes
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	var detail string
+	var detail patchDetailCapture
 	engine, err := runtimepkg.New(fixture.store, client, tools.NewRegistry(sessionRuntimeTestTool{name: toolspec.ToolPatch}), runtimepkg.Config{
 		Model:                "gpt-5",
 		TranscriptWorkingDir: "/old-worktree",
@@ -848,7 +867,7 @@ func TestRuntimeRebindDoesNotAdvanceTranscriptWorkdirWhenLocalRebindFails(t *tes
 			}
 			meta, ok := toolcodec.DecodeToolCallMeta(evt.ToolCall.Presentation)
 			if ok {
-				detail = meta.PatchDetail
+				detail.Set(meta.PatchDetail)
 			}
 		},
 	})
@@ -862,11 +881,12 @@ func TestRuntimeRebindDoesNotAdvanceTranscriptWorkdirWhenLocalRebindFails(t *tes
 	if _, err := engine.SubmitUserMessage(context.Background(), "apply patch"); err != nil {
 		t.Fatalf("SubmitUserMessage: %v", err)
 	}
-	if !strings.Contains(detail, "/old-worktree/probe.txt") {
-		t.Fatalf("expected patch detail to keep old workdir, got %q", detail)
+	gotDetail := detail.Get()
+	if !strings.Contains(gotDetail, "/old-worktree/probe.txt") {
+		t.Fatalf("expected patch detail to keep old workdir, got %q", gotDetail)
 	}
-	if strings.Contains(detail, "/new-worktree/probe.txt") {
-		t.Fatalf("did not expect failed rebind workdir in patch detail, got %q", detail)
+	if strings.Contains(gotDetail, "/new-worktree/probe.txt") {
+		t.Fatalf("did not expect failed rebind workdir in patch detail, got %q", gotDetail)
 	}
 }
 

@@ -198,7 +198,21 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 }
 
-func TestLoadAppliesWorkspaceConfigAfterEnvBeforeCLI(t *testing.T) {
+func TestLoadTrimsWorkspaceRootBeforeResolving(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load("  "+workspace+"  ", LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.WorkspaceRoot != workspace {
+		t.Fatalf("workspace root = %q, want %q", cfg.WorkspaceRoot, workspace)
+	}
+}
+
+func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -221,8 +235,8 @@ func TestLoadAppliesWorkspaceConfigAfterEnvBeforeCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Settings.Model != "workspace-model" {
-		t.Fatalf("model = %q, want workspace-model", cfg.Settings.Model)
+	if cfg.Settings.Model != "env-model" {
+		t.Fatalf("model = %q, want env-model", cfg.Settings.Model)
 	}
 	if cfg.Settings.ThinkingLevel != "low" {
 		t.Fatalf("thinking level = %q, want cli override", cfg.Settings.ThinkingLevel)
@@ -230,7 +244,7 @@ func TestLoadAppliesWorkspaceConfigAfterEnvBeforeCLI(t *testing.T) {
 	if cfg.Source.SettingsPath != workspaceConfigPath || !cfg.Source.WorkspaceSettingsFileExists {
 		t.Fatalf("unexpected workspace source report: %+v", cfg.Source)
 	}
-	if cfg.Source.Sources["model"] != "file" || cfg.Source.Sources["thinking_level"] != "cli" {
+	if cfg.Source.Sources["model"] != "env" || cfg.Source.Sources["thinking_level"] != "cli" {
 		t.Fatalf("unexpected sources: %+v", cfg.Source.Sources)
 	}
 }

@@ -23,6 +23,21 @@ func TestRenderFormatsSummaryAndDetailFromParsedPatch(t *testing.T) {
 	}
 }
 
+func TestParseHeredocRequiresExactEOFDelimiter(t *testing.T) {
+	patchText := "<<EOF\n*** Begin Patch\n*** Add File: eof.txt\n+MY_EOF\n*** End Patch\nEOF\n"
+	doc, err := Parse(patchText)
+	if err != nil {
+		t.Fatalf("parse patch: %v", err)
+	}
+	add, ok := doc.Hunks[0].(AddFile)
+	if !ok {
+		t.Fatalf("expected add file hunk, got %+v", doc.Hunks)
+	}
+	if len(add.Content) != 1 || add.Content[0] != "MY_EOF" {
+		t.Fatalf("expected body line ending in EOF preserved, got %+v", add.Content)
+	}
+}
+
 func TestRenderFallsBackToRawForUnparseablePatch(t *testing.T) {
 	rendered := Render("not a structured patch payload", "/workspace")
 

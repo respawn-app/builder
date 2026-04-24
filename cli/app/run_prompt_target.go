@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ var dialConfiguredProjectViewRemote = func(ctx context.Context, cfg config.App) 
 }
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = func(_ string, opts Options) []string { return buildServeArgs(opts) }
+var buildServeEnvFunc = buildServeEnv
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
 	if process == nil {
 		return nil
@@ -298,7 +300,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	cmd.Env = os.Environ()
+	cmd.Env = buildServeEnvFunc(cfg)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, false, err
 	}
@@ -417,4 +419,18 @@ func daemonExecutablePath() (string, bool) {
 
 func buildServeArgs(opts Options) []string {
 	return []string{"serve"}
+}
+
+func buildServeEnv(cfg config.App) []string {
+	env := os.Environ()
+	if strings.TrimSpace(cfg.PersistenceRoot) != "" {
+		env = append(env, "BUILDER_PERSISTENCE_ROOT="+cfg.PersistenceRoot)
+	}
+	if strings.TrimSpace(cfg.Settings.ServerHost) != "" {
+		env = append(env, "BUILDER_SERVER_HOST="+cfg.Settings.ServerHost)
+	}
+	if cfg.Settings.ServerPort > 0 {
+		env = append(env, "BUILDER_SERVER_PORT="+strconv.Itoa(cfg.Settings.ServerPort))
+	}
+	return env
 }

@@ -415,24 +415,31 @@ func (s *Store) BackfillLockedContextBudget(contextWindow, contextPercent int) e
 	if contextWindow <= 0 || contextPercent <= 0 {
 		return nil
 	}
-	return s.mutateAndPersist(func() error {
-		if s.meta.Locked == nil {
-			return nil
-		}
-		changed := false
-		if s.meta.Locked.ContextWindow <= 0 {
-			s.meta.Locked.ContextWindow = contextWindow
-			changed = true
-		}
-		if s.meta.Locked.ContextPercent <= 0 {
-			s.meta.Locked.ContextPercent = contextPercent
-			changed = true
-		}
-		if changed {
-			s.meta.UpdatedAt = time.Now().UTC()
-		}
+	s.mu.Lock()
+	if s.meta.Locked == nil {
+		s.mu.Unlock()
 		return nil
-	})
+	}
+	changed := false
+	if s.meta.Locked.ContextWindow <= 0 {
+		s.meta.Locked.ContextWindow = contextWindow
+		changed = true
+	}
+	if s.meta.Locked.ContextPercent <= 0 {
+		s.meta.Locked.ContextPercent = contextPercent
+		changed = true
+	}
+	if !changed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.meta.UpdatedAt = time.Now().UTC()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
 }
 
 func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {

@@ -24,7 +24,7 @@ const uiRuntimeReadTimeout = 300 * time.Millisecond
 const uiRuntimeHydrationReadTimeout = 10 * time.Second
 const uiRuntimeMainViewRefreshInterval = 250 * time.Millisecond
 const uiRuntimeTranscriptPageCacheMaxEntries = 16
-const runtimeLeaseRecoveryWarningText = "Connection was lost, re-acquiring a new lease."
+const runtimeLeaseRecoveryWarningText = "Lost connection to the session runtime; reconnected."
 
 type sessionRuntimeClient struct {
 	reads                   client.SessionViewClient
@@ -126,7 +126,7 @@ func (c *sessionRuntimeClient) controllerLeaseManager() *controllerLeaseManager 
 	return c.controllerLease
 }
 
-func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context) error {
+func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context, trigger error) error {
 	manager := c.controllerLeaseManager()
 	if manager == nil {
 		return errControllerLeaseRecoveryUnavailable
@@ -135,7 +135,9 @@ func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	c.appendLeaseRecoveryWarning(leaseID)
+	if isRecoverableRuntimeControlError(trigger) {
+		c.appendLeaseRecoveryWarning(leaseID)
+	}
 	return nil
 }
 
@@ -171,13 +173,13 @@ func (c *sessionRuntimeClient) retryControlCallNoResult(ctx context.Context, cal
 	return err
 }
 
-func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context) error, call func(controllerLeaseID string) (T, error)) (T, error) {
+func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context, error) error, call func(controllerLeaseID string) (T, error)) (T, error) {
 	value, err := call(currentLeaseID())
 	if !isRecoverableRuntimeControlError(err) {
 		return value, err
 	}
 	var zero T
-	if recoverErr := recoverLease(ctx); recoverErr != nil {
+	if recoverErr := recoverLease(ctx, err); recoverErr != nil {
 		return zero, recoverErr
 	}
 	return call(currentLeaseID())
