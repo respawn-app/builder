@@ -911,8 +911,68 @@ func TestWorktreeDeleteCommandOpensDeleteDialogInOverlay(t *testing.T) {
 		t.Fatalf("delete target = %+v", updated.worktrees.deleteConfirm.target)
 	}
 	plain := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(plain, "Delete worktree") || !strings.Contains(plain, "feature-a") {
+	if !strings.Contains(plain, "Delete feature-a?") {
 		t.Fatalf("expected delete dialog render, got %q", plain)
+	}
+	for _, want := range []string{"Will delete:", "• Workspace folder at /wt/feature-a", "• Git worktree feature-a"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected delete preview line %q, got %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Local branch feature/a") {
+		t.Fatalf("did not expect branch preview before explicit branch delete action, got %q", plain)
+	}
+	for _, removed := range []string{"Delete worktree", "Delete feature-a?\n\nDelete feature-a?", "Branch cleanup target", "Branch cleanup needs explicit confirmation", "Esc back | Left/Right choose action | Enter confirm"} {
+		if strings.Contains(plain, removed) {
+			t.Fatalf("did not expect removed delete dialog copy %q, got %q", removed, plain)
+		}
+	}
+}
+
+func TestWorktreeDeleteDialogBranchPreviewFollowsSelectedAction(t *testing.T) {
+	client := &worktreeCommandTestClient{listResp: testLinkedWorktreeListResponse()}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("did not expect branch preview for plain delete action, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated = next.(*uiModel)
+	plain = stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("expected branch preview for delete branch action, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated = next.(*uiModel)
+	plain = stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("did not expect branch preview after returning to plain delete action, got %q", plain)
+	}
+}
+
+func TestWorktreeDeleteDialogPreviewOmitsBranchWhenActionKeepsBranch(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].BuilderManaged = false
+	resp.Worktrees[1].CreatedBranch = false
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "Local branch feature/a") {
+		t.Fatalf("did not expect branch preview before explicit branch delete action, got %q", plain)
+	}
+	if !strings.Contains(plain, "• Workspace folder at /wt/feature-a") || !strings.Contains(plain, "• Git worktree feature-a") {
+		t.Fatalf("expected non-branch delete preview, got %q", plain)
 	}
 }
 
