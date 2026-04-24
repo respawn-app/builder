@@ -205,7 +205,16 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if options.RefreshReviewerConfigOnResolve {
 				effectiveReviewerFrequency, effectiveReviewerClient = e.reviewerTurnConfigSnapshot()
 			}
+			assistantEventEmitted := false
 			if s.reviewer.ShouldRunTurn(effectiveReviewerFrequency, effectiveReviewerClient, patchEditsApplied) {
+				if options.EmitAssistantEvent {
+					// The answer is already committed before supervisor entries are appended.
+					// Publish it first so live clients never see supervisor entries as a gap
+					// after an unannounced committed assistant message.
+					e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved, CommittedTranscriptChanged: true, CommittedEntryStart: resolvedCommittedStart, CommittedEntryStartSet: resolvedCommittedStartSet})
+					assistantEventEmitted = true
+				}
+				preReviewMessage := resolved
 				reviewed, err := s.reviewer.RunFollowUp(ctx, stepID, resolved, resolvedCommittedStart, resolvedCommittedStartSet, effectiveReviewerClient)
 				if err == nil {
 					resolved = reviewed.Message
@@ -213,8 +222,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					resolvedCommittedStart = reviewed.AssistantCommittedStart
 					resolvedCommittedStartSet = reviewed.AssistantCommittedStartSet
 				}
+				assistantEventEmitted = assistantEventEmitted && sameVisibleAssistantMessage(preReviewMessage, resolved)
 			}
-			if options.EmitAssistantEvent {
+			if options.EmitAssistantEvent && !assistantEventEmitted {
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved, CommittedTranscriptChanged: true, CommittedEntryStart: resolvedCommittedStart, CommittedEntryStartSet: resolvedCommittedStartSet})
 			}
 			if reviewerCompletion != nil {
@@ -283,6 +293,29 @@ func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {
 		Content: msg.Content,
 		Phase:   msg.Phase,
 	}, true
+}
+
+func sameVisibleAssistantMessage(a, b llm.Message) bool {
+	aEntries := VisibleChatEntriesFromMessage(a)
+	bEntries := VisibleChatEntriesFromMessage(b)
+	if len(aEntries) != len(bEntries) {
+		return false
+	}
+	for idx := range aEntries {
+		if !sameVisibleChatEntryContent(aEntries[idx], bEntries[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameVisibleChatEntryContent(a, b ChatEntry) bool {
+	return a.Visibility == b.Visibility &&
+		a.Role == b.Role &&
+		a.Text == b.Text &&
+		a.OngoingText == b.OngoingText &&
+		a.Phase == b.Phase &&
+		strings.TrimSpace(a.ToolCallID) == strings.TrimSpace(b.ToolCallID)
 }
 
 func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message, executableCallIDs map[string]struct{}) (int, map[string]int) {

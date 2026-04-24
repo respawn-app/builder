@@ -3284,8 +3284,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
 			Model:         "gpt-5",
@@ -3428,6 +3437,36 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	}
 	if !foundReviewerStatus {
 		t.Fatalf("expected reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	eventsMu.Lock()
+	recordedEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
+	reviewerStatusEventIdx := -1
+	for idx, evt := range recordedEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_status" {
+			reviewerStatusEventIdx = idx
+		}
+	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer events, got %+v", recordedEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event, got %+v", recordedEvents)
+	}
+	if reviewerStatusEventIdx < 0 {
+		t.Fatalf("expected reviewer status local entry event, got %+v", recordedEvents)
+	}
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > reviewerStatusEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> reviewer status event order, got %+v", recordedEvents)
 	}
 }
 
@@ -3708,10 +3747,18 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	eventsMu.Lock()
 	deferredEvents := append([]Event(nil), events...)
 	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
 	assistantEventIdx := -1
 	reviewerStatusIdx := -1
 	reviewerEventIdx := -1
 	for idx, evt := range deferredEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
 			assistantEventIdx = idx
 		}
@@ -3728,14 +3775,20 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	if assistantEventIdx < 0 {
 		t.Fatalf("expected follow-up assistant event, got %+v", deferredEvents)
 	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer follow-up, got %+v", deferredEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event before reviewer follow-up, got %+v", deferredEvents)
+	}
 	if reviewerStatusIdx < 0 {
 		t.Fatalf("expected reviewer status local entry event, got %+v", deferredEvents)
 	}
 	if reviewerEventIdx < 0 {
 		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
 	}
-	if assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
-		t.Fatalf("expected assistant -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > assistantEventIdx || assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> updated final -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
 	}
 
 	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
