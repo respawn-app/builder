@@ -310,7 +310,7 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts
 		return toolCallDisplayText(entry.ToolCall, entry.Text)
 	}
 	combined := compactToolCallText(entry.ToolCall, entry.Text)
-	if blockRole == "tool_shell" {
+	if isShellPreviewRole(blockRole) {
 		combined = compactOngoingShellPreviewText(combined)
 	}
 	return combined

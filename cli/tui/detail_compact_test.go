@@ -92,3 +92,27 @@ func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *te
 		t.Fatalf("did not expect compact detail selection to force foreground, got %q", selectedLine)
 	}
 }
+
+func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "printf 'one\\n'\nprintf 'two\\n'",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "printf 'one\\n'\nprintf 'two\\n'",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "done"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "▶︎ $ printf 'one\\n'…") {
+		t.Fatalf("expected completed shell call to stay compact, got %q", rendered)
+	}
+	if strings.Contains(rendered, "printf 'two") {
+		t.Fatalf("expected collapsed completed shell call to hide second command line, got %q", rendered)
+	}
+}
