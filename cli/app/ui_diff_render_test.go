@@ -39,6 +39,7 @@ func TestDetailDiffBackgroundCoversSyntaxHighlightedCodeInAppView(t *testing.T) 
 		},
 	})
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
 
 	view := m.View()
 	const addBg = "\x1b[48;2;31;42;34m"
@@ -109,6 +110,7 @@ func TestCustomPatchToolCallRendersSummaryOngoingAndHighlightedDiffDetail(t *tes
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
 	detailView := m.View()
 	detailPlain := ansi.Strip(detailView)
 	if !strings.Contains(detailPlain, "cli/app/ui_status.go") || !strings.Contains(detailPlain, "+    Ready bool") || !strings.Contains(detailPlain, "-    Summary string") {
@@ -141,7 +143,7 @@ func TestCustomPatchToolCallRendersSummaryOngoingAndHighlightedDiffDetail(t *tes
 		t.Fatalf("expected no reset between diff background and first syntax-highlighted custom patch token, got %q", addedLine)
 	}
 	tailBgIdx := strings.LastIndex(addedLine, addBg)
-	if tailBgIdx < 0 || !strings.Contains(addedLine[tailBgIdx:], strings.Repeat(" ", 16)+"\x1b[0m") {
+	if tailBgIdx < 0 || !strings.Contains(addedLine[tailBgIdx:], strings.Repeat(" ", 16)) {
 		t.Fatalf("expected diff background to continue through padded tail, got %q", addedLine)
 	}
 	if got := runewidth.StringWidth(ansi.Strip(addedLine)); got < viewportWidth {

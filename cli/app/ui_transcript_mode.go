@@ -67,13 +67,17 @@ func (m *uiModel) primeDetailTranscriptFromCurrentTail() {
 	}
 	for _, entry := range committedTranscriptEntriesForApp(m.transcriptEntries) {
 		page.Entries = append(page.Entries, clientui.ChatEntry{
-			Visibility:  entry.Visibility,
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       string(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    transcriptToolCallMetaClient(entry.ToolCall),
+			Visibility:        entry.Visibility,
+			Role:              entry.Role,
+			Text:              entry.Text,
+			OngoingText:       entry.OngoingText,
+			Phase:             string(entry.Phase),
+			MessageType:       string(entry.MessageType),
+			SourcePath:        entry.SourcePath,
+			CompactLabel:      entry.CompactLabel,
+			ToolResultSummary: entry.ToolResultSummary,
+			ToolCallID:        entry.ToolCallID,
+			ToolCall:          transcriptToolCallMetaClient(entry.ToolCall),
 		})
 	}
 	if page.TotalEntries == 0 {

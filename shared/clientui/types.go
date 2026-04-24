@@ -97,13 +97,17 @@ type BackgroundShellEvent struct {
 }
 
 type ChatEntry struct {
-	Visibility  EntryVisibility
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       string
-	ToolCallID  string
-	ToolCall    *ToolCallMeta
+	Visibility        EntryVisibility
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             string
+	MessageType       string
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *ToolCallMeta
 }
 
 type ChatSnapshot struct {

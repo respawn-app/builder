@@ -2,10 +2,12 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"builder/cli/tui"
 	"builder/server/runtime"
+	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -44,21 +46,50 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 
-	initial := stripANSIAndTrimRight(m.view.View())
+	initial := m.view.View()
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before scrolling")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-	afterUp := stripANSIAndTrimRight(m.view.View())
+	afterUp := m.view.View()
 	if afterUp == initial {
 		t.Fatal("expected detail transcript to change after up")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	afterDown := stripANSIAndTrimRight(m.view.View())
+	afterDown := m.view.View()
 	if afterDown != initial {
 		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
+	}
+}
+
+func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 12
+	m.syncViewport()
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "cat large.txt",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "cat large.txt"},
+	})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2"})
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	collapsed := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
+		t.Fatalf("expected collapsed compact tool row, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "line 2") {
+		t.Fatalf("expected collapsed detail to hide tool output, got %q", collapsed)
+	}
+
+	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
 	}
 }
 
@@ -117,10 +148,10 @@ func TestUpDownRouteByTranscriptMode(t *testing.T) {
 	if m.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected detail mode, got %q", m.view.Mode())
 	}
-	initialDetail := stripANSIAndTrimRight(m.view.View())
+	initialDetail := m.view.View()
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-	afterDetailUp := stripANSIAndTrimRight(m.view.View())
+	afterDetailUp := m.view.View()
 	if afterDetailUp == initialDetail {
 		t.Fatal("expected detail mode up to scroll transcript")
 	}

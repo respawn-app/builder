@@ -96,9 +96,11 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 			return nil
 		}
 		return []ChatEntry{{
-			Role:        "system",
-			Text:        formatBackgroundShellNotice(*evt.Background),
-			OngoingText: formatBackgroundShellCompact(*evt.Background),
+			Role:         "system",
+			Text:         formatBackgroundShellNotice(*evt.Background),
+			OngoingText:  formatBackgroundShellCompact(*evt.Background),
+			MessageType:  llm.MessageTypeBackgroundNotice,
+			CompactLabel: formatBackgroundShellCompact(*evt.Background),
 		}}
 	default:
 		return nil
@@ -111,8 +113,9 @@ func toolResultChatEntry(result tools.Result) ChatEntry {
 		role = "tool_result_error"
 	}
 	return ChatEntry{
-		Role:       role,
-		Text:       formatToolResult(result),
-		ToolCallID: strings.TrimSpace(result.CallID),
+		Role:              role,
+		Text:              formatToolResult(result),
+		ToolCallID:        strings.TrimSpace(result.CallID),
+		ToolResultSummary: strings.TrimSpace(result.Summary),
 	}
 }

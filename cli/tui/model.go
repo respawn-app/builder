@@ -23,15 +23,19 @@ const (
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Visibility  transcript.EntryVisibility
-	Transient   bool
-	Committed   bool
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       llm.MessagePhase
-	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	Visibility        transcript.EntryVisibility
+	Transient         bool
+	Committed         bool
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             llm.MessagePhase
+	MessageType       llm.MessageType
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *transcript.ToolCallMeta
 }
 
 type VisibleLineKind uint8
@@ -70,15 +74,19 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Visibility  transcript.EntryVisibility
-	Transient   bool
-	Committed   bool
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       llm.MessagePhase
-	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	Visibility        transcript.EntryVisibility
+	Transient         bool
+	Committed         bool
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             llm.MessagePhase
+	MessageType       llm.MessageType
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -167,9 +175,16 @@ func WithRenderDiagnosticHandler(handler RenderDiagnosticHandler) Option {
 	}
 }
 
+func WithCompactDetail() Option {
+	return func(m *Model) {
+		m.compactDetail = true
+	}
+}
+
 type Model struct {
 	mode Mode
 
+	compactDetail               bool
 	viewportLines               int
 	viewportWidth               int
 	ongoingScroll               int
@@ -184,6 +199,9 @@ type Model struct {
 
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
+	detailSelectedEntry      int
+	detailSelectedActive     bool
+	detailExpandedEntries    map[int]struct{}
 
 	detailSnapshot          string
 	detailLines             []string
@@ -314,6 +332,8 @@ type detailBlockSpec struct {
 	role       string
 	entryIndex int
 	entryEnd   int
+	selectable bool
+	expanded   bool
 	render     func(Model) []string
 }
 
@@ -484,6 +504,9 @@ func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
 			m.rebuildDetailSnapshot()
 			m.detailStale = false
 		}
+		if m.compactDetail {
+			m.ensureDetailSelection()
+		}
 		m.refreshDetailViewport()
 	case ModeOngoing:
 		m.mode = ModeOngoing
@@ -516,6 +539,37 @@ func (m Model) scrollDetail(delta int) Model {
 	m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
 	m.refreshDetailViewport()
 	return m
+}
+
+func (m *Model) ensureDetailSelection() {
+	if m == nil {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	if m.detailSelectedActive && m.detailBlockIndexForEntry(m.detailSelectedEntry) >= 0 {
+		return
+	}
+	for idx := len(m.detailBlocks) - 1; idx >= 0; idx-- {
+		if !m.detailBlocks[idx].selectable {
+			continue
+		}
+		m.detailSelectedEntry = m.detailBlocks[idx].entryIndex
+		m.detailSelectedActive = true
+		return
+	}
+	m.detailSelectedEntry = -1
+	m.detailSelectedActive = false
+}
+
+func (m Model) detailBlockIndexForEntry(entryIndex int) int {
+	for idx, block := range m.detailBlocks {
+		if block.selectable && block.entryIndex == entryIndex {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (m Model) maxOngoingScroll() int {
@@ -725,11 +779,15 @@ func (m Model) renderDetailSnapshot() string {
 		lines = []string{""}
 	}
 
-	selectedEntry, highlightSelected := m.selectedUserTranscriptEntry()
 	out := make([]string, 0, m.viewportLines)
 	for i, line := range lines {
-		if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
+		if m.compactDetail && m.detailSelectedActive && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == m.detailSelectedEntry {
 			line = m.renderSelectedTranscriptLine(line)
+		} else {
+			selectedEntry, highlightSelected := m.selectedUserTranscriptEntry()
+			if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
+				line = m.renderSelectedTranscriptLine(line)
+			}
 		}
 		out = append(out, line)
 	}

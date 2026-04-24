@@ -177,6 +177,33 @@ func TestPersistedTranscriptScanEnrichesToolResultFromCompletion(t *testing.T) {
 	}
 }
 
+func TestPersistedTranscriptScanProjectsUnknownDeveloperAndToolSummaryMetadata(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageType("custom_internal"), Content: "Internal developer note"}),
+		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(toolspec.ToolExecCommand), "is_error": true, "summary": "permission denied", "output": json.RawMessage(`{"error":"permission denied"}`)}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"cat secret"}`)}}}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if got := len(page.Entries); got != 3 {
+		t.Fatalf("len(page.Entries) = %d, want 3 (%+v)", got, page.Entries)
+	}
+	developer := page.Entries[0]
+	if developer.Role != string(transcript.EntryRoleDeveloperContext) || developer.Visibility != transcript.EntryVisibilityAll || developer.MessageType != llm.MessageType("custom_internal") || developer.CompactLabel != "Developer context: custom_internal" {
+		t.Fatalf("unexpected unknown developer projection: %+v", developer)
+	}
+	result := page.Entries[2]
+	if result.Role != "tool_result_error" || result.ToolResultSummary != "permission denied" {
+		t.Fatalf("unexpected tool result summary projection: %+v", result)
+	}
+}
+
 func TestPersistedTranscriptScanSynthesizesCompletedToolResultWithoutToolMessage(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
 	events := []session.Event{

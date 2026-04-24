@@ -14,7 +14,7 @@ func ErrorResultWith(c Call, msg string, marshal func(any) (json.RawMessage, err
 	if err != nil {
 		body, _ = defaultMarshal(map[string]any{"error": msg})
 	}
-	return Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
+	return Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true, Summary: msg}
 }
 
 func defaultMarshal(v any) (json.RawMessage, error) {

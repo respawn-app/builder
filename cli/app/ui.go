@@ -323,6 +323,7 @@ func WithUITheme(theme string) UIOption {
 		m.theme = strings.TrimSpace(theme)
 		m.view = tui.NewModel(
 			tui.WithTheme(theme),
+			tui.WithCompactDetail(),
 			tui.WithRenderDiagnosticHandler(m.handleRenderDiagnostic),
 		)
 	}
@@ -622,7 +623,7 @@ type rollbackCandidate struct {
 func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
 		engine:                       runtimeClient,
-		view:                         tui.NewModel(),
+		view:                         tui.NewModel(tui.WithCompactDetail()),
 		activity:                     uiActivityIdle,
 		runtimeEvents:                runtimeEvents,
 		askEvents:                    askEvents,

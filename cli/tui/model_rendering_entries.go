@@ -480,7 +480,10 @@ func (m Model) maybeHighlightSelectedTranscriptLine(line string, entryIndex int)
 func (m Model) renderSelectedTranscriptLine(line string) string {
 	palette := m.palette()
 	padded := padRenderedLineToWidth(line, m.viewportWidth)
-	return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
+	if !m.compactDetail {
+		return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
+	}
+	return applySelectionBackground(padded, palette.selectionBackgroundColor)
 }
 
 func padRenderedLineToWidth(line string, width int) string {
