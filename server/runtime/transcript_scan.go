@@ -239,29 +239,37 @@ func (w *responseItemMessageWalker) Apply(item llm.ResponseItem) {
 		}
 		w.flushAssistant()
 		w.emit(msg)
-	case llm.ResponseItemTypeFunctionCall:
+	case llm.ResponseItemTypeFunctionCall, llm.ResponseItemTypeCustomToolCall:
 		assistant := w.ensureAssistant()
 		callID := strings.TrimSpace(item.CallID)
 		if callID == "" {
 			callID = strings.TrimSpace(item.ID)
 		}
-		assistant.ToolCalls = append(assistant.ToolCalls, llm.ToolCall{
+		call := llm.ToolCall{
 			ID:           callID,
 			Name:         item.Name,
 			Presentation: append(json.RawMessage(nil), item.ToolPresentation...),
 			Input:        normalizeRuntimeToolInput(string(item.Arguments)),
-		})
-	case llm.ResponseItemTypeFunctionCallOutput:
+			Custom:       llm.ResponseItemTypeIsCustomToolCall(item.Type),
+			CustomInput:  item.CustomInput,
+		}
+		call.Input = transcriptToolCallInput(call)
+		assistant.ToolCalls = append(assistant.ToolCalls, call)
+	case llm.ResponseItemTypeFunctionCallOutput, llm.ResponseItemTypeCustomToolOutput:
 		w.flushAssistant()
 		callID := strings.TrimSpace(item.CallID)
+		if callID == "" {
+			callID = strings.TrimSpace(item.ID)
+		}
 		if callID == "" {
 			return
 		}
 		w.emit(llm.Message{
-			Role:       llm.RoleTool,
-			ToolCallID: callID,
-			Name:       item.Name,
-			Content:    stringFromJSONRawRuntime(item.Output),
+			Role:        llm.RoleTool,
+			MessageType: llm.ToolOutputMessageType(item.Type == llm.ResponseItemTypeCustomToolOutput),
+			ToolCallID:  callID,
+			Name:        item.Name,
+			Content:     stringFromJSONRawRuntime(item.Output),
 		})
 	case llm.ResponseItemTypeReasoning:
 		id := strings.TrimSpace(item.ID)

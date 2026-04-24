@@ -39,6 +39,7 @@ func defaultResponseOutputItemParsers() responseOutputItemParsers {
 	return newResponseOutputItemParsers(
 		messageOutputItemParser{},
 		functionCallOutputItemParser{},
+		customToolCallOutputItemParser{},
 		reasoningOutputItemParser{},
 		compactionOutputItemParser{},
 	)
@@ -151,6 +152,37 @@ func (functionCallOutputItemParser) Parse(item responses.ResponseOutputItemUnion
 }
 
 type reasoningOutputItemParser struct{}
+
+type customToolCallOutputItemParser struct{}
+
+func (customToolCallOutputItemParser) ItemType() string { return "custom_tool_call" }
+
+func (customToolCallOutputItemParser) Parse(item responses.ResponseOutputItemUnion) parsedResponseOutputItem {
+	call := item.AsCustomToolCall()
+	callID := textutil.FirstNonEmpty(strings.TrimSpace(call.CallID), strings.TrimSpace(call.ID))
+	name := strings.TrimSpace(call.Name)
+	if callID == "" && name == "" {
+		return parsedResponseOutputItem{}
+	}
+	raw := json.RawMessage(item.RawJSON())
+	return parsedResponseOutputItem{
+		CanonicalItems: []ResponseItem{{
+			Type:        ResponseItemTypeCustomToolCall,
+			ID:          strings.TrimSpace(call.ID),
+			CallID:      callID,
+			Name:        call.Name,
+			CustomInput: call.Input,
+			Raw:         raw,
+		}},
+		ToolCalls: []ToolCall{{
+			ID:          callID,
+			Name:        call.Name,
+			Input:       normalizeToolInput(call.Input),
+			Custom:      true,
+			CustomInput: call.Input,
+		}},
+	}
+}
 
 func (reasoningOutputItemParser) ItemType() string { return "reasoning" }
 

@@ -21,6 +21,7 @@ type GitWorktree struct {
 	Bare           bool
 	LockedReason   string
 	PrunableReason string
+	DirtyFileCount int
 	IsMain         bool
 }
 
@@ -183,7 +184,22 @@ func (i *GitInspector) Add(ctx context.Context, workspaceRoot string, worktreeRo
 	return normalized.CreateBranch, nil
 }
 
-func (i *GitInspector) Remove(ctx context.Context, workspaceRoot string, worktreeRoot string) error {
+func (i *GitInspector) DirtyFileCount(ctx context.Context, worktreeRoot string) (int, error) {
+	if i == nil {
+		return 0, fmt.Errorf("git inspector is required")
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		return 0, err
+	}
+	output, err := i.runner.Output(ctx, canonicalWorktreeRoot, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		return 0, err
+	}
+	return countPorcelainStatusEntries(output), nil
+}
+
+func (i *GitInspector) Remove(ctx context.Context, workspaceRoot string, worktreeRoot string, force bool) error {
 	if i == nil {
 		return fmt.Errorf("git inspector is required")
 	}
@@ -195,8 +211,29 @@ func (i *GitInspector) Remove(ctx context.Context, workspaceRoot string, worktre
 	if err != nil {
 		return err
 	}
-	_, err = i.runner.Output(ctx, canonicalWorkspaceRoot, "worktree", "remove", canonicalWorktreeRoot)
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, canonicalWorktreeRoot)
+	_, err = i.runner.Output(ctx, canonicalWorkspaceRoot, args...)
 	return err
+}
+
+func countPorcelainStatusEntries(output []byte) int {
+	fields := strings.Split(string(output), "\x00")
+	count := 0
+	for idx := 0; idx < len(fields); idx++ {
+		entry := fields[idx]
+		if strings.TrimSpace(entry) == "" {
+			continue
+		}
+		count++
+		if len(entry) >= 2 && (entry[0] == 'R' || entry[1] == 'R' || entry[0] == 'C' || entry[1] == 'C') {
+			idx++
+		}
+	}
+	return count
 }
 
 func (i *GitInspector) Prune(ctx context.Context, workspaceRoot string) error {

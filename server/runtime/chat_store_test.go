@@ -7,7 +7,6 @@ import (
 	"builder/shared/transcript"
 	"encoding/json"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -333,9 +332,10 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n line1\n-old\n+new\n*** Add File: b.go\n+hello\n*** End Patch\n"
 	call := llm.ToolCall{
-		ID:    "call_patch",
-		Name:  string(toolspec.ToolPatch),
-		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+		ID:          "call_patch",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: patchText,
 	}
 	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
@@ -367,15 +367,46 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	}
 }
 
+func TestCustomPatchToolCallFormattingUsesFreeformInput(t *testing.T) {
+	s := newChatStore()
+	s.cwd = "/workspace"
+
+	patchText := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
+	call := llm.ToolCall{
+		ID:          "call_patch_custom",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: patchText,
+	}
+	call = toolCallWithPresentation(t, s, call)
+	rendered := s.formatToolCall(call)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata on custom patch call")
+	}
+	if rendered.Text != rendered.ToolCall.PatchDetail {
+		t.Fatalf("expected custom patch call text to use rendered detail, text=%q detail=%q", rendered.Text, rendered.ToolCall.PatchDetail)
+	}
+	if strings.Contains(rendered.ToolCall.PatchSummary, "*** Begin Patch") {
+		t.Fatalf("expected ongoing summary to hide raw patch payload, got %q", rendered.ToolCall.PatchSummary)
+	}
+	if rendered.ToolCall.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+		t.Fatalf("unexpected custom patch summary: %q", rendered.ToolCall.PatchSummary)
+	}
+	if rendered.ToolCall.PatchRender == nil {
+		t.Fatalf("expected typed patch render metadata, got %+v", rendered.ToolCall)
+	}
+}
+
 func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	s := newChatStore()
 	s.cwd = "/workspace"
 
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n-old\n+new\n*** End Patch\n"
 	call := llm.ToolCall{
-		ID:    "call_patch_single",
-		Name:  string(toolspec.ToolPatch),
-		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+		ID:          "call_patch_single",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: patchText,
 	}
 	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
@@ -404,9 +435,10 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 
 	patchText := "not a structured patch payload"
 	call := llm.ToolCall{
-		ID:    "call_patch_raw",
-		Name:  string(toolspec.ToolPatch),
-		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+		ID:          "call_patch_raw",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: patchText,
 	}
 	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
@@ -506,8 +538,8 @@ func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
 	if !rendered.ToolCall.IsShell {
 		t.Fatalf("expected write_stdin to remain marked as shell-like, got %+v", rendered.ToolCall)
 	}
-	if rendered.ToolCall.RenderHint != nil {
-		t.Fatalf("did not expect render hint for write_stdin poll summary, got %+v", rendered.ToolCall.RenderHint)
+	if rendered.ToolCall.RenderHint == nil || rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindPlain {
+		t.Fatalf("expected plain render hint for write_stdin poll summary, got %+v", rendered.ToolCall.RenderHint)
 	}
 }
 

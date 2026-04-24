@@ -270,7 +270,7 @@ func TestListWorktreesForCurrentSessionUsesBoundedControlContext(t *testing.T) {
 	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
 	m := newWorktreeTestModel(t, client)
 
-	if _, err := m.listWorktreesForCurrentSession(); err != nil {
+	if _, err := m.listWorktreesForCurrentSession(false); err != nil {
 		t.Fatalf("listWorktreesForCurrentSession: %v", err)
 	}
 	if client.listCtx == nil {
@@ -910,9 +910,104 @@ func TestWorktreeDeleteCommandOpensDeleteDialogInOverlay(t *testing.T) {
 	if updated.worktrees.deleteConfirm.target.WorktreeID != "wt-feature" {
 		t.Fatalf("delete target = %+v", updated.worktrees.deleteConfirm.target)
 	}
+	if len(client.listRequests) == 0 || !client.listRequests[0].IncludeDirtyCount {
+		t.Fatalf("expected delete command list request to include dirty count, got %+v", client.listRequests)
+	}
 	plain := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(plain, "Delete worktree") || !strings.Contains(plain, "feature-a") {
+	if !strings.Contains(plain, "Delete feature-a?") {
 		t.Fatalf("expected delete dialog render, got %q", plain)
+	}
+	for _, want := range []string{"Will delete:", "• Workspace folder at /wt/feature-a", "• Git worktree feature-a"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected delete preview line %q, got %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Local branch feature/a") {
+		t.Fatalf("did not expect branch preview before explicit branch delete action, got %q", plain)
+	}
+	for _, removed := range []string{"Delete worktree", "Delete feature-a?\n\nDelete feature-a?", "Branch cleanup target", "Branch cleanup needs explicit confirmation", "Esc back | Left/Right choose action | Enter confirm"} {
+		if strings.Contains(plain, removed) {
+			t.Fatalf("did not expect removed delete dialog copy %q, got %q", removed, plain)
+		}
+	}
+}
+
+func TestWorktreeDeleteDialogBranchPreviewFollowsSelectedAction(t *testing.T) {
+	client := &worktreeCommandTestClient{listResp: testLinkedWorktreeListResponse()}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("did not expect branch preview for plain delete action, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated = next.(*uiModel)
+	plain = stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("expected branch preview for delete branch action, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated = next.(*uiModel)
+	plain = stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "• Local branch feature/a") {
+		t.Fatalf("did not expect branch preview after returning to plain delete action, got %q", plain)
+	}
+}
+
+func TestWorktreeDeleteDialogPreviewOmitsBranchWhenActionKeepsBranch(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].BuilderManaged = false
+	resp.Worktrees[1].CreatedBranch = false
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "Local branch feature/a") {
+		t.Fatalf("did not expect branch preview before explicit branch delete action, got %q", plain)
+	}
+	if !strings.Contains(plain, "• Workspace folder at /wt/feature-a") || !strings.Contains(plain, "• Git worktree feature-a") {
+		t.Fatalf("expected non-branch delete preview, got %q", plain)
+	}
+}
+
+func TestWorktreeDeleteDialogPreviewWarnsAboutDirtyFiles(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].DirtyFileCount = 2
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Drop 2 modified/untracked files") {
+		t.Fatalf("expected dirty file warning, got %q", plain)
+	}
+}
+
+func TestWorktreeDeleteDialogPreviewWarnsWhenDirtyCountUnavailable(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].DirtyFileCount = -1
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Dirty file count unavailable; delete will force removal") {
+		t.Fatalf("expected unknown dirty file warning, got %q", plain)
 	}
 }
 
@@ -1095,6 +1190,25 @@ func TestWorktreeDeleteDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
 	}
 }
 
+func TestWorktreeDeleteDoneShowsBranchCleanupOutcome(t *testing.T) {
+	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
+	m.worktrees.mutationToken = 9
+
+	next, _ := m.Update(worktreeDeleteDoneMsg{
+		token: 9,
+		resp: serverapi.WorktreeDeleteResponse{
+			Target:               clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"},
+			Worktree:             serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
+			BranchCleanupMessage: "Kept branch feature-a: Builder cannot prove this worktree created it",
+		},
+	})
+	updated := next.(*uiModel)
+
+	if !strings.Contains(updated.transientStatus, "Deleted worktree feature-a") || !strings.Contains(updated.transientStatus, "Kept branch feature-a") {
+		t.Fatalf("transient status = %q, want delete and branch cleanup outcome", updated.transientStatus)
+	}
+}
+
 func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees, serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a", BranchName: "feature/a"})
@@ -1225,11 +1339,14 @@ func TestWorktreeDeleteBranchHotkeyPrefersBranchDeleteAction(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	updated = next.(*uiModel)
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
 	if updated.worktrees.phase != uiWorktreeOverlayPhaseDeleteConfirm {
 		t.Fatalf("phase = %q, want delete_confirm", updated.worktrees.phase)
+	}
+	if len(client.listRequests) < 2 || !client.listRequests[1].IncludeDirtyCount {
+		t.Fatalf("expected delete hotkey refresh to include dirty count, got %+v", client.listRequests)
 	}
 	if updated.worktrees.deleteConfirm.selectedAction != uiWorktreeDeleteActionDeleteBranch {
 		t.Fatalf("selected action = %v, want delete branch", updated.worktrees.deleteConfirm.selectedAction)

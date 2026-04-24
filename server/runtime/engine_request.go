@@ -12,6 +12,8 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	compactionutil "builder/shared/compaction"
+	"builder/shared/toolspec"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -48,7 +50,7 @@ func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID stri
 
 	var requestTools []llm.Tool
 	if allowTools {
-		requestTools = e.requestTools()
+		requestTools = e.requestTools(ctx)
 	} else {
 		requestTools = []llm.Tool{}
 	}
@@ -128,7 +130,34 @@ func (e *Engine) systemPrompt(locked session.LockedContract) string {
 	if locked.ToolPreambles != nil {
 		includeToolPreambles = *locked.ToolPreambles
 	}
-	return prompts.MainSystemPrompt(includeToolPreambles)
+	return prompts.MainSystemPrompt(includeToolPreambles, prompts.SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: e.estimatedToolCallsForLockedContext(locked),
+	})
+}
+
+func (e *Engine) estimatedToolCallsForLockedContext(locked session.LockedContract) int {
+	budget := e.promptContextBudget(locked)
+	return compactionutil.EstimatedToolCallsForContextWindow(budget.window, budget.percent)
+}
+
+type promptContextBudget struct {
+	window  int
+	percent int
+}
+
+func (e *Engine) promptContextBudget(locked session.LockedContract) promptContextBudget {
+	budget := e.promptContextBudgetFromConfig()
+	if locked.ContextWindow > 0 {
+		budget.window = locked.ContextWindow
+	}
+	if locked.ContextPercent > 0 {
+		budget.percent = locked.ContextPercent
+	}
+	return budget
+}
+
+func (e *Engine) promptContextBudgetFromConfig() promptContextBudget {
+	return promptContextBudget{window: e.cfg.ContextWindowTokens, percent: e.cfg.EffectiveContextWindowPercent}
 }
 
 func summarizeOutputItemTypes(items []llm.ResponseItem) []string {
@@ -183,7 +212,7 @@ func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.
 	return out
 }
 
-func (e *Engine) requestTools() []llm.Tool {
+func (e *Engine) requestTools(ctx context.Context) []llm.Tool {
 	exposure := tools.RequestExposureContext{
 		SupportsVision: llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model),
 	}
@@ -192,10 +221,39 @@ func (e *Engine) requestTools() []llm.Tool {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
+	customPatchSupported := e.supportsCustomPatchTool(ctx)
 	for _, d := range defs {
-		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
+		tool := llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema}
+		if d.ID == toolspec.ToolPatch && customPatchSupported {
+			tool.Schema = nil
+			tool.Custom = &llm.CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: llm.PatchToolLarkGrammar}
+		}
+		out = append(out, tool)
 	}
 	return out
+}
+
+func (e *Engine) supportsCustomPatchTool(ctx context.Context) bool {
+	caps, ok := e.activeProviderCapabilities(ctx)
+	return ok && caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
+}
+
+func (e *Engine) activeProviderCapabilities(ctx context.Context) (llm.ProviderCapabilities, bool) {
+	if e == nil {
+		return llm.ProviderCapabilities{}, false
+	}
+	if e.cfg.ProviderCapabilitiesOverride != nil {
+		return *e.cfg.ProviderCapabilitiesOverride, true
+	}
+	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return llm.ProviderCapabilities{}, false
+	}
+	caps, err := provider.ProviderCapabilities(ctx)
+	if err != nil {
+		return llm.ProviderCapabilities{}, false
+	}
+	return caps, true
 }
 
 func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
@@ -207,7 +265,7 @@ func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
 		if cleaned[i].Type == llm.ResponseItemTypeMessage {
 			cleaned[i].Content = xansi.Strip(cleaned[i].Content)
 		}
-		if cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput && len(cleaned[i].Output) > 0 {
+		if (cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput || cleaned[i].Type == llm.ResponseItemTypeCustomToolOutput) && len(cleaned[i].Output) > 0 {
 			normalized := normalizeToolMessageForLLM(string(cleaned[i].Output))
 			if json.Valid([]byte(normalized)) {
 				cleaned[i].Output = json.RawMessage(normalized)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/shared/transcript"
 	"strings"
 	"testing"
 
@@ -62,6 +63,44 @@ func TestMuteANSIOutputPrefixesPreviewForegroundAndFaint(t *testing.T) {
 	}
 	if !strings.HasSuffix(muted, "\x1b[0m") {
 		t.Fatalf("expected muted output to terminate style state, got %q", muted)
+	}
+}
+
+func TestApplyANSIStyleIntentsFaintUsesForegroundAndRestoresAfterReset(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	base := m.palette().foregroundColor
+	out := applyANSIStyleIntents("echo \x1b[0mhello", m.ansiIntentPalette(), ThemeForeground|Faint)
+
+	prefix := "\x1b[" + strings.Join(styleParams(ansiStyleTransform{
+		DefaultForeground: &base,
+		ForceFaint:        true,
+	}, false), ";") + "m"
+	if !strings.HasPrefix(out, prefix) {
+		t.Fatalf("expected faint foreground output to start with app foreground+faint style, got %q", out)
+	}
+	reset := "\x1b[" + strings.Join(styleParams(ansiStyleTransform{
+		DefaultForeground: &base,
+		ForceFaint:        true,
+	}, true), ";") + "m"
+	if !strings.Contains(out, reset+"hello") {
+		t.Fatalf("expected reset to restore app foreground+faint style, got %q", out)
+	}
+	if got := xansi.Strip(out); got != "echo hello" {
+		t.Fatalf("expected text preserved after faint foreground styling, got %q", got)
+	}
+}
+
+func TestOrdinaryMutedShellPreviewStillUsesPreviewForeground(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	line := strings.Join(m.flattenEntryWithMeta("tool_shell_success", "plain shell summary", true, &transcript.ToolCallMeta{
+		IsShell: true,
+	}), "\n")
+
+	if !containsColor(extractForegroundTrueColors(line), m.palette().previewColor) {
+		t.Fatalf("expected ordinary muted shell preview to keep preview foreground, got %q", line)
+	}
+	if containsColor(extractForegroundTrueColors(line), m.palette().foregroundColor) {
+		t.Fatalf("did not expect ordinary muted shell preview to switch to app foreground, got %q", line)
 	}
 }
 

@@ -1,13 +1,23 @@
 package prompts
 
 import (
+	"bytes"
 	_ "embed"
+	"fmt"
 	"strings"
+	"text/template"
 
 	"builder/cli/selfcmd"
 )
 
-const runCommandPlaceholder = "{{builder_run_command}}"
+type SystemPromptTemplateArgs struct {
+	EstimatedToolCallsForContext int
+}
+
+type systemPromptTemplateData struct {
+	BuilderRunCommand            string
+	EstimatedToolCallsForContext int
+}
 
 //go:embed system_prompt.md
 var SystemPrompt string
@@ -51,8 +61,8 @@ var WorktreeModePrompt string
 //go:embed worktree_mode_exit_prompt.md
 var WorktreeModeExitPrompt string
 
-func MainSystemPrompt(includeToolPreambles bool) string {
-	base := renderRunCommand(strings.TrimSpace(SystemPrompt))
+func MainSystemPrompt(includeToolPreambles bool, args SystemPromptTemplateArgs) string {
+	base := renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
 	if !includeToolPreambles {
 		return base
 	}
@@ -66,8 +76,8 @@ func MainSystemPrompt(includeToolPreambles bool) string {
 	return base + "\n\n" + preambles
 }
 
-func BaseSystemPrompt() string {
-	return renderRunCommand(strings.TrimSpace(SystemPrompt))
+func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
+	return renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
 }
 
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
@@ -95,8 +105,23 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 	})
 }
 
-func renderRunCommand(text string) string {
-	return renderRunCommandWithPrefix(text, selfcmd.RunCommandPrefix())
+func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	tmpl, err := template.New("system_prompt").Option("missingkey=error").Parse(trimmed)
+	if err != nil {
+		panic(fmt.Errorf("parse system prompt template: %w", err))
+	}
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, systemPromptTemplateData{
+		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
+		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
+	}); err != nil {
+		panic(fmt.Errorf("render system prompt template: %w", err))
+	}
+	return out.String()
 }
 
 func renderWorktreePrompt(template string, replacements map[string]string) string {
@@ -108,11 +133,4 @@ func renderWorktreePrompt(template string, replacements map[string]string) strin
 		text = strings.ReplaceAll(text, placeholder, value)
 	}
 	return text
-}
-
-func renderRunCommandWithPrefix(text, prefix string) string {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	return strings.ReplaceAll(text, runCommandPlaceholder, prefix)
 }

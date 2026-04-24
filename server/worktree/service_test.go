@@ -86,6 +86,12 @@ func (r *serviceTestRuntime) SyncExecutionTarget(_ context.Context, sessionID st
 	return nil
 }
 
+func (r *serviceTestRuntime) IsSessionRuntimeActive(sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.activeSessions[strings.TrimSpace(sessionID)]
+}
+
 type serviceTestGate struct {
 	err error
 }
@@ -110,6 +116,26 @@ type serviceTestLocalNotes struct {
 	texts          []string
 	sessionTexts   []string
 	appendLocalErr error
+}
+
+type dirtyCountFailingGitRunner struct {
+	base      gitCommandRunner
+	dirtyRoot string
+}
+
+func (r *dirtyCountFailingGitRunner) Output(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	output, exitCode, err := r.Run(ctx, dir, args...)
+	if err != nil {
+		return nil, formatGitRunError(exitCode, err, output, args...)
+	}
+	return output, nil
+}
+
+func (r *dirtyCountFailingGitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	if equalStrings(args, []string{"status", "--porcelain=v1", "-z"}) && strings.TrimSpace(dir) == strings.TrimSpace(r.dirtyRoot) {
+		return []byte("status failed"), 1, errors.New("status failed")
+	}
+	return r.base.Run(ctx, dir, args...)
 }
 
 func (n *serviceTestLocalNotes) AppendLocalEntry(_ context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
@@ -346,6 +372,8 @@ func TestDeleteWorktreeKeepsExistingBranchUnlessExplicitlyRequested(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateWorktree existing branch: %v", err)
 	}
+	env.localNotes = &serviceTestLocalNotes{}
+	env.service.localNotes = env.localNotes
 
 	deleteResp, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-shared-branch",
@@ -361,6 +389,9 @@ func TestDeleteWorktreeKeepsExistingBranchUnlessExplicitlyRequested(t *testing.T
 	}
 	if !strings.Contains(deleteResp.BranchCleanupMessage, "Kept branch feature/shared-branch") {
 		t.Fatalf("unexpected branch cleanup message: %q", deleteResp.BranchCleanupMessage)
+	}
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no transcript note for delete branch cleanup message, got %+v", notes)
 	}
 	if got := runGit(t, env.workspaceRoot, "branch", "--list", "feature/shared-branch"); !strings.Contains(got, "feature/shared-branch") {
 		t.Fatalf("expected shared branch to remain, got %q", got)
@@ -380,6 +411,8 @@ func TestDeleteWorktreeDeletesExistingBranchWhenExplicitlyRequested(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateWorktree existing branch: %v", err)
 	}
+	env.localNotes = &serviceTestLocalNotes{}
+	env.service.localNotes = env.localNotes
 
 	deleteResp, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-shared-branch-explicit",
@@ -396,6 +429,9 @@ func TestDeleteWorktreeDeletesExistingBranchWhenExplicitlyRequested(t *testing.T
 	}
 	if !strings.Contains(deleteResp.BranchCleanupMessage, "Deleted branch feature/shared-branch") {
 		t.Fatalf("unexpected branch cleanup message: %q", deleteResp.BranchCleanupMessage)
+	}
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no transcript note for delete branch cleanup message, got %+v", notes)
 	}
 	if got := runGit(t, env.workspaceRoot, "branch", "--list", "feature/shared-branch"); strings.Contains(got, "feature/shared-branch") {
 		t.Fatalf("expected shared branch removed, got %q", got)
@@ -724,6 +760,7 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
 	}
+	env.runtime.activeSessions[otherSession.Meta().SessionID] = true
 
 	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-blocked-session",
@@ -733,6 +770,143 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	})
 	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
 		t.Fatalf("DeleteWorktree error = %v, want ErrWorktreeBlocked", err)
+	}
+}
+
+func TestDeleteWorktreeIgnoresDormantSessionsTargetingIt(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dormant-session")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dormant-session",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree root removed, stat err=%v", err)
+	}
+}
+
+func TestListWorktreesReportsDirtyFileCount(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/dirty-count")
+	if err := os.WriteFile(filepath.Join(created.CanonicalRoot, "untracked.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID, IncludeDirtyCount: true})
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	listed := findWorktreeByID(t, resp.Worktrees, created.WorktreeID)
+	if listed.DirtyFileCount != 1 {
+		t.Fatalf("dirty file count = %d, want 1", listed.DirtyFileCount)
+	}
+}
+
+func TestListWorktreesDirtyCountProbeFailureIsBestEffort(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/dirty-probe-failure")
+	env.service.git = NewGitInspector(&dirtyCountFailingGitRunner{base: execGitCommandRunner{}, dirtyRoot: created.CanonicalRoot})
+
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID, IncludeDirtyCount: true})
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	listed := findWorktreeByID(t, resp.Worktrees, created.WorktreeID)
+	if listed.DirtyFileCount != -1 {
+		t.Fatalf("dirty file count after failed probe = %d, want -1", listed.DirtyFileCount)
+	}
+}
+
+func TestDeleteWorktreeForcesRemovalWhenDirty(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dirty")
+	if err := os.WriteFile(filepath.Join(created.CanonicalRoot, "untracked.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dirty",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected dirty worktree root removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteWorktreeDirtyCountProbeFailureIsBestEffort(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dirty-probe-failure")
+	env.service.git = NewGitInspector(&dirtyCountFailingGitRunner{base: execGitCommandRunner{}, dirtyRoot: created.CanonicalRoot})
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dirty-probe-failure",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree root removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteWorktreeBlocksOnlyActiveSessionsTargetingIt(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-mixed-session-blockers")
+	dormantSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	activeSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := dormantSession.SetName("dormant blocker"); err != nil {
+		t.Fatalf("SetName dormant: %v", err)
+	}
+	if err := activeSession.SetName("active blocker"); err != nil {
+		t.Fatalf("SetName active: %v", err)
+	}
+	if err := env.store.ImportSessionSnapshot(env.ctx, session.PersistedStoreSnapshot{SessionDir: dormantSession.Dir(), Meta: dormantSession.Meta()}); err != nil {
+		t.Fatalf("ImportSessionSnapshot dormant: %v", err)
+	}
+	if err := env.store.ImportSessionSnapshot(env.ctx, session.PersistedStoreSnapshot{SessionDir: activeSession.Dir(), Meta: activeSession.Meta()}); err != nil {
+		t.Fatalf("ImportSessionSnapshot active: %v", err)
+	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, dormantSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID dormant session: %v", err)
+	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, activeSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID active session: %v", err)
+	}
+	env.runtime.activeSessions[activeSession.Meta().SessionID] = true
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-mixed-session-blockers",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
+		t.Fatalf("DeleteWorktree error = %v, want ErrWorktreeBlocked", err)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "active blocker") {
+		t.Fatalf("expected active blocker in error, got %q", message)
+	}
+	if strings.Contains(message, "dormant blocker") {
+		t.Fatalf("did not expect dormant blocker in error, got %q", message)
 	}
 }
 
@@ -793,9 +967,8 @@ func TestDeleteWorktreeRebindsCurrentSessionToMainBeforeRemoval(t *testing.T) {
 			t.Fatalf("expected deleted worktree to disappear from list, got %+v", worktree)
 		}
 	}
-	notes := env.localNotes.snapshot()
-	if len(notes) == 0 || !strings.Contains(notes[0], "Switched worktree to main workspace") {
-		t.Fatalf("expected delete path to append switch note, got %+v", notes)
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected delete path not to append transcript notes, got %+v", notes)
 	}
 }
 

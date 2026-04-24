@@ -143,6 +143,9 @@ func buildRenderedFiles(doc Document, cwd string) []RenderedFile {
 }
 
 func renderChangeLine(change ChangeLine) string {
+	if change.EndOfFile {
+		return "*** End of File"
+	}
 	if change.Kind == ' ' && change.Content == "" {
 		return ""
 	}

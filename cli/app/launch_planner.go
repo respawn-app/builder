@@ -154,6 +154,7 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 			Settings:        resp.Plan.ActiveSettings,
 			Source:          resp.Plan.Source,
 			AuthManager:     authManager,
+			AuthStatus:      p.server.AuthStatusClient(),
 			AuthStatePath:   authStatePath,
 			OwnsServer:      p.server.OwnsServer(),
 		},

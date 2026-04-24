@@ -11,14 +11,18 @@ import (
 )
 
 func Parse(src string) (Document, error) {
-	s := scanner{lines: splitRawLines(src)}
-	if !s.consumeExact("*** Begin Patch") {
+	lines, err := patchBodyLines(src)
+	if err != nil {
+		return Document{}, err
+	}
+	s := scanner{lines: lines}
+	if !s.consumeMarker("*** Begin Patch") {
 		return Document{}, errors.New("patch must start with *** Begin Patch")
 	}
 
 	doc := Document{}
 	for !s.done() {
-		line := s.peek()
+		line := strings.TrimSpace(s.peek())
 		switch {
 		case line == "*** End Patch":
 			s.next()
@@ -27,7 +31,7 @@ func Parse(src string) (Document, error) {
 			}
 			return doc, nil
 		case strings.HasPrefix(line, "*** Add File: "):
-			head := strings.TrimPrefix(s.next(), "*** Add File: ")
+			head := strings.TrimPrefix(strings.TrimSpace(s.next()), "*** Add File: ")
 			content := []string{}
 			for !s.done() {
 				n := s.peek()
@@ -39,18 +43,26 @@ func Parse(src string) (Document, error) {
 				}
 				content = append(content, strings.TrimPrefix(s.next(), "+"))
 			}
+			if len(content) == 0 {
+				return Document{}, fmt.Errorf("add file hunk for path %q is empty", head)
+			}
 			doc.Hunks = append(doc.Hunks, AddFile{Path: head, Content: content})
 		case strings.HasPrefix(line, "*** Delete File: "):
-			path := strings.TrimPrefix(s.next(), "*** Delete File: ")
+			path := strings.TrimPrefix(strings.TrimSpace(s.next()), "*** Delete File: ")
 			doc.Hunks = append(doc.Hunks, DeleteFile{Path: path})
 		case strings.HasPrefix(line, "*** Update File: "):
-			path := strings.TrimPrefix(s.next(), "*** Update File: ")
+			path := strings.TrimPrefix(strings.TrimSpace(s.next()), "*** Update File: ")
 			up := UpdateFile{Path: path}
-			if !s.done() && strings.HasPrefix(s.peek(), "*** Move to: ") {
-				up.MoveTo = strings.TrimPrefix(s.next(), "*** Move to: ")
+			if !s.done() && strings.HasPrefix(strings.TrimSpace(s.peek()), "*** Move to: ") {
+				up.MoveTo = strings.TrimPrefix(strings.TrimSpace(s.next()), "*** Move to: ")
 			}
 			for !s.done() {
 				n := s.peek()
+				if strings.TrimSpace(n) == "*** End of File" {
+					up.Changes = append(up.Changes, ChangeLine{EndOfFile: true})
+					s.next()
+					continue
+				}
 				if strings.HasPrefix(n, "*** ") {
 					break
 				}
@@ -66,6 +78,9 @@ func Parse(src string) (Document, error) {
 				up.Changes = append(up.Changes, ChangeLine{Kind: rune(p), Content: n[1:]})
 				s.next()
 			}
+			if len(up.Changes) == 0 && strings.TrimSpace(up.MoveTo) == "" {
+				return Document{}, fmt.Errorf("update file hunk for path %q is empty", path)
+			}
 			doc.Hunks = append(doc.Hunks, up)
 		default:
 			return Document{}, fmt.Errorf("unknown patch block: %q", line)
@@ -73,6 +88,18 @@ func Parse(src string) (Document, error) {
 	}
 
 	return Document{}, errors.New("missing *** End Patch")
+}
+
+func patchBodyLines(src string) ([]string, error) {
+	lines := splitRawLines(strings.TrimSpace(src))
+	if len(lines) >= 3 {
+		first := lines[0]
+		last := lines[len(lines)-1]
+		if (first == "<<EOF" || first == "<<'EOF'" || first == "<<\"EOF\"") && last == "EOF" {
+			return lines[1 : len(lines)-1], nil
+		}
+	}
+	return lines, nil
 }
 
 type scanner struct {
@@ -99,6 +126,14 @@ func (s *scanner) next() string {
 
 func (s *scanner) consumeExact(v string) bool {
 	if s.peek() == v {
+		s.next()
+		return true
+	}
+	return false
+}
+
+func (s *scanner) consumeMarker(v string) bool {
+	if strings.TrimSpace(s.peek()) == v {
 		s.next()
 		return true
 	}

@@ -144,10 +144,15 @@ type ReviewerSettings struct {
 }
 
 type SourceReport struct {
-	SettingsPath         string
-	SettingsFileExists   bool
-	CreatedDefaultConfig bool
-	Sources              map[string]string
+	SettingsPath                  string
+	SettingsFileExists            bool
+	CreatedDefaultConfig          bool
+	HomeSettingsPath              string
+	HomeSettingsFileExists        bool
+	WorkspaceSettingsPath         string
+	WorkspaceSettingsFileExists   bool
+	WorkspaceSettingsLayerEnabled bool
+	Sources                       map[string]string
 }
 
 type App struct {

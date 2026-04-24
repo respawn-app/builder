@@ -270,6 +270,16 @@ func (t fakeTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
 }
 
+type failingTool struct {
+	name toolspec.ID
+}
+
+func (t failingTool) Name() toolspec.ID { return t.name }
+func (t failingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
+	out, _ := json.Marshal(map[string]any{"error": "failed"})
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: out, IsError: true}, nil
+}
+
 type blockingTool struct {
 	name    toolspec.ID
 	started chan struct{}
@@ -661,9 +671,6 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 	if meta.Locked.ToolPreambles == nil || *meta.Locked.ToolPreambles {
 		t.Fatalf("expected locked tool_preambles=false for headless session")
 	}
-	if strings.Contains(client.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect intermediary updates in headless system prompt")
-	}
 }
 
 func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
@@ -688,8 +695,8 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
-	if strings.Contains(firstClient.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect intermediary updates in first locked prompt")
+	if store.Meta().Locked == nil || store.Meta().Locked.ToolPreambles == nil || *store.Meta().Locked.ToolPreambles {
+		t.Fatalf("expected first session to lock tool_preambles=false, got %+v", store.Meta().Locked)
 	}
 
 	resumedClient := &fakeClient{responses: []llm.Response{{
@@ -707,8 +714,129 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
-	if strings.Contains(resumedClient.calls[0].SystemPrompt, "## Intermediary updates") {
-		t.Fatalf("did not expect resumed session to change locked tool_preambles policy")
+	if store.Meta().Locked == nil || store.Meta().Locked.ToolPreambles == nil || *store.Meta().Locked.ToolPreambles {
+		t.Fatalf("expected resumed session to preserve locked tool_preambles=false, got %+v", store.Meta().Locked)
+	}
+}
+
+func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	firstClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+		Usage:     llm.Usage{WindowTokens: 272_000},
+	}}}
+	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 272_000,
+	})
+	if err != nil {
+		t.Fatalf("new first engine: %v", err)
+	}
+	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected locked context budget, got %+v", locked)
+	}
+	if got := firstEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("estimated tool calls = %d, want 185", got)
+	}
+	firstPrompt := firstClient.calls[0].SystemPrompt
+	if strings.TrimSpace(firstPrompt) == "" {
+		t.Fatal("expected non-empty rendered system prompt")
+	}
+	firstPromptCacheKey := firstClient.calls[0].PromptCacheKey
+	if firstPromptCacheKey == "" {
+		t.Fatal("expected prompt cache key on first request")
+	}
+
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+		Usage:     llm.Usage{WindowTokens: 400_000},
+	}}}
+	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 400_000,
+	})
+	if err != nil {
+		t.Fatalf("new resumed engine: %v", err)
+	}
+	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	if strings.TrimSpace(resumedClient.calls[0].SystemPrompt) == "" {
+		t.Fatal("expected resumed system prompt to stay non-empty")
+	}
+	if resumedClient.calls[0].PromptCacheKey != firstPromptCacheKey {
+		t.Fatalf("expected resumed prompt cache key = %q, got %q", firstPromptCacheKey, resumedClient.calls[0].PromptCacheKey)
+	}
+	if got := resumedEngine.estimatedToolCallsForLockedContext(*store.Meta().Locked); got != 185 {
+		t.Fatalf("resumed estimated tool calls = %d, want 185", got)
+	}
+
+	alteredLocked := *store.Meta().Locked
+	alteredLocked.ContextWindow = 400_000
+	if got := resumedEngine.estimatedToolCallsForLockedContext(alteredLocked); got != 271 {
+		t.Fatalf("altered estimated tool calls = %d, want 271", got)
+	}
+	alteredPrompt := resumedEngine.systemPrompt(alteredLocked)
+	if alteredPrompt == firstPrompt {
+		t.Fatal("expected system prompt estimate to change when locked context budget changes")
+	}
+}
+
+func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:          "gpt-5",
+		Temperature:    1,
+		MaxOutputToken: 0,
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+
+	firstEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 272_000,
+	})
+	if err != nil {
+		t.Fatalf("new first engine: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected legacy lock backfilled from first resume config, got %+v", locked)
+	}
+	if got := firstEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("first estimated tool calls = %d, want 185", got)
+	}
+
+	secondEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:               "gpt-5",
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens: 400_000,
+	})
+	if err != nil {
+		t.Fatalf("new second engine: %v", err)
+	}
+	locked = store.Meta().Locked
+	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
+		t.Fatalf("expected legacy lock backfill to stay pinned, got %+v", locked)
+	}
+	if got := secondEngine.estimatedToolCallsForLockedContext(*locked); got != 185 {
+		t.Fatalf("second estimated tool calls = %d, want 185", got)
 	}
 }
 
@@ -1164,7 +1292,7 @@ func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -1224,7 +1352,7 @@ func TestSetReviewerDisabledConcurrentWithBusyStepSkipsReviewerForCurrentRun(t *
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -3077,7 +3205,7 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -5736,9 +5864,10 @@ func TestReopenCarriesInterruptedShellToolAttemptIntoNextModelRequest(t *testing
 
 func TestReopenCarriesInterruptedApprovalBackedPatchToolAttemptIntoNextModelRequest(t *testing.T) {
 	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
-		ID:    "call_patch",
-		Name:  string(toolspec.ToolPatch),
-		Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: ../outside.txt\n+hello\n*** End Patch\n"}`),
+		ID:          "call_patch",
+		Name:        string(toolspec.ToolPatch),
+		Custom:      true,
+		CustomInput: "*** Begin Patch\n*** Add File: ../outside.txt\n+hello\n*** End Patch\n",
 	})
 }
 
@@ -5795,7 +5924,11 @@ func testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t *testing.T, c
 		switch {
 		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == call.ID && item.Name == call.Name:
 			foundPriorAttempt = true
+		case item.Type == llm.ResponseItemTypeCustomToolCall && item.CallID == call.ID && item.Name == call.Name:
+			foundPriorAttempt = true
 		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == call.ID:
+			foundUnexpectedReply = true
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == call.ID:
 			foundUnexpectedReply = true
 		}
 	}
@@ -6328,6 +6461,204 @@ func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *test
 	}
 	if client.countInputTokenCalls != 2 {
 		t.Fatalf("expected critical recount after tool completion, got %d count calls", client.countInputTokenCalls)
+	}
+}
+
+func TestCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	patchInput := "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n"
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "patching", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:          "call_patch",
+				Name:        string(toolspec.ToolPatch),
+				Custom:      true,
+				CustomInput: patchInput,
+				Input:       json.RawMessage(`{}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "apply patch")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected final message: %+v", msg)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected follow-up request after tool result, got %d", len(client.calls))
+	}
+
+	foundCustomCall := false
+	foundCustomOutput := false
+	foundFunctionOutput := false
+	for _, item := range client.calls[1].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeCustomToolCall && item.CallID == "call_patch":
+			foundCustomCall = true
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == "call_patch":
+			foundCustomOutput = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_patch":
+			foundFunctionOutput = true
+		}
+	}
+	if !foundCustomCall || !foundCustomOutput || foundFunctionOutput {
+		t.Fatalf("expected custom call/output pair only, foundCustomCall=%v foundCustomOutput=%v foundFunctionOutput=%v items=%+v", foundCustomCall, foundCustomOutput, foundFunctionOutput, client.calls[1].Items)
+	}
+}
+
+func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t *testing.T) {
+	tests := []struct {
+		name       string
+		caps       llm.ProviderCapabilities
+		wantCustom bool
+	}{
+		{
+			name:       "first party OpenAI",
+			caps:       llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true},
+			wantCustom: true,
+		},
+		{
+			name:       "OpenAI compatible fallback",
+			caps:       llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, IsOpenAIFirstParty: false},
+			wantCustom: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+			client := &fakeClient{caps: tt.caps}
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+			if _, err := eng.ensureLocked(); err != nil {
+				t.Fatalf("ensureLocked: %v", err)
+			}
+
+			requestTools := eng.requestTools(context.Background())
+			if len(requestTools) != 1 {
+				t.Fatalf("request tools = %+v, want one patch tool", requestTools)
+			}
+			gotCustom := requestTools[0].Custom != nil
+			if gotCustom != tt.wantCustom {
+				t.Fatalf("patch custom tool = %v, want %v; tool=%+v", gotCustom, tt.wantCustom, requestTools[0])
+			}
+			if !tt.wantCustom && len(requestTools[0].Schema) == 0 {
+				t.Fatalf("expected function-tool schema fallback for unsupported custom tools, got %+v", requestTools[0])
+			}
+		})
+	}
+}
+
+func TestRequestToolsUseActiveProviderCapsForCustomPatchTool(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:        "gpt-5",
+		EnabledTools: []string{string(toolspec.ToolPatch)},
+		ProviderContract: llm.LockedProviderCapabilitiesFromContract(llm.ProviderCapabilities{
+			ProviderID:           "openai",
+			SupportsResponsesAPI: true,
+			IsOpenAIFirstParty:   true,
+		}),
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+	activeCaps := llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}
+	client := &fakeClient{caps: activeCaps}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+		Model:                        "gpt-5",
+		EnabledTools:                 []toolspec.ID{toolspec.ToolPatch},
+		ProviderCapabilitiesOverride: &activeCaps,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	requestTools := eng.requestTools(context.Background())
+	if len(requestTools) != 1 {
+		t.Fatalf("request tools = %+v, want one patch tool", requestTools)
+	}
+	if requestTools[0].Custom != nil {
+		t.Fatalf("expected active compatible provider to use schema patch tool despite stale locked OpenAI caps, got %+v", requestTools[0])
+	}
+	if len(requestTools[0].Schema) == 0 {
+		t.Fatalf("expected function-tool schema fallback for active compatible provider, got %+v", requestTools[0])
+	}
+}
+
+func TestFailedCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "patching", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:          "call_patch",
+				Name:        string(toolspec.ToolPatch),
+				Custom:      true,
+				CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n",
+				Input:       json.RawMessage(`{}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(failingTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "apply patch"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected follow-up request after tool result, got %d", len(client.calls))
+	}
+
+	foundCustomOutput := false
+	foundFunctionOutput := false
+	for _, item := range client.calls[1].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeCustomToolOutput && item.CallID == "call_patch":
+			foundCustomOutput = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_patch":
+			foundFunctionOutput = true
+		}
+	}
+	if !foundCustomOutput || foundFunctionOutput {
+		t.Fatalf("expected failed custom output only, foundCustomOutput=%v foundFunctionOutput=%v items=%+v", foundCustomOutput, foundFunctionOutput, client.calls[1].Items)
 	}
 }
 

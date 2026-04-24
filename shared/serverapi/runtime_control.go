@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"builder/shared/transcript"
 )
 
 type RuntimeSetSessionNameRequest struct {
@@ -61,6 +63,7 @@ type RuntimeAppendLocalEntryRequest struct {
 	ControllerLeaseID string `json:"controller_lease_id"`
 	Role              string `json:"role"`
 	Text              string `json:"text"`
+	Visibility        string `json:"visibility,omitempty"`
 }
 
 type RuntimeShouldCompactBeforeUserMessageRequest struct {
@@ -241,6 +244,9 @@ func (r RuntimeAppendLocalEntryRequest) Validate() error {
 	}
 	if err := validateRuntimeSessionID(r.SessionID); err != nil {
 		return err
+	}
+	if visibility := transcript.NormalizeEntryVisibility(transcript.EntryVisibility(r.Visibility)); visibility != "" && visibility != transcript.EntryVisibilityAll && visibility != transcript.EntryVisibilityDetailOnly {
+		return errors.New("visibility must be all or detail_only")
 	}
 	return validateControllerLeaseID(r.ControllerLeaseID)
 }

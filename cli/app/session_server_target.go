@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
 	"time"
 
@@ -97,17 +96,13 @@ func startLocalInteractiveSessionDaemon(ctx context.Context, opts Options) (*cli
 	if !ok {
 		return nil, nil, false, nil
 	}
-	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
-	if err != nil {
-		return nil, nil, false, err
-	}
 	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
-	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
+	args := append([]string{execPath}, buildServeArgsFunc("", opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	cmd.Env = os.Environ()
+	cmd.Env = buildServeEnvFunc(cfg)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, false, err
 	}

@@ -45,7 +45,7 @@ func applyEdit(original []string, changes []patchformat.ChangeLine) ([]string, e
 		if h.header.hasPosition {
 			expected = h.header.oldStart - 1 + cumulativeOffset
 		}
-		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition)
+		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition, h.header.context, h.endOfFile)
 		if err != nil {
 			return nil, attachFailureReasonContext(err, fmt.Sprintf("hunk %d", idx+1))
 		}
@@ -82,6 +82,11 @@ func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 
 	flush := func() error {
 		if len(current.changes) == 0 {
+			if current.endOfFile {
+				hunks = append(hunks, current)
+				current = editHunk{}
+				return nil
+			}
 			if current.header.hasPosition {
 				return malformedFailure("hunk header without changes")
 			}
@@ -93,6 +98,10 @@ func parseEditHunks(changes []patchformat.ChangeLine) ([]editHunk, error) {
 	}
 
 	for _, ch := range changes {
+		if ch.EndOfFile {
+			current.endOfFile = true
+			continue
+		}
 		switch ch.Kind {
 		case '@':
 			if err := flush(); err != nil {
@@ -123,6 +132,9 @@ func parseHunkHeader(line string) (hunkHeader, error) {
 
 	m := unifiedHunkHeaderPattern.FindStringSubmatch(line)
 	if len(m) == 0 {
+		if strings.HasPrefix(line, "@@ ") {
+			return hunkHeader{context: strings.TrimPrefix(line, "@@ ")}, nil
+		}
 		return hunkHeader{}, malformedFailure(fmt.Sprintf("invalid hunk header %q", line))
 	}
 
@@ -158,7 +170,7 @@ func parseHunkHeader(line string) (hunkHeader, error) {
 	}, nil
 }
 
-func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, floor int, anchored bool) (int, error) {
+func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, floor int, anchored bool, context string, endOfFile bool) (int, error) {
 	if floor < 0 {
 		floor = 0
 	}
@@ -192,12 +204,47 @@ func findHunkAnchor(lines []string, changes []patchformat.ChangeLine, expected, 
 		return -1, contentMismatchFailure(expected+1, true, fmt.Sprintf("patch hunk did not match within %d lines of the expected location", hunkMaxFuzz))
 	}
 
+	if strings.TrimSpace(context) != "" {
+		for start := floor; start < len(lines); start++ {
+			if lineMatches(lines[start], context) {
+				contextStart := start + 1
+				for candidate := contextStart; candidate <= maxStart; candidate++ {
+					if endOfFile && candidate+oldLineCount(changes) != len(lines) {
+						continue
+					}
+					if matchAt(candidate) {
+						return candidate, nil
+					}
+				}
+			}
+		}
+		return -1, contentMismatchFailure(0, false, fmt.Sprintf("failed to find context %q", context))
+	}
+
 	for start := floor; start <= maxStart; start++ {
+		if endOfFile && start+oldLineCount(changes) != len(lines) {
+			continue
+		}
 		if matchAt(start) {
 			return start, nil
 		}
 	}
 	return -1, contentMismatchFailure(0, false, "patch hunk did not match file content")
+}
+
+func oldLineCount(changes []patchformat.ChangeLine) int {
+	count := 0
+	for _, ch := range changes {
+		switch ch.Kind {
+		case ' ', '-':
+			count++
+		}
+	}
+	return count
+}
+
+func lineMatches(actual, expected string) bool {
+	return actual == expected || strings.TrimRight(actual, " \t") == strings.TrimRight(expected, " \t") || strings.TrimSpace(actual) == strings.TrimSpace(expected)
 }
 
 func applyHunkAt(lines []string, changes []patchformat.ChangeLine, start int) ([]string, int, int, error) {

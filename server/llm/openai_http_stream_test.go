@@ -85,6 +85,57 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestGenerateStream_ParsesCustomPatchToolCall(t *testing.T) {
+	patchInput := "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"ct_1\",\"type\":\"custom_tool_call\",\"name\":\"patch\",\"call_id\":\"call_1\",\"input\":\"\"}}\n\n")
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.custom_tool_call_input.delta\",\"item_id\":\"ct_1\",\"delta\":%q}\n\n", patchInput)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"custom_tool_call\",\"id\":\"ct_1\",\"name\":\"patch\",\"call_id\":\"call_1\",\"input\":%q}]}}\n\n", patchInput)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuthHeader{})
+	transport.BaseURL = server.URL
+	transport.Client = server.Client()
+
+	resp, err := transport.GenerateStreamWithEvents(context.Background(), OpenAIRequest{Model: "gpt-5"}, StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("GenerateStream failed: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "patch" {
+		t.Fatalf("unexpected custom tool call: %+v", resp.ToolCalls[0])
+	}
+	if !resp.ToolCalls[0].Custom || resp.ToolCalls[0].CustomInput != patchInput {
+		t.Fatalf("unexpected custom patch tool call: %+v", resp.ToolCalls[0])
+	}
+	if len(resp.OutputItems) != 1 || resp.OutputItems[0].Type != ResponseItemTypeCustomToolCall || resp.OutputItems[0].CustomInput != patchInput {
+		t.Fatalf("unexpected custom output item: %+v", resp.OutputItems)
+	}
+}
+
+func TestToolCallAccumulatorMergesCompletedCustomInputWithoutJSONInput(t *testing.T) {
+	accumulator := newToolCallAccumulator()
+	accumulator.Merge([]ToolCall{{ID: "call-1", Name: "patch", Custom: true, CustomInput: "partial"}})
+	accumulator.Merge([]ToolCall{{ID: "call-1", Name: "patch", Custom: true, CustomInput: "complete"}})
+
+	calls := accumulator.ToToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected one call, got %+v", calls)
+	}
+	if !calls[0].Custom || calls[0].CustomInput != "complete" {
+		t.Fatalf("expected completed custom input to replace partial input, got %+v", calls[0])
+	}
+}
+
 func TestGenerateStream_PreservesBoldReasoningTextWithoutInferringStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

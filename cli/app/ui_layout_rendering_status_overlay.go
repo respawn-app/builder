@@ -78,25 +78,39 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 
 	snapshot := m.status.snapshot
 
-	appendSectionTitle("Account")
-	if summary := statusVisibleAuthSummary(snapshot.Auth, snapshot.Subscription); summary != "" {
-		appendWrapped(summary, boldStyle)
-	} else if l.statusSectionLoading(uiStatusSectionAuth) {
-		appendWrapped("Loading account...", subtleStyle)
-	}
-	if summary := strings.TrimSpace(snapshot.Subscription.Summary); summary != "" {
-		appendWrapped(summary, boldStyle)
-	}
-	if len(snapshot.Subscription.Windows) > 0 {
-		labelWidth := statusSubscriptionLabelWidth(snapshot.Subscription.Windows)
-		for _, window := range snapshot.Subscription.Windows {
-			appendANSI(l.renderStatusSubscriptionLine(width, window, labelWidth))
+	authSummary := statusVisibleAuthSummary(snapshot.Auth, snapshot.Subscription)
+	subscriptionSummary := strings.TrimSpace(snapshot.Subscription.Summary)
+	hasSubscriptionRows := len(snapshot.Subscription.Windows) > 0
+	showAccountSection := authSummary != "" || subscriptionSummary != "" || hasSubscriptionRows || l.statusSectionLoading(uiStatusSectionAuth)
+	if showAccountSection {
+		if subscriptionSummary != "" || hasSubscriptionRows {
+			appendSectionTitle("Subscription")
+		} else {
+			appendSectionTitle("Account")
 		}
-	} else if l.statusSectionLoading(uiStatusSectionAuth) {
-		appendWrapped("Loading limits...", subtleStyle)
-	}
-	for _, detail := range snapshot.Auth.Details {
-		appendWrapped(detail, subtleStyle)
+		if authSummary != "" {
+			appendWrapped(authSummary, boldStyle)
+		} else if subscriptionSummary == "" && !hasSubscriptionRows && l.statusSectionLoading(uiStatusSectionAuth) {
+			appendWrapped("Loading account...", subtleStyle)
+		}
+		if subscriptionSummary != "" {
+			if strings.TrimSpace(snapshot.Subscription.Error) != "" {
+				appendWrapped(subscriptionSummary, warningStyle)
+			} else {
+				appendWrapped(subscriptionSummary, boldStyle)
+			}
+		}
+		if hasSubscriptionRows {
+			labelWidth := statusSubscriptionLabelWidth(snapshot.Subscription.Windows)
+			for _, window := range snapshot.Subscription.Windows {
+				appendANSI(l.renderStatusSubscriptionLine(width, window, labelWidth))
+			}
+		} else if subscriptionSummary != "" && l.statusSectionLoading(uiStatusSectionAuth) {
+			appendWrapped("Loading limits...", subtleStyle)
+		}
+		for _, detail := range snapshot.Auth.Details {
+			appendWrapped(detail, subtleStyle)
+		}
 	}
 
 	appendSectionTitle("Session")
@@ -406,6 +420,9 @@ func statusRelativeDuration(value time.Duration) string {
 }
 
 func statusVisibleAuthSummary(auth uiStatusAuthInfo, subscription uiStatusSubscriptionInfo) string {
+	if !auth.Visible {
+		return ""
+	}
 	summary := strings.TrimSpace(auth.Summary)
 	if summary == "" {
 		return ""

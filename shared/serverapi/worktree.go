@@ -22,6 +22,7 @@ type WorktreeView struct {
 	Detached        bool   `json:"detached,omitempty"`
 	LockedReason    string `json:"locked_reason,omitempty"`
 	PrunableReason  string `json:"prunable_reason,omitempty"`
+	DirtyFileCount  int    `json:"dirty_file_count,omitempty"`
 	IsMain          bool   `json:"is_main,omitempty"`
 	IsCurrent       bool   `json:"is_current,omitempty"`
 	BuilderManaged  bool   `json:"builder_managed,omitempty"`
@@ -32,6 +33,7 @@ type WorktreeView struct {
 type WorktreeListRequest struct {
 	SessionID         string `json:"session_id"`
 	ControllerLeaseID string `json:"controller_lease_id"`
+	IncludeDirtyCount bool   `json:"include_dirty_count,omitempty"`
 }
 
 type WorktreeListResponse struct {

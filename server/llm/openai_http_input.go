@@ -33,6 +33,18 @@ func buildResponsesInput(canonical []ResponseItem) []responses.ResponseInputItem
 				continue
 			}
 			items = append(items, functionCallOutputInputItems(callID, item.Name, item.Output)...)
+		case ResponseItemTypeCustomToolCall:
+			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
+			if callID == "" {
+				continue
+			}
+			items = append(items, responses.ResponseInputItemParamOfCustomToolCall(callID, item.CustomInput, strings.TrimSpace(item.Name)))
+		case ResponseItemTypeCustomToolOutput:
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				continue
+			}
+			items = append(items, responses.ResponseInputItemParamOfCustomToolCallOutput(callID, outputStringFromRaw(item.Output)))
 		case ResponseItemTypeReasoning:
 			id := strings.TrimSpace(item.ID)
 			if id == "" {

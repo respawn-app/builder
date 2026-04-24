@@ -2,6 +2,7 @@ package runtimecontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"builder/server/requestmemo"
 	"builder/server/runtime"
 	"builder/shared/serverapi"
+	"builder/shared/transcript"
 )
 
 type RuntimeResolver interface {
@@ -66,9 +68,10 @@ type sessionOnlyMemoRequest struct {
 }
 
 type localEntryMemoRequest struct {
-	SessionID string
-	Role      string
-	Text      string
+	SessionID  string
+	Role       string
+	Text       string
+	Visibility transcript.EntryVisibility
 }
 
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
@@ -118,7 +121,7 @@ func (s *Service) resolve(ctx context.Context, sessionID string) (*runtime.Engin
 		return nil, err
 	}
 	if engine == nil {
-		return nil, fmt.Errorf("runtime for session %q is unavailable", strings.TrimSpace(sessionID))
+		return nil, errors.Join(serverapi.ErrRuntimeUnavailable, fmt.Errorf("runtime for session %q is unavailable", strings.TrimSpace(sessionID)))
 	}
 	return engine, nil
 }
@@ -223,7 +226,8 @@ func (s *Service) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeApp
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	memoReq := localEntryMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Role: strings.TrimSpace(req.Role), Text: req.Text}
+	visibility := transcript.NormalizeEntryVisibility(transcript.EntryVisibility(req.Visibility))
+	memoReq := localEntryMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Role: strings.TrimSpace(req.Role), Text: req.Text, Visibility: visibility}
 	_, err := s.localEntries.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameLocalEntryMemoRequest, func(ctx context.Context) (struct{}, error) {
 		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return struct{}{}, err
@@ -232,7 +236,11 @@ func (s *Service) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeApp
 		if err != nil {
 			return struct{}{}, err
 		}
-		engine.AppendLocalEntry(req.Role, req.Text)
+		if visibility == transcript.EntryVisibilityAuto {
+			engine.AppendLocalEntry(req.Role, req.Text)
+		} else {
+			engine.AppendLocalEntryWithVisibility(req.Role, req.Text, visibility)
+		}
 		return struct{}{}, nil
 	})
 	return err
@@ -497,7 +505,7 @@ func sameSessionOnlyMemoRequest(a sessionOnlyMemoRequest, b sessionOnlyMemoReque
 }
 
 func sameLocalEntryMemoRequest(a localEntryMemoRequest, b localEntryMemoRequest) bool {
-	return a.SessionID == b.SessionID && a.Role == b.Role && a.Text == b.Text
+	return a.SessionID == b.SessionID && a.Role == b.Role && a.Text == b.Text && a.Visibility == b.Visibility
 }
 
 var _ serverapi.RuntimeControlService = (*Service)(nil)

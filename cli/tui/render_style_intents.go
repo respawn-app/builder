@@ -8,6 +8,7 @@ const (
 	SuccessForeground
 	WarningForeground
 	ErrorForeground
+	Faint
 	ShellPreview
 	SyntaxHighlighted
 	DiffAdded
@@ -68,7 +69,12 @@ func applyANSIStyleIntents(text string, palette ansiIntentPalette, intents Style
 	case intents.Has(ThemeForeground):
 		transform.DefaultForeground = &palette.ThemeForeground
 	default:
-		return text
+		if !intents.Has(Faint) {
+			return text
+		}
+	}
+	if intents.Has(Subdued) || intents.Has(Faint) {
+		transform.ForceFaint = true
 	}
 	return applyANSIStyleTransform(text, transform)
 }

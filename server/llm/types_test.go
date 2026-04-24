@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"builder/server/session"
@@ -59,6 +60,58 @@ func TestMessagesFromItems_PreservesAssistantPhase(t *testing.T) {
 	}
 	if msgs[0].Phase != MessagePhaseCommentary {
 		t.Fatalf("expected commentary phase, got %q", msgs[0].Phase)
+	}
+}
+
+func TestCustomToolCallItemsRoundTripThroughMessages(t *testing.T) {
+	patchInput := "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n"
+	items := []ResponseItem{
+		{Type: ResponseItemTypeCustomToolCall, ID: "ct_1", CallID: "call_1", Name: "patch", CustomInput: patchInput},
+		{Type: ResponseItemTypeCustomToolOutput, CallID: "call_1", Name: "patch", Output: json.RawMessage(`{"ok":true}`)},
+	}
+
+	msgs := MessagesFromItems(items)
+	if len(msgs) != 2 {
+		t.Fatalf("expected assistant and tool messages, got %+v", msgs)
+	}
+	if len(msgs[0].ToolCalls) != 1 || !msgs[0].ToolCalls[0].Custom || msgs[0].ToolCalls[0].CustomInput != patchInput {
+		t.Fatalf("unexpected custom tool call message: %+v", msgs[0])
+	}
+	if msgs[1].MessageType != MessageTypeCustomToolCallOutput || msgs[1].ToolCallID != "call_1" {
+		t.Fatalf("unexpected custom tool output message: %+v", msgs[1])
+	}
+
+	roundTrip := ItemsFromMessages(msgs)
+	if len(roundTrip) != 2 {
+		t.Fatalf("expected two round-trip items, got %+v", roundTrip)
+	}
+	if roundTrip[0].Type != ResponseItemTypeCustomToolCall || roundTrip[0].CustomInput != patchInput {
+		t.Fatalf("unexpected round-trip custom call item: %+v", roundTrip[0])
+	}
+	if roundTrip[1].Type != ResponseItemTypeCustomToolOutput || string(roundTrip[1].Output) != `{"ok":true}` {
+		t.Fatalf("unexpected round-trip custom output item: %+v", roundTrip[1])
+	}
+}
+
+func TestMessagesFromItemsStartsNewAssistantAfterFunctionToolOutput(t *testing.T) {
+	items := []ResponseItem{
+		{Type: ResponseItemTypeFunctionCall, ID: "fc_1", CallID: "call_1", Name: "shell", Arguments: json.RawMessage(`{"cmd":"pwd"}`)},
+		{Type: ResponseItemTypeFunctionCallOutput, CallID: "call_1", Name: "shell", Output: json.RawMessage(`{"output":"/tmp"}`)},
+		{Type: ResponseItemTypeReasoning, ID: "rs_1", EncryptedContent: "enc_1"},
+	}
+
+	msgs := MessagesFromItems(items)
+	if len(msgs) != 3 {
+		t.Fatalf("expected assistant, tool, assistant messages, got %+v", msgs)
+	}
+	if len(msgs[0].ToolCalls) != 1 {
+		t.Fatalf("expected first assistant to contain tool call, got %+v", msgs[0])
+	}
+	if msgs[1].Role != RoleTool || msgs[1].ToolCallID != "call_1" {
+		t.Fatalf("expected tool output message, got %+v", msgs[1])
+	}
+	if msgs[2].Role != RoleAssistant || len(msgs[2].ReasoningItems) != 1 {
+		t.Fatalf("expected reasoning on new assistant message, got %+v", msgs[2])
 	}
 }
 

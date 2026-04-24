@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -29,7 +30,12 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		if call.ID == "" {
 			call.ID = uuid.NewString()
 		}
-		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true}
+		toolID, knownTool := toolspec.ParseID(call.Name)
+		executableCall := call
+		if call.Custom && knownTool {
+			executableCall.Input = executorInputForCustomTool(toolID, call.CustomInput)
+		}
+		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(executableCall, e.transcriptWorkingDir())), CommittedTranscriptChanged: true}
 		if start, ok := e.pendingToolCallStart(call.ID); ok {
 			started.CommittedEntryStart = start
 			started.CommittedEntryStartSet = true
@@ -37,13 +43,12 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		e.emit(started)
 		idx := i
 		wg.Add(1)
-		go func(tc llm.ToolCall) {
+		go func(tc llm.ToolCall, toolID toolspec.ID, knownTool bool) {
 			defer wg.Done()
 			defer e.forgetPendingToolCallStart(tc.ID)
 			var callErr error
 
-			toolID, ok := toolspec.ParseID(tc.Name)
-			if !ok {
+			if !knownTool {
 				results[idx] = tools.Result{CallID: tc.ID, Name: toolspec.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
 					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
@@ -89,7 +94,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 			}
 			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(res), CommittedTranscriptChanged: true})
 			callErrs[idx] = callErr
-		}(call)
+		}(executableCall, toolID, knownTool)
 	}
 
 	wg.Wait()
@@ -101,6 +106,20 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		return results, joined
 	}
 	return results, nil
+}
+
+func executorInputForCustomTool(toolID toolspec.ID, input string) json.RawMessage {
+	switch toolID {
+	case toolspec.ToolPatch:
+		encoded, _ := json.Marshal(map[string]string{"patch": input})
+		return encoded
+	default:
+		if json.Valid([]byte(input)) {
+			return json.RawMessage(input)
+		}
+		encoded, _ := json.Marshal(input)
+		return encoded
+	}
 }
 
 func activeRunIDForStep(engine *Engine, stepID string) string {

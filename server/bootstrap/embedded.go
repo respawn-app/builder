@@ -51,7 +51,7 @@ func ResolveConfig(req Request) (ConfigPlan, error) {
 		now = time.Now
 	}
 	bootstrapPlan := launch.BootstrapPlan{
-		WorkspaceRoot:    requestedWorkspaceRoot(req.WorkspaceRoot),
+		WorkspaceRoot:    strings.TrimSpace(req.WorkspaceRoot),
 		OpenAIBaseURL:    strings.TrimSpace(req.OpenAIBaseURL),
 		UseOpenAIBaseURL: req.OpenAIBaseURLExplicit,
 	}
@@ -63,7 +63,7 @@ func ResolveConfig(req Request) (ConfigPlan, error) {
 		return ConfigPlan{}, err
 	}
 	bootstrapPlan, err = launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
-		WorkspaceRoot:         requestedWorkspaceRoot(req.WorkspaceRoot),
+		WorkspaceRoot:         strings.TrimSpace(req.WorkspaceRoot),
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
 		SessionID:             strings.TrimSpace(req.SessionID),
 		OpenAIBaseURL:         strings.TrimSpace(req.OpenAIBaseURL),
@@ -76,9 +76,13 @@ func ResolveConfig(req Request) (ConfigPlan, error) {
 	if err != nil {
 		return ConfigPlan{}, err
 	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		return ConfigPlan{}, err
+	containerDir := ""
+	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
+		_, resolvedContainerDir, err := config.ResolveWorkspaceContainer(cfg)
+		if err != nil {
+			return ConfigPlan{}, err
+		}
+		containerDir = resolvedContainerDir
 	}
 	return ConfigPlan{Config: cfg, ContainerDir: containerDir}, nil
 }
@@ -131,12 +135,8 @@ func loadConfig(loadOpts config.LoadOptions, workspaceRoot, openAIBaseURL string
 	} else {
 		loadOpts.OpenAIBaseURL = ""
 	}
-	return config.Load(workspaceRoot, loadOpts)
-}
-
-func requestedWorkspaceRoot(workspaceRoot string) string {
 	if strings.TrimSpace(workspaceRoot) == "" {
-		return "."
+		return config.LoadGlobal(loadOpts)
 	}
-	return workspaceRoot
+	return config.Load(workspaceRoot, loadOpts)
 }

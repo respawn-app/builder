@@ -59,11 +59,11 @@ var catalogEntries = []CatalogEntry{
     },
     "raw": {
       "type": "boolean",
-      "description": "Bypasses semantic command post-processing while keeping normal sanitization and truncation behavior. Defaults to false."
+      "description": "Bypass automatic optimization that reduces noise. Rerun the command in raw mode if the original output hid important details. Defaults to false."
     },
     "yield_time_ms": {
       "type": "integer",
-      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands."
+      "description": "How long to wait for command to finish before backgrounding the process. Omit this for most commands."
     },
     "max_output_tokens": {
       "type": "integer",
@@ -139,7 +139,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolPatch,
 		Aliases:        nil,
-		Description:    "Apply a freeform patch.",
+		Description:    "Apply edits to files using freeform patch syntax.",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderPatch,
@@ -200,7 +200,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolTriggerHandoff,
 		Aliases:        nil,
-		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. The tool is private to the agent, so you can use 'analysis' channel content in its parameters.",
+		Description:    "Trigger a proactive handoff to another agent. By default, this tool is disallowed even if visible. Using this tool is allowed only after a specific developer message appears in transcript that allows this tool. Do not use this tool before the reminder. The tool is private to the agent, so you can use 'analysis' channel content in its parameters.",
 		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderTriggerHandoff,
@@ -217,7 +217,7 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "summarizer_prompt": {
       "type": "string",
-      "description": "Optional *extra* instructions for the handoff summarizer. The summarizer already receives detailed generic guidance on preserving the workspace state and full conversation transcript. Only use this to add something specific to your current thoughts or state of work."
+      "description": "Optional *extra* instructions for the handoff summarizer. The summarizer already receives detailed generic guidance on preserving the workspace state and full conversation transcript. Only use this to add something specific about your current thoughts or state of work."
     },
     "future_agent_message": {
       "type": "string",

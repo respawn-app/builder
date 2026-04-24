@@ -45,6 +45,21 @@ func TestNewLazyReadEventsBeforePersistReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestBackfillLockedContextBudgetWithoutLockedContractDoesNotPersistLazyStore(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+
+	if err := store.BackfillLockedContextBudget(1000, 50); err != nil {
+		t.Fatalf("BackfillLockedContextBudget: %v", err)
+	}
+	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
+		t.Fatalf("expected no session dir after no-op backfill, stat err=%v", err)
+	}
+}
+
 func TestAppendEventMonotonicSequence(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")

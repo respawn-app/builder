@@ -9,6 +9,8 @@ type LockedContract struct {
 	Model             string                     `json:"model"`
 	Temperature       float64                    `json:"temperature"`
 	MaxOutputToken    int                        `json:"max_output_token"`
+	ContextWindow     int                        `json:"context_window,omitempty"`
+	ContextPercent    int                        `json:"context_percent,omitempty"`
 	EnabledTools      []string                   `json:"enabled_tools,omitempty"`
 	ToolPreambles     *bool                      `json:"tool_preambles,omitempty"`
 	ModelCapabilities LockedModelCapabilities    `json:"model_capabilities,omitempty"`

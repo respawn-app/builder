@@ -106,7 +106,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	rootFS.Usage = func() { writeRootUsage(rootFS) }
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
-	flags := registerCommonFlags(rootFS, true)
+	flags := registerSessionFlags(rootFS)
 	if err := rootFS.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -134,17 +134,8 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	}
 
 	opts := app.Options{
-		WorkspaceRoot:         flags.WorkspaceRoot,
-		WorkspaceRootExplicit: flags.WorkspaceExplicit,
-		SessionID:             sessionID,
-		Model:                 flags.Model,
-		ProviderOverride:      flags.ProviderOverride,
-		ThinkingLevel:         flags.ThinkingLevel,
-		Theme:                 flags.Theme,
-		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		Tools:                 flags.Tools,
-		OpenAIBaseURL:         flags.OpenAIBaseURL,
-		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
+		WorkspaceRoot: ".",
+		SessionID:     sessionID,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -319,8 +310,7 @@ func registerCommonFlags(fs *flag.FlagSet, includeSession bool) *commonFlags {
 	flags := &commonFlags{}
 	fs.StringVar(&flags.WorkspaceRoot, "workspace", ".", "workspace root")
 	if includeSession {
-		fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
-		fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
+		registerSessionFlagVars(fs, flags)
 	}
 	fs.StringVar(&flags.Model, "model", "", "model name override")
 	fs.StringVar(&flags.ProviderOverride, "provider-override", "", "provider override for custom/alias model names")
@@ -330,6 +320,17 @@ func registerCommonFlags(fs *flag.FlagSet, includeSession bool) *commonFlags {
 	fs.StringVar(&flags.Tools, "tools", "", "enabled tools override as csv (e.g. shell,patch)")
 	fs.StringVar(&flags.OpenAIBaseURL, "openai-base-url", "", "OpenAI-compatible base URL override")
 	return flags
+}
+
+func registerSessionFlags(fs *flag.FlagSet) *commonFlags {
+	flags := &commonFlags{}
+	registerSessionFlagVars(fs, flags)
+	return flags
+}
+
+func registerSessionFlagVars(fs *flag.FlagSet, flags *commonFlags) {
+	fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
+	fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
 }
 
 func effectiveSessionID(flags commonFlags) (string, error) {

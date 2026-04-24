@@ -973,11 +973,75 @@ func TestStatusRefreshCmdSchedulesBaseEnrichmentForProgressiveCollector(t *testi
 }
 
 func TestStatusVisibleAuthSummarySuppressesGenericSubscriptionWhenPlanPresent(t *testing.T) {
-	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "Subscription"}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "" {
+	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "Subscription", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "" {
 		t.Fatalf("visible auth summary = %q", got)
 	}
-	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "user@example.com"}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "user@example.com" {
+	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "user@example.com", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "user@example.com" {
 		t.Fatalf("visible auth summary = %q", got)
+	}
+	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "Not configured"}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "" {
+		t.Fatalf("visible auth summary = %q", got)
+	}
+}
+
+func TestStatusOverlayRendersSubscriptionWithoutNotConfiguredAccount(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Auth:        uiStatusAuthInfo{},
+		Subscription: uiStatusSubscriptionInfo{
+			Applicable: true,
+			Summary:    "Pro subscription",
+			Windows: []uiStatusSubscriptionWindow{
+				{Label: "5h", UsedPercent: 20},
+			},
+		},
+	}}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
+	plain := stripANSIAndTrimRight(next.(*uiModel).View())
+	if !strings.Contains(plain, "Subscription") || !strings.Contains(plain, "Pro subscription") {
+		t.Fatalf("expected subscription section, got %q", plain)
+	}
+	if !strings.Contains(plain, "5h") || !strings.Contains(plain, "80% left") {
+		t.Fatalf("expected subscription limit rows, got %q", plain)
+	}
+	if strings.Contains(plain, "Not configured") || strings.Contains(plain, "Account") {
+		t.Fatalf("did not expect empty account state, got %q", plain)
+	}
+}
+
+func TestStatusOverlayOmitsEmptyAccountSection(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Auth:        uiStatusAuthInfo{},
+	}}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
+	plain := stripANSIAndTrimRight(next.(*uiModel).View())
+	if strings.Contains(plain, "Not configured") || strings.Contains(plain, "Account") {
+		t.Fatalf("did not expect empty account section, got %q", plain)
 	}
 }
 

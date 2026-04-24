@@ -27,6 +27,7 @@ type Request struct {
 	Tools                 string
 	OpenAIBaseURL         string
 	OpenAIBaseURLExplicit bool
+	LoadOptions           config.LoadOptions
 }
 
 type AuthHandler interface {
@@ -133,6 +134,17 @@ func EnsureReady(ctx context.Context, state AuthState, authHandler AuthHandler) 
 }
 
 func buildRequest(req Request, authHandler AuthHandler) serverbootstrap.Request {
+	loadOptions := req.LoadOptions
+	if loadOptions == (config.LoadOptions{}) {
+		loadOptions = config.LoadOptions{
+			Model:               req.Model,
+			ProviderOverride:    req.ProviderOverride,
+			ThinkingLevel:       req.ThinkingLevel,
+			Theme:               req.Theme,
+			ModelTimeoutSeconds: req.ModelTimeoutSeconds,
+			Tools:               req.Tools,
+		}
+	}
 	return serverbootstrap.Request{
 		WorkspaceRoot:         req.WorkspaceRoot,
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
@@ -140,14 +152,7 @@ func buildRequest(req Request, authHandler AuthHandler) serverbootstrap.Request 
 		OpenAIBaseURL:         req.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: req.OpenAIBaseURLExplicit,
 		LookupEnv:             lookupEnv(authHandler),
-		LoadOptions: config.LoadOptions{
-			Model:               req.Model,
-			ProviderOverride:    req.ProviderOverride,
-			ThinkingLevel:       req.ThinkingLevel,
-			Theme:               req.Theme,
-			ModelTimeoutSeconds: req.ModelTimeoutSeconds,
-			Tools:               req.Tools,
-		},
+		LoadOptions:           loadOptions,
 	}
 }
 

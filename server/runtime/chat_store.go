@@ -79,12 +79,16 @@ type compactionCheckpoint struct {
 
 func newChatStore() *chatStore {
 	cwd, _ := os.Getwd()
+	return newChatStoreWithCWD(cwd)
+}
+
+func newChatStoreWithCWD(cwd string) *chatStore {
 	return &chatStore{
 		toolCompletions:            make(map[string]tools.Result, 16),
 		assistantToolCalls:         make(map[string]struct{}, 16),
 		materializedToolResults:    make(map[string]struct{}, 16),
 		synthesizedToolResults:     make(map[string]struct{}, 16),
-		cwd:                        cwd,
+		cwd:                        strings.TrimSpace(cwd),
 		providerTokenEstimateDirty: true,
 	}
 }
@@ -306,17 +310,17 @@ func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
 		pendingOutputs = pendingOutputs[:0]
 	}
 	for _, item := range items {
-		if item.Type != llm.ResponseItemTypeFunctionCallOutput {
+		if !isToolOutputItem(item.Type) {
 			if inFunctionOutputRun {
 				flushPendingOutputs()
 				inFunctionOutputRun = false
-			} else if item.Type != llm.ResponseItemTypeFunctionCall {
+			} else if !isToolCallItem(item.Type) {
 				flushPendingOutputs()
 			}
 		}
 		out = append(out, item)
-		if item.Type != llm.ResponseItemTypeFunctionCall {
-			if item.Type == llm.ResponseItemTypeFunctionCallOutput {
+		if !isToolCallItem(item.Type) {
+			if isToolOutputItem(item.Type) {
 				inFunctionOutputRun = true
 			}
 			continue
@@ -336,7 +340,7 @@ func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
 			continue
 		}
 		pendingOutputs = append(pendingOutputs, llm.ResponseItem{
-			Type:   llm.ResponseItemTypeFunctionCallOutput,
+			Type:   llm.ToolOutputItemType(item.Type == llm.ResponseItemTypeCustomToolCall),
 			CallID: callID,
 			Name:   firstNonEmpty(strings.TrimSpace(string(completion.Name)), strings.TrimSpace(item.Name)),
 			Output: append(json.RawMessage(nil), completion.Output...),
@@ -344,6 +348,14 @@ func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
 	}
 	flushPendingOutputs()
 	return out
+}
+
+func isToolCallItem(itemType llm.ResponseItemType) bool {
+	return itemType == llm.ResponseItemTypeFunctionCall || itemType == llm.ResponseItemTypeCustomToolCall
+}
+
+func isToolOutputItem(itemType llm.ResponseItemType) bool {
+	return itemType == llm.ResponseItemTypeFunctionCallOutput || itemType == llm.ResponseItemTypeCustomToolOutput
 }
 
 func (s *chatStore) providerItemsSourceLocked() []llm.ResponseItem {
