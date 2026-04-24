@@ -93,6 +93,28 @@ func TestCustomToolCallItemsRoundTripThroughMessages(t *testing.T) {
 	}
 }
 
+func TestMessagesFromItemsStartsNewAssistantAfterFunctionToolOutput(t *testing.T) {
+	items := []ResponseItem{
+		{Type: ResponseItemTypeFunctionCall, ID: "fc_1", CallID: "call_1", Name: "shell", Arguments: json.RawMessage(`{"cmd":"pwd"}`)},
+		{Type: ResponseItemTypeFunctionCallOutput, CallID: "call_1", Name: "shell", Output: json.RawMessage(`{"output":"/tmp"}`)},
+		{Type: ResponseItemTypeReasoning, ID: "rs_1", EncryptedContent: "enc_1"},
+	}
+
+	msgs := MessagesFromItems(items)
+	if len(msgs) != 3 {
+		t.Fatalf("expected assistant, tool, assistant messages, got %+v", msgs)
+	}
+	if len(msgs[0].ToolCalls) != 1 {
+		t.Fatalf("expected first assistant to contain tool call, got %+v", msgs[0])
+	}
+	if msgs[1].Role != RoleTool || msgs[1].ToolCallID != "call_1" {
+		t.Fatalf("expected tool output message, got %+v", msgs[1])
+	}
+	if msgs[2].Role != RoleAssistant || len(msgs[2].ReasoningItems) != 1 {
+		t.Fatalf("expected reasoning on new assistant message, got %+v", msgs[2])
+	}
+}
+
 func TestMessagesFromItems_PreservesMessageType(t *testing.T) {
 	items := []ResponseItem{
 		{

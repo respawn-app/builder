@@ -34,7 +34,7 @@ type AuthSubscriptionWindow struct {
 	Label       string    `json:"label,omitempty"`
 	Qualifier   string    `json:"qualifier,omitempty"`
 	UsedPercent float64   `json:"used_percent,omitempty"`
-	ResetAt     time.Time `json:"reset_at,omitempty"`
+	ResetAt     time.Time `json:"reset_at,omitzero"`
 }
 
 type AuthStatusService interface {

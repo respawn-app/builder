@@ -223,14 +223,16 @@ func fetchUsagePayload(ctx context.Context, baseURL string, state auth.State) (u
 	}
 	request.Header.Set("Authorization", authorization)
 	request.Header.Set("User-Agent", "builder/dev")
-	if accountID := strings.TrimSpace(state.Method.OAuth.AccountID); accountID != "" {
-		request.Header.Set("ChatGPT-Account-Id", accountID)
+	if state.Method.OAuth != nil {
+		if accountID := strings.TrimSpace(state.Method.OAuth.AccountID); accountID != "" {
+			request.Header.Set("ChatGPT-Account-Id", accountID)
+		}
 	}
 	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
 	if err != nil {
 		return usagePayload{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return usagePayload{}, fmt.Errorf("usage request failed: %s", response.Status)
 	}

@@ -546,15 +546,15 @@ func (a *toolCallAccumulator) Merge(calls []ToolCall) {
 		if v := strings.TrimSpace(call.Name); v != "" {
 			state.Name = v
 		}
-		if len(call.Input) > 0 {
-			if call.Custom {
-				state.IsCustom = true
+		if call.Custom {
+			state.IsCustom = true
+			if call.CustomInput != "" {
 				state.Custom.Reset()
 				state.Custom.WriteString(call.CustomInput)
-			} else {
-				state.Args.Reset()
-				state.Args.WriteString(normalizeToolArguments(string(call.Input)))
 			}
+		} else if len(call.Input) > 0 {
+			state.Args.Reset()
+			state.Args.WriteString(normalizeToolArguments(string(call.Input)))
 		}
 	}
 }

@@ -122,6 +122,20 @@ func TestGenerateStream_ParsesCustomPatchToolCall(t *testing.T) {
 	}
 }
 
+func TestToolCallAccumulatorMergesCompletedCustomInputWithoutJSONInput(t *testing.T) {
+	accumulator := newToolCallAccumulator()
+	accumulator.Merge([]ToolCall{{ID: "call-1", Name: "patch", Custom: true, CustomInput: "partial"}})
+	accumulator.Merge([]ToolCall{{ID: "call-1", Name: "patch", Custom: true, CustomInput: "complete"}})
+
+	calls := accumulator.ToToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected one call, got %+v", calls)
+	}
+	if !calls[0].Custom || calls[0].CustomInput != "complete" {
+		t.Fatalf("expected completed custom input to replace partial input, got %+v", calls[0])
+	}
+}
+
 func TestGenerateStream_PreservesBoldReasoningTextWithoutInferringStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

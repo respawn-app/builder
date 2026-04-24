@@ -307,6 +307,7 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				Name:       item.Name,
 				Content:    stringFromJSONRaw(item.Output),
 			})
+			lastAssistantIdx = -1
 		case ResponseItemTypeCustomToolOutput:
 			callID := strings.TrimSpace(item.CallID)
 			if callID == "" {

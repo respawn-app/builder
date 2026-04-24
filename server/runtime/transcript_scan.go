@@ -259,6 +259,9 @@ func (w *responseItemMessageWalker) Apply(item llm.ResponseItem) {
 		w.flushAssistant()
 		callID := strings.TrimSpace(item.CallID)
 		if callID == "" {
+			callID = strings.TrimSpace(item.ID)
+		}
+		if callID == "" {
 			return
 		}
 		w.emit(llm.Message{

@@ -1,19 +1,21 @@
 package prompts
 
 import (
+	"bytes"
 	_ "embed"
-	"strconv"
+	"fmt"
 	"strings"
+	"text/template"
 
 	"builder/cli/selfcmd"
 )
 
-const (
-	runCommandPlaceholder                = "{{builder_run_command}}"
-	estimatedToolCallsContextPlaceholder = "{{estimated_tool_calls_for_context}}"
-)
-
 type SystemPromptTemplateArgs struct {
+	EstimatedToolCallsForContext int
+}
+
+type systemPromptTemplateData struct {
+	BuilderRunCommand            string
 	EstimatedToolCallsForContext int
 }
 
@@ -103,16 +105,23 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 	})
 }
 
-func renderRunCommand(text string) string {
-	return renderRunCommandWithPrefix(text, selfcmd.RunCommandPrefix())
-}
-
 func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs) string {
-	if strings.TrimSpace(text) == "" {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
 		return ""
 	}
-	rendered := renderRunCommand(text)
-	return strings.ReplaceAll(rendered, estimatedToolCallsContextPlaceholder, strconv.Itoa(args.EstimatedToolCallsForContext))
+	tmpl, err := template.New("system_prompt").Option("missingkey=error").Parse(trimmed)
+	if err != nil {
+		panic(fmt.Errorf("parse system prompt template: %w", err))
+	}
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, systemPromptTemplateData{
+		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
+		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
+	}); err != nil {
+		panic(fmt.Errorf("render system prompt template: %w", err))
+	}
+	return out.String()
 }
 
 func renderWorktreePrompt(template string, replacements map[string]string) string {
@@ -124,11 +133,4 @@ func renderWorktreePrompt(template string, replacements map[string]string) strin
 		text = strings.ReplaceAll(text, placeholder, value)
 	}
 	return text
-}
-
-func renderRunCommandWithPrefix(text, prefix string) string {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	return strings.ReplaceAll(text, runCommandPlaceholder, prefix)
 }

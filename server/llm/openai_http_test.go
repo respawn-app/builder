@@ -822,6 +822,16 @@ func TestBuildPayload_UsesExplicitPatchCustomGrammarTool(t *testing.T) {
 	}
 }
 
+func TestBuildFunctionToolParamRejectsBlankCustomToolName(t *testing.T) {
+	_, err := buildFunctionToolParam(Tool{
+		Name:   "   ",
+		Custom: &CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: \"x\""},
+	})
+	if err == nil || !strings.Contains(err.Error(), "custom tool name is required") {
+		t.Fatalf("error = %v, want blank custom tool name rejection", err)
+	}
+}
+
 func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

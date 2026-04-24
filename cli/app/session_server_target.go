@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
 	"time"
 
@@ -103,7 +102,7 @@ func startLocalInteractiveSessionDaemon(ctx context.Context, opts Options) (*cli
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	cmd.Env = os.Environ()
+	cmd.Env = buildServeEnvFunc(cfg)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, false, err
 	}

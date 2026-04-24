@@ -367,8 +367,9 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	if registeredTarget, ok := findSyncedWorktreeByID(synced, req.WorktreeID); ok {
-		dirtyCount, _ := s.git.DirtyFileCount(ctx, registeredTarget.record.CanonicalRoot)
-		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, dirtyCount > 0); err != nil {
+		dirtyCount, dirtyErr := s.git.DirtyFileCount(ctx, registeredTarget.record.CanonicalRoot)
+		force := dirtyCount > 0 || dirtyErr != nil
+		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, force); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
 		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, false)
