@@ -42,6 +42,7 @@ type uiStatusConfig struct {
 	Settings        config.Settings
 	Source          config.SourceReport
 	AuthManager     *auth.Manager
+	AuthStatus      client.AuthStatusClient
 	AuthStatePath   string
 	OwnsServer      bool
 }
@@ -74,6 +75,7 @@ type uiStatusRequest struct {
 	Settings              config.Settings
 	Source                config.SourceReport
 	AuthManager           *auth.Manager
+	AuthStatus            client.AuthStatusClient
 	AuthStatePath         string
 	SessionName           string
 	SessionID             string
@@ -114,6 +116,7 @@ type uiStatusSnapshot struct {
 type uiStatusAuthInfo struct {
 	Summary string
 	Details []string
+	Visible bool
 }
 
 type uiStatusGitInfo struct {
@@ -147,6 +150,7 @@ type uiStatusConfigInfo struct {
 type uiStatusSubscriptionInfo struct {
 	Applicable bool
 	Summary    string
+	Error      string
 	Windows    []uiStatusSubscriptionWindow
 }
 
@@ -267,6 +271,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 		Settings:              m.statusConfig.Settings,
 		Source:                m.statusConfig.Source,
 		AuthManager:           m.statusConfig.AuthManager,
+		AuthStatus:            m.statusConfig.AuthStatus,
 		AuthStatePath:         strings.TrimSpace(m.statusConfig.AuthStatePath),
 		SessionName:           strings.TrimSpace(m.sessionName),
 		SessionID:             strings.TrimSpace(m.sessionID),
@@ -388,6 +393,31 @@ func statusParentSessionName(ctx context.Context, sessionViews client.SessionVie
 }
 
 func (defaultUIStatusCollector) CollectAuth(ctx context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusAuthStageResult {
+	if req.AuthStatus != nil {
+		resp, err := req.AuthStatus.GetAuthStatus(ctx, serverapi.AuthStatusRequest{Settings: req.Settings})
+		if err != nil {
+			errText := err.Error()
+			return uiStatusAuthStageResult{
+				Auth:         uiStatusAuthInfo{Summary: "Auth unavailable", Details: []string{errText}, Visible: true},
+				Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + errText, Error: errText},
+				Warning:      "auth: " + errText,
+			}
+		}
+		return uiStatusAuthStageResult{
+			Auth: uiStatusAuthInfo{
+				Summary: strings.TrimSpace(resp.Auth.Summary),
+				Details: append([]string(nil), resp.Auth.Details...),
+				Visible: resp.Auth.Visible,
+			},
+			Subscription: uiStatusSubscriptionInfo{
+				Applicable: resp.Subscription.Applicable,
+				Summary:    strings.TrimSpace(resp.Subscription.Summary),
+				Error:      strings.TrimSpace(resp.Subscription.Error),
+				Windows:    statusSubscriptionWindowsFromAPI(resp.Subscription.Windows),
+			},
+			Warning: strings.TrimSpace(resp.Warning),
+		}
+	}
 	state := auth.EmptyState()
 	authStateErr := error(nil)
 	if req.AuthManager != nil {
@@ -577,15 +607,33 @@ func collectSubscriptionStatus(ctx context.Context, req uiStatusRequest, state a
 		return uiStatusSubscriptionInfo{}
 	}
 	if authStateErr != nil {
-		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + authStateErr.Error()}
+		errText := authStateErr.Error()
+		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + errText, Error: errText}
 	}
 	payload, err := statusUsagePayloadFetcher(ctx, statusUsageBaseURL, state)
 	if err != nil {
-		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + err.Error()}
+		errText := err.Error()
+		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + errText, Error: errText}
 	}
 	windows := statusUsageWindowsByLabel(payload)
 	summary := statusSubscriptionPlanSummary(payload.PlanType)
 	return uiStatusSubscriptionInfo{Applicable: true, Summary: summary, Windows: windows}
+}
+
+func statusSubscriptionWindowsFromAPI(windows []serverapi.AuthSubscriptionWindow) []uiStatusSubscriptionWindow {
+	if len(windows) == 0 {
+		return nil
+	}
+	result := make([]uiStatusSubscriptionWindow, 0, len(windows))
+	for _, window := range windows {
+		result = append(result, uiStatusSubscriptionWindow{
+			Label:       strings.TrimSpace(window.Label),
+			Qualifier:   strings.TrimSpace(window.Qualifier),
+			UsedPercent: window.UsedPercent,
+			ResetAt:     window.ResetAt,
+		})
+	}
+	return result
 }
 
 func statusShouldFetchSubscriptionUsage(settings config.Settings, state auth.State) bool {
@@ -745,7 +793,7 @@ func statusLimitDuration(windowMinutes int) string {
 
 func statusAuthInfo(state auth.State, settings config.Settings, statusErr error) uiStatusAuthInfo {
 	if statusErr != nil && !state.IsConfigured() {
-		return uiStatusAuthInfo{Summary: "Auth unavailable", Details: []string{statusErr.Error()}}
+		return uiStatusAuthInfo{Summary: "Auth unavailable", Details: []string{statusErr.Error()}, Visible: true}
 	}
 	details := make([]string, 0, 2)
 	baseURL := strings.TrimSpace(settings.OpenAIBaseURL)
@@ -761,7 +809,7 @@ func statusAuthInfo(state auth.State, settings config.Settings, statusErr error)
 		if statusErr != nil {
 			details = append(details, statusErr.Error())
 		}
-		return uiStatusAuthInfo{Summary: summary, Details: details}
+		return uiStatusAuthInfo{Summary: summary, Details: details, Visible: true}
 	case auth.MethodAPIKey:
 		summary := "API key"
 		if provider := statusProviderLabel(state, settings); provider != "" {
@@ -773,12 +821,12 @@ func statusAuthInfo(state auth.State, settings config.Settings, statusErr error)
 		if statusErr != nil {
 			details = append(details, statusErr.Error())
 		}
-		return uiStatusAuthInfo{Summary: summary, Details: details}
+		return uiStatusAuthInfo{Summary: summary, Details: details, Visible: true}
 	default:
 		if statusErr != nil {
-			return uiStatusAuthInfo{Summary: "Not configured", Details: []string{statusErr.Error()}}
+			return uiStatusAuthInfo{Summary: "Auth unavailable", Details: []string{statusErr.Error()}, Visible: true}
 		}
-		return uiStatusAuthInfo{Summary: "Not configured"}
+		return uiStatusAuthInfo{}
 	}
 }
 

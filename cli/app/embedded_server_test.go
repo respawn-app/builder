@@ -257,6 +257,9 @@ func (s *testEmbeddedServer) PromptActivityClient() client.PromptActivityClient 
 func (s *testEmbeddedServer) ContainerDir() string                  { return s.containerDir }
 func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
 func (s *testEmbeddedServer) AuthManager() *auth.Manager            { return s.authManager }
+func (s *testEmbeddedServer) AuthStatusClient() client.AuthStatusClient {
+	return nil
+}
 func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState { return s.fastModeState }
 func (s *testEmbeddedServer) Background() *shelltool.Manager        { return s.background }
 func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter {

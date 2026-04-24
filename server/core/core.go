@@ -11,6 +11,7 @@ import (
 	"builder/server/askview"
 	"builder/server/auth"
 	"builder/server/authbootstrap"
+	"builder/server/authstatus"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/launch"
 	"builder/server/metadata"
@@ -61,6 +62,7 @@ type Core struct {
 	projectID        string
 	projectViews     client.ProjectViewClient
 	authBootstrap    client.AuthBootstrapClient
+	authStatus       client.AuthStatusClient
 	askViews         client.AskViewClient
 	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
@@ -139,6 +141,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	worktreeService := worktree.NewService(metadataStore, nil, runtimeRegistry, sessionRuntimeService, runtimeSupport.Background, runtimeControlService, worktree.ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir, SetupScript: cfg.Settings.Worktrees.SetupScript})
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
+	authStatusService := authstatus.NewService(authSupport.AuthManager)
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
@@ -157,6 +160,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		runPromptMap:     make(map[string]client.RunPromptClient),
 		projectViews:     projectViews,
 		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
+		authStatus:       client.NewLoopbackAuthStatusClient(authStatusService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
 		processControls:  client.NewLoopbackProcessControlClient(processService),
@@ -503,6 +507,13 @@ func (s *Core) AuthBootstrapClient() client.AuthBootstrapClient {
 		return nil
 	}
 	return s.authBootstrap
+}
+
+func (s *Core) AuthStatusClient() client.AuthStatusClient {
+	if s == nil {
+		return nil
+	}
+	return s.authStatus
 }
 
 func (s *Core) AskViewClient() client.AskViewClient {

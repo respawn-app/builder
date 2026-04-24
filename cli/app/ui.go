@@ -33,7 +33,7 @@ func newSubmitDoneMsg(message string, submittedText string, err error) submitDon
 	return submitDoneMsg{
 		message:       message,
 		submittedText: submittedText,
-		silentFinal:   strings.TrimSpace(message) == uiNoopFinalToken,
+		silentFinal:   isNoopFinalText(message),
 		err:           err,
 	}
 }
@@ -1329,7 +1329,7 @@ func envFlagEnabled(name string) bool {
 }
 
 func statusHasAuthData(snapshot uiStatusSnapshot) bool {
-	return strings.TrimSpace(snapshot.Auth.Summary) != "" || len(snapshot.Auth.Details) > 0 || snapshot.Subscription.Applicable || strings.TrimSpace(snapshot.Subscription.Summary) != "" || len(snapshot.Subscription.Windows) > 0
+	return snapshot.Auth.Visible || snapshot.Subscription.Applicable || strings.TrimSpace(snapshot.Subscription.Summary) != "" || len(snapshot.Subscription.Windows) > 0
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {

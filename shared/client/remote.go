@@ -116,6 +116,11 @@ func (c *Remote) CompleteAuthBootstrap(ctx context.Context, req serverapi.AuthCo
 	return resp, c.callUnscoped(ctx, protocol.MethodAuthCompleteBootstrap, req, &resp)
 }
 
+func (c *Remote) GetAuthStatus(ctx context.Context, req serverapi.AuthStatusRequest) (serverapi.AuthStatusResponse, error) {
+	var resp serverapi.AuthStatusResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodAuthGetStatus, req, &resp)
+}
+
 func (c *Remote) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	var resp serverapi.ProjectListResponse
 	return resp, c.callUnscoped(ctx, protocol.MethodProjectList, req, &resp)
@@ -427,6 +432,7 @@ func dialConfiguredRemote(ctx context.Context, cfg config.App, projectID string,
 }
 
 var _ ProjectViewClient = (*Remote)(nil)
+var _ AuthStatusClient = (*Remote)(nil)
 var _ SessionLaunchClient = (*Remote)(nil)
 var _ SessionViewClient = (*Remote)(nil)
 var _ SessionLifecycleClient = (*Remote)(nil)

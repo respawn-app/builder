@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/authstatus"
 	"builder/server/llm"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
@@ -1201,6 +1202,14 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
 
+	originalFetcher := authstatus.DefaultUsagePayloadFetcher
+	defer func() { authstatus.DefaultUsagePayloadFetcher = originalFetcher }()
+	called := false
+	authstatus.DefaultUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (authstatus.UsagePayload, error) {
+		called = true
+		return authstatus.UsagePayload{PlanType: "pro"}, nil
+	}
+
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
@@ -1208,8 +1217,12 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	}, memoryAuthHandler{state: auth.State{
 		Scope: auth.ScopeGlobal,
 		Method: auth.Method{
-			Type:   auth.MethodAPIKey,
-			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "server-access-token",
+				AccountID:   "server-acct",
+				Email:       "user@example.com",
+			},
 		},
 		UpdatedAt: time.Now().UTC(),
 	}}, autoOnboarding{})
@@ -1240,24 +1253,12 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	if err := store.Save(context.Background(), auth.State{
 		Scope: auth.ScopeGlobal,
 		Method: auth.Method{
-			Type: auth.MethodOAuth,
-			OAuth: &auth.OAuthMethod{
-				AccessToken: "access-token",
-				AccountID:   "acct-123",
-				Email:       "user@example.com",
-			},
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "local-key"},
 		},
 		UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("save auth state: %v", err)
-	}
-
-	originalFetcher := statusUsagePayloadFetcher
-	defer func() { statusUsagePayloadFetcher = originalFetcher }()
-	called := false
-	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
-		called = true
-		return statusUsagePayload{PlanType: "pro"}, nil
 	}
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
@@ -1288,20 +1289,21 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 		Settings:        plan.StatusConfig.Settings,
 		Source:          plan.StatusConfig.Source,
 		AuthManager:     plan.StatusConfig.AuthManager,
+		AuthStatus:      plan.StatusConfig.AuthStatus,
 		AuthStatePath:   plan.StatusConfig.AuthStatePath,
 		OwnsServer:      plan.StatusConfig.OwnsServer,
 	})
 	if err != nil {
 		t.Fatalf("collect status: %v", err)
 	}
-	if got := snapshot.Auth.Summary; got != "Not configured" {
+	if got := snapshot.Auth.Summary; got != "user@example.com" {
 		t.Fatalf("auth summary = %q", got)
 	}
-	if snapshot.Subscription.Applicable {
-		t.Fatalf("expected remote status subscription to remain unavailable, got %+v", snapshot.Subscription)
+	if !snapshot.Subscription.Applicable || snapshot.Subscription.Summary != "Pro subscription" {
+		t.Fatalf("expected remote status subscription to come from server auth, got %+v", snapshot.Subscription)
 	}
-	if called {
-		t.Fatal("expected remote session status to avoid local subscription lookup")
+	if !called {
+		t.Fatal("expected remote session status to fetch subscription through server auth")
 	}
 }
 
