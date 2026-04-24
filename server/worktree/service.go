@@ -351,7 +351,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		if !mainFound {
 			return serverapi.WorktreeDeleteResponse{}, fmt.Errorf("main worktree not found for workspace %q", workspaceCtx.workspaceID)
 		}
-		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree, true); err != nil {
+		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree, false); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
 		workspaceCtx, err = s.resolveSessionWorkspaceContext(ctx, workspaceCtx.sessionID)
@@ -389,9 +389,6 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 	finalTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, workspaceCtx.sessionID)
 	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
-	}
-	if strings.TrimSpace(branchCleanupMessage) != "" {
-		s.appendLocalNote(context.Background(), workspaceCtx.sessionID, req.ControllerLeaseID, branchCleanupMessage)
 	}
 	return serverapi.WorktreeDeleteResponse{Target: finalTarget, Worktree: worktreeViewFromSynced(targetWorktree, finalTarget), BranchDeleted: branchDeleted, BranchCleanupMessage: branchCleanupMessage}, nil
 }

@@ -149,14 +149,6 @@ func worktreeUsage() string {
 	return "Usage: /wt | /wt status | /wt create | /wt new | /wt delete [target] | /wt remove [target] | /wt rm [target] | /wt switch <target>"
 }
 
-func formatWorktreeDelete(resp serverapi.WorktreeDeleteResponse) string {
-	message := fmt.Sprintf("Deleted %s\nCurrent workdir: %s", worktreeDisplayName(resp.Worktree), resp.Target.EffectiveWorkdir)
-	if details := strings.TrimSpace(resp.BranchCleanupMessage); details != "" {
-		message += "\n" + details
-	}
-	return message
-}
-
 func worktreeDisplayName(item serverapi.WorktreeView) string {
 	if trimmed := strings.TrimSpace(item.DisplayName); trimmed != "" {
 		return trimmed
