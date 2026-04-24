@@ -13,6 +13,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/cachewarn"
 	compactionutil "builder/shared/compaction"
+	"builder/shared/toolspec"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -221,7 +222,12 @@ func (e *Engine) requestTools() []llm.Tool {
 	}
 	out := make([]llm.Tool, 0, len(defs))
 	for _, d := range defs {
-		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
+		tool := llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema}
+		if d.ID == toolspec.ToolPatch {
+			tool.Schema = nil
+			tool.Custom = &llm.CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: llm.PatchToolLarkGrammar}
+		}
+		out = append(out, tool)
 	}
 	return out
 }
@@ -235,7 +241,7 @@ func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
 		if cleaned[i].Type == llm.ResponseItemTypeMessage {
 			cleaned[i].Content = xansi.Strip(cleaned[i].Content)
 		}
-		if cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput && len(cleaned[i].Output) > 0 {
+		if (cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput || cleaned[i].Type == llm.ResponseItemTypeCustomToolOutput) && len(cleaned[i].Output) > 0 {
 			normalized := normalizeToolMessageForLLM(string(cleaned[i].Output))
 			if json.Valid([]byte(normalized)) {
 				cleaned[i].Output = json.RawMessage(normalized)
