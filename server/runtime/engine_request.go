@@ -50,7 +50,7 @@ func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID stri
 
 	var requestTools []llm.Tool
 	if allowTools {
-		requestTools = e.requestTools()
+		requestTools = e.requestTools(ctx)
 	} else {
 		requestTools = []llm.Tool{}
 	}
@@ -212,7 +212,7 @@ func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.
 	return out
 }
 
-func (e *Engine) requestTools() []llm.Tool {
+func (e *Engine) requestTools(ctx context.Context) []llm.Tool {
 	exposure := tools.RequestExposureContext{
 		SupportsVision: llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model),
 	}
@@ -221,7 +221,7 @@ func (e *Engine) requestTools() []llm.Tool {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
-	customPatchSupported := e.supportsCustomPatchTool()
+	customPatchSupported := e.supportsCustomPatchTool(ctx)
 	for _, d := range defs {
 		tool := llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema}
 		if d.ID == toolspec.ToolPatch && customPatchSupported {
@@ -233,12 +233,27 @@ func (e *Engine) requestTools() []llm.Tool {
 	return out
 }
 
-func (e *Engine) supportsCustomPatchTool() bool {
-	if e == nil || e.store == nil {
-		return false
-	}
-	caps, ok := llm.ProviderCapabilitiesFromLocked(e.store.Meta().Locked)
+func (e *Engine) supportsCustomPatchTool(ctx context.Context) bool {
+	caps, ok := e.activeProviderCapabilities(ctx)
 	return ok && caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
+}
+
+func (e *Engine) activeProviderCapabilities(ctx context.Context) (llm.ProviderCapabilities, bool) {
+	if e == nil {
+		return llm.ProviderCapabilities{}, false
+	}
+	if e.cfg.ProviderCapabilitiesOverride != nil {
+		return *e.cfg.ProviderCapabilitiesOverride, true
+	}
+	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return llm.ProviderCapabilities{}, false
+	}
+	caps, err := provider.ProviderCapabilities(ctx)
+	if err != nil {
+		return llm.ProviderCapabilities{}, false
+	}
+	return caps, true
 }
 
 func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
