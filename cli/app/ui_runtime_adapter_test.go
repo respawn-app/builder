@@ -211,6 +211,90 @@ func TestProjectRuntimeEventIncludesBackgroundSystemTranscriptEntry(t *testing.T
 	}
 }
 
+func TestOngoingReviewerEntriesAfterCommittedFinalKeepFinalVisibleWithoutHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 100})
+
+	finalText := "final answer"
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:           clientui.EventAssistantDelta,
+		StepID:         "step-1",
+		AssistantDelta: finalText,
+	})
+	if got := stripANSIPreserve(m.view.OngoingSnapshot()); !strings.Contains(got, finalText) {
+		t.Fatalf("expected streaming final answer visible before commit, got %q", got)
+	}
+
+	events := []clientui.Event{
+		{
+			Kind:                       clientui.EventAssistantMessage,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         1,
+			CommittedEntryCount:        1,
+			CommittedEntryStart:        0,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:  "assistant",
+				Text:  finalText,
+				Phase: string(llm.MessagePhaseFinal),
+			}},
+		},
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         2,
+			CommittedEntryCount:        2,
+			CommittedEntryStart:        1,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:        "reviewer_suggestions",
+				Text:        "Supervisor suggested:\n1. Check final answer.",
+				OngoingText: "Supervisor suggested:\n1. Check final answer.",
+			}},
+		},
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         3,
+			CommittedEntryCount:        3,
+			CommittedEntryStart:        2,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role: "reviewer_status",
+				Text: "Supervisor ran: 1 suggestion, no changes applied.",
+			}},
+		},
+		{
+			Kind:   clientui.EventReviewerCompleted,
+			StepID: "step-1",
+		},
+	}
+
+	for _, evt := range events {
+		msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(evt))
+		for _, msg := range msgs {
+			if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+				t.Fatalf("did not expect reviewer sequence to trigger transcript hydration, event=%s msg=%+v", evt.Kind, msg)
+			}
+		}
+		if m.runtimeTranscriptBusy {
+			t.Fatalf("did not expect reviewer sequence to start transcript sync after event=%s", evt.Kind)
+		}
+	}
+
+	view := stripANSIPreserve(m.view.OngoingSnapshot())
+	if !containsInOrder(view, finalText, "Supervisor suggested:", "Supervisor ran: 1 suggestion") {
+		t.Fatalf("expected final answer and reviewer entries visible immediately in ongoing mode, got %q", view)
+	}
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected committed final to clear streaming text, got %q", got)
+	}
+}
+
 func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
