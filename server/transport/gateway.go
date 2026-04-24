@@ -178,6 +178,14 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			}
 			return client.CompleteAuthBootstrap(ctx, params)
 		})
+	case protocol.MethodAuthGetStatus:
+		return decodeAndHandle(req, func(params serverapi.AuthStatusRequest) (serverapi.AuthStatusResponse, error) {
+			client := g.core.AuthStatusClient()
+			if client == nil {
+				return serverapi.AuthStatusResponse{}, serverapi.ErrServerAuthRequired
+			}
+			return client.GetAuthStatus(ctx, params)
+		})
 	case protocol.MethodAttachProject:
 		return decodeAndHandle(req, func(params protocol.AttachProjectRequest) (protocol.AttachResponse, error) {
 			if err := params.Validate(); err != nil {

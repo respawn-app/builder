@@ -11,6 +11,7 @@ const (
 	MethodHandshake                                = "protocol.handshake"
 	MethodAuthGetBootstrapStatus                   = "auth.getBootstrapStatus"
 	MethodAuthCompleteBootstrap                    = "auth.completeBootstrap"
+	MethodAuthGetStatus                            = "auth.getStatus"
 	MethodAttachProject                            = "project.attach"
 	MethodAttachSession                            = "session.attach"
 	MethodProjectList                              = "project.list"
@@ -76,6 +77,7 @@ const (
 var allowedPreAuthMethods = []string{
 	MethodAuthGetBootstrapStatus,
 	MethodAuthCompleteBootstrap,
+	MethodAuthGetStatus,
 	MethodAttachProject,
 	MethodAttachSession,
 	MethodProjectList,
