@@ -177,6 +177,57 @@ func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 	}
 }
 
+func TestBellHooksNoopAssistantDeltaClearsPendingTurnCompletion(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-2", AssistantDelta: uiNoopFinalToken})
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after NO_OP delta drain, want 0", got)
+	}
+}
+
+func TestBellHooksNoopAssistantMessageClearsPendingTurnCompletion(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-2", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "NO_OP"}}})
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after NO_OP assistant message drain, want 0", got)
+	}
+}
+
+func TestBellHooksNoopAssistantEventPreservesUnrelatedActiveTurn(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "first"}}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-3", AssistantDelta: uiNoopFinalToken})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-2", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "second"}}})
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count = %d after unrelated active turn completes, want 1", got)
+	}
+	if got := ringer.Last(); got != "builder: second" {
+		t.Fatalf("last message = %q, want %q", got, "builder: second")
+	}
+}
+
 func TestFormatAssistantPreview(t *testing.T) {
 	if got := formatAssistantPreview("\n  hello\tworld  ", 80); got != "hello world" {
 		t.Fatalf("preview = %q, want %q", got, "hello world")

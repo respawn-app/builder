@@ -15,8 +15,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const uiNoopFinalToken = "NO_OP"
-
 type uiRuntimeAdapter struct {
 	model *uiModel
 }
@@ -130,7 +128,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	if update.AssistantDelta != "" {
 		if shouldIgnoreStaleAssistantDelta(m, evt, update.AssistantDelta) {
 			update.AssistantDelta = ""
-		} else if strings.TrimSpace(update.AssistantDelta) == uiNoopFinalToken {
+		} else if isNoopFinalText(update.AssistantDelta) {
 			update.AssistantDelta = ""
 		} else {
 			m.sawAssistantDelta = true
