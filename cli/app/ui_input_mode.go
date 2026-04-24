@@ -12,6 +12,7 @@ const (
 	uiInputModeMain              uiInputMode = "main"
 	uiInputModeAsk               uiInputMode = "ask"
 	uiInputModeStatus            uiInputMode = "status"
+	uiInputModeWorktree          uiInputMode = "worktree"
 	uiInputModeRollbackSelection uiInputMode = "rollback_selection"
 	uiInputModeRollbackEdit      uiInputMode = "rollback_edit"
 	uiInputModeProcessList       uiInputMode = "process_list"

@@ -8,6 +8,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/cachewarn"
+	"builder/shared/config"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
@@ -307,6 +308,33 @@ func TestPersistedTranscriptScanReplaysCacheWarnings(t *testing.T) {
 	}
 	if page.Entries[0].Text != cachewarn.Text(cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix}) {
 		t.Fatalf("unexpected cache warning text: %+v", page.Entries[0])
+	}
+}
+
+func TestPersistedTranscriptScanUsesCacheWarningModeVisibility(t *testing.T) {
+	tests := []struct {
+		name string
+		mode config.CacheWarningMode
+		want transcript.EntryVisibility
+	}{
+		{name: "default", mode: config.CacheWarningModeDefault, want: transcript.EntryVisibilityDetailOnly},
+		{name: "verbose", mode: config.CacheWarningModeVerbose, want: transcript.EntryVisibilityAll},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{CacheWarningMode: tt.mode})
+			if err := scan.ApplyPersistedEvent(mustPersistedScanEvent(t, sessionEventCacheWarning, cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix})); err != nil {
+				t.Fatalf("ApplyPersistedEvent(cache_warning): %v", err)
+			}
+
+			page := scan.CollectedPageSnapshot()
+			if len(page.Entries) != 1 {
+				t.Fatalf("len(page.Entries) = %d, want 1", len(page.Entries))
+			}
+			if got := page.Entries[0].Visibility; got != tt.want {
+				t.Fatalf("cache warning visibility = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

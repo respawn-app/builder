@@ -212,7 +212,7 @@ func (c *defaultContextCompactor) ShouldCompactBeforeUserMessage(ctx context.Con
 	if estimatedCurrentTotal+promptEstimate < limit {
 		return false, nil
 	}
-	req, err := e.buildRequestWithExtraItems(ctx, []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: text}}, true)
+	req, err := e.buildRequestWithExtraItems(ctx, "", []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: text}}, true)
 	if err != nil {
 		return false, err
 	}
@@ -1072,7 +1072,7 @@ func (e *Engine) buildCanonicalCompactionReplacement(prefix []llm.ResponseItem) 
 }
 
 func (e *Engine) compactionReinjectedBaseMessages() ([]llm.Message, error) {
-	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.currentModel(), e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	builder := newActiveMetaContextBuilder(e.store.Meta(), e.currentModel(), e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		IncludeAgents:      true,
 		IncludeSkills:      true,

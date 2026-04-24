@@ -334,6 +334,9 @@ func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient 
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
 }
+func (s *testEmbeddedServer) WorktreeClient() client.WorktreeClient {
+	return nil
+}
 func (s *testEmbeddedServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s.prepareRuntime != nil {
 		return s.prepareRuntime(ctx, plan, diagnosticWriter, startLogLine)

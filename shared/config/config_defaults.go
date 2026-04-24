@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultModel                         = "gpt-5.4"
+	defaultModel                         = "gpt-5.5"
 	defaultThinkingLevel                 = "medium"
 	defaultModelVerbosity                = ModelVerbosityMedium
 	defaultTheme                         = theme.Auto
@@ -99,6 +99,7 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 		rootLines = filterRenderedLines(rootLines, omittedKeys)
 	}
 	timeoutLines := annotateRenderedLines(filterDefaultLines(lines, "timeouts"), filterDefaultLines(defaultLines, "timeouts"), nil)
+	worktreeLines := annotateRenderedLines(filterDefaultLines(lines, "worktrees"), filterDefaultLines(defaultLines, "worktrees"), nil)
 	reviewerLines := annotateRenderedLines(filterDefaultLines(lines, "reviewer"), filterDefaultLines(defaultLines, "reviewer"), nil)
 
 	var out strings.Builder
@@ -123,6 +124,10 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 	if len(shellLines) > 0 {
 		out.WriteString("\n[shell]\n")
 		writeDefaultLines(&out, shellLines)
+	}
+	if len(worktreeLines) > 0 {
+		out.WriteString("\n[worktrees]\n")
+		writeDefaultLines(&out, worktreeLines)
 	}
 	if len(timeoutLines) > 0 {
 		out.WriteString("\n[timeouts]\n")

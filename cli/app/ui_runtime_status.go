@@ -47,6 +47,18 @@ func (m *uiModel) refreshRuntimeSessionView() clientui.RuntimeSessionView {
 	return m.refreshRuntimeMainView().Session
 }
 
+func (m *uiModel) tryRefreshRuntimeSessionView() (clientui.RuntimeSessionView, bool) {
+	if client := m.runtimeClient(); client != nil {
+		view, err := client.RefreshMainView()
+		m.observeRuntimeRequestResult(err)
+		if err != nil {
+			return clientui.RuntimeSessionView{}, false
+		}
+		return view.Session, true
+	}
+	return m.localRuntimeSessionView(), true
+}
+
 func (m *uiModel) runtimeTranscript() clientui.TranscriptPage {
 	if client := m.runtimeClient(); client != nil {
 		return client.Transcript()

@@ -338,6 +338,26 @@ func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	}
 }
 
+func TestEventFromRuntimeProjectsDefaultCacheWarningAsDetailOnly(t *testing.T) {
+	event := EventFromRuntime(runtime.Event{
+		Kind:                   runtime.EventCacheWarning,
+		CacheWarningVisibility: transcript.EntryVisibilityDetailOnly,
+		CacheWarning: &cachewarn.Warning{
+			Scope:  cachewarn.ScopeConversation,
+			Reason: cachewarn.ReasonNonPostfix,
+		},
+	})
+	if event.CacheWarningVisibility != clientui.EntryVisibilityDetailOnly {
+		t.Fatalf("cache warning visibility = %q, want %q", event.CacheWarningVisibility, clientui.EntryVisibilityDetailOnly)
+	}
+	if len(event.TranscriptEntries) != 1 {
+		t.Fatalf("expected one projected transcript entry, got %d", len(event.TranscriptEntries))
+	}
+	if entry := event.TranscriptEntries[0]; entry.Role != "cache_warning" || entry.Visibility != clientui.EntryVisibilityDetailOnly {
+		t.Fatalf("unexpected projected cache warning entry: %+v", entry)
+	}
+}
+
 func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	toolCall := &transcript.ToolCallMeta{
 		ToolName:    "shell",

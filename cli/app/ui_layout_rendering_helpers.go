@@ -60,9 +60,13 @@ func renderFramedEditableInputLines(width, maxContentLines int, spec uiEditableI
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
-	contentLines := visibleEditableInputLines(width, maxContentLines, spec)
+	contentLines, cursorLine, cursorCol := visibleEditableInputViewport(width, maxContentLines, spec)
 	rendered := make([]string, 0, len(contentLines))
-	for _, line := range contentLines {
+	for index, line := range contentLines {
+		if spec.RenderCursor && index == cursorLine {
+			rendered = append(rendered, renderEditableInputLineWithCursor(line, width, cursorCol, lineStyle))
+			continue
+		}
 		rendered = append(rendered, lineStyle.Render(padANSIRight(line, width)))
 	}
 	return renderFramedLines(width, rendered, borderStyle)
@@ -82,26 +86,60 @@ func wrappedEditableInputLines(width int, spec uiEditableInputRenderSpec) []stri
 }
 
 func visibleEditableInputLines(width, maxContentLines int, spec uiEditableInputRenderSpec) []string {
+	visible, _, _ := visibleEditableInputViewport(width, maxContentLines, spec)
+	return visible
+}
+
+func visibleEditableInputViewport(width, maxContentLines int, spec uiEditableInputRenderSpec) ([]string, int, int) {
 	wrapped := wrappedEditableInputLines(width, spec)
 	if len(wrapped) == 0 {
 		wrapped = []string{""}
 	}
-	visibleStart := visibleWrappedLineStart(len(wrapped), maxContentLines, editableInputCursorLine(width, spec), spec.RenderCursor)
+	cursorLine := -1
+	cursorCol := 0
+	if spec.RenderCursor {
+		cursorLine, cursorCol = inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
+	}
+	visibleStart := visibleWrappedLineStart(len(wrapped), maxContentLines, cursorLine, spec.RenderCursor)
 	end := visibleStart + maxContentLines
 	if end > len(wrapped) {
 		end = len(wrapped)
 	}
 	visible := append([]string(nil), wrapped[visibleStart:end]...)
-	if !spec.RenderCursor {
-		return visible
-	}
-	cursorLine, cursorCol := inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
 	visibleCursorLine := cursorLine - visibleStart
 	if visibleCursorLine < 0 || visibleCursorLine >= len(visible) {
-		return visible
+		return visible, -1, 0
 	}
-	visible[visibleCursorLine] = overlayCursorOnLine(visible[visibleCursorLine], cursorCol, width, lipgloss.NewStyle().Reverse(true))
-	return visible
+	return visible, visibleCursorLine, cursorCol
+}
+
+func renderEditableInputLineWithCursor(line string, width int, cursorCol int, lineStyle lipgloss.Style) string {
+	if width < 1 {
+		return lineStyle.Render("")
+	}
+	runes := []rune(line)
+	displayCol := 0
+	for index, r := range runes {
+		rw := runewidth.RuneWidth(r)
+		if rw < 1 {
+			rw = 1
+		}
+		if cursorCol < displayCol+rw {
+			prefix := string(runes[:index])
+			suffix := string(runes[index+1:])
+			return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(r)) + lineStyle.Render(padANSIRight(suffix, width-displayCol-rw))
+		}
+		displayCol += rw
+	}
+	if displayCol < width {
+		return lineStyle.Render(line) + lineStyle.Reverse(true).Render(" ") + lineStyle.Render(strings.Repeat(" ", max(0, width-displayCol-1)))
+	}
+	if len(runes) == 0 {
+		return lineStyle.Reverse(true).Render(" ")
+	}
+	last := len(runes) - 1
+	prefix := string(runes[:last])
+	return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(runes[last]))
 }
 
 func editableInputCursorLine(width int, spec uiEditableInputRenderSpec) int {

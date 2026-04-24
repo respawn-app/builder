@@ -20,6 +20,7 @@ type RuntimeWiring struct {
 	AskBroker     *askquestion.Broker
 	EventBridge   *EventBridge
 	Background    *shelltool.Manager
+	LocalTools    *LocalToolRegistryBinding
 	PromptHistory []string
 }
 
@@ -47,7 +48,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	}
 
 	var eng *runtime.Engine
-	toolRegistry, askBroker, background, err := BuildToolRegistry(
+	localTools, askBroker, background, err := NewLocalToolRegistryBinding(
 		workspaceRoot,
 		store.Meta().SessionID,
 		enabledTools,
@@ -62,6 +63,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	if err != nil {
 		return nil, err
 	}
+	toolRegistry := localTools.Registry()
 
 	modelHTTPClient := llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second)
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
@@ -159,6 +161,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		AskBroker:     askBroker,
 		EventBridge:   eventBridge,
 		Background:    background,
+		LocalTools:    localTools,
 		PromptHistory: append([]string(nil), promptHistory...),
 	}, nil
 }

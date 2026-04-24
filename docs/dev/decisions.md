@@ -397,12 +397,17 @@
 - Worktree-management planning and implementation use `workspace` terminology only; older `repo` references are stale.
 - Planned `/worktree` management keeps session identity stable and changes only the shared session execution target `(workspace_id, worktree_id?, cwd_relpath)`.
 - The first `/worktree` slice does not introduce a separate teleport-root abstraction; execution-target switching plus explicit worktree/origin status is sufficient.
+- The shipped `/worktree` create UX is flow-only: `/worktree`, `/worktree new`, and `/worktree create` all enter a single smart-target create dialog. The raw `/worktree create <branch> [path]` bypass is intentionally unsupported.
+- The create dialog only auto-suggests a target name from the sanitized session name. If that yields nothing, the `Branch or ref` field stays blank; it must not fall back to the current branch, main branch, or a generic placeholder name.
+- The create dialog has no explicit `new branch` / `existing ref` selector. Builder resolves the typed `Branch or ref` asynchronously and shows a live badge: `new branch`, `existing branch`, or `detached ref`.
+- In the create dialog, `Branch or ref` appears before `Base ref`; `Base ref` still defaults to `HEAD`, is treated as the less-frequently changed field, and is only relevant when Builder will create a new branch.
 - Worktree transitions append an immediate user-visible local note and also maintain a lazy typed developer-context reminder for the next model submission; the latest pending reminder always wins before submit and may reappear after compaction generation changes.
 - Git remains the source of truth for worktree topology; Builder stores only additive metadata and blocks deleting a worktree that is still targeted by another session.
 - Existing non-Builder git worktrees remain manageable from Builder in the first slice, but should be visually marked where feasible.
+- Additive `/worktree` aliases are acceptable when they preserve the same safety semantics: `/worktree status`, `/worktree ls`, `/worktree remove`, and `/worktree rm` are supported synonyms over the same server-owned operations.
 - Worktree delete is rebind-first cleanup: if the current session targets the worktree, Builder first moves it back to the main workspace, then performs remaining git cleanup even if the worktree directory was already removed manually.
 - Worktree delete is also blocked while background shell processes still run under that worktree.
-- Automatic branch cleanup after worktree delete is conservative and best-effort; safe delete is allowed, force delete is not part of the first slice.
+- Automatic branch cleanup after worktree delete is conservative and best-effort; Builder only auto-attempts branch deletion when provenance proves the branch was created for that worktree. Otherwise the branch stays unless the user explicitly confirms branch deletion too. Safe delete is allowed, force delete is not part of the first slice.
 - New worktrees default under `worktrees.base_dir`, rooted under Builder persistence state by default; Builder creates missing base directories and auto-picks unique suffixed paths on collisions.
 - Live worktree retarget should rebind runtime-local tool handlers to the new effective root rather than leaving tools pinned to the original startup workspace.
 - The optional post-create worktree setup script is configured by `worktrees.setup_script`, runs asynchronously after new-worktree creation only, and receives both positional args and stdin JSON plus mirrored env vars; failure or timeout surfaces as transcript-local error info and does not undo the created worktree or session switch.

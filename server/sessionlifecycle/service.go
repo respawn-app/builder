@@ -2,6 +2,7 @@ package sessionlifecycle
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -220,6 +221,11 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 	if err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
+	if action == serverlifecycle.ActionForkRollback {
+		if err := s.preserveForkExecutionTarget(ctx, req.SessionID, resolved.NextSessionID); err != nil {
+			return serverapi.SessionResolveTransitionResponse{}, err
+		}
+	}
 	return serverapi.SessionResolveTransitionResponse{
 		NextSessionID:   resolved.NextSessionID,
 		InitialPrompt:   resolved.InitialPrompt,
@@ -229,6 +235,33 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 		ShouldContinue:  resolved.ShouldContinue,
 		RequiresReauth:  resolved.RequiresReauth,
 	}, nil
+}
+
+func (s *Service) preserveForkExecutionTarget(ctx context.Context, parentSessionID string, childSessionID string) error {
+	if s == nil {
+		return nil
+	}
+	trimmedParentID := strings.TrimSpace(parentSessionID)
+	trimmedChildID := strings.TrimSpace(childSessionID)
+	if trimmedParentID == "" || trimmedChildID == "" || trimmedParentID == trimmedChildID {
+		return nil
+	}
+	if strings.TrimSpace(s.persistenceRoot) == "" {
+		return nil
+	}
+	metadataStore, err := metadata.Open(s.persistenceRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = metadataStore.Close() }()
+	target, err := metadataStore.ResolveSessionExecutionTarget(ctx, trimmedParentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, session.ErrSessionNotFound) {
+			return nil
+		}
+		return err
+	}
+	return metadataStore.UpdateSessionExecutionTargetByID(ctx, trimmedChildID, target.WorkspaceID, target.WorktreeID, target.CwdRelpath)
 }
 
 func (s *Service) resolveForkUserMessageIndex(ctx context.Context, store *session.Store, transition serverapi.SessionTransition) (int, error) {

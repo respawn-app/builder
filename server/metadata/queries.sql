@@ -141,12 +141,94 @@ SELECT
     display_name,
     availability,
     is_main,
+    builder_managed,
+    created_branch,
+    origin_session_id,
     git_metadata_json,
     created_at_unix_ms,
     updated_at_unix_ms
 FROM worktrees
 WHERE workspace_id = sqlc.arg(workspace_id)
 ORDER BY created_at_unix_ms ASC, rowid ASC;
+
+-- name: GetWorktreeByID :one
+SELECT
+    id,
+    workspace_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_main,
+    builder_managed,
+    created_branch,
+    origin_session_id,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM worktrees
+WHERE id = sqlc.arg(id)
+LIMIT 1;
+
+-- name: GetWorktreeByCanonicalRoot :one
+SELECT
+    id,
+    workspace_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_main,
+    builder_managed,
+    created_branch,
+    origin_session_id,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM worktrees
+WHERE canonical_root_path = sqlc.arg(canonical_root_path)
+LIMIT 1;
+
+-- name: UpsertWorktree :exec
+INSERT INTO worktrees (
+    id,
+    workspace_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_main,
+    builder_managed,
+    created_branch,
+    origin_session_id,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(workspace_id),
+    sqlc.arg(canonical_root_path),
+    sqlc.arg(display_name),
+    sqlc.arg(availability),
+    sqlc.arg(is_main),
+    sqlc.arg(builder_managed),
+    sqlc.arg(created_branch),
+    sqlc.arg(origin_session_id),
+    sqlc.arg(git_metadata_json),
+    sqlc.arg(created_at_unix_ms),
+    sqlc.arg(updated_at_unix_ms)
+)
+ON CONFLICT(canonical_root_path) DO UPDATE SET
+    workspace_id = excluded.workspace_id,
+    display_name = excluded.display_name,
+    availability = excluded.availability,
+    is_main = excluded.is_main,
+    builder_managed = excluded.builder_managed,
+    created_branch = excluded.created_branch,
+    origin_session_id = excluded.origin_session_id,
+    git_metadata_json = excluded.git_metadata_json,
+    updated_at_unix_ms = excluded.updated_at_unix_ms;
+
+-- name: DeleteWorktreeByID :execrows
+DELETE FROM worktrees
+WHERE id = sqlc.arg(id);
 
 -- name: UpdateWorktreeCanonicalRoot :execrows
 UPDATE worktrees
@@ -332,6 +414,24 @@ JOIN workspaces w ON w.id = s.workspace_id
 LEFT JOIN worktrees wt ON wt.id = s.worktree_id
 WHERE s.id = sqlc.arg(session_id)
 LIMIT 1;
+
+-- name: UpdateSessionExecutionTargetByID :execrows
+UPDATE sessions
+SET
+    workspace_id = sqlc.arg(workspace_id),
+    worktree_id = sqlc.narg(worktree_id),
+    cwd_relpath = sqlc.arg(cwd_relpath),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(session_id);
+
+-- name: ListSessionsTargetingWorktree :many
+SELECT
+    id,
+    name,
+    updated_at_unix_ms
+FROM sessions
+WHERE worktree_id = sqlc.arg(worktree_id)
+ORDER BY updated_at_unix_ms DESC, rowid DESC;
 
 -- name: InsertRuntimeLease :exec
 INSERT INTO runtime_leases (

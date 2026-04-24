@@ -19,11 +19,17 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
 | `/status` | none | Open a page with detailed information about the config, git, runtime, and model. |
 | <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
+| <code>/wt</code> | none | Open the Worktrees page. |
+| <code>/wt create</code> | none | Open the create-worktree dialog. |
+| <code>/wt switch &lt;target&gt;</code> | required selector | Switch directly to a worktree without opening the page first. |
+| <code>/wt delete [&lt;target&gt;]</code> | optional selector | Open delete confirmation in the Worktrees page. |
 | `/copy` | none | Copy the latest committed model final answer to the system clipboard. |
 | `/back` | none | Teleport back to the parent session, if present. |
 | `/review <what to review>` | optional free-form text | Trigger Builder's native code review. Trailing text is appended to the prompt body. |
 | `/init <instructions>` | optional free-form text | Use the built-in workspace creation prompt. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
+
+Canonical forms only. Some commands also accept aliases.
 
 ## Input Behavior
 
@@ -45,5 +51,5 @@ To add a custom prompt, create a Markdown file in one of these directories:
 - `~/.builder/prompts`
 - `~/.builder/commands`
 
-The command id is derived from the filename as `prompt:<normalized_base_name>`. 
+The command id is derived from the filename as `prompt:<normalized_base_name>`.
 Duplicate command ids are deduplicated by first match, so repo-scoped commands override global command.

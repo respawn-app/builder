@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 )
 
 type Call struct {
@@ -35,11 +36,45 @@ type Handler interface {
 }
 
 type Registry struct {
+	mu     sync.RWMutex
 	byName map[toolspec.ID]Handler
 	order  []toolspec.ID
 }
 
 func NewRegistry(handlers ...Handler) *Registry {
+	r := &Registry{}
+	r.mustReplaceLocked(handlers)
+	return r
+}
+
+func (r *Registry) Get(name toolspec.ID) (Handler, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	h, ok := r.byName[name]
+	return h, ok
+}
+
+func (r *Registry) Definitions() []Definition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Definition, 0, len(r.byName))
+	for _, id := range r.order {
+		def, _ := definitionFor(id)
+		out = append(out, def)
+	}
+	return out
+}
+
+func (r *Registry) ReplaceHandlers(handlers ...Handler) {
+	if r == nil {
+		panic("tool registry is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mustReplaceLocked(handlers)
+}
+
+func (r *Registry) mustReplaceLocked(handlers []Handler) {
 	m := make(map[toolspec.ID]Handler, len(handlers))
 	order := make([]toolspec.ID, 0, len(handlers))
 	for _, h := range handlers {
@@ -53,19 +88,6 @@ func NewRegistry(handlers ...Handler) *Registry {
 		m[id] = h
 		order = append(order, id)
 	}
-	return &Registry{byName: m, order: order}
-}
-
-func (r *Registry) Get(name toolspec.ID) (Handler, bool) {
-	h, ok := r.byName[name]
-	return h, ok
-}
-
-func (r *Registry) Definitions() []Definition {
-	out := make([]Definition, 0, len(r.byName))
-	for _, id := range r.order {
-		def, _ := definitionFor(id)
-		out = append(out, def)
-	}
-	return out
+	r.byName = m
+	r.order = order
 }

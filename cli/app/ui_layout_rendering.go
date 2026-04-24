@@ -25,6 +25,9 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 	if l.model.status.isOpen() {
 		return l.renderStatusOverlay(width, height, style)
 	}
+	if l.model.worktrees.isOpen() {
+		return l.renderWorktreeOverlay(width, height, style)
+	}
 	if l.model.processList.isOpen() {
 		return l.renderProcessList(width, height, style)
 	}
