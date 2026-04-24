@@ -483,7 +483,7 @@ func (m Model) renderSelectedTranscriptLine(line string) string {
 	if !m.compactDetail {
 		return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
 	}
-	return applySelectionBackground(padded, palette.selectionBackgroundColor)
+	return applySelectionBackground(padded, themeModeBackgroundColor(m.theme))
 }
 
 func padRenderedLineToWidth(line string, width int) string {

@@ -356,6 +356,10 @@ func themePreviewColor(themeName string) rgbColor {
 	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Subdued.TrueColor)
 }
 
+func themeModeBackgroundColor(themeName string) rgbColor {
+	return rgbColorFromHex(theme.ResolvePalette(themeName).App.ModeBg.TrueColor)
+}
+
 func themeSuccessColor(themeName string) rgbColor {
 	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Success.TrueColor)
 }

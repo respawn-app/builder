@@ -38,7 +38,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.view.Mode() == tui.ModeDetail {
 		switch msg.Type {
-		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyEnter:
 			m.forwardToView(tea.KeyMsg{Type: msg.Type})
 			return m, m.maybeRequestDetailTranscriptPage()
 		case tea.KeyShiftTab, tea.KeyCtrlT:

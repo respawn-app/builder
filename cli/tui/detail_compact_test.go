@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -71,5 +72,23 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	}
 	if len(m.detailExpandedEntries) != 0 {
 		t.Fatalf("expected stale expanded entries cleared, got %+v", m.detailExpandedEntries)
+	}
+}
+
+func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	selectedLine := lineContaining(m.View(), "selected detail entry")
+	if selectedLine == "" {
+		t.Fatalf("expected selected detail line, got %q", m.View())
+	}
+	modeBg := themeModeBackgroundColor("dark")
+	if !strings.Contains(selectedLine, fmt.Sprintf("48;2;%d;%d;%d", modeBg.r, modeBg.g, modeBg.b)) {
+		t.Fatalf("expected compact detail selection to use mode background, got %q", selectedLine)
+	}
+	if strings.Contains(selectedLine, "38;2;215;218;224") {
+		t.Fatalf("did not expect compact detail selection to force foreground, got %q", selectedLine)
 	}
 }
