@@ -403,6 +403,20 @@ func (s *Service) SyncExecutionTarget(ctx context.Context, sessionID string, tar
 	return s.persistWorktreeReminderState(ctx, trimmedSessionID, normalizedReminder)
 }
 
+func (s *Service) IsSessionRuntimeActive(sessionID string) bool {
+	if s == nil {
+		return false
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	handle := s.handles[trimmedSessionID]
+	return handle != nil && handle.activationErr == nil
+}
+
 func (s *Service) persistWorktreeReminderState(ctx context.Context, sessionID string, reminder *session.WorktreeReminderState) error {
 	if reminder == nil {
 		return nil

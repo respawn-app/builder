@@ -86,6 +86,12 @@ func (r *serviceTestRuntime) SyncExecutionTarget(_ context.Context, sessionID st
 	return nil
 }
 
+func (r *serviceTestRuntime) IsSessionRuntimeActive(sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.activeSessions[strings.TrimSpace(sessionID)]
+}
+
 type serviceTestGate struct {
 	err error
 }
@@ -724,6 +730,7 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
 		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
 	}
+	env.runtime.activeSessions[otherSession.Meta().SessionID] = true
 
 	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-blocked-session",
@@ -733,6 +740,28 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	})
 	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
 		t.Fatalf("DeleteWorktree error = %v, want ErrWorktreeBlocked", err)
+	}
+}
+
+func TestDeleteWorktreeIgnoresDormantSessionsTargetingIt(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dormant-session")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dormant-session",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree root removed, stat err=%v", err)
 	}
 }
 
