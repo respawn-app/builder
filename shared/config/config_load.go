@@ -5,43 +5,81 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func Load(workspaceRoot string, opts LoadOptions) (App, error) {
-	if workspaceRoot == "" {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return App{}, errors.New("workspace root is required")
+	}
+	return load(workspaceRoot, true, opts)
+}
+
+func LoadGlobal(opts LoadOptions) (App, error) {
+	return load("", false, opts)
+}
+
+func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (App, error) {
+	absWorkspace := ""
+	if strings.TrimSpace(workspaceRoot) != "" {
+		resolved, err := filepath.Abs(workspaceRoot)
+		if err != nil {
+			return App{}, fmt.Errorf("resolve workspace root: %w", err)
+		}
+		absWorkspace = resolved
+	} else if includeWorkspaceLayer {
 		return App{}, errors.New("workspace root is required")
 	}
 
-	absWorkspace, err := filepath.Abs(workspaceRoot)
-	if err != nil {
-		return App{}, fmt.Errorf("resolve workspace root: %w", err)
-	}
-
-	settingsPath, err := resolveSettingsFilePath()
+	homeSettingsPath, err := resolveSettingsFilePath()
 	if err != nil {
 		return App{}, err
 	}
-	settingsExists, err := settingsFileExists(settingsPath)
+	homeSettingsExists, err := settingsFileExists(homeSettingsPath)
 	if err != nil {
 		return App{}, err
 	}
 
-	fileConfig := settingsFile{}
-	if settingsExists {
-		fileConfig, err = readSettingsFile(settingsPath)
+	homeFileConfig := settingsFile{}
+	if homeSettingsExists {
+		homeFileConfig, err = readSettingsFile(homeSettingsPath)
 		if err != nil {
 			return App{}, err
+		}
+	}
+	workspaceSettingsPath := ""
+	workspaceSettingsExists := false
+	workspaceFileConfig := settingsFile{}
+	if includeWorkspaceLayer {
+		workspaceSettingsPath, err = resolveWorkspaceSettingsFilePath(absWorkspace)
+		if err != nil {
+			return App{}, err
+		}
+		workspaceSettingsExists, err = settingsFileExists(workspaceSettingsPath)
+		if err != nil {
+			return App{}, err
+		}
+		if workspaceSettingsExists {
+			workspaceFileConfig, err = readSettingsFile(workspaceSettingsPath)
+			if err != nil {
+				return App{}, err
+			}
 		}
 	}
 
 	state := configRegistry.defaultState()
 	sources := configRegistry.defaultSourceMap()
 
-	if err := configRegistry.applyFile(fileConfig, settingsPath, &state, sources); err != nil {
+	if err := configRegistry.applyFile(homeFileConfig, homeSettingsPath, &state, sources); err != nil {
 		return App{}, err
 	}
 	if err := configRegistry.applyEnv(os.LookupEnv, &state, sources); err != nil {
 		return App{}, err
+	}
+	if includeWorkspaceLayer {
+		if err := configRegistry.applyFile(workspaceFileConfig, workspaceSettingsPath, &state, sources); err != nil {
+			return App{}, err
+		}
 	}
 	if err := configRegistry.applyCLI(opts, &state, sources); err != nil {
 		return App{}, err
@@ -65,16 +103,26 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	}
 	state.Settings.Worktrees.BaseDir = absWorktreeBaseDir
 
+	settingsPath := homeSettingsPath
+	if workspaceSettingsExists {
+		settingsPath = workspaceSettingsPath
+	}
+	settingsExists := homeSettingsExists || workspaceSettingsExists
 	return App{
 		AppName:         DefaultAppName,
 		WorkspaceRoot:   absWorkspace,
 		PersistenceRoot: absPersistenceRoot,
 		Settings:        state.Settings,
 		Source: SourceReport{
-			SettingsPath:         settingsPath,
-			SettingsFileExists:   settingsExists,
-			CreatedDefaultConfig: false,
-			Sources:              sources,
+			SettingsPath:                  settingsPath,
+			SettingsFileExists:            settingsExists,
+			CreatedDefaultConfig:          false,
+			HomeSettingsPath:              homeSettingsPath,
+			HomeSettingsFileExists:        homeSettingsExists,
+			WorkspaceSettingsPath:         workspaceSettingsPath,
+			WorkspaceSettingsFileExists:   workspaceSettingsExists,
+			WorkspaceSettingsLayerEnabled: includeWorkspaceLayer,
+			Sources:                       sources,
 		},
 	}, nil
 }

@@ -18,6 +18,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authstatus"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	askquestion "builder/server/tools/askquestion"
@@ -100,7 +101,7 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 	}()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -142,6 +143,72 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 	cancel()
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
+		t.Fatalf("create home config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".builder", "config.toml"), []byte("model = \"home-model\"\nthinking_level = \"low\"\n"), 0o644); err != nil {
+		t.Fatalf("write home config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".builder"), 0o755); err != nil {
+		t.Fatalf("create workspace config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".builder", "config.toml"), []byte("model = \"workspace-model\"\nthinking_level = \"high\"\n"), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	glob, err := config.LoadGlobal(config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadGlobal: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), glob.PersistenceRoot, workspace); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{AllowUnauthenticated: true}, memoryAuthHandler{state: auth.EmptyState()}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); !ok {
+		t.Fatalf("expected remote app server, got %T", server)
+	}
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	if plan.ActiveSettings.Model != "workspace-model" || plan.ActiveSettings.ThinkingLevel != "high" {
+		t.Fatalf("active settings = %+v, want workspace-local model/thinking", plan.ActiveSettings)
+	}
+	if !plan.Source.WorkspaceSettingsFileExists {
+		t.Fatalf("expected workspace settings source, got %+v", plan.Source)
 	}
 }
 
