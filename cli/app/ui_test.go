@@ -7866,7 +7866,7 @@ func lineContaining(text, substring string) string {
 }
 
 func themeSelectionBackgroundEscape(themeName string) string {
-	hex := strings.TrimPrefix(theme.ResolvePalette(themeName).Transcript.SelectionBackground.TrueColor, "#")
+	hex := strings.TrimPrefix(theme.ResolvePalette(themeName).App.ModeBg.TrueColor, "#")
 	var r, g, b int
 	if _, err := fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &b); err != nil {
 		return ""

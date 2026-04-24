@@ -86,7 +86,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 		t.Fatalf("expected collapsed detail to hide tool output, got %q", collapsed)
 	}
 
-	m.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := stripANSIAndTrimRight(m.view.View())
 	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
 		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
