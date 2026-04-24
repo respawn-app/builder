@@ -565,6 +565,7 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		return session.LockedContract{}, err
 	}
 	lock.SystemPrompt = systemPrompt
+	lock.HasSystemPrompt = true
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err
 	}

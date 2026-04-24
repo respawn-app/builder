@@ -444,15 +444,13 @@ func (s *Store) BackfillLockedContextBudget(contextWindow, contextPercent int) e
 
 func (s *Store) BackfillLockedSystemPrompt(systemPrompt string) error {
 	trimmed := strings.TrimSpace(systemPrompt)
-	if trimmed == "" {
-		return nil
-	}
 	s.mu.Lock()
-	if s.meta.Locked == nil || strings.TrimSpace(s.meta.Locked.SystemPrompt) != "" {
+	if s.meta.Locked == nil || s.meta.Locked.HasSystemPrompt {
 		s.mu.Unlock()
 		return nil
 	}
 	s.meta.Locked.SystemPrompt = trimmed
+	s.meta.Locked.HasSystemPrompt = true
 	s.meta.UpdatedAt = time.Now().UTC()
 	snapshot, err := s.persistMetaLocked()
 	s.mu.Unlock()

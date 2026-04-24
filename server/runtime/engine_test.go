@@ -1177,6 +1177,69 @@ func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
 	}
 }
 
+func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	systemPath := filepath.Join(systemDir, systemPromptFileName)
+	writeTestFile(t, systemPath, "   \n")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := client.calls[0].SystemPrompt; got != "" {
+		t.Fatalf("first system prompt = %q, want empty", got)
+	}
+	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	}
+	data, err := os.ReadFile(filepath.Join(store.Dir(), "session.json"))
+	if err != nil {
+		t.Fatalf("read session metadata: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"system_prompt": ""`) || !strings.Contains(text, `"has_system_prompt": true`) {
+		t.Fatalf("session metadata must persist empty system prompt snapshot marker: %s", text)
+	}
+	writeTestFile(t, systemPath, "changed")
+	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit again: %v", err)
+	}
+	if got := client.calls[1].SystemPrompt; got != "" {
+		t.Fatalf("second system prompt = %q, want empty snapshot", got)
+	}
+	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("stored system prompt snapshot changed: %+v", locked)
+	}
+}
+
 func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
