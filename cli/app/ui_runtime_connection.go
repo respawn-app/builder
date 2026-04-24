@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"builder/server/llm"
+	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
 
@@ -62,11 +63,11 @@ func enqueueRuntimeConnectionStateChange(ch chan runtimeConnectionStateChangedMs
 	}
 }
 
-func enqueueRuntimeLeaseRecoveryWarning(ch chan runtimeLeaseRecoveryWarningMsg, text string) {
+func enqueueRuntimeLeaseRecoveryWarning(ch chan runtimeLeaseRecoveryWarningMsg, text string, visibility clientui.EntryVisibility) {
 	if ch == nil || strings.TrimSpace(text) == "" {
 		return
 	}
-	msg := runtimeLeaseRecoveryWarningMsg{text: strings.TrimSpace(text)}
+	msg := runtimeLeaseRecoveryWarningMsg{text: strings.TrimSpace(text), visibility: visibility}
 	select {
 	case ch <- msg:
 		return

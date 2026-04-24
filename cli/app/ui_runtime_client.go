@@ -34,7 +34,7 @@ type sessionRuntimeClient struct {
 	diagLogf                func(string)
 	transcriptDiagnostics   bool
 	connectionStateObserver func(error)
-	leaseRecoveryWarning    func(string)
+	leaseRecoveryWarning    func(string, clientui.EntryVisibility)
 
 	mu                        sync.RWMutex
 	mainView                  clientui.RuntimeMainView
@@ -153,7 +153,7 @@ func (c *sessionRuntimeClient) appendLeaseRecoveryWarning(controllerLeaseID stri
 		Text:              runtimeLeaseRecoveryWarningText,
 		Visibility:        string(clientui.EntryVisibilityAll),
 	}); err != nil {
-		c.notifyLeaseRecoveryWarning(runtimeLeaseRecoveryWarningText)
+		c.notifyLeaseRecoveryWarning(runtimeLeaseRecoveryWarningText, clientui.EntryVisibilityAll)
 	}
 }
 
@@ -213,7 +213,7 @@ func (c *sessionRuntimeClient) SetConnectionStateObserver(observer func(error)) 
 	c.connectionStateObserver = observer
 }
 
-func (c *sessionRuntimeClient) SetLeaseRecoveryWarningObserver(observer func(string)) {
+func (c *sessionRuntimeClient) SetLeaseRecoveryWarningObserver(observer func(string, clientui.EntryVisibility)) {
 	if c == nil {
 		return
 	}
@@ -476,7 +476,7 @@ func (c *sessionRuntimeClient) notifyConnectionState(err error) {
 	observer(err)
 }
 
-func (c *sessionRuntimeClient) notifyLeaseRecoveryWarning(text string) {
+func (c *sessionRuntimeClient) notifyLeaseRecoveryWarning(text string, visibility clientui.EntryVisibility) {
 	if c == nil || strings.TrimSpace(text) == "" {
 		return
 	}
@@ -486,7 +486,7 @@ func (c *sessionRuntimeClient) notifyLeaseRecoveryWarning(text string) {
 	if observer == nil {
 		return
 	}
-	observer(text)
+	observer(text, visibility)
 }
 
 func (c *sessionRuntimeClient) logTranscriptDiag(line string) {

@@ -1144,8 +1144,10 @@ func TestRuntimeClientSubmitUserMessageRecoversRuntimeUnavailable(t *testing.T) 
 func TestRuntimeClientLeaseRecoveryWarningFailureDoesNotBlockSubmit(t *testing.T) {
 	controls := &leaseRetryRuntimeControlClient{firstSubmitErr: serverapi.ErrRuntimeUnavailable, appendErr: serverapi.ErrRuntimeUnavailable}
 	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
-	warnings := make(chan string, 1)
-	runtimeClient.SetLeaseRecoveryWarningObserver(func(text string) { warnings <- text })
+	warnings := make(chan runtimeLeaseRecoveryWarningMsg, 1)
+	runtimeClient.SetLeaseRecoveryWarningObserver(func(text string, visibility clientui.EntryVisibility) {
+		warnings <- runtimeLeaseRecoveryWarningMsg{text: text, visibility: visibility}
+	})
 	leaseManager := newControllerLeaseManager("lease-old")
 	leaseManager.SetRecoverFunc(func(context.Context) (string, error) { return "lease-new", nil })
 	runtimeClient.SetControllerLeaseManager(leaseManager)
@@ -1165,8 +1167,8 @@ func TestRuntimeClientLeaseRecoveryWarningFailureDoesNotBlockSubmit(t *testing.T
 	}
 	select {
 	case warning := <-warnings:
-		if warning != runtimeLeaseRecoveryWarningText {
-			t.Fatalf("warning = %q, want lease recovery warning", warning)
+		if warning.text != runtimeLeaseRecoveryWarningText || warning.visibility != clientui.EntryVisibilityAll {
+			t.Fatalf("warning = %+v, want lease recovery warning", warning)
 		}
 	default:
 		t.Fatal("expected warning fallback notification")

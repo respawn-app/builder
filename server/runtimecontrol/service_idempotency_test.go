@@ -10,6 +10,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/serverapi"
+	"builder/shared/transcript"
 )
 
 var runtimeControlOpenAICapabilities = llm.ProviderCapabilities{
@@ -349,6 +350,38 @@ func TestServiceAppendLocalEntryDedupesSuccessfulRetry(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("local entry count = %d, want 1", count)
+	}
+}
+
+func TestServiceAppendLocalEntryReplaysVisibility(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	req := serverapi.RuntimeAppendLocalEntryRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, ControllerLeaseID: "lease-1", Role: "warning", Text: "visible warning", Visibility: string(transcript.EntryVisibilityAll)}
+
+	if err := service.AppendLocalEntry(context.Background(), req); err != nil {
+		t.Fatalf("AppendLocalEntry first: %v", err)
+	}
+	if err := service.AppendLocalEntry(context.Background(), req); err != nil {
+		t.Fatalf("AppendLocalEntry replay: %v", err)
+	}
+	count := 0
+	for _, entry := range engine.ChatSnapshot().Entries {
+		if entry.Role == "warning" && entry.Text == "visible warning" {
+			count++
+			if entry.Visibility != transcript.EntryVisibilityAll {
+				t.Fatalf("entry visibility = %q, want all", entry.Visibility)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("visible warning entry count = %d, want 1", count)
 	}
 }
 

@@ -92,7 +92,8 @@ type runtimeConnectionStateChangedMsg struct {
 }
 
 type runtimeLeaseRecoveryWarningMsg struct {
-	text string
+	text       string
+	visibility clientui.EntryVisibility
 }
 
 type runtimeMainViewRefreshedMsg struct {
@@ -660,11 +661,13 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			enqueueRuntimeConnectionStateChange(runtimeConnectionEvents, err)
 		})
 	}
-	if configurable, ok := m.engine.(interface{ SetLeaseRecoveryWarningObserver(func(string)) }); ok {
+	if configurable, ok := m.engine.(interface {
+		SetLeaseRecoveryWarningObserver(func(string, clientui.EntryVisibility))
+	}); ok {
 		runtimeLeaseRecoveryWarning := make(chan runtimeLeaseRecoveryWarningMsg, 1)
 		m.runtimeLeaseRecoveryWarning = runtimeLeaseRecoveryWarning
-		configurable.SetLeaseRecoveryWarningObserver(func(text string) {
-			enqueueRuntimeLeaseRecoveryWarning(runtimeLeaseRecoveryWarning, text)
+		configurable.SetLeaseRecoveryWarningObserver(func(text string, visibility clientui.EntryVisibility) {
+			enqueueRuntimeLeaseRecoveryWarning(runtimeLeaseRecoveryWarning, text, visibility)
 		})
 	}
 	status := m.runtimeStatus()
@@ -979,7 +982,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents)
 	case runtimeLeaseRecoveryWarningMsg:
-		cmd := m.appendLocalEntryFallback("warning", msg.text)
+		cmd := m.appendLocalEntryFallbackWithVisibility("warning", msg.text, msg.visibility)
 		m.syncViewport()
 		return m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
 	case runtimeMainViewRefreshedMsg:
