@@ -8,6 +8,7 @@ import (
 	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -114,5 +115,50 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 	}
 	if strings.Contains(rendered, "printf 'two") {
 		t.Fatalf("expected collapsed completed shell call to hide second command line, got %q", rendered)
+	}
+}
+
+func TestCompactDetailLeftMarkerStaysWithinViewportWidth(t *testing.T) {
+	const viewportWidth = 24
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("a", 80)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), "▶︎")
+	if line == "" {
+		t.Fatalf("expected collapsed detail marker, got %q", m.View())
+	}
+	if width := lipgloss.Width(line); width > viewportWidth {
+		t.Fatalf("expected marked row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+}
+
+func TestCompactDetailCollapsedShellErrorKeepsSummary(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "printf 'one\\n'\nprintf 'two\\n'",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "printf 'one\\n'\nprintf 'two\\n'",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:              "tool_result_error",
+		ToolCallID:        "call_1",
+		Text:              "full output hidden while collapsed",
+		ToolResultSummary: "permission denied",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "permission denied") {
+		t.Fatalf("expected collapsed shell error summary, got %q", rendered)
+	}
+	if strings.Contains(rendered, "printf 'two") || strings.Contains(rendered, "full output hidden") {
+		t.Fatalf("expected collapsed shell error to stay compact, got %q", rendered)
 	}
 }

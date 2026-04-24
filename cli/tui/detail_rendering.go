@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"builder/server/tools"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -34,16 +37,58 @@ func (m Model) detailWithChevron(role string, lines []string, expanded bool) []s
 	}
 	prefixWidth := m.entryPrefixWidth(role, "")
 	if prefixWidth <= 0 {
-		out[0] = marker + out[0]
+		out[0] = m.truncateDetailMarkerLine(marker + out[0])
 		return out
 	}
 	plainPrefix := strings.Repeat(" ", prefixWidth)
 	if strings.HasPrefix(out[0], plainPrefix) {
-		out[0] = plainPrefix + marker + strings.TrimPrefix(out[0], plainPrefix)
+		out[0] = m.truncateDetailMarkerLine(plainPrefix + marker + strings.TrimPrefix(out[0], plainPrefix))
 		return out
 	}
-	out[0] = marker + out[0]
+	out[0] = m.truncateDetailMarkerLine(marker + out[0])
 	return out
+}
+
+func (m Model) truncateDetailMarkerLine(line string) string {
+	width := m.viewportWidth
+	if width < 1 {
+		width = 1
+	}
+	for overflow := lipgloss.Width(line) - width; overflow > 0; overflow = lipgloss.Width(line) - width {
+		trimmed := removeSpacesFromLongestRun(line, overflow)
+		if trimmed == line {
+			break
+		}
+		line = trimmed
+	}
+	return truncateRenderedLineToWidthWithEllipsis(line, width, false)
+}
+
+func removeSpacesFromLongestRun(line string, count int) string {
+	if count <= 0 || line == "" {
+		return line
+	}
+	bestStart := -1
+	bestLen := 0
+	for idx := 0; idx < len(line); {
+		if line[idx] != ' ' {
+			idx++
+			continue
+		}
+		start := idx
+		for idx < len(line) && line[idx] == ' ' {
+			idx++
+		}
+		if length := idx - start; length > bestLen {
+			bestStart = start
+			bestLen = length
+		}
+	}
+	if bestStart < 0 {
+		return line
+	}
+	remove := min(count, bestLen)
+	return line[:bestStart] + line[bestStart+remove:]
 }
 
 func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role string, text string) []string {
@@ -68,9 +113,33 @@ func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resu
 		compact = "Tool call"
 	}
 	if summary := strings.TrimSpace(resultSummary); summary != "" {
-		compact += "\n" + summary
+		if isShellPreviewRole(role) {
+			compact = attachShellSummaryToFirstLine(compact, summary)
+		} else {
+			compact += "\n" + summary
+		}
 	}
 	return m.detailWithChevron(role, m.flattenEntryWithMeta(role, compact, true, entry.ToolCall), false)
+}
+
+func attachShellSummaryToFirstLine(text string, summary string) string {
+	lines := splitLines(text)
+	if len(lines) == 0 {
+		return summary
+	}
+	if len(lines) > 1 {
+		if hiddenMarker := strings.TrimSpace(strings.Join(lines[1:], " ")); hiddenMarker != "" {
+			lines[0] = strings.TrimSpace(lines[0]) + " " + hiddenMarker
+		}
+		lines = lines[:1]
+	}
+	command, meta := tools.SplitInlineMeta(lines[0])
+	if meta == "" {
+		lines[0] = command + tools.InlineMetaSeparator + summary
+	} else {
+		lines[0] = command + tools.InlineMetaSeparator + meta + " · " + summary
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) knownDetailLabel(entry TranscriptEntry, role string) string {
