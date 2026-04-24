@@ -118,39 +118,25 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 }
 
 func TestCompactDetailDividersWrapExpandedRunsOnly(t *testing.T) {
-	tests := []struct {
-		name          string
-		expandFirst   bool
-		expandSecond  bool
-		wantDividers  int
-		forbidBetween bool
-	}{
-		{name: "collapsed collapsed", wantDividers: 0},
-		{name: "collapsed expanded", expandSecond: true, wantDividers: 2},
-		{name: "expanded collapsed", expandFirst: true, wantDividers: 2},
-		{name: "expanded expanded", expandFirst: true, expandSecond: true, wantDividers: 3, forbidBetween: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewModel(WithCompactDetail(), WithPreviewLines(20))
-			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first entry"})
-			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "second entry"})
-			m = updateModel(t, m, ToggleModeMsg{})
-			if tt.expandSecond {
-				m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-			}
-			if tt.expandFirst {
-				m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-				m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-			}
+	m := NewModel(WithCompactDetail(), WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "collapsed"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "expanded one"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "expanded two"})
+	m = updateModel(t, m, ToggleModeMsg{})
 
-			rendered := xansi.Strip(m.View())
-			if got := strings.Count(rendered, detailDivider()); got != tt.wantDividers {
-				t.Fatalf("divider count = %d, want %d in %q", got, tt.wantDividers, rendered)
-			}
-			if tt.forbidBetween && strings.Contains(rendered, "first entry\n"+detailDivider()+"\n▼ ❮ second entry") {
-				t.Fatalf("did not expect duplicate divider between consecutive expanded entries, got %q", rendered)
-			}
-		})
+	if collapsed := xansi.Strip(m.View()); strings.Contains(collapsed, detailDivider()) {
+		t.Fatalf("expected no dividers when every entry is collapsed, got %q", collapsed)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	rendered := xansi.Strip(m.View())
+	if got := strings.Count(rendered, detailDivider()); got != 3 {
+		t.Fatalf("expected expanded-run dividers with one shared between adjacent expanded entries, got %d in %q", got, rendered)
+	}
+	if strings.Contains(rendered, "expanded one\n"+detailDivider()+"\n▼ ❮ expanded two") {
+		t.Fatalf("did not expect duplicate divider between consecutive expanded entries, got %q", rendered)
 	}
 }
