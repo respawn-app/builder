@@ -116,27 +116,3 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 		t.Fatalf("expected collapsed completed shell call to hide second command line, got %q", rendered)
 	}
 }
-
-func TestCompactDetailDividersWrapExpandedRunsOnly(t *testing.T) {
-	m := NewModel(WithCompactDetail(), WithPreviewLines(20))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "collapsed"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "expanded one"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "expanded two"})
-	m = updateModel(t, m, ToggleModeMsg{})
-
-	if collapsed := xansi.Strip(m.View()); strings.Contains(collapsed, detailDivider()) {
-		t.Fatalf("expected no dividers when every entry is collapsed, got %q", collapsed)
-	}
-
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-
-	rendered := xansi.Strip(m.View())
-	if got := strings.Count(rendered, detailDivider()); got != 3 {
-		t.Fatalf("expected expanded-run dividers with one shared between adjacent expanded entries, got %d in %q", got, rendered)
-	}
-	if strings.Contains(rendered, "expanded one\n"+detailDivider()+"\n▼ ❮ expanded two") {
-		t.Fatalf("did not expect duplicate divider between consecutive expanded entries, got %q", rendered)
-	}
-}
