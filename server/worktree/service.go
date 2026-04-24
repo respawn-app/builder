@@ -251,7 +251,7 @@ func (s *Service) cleanupFailedCreate(ctx context.Context, cleanup failedCreateC
 	defer cancel()
 	var collected []error
 	if strings.TrimSpace(cleanup.worktreeRoot) != "" {
-		if err := s.git.Remove(cleanupCtx, cleanup.workspaceRoot, cleanup.worktreeRoot); err != nil {
+		if err := s.git.Remove(cleanupCtx, cleanup.workspaceRoot, cleanup.worktreeRoot, false); err != nil {
 			collected = append(collected, fmt.Errorf("remove failed worktree %q: %w", cleanup.worktreeRoot, err))
 		}
 	}
@@ -367,7 +367,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	if registeredTarget, ok := findSyncedWorktreeByID(synced, req.WorktreeID); ok {
-		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot); err != nil {
+		if err := s.git.Remove(ctx, workspaceCtx.workspaceRoot, registeredTarget.record.CanonicalRoot, registeredTarget.git.DirtyFileCount > 0); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
 		synced, err = s.syncWorkspace(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot)
@@ -554,6 +554,13 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	}
 	synced := make([]syncedWorktree, 0, len(gitEntries))
 	for _, gitEntry := range gitEntries {
+		if pathAvailability(gitEntry.Root) == "available" {
+			dirtyCount, err := s.git.DirtyFileCount(ctx, gitEntry.Root)
+			if err != nil {
+				return nil, err
+			}
+			gitEntry.DirtyFileCount = dirtyCount
+		}
 		record, ok := refreshedByRoot[strings.TrimSpace(gitEntry.Root)]
 		if !ok {
 			return nil, fmt.Errorf("synced worktree record missing for %q", gitEntry.Root)
@@ -990,6 +997,7 @@ func worktreeViewFromSynced(item syncedWorktree, target clientui.SessionExecutio
 		Detached:        item.git.Detached,
 		LockedReason:    item.git.LockedReason,
 		PrunableReason:  item.git.PrunableReason,
+		DirtyFileCount:  item.git.DirtyFileCount,
 		IsMain:          item.git.IsMain,
 		IsCurrent:       isCurrent,
 		BuilderManaged:  item.record.BuilderManaged,
@@ -1091,6 +1099,7 @@ func marshalGitMetadata(entry GitWorktree) (string, error) {
 		Bare           bool   `json:"bare,omitempty"`
 		LockedReason   string `json:"locked_reason,omitempty"`
 		PrunableReason string `json:"prunable_reason,omitempty"`
+		DirtyFileCount int    `json:"dirty_file_count,omitempty"`
 	}{
 		HeadOID:        entry.HeadOID,
 		BranchRef:      entry.BranchRef,
@@ -1099,6 +1108,7 @@ func marshalGitMetadata(entry GitWorktree) (string, error) {
 		Bare:           entry.Bare,
 		LockedReason:   entry.LockedReason,
 		PrunableReason: entry.PrunableReason,
+		DirtyFileCount: entry.DirtyFileCount,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal git worktree metadata: %w", err)

@@ -976,6 +976,22 @@ func TestWorktreeDeleteDialogPreviewOmitsBranchWhenActionKeepsBranch(t *testing.
 	}
 }
 
+func TestWorktreeDeleteDialogPreviewWarnsAboutDirtyFiles(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].DirtyFileCount = 2
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Drop 2 modified/untracked files") {
+		t.Fatalf("expected dirty file warning, got %q", plain)
+	}
+}
+
 func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 	client := &worktreeCommandTestClient{
 		listResp: testLinkedWorktreeListResponse(),
