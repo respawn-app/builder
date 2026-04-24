@@ -287,6 +287,13 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 
 	meta := store.Meta()
 	if meta.Locked != nil {
+		if meta.Locked.ContextWindow <= 0 || meta.Locked.ContextPercent <= 0 {
+			budget := eng.promptContextBudgetFromConfig()
+			if err := store.BackfillLockedContextBudget(budget.window, budget.percent); err != nil {
+				return nil, err
+			}
+			meta = store.Meta()
+		}
 		copyLocked := *meta.Locked
 		eng.locked = &copyLocked
 	}
@@ -532,10 +539,13 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		}
 	}
 
+	contextBudget := e.promptContextBudgetFromConfig()
 	lock := session.LockedContract{
 		Model:             e.cfg.Model,
 		Temperature:       e.cfg.Temperature,
 		MaxOutputToken:    e.cfg.MaxTokens,
+		ContextWindow:     contextBudget.window,
+		ContextPercent:    contextBudget.percent,
 		EnabledTools:      toToolNames(e.cfg.EnabledTools),
 		ModelCapabilities: e.cfg.ModelCapabilities,
 		ToolPreambles: func() *bool {

@@ -12,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	compactionutil "builder/shared/compaction"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -128,7 +129,34 @@ func (e *Engine) systemPrompt(locked session.LockedContract) string {
 	if locked.ToolPreambles != nil {
 		includeToolPreambles = *locked.ToolPreambles
 	}
-	return prompts.MainSystemPrompt(includeToolPreambles)
+	return prompts.MainSystemPrompt(includeToolPreambles, prompts.SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: e.estimatedToolCallsForLockedContext(locked),
+	})
+}
+
+func (e *Engine) estimatedToolCallsForLockedContext(locked session.LockedContract) int {
+	budget := e.promptContextBudget(locked)
+	return compactionutil.EstimatedToolCallsForContextWindow(budget.window, budget.percent)
+}
+
+type promptContextBudget struct {
+	window  int
+	percent int
+}
+
+func (e *Engine) promptContextBudget(locked session.LockedContract) promptContextBudget {
+	budget := e.promptContextBudgetFromConfig()
+	if locked.ContextWindow > 0 {
+		budget.window = locked.ContextWindow
+	}
+	if locked.ContextPercent > 0 {
+		budget.percent = locked.ContextPercent
+	}
+	return budget
+}
+
+func (e *Engine) promptContextBudgetFromConfig() promptContextBudget {
+	return promptContextBudget{window: e.cfg.ContextWindowTokens, percent: e.cfg.EffectiveContextWindowPercent}
 }
 
 func summarizeOutputItemTypes(items []llm.ResponseItem) []string {
