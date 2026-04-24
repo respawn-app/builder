@@ -386,10 +386,11 @@ func (m *uiModel) requestWorktreeListCmd() tea.Cmd {
 	}
 	m.worktrees.refreshToken++
 	token := m.worktrees.refreshToken
+	includeDirtyCount := m.worktrees.intent.OpenDelete || m.worktrees.phase == uiWorktreeOverlayPhaseDeleteConfirm
 	m.worktrees.loading = true
 	m.worktrees.errorText = ""
 	return func() tea.Msg {
-		resp, err := m.listWorktreesForCurrentSession()
+		resp, err := m.listWorktreesForCurrentSession(includeDirtyCount)
 		return worktreeListDoneMsg{token: token, resp: resp, err: err}
 	}
 }
@@ -860,8 +861,8 @@ func (c uiInputController) handleWorktreeOverlayKey(msg tea.KeyMsg) (tea.Model, 
 		if target.IsMain {
 			return m, c.showErrorStatus("Main workspace is not deletable")
 		}
-		m.openDeleteWorktreeDialog(target, false)
-		return m, nil
+		m.worktrees.intent = uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: target.WorktreeID}
+		return m, tea.Batch(m.requestWorktreeListCmd(), m.ensureSpinnerTicking())
 	case "x":
 		target, ok := m.selectedWorktreeRow()
 		if !ok {
@@ -870,8 +871,8 @@ func (c uiInputController) handleWorktreeOverlayKey(msg tea.KeyMsg) (tea.Model, 
 		if target.IsMain {
 			return m, c.showErrorStatus("Main workspace is not deletable")
 		}
-		m.openDeleteWorktreeDialog(target, true)
-		return m, nil
+		m.worktrees.intent = uiWorktreeOpenIntent{OpenDelete: true, ConfirmDeleteTarget: target.WorktreeID, PreferDeleteBranch: true}
+		return m, tea.Batch(m.requestWorktreeListCmd(), m.ensureSpinnerTicking())
 	case "enter":
 		if m.worktrees.selection == 0 {
 			return m, m.openCreateWorktreeDialog()

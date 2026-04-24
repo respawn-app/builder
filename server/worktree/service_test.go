@@ -118,6 +118,26 @@ type serviceTestLocalNotes struct {
 	appendLocalErr error
 }
 
+type dirtyCountFailingGitRunner struct {
+	base      gitCommandRunner
+	dirtyRoot string
+}
+
+func (r *dirtyCountFailingGitRunner) Output(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	output, exitCode, err := r.Run(ctx, dir, args...)
+	if err != nil {
+		return nil, formatGitRunError(exitCode, err, output, args...)
+	}
+	return output, nil
+}
+
+func (r *dirtyCountFailingGitRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	if equalStrings(args, []string{"status", "--porcelain=v1", "-z"}) && strings.TrimSpace(dir) == strings.TrimSpace(r.dirtyRoot) {
+		return []byte("status failed"), 1, errors.New("status failed")
+	}
+	return r.base.Run(ctx, dir, args...)
+}
+
 func (n *serviceTestLocalNotes) AppendLocalEntry(_ context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
 	if n.appendLocalErr != nil {
 		return n.appendLocalErr
@@ -772,9 +792,28 @@ func TestListWorktreesReportsDirtyFileCount(t *testing.T) {
 		t.Fatalf("write untracked file: %v", err)
 	}
 
-	listed := findWorktreeByID(t, mustListWorktrees(t, env).Worktrees, created.WorktreeID)
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID, IncludeDirtyCount: true})
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	listed := findWorktreeByID(t, resp.Worktrees, created.WorktreeID)
 	if listed.DirtyFileCount != 1 {
 		t.Fatalf("dirty file count = %d, want 1", listed.DirtyFileCount)
+	}
+}
+
+func TestListWorktreesDirtyCountProbeFailureIsBestEffort(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/dirty-probe-failure")
+	env.service.git = NewGitInspector(&dirtyCountFailingGitRunner{base: execGitCommandRunner{}, dirtyRoot: created.CanonicalRoot})
+
+	resp, err := env.service.ListWorktrees(env.ctx, serverapi.WorktreeListRequest{SessionID: env.session.Meta().SessionID, ControllerLeaseID: env.leaseID, IncludeDirtyCount: true})
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	listed := findWorktreeByID(t, resp.Worktrees, created.WorktreeID)
+	if listed.DirtyFileCount != 0 {
+		t.Fatalf("dirty file count after failed probe = %d, want 0", listed.DirtyFileCount)
 	}
 }
 
@@ -796,6 +835,25 @@ func TestDeleteWorktreeForcesRemovalWhenDirty(t *testing.T) {
 	}
 	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected dirty worktree root removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteWorktreeDirtyCountProbeFailureIsBestEffort(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-dirty-probe-failure")
+	env.service.git = NewGitInspector(&dirtyCountFailingGitRunner{base: execGitCommandRunner{}, dirtyRoot: created.CanonicalRoot})
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-dirty-probe-failure",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree root removed, stat err=%v", err)
 	}
 }
 

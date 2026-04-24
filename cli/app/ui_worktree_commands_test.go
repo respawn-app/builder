@@ -270,7 +270,7 @@ func TestListWorktreesForCurrentSessionUsesBoundedControlContext(t *testing.T) {
 	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
 	m := newWorktreeTestModel(t, client)
 
-	if _, err := m.listWorktreesForCurrentSession(); err != nil {
+	if _, err := m.listWorktreesForCurrentSession(false); err != nil {
 		t.Fatalf("listWorktreesForCurrentSession: %v", err)
 	}
 	if client.listCtx == nil {
@@ -910,6 +910,9 @@ func TestWorktreeDeleteCommandOpensDeleteDialogInOverlay(t *testing.T) {
 	if updated.worktrees.deleteConfirm.target.WorktreeID != "wt-feature" {
 		t.Fatalf("delete target = %+v", updated.worktrees.deleteConfirm.target)
 	}
+	if len(client.listRequests) == 0 || !client.listRequests[0].IncludeDirtyCount {
+		t.Fatalf("expected delete command list request to include dirty count, got %+v", client.listRequests)
+	}
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "Delete feature-a?") {
 		t.Fatalf("expected delete dialog render, got %q", plain)
@@ -1301,11 +1304,14 @@ func TestWorktreeDeleteBranchHotkeyPrefersBranchDeleteAction(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	updated = next.(*uiModel)
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
 	if updated.worktrees.phase != uiWorktreeOverlayPhaseDeleteConfirm {
 		t.Fatalf("phase = %q, want delete_confirm", updated.worktrees.phase)
+	}
+	if len(client.listRequests) < 2 || !client.listRequests[1].IncludeDirtyCount {
+		t.Fatalf("expected delete hotkey refresh to include dirty count, got %+v", client.listRequests)
 	}
 	if updated.worktrees.deleteConfirm.selectedAction != uiWorktreeDeleteActionDeleteBranch {
 		t.Fatalf("selected action = %v, want delete branch", updated.worktrees.deleteConfirm.selectedAction)
