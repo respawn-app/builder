@@ -284,7 +284,7 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 		if !strings.Contains(display, "\x1b[") {
 			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), line.Intents)
 		}
-		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) {
+		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) && !line.Intents.Has(Faint) {
 			display = m.palette().preview.Faint(true).Render(display)
 		} else if isStyledMetaRole(role) {
 			display = styleForRole(role, m.palette()).Render(display)
@@ -520,6 +520,9 @@ func (m Model) renderEntryTextStage(role, text string, width int, toolMeta *tran
 	if rendered, intents, ok := m.renderToolTextWithHighlight(role, text, toolMeta, muteText); ok {
 		return rendered, intents, transcriptRenderWrapModeViewport
 	}
+	if shouldUseMutedToolForeground(role, toolMeta, muteText) {
+		return text, ThemeForeground | Faint, transcriptRenderWrapModeViewport
+	}
 	if !isMarkdownRole(role) {
 		intents := m.defaultEntryStyleIntents(role, muteText)
 		if isToolHeadlineRole(role) && strings.Contains(text, "\n") {
@@ -539,6 +542,14 @@ func (m Model) renderEntryTextStage(role, text string, width int, toolMeta *tran
 
 func (m Model) wrapRenderedEntryContent(text string, width int) string {
 	return wrapTextForViewport(text, width)
+}
+
+func shouldUseMutedToolForeground(role string, toolMeta *transcript.ToolCallMeta, muteText bool) bool {
+	return muteText &&
+		isShellPreviewRole(role) &&
+		toolMeta != nil &&
+		toolMeta.HasRenderHint() &&
+		toolMeta.RenderHint.Kind == transcript.ToolRenderKindPlain
 }
 
 func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent {
@@ -628,6 +639,9 @@ func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta)
 	}
 	hint := toolMeta.RenderHint
 	if hint == nil {
+		return nil, false
+	}
+	if hint.Kind == transcript.ToolRenderKindPlain {
 		return nil, false
 	}
 	if shouldFallbackToShellPreviewHint(role, text, toolMeta, hint) {
