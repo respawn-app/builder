@@ -22,6 +22,7 @@ const (
 	interruptMessage                  = "User interrupted you"
 	agentsFileName                    = "AGENTS.md"
 	agentsGlobalDirName               = ".builder"
+	systemPromptFileName              = "SYSTEM.md"
 	agentsInjectedHeader              = "# Project context and authoritative instructions from the ./AGENTS.md file:"
 	agentsInjectedFenceLabel          = "md"
 	environmentInjectedHeader         = "# Info about environment:"
@@ -559,6 +560,12 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	if hasProviderContract {
 		lock.ProviderContract = llm.LockedProviderCapabilitiesFromContract(providerContract)
 	}
+	systemPrompt, err := e.buildSystemPromptSnapshotForRoot(lock, e.systemPromptWorkspaceRootLocked())
+	if err != nil {
+		return session.LockedContract{}, err
+	}
+	lock.SystemPrompt = systemPrompt
+	lock.HasSystemPrompt = true
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err
 	}

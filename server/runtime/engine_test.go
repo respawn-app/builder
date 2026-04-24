@@ -787,9 +787,467 @@ func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(
 	if got := resumedEngine.estimatedToolCallsForLockedContext(alteredLocked); got != 271 {
 		t.Fatalf("altered estimated tool calls = %d, want 271", got)
 	}
-	alteredPrompt := resumedEngine.systemPrompt(alteredLocked)
-	if alteredPrompt == firstPrompt {
-		t.Fatal("expected system prompt estimate to change when locked context budget changes")
+	alteredPrompt, err := resumedEngine.systemPrompt(alteredLocked)
+	if err != nil {
+		t.Fatalf("altered system prompt: %v", err)
+	}
+	if alteredPrompt != firstPrompt {
+		t.Fatal("expected locked system prompt snapshot to stay stable when locked context budget changes")
+	}
+}
+
+func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{filepath.Join(home, agentsGlobalDirName), filepath.Join(workspace, agentsGlobalDirName)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	writeTestFile(t, filepath.Join(home, agentsGlobalDirName, systemPromptFileName), "global system")
+	localPath := filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName)
+	writeTestFile(t, localPath, "local {{.EstimatedToolCallsForContext}} {{.BuilderRunCommand}}")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens:  272_000,
+		TranscriptWorkingDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	firstPrompt := client.calls[0].SystemPrompt
+	if !strings.Contains(firstPrompt, "local 185 ") || strings.Contains(firstPrompt, "global system") || strings.Contains(firstPrompt, "{{") {
+		t.Fatalf("unexpected first system prompt: %q", firstPrompt)
+	}
+	firstCacheKey := client.calls[0].PromptCacheKey
+	if firstCacheKey == "" {
+		t.Fatal("expected prompt cache key")
+	}
+	writeTestFile(t, localPath, "changed local system")
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close first engine: %v", err)
+	}
+
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	reopenedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+		Usage:     llm.Usage{WindowTokens: 400000},
+	}}}
+	reopenedEngine, err := New(reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		ContextWindowTokens:  400_000,
+		TranscriptWorkingDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	if _, err := reopenedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	if got := reopenedClient.calls[0].SystemPrompt; got != firstPrompt {
+		t.Fatalf("system prompt changed after SYSTEM.md edit\ngot: %q\nwant: %q", got, firstPrompt)
+	}
+	if got := reopenedClient.calls[0].PromptCacheKey; got != firstCacheKey {
+		t.Fatalf("prompt cache key changed after SYSTEM.md edit: got %q want %q", got, firstCacheKey)
+	}
+	if got := reopened.Meta().Locked.SystemPrompt; got != firstPrompt {
+		t.Fatalf("locked system prompt mismatch\ngot: %q\nwant: %q", got, firstPrompt)
+	}
+}
+
+func TestReadSystemPromptTemplateUsesGlobalFileWhenLocalMissing(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(globalDir, systemPromptFileName), "global system")
+
+	template, sourcePath, ok, err := readSystemPromptTemplate(systemPromptSnapshotOptions{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("read system prompt template: %v", err)
+	}
+	if !ok || template != "global system" {
+		t.Fatalf("template = %q ok=%t, want global system true", template, ok)
+	}
+	if want := filepath.Join(globalDir, systemPromptFileName); sourcePath != want {
+		t.Fatalf("source path = %q, want %q", sourcePath, want)
+	}
+}
+
+func TestSystemPromptSnapshotUsesStoredWorkspaceRootWhenTranscriptWorkdirIsNested(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "pkg")
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(systemDir, systemPromptFileName), "workspace root system")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: nested,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := client.calls[0].SystemPrompt; got != "workspace root system" {
+		t.Fatalf("system prompt = %q, want workspace root system", got)
+	}
+}
+
+func TestSystemPromptSnapshotFallsBackWhenHomeDirUnavailable(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("HOME", "")
+	if err := os.MkdirAll(filepath.Join(workspace, agentsGlobalDirName), 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName), "local without home")
+
+	template, sourcePath, ok, err := readSystemPromptTemplate(systemPromptSnapshotOptions{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("read system prompt template: %v", err)
+	}
+	if !ok || template != "local without home" {
+		t.Fatalf("template = %q ok=%t, want local without home true", template, ok)
+	}
+	if want := filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName); sourcePath != want {
+		t.Fatalf("source path = %q, want %q", sourcePath, want)
+	}
+	template, sourcePath, ok, err = readSystemPromptTemplate(systemPromptSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("read system prompt template without local prompt: %v", err)
+	}
+	if ok || template != "" || sourcePath != "" {
+		t.Fatalf("template = %q sourcePath=%q ok=%t, want empty fallback", template, sourcePath, ok)
+	}
+}
+
+func TestEnsureLockedWithSystemPromptAndTranscriptWorkingDirDoesNotDeadlock(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(systemDir, systemPromptFileName), "deadlock guard")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	done := make(chan struct {
+		locked session.LockedContract
+		err    error
+	}, 1)
+	go func() {
+		locked, err := eng.ensureLocked()
+		done <- struct {
+			locked session.LockedContract
+			err    error
+		}{locked: locked, err: err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("ensureLocked: %v", got.err)
+		}
+		if got.locked.SystemPrompt != "deadlock guard" {
+			t.Fatalf("system prompt = %q, want deadlock guard", got.locked.SystemPrompt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureLocked deadlocked while resolving SYSTEM.md from TranscriptWorkingDir")
+	}
+}
+
+func TestBuildSystemPromptSnapshotForRootDoesNotUseMutexTakingWorkspaceAccessor(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	writeTestFile(t, filepath.Join(systemDir, systemPromptFileName), "locked helper guard")
+
+	store, err := session.Create(t.TempDir(), "ws", t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:         "gpt-5",
+		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
+		ToolPreambles: false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	done := make(chan struct {
+		prompt string
+		err    error
+	}, 1)
+	eng.mu.Lock()
+	go func() {
+		prompt, err := eng.buildSystemPromptSnapshotForRoot(session.LockedContract{
+			Model:          "gpt-5",
+			Temperature:    1,
+			ContextWindow:  272_000,
+			ContextPercent: 95,
+			ToolPreambles: func() *bool {
+				enabled := false
+				return &enabled
+			}(),
+		}, workspace)
+		done <- struct {
+			prompt string
+			err    error
+		}{prompt: prompt, err: err}
+	}()
+	select {
+	case got := <-done:
+		eng.mu.Unlock()
+		if got.err != nil {
+			t.Fatalf("buildSystemPromptSnapshotForRoot: %v", got.err)
+		}
+		if got.prompt != "locked helper guard" {
+			t.Fatalf("prompt = %q, want locked helper guard", got.prompt)
+		}
+	case <-time.After(2 * time.Second):
+		eng.mu.Unlock()
+		t.Fatal("buildSystemPromptSnapshotForRoot called a mutex-taking workspace accessor")
+	}
+}
+
+func TestSystemPromptSnapshotUsesTranscriptWorkingDirForRetargetedSession(t *testing.T) {
+	home := t.TempDir()
+	canonical := t.TempDir()
+	worktree := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{filepath.Join(canonical, agentsGlobalDirName), filepath.Join(worktree, agentsGlobalDirName)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	writeTestFile(t, filepath.Join(canonical, agentsGlobalDirName, systemPromptFileName), "canonical system")
+	writeTestFile(t, filepath.Join(worktree, agentsGlobalDirName, systemPromptFileName), "worktree system")
+
+	store, err := session.Create(t.TempDir(), "ws", canonical)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: canonical,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.SetTranscriptWorkingDir(worktree)
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := client.calls[0].SystemPrompt; got != "worktree system" {
+		t.Fatalf("system prompt = %q, want worktree system", got)
+	}
+}
+
+func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	systemPath := filepath.Join(systemDir, systemPromptFileName)
+	writeTestFile(t, systemPath, "stale legacy {{.EstimatedToolCallsForContext}}")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:          "gpt-5",
+		Temperature:    1,
+		MaxOutputToken: 0,
+		ContextWindow:  272_000,
+		ContextPercent: 95,
+		ToolPreambles: func() *bool {
+			enabled := false
+			return &enabled
+		}(),
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if snapshot := store.Meta().Locked.SystemPrompt; snapshot != "" {
+		t.Fatalf("system prompt snapshot before first dispatch = %q, want empty", snapshot)
+	}
+	writeTestFile(t, systemPath, "legacy {{.EstimatedToolCallsForContext}}")
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	snapshot := store.Meta().Locked.SystemPrompt
+	if snapshot != "legacy 185" {
+		t.Fatalf("system prompt snapshot = %q, want legacy 185", snapshot)
+	}
+	writeTestFile(t, systemPath, "changed legacy")
+	if got := client.calls[0].SystemPrompt; got != snapshot {
+		t.Fatalf("request used changed system prompt\ngot: %q\nwant: %q", got, snapshot)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit again: %v", err)
+	}
+	if got := client.calls[1].SystemPrompt; got != snapshot {
+		t.Fatalf("second request used changed system prompt\ngot: %q\nwant: %q", got, snapshot)
+	}
+	if got := store.Meta().Locked.SystemPrompt; got != snapshot {
+		t.Fatalf("stored system prompt changed\ngot: %q\nwant: %q", got, snapshot)
+	}
+}
+
+func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	systemDir := filepath.Join(workspace, agentsGlobalDirName)
+	if err := os.MkdirAll(systemDir, 0o755); err != nil {
+		t.Fatalf("mkdir system dir: %v", err)
+	}
+	systemPath := filepath.Join(systemDir, systemPromptFileName)
+	writeTestFile(t, systemPath, "   \n")
+
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := client.calls[0].SystemPrompt; got != "" {
+		t.Fatalf("first system prompt = %q, want empty", got)
+	}
+	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close engine: %v", err)
+	}
+	writeTestFile(t, systemPath, "changed")
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("reopened locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	}
+	reopenedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reopenedEngine, err := New(reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                "gpt-5",
+		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
+		TranscriptWorkingDir: workspace,
+		ToolPreambles:        false,
+	})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	if _, err := reopenedEngine.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit again: %v", err)
+	}
+	if got := reopenedClient.calls[0].SystemPrompt; got != "" {
+		t.Fatalf("second system prompt = %q, want empty snapshot", got)
+	}
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+		t.Fatalf("stored system prompt snapshot changed: %+v", locked)
 	}
 }
 
@@ -3284,8 +3742,17 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
 			Model:         "gpt-5",
@@ -3428,6 +3895,36 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	}
 	if !foundReviewerStatus {
 		t.Fatalf("expected reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	eventsMu.Lock()
+	recordedEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
+	reviewerStatusEventIdx := -1
+	for idx, evt := range recordedEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_status" {
+			reviewerStatusEventIdx = idx
+		}
+	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer events, got %+v", recordedEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event, got %+v", recordedEvents)
+	}
+	if reviewerStatusEventIdx < 0 {
+		t.Fatalf("expected reviewer status local entry event, got %+v", recordedEvents)
+	}
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > reviewerStatusEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> reviewer status event order, got %+v", recordedEvents)
 	}
 }
 
@@ -3708,10 +4205,18 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	eventsMu.Lock()
 	deferredEvents := append([]Event(nil), events...)
 	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
 	assistantEventIdx := -1
 	reviewerStatusIdx := -1
 	reviewerEventIdx := -1
 	for idx, evt := range deferredEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
 			assistantEventIdx = idx
 		}
@@ -3728,14 +4233,20 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	if assistantEventIdx < 0 {
 		t.Fatalf("expected follow-up assistant event, got %+v", deferredEvents)
 	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer follow-up, got %+v", deferredEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event before reviewer follow-up, got %+v", deferredEvents)
+	}
 	if reviewerStatusIdx < 0 {
 		t.Fatalf("expected reviewer status local entry event, got %+v", deferredEvents)
 	}
 	if reviewerEventIdx < 0 {
 		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
 	}
-	if assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
-		t.Fatalf("expected assistant -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > assistantEventIdx || assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> updated final -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
 	}
 
 	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
