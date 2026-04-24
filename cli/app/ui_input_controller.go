@@ -9,7 +9,6 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/llm"
-	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/transcript"
 
@@ -181,13 +180,14 @@ func (m *uiModel) appendLocalEntry(role, text string) tea.Cmd {
 }
 
 func (m *uiModel) appendLocalEntryFallback(role, text string) tea.Cmd {
+	return m.appendLocalEntryFallbackWithVisibility(role, text, transcript.EntryVisibilityAuto)
+}
+
+func (m *uiModel) appendLocalEntryFallbackWithVisibility(role, text string, visibility transcript.EntryVisibility) tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	entry := tui.TranscriptEntry{Role: role, Text: text}
-	if role == "warning" && text == runtimeLeaseRecoveryWarningText {
-		entry.Visibility = clientui.EntryVisibilityAll
-	}
+	entry := tui.TranscriptEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text}
 	m.transcriptEntries = append(m.transcriptEntries, entry)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(committedTranscriptEntriesForApp(m.transcriptEntries)))
 	m.refreshRollbackCandidates()
