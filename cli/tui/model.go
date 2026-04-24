@@ -875,7 +875,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 	}
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if m.detailDividerBeforeBlock(idx) {
 			lineOffset++
 		}
 		blockLines := m.detailBlockLinesAt(idx)
@@ -890,6 +890,9 @@ func (m *Model) ensureDetailMetricsResolved() {
 			}
 		}
 		lineOffset += len(blockLines)
+		if m.detailDividerAfterBlock(idx) {
+			lineOffset++
+		}
 	}
 	if lineOffset == 0 {
 		lineOffset = 1
@@ -932,6 +935,18 @@ func (m *Model) detailViewportFromBottomOffset(offset int) ([]string, []VisibleL
 	for idx := len(m.detailBlocks) - 1; idx >= 0 && len(lines) < m.viewportLines; idx-- {
 		block := m.detailBlocks[idx]
 		blockLines := m.detailBlockLinesAt(idx)
+		if m.detailDividerAfterBlock(idx) {
+			totalLines++
+		}
+		if m.detailDividerAfterBlock(idx) && len(lines) < m.viewportLines {
+			if remainingSkip > 0 {
+				remainingSkip--
+			} else {
+				lines = append(lines, detailDivider())
+				kinds = append(kinds, VisibleLineDivider)
+				owners = append(owners, -1)
+			}
+		}
 		totalLines += len(blockLines)
 		for lineIdx := len(blockLines) - 1; lineIdx >= 0 && len(lines) < m.viewportLines; lineIdx-- {
 			if remainingSkip > 0 {
@@ -942,10 +957,10 @@ func (m *Model) detailViewportFromBottomOffset(offset int) ([]string, []VisibleL
 			kinds = append(kinds, VisibleLineContent)
 			owners = append(owners, block.entryIndex)
 		}
-		if idx > 0 {
+		if m.detailDividerBeforeBlock(idx) {
 			totalLines++
 		}
-		if idx > 0 && len(lines) < m.viewportLines {
+		if m.detailDividerBeforeBlock(idx) && len(lines) < m.viewportLines {
 			if remainingSkip > 0 {
 				remainingSkip--
 				continue
@@ -976,7 +991,7 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 	owners := make([]int, 0, m.viewportLines)
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if m.detailDividerBeforeBlock(idx) {
 			if lineOffset >= start && lineOffset < end {
 				lines = append(lines, detailDivider())
 				kinds = append(kinds, VisibleLineDivider)
@@ -997,11 +1012,39 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 			}
 		}
 		lineOffset = blockEnd
+		if m.detailDividerAfterBlock(idx) {
+			if lineOffset >= start && lineOffset < end {
+				lines = append(lines, detailDivider())
+				kinds = append(kinds, VisibleLineDivider)
+				owners = append(owners, -1)
+			}
+			lineOffset++
+		}
 		if lineOffset >= end {
 			break
 		}
 	}
 	return lines, kinds, owners
+}
+
+func (m *Model) detailDividerBeforeBlock(idx int) bool {
+	if m == nil || idx < 0 || idx >= len(m.detailBlocks) {
+		return false
+	}
+	if !m.compactDetail {
+		return idx > 0
+	}
+	if idx == 0 {
+		return m.detailBlocks[idx].expanded
+	}
+	return m.detailBlocks[idx-1].expanded || m.detailBlocks[idx].expanded
+}
+
+func (m *Model) detailDividerAfterBlock(idx int) bool {
+	if m == nil || idx < 0 || idx >= len(m.detailBlocks) || !m.compactDetail {
+		return false
+	}
+	return idx == len(m.detailBlocks)-1 && m.detailBlocks[idx].expanded
 }
 
 func reverseStrings(values []string) {
