@@ -1174,6 +1174,25 @@ func TestWorktreeDeleteDoneAppliesTargetAfterOverlayCloses(t *testing.T) {
 	}
 }
 
+func TestWorktreeDeleteDoneShowsBranchCleanupOutcome(t *testing.T) {
+	m := newWorktreeTestModel(t, &worktreeCommandTestClient{})
+	m.worktrees.mutationToken = 9
+
+	next, _ := m.Update(worktreeDeleteDoneMsg{
+		token: 9,
+		resp: serverapi.WorktreeDeleteResponse{
+			Target:               clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"},
+			Worktree:             serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"},
+			BranchCleanupMessage: "Kept branch feature-a: Builder cannot prove this worktree created it",
+		},
+	})
+	updated := next.(*uiModel)
+
+	if !strings.Contains(updated.transientStatus, "Deleted worktree feature-a") || !strings.Contains(updated.transientStatus, "Kept branch feature-a") {
+		t.Fatalf("transient status = %q, want delete and branch cleanup outcome", updated.transientStatus)
+	}
+}
+
 func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 	resp := testMainWorktreeListResponse()
 	resp.Worktrees = append(resp.Worktrees, serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a", BranchName: "feature/a"})

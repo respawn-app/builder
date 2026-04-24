@@ -1157,7 +1157,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.worktrees.selectedID = worktreeCreateRowID
 			listCmd = m.requestWorktreeListCmd()
 		}
-		feedbackCmd := m.setTransientStatusWithKind("Deleted worktree "+worktreeDisplayName(msg.resp.Worktree), uiStatusNoticeSuccess)
+		feedbackCmd := m.setTransientStatusWithKind(worktreeDeleteSuccessStatus(msg.resp), uiStatusNoticeSuccess)
 		m.syncViewport()
 		return m, tea.Batch(feedbackCmd, listCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeCreateTargetResolveDebounceMsg:
@@ -1436,6 +1436,14 @@ func (m *uiModel) updateTranscriptDiagnosticsMode() {
 
 func (m *uiModel) inputController() uiInputController {
 	return uiInputController{model: m}
+}
+
+func worktreeDeleteSuccessStatus(resp serverapi.WorktreeDeleteResponse) string {
+	status := "Deleted worktree " + worktreeDisplayName(resp.Worktree)
+	if cleanup := strings.TrimSpace(resp.BranchCleanupMessage); cleanup != "" {
+		status += ". " + cleanup
+	}
+	return status
 }
 
 func (m *uiModel) askController() uiAskController {

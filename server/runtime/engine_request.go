@@ -221,15 +221,24 @@ func (e *Engine) requestTools() []llm.Tool {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
+	customPatchSupported := e.supportsCustomPatchTool()
 	for _, d := range defs {
 		tool := llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema}
-		if d.ID == toolspec.ToolPatch {
+		if d.ID == toolspec.ToolPatch && customPatchSupported {
 			tool.Schema = nil
 			tool.Custom = &llm.CustomToolFormat{Type: "grammar", Syntax: "lark", Definition: llm.PatchToolLarkGrammar}
 		}
 		out = append(out, tool)
 	}
 	return out
+}
+
+func (e *Engine) supportsCustomPatchTool() bool {
+	if e == nil || e.store == nil {
+		return false
+	}
+	caps, ok := llm.ProviderCapabilitiesFromLocked(e.store.Meta().Locked)
+	return ok && caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
 }
 
 func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
