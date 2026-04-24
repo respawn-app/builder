@@ -167,6 +167,40 @@ func TestCompactDetailHidesMarkerWhenExpansionDoesNotChangeEntry(t *testing.T) {
 	}
 }
 
+func TestCompactDetailMarkerVisibilityByExpansionState(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		expand     bool
+		wantMarker string
+	}{
+		{name: "collapsed identical short entry", text: "short answer", wantMarker: ""},
+		{name: "expanded identical short entry", text: "short answer", expand: true, wantMarker: ""},
+		{name: "collapsed expandable entry", text: "one\ntwo\nthree\nfour", wantMarker: "▶︎"},
+		{name: "expanded expandable entry", text: "one\ntwo\nthree\nfour", expand: true, wantMarker: "▼"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: tt.text})
+			m = updateModel(t, m, ToggleModeMsg{})
+			if tt.expand {
+				m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			}
+			rendered := xansi.Strip(m.View())
+			if tt.wantMarker == "" {
+				if strings.Contains(rendered, "▶︎") || strings.Contains(rendered, "▼") {
+					t.Fatalf("expected no marker, got %q", rendered)
+				}
+				return
+			}
+			if !strings.Contains(rendered, tt.wantMarker) {
+				t.Fatalf("expected marker %q, got %q", tt.wantMarker, rendered)
+			}
+		})
+	}
+}
+
 func TestCompactDetailRightMarkerReservesRowSpace(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 24})
