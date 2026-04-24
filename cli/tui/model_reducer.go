@@ -270,6 +270,9 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	}
 	m.invalidateDetailSnapshot()
 	m.rebuildDetailSnapshot()
+	if m.compactDetail {
+		m.ensureDetailSelection()
+	}
 	if preserveAnchor {
 		if start, _, ok := m.detailLineRangeForEntry(anchorEntry); ok {
 			m.detailScroll = clamp(start+anchorOffset, 0, m.maxDetailScroll())
@@ -524,6 +527,9 @@ func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom b
 	if result.forceDetailRefresh || (m.mode == ModeDetail && result.detailChanged) {
 		m.rebuildDetailSnapshot()
 		m.detailStale = false
+		if m.compactDetail {
+			m.ensureDetailSelection()
+		}
 	}
 	if m.ongoingDirty && m.mode == ModeOngoing {
 		m.rebuildOngoingSnapshot()

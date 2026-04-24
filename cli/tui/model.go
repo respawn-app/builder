@@ -780,14 +780,10 @@ func (m Model) renderDetailSnapshot() string {
 	}
 
 	out := make([]string, 0, m.viewportLines)
+	selectedEntry, highlightSelected := m.resolveDetailSelection()
 	for i, line := range lines {
-		if m.compactDetail && m.detailSelectedActive && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == m.detailSelectedEntry {
+		if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
 			line = m.renderSelectedTranscriptLine(line)
-		} else {
-			selectedEntry, highlightSelected := m.selectedUserTranscriptEntry()
-			if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
-				line = m.renderSelectedTranscriptLine(line)
-			}
 		}
 		out = append(out, line)
 	}

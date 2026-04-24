@@ -95,12 +95,13 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 		if evt.Background.Type != "completed" && evt.Background.Type != "killed" {
 			return nil
 		}
+		compact := formatBackgroundShellCompact(*evt.Background)
 		return []ChatEntry{{
 			Role:         "system",
 			Text:         formatBackgroundShellNotice(*evt.Background),
-			OngoingText:  formatBackgroundShellCompact(*evt.Background),
+			OngoingText:  compact,
 			MessageType:  llm.MessageTypeBackgroundNotice,
-			CompactLabel: formatBackgroundShellCompact(*evt.Background),
+			CompactLabel: compact,
 		}}
 	default:
 		return nil

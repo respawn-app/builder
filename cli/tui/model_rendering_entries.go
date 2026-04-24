@@ -469,6 +469,16 @@ func (m Model) selectedUserTranscriptEntry() (int, bool) {
 	return m.selectedTranscriptEntry, true
 }
 
+func (m Model) resolveDetailSelection() (int, bool) {
+	if selectedEntry, ok := m.selectedUserTranscriptEntry(); ok {
+		return selectedEntry, true
+	}
+	if m.compactDetail && m.detailSelectedActive {
+		return m.detailSelectedEntry, true
+	}
+	return -1, false
+}
+
 func (m Model) maybeHighlightSelectedTranscriptLine(line string, entryIndex int) string {
 	selectedEntry, ok := m.selectedUserTranscriptEntry()
 	if !ok || entryIndex != selectedEntry {
@@ -478,9 +488,9 @@ func (m Model) maybeHighlightSelectedTranscriptLine(line string, entryIndex int)
 }
 
 func (m Model) renderSelectedTranscriptLine(line string) string {
-	palette := m.palette()
 	padded := padRenderedLineToWidth(line, m.viewportWidth)
 	if !m.compactDetail {
+		palette := m.palette()
 		return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
 	}
 	return applySelectionBackground(padded, themeModeBackgroundColor(m.theme))

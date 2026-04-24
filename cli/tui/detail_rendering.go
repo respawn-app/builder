@@ -199,6 +199,12 @@ func defaultDetailLabelForRole(role string) string {
 		return "Reviewer status"
 	case "reviewer_suggestions":
 		return "Reviewer suggestions"
+	case "thinking", "reasoning":
+		return "Reasoning summary"
+	case "thinking_trace":
+		return "Reasoning trace"
+	case "compaction_notice":
+		return "Context compacted"
 	case roleDeveloperContext:
 		return "Developer context"
 	case roleDeveloperFeedback:

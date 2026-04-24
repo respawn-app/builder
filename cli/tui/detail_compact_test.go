@@ -68,8 +68,8 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	}
 
 	m = updateModel(t, m, SetConversationMsg{BaseOffset: 20, Entries: []TranscriptEntry{{Role: "assistant", Text: "replacement"}}})
-	if m.detailSelectedActive {
-		t.Fatalf("expected stale detail selection cleared, got entry %d", m.detailSelectedEntry)
+	if !m.detailSelectedActive || m.detailSelectedEntry != 20 {
+		t.Fatalf("expected detail selection re-anchored to replacement, got active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
 	}
 	if len(m.detailExpandedEntries) != 0 {
 		t.Fatalf("expected stale expanded entries cleared, got %+v", m.detailExpandedEntries)
@@ -115,6 +115,21 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 	}
 	if strings.Contains(rendered, "printf 'two") {
 		t.Fatalf("expected collapsed completed shell call to hide second command line, got %q", rendered)
+	}
+}
+
+func TestCompactDetailDefaultLabelsCoverInternalRoles(t *testing.T) {
+	tests := map[string]string{
+		"thinking":          "Reasoning summary",
+		"reasoning":         "Reasoning summary",
+		"thinking_trace":    "Reasoning trace",
+		"compaction_notice": "Context compacted",
+	}
+
+	for role, want := range tests {
+		if got := defaultDetailLabelForRole(role); got != want {
+			t.Fatalf("defaultDetailLabelForRole(%q) = %q, want %q", role, got, want)
+		}
 	}
 }
 
