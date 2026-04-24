@@ -28,3 +28,24 @@ func TestFetchUsagePayloadHandlesNonOAuthState(t *testing.T) {
 		t.Fatalf("ChatGPT-Account-Id = %q, want empty for API key auth", accountHeader)
 	}
 }
+
+func TestLimitDuration(t *testing.T) {
+	tests := []struct {
+		name          string
+		windowMinutes int
+		want          string
+	}{
+		{name: "daily", windowMinutes: 24 * 60, want: "24h"},
+		{name: "weekly", windowMinutes: 7 * 24 * 60, want: "weekly"},
+		{name: "monthly", windowMinutes: 30 * 24 * 60, want: "monthly"},
+		{name: "ninety days", windowMinutes: 90 * 24 * 60, want: "90d"},
+		{name: "annual", windowMinutes: 365 * 24 * 60, want: "annual"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := limitDuration(tt.windowMinutes); got != tt.want {
+				t.Fatalf("limitDuration(%d) = %q, want %q", tt.windowMinutes, got, tt.want)
+			}
+		})
+	}
+}

@@ -995,6 +995,22 @@ func TestWorktreeDeleteDialogPreviewWarnsAboutDirtyFiles(t *testing.T) {
 	}
 }
 
+func TestWorktreeDeleteDialogPreviewWarnsWhenDirtyCountUnavailable(t *testing.T) {
+	resp := testLinkedWorktreeListResponse()
+	resp.Worktrees[1].DirtyFileCount = -1
+	client := &worktreeCommandTestClient{listResp: resp}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree delete"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "• Dirty file count unavailable; delete will force removal") {
+		t.Fatalf("expected unknown dirty file warning, got %q", plain)
+	}
+}
+
 func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 	client := &worktreeCommandTestClient{
 		listResp: testLinkedWorktreeListResponse(),

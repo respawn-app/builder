@@ -784,6 +784,7 @@ func TestSyncExecutionTargetUpdatesActiveRuntimePatchTranscriptWorkdir(t *testin
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
 	}
+	defer func() { _ = engine.Close() }()
 	handle := &runtimeHandle{
 		controllerRequestID: "req-1",
 		controllerLeaseID:   "lease-1",
@@ -874,6 +875,7 @@ func TestRuntimeRebindDoesNotAdvanceTranscriptWorkdirWhenLocalRebindFails(t *tes
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
 	}
+	defer func() { _ = engine.Close() }()
 	rebindErr := runtimeRebindFunc(func(string) error { return errors.New("local rebind failed") }, engine)("/new-worktree")
 	if rebindErr == nil || !strings.Contains(rebindErr.Error(), "local rebind failed") {
 		t.Fatalf("runtimeRebindFunc error = %v, want local rebind failed", rebindErr)
