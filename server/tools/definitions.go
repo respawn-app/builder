@@ -165,7 +165,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolAskQuestion,
 		Aliases:        nil,
-		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like messaging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if applicable, and choosing one recommended option you deem best for user goals.",
+		Description:    "Ask the user a question. You should ask the user when planning or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, architecture, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if applicable, and providing one recommended option you deem best for user goals.",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderAskQuestion,
@@ -200,7 +200,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolTriggerHandoff,
 		Aliases:        nil,
-		Description:    "Trigger a proactive handoff to another agent. By default, this tool is disallowed even if visible. Using this tool is allowed only after a specific developer message appears in transcript that allows this tool. Do not use this tool before the reminder. The tool is private to the agent, so you can use 'analysis' channel content in its parameters.",
+		Description:    "Trigger a proactive handoff to another agent. By default, this tool is disallowed even if visible. Using this tool is allowed only after a specific developer message appears in transcript that allows this tool. Do not use this tool before the reminder. The tool is private to you, so you can use 'analysis' channel content in its parameters.",
 		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderTriggerHandoff,
