@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/server/llm"
 	"builder/shared/transcript"
 )
 
@@ -23,6 +24,25 @@ func TestCommittedOngoingProjectionRenderAppendDeltaFromAppendedEntry(t *testing
 	}
 	if strings.Contains(delta, "seed") {
 		t.Fatalf("expected delta to exclude already committed prefix, got %q", delta)
+	}
+}
+
+func TestCommittedOngoingProjectionRenderAppendDeltaFromAssistantCommentaryContinuation(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "Decision: keep", Phase: llm.MessagePhaseCommentary})
+	previous := m.CommittedOngoingProjection()
+
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "going"})
+	current := m.CommittedOngoingProjection()
+	delta, ok := current.RenderAppendDeltaFrom(previous, TranscriptDivider)
+	if !ok {
+		t.Fatal("expected append-only committed projection delta")
+	}
+	if strings.Contains(delta, TranscriptDivider) {
+		t.Fatalf("expected assistant commentary continuation delta without divider, got %q", delta)
+	}
+	if !strings.Contains(delta, "going") {
+		t.Fatalf("expected delta to include appended assistant continuation, got %q", delta)
 	}
 }
 

@@ -3027,6 +3027,36 @@ func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
 	}
 }
 
+func TestAssistantCommentaryCommitPlusDeltaDoesNotSplitOngoingView(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind:                       runtime.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         1,
+		CommittedEntryCount:        1,
+		Message: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: "Decision: keep Builder tool name patch; expose custom tool with Lark grammar.",
+			Phase:   llm.MessagePhaseCommentary,
+		},
+	})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind:           runtime.EventAssistantDelta,
+		StepID:         "step-1",
+		AssistantDelta: " Internally normalize custom calls into existing executor input.",
+	})
+
+	view := stripANSIPreserve(m.view.OngoingSnapshot())
+	if strings.Contains(view, tui.TranscriptDivider) {
+		t.Fatalf("expected projected commentary commit plus live assistant delta without divider, got %q", view)
+	}
+	if !containsInOrder(view, "Decision:", "executor input") {
+		t.Fatalf("expected projected commentary commit and live delta in order, got %q", view)
+	}
+}
+
 func TestAssistantDeltaSkipsNoopFinalToken(t *testing.T) {
 	m := newProjectedStaticUIModel()
 
