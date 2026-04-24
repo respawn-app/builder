@@ -13,6 +13,7 @@ import (
 
 	"builder/server/tools"
 	"builder/shared/toolspec"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 func TestDeleteFile(t *testing.T) {
@@ -348,6 +349,16 @@ func TestUpdateFileAcceptsWhitespacePaddedEndOfFileMarker(t *testing.T) {
 	}
 	if string(data) != "ONE\ntwo\n" {
 		t.Fatalf("unexpected target contents: %q", string(data))
+	}
+}
+
+func TestParseEditHunksPreservesSoleEndOfFileMarker(t *testing.T) {
+	hunks, err := parseEditHunks([]patchformat.ChangeLine{{EndOfFile: true}})
+	if err != nil {
+		t.Fatalf("parseEditHunks: %v", err)
+	}
+	if len(hunks) != 1 || !hunks[0].endOfFile || len(hunks[0].changes) != 0 {
+		t.Fatalf("expected sole EOF marker hunk preserved, got %+v", hunks)
 	}
 }
 
