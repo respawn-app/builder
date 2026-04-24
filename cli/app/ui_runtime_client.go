@@ -24,6 +24,7 @@ const uiRuntimeReadTimeout = 300 * time.Millisecond
 const uiRuntimeHydrationReadTimeout = 10 * time.Second
 const uiRuntimeMainViewRefreshInterval = 250 * time.Millisecond
 const uiRuntimeTranscriptPageCacheMaxEntries = 16
+const runtimeLeaseRecoveryWarningText = "Connection was lost, re-acquiring a new lease."
 
 type sessionRuntimeClient struct {
 	reads                   client.SessionViewClient
@@ -129,8 +130,32 @@ func (c *sessionRuntimeClient) recoverControllerLease(ctx context.Context) error
 	if manager == nil {
 		return errControllerLeaseRecoveryUnavailable
 	}
-	_, err := manager.Recover(ctx)
-	return err
+	leaseID, err := manager.Recover(ctx)
+	if err != nil {
+		return err
+	}
+	c.appendLeaseRecoveryWarning(ctx, leaseID)
+	return nil
+}
+
+func (c *sessionRuntimeClient) appendLeaseRecoveryWarning(ctx context.Context, controllerLeaseID string) {
+	if c == nil || c.controls == nil {
+		return
+	}
+	_ = c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{
+		ClientRequestID:   uuid.NewString(),
+		SessionID:         c.sessionID,
+		ControllerLeaseID: controllerLeaseID,
+		Role:              "warning",
+		Text:              runtimeLeaseRecoveryWarningText,
+	})
+}
+
+func isRecoverableRuntimeControlError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, serverapi.ErrInvalidControllerLease) || errors.Is(err, serverapi.ErrRuntimeUnavailable)
 }
 
 func (c *sessionRuntimeClient) retryControlCallNoResult(ctx context.Context, call func(controllerLeaseID string) error) error {
@@ -142,7 +167,7 @@ func (c *sessionRuntimeClient) retryControlCallNoResult(ctx context.Context, cal
 
 func retryRuntimeControlCall[T any](ctx context.Context, currentLeaseID func() string, recoverLease func(context.Context) error, call func(controllerLeaseID string) (T, error)) (T, error) {
 	value, err := call(currentLeaseID())
-	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+	if !isRecoverableRuntimeControlError(err) {
 		return value, err
 	}
 	var zero T

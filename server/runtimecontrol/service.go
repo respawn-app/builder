@@ -2,6 +2,7 @@ package runtimecontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -118,7 +119,7 @@ func (s *Service) resolve(ctx context.Context, sessionID string) (*runtime.Engin
 		return nil, err
 	}
 	if engine == nil {
-		return nil, fmt.Errorf("runtime for session %q is unavailable", strings.TrimSpace(sessionID))
+		return nil, errors.Join(serverapi.ErrRuntimeUnavailable, fmt.Errorf("runtime for session %q is unavailable", strings.TrimSpace(sessionID)))
 	}
 	return engine, nil
 }

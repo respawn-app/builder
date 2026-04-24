@@ -901,6 +901,9 @@ func protocolError(err error) (int, string) {
 	if errors.Is(err, serverapi.ErrInvalidControllerLease) {
 		return protocol.ErrCodeInvalidControllerLease, message
 	}
+	if errors.Is(err, serverapi.ErrRuntimeUnavailable) {
+		return protocol.ErrCodeRuntimeUnavailable, message
+	}
 	if errors.Is(err, serverapi.ErrStreamUnavailable) {
 		return protocol.ErrCodeStreamUnavailable, message
 	}

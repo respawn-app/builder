@@ -627,6 +627,12 @@ func TestProtocolErrorMapsAuthRequiredCode(t *testing.T) {
 	}
 }
 
+func TestProtocolErrorMapsRuntimeUnavailableCode(t *testing.T) {
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRuntimeUnavailable, Message: "runtime missing"}); !errors.Is(err, serverapi.ErrRuntimeUnavailable) {
+		t.Fatalf("expected runtime unavailable, got %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)

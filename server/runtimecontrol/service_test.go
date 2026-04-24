@@ -78,6 +78,21 @@ func (c *runtimeControlFakeClient) ProviderCapabilities(context.Context) (llm.Pr
 	return c.capabilities, nil
 }
 
+func TestServiceSubmitUserMessageReturnsTypedRuntimeUnavailable(t *testing.T) {
+	service := NewService(stubRuntimeResolver{}, nil)
+	req := serverapi.RuntimeSubmitUserMessageRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         "session-1",
+		ControllerLeaseID: "lease-1",
+		Text:              "hello",
+	}
+
+	_, err := service.SubmitUserMessage(context.Background(), req)
+	if !errors.Is(err, serverapi.ErrRuntimeUnavailable) {
+		t.Fatalf("SubmitUserMessage error = %v, want ErrRuntimeUnavailable", err)
+	}
+}
+
 func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {
