@@ -372,6 +372,8 @@ func TestDeleteWorktreeKeepsExistingBranchUnlessExplicitlyRequested(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateWorktree existing branch: %v", err)
 	}
+	env.localNotes = &serviceTestLocalNotes{}
+	env.service.localNotes = env.localNotes
 
 	deleteResp, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-shared-branch",
@@ -387,6 +389,9 @@ func TestDeleteWorktreeKeepsExistingBranchUnlessExplicitlyRequested(t *testing.T
 	}
 	if !strings.Contains(deleteResp.BranchCleanupMessage, "Kept branch feature/shared-branch") {
 		t.Fatalf("unexpected branch cleanup message: %q", deleteResp.BranchCleanupMessage)
+	}
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no transcript note for delete branch cleanup message, got %+v", notes)
 	}
 	if got := runGit(t, env.workspaceRoot, "branch", "--list", "feature/shared-branch"); !strings.Contains(got, "feature/shared-branch") {
 		t.Fatalf("expected shared branch to remain, got %q", got)
@@ -406,6 +411,8 @@ func TestDeleteWorktreeDeletesExistingBranchWhenExplicitlyRequested(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateWorktree existing branch: %v", err)
 	}
+	env.localNotes = &serviceTestLocalNotes{}
+	env.service.localNotes = env.localNotes
 
 	deleteResp, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-shared-branch-explicit",
@@ -422,6 +429,9 @@ func TestDeleteWorktreeDeletesExistingBranchWhenExplicitlyRequested(t *testing.T
 	}
 	if !strings.Contains(deleteResp.BranchCleanupMessage, "Deleted branch feature/shared-branch") {
 		t.Fatalf("unexpected branch cleanup message: %q", deleteResp.BranchCleanupMessage)
+	}
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no transcript note for delete branch cleanup message, got %+v", notes)
 	}
 	if got := runGit(t, env.workspaceRoot, "branch", "--list", "feature/shared-branch"); strings.Contains(got, "feature/shared-branch") {
 		t.Fatalf("expected shared branch removed, got %q", got)
@@ -957,9 +967,8 @@ func TestDeleteWorktreeRebindsCurrentSessionToMainBeforeRemoval(t *testing.T) {
 			t.Fatalf("expected deleted worktree to disappear from list, got %+v", worktree)
 		}
 	}
-	notes := env.localNotes.snapshot()
-	if len(notes) == 0 || !strings.Contains(notes[0], "Switched worktree to main workspace") {
-		t.Fatalf("expected delete path to append switch note, got %+v", notes)
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected delete path not to append transcript notes, got %+v", notes)
 	}
 }
 

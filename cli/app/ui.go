@@ -1135,8 +1135,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.worktrees.selectedID = worktreeCreateRowID
 			listCmd = m.requestWorktreeListCmd()
 		}
-		status := "Deleted worktree " + worktreeDisplayName(msg.resp.Worktree)
-		feedbackCmd := sequenceCmds(m.appendLocalEntry("system", formatWorktreeDelete(msg.resp)), m.setTransientStatusWithKind(status, uiStatusNoticeSuccess))
+		feedbackCmd := m.setTransientStatusWithKind("Deleted worktree "+worktreeDisplayName(msg.resp.Worktree), uiStatusNoticeSuccess)
 		m.syncViewport()
 		return m, tea.Batch(feedbackCmd, listCmd, m.requestRuntimeMainViewRefresh(), m.ensureSpinnerTicking())
 	case worktreeCreateTargetResolveDebounceMsg:
