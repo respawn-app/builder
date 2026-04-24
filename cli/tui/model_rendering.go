@@ -47,8 +47,13 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				role:       blockRole,
 				entryIndex: absoluteIndex,
 				entryEnd:   absoluteIndex,
+				selectable: true,
+				expanded:   m.detailEntryExpanded(absoluteIndex),
 				render: func(model Model) []string {
-					return model.flattenEntry(blockRole, text)
+					if model.detailEntryExpanded(absoluteIndex) || blockRole == "tool_error" {
+						return model.detailWithChevron(blockRole, model.flattenEntry(blockRole, text), true)
+					}
+					return model.detailWithChevron(blockRole, model.flattenEntry(blockRole, model.firstDetailPreviewLine(text, "Tool output")), false)
 				},
 			})
 		default:
@@ -209,9 +214,11 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	combined := toolCallDisplayText(entry.ToolCall, entry.Text)
 	entryEnd := entryIndex
 	resultText := ""
+	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcript[resultIdx]
 		resultRole := strings.TrimSpace(resultEntry.Role)
+		resultSummary = strings.TrimSpace(resultEntry.ToolResultSummary)
 		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != "tool_result_error"
 		if trimmedResultText := strings.TrimSpace(resultEntry.Text); trimmedResultText != "" && !omitSuccessfulResult {
 			combined += "\n" + resultEntry.Text
@@ -230,11 +237,16 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		role:       blockRole,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteEnd,
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
-			if meta != nil && meta.PatchRender != nil {
-				return model.flattenPatchToolBlock(blockRole, meta, resultText)
+			if !model.detailEntryExpanded(absoluteIndex) {
+				return model.detailCollapsedToolLines(blockRole, entry, resultSummary)
 			}
-			return model.flattenEntryWithMeta(blockRole, combined, false, meta)
+			if meta != nil && meta.PatchRender != nil {
+				return model.detailWithChevron(blockRole, model.flattenPatchToolBlock(blockRole, meta, resultText), true)
+			}
+			return model.detailWithChevron(blockRole, model.flattenEntryWithMeta(blockRole, combined, false, meta), true)
 		},
 	}
 }
@@ -263,10 +275,12 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 	blockRole := "tool_question"
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
+	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 		if isToolResultRole(nextRole) {
 			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
+			resultSummary = strings.TrimSpace(m.transcript[resultIdx].ToolResultSummary)
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 			consumed[resultIdx] = struct{}{}
 		}
@@ -276,8 +290,17 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 		role:       blockRole,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteIndex,
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
-			return model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true)
+			if model.detailEntryExpanded(absoluteIndex) {
+				return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true), true)
+			}
+			collapsedAnswer := ""
+			if resultSummary != "" {
+				collapsedAnswer = resultSummary
+			}
+			return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false), false)
 		},
 	}
 }
@@ -349,8 +372,13 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		role:       role,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteIndex,
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
-			return model.flattenEntry(role, text)
+			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
+				return model.detailWithChevron(role, model.flattenEntry(role, text), true)
+			}
+			return model.detailCollapsedStandardLines(entry, role, text)
 		},
 	}
 }

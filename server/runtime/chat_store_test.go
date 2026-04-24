@@ -746,7 +746,7 @@ func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T)
 	}
 }
 
-func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t *testing.T) {
+func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsVisibleContext(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageType("custom_internal"), Content: "Internal developer note"})
 
@@ -754,7 +754,7 @@ func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t 
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityAll || got.MessageType != llm.MessageType("custom_internal") || got.CompactLabel != "Developer context: custom_internal" {
 		t.Fatalf("unexpected unknown developer context entry: %+v", got)
 	}
 }

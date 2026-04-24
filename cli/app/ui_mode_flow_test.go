@@ -640,6 +640,7 @@ func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
 	}
 
 	detail := updateUIModel(t, hydrated, tea.KeyMsg{Type: tea.KeyCtrlT})
+	detail.forwardToView(tea.KeyMsg{Type: tea.KeyEnter})
 	if detail.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected detail mode after toggle, got %q", detail.view.Mode())
 	}

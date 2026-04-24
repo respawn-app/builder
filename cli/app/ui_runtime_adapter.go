@@ -942,15 +942,19 @@ func committedTranscriptProjectionForApp(view tui.Model, entries []tui.Transcrip
 
 func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient bool, committed bool) tui.TranscriptEntry {
 	return tui.TranscriptEntry{
-		Visibility:  entry.Visibility,
-		Transient:   transient,
-		Committed:   committed,
-		Role:        entry.Role,
-		Text:        entry.Text,
-		OngoingText: entry.OngoingText,
-		Phase:       llm.MessagePhase(entry.Phase),
-		ToolCallID:  entry.ToolCallID,
-		ToolCall:    transcriptToolCallMeta(entry.ToolCall),
+		Visibility:        entry.Visibility,
+		Transient:         transient,
+		Committed:         committed,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             llm.MessagePhase(entry.Phase),
+		MessageType:       llm.MessageType(entry.MessageType),
+		SourcePath:        strings.TrimSpace(entry.SourcePath),
+		CompactLabel:      strings.TrimSpace(entry.CompactLabel),
+		ToolResultSummary: strings.TrimSpace(entry.ToolResultSummary),
+		ToolCallID:        entry.ToolCallID,
+		ToolCall:          transcriptToolCallMeta(entry.ToolCall),
 	}
 }
 
@@ -1435,6 +1439,10 @@ func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clie
 		existing.Text == incoming.Text &&
 		existing.OngoingText == incoming.OngoingText &&
 		existing.Phase == llm.MessagePhase(incoming.Phase) &&
+		existing.MessageType == llm.MessageType(incoming.MessageType) &&
+		strings.TrimSpace(existing.SourcePath) == strings.TrimSpace(incoming.SourcePath) &&
+		strings.TrimSpace(existing.CompactLabel) == strings.TrimSpace(incoming.CompactLabel) &&
+		strings.TrimSpace(existing.ToolResultSummary) == strings.TrimSpace(incoming.ToolResultSummary) &&
 		strings.TrimSpace(existing.ToolCallID) == strings.TrimSpace(incoming.ToolCallID)
 }
 

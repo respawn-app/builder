@@ -128,9 +128,21 @@ func (m *Model) reduceDetailKeyMsg(msg tea.KeyMsg) {
 	case tea.KeyTab:
 		*m = m.transitionMode(ModeOngoing, false)
 	case tea.KeyUp:
-		*m = m.scrollDetail(-1)
+		if m.compactDetail {
+			m.moveDetailSelection(-1)
+		} else {
+			*m = m.scrollDetail(-1)
+		}
 	case tea.KeyDown:
-		*m = m.scrollDetail(1)
+		if m.compactDetail {
+			m.moveDetailSelection(1)
+		} else {
+			*m = m.scrollDetail(1)
+		}
+	case tea.KeyEnter:
+		if m.compactDetail {
+			m.toggleSelectedDetailExpansion()
+		}
 	case tea.KeyPgUp:
 		*m = m.scrollDetail(-max(1, m.viewportLines-1))
 	case tea.KeyPgDown:
@@ -193,15 +205,19 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 		role = "unknown"
 	}
 	m.transcript = append(m.transcript, TranscriptEntry{
-		Visibility:  transcript.NormalizeEntryVisibility(msg.Visibility),
-		Transient:   msg.Transient,
-		Committed:   msg.Committed,
-		Role:        role,
-		Text:        msg.Text,
-		OngoingText: msg.OngoingText,
-		Phase:       msg.Phase,
-		ToolCallID:  strings.TrimSpace(msg.ToolCallID),
-		ToolCall:    cloneToolCallMeta(msg.ToolCall),
+		Visibility:        transcript.NormalizeEntryVisibility(msg.Visibility),
+		Transient:         msg.Transient,
+		Committed:         msg.Committed,
+		Role:              role,
+		Text:              msg.Text,
+		OngoingText:       msg.OngoingText,
+		Phase:             msg.Phase,
+		MessageType:       msg.MessageType,
+		SourcePath:        strings.TrimSpace(msg.SourcePath),
+		CompactLabel:      strings.TrimSpace(msg.CompactLabel),
+		ToolResultSummary: strings.TrimSpace(msg.ToolResultSummary),
+		ToolCallID:        strings.TrimSpace(msg.ToolCallID),
+		ToolCall:          cloneToolCallMeta(msg.ToolCall),
 	})
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(m.transcript))
 	result.autoFollowOngoing = true
@@ -221,6 +237,9 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	for i := range entries {
 		entries[i].Visibility = transcript.NormalizeEntryVisibility(entries[i].Visibility)
 		entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
+		entries[i].SourcePath = strings.TrimSpace(entries[i].SourcePath)
+		entries[i].CompactLabel = strings.TrimSpace(entries[i].CompactLabel)
+		entries[i].ToolResultSummary = strings.TrimSpace(entries[i].ToolResultSummary)
 		entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 	}
 	m.transcript = entries
@@ -238,6 +257,10 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	if _, ok := m.localTranscriptIndex(m.selectedTranscriptEntry); !ok {
 		m.selectedTranscriptActive = false
 	}
+	if _, ok := m.localTranscriptIndex(m.detailSelectedEntry); !ok {
+		m.detailSelectedActive = false
+	}
+	m.reconcileDetailExpandedEntries()
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
@@ -255,6 +278,97 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 			m.refreshDetailViewport()
 		}
 	}
+}
+
+func (m *Model) reconcileDetailExpandedEntries() {
+	if m == nil || len(m.detailExpandedEntries) == 0 {
+		return
+	}
+	for entryIndex := range m.detailExpandedEntries {
+		if _, ok := m.localTranscriptIndex(entryIndex); !ok {
+			delete(m.detailExpandedEntries, entryIndex)
+		}
+	}
+}
+
+func (m *Model) moveDetailSelection(delta int) {
+	if m == nil || delta == 0 {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	m.ensureDetailSelection()
+	if !m.detailSelectedActive {
+		return
+	}
+	current := m.detailBlockIndexForEntry(m.detailSelectedEntry)
+	if current < 0 {
+		m.detailSelectedActive = false
+		m.ensureDetailSelection()
+		current = m.detailBlockIndexForEntry(m.detailSelectedEntry)
+	}
+	if current < 0 {
+		return
+	}
+	next := current + delta
+	for next >= 0 && next < len(m.detailBlocks) && !m.detailBlocks[next].selectable {
+		next += delta
+	}
+	if next < 0 || next >= len(m.detailBlocks) {
+		return
+	}
+	m.detailSelectedEntry = m.detailBlocks[next].entryIndex
+	m.detailSelectedActive = true
+	m.scrollDetailSelectionIntoView()
+	m.refreshDetailViewport()
+}
+
+func (m *Model) toggleSelectedDetailExpansion() {
+	if m == nil {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	m.ensureDetailSelection()
+	if !m.detailSelectedActive {
+		return
+	}
+	if m.detailExpandedEntries == nil {
+		m.detailExpandedEntries = make(map[int]struct{})
+	}
+	if _, ok := m.detailExpandedEntries[m.detailSelectedEntry]; ok {
+		delete(m.detailExpandedEntries, m.detailSelectedEntry)
+	} else {
+		m.detailExpandedEntries[m.detailSelectedEntry] = struct{}{}
+	}
+	m.invalidateDetailSnapshot()
+	m.rebuildDetailSnapshot()
+	m.scrollDetailSelectionIntoView()
+	m.refreshDetailViewport()
+}
+
+func (m *Model) scrollDetailSelectionIntoView() {
+	if m == nil || !m.detailSelectedActive {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	start, end, ok := m.detailLineRangeForEntry(m.detailSelectedEntry)
+	if !ok {
+		return
+	}
+	m.ensureDetailScrollResolved()
+	if start < m.detailScroll {
+		m.detailScroll = start
+	} else if end >= m.detailScroll+m.viewportLines {
+		m.detailScroll = max(0, end-m.viewportLines+1)
+	}
+	m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+	m.detailBottomAnchor = false
+	m.detailBottomOffset = 0
 }
 
 func (m *Model) detailViewportAnchor() (int, int, bool) {

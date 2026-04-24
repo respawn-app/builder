@@ -1,0 +1,151 @@
+package tui
+
+import (
+	"strings"
+)
+
+const (
+	detailCollapsedMarker = "▶︎ "
+	detailExpandedMarker  = "▼ "
+)
+
+func (m Model) detailEntryExpanded(entryIndex int) bool {
+	if !m.compactDetail {
+		return true
+	}
+	if m.detailExpandedEntries == nil {
+		return false
+	}
+	_, ok := m.detailExpandedEntries[entryIndex]
+	return ok
+}
+
+func (m Model) detailWithChevron(role string, lines []string, expanded bool) []string {
+	if !m.compactDetail {
+		return lines
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	out := append([]string(nil), lines...)
+	marker := detailCollapsedMarker
+	if expanded {
+		marker = detailExpandedMarker
+	}
+	prefixWidth := m.entryPrefixWidth(role, "")
+	if prefixWidth <= 0 {
+		out[0] = marker + out[0]
+		return out
+	}
+	plainPrefix := strings.Repeat(" ", prefixWidth)
+	if strings.HasPrefix(out[0], plainPrefix) {
+		out[0] = plainPrefix + marker + strings.TrimPrefix(out[0], plainPrefix)
+		return out
+	}
+	out[0] = marker + out[0]
+	return out
+}
+
+func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role string, text string) []string {
+	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
+	}
+	if label := strings.TrimSpace(entry.OngoingText); label != "" {
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
+	}
+	if isThreeLinePreviewRole(role) {
+		return m.detailWithChevron(role, firstNRenderedLines(m.flattenEntry(role, text), 3), false)
+	}
+	if label := m.knownDetailLabel(entry, role); label != "" {
+		return m.detailWithChevron(role, m.flattenEntry(role, label), false)
+	}
+	return m.detailWithChevron(role, m.flattenEntry(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role))), false)
+}
+
+func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resultSummary string) []string {
+	compact := m.toolCallDisplayText(entry, role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
+	if strings.TrimSpace(compact) == "" {
+		compact = "Tool call"
+	}
+	if summary := strings.TrimSpace(resultSummary); summary != "" {
+		compact += "\n" + summary
+	}
+	return m.detailWithChevron(role, m.flattenEntryWithMeta(role, compact, true, entry.ToolCall), false)
+}
+
+func (m Model) knownDetailLabel(entry TranscriptEntry, role string) string {
+	messageType := strings.TrimSpace(string(entry.MessageType))
+	if messageType != "" && role == roleDeveloperContext {
+		return "Developer context: " + messageType
+	}
+	return ""
+}
+
+func (m Model) detailRoleRendersFullWhenCollapsed(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "error", roleDeveloperErrorFeedback:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Model) firstDetailPreviewLine(text string, fallback string) string {
+	for _, line := range splitLines(text) {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return fallback
+}
+
+func isThreeLinePreviewRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "user", "assistant", "assistant_commentary":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNRenderedLines(lines []string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	if len(lines) <= limit {
+		return lines
+	}
+	return append([]string(nil), lines[:limit]...)
+}
+
+func defaultDetailLabelForRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "system":
+		return "System notice"
+	case "warning":
+		return "Warning"
+	case "cache_warning":
+		return "Cache warning"
+	case "reviewer_status":
+		return "Reviewer status"
+	case "reviewer_suggestions":
+		return "Reviewer suggestions"
+	case roleDeveloperContext:
+		return "Developer context"
+	case roleDeveloperFeedback:
+		return "Developer feedback"
+	case roleManualCompactionCarryover:
+		return "Last user message preserved for compaction"
+	case roleCompactionSummary:
+		return "Context compacted"
+	case roleInterruption:
+		return "You interrupted"
+	case "tool_result", "tool_result_ok", "tool_result_error":
+		return "Tool output"
+	default:
+		if role == "" {
+			return "Unknown entry"
+		}
+		return "Unknown entry: " + role
+	}
+}

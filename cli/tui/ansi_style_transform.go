@@ -17,6 +17,7 @@ type rgbColor struct {
 type ansiStyleTransform struct {
 	DefaultForeground   *rgbColor
 	DefaultBackground   *rgbColor
+	PreserveBackground  bool
 	TransformForeground func(rgbColor) rgbColor
 	ForceFaint          bool
 }
@@ -31,6 +32,10 @@ func applyDefaultForeground(text string, target rgbColor) string {
 
 func applySelectionColors(text string, foreground, background rgbColor) string {
 	return applyANSIStyleTransform(text, ansiStyleTransform{DefaultForeground: &foreground, DefaultBackground: &background})
+}
+
+func applySelectionBackground(text string, background rgbColor) string {
+	return applyANSIStyleTransform(text, ansiStyleTransform{DefaultBackground: &background, PreserveBackground: true})
 }
 
 func ApplyThemeDefaultForeground(text, theme string) string {
@@ -153,7 +158,7 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 			needsDefaultForeground = false
 			idx += consumed
 		case 40 <= param && param <= 47:
-			if transform.DefaultBackground == nil {
+			if transform.DefaultBackground == nil || transform.PreserveBackground {
 				rewritten = append(rewritten, strconv.Itoa(param))
 				needsDefaultBackground = false
 			} else {
@@ -161,7 +166,7 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 			}
 			idx++
 		case 100 <= param && param <= 107:
-			if transform.DefaultBackground == nil {
+			if transform.DefaultBackground == nil || transform.PreserveBackground {
 				rewritten = append(rewritten, strconv.Itoa(param))
 				needsDefaultBackground = false
 			} else {
@@ -169,7 +174,7 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 			}
 			idx++
 		case param == 48:
-			if transform.DefaultBackground == nil {
+			if transform.DefaultBackground == nil || transform.PreserveBackground {
 				copied, consumed, ok := copyANSIBackgroundParams(params, idx)
 				if !ok {
 					rewritten = append(rewritten, strconv.Itoa(param))

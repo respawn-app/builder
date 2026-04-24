@@ -1,0 +1,75 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	"builder/shared/transcript"
+
+	tea "github.com/charmbracelet/bubbletea"
+	xansi "github.com/charmbracelet/x/ansi"
+)
+
+func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "cat large.txt",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "cat large.txt"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2\nline 3"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
+		t.Fatalf("expected collapsed tool input, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "line 2") {
+		t.Fatalf("expected collapsed detail to hide tool output, got %q", collapsed)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := xansi.Strip(m.View())
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+		t.Fatalf("expected expanded tool input and output, got %q", expanded)
+	}
+}
+
+func TestCompactDetailNavigatesByMessageAndKeepsMultipleExpanded(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first user\nhidden"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first assistant\nhidden"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	rendered := xansi.Strip(m.View())
+	if strings.Count(rendered, "▼") != 2 {
+		t.Fatalf("expected both messages expanded, got %q", rendered)
+	}
+}
+
+func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 10, Entries: []TranscriptEntry{
+		{Role: "user", Text: "older"},
+		{Role: "assistant", Text: "newer"},
+	}})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if _, ok := m.detailExpandedEntries[11]; !ok {
+		t.Fatalf("expected entry 11 expanded, got %+v", m.detailExpandedEntries)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 20, Entries: []TranscriptEntry{{Role: "assistant", Text: "replacement"}}})
+	if m.detailSelectedActive {
+		t.Fatalf("expected stale detail selection cleared, got entry %d", m.detailSelectedEntry)
+	}
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("expected stale expanded entries cleared, got %+v", m.detailExpandedEntries)
+	}
+}

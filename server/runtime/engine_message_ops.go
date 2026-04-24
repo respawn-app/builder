@@ -26,6 +26,7 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		"name":     string(r.Name),
 		"is_error": r.IsError,
 		"output":   json.RawMessage(r.Output),
+		"summary":  r.Summary,
 	})
 	if err == nil {
 		e.markCurrentRequestShapeDirtyForSignificantMutation()
