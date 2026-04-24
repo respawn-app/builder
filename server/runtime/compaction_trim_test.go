@@ -66,7 +66,7 @@ func TestCompactionCacheObservationRequestAppendsPromptToConversationReplica(t *
 	}
 
 	args := "keep API details"
-	request, ok, err := eng.compactionCacheObservationRequest(llm.CompactionRequest{
+	request, ok, err := eng.compactionCacheObservationRequest(context.Background(), llm.CompactionRequest{
 		Model:        "gpt-5",
 		Instructions: compactionInstructions(args),
 		InputItems:   eng.snapshotItems(),

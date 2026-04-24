@@ -6556,7 +6556,7 @@ func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t
 				t.Fatalf("ensureLocked: %v", err)
 			}
 
-			requestTools := eng.requestTools()
+			requestTools := eng.requestTools(context.Background())
 			if len(requestTools) != 1 {
 				t.Fatalf("request tools = %+v, want one patch tool", requestTools)
 			}
@@ -6568,6 +6568,46 @@ func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t
 				t.Fatalf("expected function-tool schema fallback for unsupported custom tools, got %+v", requestTools[0])
 			}
 		})
+	}
+}
+
+func TestRequestToolsUseActiveProviderCapsForCustomPatchTool(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:        "gpt-5",
+		EnabledTools: []string{string(toolspec.ToolPatch)},
+		ProviderContract: llm.LockedProviderCapabilitiesFromContract(llm.ProviderCapabilities{
+			ProviderID:           "openai",
+			SupportsResponsesAPI: true,
+			IsOpenAIFirstParty:   true,
+		}),
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+	activeCaps := llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}
+	client := &fakeClient{caps: activeCaps}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+		Model:                        "gpt-5",
+		EnabledTools:                 []toolspec.ID{toolspec.ToolPatch},
+		ProviderCapabilitiesOverride: &activeCaps,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	requestTools := eng.requestTools(context.Background())
+	if len(requestTools) != 1 {
+		t.Fatalf("request tools = %+v, want one patch tool", requestTools)
+	}
+	if requestTools[0].Custom != nil {
+		t.Fatalf("expected active compatible provider to use schema patch tool despite stale locked OpenAI caps, got %+v", requestTools[0])
+	}
+	if len(requestTools[0].Schema) == 0 {
+		t.Fatalf("expected function-tool schema fallback for active compatible provider, got %+v", requestTools[0])
 	}
 }
 

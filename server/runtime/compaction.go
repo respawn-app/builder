@@ -817,14 +817,14 @@ func (e *Engine) prepareCompactionCacheObservation(ctx context.Context, request 
 	if e == nil || e.requestCache == nil || !e.supportsPromptCacheKey(ctx) {
 		return preparedCacheRequestObservation{}, nil
 	}
-	lineageRequest, ok, err := e.compactionCacheObservationRequest(request)
+	lineageRequest, ok, err := e.compactionCacheObservationRequest(ctx, request)
 	if err != nil || !ok {
 		return preparedCacheRequestObservation{}, err
 	}
 	return e.requestCache.Prepare(lineageRequest)
 }
 
-func (e *Engine) compactionCacheObservationRequest(request llm.CompactionRequest) (llm.Request, bool, error) {
+func (e *Engine) compactionCacheObservationRequest(ctx context.Context, request llm.CompactionRequest) (llm.Request, bool, error) {
 	if e == nil {
 		return llm.Request{}, false, nil
 	}
@@ -837,7 +837,7 @@ func (e *Engine) compactionCacheObservationRequest(request llm.CompactionRequest
 		return llm.Request{}, false, err
 	}
 	items := compactionConversationWithPromptItems(request.InputItems, request.Instructions)
-	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), sanitizeItemsForLLM(items), e.requestTools())
+	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), sanitizeItemsForLLM(items), e.requestTools(ctx))
 	if err != nil {
 		return llm.Request{}, false, err
 	}
@@ -894,7 +894,7 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	})
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, e.requestTools())
+	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, e.requestTools(ctx))
 	if err != nil {
 		return "", err
 	}
