@@ -32,6 +32,9 @@ type runtimeController interface {
 	RebindLocalTools(ctx context.Context, sessionID string, leaseID string, workspaceRoot string) error
 	RecordWorktreeTransition(ctx context.Context, sessionID string, leaseID string, state session.WorktreeReminderState) error
 	SyncExecutionTarget(ctx context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error
+}
+
+type activeRuntimeSource interface {
 	IsSessionRuntimeActive(sessionID string) bool
 }
 
@@ -54,6 +57,7 @@ type Service struct {
 	git         *GitInspector
 	gate        primaryrun.Gate
 	runtime     runtimeController
+	active      activeRuntimeSource
 	processes   processSource
 	localNotes  localEntryAppender
 	baseDir     string
@@ -106,11 +110,18 @@ func NewService(metadataStore *metadata.Store, gitInspector *GitInspector, gate 
 	if gitInspector == nil {
 		gitInspector = NewGitInspector(nil)
 	}
+	var active activeRuntimeSource
+	if source, ok := gate.(activeRuntimeSource); ok {
+		active = source
+	} else if source, ok := runtime.(activeRuntimeSource); ok {
+		active = source
+	}
 	return &Service{
 		metadata:       metadataStore,
 		git:            gitInspector,
 		gate:           gate,
 		runtime:        runtime,
+		active:         active,
 		processes:      processes,
 		localNotes:     localNotes,
 		baseDir:        strings.TrimSpace(opts.BaseDir),
@@ -749,7 +760,7 @@ func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID 
 		if strings.TrimSpace(blocker.SessionID) == strings.TrimSpace(currentSessionID) {
 			continue
 		}
-		if s.runtime != nil && !s.runtime.IsSessionRuntimeActive(blocker.SessionID) {
+		if s.active != nil && !s.active.IsSessionRuntimeActive(blocker.SessionID) {
 			continue
 		}
 		otherSessions = append(otherSessions, blocker)
