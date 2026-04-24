@@ -17,6 +17,7 @@ type SystemPromptTemplateArgs struct {
 type systemPromptTemplateData struct {
 	BuilderRunCommand            string
 	EstimatedToolCallsForContext int
+	DefaultSystemPrompt          string
 }
 
 //go:embed system_prompt.md
@@ -62,7 +63,27 @@ var WorktreeModePrompt string
 var WorktreeModeExitPrompt string
 
 func MainSystemPrompt(includeToolPreambles bool, args SystemPromptTemplateArgs) string {
-	base := renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
+	return WithToolPreambles(BaseSystemPrompt(args), includeToolPreambles)
+}
+
+func CustomSystemPrompt(text string, includeToolPreambles bool, args SystemPromptTemplateArgs) string {
+	rendered, err := RenderCustomSystemPrompt(text, includeToolPreambles, args)
+	if err != nil {
+		panic(err)
+	}
+	return rendered
+}
+
+func RenderCustomSystemPrompt(text string, includeToolPreambles bool, args SystemPromptTemplateArgs) (string, error) {
+	rendered, err := renderSystemPromptTemplateErr(strings.TrimSpace(text), args, BaseSystemPrompt(args))
+	if err != nil {
+		return "", err
+	}
+	return WithToolPreambles(rendered, includeToolPreambles), nil
+}
+
+func WithToolPreambles(base string, includeToolPreambles bool) string {
+	base = strings.TrimSpace(base)
 	if !includeToolPreambles {
 		return base
 	}
@@ -77,7 +98,7 @@ func MainSystemPrompt(includeToolPreambles bool, args SystemPromptTemplateArgs) 
 }
 
 func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
-	return renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args)
+	return renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args, "")
 }
 
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
@@ -105,23 +126,32 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 	})
 }
 
-func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs) string {
+func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs, defaultSystemPrompt string) string {
+	rendered, err := renderSystemPromptTemplateErr(text, args, defaultSystemPrompt)
+	if err != nil {
+		panic(err)
+	}
+	return rendered
+}
+
+func renderSystemPromptTemplateErr(text string, args SystemPromptTemplateArgs, defaultSystemPrompt string) (string, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return ""
+		return "", nil
 	}
 	tmpl, err := template.New("system_prompt").Option("missingkey=error").Parse(trimmed)
 	if err != nil {
-		panic(fmt.Errorf("parse system prompt template: %w", err))
+		return "", fmt.Errorf("parse system prompt template: %w", err)
 	}
 	var out bytes.Buffer
 	if err := tmpl.Execute(&out, systemPromptTemplateData{
 		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
 		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
+		DefaultSystemPrompt:          strings.TrimSpace(defaultSystemPrompt),
 	}); err != nil {
-		panic(fmt.Errorf("render system prompt template: %w", err))
+		return "", fmt.Errorf("render system prompt template: %w", err)
 	}
-	return out.String()
+	return out.String(), nil
 }
 
 func renderWorktreePrompt(template string, replacements map[string]string) string {

@@ -76,6 +76,7 @@ func cloneLockedContract(in *LockedContract) *LockedContract {
 	if len(in.EnabledTools) > 0 {
 		copyLocked.EnabledTools = append([]string(nil), in.EnabledTools...)
 	}
+	copyLocked.SystemPrompt = strings.TrimSpace(in.SystemPrompt)
 	return &copyLocked
 }
 
