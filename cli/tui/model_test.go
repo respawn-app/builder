@@ -401,6 +401,24 @@ func TestOngoingShowsCommittedAssistantAfterCommit(t *testing.T) {
 	}
 }
 
+func TestOngoingDoesNotInsertDividerBetweenCommentaryAndLiveAssistantTail(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:  "assistant",
+		Text:  "Decision: keep custom tool grammar {\"patch\": ...",
+		Phase: llm.MessagePhaseCommentary,
+	})
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "  } executor input so runtime/UI stays compatible."})
+
+	view := plainTranscript(m.View())
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("ongoing commentary continuation should not be split by divider, got %q", view)
+	}
+	if !containsInOrder(view, "Decision:", "executor input") {
+		t.Fatalf("expected committed commentary and live tail in one assistant group, got %q", view)
+	}
+}
+
 func TestOngoingAutoFollowsWhenUserIsAtBottom(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
