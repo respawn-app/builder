@@ -160,6 +160,7 @@ const (
 	ToolRenderKindShell  ToolRenderKind = "shell"
 	ToolRenderKindDiff   ToolRenderKind = "diff"
 	ToolRenderKindSource ToolRenderKind = "source"
+	ToolRenderKindPlain  ToolRenderKind = "plain"
 
 	ToolShellDialectPosix          ToolShellDialect = "posix"
 	ToolShellDialectPowerShell     ToolShellDialect = "powershell"

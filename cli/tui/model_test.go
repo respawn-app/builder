@@ -1321,6 +1321,35 @@ func TestRenderEntryTextDoesNotShellHighlightWriteStdinPollSummary(t *testing.T)
 	}
 }
 
+func TestOngoingWriteStdinPollSummaryUsesMutedForeground(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m.viewportWidth = 16
+	line := strings.Join(m.flattenEntryWithMeta("tool_shell_success", "Polled session 1149 for 2s", true, &transcript.ToolCallMeta{
+		IsShell:    true,
+		Command:    "Polled session 1149 for 2s",
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindPlain},
+	}), "\n")
+
+	if !strings.Contains(line, ";2m") {
+		t.Fatalf("expected ongoing write_stdin poll summary to stay faint, got %q", line)
+	}
+	foreground := m.palette().foregroundColor
+	expectedContentPrefix := m.roleSymbol("tool_shell_success") + " " + "\x1b[" + strings.Join(styleParams(ansiStyleTransform{
+		DefaultForeground: &foreground,
+		ForceFaint:        true,
+	}, false), ";") + "m"
+	if !strings.HasPrefix(line, expectedContentPrefix) {
+		t.Fatalf("expected truncated poll summary to start with exact foreground+faint style, got %q want prefix %q", line, expectedContentPrefix)
+	}
+	colors := extractForegroundTrueColors(line)
+	if !containsColor(colors, m.palette().foregroundColor) {
+		t.Fatalf("expected ongoing write_stdin poll summary to use app foreground, got %q", line)
+	}
+	if containsColor(colors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing write_stdin poll summary to avoid extra-muted preview color, got %q", line)
+	}
+}
+
 func TestWriteStdinPollFormattingShowsSubSecondDurationInOngoingAndDetail(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})

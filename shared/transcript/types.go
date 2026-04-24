@@ -30,6 +30,7 @@ const (
 	ToolRenderKindShell  ToolRenderKind = "shell"
 	ToolRenderKindDiff   ToolRenderKind = "diff"
 	ToolRenderKindSource ToolRenderKind = "source"
+	ToolRenderKindPlain  ToolRenderKind = "plain"
 
 	ToolShellDialectPosix          ToolShellDialect = "posix"
 	ToolShellDialectPowerShell     ToolShellDialect = "powershell"
@@ -90,6 +91,9 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 	}
 	if out.RenderBehavior == ToolCallRenderBehaviorShell {
 		out.IsShell = true
+	}
+	if out.RenderHint == nil && strings.TrimSpace(out.ToolName) == "write_stdin" && out.IsShell {
+		out.RenderHint = &ToolRenderHint{Kind: ToolRenderKindPlain}
 	}
 	if strings.TrimSpace(out.InlineMeta) == "" {
 		out.InlineMeta = strings.TrimSpace(out.TimeoutLabel)
@@ -170,6 +174,8 @@ func (h *ToolRenderHint) Valid() bool {
 		return true
 	case ToolRenderKindSource:
 		return strings.TrimSpace(h.Path) != ""
+	case ToolRenderKindPlain:
+		return true
 	default:
 		return false
 	}
