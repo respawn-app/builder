@@ -199,20 +199,28 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		_ = logger.Close()
 	}
 	handle.rebind = nil
-	handle.rebind = func(workdir string) error {
-		if wiring.LocalTools != nil {
-			if err := wiring.LocalTools.Rebind(workdir); err != nil {
-				return err
-			}
-		}
-		if wiring.Engine != nil {
-			wiring.Engine.SetTranscriptWorkingDir(workdir)
-		}
-		return nil
+	var localRebind func(string) error
+	if wiring.LocalTools != nil {
+		localRebind = wiring.LocalTools.Rebind
 	}
+	handle.rebind = runtimeRebindFunc(localRebind, wiring.Engine)
 	s.completeActivation(handle, leaseID, cleanup)
 	cleanup = nil
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func runtimeRebindFunc(localRebind func(string) error, engine *runtime.Engine) func(string) error {
+	return func(workdir string) error {
+		if localRebind != nil {
+			if err := localRebind(workdir); err != nil {
+				return err
+			}
+		}
+		if engine != nil {
+			engine.SetTranscriptWorkingDir(workdir)
+		}
+		return nil
+	}
 }
 
 func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {

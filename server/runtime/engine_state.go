@@ -375,19 +375,25 @@ func (e *Engine) ParentSessionID() string {
 }
 
 func (e *Engine) SetTranscriptWorkingDir(workdir string) {
-	if e == nil || e.chat == nil {
+	if e == nil {
 		return
 	}
-	e.chat.setCWD(workdir)
+	trimmed := strings.TrimSpace(workdir)
+	if trimmed == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.transcriptCWD = trimmed
 }
 
 func (e *Engine) transcriptWorkingDir() string {
-	if e == nil || e.chat == nil {
+	if e == nil {
 		return ""
 	}
-	e.chat.mu.RLock()
-	defer e.chat.mu.RUnlock()
-	return strings.TrimSpace(e.chat.cwd)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.TrimSpace(e.transcriptCWD)
 }
 
 func transcriptWorkingDir(primary string, fallback string) string {
