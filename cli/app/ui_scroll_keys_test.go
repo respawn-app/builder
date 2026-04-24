@@ -93,6 +93,38 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 	}
 }
 
+func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 12
+	m.syncViewport()
+	m.input = "locked draft"
+	m.inputSubmitLocked = true
+	m.lockedInjectText = "locked draft"
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "cat large.txt",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "cat large.txt"},
+	})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2"})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	controller := uiInputController{model: m}
+	next, cmd := controller.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected detail enter to be handled without command, got %T", cmd)
+	}
+	updated := next.(*uiModel)
+	expanded := stripANSIAndTrimRight(updated.view.View())
+	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+		t.Fatalf("expected input-controller enter to expand detail even while input locked, got %q", expanded)
+	}
+	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
+		t.Fatalf("expected locked input state preserved, input=%q locked=%t inject=%q", updated.input, updated.inputSubmitLocked, updated.lockedInjectText)
+	}
+}
+
 func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
