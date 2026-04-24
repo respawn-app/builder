@@ -1420,7 +1420,9 @@ func worktreeDeletePreviewLines(dialog uiWorktreeDeleteDialogState) []worktreeDe
 		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Workspace folder at " + root})
 	}
 	items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindBullet, text: "• Git worktree " + worktreeDisplayName(target)})
-	if target.DirtyFileCount > 0 {
+	if target.DirtyFileCount < 0 {
+		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindWarning, text: "• Dirty file count unavailable; delete will force removal"})
+	} else if target.DirtyFileCount > 0 {
 		items = append(items, worktreeDeletePreviewLine{kind: worktreeDeletePreviewLineKindWarning, text: "• Drop " + pluralizeCount(target.DirtyFileCount, "modified/untracked file")})
 	}
 	if len(items) == 0 {

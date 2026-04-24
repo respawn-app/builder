@@ -322,6 +322,7 @@ func limitDuration(windowMinutes int) string {
 	const minutesPerDay = 24 * minutesPerHour
 	const minutesPerWeek = 7 * minutesPerDay
 	const minutesPerMonth = 30 * minutesPerDay
+	const minutesPerYear = 365 * minutesPerDay
 	const roundingBiasMinutes = 3
 
 	if windowMinutes < 0 {
@@ -339,6 +340,13 @@ func limitDuration(windowMinutes int) string {
 	}
 	if windowMinutes <= minutesPerMonth+roundingBiasMinutes {
 		return "monthly"
+	}
+	if windowMinutes < minutesPerYear-roundingBiasMinutes {
+		days := (windowMinutes + minutesPerDay/2) / minutesPerDay
+		if days < 31 {
+			days = 31
+		}
+		return fmt.Sprintf("%dd", days)
 	}
 	return "annual"
 }

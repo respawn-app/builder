@@ -554,8 +554,12 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	synced := make([]syncedWorktree, 0, len(gitEntries))
 	for _, gitEntry := range gitEntries {
 		if includeDirtyCount && pathAvailability(gitEntry.Root) == "available" {
-			dirtyCount, _ := s.git.DirtyFileCount(ctx, gitEntry.Root)
-			gitEntry.DirtyFileCount = dirtyCount
+			dirtyCount, dirtyErr := s.git.DirtyFileCount(ctx, gitEntry.Root)
+			if dirtyErr != nil {
+				gitEntry.DirtyFileCount = -1
+			} else {
+				gitEntry.DirtyFileCount = dirtyCount
+			}
 		}
 		record, ok := refreshedByRoot[strings.TrimSpace(gitEntry.Root)]
 		if !ok {
@@ -1095,7 +1099,6 @@ func marshalGitMetadata(entry GitWorktree) (string, error) {
 		Bare           bool   `json:"bare,omitempty"`
 		LockedReason   string `json:"locked_reason,omitempty"`
 		PrunableReason string `json:"prunable_reason,omitempty"`
-		DirtyFileCount int    `json:"dirty_file_count,omitempty"`
 	}{
 		HeadOID:        entry.HeadOID,
 		BranchRef:      entry.BranchRef,
@@ -1104,7 +1107,6 @@ func marshalGitMetadata(entry GitWorktree) (string, error) {
 		Bare:           entry.Bare,
 		LockedReason:   entry.LockedReason,
 		PrunableReason: entry.PrunableReason,
-		DirtyFileCount: entry.DirtyFileCount,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal git worktree metadata: %w", err)

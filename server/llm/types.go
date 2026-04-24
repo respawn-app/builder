@@ -377,7 +377,7 @@ filename: /(.+)/
 add_line: "+" /(.*)/ LF -> line
 
 change_move: "*** Move to: " filename LF
-change: (change_context | change_line)+ eof_line?
+change: ((change_context | change_line)+ eof_line? | eof_line)
 change_context: ("@@" | "@@ " /(.+)/) LF
 change_line: ("+" | "-" | " ") /(.*)/ LF
 eof_line: "*** End of File" LF

@@ -3,6 +3,8 @@ package prompts
 import (
 	"strings"
 	"testing"
+
+	"builder/cli/selfcmd"
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
@@ -12,7 +14,8 @@ func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
 	}
-	if !strings.Contains(rendered, "cmd=") || strings.Contains(rendered, "{{") {
-		t.Fatalf("expected builder run command rendered, got %q", rendered)
+	expectedCmd := "cmd=" + selfcmd.RunCommandPrefix()
+	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
+		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
 	}
 }

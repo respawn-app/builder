@@ -822,8 +822,8 @@ func TestListWorktreesDirtyCountProbeFailureIsBestEffort(t *testing.T) {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
 	listed := findWorktreeByID(t, resp.Worktrees, created.WorktreeID)
-	if listed.DirtyFileCount != 0 {
-		t.Fatalf("dirty file count after failed probe = %d, want 0", listed.DirtyFileCount)
+	if listed.DirtyFileCount != -1 {
+		t.Fatalf("dirty file count after failed probe = %d, want -1", listed.DirtyFileCount)
 	}
 }
 
