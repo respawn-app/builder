@@ -113,6 +113,7 @@ type Config struct {
 	Reviewer                      ReviewerConfig
 	HeadlessMode                  bool
 	ToolPreambles                 bool
+	TranscriptWorkingDir          string
 	OnEvent                       func(Event)
 }
 
@@ -260,7 +261,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		reviewer:              cfg.Reviewer.Client,
 		registry:              registry,
 		cfg:                   cfg,
-		chat:                  newChatStore(),
+		chat:                  newChatStoreWithCWD(transcriptWorkingDir(cfg.TranscriptWorkingDir, store.Meta().WorkspaceRoot)),
 		localDiagnosticKeys:   make(map[string]struct{}),
 		persistedDiagnostics:  make(map[string]struct{}),
 		pendingToolCallStarts: make(map[string]int),
@@ -455,7 +456,7 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 			return err
 		}
 		if _, ok := e.registry.Get(toolspec.ToolExecCommand); !ok {
-			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true})
+			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.transcriptWorkingDir())), CommittedTranscriptChanged: true})
 			result = tools.Result{CallID: call.ID, Name: toolspec.ToolExecCommand, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 			if err := e.persistToolCompletion(stepID, result); err != nil {
 				return fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)

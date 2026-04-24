@@ -35,7 +35,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		if call.Custom && knownTool {
 			executableCall.Input = executorInputForCustomTool(toolID, call.CustomInput)
 		}
-		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(executableCall, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true}
+		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(executableCall, e.transcriptWorkingDir())), CommittedTranscriptChanged: true}
 		if start, ok := e.pendingToolCallStart(call.ID); ok {
 			started.CommittedEntryStart = start
 			started.CommittedEntryStartSet = true
