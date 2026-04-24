@@ -93,19 +93,6 @@ func newChatStoreWithCWD(cwd string) *chatStore {
 	}
 }
 
-func (s *chatStore) setCWD(cwd string) {
-	if s == nil {
-		return
-	}
-	trimmed := strings.TrimSpace(cwd)
-	if trimmed == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cwd = trimmed
-}
-
 func (s *chatStore) appendMessage(msg llm.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

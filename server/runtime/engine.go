@@ -150,6 +150,7 @@ type Engine struct {
 	cfg      Config
 
 	chat                  *chatStore
+	transcriptCWD         string
 	locked                *session.LockedContract
 	localDiagnosticKeys   map[string]struct{}
 	persistedDiagnostics  map[string]struct{}
@@ -261,7 +262,8 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		reviewer:              cfg.Reviewer.Client,
 		registry:              registry,
 		cfg:                   cfg,
-		chat:                  newChatStoreWithCWD(transcriptWorkingDir(cfg.TranscriptWorkingDir, store.Meta().WorkspaceRoot)),
+		chat:                  newChatStore(),
+		transcriptCWD:         transcriptWorkingDir(cfg.TranscriptWorkingDir, store.Meta().WorkspaceRoot),
 		localDiagnosticKeys:   make(map[string]struct{}),
 		persistedDiagnostics:  make(map[string]struct{}),
 		pendingToolCallStarts: make(map[string]int),
