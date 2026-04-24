@@ -45,6 +45,10 @@ export default defineConfig({
           link: '/worktrees/',
         },
         {
+          label: 'Prompts',
+          link: '/prompts/',
+        },
+        {
           label: 'Subagents / Headless',
           link: '/headless/',
         },

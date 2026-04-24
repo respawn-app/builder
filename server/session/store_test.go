@@ -302,7 +302,7 @@ func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	}
 }
 
-func TestLockedContractPersistenceDoesNotIncludePromptOrToolSchema(t *testing.T) {
+func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")
 	if err != nil {
@@ -312,6 +312,7 @@ func TestLockedContractPersistenceDoesNotIncludePromptOrToolSchema(t *testing.T)
 		Model:          "gpt-5",
 		Temperature:    1,
 		MaxOutputToken: 0,
+		SystemPrompt:   "locked system prompt",
 	}); err != nil {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
@@ -324,8 +325,8 @@ func TestLockedContractPersistenceDoesNotIncludePromptOrToolSchema(t *testing.T)
 	if strings.Contains(text, "tools_json") {
 		t.Fatalf("session metadata must not persist tools_json: %s", text)
 	}
-	if strings.Contains(text, "system_prompt") {
-		t.Fatalf("session metadata must not persist system_prompt: %s", text)
+	if !strings.Contains(text, `"system_prompt": "locked system prompt"`) {
+		t.Fatalf("session metadata must persist system_prompt snapshot: %s", text)
 	}
 }
 
