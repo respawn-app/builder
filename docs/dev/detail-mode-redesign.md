@@ -20,7 +20,7 @@ Success metrics:
 - Unknown or malformed entries with recoverable text are visible in ongoing and detail. Empty unknown/malformed entries are detail-only diagnostics.
 - Multiple messages may be expanded at once.
 - Tool calls with error results do not auto-expand; collapsed detail shows compact input plus structured error summary when runtime/projection provides one.
-- Chevron markers are mandatory: `▶︎` collapsed and `▼` expanded.
+- Expand/collapse markers are right-aligned at row end when expansion changes visible content: `▶︎` collapsed and `▼` expanded. Rows whose collapsed and expanded renderings are identical show no marker.
 - Selection never changes foreground colors. Selection background/fill has the lowest background priority.
 
 ## Interaction Model
@@ -34,10 +34,12 @@ Success metrics:
 
 Selection is message-oriented, not line-oriented. If the selected message is outside the viewport after navigation or expansion, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
 
-Collapsed/expanded state is shown with a mandatory chevron marker:
+Collapsed/expanded state is shown with a right-aligned chevron marker only when expansion changes visible content:
 
 - `▶︎` means collapsed.
 - `▼` means expanded.
+- Rows reserve marker width before truncating text so the marker stays at the right edge without overflowing the terminal width.
+- Rows whose expanded rendering is identical to collapsed rendering show no marker.
 
 The selected message uses a selection background/fill across every rendered line of that message and across the full terminal width. Selection must not change foreground colors. Selection background is lowest priority: any semantic background already present on a cell, such as patch diff backgrounds or syntax-highlight backgrounds, wins over selection background.
 
@@ -563,7 +565,7 @@ Deliverables:
 - Collapsed tool renderers matching ongoing input previews.
 - Structured tool-error summary display when available.
 - Developer/context labels from metadata.
-- Chevron markers.
+- Right-aligned conditional chevron markers with text truncation reserving marker space.
 
 Exit criteria:
 
