@@ -1036,12 +1036,21 @@ func (m Model) renderDetailSnapshot() string {
 	}
 	for i, line := range lines {
 		selected := highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerBefore(i, firstSelectedLine) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+		}
 		if m.compactDetail && highlightSelected && m.shouldRenderDetailSelectionSpacer(i, firstSelectedLine, lastSelectedLine) {
 			out = append(out, m.renderDetailSelectionSpacerLine())
 			continue
 		}
 		line = m.renderDetailViewportLine(line, selected)
 		out = append(out, line)
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerAfter(i, lastSelectedLine) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+		}
+	}
+	if len(out) > m.viewportLines {
+		out = out[:m.viewportLines]
 	}
 	for len(out) < m.viewportLines {
 		out = append(out, "")
@@ -1054,12 +1063,20 @@ func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLin
 		return false
 	}
 	if lineIndex == firstSelectedLine-1 {
-		return m.detailScroll > 0 || !m.detailViewportLineOwnsSelectableEntry(lineIndex)
+		return !m.shouldInsertDetailSelectionSpacerBefore(firstSelectedLine, firstSelectedLine)
 	}
 	if lineIndex == lastSelectedLine+1 {
-		return m.detailScroll < m.maxDetailScroll() || !m.detailViewportLineOwnsSelectableEntry(lineIndex)
+		return !m.shouldInsertDetailSelectionSpacerAfter(lastSelectedLine, lastSelectedLine)
 	}
 	return false
+}
+
+func (m Model) shouldInsertDetailSelectionSpacerBefore(lineIndex int, firstSelectedLine int) bool {
+	return lineIndex == firstSelectedLine && m.detailScroll == 0 && m.detailViewportLineOwnsSelectableEntry(firstSelectedLine-1)
+}
+
+func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelectedLine int) bool {
+	return lineIndex == lastSelectedLine && m.detailScroll == m.maxDetailScroll() && m.detailViewportLineOwnsSelectableEntry(lastSelectedLine+1)
 }
 
 func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int) bool {
