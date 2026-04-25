@@ -48,12 +48,7 @@ func (m *uiModel) statusHelpHint() string {
 }
 
 func (m *uiModel) canShowHelp() bool {
-	switch m.view.Mode() {
-	case tui.ModeOngoing, tui.ModeDetail:
-		return true
-	default:
-		return false
-	}
+	return m.view.Mode() == tui.ModeOngoing
 }
 
 func (m *uiModel) helpSections() []uiHelpSection {

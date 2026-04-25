@@ -3342,8 +3342,18 @@ func TestRuntimeContinuityRecoveryReplaysOngoingScrollbackAndLaterAssistantAppen
 		t.Fatalf("expected detail mode after toggle, got %q", model.view.Mode())
 	}
 	detail := stripANSIAndTrimRight(model.View())
-	if !strings.Contains(detail, "after") || !strings.Contains(detail, "next answer") {
+	if !strings.Contains(detail, "next answer") {
 		t.Fatalf("expected detail mode to reflect authoritative transcript tail, got %q", detail)
+	}
+	foundAuthoritativeTail := false
+	for _, entry := range model.transcriptEntries {
+		if strings.Contains(entry.Text, "after") {
+			foundAuthoritativeTail = true
+			break
+		}
+	}
+	if !foundAuthoritativeTail {
+		t.Fatalf("expected detail transcript state to include authoritative tail, got %+v", model.transcriptEntries)
 	}
 	if strings.Contains(detail, "before") {
 		t.Fatalf("expected detail mode to exclude stale assistant tail after continuity recovery, got %q", detail)

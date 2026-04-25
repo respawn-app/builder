@@ -130,6 +130,9 @@ func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, rol
 		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 		}
+		if label := strings.TrimSpace(entry.OngoingText); label != "" && strings.Contains(label, "\n") {
+			return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), true, symbolOverride)
+		}
 		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, "Supervisor suggestions", false, nil, symbolOverride), false, symbolOverride)
 	}
 	if label := strings.TrimSpace(entry.OngoingText); label != "" {
@@ -158,6 +161,9 @@ func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text
 	if strings.TrimSpace(role) == "reviewer_suggestions" {
 		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return label != trimmedText
+		}
+		if label := strings.TrimSpace(entry.OngoingText); label != "" && strings.Contains(label, "\n") {
+			return false
 		}
 		return trimmedText != "Supervisor suggestions"
 	}
