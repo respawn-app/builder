@@ -381,11 +381,11 @@ func TestPersistedTranscriptScanMaterializesCompactedDeveloperContextInDetailPag
 	if got := page.Entries[2]; got.Role != "developer_context" || got.Text != "environment info" {
 		t.Fatalf("entry[2] = %+v, want compacted developer context", got)
 	}
-	if got := page.Entries[3]; got.Role != "compaction_summary" || got.Text != "condensed summary" {
+	if got := page.Entries[3]; got.Role != "compaction_summary" || got.Text != "condensed summary" || got.CompactLabel != "Context compacted" || got.OngoingText != "Context compacted" {
 		t.Fatalf("entry[3] = %+v, want compacted summary", got)
 	}
 	if got := page.Entries[4]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
-		t.Fatalf("entry[4] = %+v, want post-compaction local entry", got)
+		t.Fatalf("entry[4] = %+v, want legacy local entry preserved without special handling", got)
 	}
 }
 

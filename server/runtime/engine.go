@@ -298,6 +298,14 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			}
 			meta = store.Meta()
 		}
+		if strings.TrimSpace(meta.Locked.ProviderContract.ProviderID) == "" {
+			if caps, err := eng.currentProviderCapabilities(context.Background()); err == nil {
+				if err := store.BackfillLockedProviderContract(llm.LockedProviderCapabilitiesFromContract(caps)); err != nil {
+					return nil, err
+				}
+				meta = store.Meta()
+			}
+		}
 		copyLocked := *meta.Locked
 		eng.locked = &copyLocked
 	}
@@ -635,6 +643,9 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, stepID string, cli
 			}
 		}
 		attemptDone.Store(true)
+		if attemptErr != nil && ctx.Err() != nil {
+			return llm.Response{}, ctx.Err()
+		}
 		if attemptErr == nil {
 			if err := e.observePromptCacheResponse(stepID, prepared, resp.Usage); err != nil {
 				return llm.Response{}, err

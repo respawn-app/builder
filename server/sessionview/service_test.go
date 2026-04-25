@@ -555,11 +555,11 @@ func TestServiceGetSessionTranscriptPagePreservesHistoryAcrossActiveCompaction(t
 	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before compaction" {
 		t.Fatalf("expected preserved pre-compaction entry, got %+v", resp.Transcript.Entries[0])
 	}
-	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" {
-		t.Fatalf("expected projected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" || resp.Transcript.Entries[1].CompactLabel != "Context compacted" || resp.Transcript.Entries[1].OngoingText != "Context compacted" {
+		t.Fatalf("expected projected compaction summary, got %+v", resp.Transcript.Entries[1])
 	}
 	if resp.Transcript.Entries[2].Role != "compaction_notice" || resp.Transcript.Entries[2].Text != "after replace notice" {
-		t.Fatalf("expected persisted post-compaction local entry, got %+v", resp.Transcript.Entries[2])
+		t.Fatalf("expected legacy local entry preserved without special handling, got %+v", resp.Transcript.Entries[2])
 	}
 	if resp.Transcript.Entries[3].Role != "assistant" || resp.Transcript.Entries[3].Text != "live local" {
 		t.Fatalf("expected live local entry after compaction, got %+v", resp.Transcript.Entries[3])

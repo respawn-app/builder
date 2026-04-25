@@ -262,10 +262,10 @@ This keeps one persisted durable source for tool output while preserving both cu
 ### `transcript.local`
 
 ```json
-{"role":"compaction_notice","text":"Context compacted.","ongoing_text":"","visibility":"auto","diagnostic_key":""}
+{"role":"cache_warning","text":"Cache miss: 12k tokens","ongoing_text":"","visibility":"auto","diagnostic_key":""}
 ```
 
-Used for persisted non-provider transcript rows such as compaction notices, cache warnings, and diagnostic entries.
+Used for persisted non-provider transcript rows such as cache warnings and diagnostic entries. Compaction completion is represented by the `compaction_summary` row materialized from `history.replaced`, not by a local entry.
 
 ### `history.replaced`
 
@@ -292,6 +292,8 @@ Minimal v2 keeps `items` as typed `[]llm.ResponseItem`. This is already restore-
 ```json
 {"cache_key":"...","scope":"conversation","reason":"reuse_dropped","lost_input_tokens":79000}
 ```
+
+Runtime emits cache warnings only when provider usage reports a positive cached-input-token loss. Legacy restored warnings may omit `lost_input_tokens`.
 
 ## Kind Mapping
 

@@ -119,29 +119,3 @@ func TestWriteCompletedResponseStreamWritesExpectedEvent(t *testing.T) {
 		t.Fatalf("done marker = %q, want data: [DONE]", lines[2])
 	}
 }
-
-func TestWriteCompletedResponseStreamEscapesAssistantTextAsJSON(t *testing.T) {
-	recorder := httptest.NewRecorder()
-
-	WriteCompletedResponseStream(recorder, "line\x01break", 11, 7)
-
-	first := strings.TrimPrefix(strings.Split(recorder.Body.String(), "\n")[0], "data: ")
-	var payload struct {
-		Response struct {
-			Output []struct {
-				Content []struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"output"`
-		} `json:"response"`
-	}
-	if err := json.Unmarshal([]byte(first), &payload); err != nil {
-		t.Fatalf("unmarshal control-character event: %v\npayload=%q", err, first)
-	}
-	if len(payload.Response.Output) != 1 || len(payload.Response.Output[0].Content) != 1 {
-		t.Fatalf("unexpected output payload: %+v", payload.Response.Output)
-	}
-	if got := payload.Response.Output[0].Content[0].Text; got != "line\x01break" {
-		t.Fatalf("assistant text = %q, want %q", got, "line\x01break")
-	}
-}

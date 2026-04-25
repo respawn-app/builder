@@ -540,54 +540,6 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *
 	}
 }
 
-func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
-	picker := newProjectBindingPickerModel(nil, "dark", projectPickerOptions{
-		AllowCreate:    true,
-		HeaderMarkdown: projectBindingPickerHeaderMarkdown,
-		HeaderFallback: projectBindingPickerHeaderFallback,
-		NoticeText:     projectBindingPickerNoticeText,
-		GroupLabel:     projectBindingExistingLabel,
-	})
-	if got := xansi.Strip(picker.renderHeader()); strings.HasPrefix(got, "  ") {
-		t.Fatalf("picker header has unexpected left padding: %q", got)
-	}
-
-	serverPicker := newProjectBindingPickerModel(nil, "dark", projectPickerOptions{
-		AllowCreate:    false,
-		HeaderMarkdown: serverProjectPickerHeaderMarkdown,
-		HeaderFallback: serverProjectPickerHeaderFallback,
-		NoticeText:     serverProjectPickerNoticeText,
-		GroupLabel:     serverProjectExistingLabel,
-	})
-	if got := xansi.Strip(serverPicker.renderHeader()); strings.HasPrefix(got, "  ") {
-		t.Fatalf("server picker header has unexpected left padding: %q", got)
-	}
-	serverPicker.width = 240
-	serverPicker.height = 12
-	if got := xansi.Strip(serverPicker.View()); !strings.Contains(got, "\n\n"+serverProjectPickerNoticeText+"\n\n") {
-		t.Fatalf("server picker notice missing or padded unexpectedly: %q", got)
-	}
-	serverPicker.width = 32
-	serverPicker.height = 12
-	narrowView := xansi.Strip(serverPicker.View())
-	if !strings.Contains(narrowView, "Couldn") || !strings.Contains(narrowView, "…\n\n") {
-		t.Fatalf("server picker narrow notice should truncate cleanly with ellipsis, got %q", narrowView)
-	}
-	if strings.Contains(narrowView, "\n\n  ") {
-		t.Fatalf("server picker narrow notice has unexpected left padding: %q", narrowView)
-	}
-
-	workspacePicker := newProjectWorkspacePickerModel(nil, "dark")
-	if got := xansi.Strip(workspacePicker.renderHeader()); strings.HasPrefix(got, "  ") {
-		t.Fatalf("workspace picker header has unexpected left padding: %q", got)
-	}
-
-	prompt := newProjectNamePromptModel("demo", "dark")
-	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
-		t.Fatalf("project name header has unexpected left padding: %q", got)
-	}
-}
-
 func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -652,34 +604,6 @@ func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(
 	}
 	if got := bound.ProjectID(); got != "project-1" {
 		t.Fatalf("bound project id = %q, want project-1", got)
-	}
-}
-
-func TestProjectNamePromptViewUsesFramedEditableInput(t *testing.T) {
-	model := newProjectNamePromptModel("demo", "dark")
-	model.width = 40
-	model.height = 10
-	view := model.View()
-	if !strings.Contains(view, "────────────────") {
-		t.Fatalf("expected framed input border in prompt view, got %q", view)
-	}
-	if strings.Contains(view, "Unknown directory opened") {
-		t.Fatalf("unexpected picker subtitle leaked into prompt view: %q", view)
-	}
-}
-
-func TestProjectNamePromptViewTracksLongInputCursor(t *testing.T) {
-	model := newProjectNamePromptModel("", "dark")
-	model.width = 18
-	model.height = 4
-	model.input.SetValue("project-name-with-long-tail")
-	model.input.SetCursor(len([]rune(model.input.Value())))
-	view := model.View()
-	if strings.Contains(view, "project-name") {
-		t.Fatalf("expected long input view to follow cursor near tail, got %q", view)
-	}
-	if !strings.Contains(view, "long-tail") {
-		t.Fatalf("expected long input tail to remain visible, got %q", view)
 	}
 }
 

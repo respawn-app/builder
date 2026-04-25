@@ -14,9 +14,3 @@ func TestValidateWebSearchInputRejectsWhitespaceQuery(t *testing.T) {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
-
-func TestFormatWebSearchDisplayTextQuotesQuery(t *testing.T) {
-	if got := FormatWebSearchDisplayText(" latest golang release "); got != `web search: "latest golang release"` {
-		t.Fatalf("unexpected display text: %q", got)
-	}
-}

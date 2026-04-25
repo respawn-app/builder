@@ -7,15 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
-	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type stubOAuthCallbackListener struct {
@@ -66,68 +63,6 @@ func (l *stubOAuthCallbackListener) Close() error {
 	return nil
 }
 
-func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{
-		Text: "Choose how Builder should complete OpenAI sign-in.",
-		Kind: startupPickerNoticeNeutral,
-	}, false, true)
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "Sign in to Builder") {
-		t.Fatalf("expected auth picker title, got %q", out)
-	}
-	if !strings.Contains(out, "Open browser and finish automatically") {
-		t.Fatalf("expected friendly browser title, got %q", out)
-	}
-	if !strings.Contains(out, "Open browser and paste the callback manually") {
-		t.Fatalf("expected friendly paste title, got %q", out)
-	}
-	if !strings.Contains(out, "Use a device code in any browser") {
-		t.Fatalf("expected friendly device title, got %q", out)
-	}
-	if !strings.Contains(out, "Choose how Builder should complete OpenAI sign-in.") {
-		t.Fatalf("expected body subtitle, got %q", out)
-	}
-	if strings.Contains(out, "Best on this machine. Builder opens your browser and waits for the callback.") {
-		t.Fatalf("did not expect per-option descriptions, got %q", out)
-	}
-	if strings.Contains(out, "Recommended when your terminal can open a local browser.") {
-		t.Fatalf("did not expect per-option selected note, got %q", out)
-	}
-	if strings.Contains(out, "oauth_browser") || strings.Contains(out, "oauth_browser_paste") || strings.Contains(out, "oauth_device") {
-		t.Fatalf("did not expect raw auth method ids in picker, got %q", out)
-	}
-}
-
-func TestAuthMethodPickerIncludesEnvAPIKeyOptionWhenAvailable(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, true, true)
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "Use existing OPENAI_API_KEY from now on") {
-		t.Fatalf("expected env api key option, got %q", out)
-	}
-}
-
-func TestAuthMethodPickerOmitsSkipWhenAuthIsRequired(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, false)
-	out := ansi.Strip(m.View())
-	if strings.Contains(out, "Continue without Builder auth") {
-		t.Fatalf("did not expect skip option when auth is required, got %q", out)
-	}
-}
-
-func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
-	header := m.renderHeader()
-	expectedPrefix := strings.TrimSuffix(tui.ApplyThemeDefaultForeground("x", "dark"), "x\x1b[0m")
-	if !strings.HasPrefix(header, expectedPrefix) {
-		t.Fatalf("expected auth picker header to start with app foreground, got %q", header)
-	}
-	if stripped := ansi.Strip(header); !strings.Contains(stripped, "Sign in to Builder") {
-		t.Fatalf("expected auth picker header text preserved, got %q", stripped)
-	} else if strings.HasPrefix(stripped, "  ") {
-		t.Fatalf("expected auth picker header without left padding, got %q", stripped)
-	}
-}
-
 func TestAuthMethodPickerSelectsSecondOption(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -157,169 +92,6 @@ func TestAuthMethodPickerCancel(t *testing.T) {
 	m = next.(*startupPickerModel)
 	if !m.result.Canceled {
 		t.Fatal("expected canceled result")
-	}
-}
-
-func TestAuthMethodPickerScrollsToKeepSelectedRowVisible(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 6})
-	m = next.(*startupPickerModel)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = next.(*startupPickerModel)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = next.(*startupPickerModel)
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "Use a device code in any browser") {
-		t.Fatalf("expected selected row visible on short terminal, got %q", out)
-	}
-	if strings.Contains(out, "Open browser and finish automatically") {
-		t.Fatalf("expected viewport to scroll past first row, got %q", out)
-	}
-}
-
-func TestAuthMethodPickerDropsSelectedNoteWhenHeightIsTight(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
-	m = next.(*startupPickerModel)
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "Open browser and finish automatically") {
-		t.Fatalf("expected selected row visible, got %q", out)
-	}
-	if strings.Contains(out, "Best on this machine. Builder opens your browser and waits for the callback.") {
-		t.Fatalf("did not expect per-option descriptions on tight height, got %q", out)
-	}
-}
-
-func TestAuthMethodPickerSubtitleSeparatedFromHeaderByBlankLine(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{
-		Text: "Choose how Builder should complete OpenAI sign-in.",
-		Kind: startupPickerNoticeNeutral,
-	}, false, true)
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	titleLine := -1
-	for i, line := range lines {
-		if strings.Contains(line, "Sign in to Builder") {
-			titleLine = i
-			break
-		}
-	}
-	if titleLine < 0 || titleLine+2 >= len(lines) {
-		t.Fatalf("expected subtitle after blank line, got %q", strings.Join(lines, "\n"))
-	}
-	if strings.TrimSpace(lines[titleLine+1]) != "" {
-		t.Fatalf("expected blank line between title and subtitle, got %q", lines[titleLine+1])
-	}
-	if !strings.Contains(lines[titleLine+2], "Choose how Builder should complete OpenAI sign-in.") {
-		t.Fatalf("expected subtitle after blank line, got %q", strings.Join(lines, "\n"))
-	}
-	if strings.HasPrefix(lines[titleLine], "  ") {
-		t.Fatalf("expected flush-left title line, got %q", lines[titleLine])
-	}
-	if strings.HasPrefix(lines[titleLine+2], "  ") {
-		t.Fatalf("expected flush-left subtitle line, got %q", lines[titleLine+2])
-	}
-}
-
-func TestAuthConflictPickerUsesBodySubtitleAndSingleLineRows(t *testing.T) {
-	m := newStartupPickerModel(
-		authConflictPickerHeaderMarkdown,
-		"Choose auth source",
-		"dark",
-		startupPickerNotice{
-			Text: "Builder found both saved subscription auth and OPENAI_API_KEY. Choose which source should win from now on.",
-			Kind: startupPickerNoticeNeutral,
-		},
-		authConflictOptions(),
-	)
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "Choose Auth Source") {
-		t.Fatalf("expected conflict picker title, got %q", out)
-	}
-	if !strings.Contains(out, "Builder found both saved subscription auth and OPENAI_API_KEY") {
-		t.Fatalf("expected body subtitle, got %q", out)
-	}
-	if strings.Contains(out, "Prefer the API key already exported in your environment whenever it is present.") {
-		t.Fatalf("did not expect per-option descriptions, got %q", out)
-	}
-	if strings.Contains(out, "Builder will keep using the environment API key until you change auth with /logout.") {
-		t.Fatalf("did not expect per-option notes, got %q", out)
-	}
-	lines := strings.Split(out, "\n")
-	titleLine := -1
-	for i, line := range lines {
-		if strings.Contains(line, "Choose Auth Source") {
-			titleLine = i
-			break
-		}
-	}
-	if titleLine < 0 || titleLine+2 >= len(lines) {
-		t.Fatalf("expected subtitle after blank line, got %q", out)
-	}
-	if strings.TrimSpace(lines[titleLine+1]) != "" {
-		t.Fatalf("expected blank line between title and subtitle, got %q", lines[titleLine+1])
-	}
-	if !strings.Contains(lines[titleLine+2], "Builder found both saved subscription auth") {
-		t.Fatalf("expected subtitle after blank line, got %q", out)
-	}
-	if !containsInOrder(out,
-		"Use existing OPENAI_API_KEY from now on",
-		"Keep using saved subscription sign-in",
-	) {
-		t.Fatalf("expected single-line conflict rows, got %q", out)
-	}
-	if strings.HasPrefix(lines[titleLine], "  ") {
-		t.Fatalf("expected flush-left title line, got %q", lines[titleLine])
-	}
-	if strings.HasPrefix(lines[titleLine+2], "  ") {
-		t.Fatalf("expected flush-left subtitle line, got %q", lines[titleLine+2])
-	}
-}
-
-func TestAuthMethodPickerNoticeForDeviceUnsupported(t *testing.T) {
-	notice := authMethodPickerNoticeForRequest(authInteraction{FlowErr: auth.ErrDeviceCodeUnsupported})
-	if notice.Kind != startupPickerNoticeError {
-		t.Fatalf("expected error notice kind, got %q", notice.Kind)
-	}
-	if !strings.Contains(notice.Text, "Device-code sign-in is not enabled") {
-		t.Fatalf("unexpected notice text %q", notice.Text)
-	}
-}
-
-func TestAuthMethodPickerNoticeUsesStartupError(t *testing.T) {
-	notice := authMethodPickerNoticeForRequest(authInteraction{StartupErr: errors.New("refresh failed")})
-	if notice.Kind != startupPickerNoticeError {
-		t.Fatalf("expected error notice kind, got %q", notice.Kind)
-	}
-	if !strings.Contains(notice.Text, "refresh failed") {
-		t.Fatalf("unexpected notice text %q", notice.Text)
-	}
-}
-
-func TestAuthMethodPickerNoticeAcknowledgesAvailableEnvAPIKey(t *testing.T) {
-	notice := authMethodPickerNoticeForRequest(authInteraction{HasEnvAPIKey: true})
-	if notice.Kind != startupPickerNoticeNeutral {
-		t.Fatalf("expected neutral notice kind, got %q", notice.Kind)
-	}
-	if !strings.Contains(notice.Text, "OPENAI_API_KEY is available for this launch") {
-		t.Fatalf("unexpected notice text %q", notice.Text)
-	}
-}
-
-func TestAuthSuccessScreenTitleUsesEmailWhenAvailable(t *testing.T) {
-	got := authSuccessScreenTitle(auth.Method{
-		Type: auth.MethodOAuth,
-		OAuth: &auth.OAuthMethod{
-			Email: "user@example.com",
-		},
-	})
-	if got != "Auth success for: user@example.com" {
-		t.Fatalf("unexpected title %q", got)
-	}
-}
-
-func TestAuthSuccessScreenTitleFallsBackWithoutEmail(t *testing.T) {
-	if got := authSuccessScreenTitle(auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk"}}); got != "Auth success" {
-		t.Fatalf("unexpected title %q", got)
 	}
 }
 

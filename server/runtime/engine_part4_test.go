@@ -1,0 +1,865 @@
+package runtime
+
+import (
+	"builder/server/llm"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/toolspec"
+	"builder/shared/transcript"
+	"context"
+	"encoding/json"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestSubmitUserMessageMissingPhaseOpenAILegacyResponseRemainsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, commentaryWithoutToolCallsWarning) {
+			t.Fatalf("did not expect commentary-without-tools warning for legacy OpenAI response")
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, finalWithoutContentWarning) {
+			t.Fatalf("did not expect final-without-content warning for legacy OpenAI response")
+		}
+	}
+}
+
+func TestSubmitUserMessageCommentaryWithoutToolsNonOpenAIRemainsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "progress update",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	client.caps = llm.ProviderCapabilities{ProviderID: "anthropic", SupportsResponsesAPI: false, IsOpenAIFirstParty: false}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "claude-3"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "progress update" {
+		t.Fatalf("assistant content = %q, want progress update", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, commentaryWithoutToolCallsWarning) {
+			t.Fatalf("did not expect commentary-phase warning for non-openai provider")
+		}
+	}
+}
+
+func TestSubmitUserMessageCommentaryWithoutToolsEmitsRealtimeAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "progress update",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantContents := make([]string, 0, 2)
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantContents = append(assistantContents, evt.Message.Content)
+	}
+	if len(assistantContents) != 2 || assistantContents[0] != "progress update" || assistantContents[1] != "done" {
+		t.Fatalf("assistant realtime events = %+v, want [progress update done]", assistantContents)
+	}
+}
+
+func TestSubmitUserMessageCommentaryWithToolCallsEmitsRealtimeAssistantEventWithoutDuplicateToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantContents := make([]string, 0, 2)
+	commentaryToolCalls := -1
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantContents = append(assistantContents, evt.Message.Content)
+		if evt.Message.Content == "working" {
+			commentaryToolCalls = len(evt.Message.ToolCalls)
+		}
+	}
+	if len(assistantContents) != 2 || assistantContents[0] != "working" || assistantContents[1] != "done" {
+		t.Fatalf("assistant realtime events = %+v, want [working done]", assistantContents)
+	}
+	if commentaryToolCalls != 0 {
+		t.Fatalf("expected commentary assistant event to omit tool calls, got %d", commentaryToolCalls)
+	}
+}
+
+func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			events = append(events, evt)
+			eventsMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "do the task"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	snapshot := eng.ChatSnapshot()
+	assistantEntryIndex := -1
+	toolCallEntryIndex := -1
+	toolResultEntryIndex := -1
+	for idx, entry := range snapshot.Entries {
+		if assistantEntryIndex < 0 && entry.Role == "assistant" && entry.Text == "working" {
+			assistantEntryIndex = idx
+		}
+		if toolCallEntryIndex < 0 && entry.Role == "tool_call" && entry.ToolCallID == "call_shell_1" {
+			toolCallEntryIndex = idx
+		}
+		if toolResultEntryIndex < 0 && entry.ToolCallID == "call_shell_1" && (entry.Role == "tool_result_ok" || entry.Role == "tool_result_error") {
+			toolResultEntryIndex = idx
+		}
+	}
+	if assistantEntryIndex < 0 || toolCallEntryIndex < 0 || toolResultEntryIndex < 0 {
+		t.Fatalf("expected authoritative snapshot to contain commentary assistant + tool call/result, snapshot=%+v", snapshot.Entries)
+	}
+
+	eventsMu.Lock()
+	eventsSnapshot := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	assistantIdx := -1
+	toolStartIdx := -1
+	toolCompleteIdx := -1
+	for idx, evt := range eventsSnapshot {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "working" {
+			assistantIdx = idx
+		}
+		if evt.Kind == EventToolCallStarted && evt.ToolCall != nil && evt.ToolCall.ID == "call_shell_1" {
+			toolStartIdx = idx
+		}
+		if evt.Kind == EventToolCallCompleted && evt.ToolResult != nil && evt.ToolResult.CallID == "call_shell_1" {
+			toolCompleteIdx = idx
+		}
+	}
+	if assistantIdx < 0 {
+		t.Fatalf("expected commentary assistant event, got %+v", eventsSnapshot)
+	}
+	if toolStartIdx < 0 {
+		t.Fatalf("expected tool_call_started event, got %+v", eventsSnapshot)
+	}
+	if toolCompleteIdx < 0 {
+		t.Fatalf("expected tool_call_completed event, got %+v", eventsSnapshot)
+	}
+	assistantEvt := eventsSnapshot[assistantIdx]
+	if !assistantEvt.CommittedEntryStartSet {
+		t.Fatalf("expected commentary assistant event committed start set, got %+v", assistantEvt)
+	}
+	if got, want := assistantEvt.CommittedEntryStart, assistantEntryIndex; got != want {
+		t.Fatalf("commentary assistant committed start = %d, want %d", got, want)
+	}
+	toolStartEvt := eventsSnapshot[toolStartIdx]
+	if !toolStartEvt.CommittedEntryStartSet {
+		t.Fatalf("expected tool_call_started committed start set, got %+v", toolStartEvt)
+	}
+	if got, want := toolStartEvt.CommittedEntryStart, toolCallEntryIndex; got != want {
+		t.Fatalf("tool_call_started committed start = %d, want %d", got, want)
+	}
+	toolCompleteEvt := eventsSnapshot[toolCompleteIdx]
+	if !toolCompleteEvt.CommittedEntryStartSet {
+		t.Fatalf("expected tool_call_completed committed start set, got %+v", toolCompleteEvt)
+	}
+	if got, want := toolCompleteEvt.CommittedEntryStart, toolResultEntryIndex; got != want {
+		t.Fatalf("tool_call_completed committed start = %d, want %d", got, want)
+	}
+	if toolStartEvt.CommittedEntryCount < toolStartEvt.CommittedEntryStart+1 {
+		t.Fatalf("tool_call_started committed count/start inconsistent: %+v", toolStartEvt)
+	}
+	if toolCompleteEvt.CommittedEntryCount < toolCompleteEvt.CommittedEntryStart+1 {
+		t.Fatalf("tool_call_completed committed count/start inconsistent: %+v", toolCompleteEvt)
+	}
+	if assistantEvt.CommittedEntryCount < assistantEvt.CommittedEntryStart+1 {
+		t.Fatalf("assistant committed count/start inconsistent: %+v", assistantEvt)
+	}
+	if toolStartIdx <= assistantIdx {
+		t.Fatalf("expected tool_call_started after commentary assistant event, assistant_idx=%d tool_idx=%d events=%+v", assistantIdx, toolStartIdx, eventsSnapshot)
+	}
+	if toolCompleteIdx <= toolStartIdx {
+		t.Fatalf("expected tool_call_completed after tool_call_started, start_idx=%d complete_idx=%d events=%+v", toolStartIdx, toolCompleteIdx, eventsSnapshot)
+	}
+	if assistantEvt.CommittedEntryStart >= toolStartEvt.CommittedEntryStart {
+		t.Fatalf("expected commentary assistant before tool call in committed order, assistant=%+v tool=%+v", assistantEvt, toolStartEvt)
+	}
+	if toolStartEvt.CommittedEntryStart >= toolCompleteEvt.CommittedEntryStart {
+		t.Fatalf("expected tool call before tool result in committed order, start=%+v complete=%+v", toolStartEvt, toolCompleteEvt)
+	}
+}
+
+func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+				{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
+		}},
+	}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			events = append(events, evt)
+			eventsMu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
+
+	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
+		t.Fatalf("auto compact failed: %v", err)
+	}
+
+	eventsMu.Lock()
+	eventsSnapshot := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	compactionIdx := -1
+	for idx, evt := range eventsSnapshot {
+		if evt.Kind == EventCompactionCompleted {
+			compactionIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "compaction_notice" {
+			t.Fatalf("did not expect separate compaction notice local entry event, got %+v", eventsSnapshot)
+		}
+	}
+	if compactionIdx < 0 {
+		t.Fatalf("expected compaction completed event, got %+v", eventsSnapshot)
+	}
+	compactionEvt := eventsSnapshot[compactionIdx]
+	if compactionEvt.CommittedEntryStartSet {
+		t.Fatalf("expected compaction status event to stay pre-commit, got %+v", compactionEvt)
+	}
+}
+
+func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionStatus(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	replacement := llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "environment info"},
+		{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
+	})
+	if err := eng.replaceHistory("step-1", "local", compactionModeManual, replacement); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+	if err := eng.emitCompactionStatus("step-1", EventCompactionCompleted, compactionModeManual, "local", "", 2, 1, ""); err != nil {
+		t.Fatalf("emit compaction status: %v", err)
+	}
+
+	var projected []Event
+	for idx := range events {
+		evt := events[idx]
+		if evt.Kind != EventLocalEntryAdded || evt.LocalEntry == nil {
+			continue
+		}
+		if evt.LocalEntry.Role == "compaction_notice" {
+			t.Fatalf("did not expect separate compaction notice event, got %+v", events)
+		}
+		projected = append(projected, evt)
+	}
+	if len(projected) != 2 {
+		t.Fatalf("expected 2 projected replacement entry events, got %+v", events)
+	}
+	if projected[0].LocalEntry.Role != string(transcript.EntryRoleDeveloperContext) || projected[0].LocalEntry.Text != "environment info" {
+		t.Fatalf("unexpected first projected event: %+v", projected[0])
+	}
+	if !projected[0].CommittedEntryStartSet || projected[0].CommittedEntryStart != 1 {
+		t.Fatalf("unexpected first projected committed start: %+v", projected[0])
+	}
+	if projected[1].LocalEntry.Role != string(transcript.EntryRoleCompactionSummary) || projected[1].LocalEntry.Text != "condensed summary" {
+		t.Fatalf("unexpected second projected event: %+v", projected[1])
+	}
+	if !projected[1].CommittedEntryStartSet || projected[1].CommittedEntryStart != 2 {
+		t.Fatalf("unexpected second projected committed start: %+v", projected[1])
+	}
+	conversationUpdatedCount := 0
+	for _, evt := range events {
+		if evt.Kind != EventConversationUpdated || evt.StepID != "step-1" {
+			continue
+		}
+		conversationUpdatedCount++
+	}
+	if conversationUpdatedCount != 1 {
+		t.Fatalf("expected one compaction conversation update, got %+v", events)
+	}
+}
+
+func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			OutputItems: []llm.ResponseItem{{
+				Type: llm.ResponseItemTypeOther,
+				Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:        "gpt-5",
+		EnabledTools: []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolWebSearch},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "do the task"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := len(eng.pendingToolCallStarts); got != 0 {
+		t.Fatalf("expected pending tool call starts drained after submit, got %+v", eng.pendingToolCallStarts)
+	}
+	if _, ok := eng.pendingToolCallStarts["ws_1"]; ok {
+		t.Fatalf("did not expect hosted tool call id retained in pending starts: %+v", eng.pendingToolCallStarts)
+	}
+}
+
+func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working #+#+#+#+#+ malformed",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "working #+#+#+#+#+ malformed" {
+		t.Fatalf("assistant content = %q", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	persistedAsFinal := false
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleAssistant && persisted.Content == "working #+#+#+#+#+ malformed" {
+			persistedAsFinal = persisted.Phase == llm.MessagePhaseFinal
+		}
+	}
+	if !persistedAsFinal {
+		t.Fatalf("expected garbage-token assistant message to remain final")
+	}
+}
+
+func TestSubmitUserMessageLegacyEnvelopeLeakRemainsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "assistant to=functions.shell commentary  {\"command\":\"pwd\"}",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "assistant to=functions.shell commentary  {\"command\":\"pwd\"}" {
+		t.Fatalf("assistant content = %q", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	persistedEnvelopeAsFinal := false
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleAssistant && strings.Contains(strings.ToLower(persisted.Content), "assistant to=functions.") {
+			persistedEnvelopeAsFinal = persisted.Phase == llm.MessagePhaseFinal
+		}
+	}
+	if !persistedEnvelopeAsFinal {
+		t.Fatalf("expected envelope leak assistant message to remain final")
+	}
+}
+
+func TestSubmitUserMessageFinalAnswerWithoutContentForcesNextLoop(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	secondReq := client.calls[1]
+	foundWarning := false
+	for _, reqMsg := range requestMessages(secondReq) {
+		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, finalWithoutContentWarning) {
+			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("expected final-without-content warning message type error_feedback, got %+v", reqMsg)
+			}
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected final-without-content warning in next request, got %+v", requestMessages(secondReq))
+	}
+}
+
+func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "final response",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final response" {
+		t.Fatalf("assistant content = %q, want final response", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	toolCompleted := 0
+	developerWarningFound := false
+	persistedFinalHasToolCalls := false
+	for _, evt := range events {
+		if evt.Kind == "tool_completed" {
+			toolCompleted++
+		}
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, finalWithToolCallsIgnoredWarning) {
+			if persisted.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("expected final-with-tools warning message type error_feedback, got %+v", persisted)
+			}
+			developerWarningFound = true
+		}
+		if persisted.Role == llm.RoleAssistant && strings.TrimSpace(persisted.Content) == "final response" && len(persisted.ToolCalls) > 0 {
+			persistedFinalHasToolCalls = true
+		}
+	}
+	if toolCompleted != 0 {
+		t.Fatalf("expected no tool execution, got %d", toolCompleted)
+	}
+	if !developerWarningFound {
+		t.Fatalf("expected developer warning persisted for model visibility")
+	}
+	if persistedFinalHasToolCalls {
+		t.Fatalf("expected persisted final assistant message to have no tool calls")
+	}
+}
+
+func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["x"]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "edits",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(reviewerClient.calls) != 0 {
+		t.Fatalf("expected reviewer not to be called, got %d calls", len(reviewerClient.calls))
+	}
+}

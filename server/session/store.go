@@ -442,6 +442,25 @@ func (s *Store) BackfillLockedContextBudget(contextWindow, contextPercent int) e
 	return s.observePersistence(snapshot)
 }
 
+func (s *Store) BackfillLockedProviderContract(contract LockedProviderCapabilities) error {
+	if strings.TrimSpace(contract.ProviderID) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	if s.meta.Locked == nil || strings.TrimSpace(s.meta.Locked.ProviderContract.ProviderID) != "" {
+		s.mu.Unlock()
+		return nil
+	}
+	s.meta.Locked.ProviderContract = contract
+	s.meta.UpdatedAt = time.Now().UTC()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
+}
+
 func (s *Store) BackfillLockedSystemPrompt(systemPrompt string) error {
 	trimmed := strings.TrimSpace(systemPrompt)
 	s.mu.Lock()
