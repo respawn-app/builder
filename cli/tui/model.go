@@ -671,18 +671,8 @@ func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
 	if m == nil || !m.compactDetail || (delta != -1 && delta != 1) {
 		return false
 	}
-	if !m.detailEdgeSelection || !m.detailMetricsResolved {
-		return false
-	}
 	if m.detailDirty {
 		m.rebuildDetailSnapshot()
-	}
-	m.ensureDetailScrollResolved()
-	if delta < 0 && m.detailScroll != m.maxDetailScroll() {
-		return false
-	}
-	if delta > 0 && m.detailScroll != 0 {
-		return false
 	}
 	first, last, ok := m.visibleDetailEntryLineRange(m.detailSelectedEntry)
 	if !m.detailSelectedActive || !ok {
