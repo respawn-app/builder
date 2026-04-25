@@ -724,6 +724,9 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsOngoingVisibleRole(t *
 	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperFeedback) || snap.Entries[1].Text != "phase mismatch warning" {
 		t.Fatalf("expected developer error feedback mapped to ongoing-visible role, got %+v", snap.Entries[1])
 	}
+	if snap.Entries[1].CompactLabel != "" {
+		t.Fatalf("expected developer error feedback to avoid generic compact label, got %+v", snap.Entries[1])
+	}
 }
 
 func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T) {
