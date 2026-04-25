@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"builder/cli/app/commands"
 	"builder/cli/tui"
+	"builder/server/auth"
 	"builder/server/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -176,6 +179,175 @@ func TestResumeSlashCommandAllowsUnknownOtherSessionAvailability(t *testing.T) {
 	if updated.Action() != UIActionResume {
 		t.Fatalf("expected UIActionResume, got %q", updated.Action())
 	}
+}
+
+func TestSlashCommandPickerShowsLoginWhenAuthIsMissingOrAPIKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		manager *auth.Manager
+	}{
+		{name: "missing auth"},
+		{
+			name: "api key",
+			manager: auth.NewManager(auth.NewMemoryStore(auth.State{
+				Scope: auth.ScopeGlobal,
+				Method: auth.Method{
+					Type:   auth.MethodAPIKey,
+					APIKey: &auth.APIKeyMethod{Key: "sk-test"},
+				},
+			}), nil, nil),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: tc.manager}))
+			m.input = "/"
+			m.refreshSlashCommandFilterFromInput()
+
+			state := m.slashCommandPicker()
+			if !slashPickerContainsCommand(state, "login") {
+				t.Fatalf("expected /login in slash picker, got %+v", slashPickerCommandNames(state))
+			}
+			if slashPickerContainsCommand(state, "logout") {
+				t.Fatalf("did not expect /logout in slash picker, got %+v", slashPickerCommandNames(state))
+			}
+		})
+	}
+}
+
+func TestExactHiddenAuthSlashCommandsStillExecute(t *testing.T) {
+	cases := []struct {
+		name    string
+		manager *auth.Manager
+		input   string
+	}{
+		{
+			name: "login while oauth shows logout",
+			manager: auth.NewManager(auth.NewMemoryStore(auth.State{
+				Scope: auth.ScopeGlobal,
+				Method: auth.Method{
+					Type: auth.MethodOAuth,
+					OAuth: &auth.OAuthMethod{
+						AccessToken: "access-token",
+						TokenType:   "Bearer",
+					},
+				},
+			}), nil, nil),
+			input: "/login",
+		},
+		{
+			name: "logout while api key shows login",
+			manager: auth.NewManager(auth.NewMemoryStore(auth.State{
+				Scope: auth.ScopeGlobal,
+				Method: auth.Method{
+					Type:   auth.MethodAPIKey,
+					APIKey: &auth.APIKeyMethod{Key: "sk-test"},
+				},
+			}), nil, nil),
+			input: "/logout",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: tc.manager}))
+			m.input = tc.input
+
+			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated := next.(*uiModel)
+			if cmd == nil {
+				t.Fatalf("expected %s to execute", tc.input)
+			}
+			if updated.Action() != UIActionLogout {
+				t.Fatalf("expected %s to execute logout/login transition, got %q", tc.input, updated.Action())
+			}
+		})
+	}
+}
+
+func TestSlashCommandPickerShowsLogoutForOAuthAuth(t *testing.T) {
+	manager := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				TokenType:   "Bearer",
+			},
+		},
+	}), nil, nil)
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: manager}))
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if !slashPickerContainsCommand(state, "logout") {
+		t.Fatalf("expected /logout in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+	if slashPickerContainsCommand(state, "login") {
+		t.Fatalf("did not expect /login in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+}
+
+func TestSlashCommandPickerHidesAuthCommandsWhenAuthStateCannotLoad(t *testing.T) {
+	manager := auth.NewManager(errorAuthStore{err: errors.New("permission denied")}, nil, nil)
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: manager}))
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if slashPickerContainsCommand(state, "login") || slashPickerContainsCommand(state, "logout") {
+		t.Fatalf("did not expect auth commands when auth state cannot load, got %+v", slashPickerCommandNames(state))
+	}
+	if m.authSlashCommandErr == "" {
+		t.Fatal("expected auth slash command error to be recorded")
+	}
+}
+
+func TestSlashCommandPickerRefreshesAuthStateAfterModelInit(t *testing.T) {
+	store := auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-test"},
+		},
+	})
+	manager := auth.NewManager(store, nil, nil)
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: manager}))
+
+	if err := store.Save(context.Background(), auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				TokenType:   "Bearer",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("update auth store: %v", err)
+	}
+
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+	state := m.slashCommandPicker()
+	if !slashPickerContainsCommand(state, "logout") {
+		t.Fatalf("expected refreshed /logout in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+	if slashPickerContainsCommand(state, "login") {
+		t.Fatalf("did not expect stale /login after auth refresh, got %+v", slashPickerCommandNames(state))
+	}
+}
+
+type errorAuthStore struct {
+	err error
+}
+
+func (s errorAuthStore) Load(context.Context) (auth.State, error) {
+	return auth.State{}, s.err
+}
+
+func (s errorAuthStore) Save(context.Context, auth.State) error {
+	return nil
 }
 
 func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T) {

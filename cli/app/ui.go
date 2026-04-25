@@ -497,6 +497,8 @@ type uiModel struct {
 	commandRegistry       *commands.Registry
 	hasOtherSessions      bool
 	hasOtherSessionsKnown bool
+	authSlashCommandName  string
+	authSlashCommandErr   string
 	slashCommandFilter    string
 	slashCommandFilterSet bool
 	slashCommandSelection int
@@ -677,6 +679,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	m.fastModeAvailable = status.FastModeAvailable
 	m.fastModeEnabled = status.FastModeEnabled
 	m.conversationFreshness = status.ConversationFreshness
+	m.refreshAuthSlashCommandState()
 	if !m.hasRuntimeClient() {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}
