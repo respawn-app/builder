@@ -547,7 +547,14 @@ func (m Model) scrollOngoing(delta int) Model {
 }
 
 func (m Model) scrollDetail(delta int) Model {
+	anchorEntry, hasAnchorEntry := m.detailSelectionAnchorDuringReverseScroll(delta)
 	if moved := m.scrollDetailLine(delta); moved {
+		if hasAnchorEntry && m.selectVisibleDetailEntry(anchorEntry) {
+			return m
+		}
+		if hasAnchorEntry && m.selectDetailViewportEdgeOppositeScroll(delta) {
+			return m
+		}
 		m.focusCenterVisibleDetailEntry()
 		return m
 	}
@@ -667,6 +674,63 @@ func (m *Model) moveDetailSelectionWithinViewport(delta int) {
 	}
 }
 
+func (m *Model) detailSelectionAnchorDuringReverseScroll(delta int) (int, bool) {
+	if m == nil || !m.compactDetail || (delta != -1 && delta != 1) {
+		return -1, false
+	}
+	entries := m.visibleSelectableDetailEntries()
+	if len(entries) == 0 || !m.detailSelectedActive {
+		return -1, false
+	}
+	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
+	if current < 0 {
+		return -1, false
+	}
+	centerEntry := m.centerVisibleSelectableDetailEntry()
+	center := detailVisibleEntryIndex(entries, centerEntry)
+	if center < 0 {
+		return -1, false
+	}
+	if delta < 0 && current <= center {
+		return -1, false
+	}
+	if delta > 0 && current >= center {
+		return -1, false
+	}
+	return entries[current], true
+}
+
+func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
+	if m == nil || entryIndex < 0 {
+		return false
+	}
+	if detailVisibleEntryIndex(m.visibleSelectableDetailEntries(), entryIndex) < 0 {
+		return false
+	}
+	previousEntry := m.detailSelectedEntry
+	previousActive := m.detailSelectedActive
+	m.detailSelectedEntry = entryIndex
+	m.detailSelectedActive = true
+	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
+		m.refreshDetailViewport()
+	}
+	return true
+}
+
+func (m *Model) selectDetailViewportEdgeOppositeScroll(delta int) bool {
+	entries := m.visibleSelectableDetailEntries()
+	if len(entries) == 0 {
+		return false
+	}
+	if delta < 0 {
+		return m.selectVisibleDetailEntry(entries[len(entries)-1])
+	}
+	if delta > 0 {
+		return m.selectVisibleDetailEntry(entries[0])
+	}
+	return false
+}
+
 func (m *Model) visibleSelectableDetailEntries() []int {
 	if m == nil {
 		return nil
@@ -687,6 +751,39 @@ func (m *Model) visibleSelectableDetailEntries() []int {
 		entries = append(entries, entryIndex)
 	}
 	return entries
+}
+
+func (m *Model) centerVisibleSelectableDetailEntry() int {
+	if m == nil {
+		return -1
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	if len(m.detailLineEntryIndices) == 0 {
+		return -1
+	}
+	anchor := m.viewportLines / 2
+	if anchor >= len(m.detailLineEntryIndices) {
+		anchor = len(m.detailLineEntryIndices) - 1
+	}
+	if anchor < 0 {
+		return -1
+	}
+	bestEntry := -1
+	bestDistance := len(m.detailLineEntryIndices) + 1
+	for lineIndex, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		distance := detailLineDistance(lineIndex, anchor)
+		if distance >= bestDistance {
+			continue
+		}
+		bestEntry = entryIndex
+		bestDistance = distance
+	}
+	return bestEntry
 }
 
 func detailLineDistance(left int, right int) int {
