@@ -1144,9 +1144,17 @@ func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
 	}
 	token := m.status.refreshToken
 	request.CurrentTime = time.Now()
-	base := defaultUIStatusCollector{}.CollectBase(request)
+	collector := m.statusCollector
+	if collector == nil {
+		collector = defaultUIStatusCollector{}
+	}
+	progressive, ok := collector.(uiStatusProgressiveCollector)
+	if !ok {
+		progressive = defaultUIStatusCollector{}
+	}
+	base := progressive.CollectBase(request)
 	cacheKey := statusGitCacheKey(base.Workdir)
-	return m.statusGitRefreshCmd(token, cacheKey, request, defaultUIStatusCollector{}, base, true)
+	return m.statusGitRefreshCmd(token, cacheKey, request, progressive, base, true)
 }
 
 func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, base uiStatusSnapshot) tea.Cmd {
