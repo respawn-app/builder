@@ -464,15 +464,15 @@ func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptEnd(t *testin
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 }
 
-func TestCompactDetailKeyReverseFromEndRecentersBeforeLineScroll(t *testing.T) {
-	assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyUp})
+func TestCompactDetailKeyReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyUp})
 }
 
-func TestCompactDetailWheelReverseFromEndRecentersBeforeLineScroll(t *testing.T) {
-	assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+func TestCompactDetailWheelReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 }
 
-func assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+func assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T, reverse tea.Msg) {
 	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
@@ -496,15 +496,24 @@ func assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t *testing.T, re
 	m = updateModel(t, m, reverse)
 
 	if got := m.DetailScroll(); got != beforeScroll {
-		t.Fatalf("expected reverse input from bottom edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
+		t.Fatalf("expected reverse input from bottom edge to hold camera before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
-		t.Fatalf("expected reverse input to snap selection to center before line scrolling, got distance=%d before=%d", got, beforeDistance)
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
+		t.Fatalf("expected reverse input to move selection one visual row toward center, got distance=%d want=%d", got, beforeDistance-1)
 	}
 
+	for guard := 0; guard < 20 && selectedDetailDistanceFromCenter(t, m) > 0; guard++ {
+		if before := m.DetailScroll(); before != beforeScroll {
+			t.Fatalf("expected camera pinned until selection reaches center, got %d want %d", before, beforeScroll)
+		}
+		m = updateModel(t, m, reverse)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected repeated reverse input to reach center, got distance=%d", got)
+	}
 	m = updateModel(t, m, reverse)
 	if got := m.DetailScroll(); got != beforeScroll-1 {
-		t.Fatalf("expected second reverse input to resume line scroll, got %d want %d", got, beforeScroll-1)
+		t.Fatalf("expected reverse input after center to resume line scroll, got %d want %d", got, beforeScroll-1)
 	}
 }
 
@@ -587,15 +596,15 @@ func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *test
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 }
 
-func TestCompactDetailKeyReverseFromStartRecentersBeforeLineScroll(t *testing.T) {
-	assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyDown})
+func TestCompactDetailKeyReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyDown})
 }
 
-func TestCompactDetailWheelReverseFromStartRecentersBeforeLineScroll(t *testing.T) {
-	assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+func TestCompactDetailWheelReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 }
 
-func assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+func assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T, reverse tea.Msg) {
 	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
@@ -624,15 +633,24 @@ func assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t *testing.T, 
 	m = updateModel(t, m, reverse)
 
 	if got := m.DetailScroll(); got != beforeScroll {
-		t.Fatalf("expected reverse input from top edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
+		t.Fatalf("expected reverse input from top edge to hold camera before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
-		t.Fatalf("expected reverse input to snap selection to center before line scrolling, got distance=%d before=%d", got, beforeDistance)
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance+1 {
+		t.Fatalf("expected reverse input to move selection one visual row toward center, got distance=%d want=%d", got, beforeDistance+1)
 	}
 
+	for guard := 0; guard < 20 && selectedDetailDistanceFromCenter(t, m) < 0; guard++ {
+		if before := m.DetailScroll(); before != beforeScroll {
+			t.Fatalf("expected camera pinned until selection reaches center, got %d want %d", before, beforeScroll)
+		}
+		m = updateModel(t, m, reverse)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected repeated reverse input to reach center, got distance=%d", got)
+	}
 	m = updateModel(t, m, reverse)
 	if got := m.DetailScroll(); got != beforeScroll+1 {
-		t.Fatalf("expected second reverse input to resume line scroll, got %d want %d", got, beforeScroll+1)
+		t.Fatalf("expected reverse input after center to resume line scroll, got %d want %d", got, beforeScroll+1)
 	}
 }
 

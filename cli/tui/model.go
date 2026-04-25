@@ -651,28 +651,20 @@ func (m *Model) moveDetailSelectionWithinViewport(delta int) bool {
 	if m == nil || !m.compactDetail {
 		return false
 	}
-	entries := m.visibleSelectableDetailEntries()
-	if len(entries) == 0 {
+	if len(m.visibleSelectableDetailEntries()) == 0 {
 		m.ensureDetailSelection()
 		return false
 	}
-	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
-	if !m.detailSelectedActive || current < 0 {
+	first, last, ok := m.visibleDetailEntryLineRange(m.detailSelectedEntry)
+	if !m.detailSelectedActive || !ok {
 		m.focusCenterVisibleDetailEntry()
 		return false
 	}
-	next := clamp(current+delta, 0, len(entries)-1)
-	if next == current {
-		return false
+	startLine := first - 1
+	if delta > 0 {
+		startLine = last + 1
 	}
-	previousEntry := m.detailSelectedEntry
-	previousActive := m.detailSelectedActive
-	m.detailSelectedEntry = entries[next]
-	m.detailSelectedActive = true
-	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
-		m.refreshDetailViewport()
-	}
-	return true
+	return m.selectVisibleDetailEntryInLineDirection(startLine, delta)
 }
 
 func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
@@ -692,26 +684,27 @@ func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
 	if delta > 0 && m.detailScroll != 0 {
 		return false
 	}
-	entries := m.visibleSelectableDetailEntries()
-	if len(entries) == 0 || !m.detailSelectedActive {
-		return false
-	}
-	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
-	if current < 0 {
+	first, last, ok := m.visibleDetailEntryLineRange(m.detailSelectedEntry)
+	if !m.detailSelectedActive || !ok {
 		return false
 	}
 	centerEntry := m.centerVisibleSelectableDetailEntry()
-	center := detailVisibleEntryIndex(entries, centerEntry)
-	if center < 0 {
+	centerFirst, centerLast, ok := m.visibleDetailEntryLineRange(centerEntry)
+	if !ok {
 		return false
 	}
-	if delta < 0 && current <= center {
+	centerLine := (centerFirst + centerLast) / 2
+	if delta < 0 && first <= centerLine {
 		return false
 	}
-	if delta > 0 && current >= center {
+	if delta > 0 && last >= centerLine {
 		return false
 	}
-	return m.selectVisibleDetailEntry(centerEntry)
+	startLine := first - 1
+	if delta > 0 {
+		startLine = last + 1
+	}
+	return m.selectVisibleDetailEntryInLineDirection(startLine, delta)
 }
 
 func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
@@ -729,6 +722,38 @@ func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
 		m.refreshDetailViewport()
 	}
 	return true
+}
+
+func (m *Model) selectVisibleDetailEntryInLineDirection(startLine int, delta int) bool {
+	if m == nil || delta == 0 {
+		return false
+	}
+	for lineIndex := startLine; lineIndex >= 0 && lineIndex < len(m.detailLineEntryIndices); lineIndex += delta {
+		entryIndex := m.detailLineEntryIndices[lineIndex]
+		if entryIndex < 0 || entryIndex == m.detailSelectedEntry || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		return m.selectVisibleDetailEntry(entryIndex)
+	}
+	return false
+}
+
+func (m Model) visibleDetailEntryLineRange(entryIndex int) (int, int, bool) {
+	if entryIndex < 0 {
+		return -1, -1, false
+	}
+	first := -1
+	last := -1
+	for lineIndex, owner := range m.detailLineEntryIndices {
+		if owner != entryIndex {
+			continue
+		}
+		if first < 0 {
+			first = lineIndex
+		}
+		last = lineIndex
+	}
+	return first, last, first >= 0
 }
 
 func (m *Model) visibleSelectableDetailEntries() []int {
