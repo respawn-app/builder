@@ -486,11 +486,11 @@ func TestCompactDetailWheelReverseFromEndKeepsLineScrollSmooth(t *testing.T) {
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
 
-	if got := m.DetailScroll(); got != beforeScroll-1 {
-		t.Fatalf("expected reverse wheel from bottom edge to keep one-line scroll, got %d want %d", got, beforeScroll-1)
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected reverse wheel from bottom edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got == 0 || detailAbs(got) > detailAbs(beforeDistance)+1 {
-		t.Fatalf("expected reverse wheel to avoid snapping selection to center, got distance=%d before=%d", got, beforeDistance)
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
+		t.Fatalf("expected reverse wheel to move selection one entry toward center, got distance=%d want %d", got, beforeDistance-1)
 	}
 }
 
@@ -582,11 +582,11 @@ func TestCompactDetailWheelReverseFromStartKeepsLineScrollSmooth(t *testing.T) {
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
 
-	if got := m.DetailScroll(); got != beforeScroll+1 {
-		t.Fatalf("expected reverse wheel from top edge to keep one-line scroll, got %d want %d", got, beforeScroll+1)
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected reverse wheel from top edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got == 0 || detailAbs(got) > detailAbs(beforeDistance)+1 {
-		t.Fatalf("expected reverse wheel to avoid snapping selection to center, got distance=%d before=%d", got, beforeDistance)
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance+1 {
+		t.Fatalf("expected reverse wheel to move selection one entry toward center, got distance=%d want %d", got, beforeDistance+1)
 	}
 }
 

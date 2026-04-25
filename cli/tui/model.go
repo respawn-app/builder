@@ -216,6 +216,7 @@ type Model struct {
 	detailMetricsResolved   bool
 	detailBottomAnchor      bool
 	detailBottomOffset      int
+	detailEdgeSelection     bool
 	detailDirty             bool
 	detailStale             bool
 	detailRebuildCount      int
@@ -547,18 +548,17 @@ func (m Model) scrollOngoing(delta int) Model {
 }
 
 func (m Model) scrollDetail(delta int) Model {
-	anchorEntry, hasAnchorEntry := m.detailSelectionAnchorDuringReverseScroll(delta)
+	if m.moveDetailSelectionTowardCenterAtScrollEdge(delta) {
+		return m
+	}
 	if moved := m.scrollDetailLine(delta); moved {
-		if hasAnchorEntry && m.selectVisibleDetailEntry(anchorEntry) {
-			return m
-		}
-		if hasAnchorEntry && m.selectDetailViewportEdgeOppositeScroll(delta) {
-			return m
-		}
+		m.detailEdgeSelection = false
 		m.focusCenterVisibleDetailEntry()
 		return m
 	}
-	m.moveDetailSelectionWithinViewport(delta)
+	if m.moveDetailSelectionWithinViewport(delta) {
+		m.detailEdgeSelection = true
+	}
 	return m
 }
 
@@ -647,23 +647,23 @@ func (m *Model) focusCenterVisibleDetailEntry() {
 	}
 }
 
-func (m *Model) moveDetailSelectionWithinViewport(delta int) {
+func (m *Model) moveDetailSelectionWithinViewport(delta int) bool {
 	if m == nil || !m.compactDetail {
-		return
+		return false
 	}
 	entries := m.visibleSelectableDetailEntries()
 	if len(entries) == 0 {
 		m.ensureDetailSelection()
-		return
+		return false
 	}
 	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
 	if !m.detailSelectedActive || current < 0 {
 		m.focusCenterVisibleDetailEntry()
-		return
+		return false
 	}
 	next := clamp(current+delta, 0, len(entries)-1)
 	if next == current {
-		return
+		return false
 	}
 	previousEntry := m.detailSelectedEntry
 	previousActive := m.detailSelectedActive
@@ -672,32 +672,46 @@ func (m *Model) moveDetailSelectionWithinViewport(delta int) {
 	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
 		m.refreshDetailViewport()
 	}
+	return true
 }
 
-func (m *Model) detailSelectionAnchorDuringReverseScroll(delta int) (int, bool) {
+func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
 	if m == nil || !m.compactDetail || (delta != -1 && delta != 1) {
-		return -1, false
+		return false
+	}
+	if !m.detailEdgeSelection || !m.detailMetricsResolved {
+		return false
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	m.ensureDetailScrollResolved()
+	if delta < 0 && m.detailScroll != m.maxDetailScroll() {
+		return false
+	}
+	if delta > 0 && m.detailScroll != 0 {
+		return false
 	}
 	entries := m.visibleSelectableDetailEntries()
 	if len(entries) == 0 || !m.detailSelectedActive {
-		return -1, false
+		return false
 	}
 	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
 	if current < 0 {
-		return -1, false
+		return false
 	}
 	centerEntry := m.centerVisibleSelectableDetailEntry()
 	center := detailVisibleEntryIndex(entries, centerEntry)
 	if center < 0 {
-		return -1, false
+		return false
 	}
 	if delta < 0 && current <= center {
-		return -1, false
+		return false
 	}
 	if delta > 0 && current >= center {
-		return -1, false
+		return false
 	}
-	return entries[current], true
+	return m.selectVisibleDetailEntry(entries[clamp(current+delta, 0, len(entries)-1)])
 }
 
 func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
@@ -715,20 +729,6 @@ func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
 		m.refreshDetailViewport()
 	}
 	return true
-}
-
-func (m *Model) selectDetailViewportEdgeOppositeScroll(delta int) bool {
-	entries := m.visibleSelectableDetailEntries()
-	if len(entries) == 0 {
-		return false
-	}
-	if delta < 0 {
-		return m.selectVisibleDetailEntry(entries[len(entries)-1])
-	}
-	if delta > 0 {
-		return m.selectVisibleDetailEntry(entries[0])
-	}
-	return false
 }
 
 func (m *Model) visibleSelectableDetailEntries() []int {
