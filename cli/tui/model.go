@@ -547,8 +547,11 @@ func (m Model) scrollOngoing(delta int) Model {
 }
 
 func (m Model) scrollDetail(delta int) Model {
-	m.scrollDetailLine(delta)
-	m.focusCenterVisibleDetailEntry()
+	if moved := m.scrollDetailLine(delta); moved {
+		m.focusCenterVisibleDetailEntry()
+		return m
+	}
+	m.moveDetailSelectionWithinViewport(delta)
 	return m
 }
 
