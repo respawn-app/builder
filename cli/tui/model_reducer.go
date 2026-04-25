@@ -330,18 +330,17 @@ func (m *Model) navigateDetailSelection(delta int) {
 	if m.detailDirty {
 		m.rebuildDetailSnapshot()
 	}
-	anchorEntry, hasAnchorEntry := m.detailSelectionAnchorDuringReverseScroll(delta)
+	if m.moveDetailSelectionTowardCenterAtScrollEdge(delta) {
+		return
+	}
 	if moved := m.scrollDetailLine(delta); moved {
-		if hasAnchorEntry && m.selectVisibleDetailEntry(anchorEntry) {
-			return
-		}
-		if hasAnchorEntry && m.selectDetailViewportEdgeOppositeScroll(delta) {
-			return
-		}
+		m.detailEdgeSelection = false
 		m.focusCenterVisibleDetailEntry()
 		return
 	}
-	m.moveDetailSelectionWithinViewport(delta)
+	if m.moveDetailSelectionWithinViewport(delta) {
+		m.detailEdgeSelection = true
+	}
 }
 
 func (m *Model) toggleSelectedDetailExpansion() {
