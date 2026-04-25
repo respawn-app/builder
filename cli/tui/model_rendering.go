@@ -184,6 +184,8 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
 		blockRole = "tool_web_search"
+	} else if isPatchToolCall(entry.ToolCall) {
+		blockRole = "tool_patch"
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
@@ -208,6 +210,8 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
 		blockRole = "tool_web_search"
+	} else if isPatchToolCall(entry.ToolCall) {
+		blockRole = "tool_patch"
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}

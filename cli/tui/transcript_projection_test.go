@@ -185,8 +185,8 @@ func TestCommittedOngoingProjectionPreservesSuccessStateForEmptyToolResult(t *te
 	if len(projection.Blocks) < 3 {
 		t.Fatalf("expected patch success block plus assistant tail, got %#v", projection.Blocks)
 	}
-	if got := projection.Blocks[1].Role; got != "tool_success" {
-		t.Fatalf("expected patch block to resolve to tool_success after empty result, got %q (%#v)", got, projection.Blocks)
+	if got := projection.Blocks[1].Role; got != "tool_patch_success" {
+		t.Fatalf("expected patch block to resolve to tool_patch_success after empty result, got %q (%#v)", got, projection.Blocks)
 	}
 	if !strings.Contains(strings.Join(projection.Blocks[1].Lines, "\n"), "apply patch") {
 		t.Fatalf("expected patch success block to retain tool call text, got %#v", projection.Blocks[1])

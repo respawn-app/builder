@@ -182,7 +182,7 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggesti
 			display = m.palette().model.Render(display)
 		case "answer":
 			if role == "tool_question_error" {
-				display = styleForRole(role, m.palette()).Render(display)
+				display = applyANSIStyleIntents(display, m.ansiIntentPalette(), ErrorForeground)
 			} else {
 				display = m.palette().user.Render(display)
 			}
@@ -236,6 +236,10 @@ func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 	return meta != nil && meta.UsesShellRendering()
 }
 
+func isPatchToolCall(meta *transcript.ToolCallMeta) bool {
+	return meta != nil && (meta.HasPatchDetail() || strings.TrimSpace(meta.ToolName) == "patch")
+}
+
 func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && meta.UsesAskQuestionRendering()
 }
@@ -246,7 +250,16 @@ func isWebSearchToolCall(meta *transcript.ToolCallMeta) bool {
 
 func isToolHeadlineRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_patch", "tool_patch_success", "tool_patch_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isToolErrorHeadlineRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_question_error", "tool_web_search_error":
 		return true
 	default:
 		return false

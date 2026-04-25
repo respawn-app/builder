@@ -25,15 +25,14 @@ Success metrics:
 
 ## Interaction Model
 
-- `Up` selects the previous expandable message.
-- `Down` selects the next expandable message.
+- `Up` scrolls one rendered line up.
+- `Down` scrolls one rendered line down.
 - `Enter` toggles the selected message between collapsed and expanded.
 - `PgUp`/`PgDn` keep page scrolling detail content.
 - Mouse wheel keeps scrolling detail content when the terminal can deliver wheel navigation without mouse capture.
 - `Tab` or the existing mode toggle returns to ongoing.
 
-Selection is message-oriented, not line-oriented. If the selected message is outside the viewport after navigation or expansion, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
-Viewport scrolling (`PgUp`/`PgDn` and mouse wheel) re-focuses compact detail selection to the first visible selectable item. This keeps `Enter` aligned with the top visible row after pointer/trackpad scrolling without requiring repeated keyboard navigation.
+Selection is message-oriented, not line-oriented. Scrolling is line-oriented. After line/page/wheel scrolling, compact detail re-focuses selection to the first visible selectable item. This keeps `Enter` aligned with the top visible row without forcing large item jumps when expanded output is taller than the terminal. If expansion makes the selected message leave the viewport, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
 
 Detail rows do not show a dedicated collapsed/expanded glyph. The first rendered line keeps the normal role/tool symbol. When an item renders more than one line, continuation lines replace the role-prefix column with a faint tree guide: `│` for middle lines and `└` for the last rendered line.
 
@@ -159,6 +158,9 @@ Source hooks:
 | current-emitted | render/tools | `tool_shell` | Shell tool, no result yet | Ongoing compact + detail | First command line, same as ongoing. | Full command input. |
 | current-emitted | render/tools | `tool_shell_success` | Shell tool success | Ongoing compact + detail | First command line, success style. | Full command input plus full output. |
 | current-emitted | render/tools | `tool_shell_error` | Shell tool error | Ongoing compact + detail | First command line plus structured error summary when available, error style. | Full command input plus full error output. |
+| current-emitted | render/tools | `tool_patch` | Patch/edit tool pending | Ongoing compact + detail | `⇄` plus patch summary. | Full patch input. |
+| current-emitted | render/tools | `tool_patch_success` | Patch/edit tool success | Ongoing compact + detail | `⇄` plus patch summary, success style. | Full rendered patch/diff; successful empty result omitted. |
+| current-emitted | render/tools | `tool_patch_error` | Patch/edit tool error | Ongoing compact + detail | `⇄` plus patch summary and structured error summary when available, error style. | Full rendered patch/diff plus full error output. |
 | current-emitted | render/tools | `tool_question` | Ask-question tool success/pending | Ongoing + detail | Question only. | Question, options, recommendation, answer if present. |
 | current-emitted | render/tools | `tool_question_error` | Ask-question tool error | Ongoing + detail | Question plus structured error summary when available, error style. | Question, options, recommendation, error/answer. |
 | current-emitted | render/tools | `tool_web_search` | Web-search tool pending | Ongoing compact + detail | Compact query/input. | Full web-search input. |

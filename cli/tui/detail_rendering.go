@@ -24,7 +24,6 @@ func (m Model) detailEntryExpanded(entryIndex int) bool {
 }
 
 func (m Model) detailWithTreeGuide(role string, lines []string, expanded bool) []string {
-	_ = expanded
 	if !m.compactDetail {
 		return lines
 	}
@@ -32,32 +31,40 @@ func (m Model) detailWithTreeGuide(role string, lines []string, expanded bool) [
 		lines = []string{""}
 	}
 	out := append([]string(nil), lines...)
-	out[0] = m.truncateDetailLine(out[0])
+	if !expanded {
+		out[0] = m.truncateDetailLine(out[0])
+	}
 	for idx := 1; idx < len(out); idx++ {
-		out[idx] = m.detailTreeGuideLine(role, out[idx], idx == len(out)-1)
+		out[idx] = m.detailTreeGuideLine(role, out[idx], idx == len(out)-1, expanded)
 	}
 	return out
 }
 
-func (m Model) detailTreeGuideLine(role string, line string, last bool) string {
+func (m Model) detailTreeGuideLine(role string, line string, last bool, expanded bool) string {
 	connector := detailTreeMiddle
 	if last {
 		connector = detailTreeLast
 	}
 	styledConnector := m.palette().preview.Faint(true).Render(connector)
+	formatLine := func(value string) string {
+		if expanded {
+			return value
+		}
+		return m.truncateDetailLine(value)
+	}
 	prefixWidth := m.entryPrefixWidth(role, "")
 	if prefixWidth <= 0 {
-		return m.truncateDetailLine(styledConnector + " " + strings.TrimLeft(line, " "))
+		return formatLine(styledConnector + " " + strings.TrimLeft(line, " "))
 	}
 	plainPrefix := strings.Repeat(" ", prefixWidth)
 	replacement := styledConnector + strings.Repeat(" ", max(0, prefixWidth-1))
 	if strings.HasPrefix(line, plainPrefix) {
-		return m.truncateDetailLine(replacement + strings.TrimPrefix(line, plainPrefix))
+		return formatLine(replacement + strings.TrimPrefix(line, plainPrefix))
 	}
 	if strings.TrimSpace(line) == "" {
-		return m.truncateDetailLine(styledConnector)
+		return formatLine(styledConnector)
 	}
-	return m.truncateDetailLine(replacement + strings.TrimLeft(line, " "))
+	return formatLine(replacement + strings.TrimLeft(line, " "))
 }
 
 func (m Model) truncateDetailLine(line string) string {
@@ -133,8 +140,16 @@ func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resu
 		if isShellPreviewRole(role) {
 			compact = attachShellSummaryToFirstLine(compact, summary)
 		} else {
+			lines := m.flattenEntryWithMeta(role, compact, true, entry.ToolCall)
+			if isToolErrorHeadlineRole(role) {
+				summaryLines := m.flattenToolErrorText(role, summary, m.entryContinuationPrefix(role, ""))
+				return m.detailWithTreeGuide(role, append(lines, summaryLines...), false)
+			}
 			compact += "\n" + summary
 		}
+	}
+	if isToolErrorHeadlineRole(role) {
+		return m.detailWithTreeGuide(role, m.flattenToolErrorText(role, compact, ""), false)
 	}
 	return m.detailWithTreeGuide(role, m.flattenEntryWithMeta(role, compact, true, entry.ToolCall), false)
 }

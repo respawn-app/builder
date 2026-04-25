@@ -92,6 +92,18 @@ func (m Model) flattenSingleLineShellPreview(role string, content transcriptRend
 	return []string{truncateRenderedLineToWidthWithEllipsis(out[0], targetWidth, forceEllipsis)}
 }
 
+func (m Model) flattenToolErrorText(role string, text string, symbolOverride string) []string {
+	renderWidth := m.entryRenderWidth(role, symbolOverride)
+	content := transcriptRenderContent{
+		Lines:    []transcriptRenderLine{{Text: text, Intents: ErrorForeground}},
+		WrapMode: transcriptRenderWrapModeViewport,
+	}
+	content = m.wrapEntryContentStage(content, renderWidth)
+	laidOut := m.layoutEntryContentStage(role, content, symbolOverride)
+	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, false, false)
+	return m.attachRoleSymbolStage(role, decorated, symbolOverride)
+}
+
 func firstShellPreviewRenderLine(content transcriptRenderContent) (transcriptRenderLine, bool) {
 	if len(content.Lines) == 0 {
 		return transcriptRenderLine{}, true
@@ -275,6 +287,10 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 	out := make([]transcriptLayoutLine, 0, len(lines))
 	for idx, line := range lines {
 		display := line.Text
+		if isEditedBlock && line.Intents.Has(Subdued) {
+			line.Intents &^= Subdued
+			line.Intents |= ThemeForeground
+		}
 		if isToolHeadlineRole(role) {
 			if idx == 0 {
 				display = m.renderToolHeadline(display, renderWidth)
@@ -403,7 +419,7 @@ func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallM
 			content.Lines = append(content.Lines, transcriptRenderLine{})
 		}
 		intents := ThemeForeground
-		if strings.TrimSpace(role) == "tool_error" {
+		if strings.TrimSpace(role) == "tool_error" || strings.TrimSpace(role) == "tool_patch_error" {
 			intents = ErrorForeground
 		}
 		for _, chunk := range splitLines(wrapTextForViewport(trimmedResult, max(1, renderWidth))) {

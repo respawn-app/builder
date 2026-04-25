@@ -47,19 +47,19 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 
-	initial := m.view.View()
+	initial := stripANSIAndTrimRight(m.view.View())
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before scrolling")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-	afterUp := m.view.View()
+	afterUp := stripANSIAndTrimRight(m.view.View())
 	if afterUp == initial {
 		t.Fatal("expected detail transcript to change after up")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	afterDown := m.view.View()
+	afterDown := stripANSIAndTrimRight(m.view.View())
 	if afterDown != initial {
 		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
 	}
@@ -91,6 +91,90 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 	expanded := stripANSIAndTrimRight(m.view.View())
 	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
 		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
+	}
+}
+
+func TestDetailModeArrowScrollsTallExpandedItemByLineAndTracksFirstVisible(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "first-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "first-command"},
+	})
+	firstOutput := make([]string, 0, 20)
+	for idx := 0; idx < 20; idx++ {
+		firstOutput = append(firstOutput, fmt.Sprintf("first output line %02d", idx))
+	}
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(firstOutput, "\n")})
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "second-command",
+		ToolCallID: "call_2",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "second-command"},
+	})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_2", Text: "second output"})
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "third-command",
+		ToolCallID: "call_3",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "third-command"},
+	})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_3", Text: "third output"})
+	for idx := 0; idx < 10; idx++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("tail entry %02d", idx)})
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	firstVisible := 0
+	ok := false
+	for guard := 0; guard < 20; guard++ {
+		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
+		if ok && firstVisible == 0 {
+			break
+		}
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+	firstVisible, _, ok = m.view.DetailVisibleEntryRange()
+	if !ok || firstVisible != 0 {
+		t.Fatalf("expected first command visible before expansion, range=(%d, ok=%v) view=%q", firstVisible, ok, stripANSIAndTrimRight(m.view.View()))
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	beforeScroll := m.view.DetailScroll()
+
+	for step := 1; step <= 5; step++ {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got, want := m.view.DetailScroll(), beforeScroll+step; got != want {
+			t.Fatalf("step %d: expected detail arrow scroll by one line, got %d want %d", step, got, want)
+		}
+		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
+		if !ok || firstVisible != 0 {
+			t.Fatalf("step %d: expected first expanded command to remain first visible, range=(%d, ok=%v)", step, firstVisible, ok)
+		}
+	}
+
+	for guard := 0; guard < 40; guard++ {
+		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
+		if ok && firstVisible == 2 {
+			break
+		}
+		before := m.view.DetailScroll()
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.view.DetailScroll(); got != before+1 {
+			t.Fatalf("expected crossing scroll to move by one rendered line, got %d want %d", got, before+1)
+		}
+	}
+	firstVisible, _, ok = m.view.DetailVisibleEntryRange()
+	if !ok || firstVisible != 2 {
+		t.Fatalf("expected second command to become first visible after crossing tall output, range=(%d, ok=%v) view=%q", firstVisible, ok, stripANSIAndTrimRight(m.view.View()))
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if expanded := stripANSIAndTrimRight(m.view.View()); !strings.Contains(expanded, "second output") {
+		t.Fatalf("expected enter after crossing to expand second visible command, got %q", expanded)
 	}
 }
 

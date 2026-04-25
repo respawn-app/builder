@@ -527,21 +527,27 @@ func (m Model) scrollOngoing(delta int) Model {
 }
 
 func (m Model) scrollDetail(delta int) Model {
+	m.scrollDetailLine(delta)
+	m.focusFirstVisibleDetailEntry()
+	return m
+}
+
+func (m *Model) scrollDetailLine(delta int) bool {
 	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		before := m.detailBottomOffset
 		nextOffset := m.detailBottomOffset - delta
 		if nextOffset < 0 {
 			nextOffset = 0
 		}
 		m.detailBottomOffset = nextOffset
 		m.refreshDetailViewport()
-		m.focusFirstVisibleDetailEntry()
-		return m
+		return m.detailBottomOffset != before
 	}
 	m.ensureDetailScrollResolved()
+	before := m.detailScroll
 	m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
 	m.refreshDetailViewport()
-	m.focusFirstVisibleDetailEntry()
-	return m
+	return m.detailScroll != before
 }
 
 func (m *Model) ensureDetailSelection() {
@@ -582,6 +588,54 @@ func (m *Model) focusFirstVisibleDetailEntry() {
 		return
 	}
 	m.ensureDetailSelection()
+}
+
+func (m *Model) focusDetailViewportEdge(delta int) {
+	if m == nil || !m.compactDetail {
+		return
+	}
+	entries := m.visibleSelectableDetailEntries()
+	if len(entries) == 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	if delta < 0 {
+		m.detailSelectedEntry = entries[0]
+	} else {
+		m.detailSelectedEntry = entries[len(entries)-1]
+	}
+	m.detailSelectedActive = true
+}
+
+func (m *Model) visibleSelectableDetailEntries() []int {
+	if m == nil {
+		return nil
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	entries := make([]int, 0, len(m.detailLineEntryIndices))
+	seen := make(map[int]struct{}, len(m.detailLineEntryIndices))
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		if _, ok := seen[entryIndex]; ok {
+			continue
+		}
+		seen[entryIndex] = struct{}{}
+		entries = append(entries, entryIndex)
+	}
+	return entries
+}
+
+func detailVisibleEntryIndex(entries []int, entryIndex int) int {
+	for idx, candidate := range entries {
+		if candidate == entryIndex {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (m Model) detailBlockIndexForEntry(entryIndex int) int {
