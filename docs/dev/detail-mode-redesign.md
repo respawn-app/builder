@@ -34,7 +34,7 @@ Success metrics:
 - Mouse wheel keeps scrolling detail content when the terminal can deliver wheel navigation without mouse capture.
 - `Tab` or the existing mode toggle returns to ongoing.
 
-Selection is message-oriented, not line-oriented. Scrolling is line-oriented. `Up`/`Down` move the viewport by one rendered line when scrolling is possible and preserve the selected item while it remains visible; at transcript boundaries they move selection within the visible entries. Page and wheel scrolling re-focus compact detail to the first visible selectable item so `Enter` stays aligned with the top visible row after coarse scrolls. If expansion makes the selected message leave the viewport, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
+Selection is message-oriented, not line-oriented. Scrolling is line-oriented. `Up`/`Down` move the viewport by one rendered line when scrolling is possible. After line, page, wheel, or alternate-scroll movement, compact detail selects the selectable message nearest the vertical center of the viewport. If the center line is inside a tall expanded entry, that entry stays selected while its body scrolls through the center. At top/bottom bounds, selection falls back to the nearest visible selectable entry to that center anchor. If expansion makes the selected message leave the viewport, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
 
 Detail rows do not show a dedicated collapsed/expanded glyph. The first rendered line keeps the normal role/tool symbol. When an item renders more than one line, continuation lines replace the role-prefix column with a faint tree guide: `│` for middle lines and `└` for the last rendered line.
 
@@ -410,7 +410,7 @@ Keyboard behavior:
 
 - `Up`/`Down`: previous/next selectable detail item.
 - `Enter`: toggle selected item in expanded set.
-- `PgUp`/`PgDn`: scroll viewport without changing selected item unless selected item leaves loaded page and reconciliation is required.
+- `PgUp`/`PgDn`: scroll viewport and then select the visible selectable item nearest the viewport center anchor.
 
 ### App/Mouse Layer
 
@@ -514,7 +514,7 @@ Mouse/app tests:
 3. Add projection/contract tests before renderer changes.
 4. Implement detail classifier with exhaustive tests generated or mirrored from the appendix.
 5. Refactor detail block specs into explicit detail item model: `{key, entry range, collapsed render, expanded render, selectable}`.
-6. Add expansion state, selection state, and key handling: `Up`/`Down` select messages, `Enter` toggles, `PgUp`/`PgDn` scroll.
+6. Add expansion state, selection state, and key handling: `Up`/`Down` scroll by rendered line and re-anchor selection to the viewport center, `Enter` toggles, `PgUp`/`PgDn` scroll by page and re-anchor selection to the viewport center.
 7. Add collapsed renderers per matrix, reusing ongoing compact tool text functions where required.
 8. Update detail viewport metrics to count rendered lines from collapsed/expanded states and preserve viewport anchor across toggles, resizes, paging, and new transcript snapshots.
 9. Rework selection styling as overlay/line-fill layer so it spans full width while preserving foregrounds and semantic backgrounds.

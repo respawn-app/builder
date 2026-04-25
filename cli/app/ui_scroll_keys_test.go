@@ -95,7 +95,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 	}
 }
 
-func TestDetailModeArrowScrollsTallExpandedItemByLineAndTracksFirstVisible(t *testing.T) {
+func TestDetailModeArrowScrollsDetailByLineAndTracksCenterSelection(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
@@ -151,31 +151,13 @@ func TestDetailModeArrowScrollsTallExpandedItemByLineAndTracksFirstVisible(t *te
 		if got, want := m.view.DetailScroll(), beforeScroll+step; got != want {
 			t.Fatalf("step %d: expected detail arrow scroll by one line, got %d want %d", step, got, want)
 		}
-		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
-		if !ok || firstVisible != 0 {
-			t.Fatalf("step %d: expected first expanded command to remain first visible, range=(%d, ok=%v)", step, firstVisible, ok)
+		if selected := selectedDetailLine(t, m.view.View()); selected == "" {
+			t.Fatalf("step %d: expected center selection to remain visible", step)
 		}
 	}
 
-	for guard := 0; guard < 40; guard++ {
-		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
-		if ok && firstVisible == 2 {
-			break
-		}
-		before := m.view.DetailScroll()
-		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-		if got := m.view.DetailScroll(); got != before+1 {
-			t.Fatalf("expected crossing scroll to move by one rendered line, got %d want %d", got, before+1)
-		}
-	}
-	firstVisible, _, ok = m.view.DetailVisibleEntryRange()
-	if !ok || firstVisible != 2 {
-		t.Fatalf("expected second command to become first visible after crossing tall output, range=(%d, ok=%v) view=%q", firstVisible, ok, stripANSIAndTrimRight(m.view.View()))
-	}
-
-	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if expanded := stripANSIAndTrimRight(m.view.View()); !strings.Contains(expanded, "second output") {
-		t.Fatalf("expected enter after crossing to expand second visible command, got %q", expanded)
+	if selected := selectedDetailLine(t, m.view.View()); selected == "" {
+		t.Fatal("expected centered selection after line scrolling")
 	}
 }
 
@@ -301,12 +283,12 @@ func TestDetailModeScrollThenEnterExpandsFirstVisibleItem(t *testing.T) {
 			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 			m = updateUIModel(t, m, tt.scroll)
 
-			firstVisible := firstVisibleDetailCommandIndex(t, m.view.View())
+			selected := selectedDetailCommandIndex(t, m.view.View())
 			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 			expanded := stripANSIAndTrimRight(m.view.View())
-			if !strings.Contains(expanded, fmt.Sprintf("$ cmd %d", firstVisible)) || !strings.Contains(expanded, fmt.Sprintf("└ output %d line 2", firstVisible)) {
-				t.Fatalf("expected enter after %s scroll to expand first visible command %d, got %q", tt.name, firstVisible, expanded)
+			if !strings.Contains(expanded, fmt.Sprintf("$ cmd %d", selected)) || !strings.Contains(expanded, fmt.Sprintf("└ output %d line 2", selected)) {
+				t.Fatalf("expected enter after %s scroll to expand selected center command %d, got %q", tt.name, selected, expanded)
 			}
 		})
 	}
@@ -366,6 +348,33 @@ func firstVisibleDetailCommandIndex(t *testing.T, view string) int {
 	}
 	t.Fatalf("expected visible detail command in %q", stripANSIAndTrimRight(view))
 	return -1
+}
+
+func selectedDetailCommandIndex(t *testing.T, view string) int {
+	t.Helper()
+
+	line := selectedDetailLine(t, view)
+	_, suffix, ok := strings.Cut(line, "$ cmd ")
+	if !ok {
+		t.Fatalf("expected selected command line, got %q in %q", line, stripANSIAndTrimRight(view))
+	}
+	value, parseErr := strconv.Atoi(strings.TrimSpace(suffix))
+	if parseErr != nil {
+		t.Fatalf("failed to parse selected command index from %q: %v", line, parseErr)
+	}
+	return value
+}
+
+func selectedDetailLine(t *testing.T, view string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
+		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) {
+			return line
+		}
+	}
+	t.Fatalf("expected selected detail line in %q", stripANSIAndTrimRight(view))
+	return ""
 }
 
 func stripDetailSelectionRail(view string) string {
