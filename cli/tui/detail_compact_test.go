@@ -528,6 +528,42 @@ func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
 	}
 }
 
+func TestCompactDetailDoesNotCountReviewerSuggestionsFromVerboseTextShape(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	suggestions := "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer."
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "reviewer_suggestions",
+		Text:        suggestions,
+		OngoingText: suggestions,
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "Supervisor suggestions") {
+		t.Fatalf("expected generic reviewer suggestions label without structured count, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	}
+}
+
+func TestCompactDetailDoesNotGuessReviewerSuggestionCountForUnnumberedLegacyText(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "reviewer_suggestions",
+		Text: "Supervisor suggested:\nAdd app-level coverage.\nRebuild before final answer.",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "Supervisor suggestions") || strings.Contains(collapsed, "Supervisor made") {
+		t.Fatalf("expected generic reviewer suggestions label for unstructured legacy text, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	}
+}
+
 func TestCompactDetailScrollFocusesCenterVisibleEntryForExpansion(t *testing.T) {
 	tests := []struct {
 		name   string
