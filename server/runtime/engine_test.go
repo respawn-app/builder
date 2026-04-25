@@ -4966,7 +4966,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 	foundVerboseSuggestions := false
 	foundConciseStatus := false
 	for _, entry := range snapshot.Entries {
-		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor suggested:\n1. Add final verification notes." {
+		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor made 1 suggestion." {
 			foundVerboseSuggestions = true
 		}
 		if entry.Role == "reviewer_status" && entry.Text == "Supervisor ran: 1 suggestion, applied." {
@@ -4988,7 +4988,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 	foundRestoredVerboseSuggestions := false
 	foundRestoredConciseStatus := false
 	for _, entry := range restoredSnapshot.Entries {
-		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor suggested:\n1. Add final verification notes." {
+		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor made 1 suggestion." {
 			foundRestoredVerboseSuggestions = true
 		}
 		if entry.Role == "reviewer_status" && entry.Text == "Supervisor ran: 1 suggestion, applied." {

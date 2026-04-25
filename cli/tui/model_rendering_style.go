@@ -123,7 +123,7 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case roleDeveloperFeedback, roleInterruption:
+	case roleDeveloperContext, roleDeveloperFeedback, roleInterruption:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
 		if isCompactionRole(role) {
@@ -159,6 +159,8 @@ func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
 		return roleSymbolColorStyle{color: p.userColor}
 	case "tool_question_error", roleDeveloperFeedback, roleInterruption:
 		return roleSymbolColorStyle{color: p.errorColor}
+	case roleDeveloperContext:
+		return roleSymbolColorStyle{color: p.previewColor, faint: true}
 	case "tool", "tool_shell", "tool_web_search":
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
@@ -191,6 +193,8 @@ func rolePrefix(role string) string {
 		return "$"
 	case "tool_question", "tool_question_error":
 		return "?"
+	case roleDeveloperContext:
+		return "ℹ"
 	case roleDeveloperFeedback:
 		return "!"
 	case roleInterruption:

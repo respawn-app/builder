@@ -18,6 +18,7 @@ const (
 
 	DefaultPreviewLines = 8
 	TranscriptDivider   = "────────────────────────"
+	detailItemSeparator = ""
 )
 
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
@@ -966,8 +967,8 @@ func (m *Model) detailViewportFromBottomOffset(offset int) ([]string, []VisibleL
 				remainingSkip--
 				continue
 			}
-			lines = append(lines, detailDivider())
-			kinds = append(kinds, VisibleLineDivider)
+			lines = append(lines, detailItemSeparator)
+			kinds = append(kinds, VisibleLineContent)
 			owners = append(owners, -1)
 		}
 	}
@@ -994,8 +995,8 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 	for idx, block := range m.detailBlocks {
 		if idx > 0 {
 			if lineOffset >= start && lineOffset < end {
-				lines = append(lines, detailDivider())
-				kinds = append(kinds, VisibleLineDivider)
+				lines = append(lines, detailItemSeparator)
+				kinds = append(kinds, VisibleLineContent)
 				owners = append(owners, -1)
 			}
 			lineOffset++

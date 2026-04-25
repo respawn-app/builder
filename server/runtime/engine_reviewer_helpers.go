@@ -311,6 +311,10 @@ func reviewerSuggestionsText(suggestions []string) string {
 	return b.String()
 }
 
+func reviewerSuggestionsCompactLabel(count int) string {
+	return "Supervisor made " + reviewerSuggestionCountLabel(count) + "."
+}
+
 func reviewerSuggestionCountLabel(count int) string {
 	if count <= 1 {
 		return "1 suggestion"

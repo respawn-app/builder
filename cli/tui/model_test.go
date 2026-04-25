@@ -673,7 +673,7 @@ func absInt(v int) int {
 	return v
 }
 
-func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
+func TestDetailUsesRequestedSymbolsAndBlankLineSeparators(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
@@ -691,8 +691,30 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	if !strings.Contains(view, "•") || !strings.Contains(view, "call") || !strings.Contains(view, "result") {
 		t.Fatalf("expected tool call/result pair with tool symbol, got %q", view)
 	}
-	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
-		t.Fatalf("expected 2 dividers for 3 blocks, got %d in %q", got, view)
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected detail items separated without divider rule, got %q", view)
+	}
+	for idx, kind := range m.VisibleLineKinds() {
+		if kind == VisibleLineDivider {
+			t.Fatalf("expected detail separator line %d to avoid divider styling, got kinds %+v", idx, m.VisibleLineKinds())
+		}
+	}
+	if !containsInOrder(view, "hello\n\n", "hi\n\n", "call", "result") {
+		t.Fatalf("expected blank lines between detail items, got %q", view)
+	}
+}
+
+func TestFlatDetailTranscriptUsesBlankLineSeparators(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
+
+	view := plainTranscript(m.renderFlatDetailTranscript())
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected flat detail transcript without divider rule, got %q", view)
+	}
+	if !containsInOrder(view, "hello\n\n", "hi") {
+		t.Fatalf("expected flat detail transcript to separate items with a blank line, got %q", view)
 	}
 }
 
@@ -1002,8 +1024,70 @@ func TestDeveloperContextRendersDetailOnly(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "AGENTS context block", "❮", "done") {
+	if !containsInOrder(detail, "ℹ", "AGENTS context block", "❮", "done") {
 		t.Fatalf("expected developer context visible in detail view, got %q", detail)
+	}
+}
+
+func TestDeveloperContextRoleUsesInfoSymbol(t *testing.T) {
+	m := NewModel()
+	if got := rolePrefix(roleDeveloperContext); got != "ℹ" {
+		t.Fatalf("rolePrefix(%q) = %q, want ℹ", roleDeveloperContext, got)
+	}
+	symbol := m.roleSymbol(roleDeveloperContext)
+	if !strings.Contains(symbol, "ℹ") {
+		t.Fatalf("expected developer context role symbol to include ℹ, got %q", symbol)
+	}
+	if !containsColor(extractForegroundTrueColors(symbol), m.palette().previewColor) {
+		t.Fatalf("expected developer context role symbol to use preview color, got %q", symbol)
+	}
+	if !strings.Contains(symbol, ";2m") {
+		t.Fatalf("expected developer context role symbol to use faint styling, got %q", symbol)
+	}
+}
+
+func TestDeveloperContextSubtypesUseInfoPrefixInCompactDetail(t *testing.T) {
+	tests := []struct {
+		name         string
+		messageType  llm.MessageType
+		compactLabel string
+		text         string
+	}{
+		{name: "agents md", messageType: llm.MessageTypeAgentsMD, compactLabel: "AGENTS.md file content", text: "agents full content"},
+		{name: "skills", messageType: llm.MessageTypeSkills, compactLabel: "Skill guidance", text: "skill full content"},
+		{name: "environment", messageType: llm.MessageTypeEnvironment, compactLabel: "Environment info", text: "environment full content"},
+		{name: "headless mode", messageType: llm.MessageTypeHeadlessMode, compactLabel: "Headless mode instructions", text: "headless full content"},
+		{name: "headless mode exit", messageType: llm.MessageTypeHeadlessModeExit, compactLabel: "Interactive mode restored", text: "interactive full content"},
+		{name: "worktree mode", messageType: llm.MessageTypeWorktreeMode, compactLabel: "Switched to worktree feature-x", text: "worktree full content"},
+		{name: "worktree mode exit", messageType: llm.MessageTypeWorktreeModeExit, compactLabel: "Returned from worktree feature-x", text: "worktree exit full content"},
+		{name: "handoff future", messageType: llm.MessageTypeHandoffFutureMessage, compactLabel: "Future-agent context", text: "handoff full content"},
+		{name: "fallback developer context", text: "fallback developer context"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:         roleDeveloperContext,
+				Text:         tt.text,
+				MessageType:  tt.messageType,
+				CompactLabel: tt.compactLabel,
+			})
+
+			if ongoing := plainTranscript(m.View()); strings.Contains(ongoing, tt.text) || (tt.compactLabel != "" && strings.Contains(ongoing, tt.compactLabel)) {
+				t.Fatalf("expected %s developer context hidden in ongoing view, got %q", tt.name, ongoing)
+			}
+
+			m = updateModel(t, m, ToggleModeMsg{})
+			detail := plainTranscript(m.View())
+			wantText := tt.compactLabel
+			if wantText == "" {
+				wantText = tt.text
+			}
+			if !containsInOrder(detail, "ℹ", wantText) {
+				t.Fatalf("expected %s compact detail to use info prefix before %q, got %q", tt.name, wantText, detail)
+			}
+		})
 	}
 }
 
@@ -1095,7 +1179,7 @@ func TestHeadlessModeContextVariantsRenderDetailOnly(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "headless mode instructions", "interactive mode instructions", "❮", "done") {
+	if !containsInOrder(detail, "ℹ", "headless mode instructions", "ℹ", "interactive mode instructions", "❮", "done") {
 		t.Fatalf("expected headless context variants visible in detail view, got %q", detail)
 	}
 }

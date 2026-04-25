@@ -7,7 +7,7 @@ import (
 )
 
 func (m Model) renderFlatDetailTranscript() string {
-	return m.DetailProjection(true, true).Render(detailDivider())
+	return m.DetailProjection(true, true).RenderWithBlockSeparator(detailItemSeparator)
 }
 
 func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []ongoingBlock {
@@ -51,9 +51,9 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				expanded:   m.detailEntryExpanded(absoluteIndex),
 				render: func(model Model) []string {
 					if model.detailEntryExpanded(absoluteIndex) || blockRole == "tool_error" {
-						return model.detailWithChevron(blockRole, model.flattenEntry(blockRole, text), true)
+						return model.detailWithTreeGuide(blockRole, model.flattenEntry(blockRole, text), true)
 					}
-					return model.detailWithChevron(blockRole, model.flattenEntry(blockRole, model.firstDetailPreviewLine(text, "Tool output")), false)
+					return model.detailWithTreeGuide(blockRole, model.flattenEntry(blockRole, model.firstDetailPreviewLine(text, "Tool output")), false)
 				},
 			})
 		default:
@@ -244,9 +244,9 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 				return model.detailCollapsedToolLines(blockRole, entry, resultSummary)
 			}
 			if meta != nil && meta.PatchRender != nil {
-				return model.detailWithChevron(blockRole, model.flattenPatchToolBlock(blockRole, meta, resultText), true)
+				return model.detailWithTreeGuide(blockRole, model.flattenPatchToolBlock(blockRole, meta, resultText), true)
 			}
-			return model.detailWithChevron(blockRole, model.flattenEntryWithMeta(blockRole, combined, false, meta), true)
+			return model.detailWithTreeGuide(blockRole, model.flattenEntryWithMeta(blockRole, combined, false, meta), true)
 		},
 	}
 }
@@ -294,13 +294,13 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
 			if model.detailEntryExpanded(absoluteIndex) {
-				return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true), true)
+				return model.detailWithTreeGuide(blockRole, model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true), true)
 			}
 			collapsedAnswer := ""
 			if resultSummary != "" {
 				collapsedAnswer = resultSummary
 			}
-			return model.detailWithChevron(blockRole, model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false), false)
+			return model.detailWithTreeGuide(blockRole, model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false), false)
 		},
 	}
 }
@@ -376,7 +376,7 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		render: func(model Model) []string {
 			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
-				return model.detailWithChevron(role, model.flattenEntry(role, text), true)
+				return model.detailWithTreeGuide(role, model.flattenEntry(role, text), true)
 			}
 			return model.detailCollapsedStandardLines(entry, role, text)
 		},

@@ -80,7 +80,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 	collapsed := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
+	if !strings.Contains(collapsed, "$ cat large.txt") {
 		t.Fatalf("expected collapsed compact tool row, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -89,8 +89,35 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
 		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
+	}
+}
+
+func TestDetailModeReviewerSuggestionsCollapseAndExpandThroughUIModel(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 12
+	m.syncViewport()
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:        "reviewer_suggestions",
+		Text:        "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer.",
+		OngoingText: "Supervisor made 2 suggestions.",
+	})
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	collapsed := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(collapsed, "Supervisor made 2 suggestions.") {
+		t.Fatalf("expected collapsed reviewer suggestions summary, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full text, got %q", collapsed)
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(expanded, "Add app-level coverage") || !strings.Contains(expanded, "Rebuild before final answer") {
+		t.Fatalf("expected UI-routed enter to expand reviewer suggestions, got %q", expanded)
 	}
 }
 
@@ -118,7 +145,7 @@ func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T
 	}
 	updated := next.(*uiModel)
 	expanded := stripANSIAndTrimRight(updated.view.View())
-	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
 		t.Fatalf("expected input-controller enter to expand detail even while input locked, got %q", expanded)
 	}
 	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
@@ -193,7 +220,7 @@ func TestDetailModeScrollThenEnterExpandsFirstVisibleItem(t *testing.T) {
 			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 			expanded := stripANSIAndTrimRight(m.view.View())
-			if !strings.Contains(expanded, fmt.Sprintf("▼ $ cmd %d", firstVisible)) || !strings.Contains(expanded, fmt.Sprintf("output %d line 2", firstVisible)) {
+			if !strings.Contains(expanded, fmt.Sprintf("$ cmd %d", firstVisible)) || !strings.Contains(expanded, fmt.Sprintf("└ output %d line 2", firstVisible)) {
 				t.Fatalf("expected enter after %s scroll to expand first visible command %d, got %q", tt.name, firstVisible, expanded)
 			}
 		})
