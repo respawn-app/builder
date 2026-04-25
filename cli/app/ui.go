@@ -1292,7 +1292,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.background {
 			m.statusGitBackgroundInFlight = false
 		}
-		if msg.token != m.status.refreshToken && !m.shouldApplyBackgroundGitRefresh(msg) {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}

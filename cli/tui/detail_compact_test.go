@@ -435,6 +435,7 @@ func TestCompactDetailLineScrollFocusesCenterVisibleSelection(t *testing.T) {
 	}
 	m = updateModel(t, m, ToggleModeMsg{})
 	m.ensureDetailScrollResolved()
+	m.detailScroll = max(1, m.maxDetailScroll()/2)
 	m.refreshDetailViewport()
 	visible := m.visibleSelectableDetailEntries()
 	if len(visible) < 2 {
@@ -462,6 +463,7 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
 	}
 	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
 	for guard := 0; guard < 20 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	}
@@ -471,14 +473,51 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 	topVisible := leadingViewportSelectableDetailEntry(t, m)
 	m.detailSelectedEntry = topVisible
 	m.detailSelectedActive = true
+	visible := m.visibleSelectableDetailEntries()
+	topVisibleIndex := detailVisibleEntryIndex(visible, topVisible)
+	if topVisibleIndex < 0 || topVisibleIndex+1 >= len(visible) {
+		t.Fatalf("expected selectable entry below top visible entry, visible=%+v top=%d", visible, topVisible)
+	}
 
 	beforeScroll := m.DetailScroll()
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	if got := m.DetailScroll(); got != beforeScroll {
 		t.Fatalf("expected down at transcript bottom to keep line scroll pinned, got %d want %d", got, beforeScroll)
 	}
-	if !m.detailSelectedActive || m.detailSelectedEntry <= topVisible {
-		t.Fatalf("expected down at transcript bottom to move selection below top visible entry %d, got active=%v entry=%d", topVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	if want := visible[topVisibleIndex+1]; !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected down at transcript bottom to move selection one visible entry to %d, got active=%v entry=%d visible=%+v", want, m.detailSelectedActive, m.detailSelectedEntry, visible)
+	}
+}
+
+func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 8; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	for guard := 0; guard < 20 && m.DetailScroll() > 0; guard++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if got := m.DetailScroll(); got != 0 {
+		t.Fatalf("expected setup to reach top scroll, got %d", got)
+	}
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected at least two visible selectable entries at top, got %+v", visible)
+	}
+	m.detailSelectedEntry = visible[len(visible)-1]
+	m.detailSelectedActive = true
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.DetailScroll(); got != 0 {
+		t.Fatalf("expected up at transcript top to keep line scroll pinned, got %d", got)
+	}
+	if want := visible[len(visible)-2]; !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected up at transcript top to move selection one visible entry to %d, got active=%v entry=%d visible=%+v", want, m.detailSelectedActive, m.detailSelectedEntry, visible)
 	}
 }
 

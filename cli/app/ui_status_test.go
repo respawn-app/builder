@@ -38,6 +38,7 @@ type stubProgressiveStatusCollector struct {
 	authResult uiStatusAuthStageResult
 	gitResult  uiStatusGitStageResult
 	envResult  uiStatusEnvironmentStageResult
+	gitCalls   int
 }
 
 func (s *stubProgressiveStatusCollector) Collect(_ context.Context, _ uiStatusRequest) (uiStatusSnapshot, error) {
@@ -62,6 +63,7 @@ func (s *stubProgressiveStatusCollector) CollectAuth(_ context.Context, _ uiStat
 }
 
 func (s *stubProgressiveStatusCollector) CollectGit(_ context.Context, _ uiStatusRequest, _ uiStatusSnapshot) uiStatusGitStageResult {
+	s.gitCalls++
 	return s.gitResult
 }
 
@@ -243,6 +245,46 @@ func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
 		t.Fatalf("expected parallel git render before base snapshot, got %q", plain)
 	}
 
+}
+
+func TestStatusCommandRunsForegroundGitRefreshWhileStartupGitInFlight(t *testing.T) {
+	collector := &stubProgressiveStatusCollector{
+		base: uiStatusSnapshot{
+			CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+			Workdir:     "/tmp/workdir",
+			SessionName: "incident",
+			SessionID:   "session-123",
+			Model:       uiStatusModelInfo{Summary: "gpt-5 high fast"},
+		},
+		gitResult: uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "foreground"}},
+	}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.statusGitBackgroundInFlight = true
+	m.input = "/status"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected status refresh command")
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if git, ok := msg.(statusGitRefreshDoneMsg); ok && git.token == updated.status.refreshToken && !git.background {
+			next, _ = updated.Update(git)
+			updated = next.(*uiModel)
+			if !strings.Contains(stripANSIAndTrimRight(updated.View()), "foreground") {
+				t.Fatalf("expected foreground git result in status overlay, got %q", stripANSIAndTrimRight(updated.View()))
+			}
+			return
+		}
+	}
+	t.Fatalf("expected foreground git refresh command while background git is in flight; git calls=%d", collector.gitCalls)
 }
 
 func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {

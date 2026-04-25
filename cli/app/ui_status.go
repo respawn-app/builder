@@ -1025,13 +1025,6 @@ func (m *uiModel) finishStatusSectionRefresh(section uiStatusSection, warning st
 	m.status.snapshot.CollectorWarning = m.statusCombinedWarnings()
 }
 
-func (m *uiModel) shouldApplyBackgroundGitRefresh(msg statusGitRefreshDoneMsg) bool {
-	if !msg.background {
-		return false
-	}
-	return m.status.pendingSections != nil && m.status.pendingSections[uiStatusSectionGit]
-}
-
 func (m *uiModel) statusCombinedWarnings() string {
 	if len(m.status.sectionWarnings) == 0 {
 		return ""
@@ -1119,9 +1112,6 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 			case uiStatusSectionAuth:
 				cmds = append(cmds, m.statusAuthRefreshCmd(token, statusAuthCacheKey(request), request, progressive, base))
 			case uiStatusSectionGit:
-				if m.statusGitBackgroundInFlight {
-					continue
-				}
 				cmds = append(cmds, m.statusGitRefreshCmd(token, statusGitCacheKey(base.Workdir), request, progressive, base))
 			case uiStatusSectionEnvironment:
 				cmds = append(cmds, m.statusEnvironmentRefreshCmd(token, statusEnvironmentCacheKey(request), request, progressive, base))

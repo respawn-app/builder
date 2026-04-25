@@ -637,7 +637,7 @@ func (m *Model) focusCenterVisibleDetailEntry() {
 	}
 }
 
-func (m *Model) focusDetailViewportEdge(delta int) {
+func (m *Model) moveDetailSelectionWithinViewport(delta int) {
 	if m == nil || !m.compactDetail {
 		return
 	}
@@ -646,12 +646,22 @@ func (m *Model) focusDetailViewportEdge(delta int) {
 		m.ensureDetailSelection()
 		return
 	}
-	if delta < 0 {
-		m.detailSelectedEntry = entries[0]
-	} else {
-		m.detailSelectedEntry = entries[len(entries)-1]
+	current := detailVisibleEntryIndex(entries, m.detailSelectedEntry)
+	if !m.detailSelectedActive || current < 0 {
+		m.focusCenterVisibleDetailEntry()
+		return
 	}
+	next := clamp(current+delta, 0, len(entries)-1)
+	if next == current {
+		return
+	}
+	previousEntry := m.detailSelectedEntry
+	previousActive := m.detailSelectedActive
+	m.detailSelectedEntry = entries[next]
 	m.detailSelectedActive = true
+	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
+		m.refreshDetailViewport()
+	}
 }
 
 func (m *Model) visibleSelectableDetailEntries() []int {
