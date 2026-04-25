@@ -188,7 +188,7 @@ func TestDetailSetConversationPreservesFocusedAbsoluteEntryAcrossBaseOffsetShift
 }
 
 func TestOngoingShowsFullConversationContext(t *testing.T) {
-	m := NewModel(WithPreviewLines(20))
+	m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first answer"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "second question"})
@@ -1041,8 +1041,8 @@ func TestDeveloperContextRoleUsesInfoSymbol(t *testing.T) {
 	if !containsColor(extractForegroundTrueColors(symbol), m.palette().previewColor) {
 		t.Fatalf("expected developer context role symbol to use preview color, got %q", symbol)
 	}
-	if !strings.Contains(symbol, ";2m") {
-		t.Fatalf("expected developer context role symbol to use faint styling, got %q", symbol)
+	if strings.Contains(symbol, ";2m") {
+		t.Fatalf("expected developer context role symbol to use full-strength styling without faint, got %q", symbol)
 	}
 }
 
@@ -1476,6 +1476,25 @@ func TestToolBlockRoleFromResult(t *testing.T) {
 	if got := toolBlockRoleFromResult("tool_result_error", "tool_shell"); got != "tool_shell_error" {
 		t.Fatalf("unexpected role for shell error result: %q", got)
 	}
+	if got := toolBlockRoleFromResult("tool_result_ok", "tool_patch"); got != "tool_patch_success" {
+		t.Fatalf("unexpected role for patch success result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result_error", "tool_patch"); got != "tool_patch_error" {
+		t.Fatalf("unexpected role for patch error result: %q", got)
+	}
+}
+
+func TestPatchToolRoleSymbols(t *testing.T) {
+	m := NewModel()
+	tests := []string{"tool_patch", "tool_patch_success", "tool_patch_error"}
+	for _, role := range tests {
+		if got := rolePrefix(role); got != "⇄" {
+			t.Fatalf("rolePrefix(%q) = %q, want ⇄", role, got)
+		}
+		if symbol := plainTranscript(m.roleSymbol(role)); !strings.Contains(symbol, "⇄") {
+			t.Fatalf("expected roleSymbol(%q) to contain ⇄, got %q", role, symbol)
+		}
+	}
 }
 
 func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) {
@@ -1503,6 +1522,16 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
 
 	ongoing := m.View()
+	if !strings.Contains(plainTranscript(ongoing), "⇄") {
+		t.Fatalf("expected patch tool symbol in ongoing mode, got %q", plainTranscript(ongoing))
+	}
+	ongoingEditedLine := lineContaining(ongoing, "Edited:")
+	if ongoingEditedLine == "" {
+		t.Fatalf("expected ongoing patch summary header, got %q", ongoing)
+	}
+	if strings.Contains(ongoingEditedLine, ";2m") || containsColor(extractForegroundTrueColors(ongoingEditedLine), m.palette().previewColor) {
+		t.Fatalf("expected ongoing multi-file patch header to render full-strength, got %q", ongoingEditedLine)
+	}
 	if !strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
 		t.Fatalf("expected patch summary in ongoing mode, got %q", ongoing)
 	}
@@ -1512,6 +1541,9 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detailView := m.View()
+	if !strings.Contains(plainTranscript(detailView), "⇄") {
+		t.Fatalf("expected patch tool symbol in detail mode, got %q", plainTranscript(detailView))
+	}
 	if !strings.Contains(detailView, "/abs/path/to/file/1.go") || !strings.Contains(detailView, "/abs/path/to/file/2.go") {
 		t.Fatalf("expected absolute file paths in detail mode, got %q", detailView)
 	}
@@ -1520,6 +1552,172 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	}
 	if strings.Contains(detailView, "output:") {
 		t.Fatalf("did not expect output prefix in detail mode, got %q", detailView)
+	}
+}
+
+func TestPatchErrorRendersPatchSymbolInOngoingAndDetail(t *testing.T) {
+	summary := "Edited: ./main.go +1 -1"
+	detailText := "Edited:\n./main.go\n-old\n+new"
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       summary,
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: summary,
+			PatchDetail:  detailText,
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
+			),
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:              "tool_result_error",
+		ToolCallID:        "call_patch",
+		Text:              "Patch failed: mismatch",
+		ToolResultSummary: "Patch failed",
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "⇄") || !strings.Contains(ongoing, summary) {
+		t.Fatalf("expected patch error symbol and summary in ongoing, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := m.View()
+	detail := plainTranscript(detailView)
+	if !strings.Contains(detail, "⇄") || !strings.Contains(detail, "Patch failed") {
+		t.Fatalf("expected patch error symbol and summary in detail, got %q", detail)
+	}
+	errorLine := lineContaining(detailView, "Patch failed")
+	if errorLine == "" {
+		t.Fatalf("expected patch error summary line in detail, got %q", detailView)
+	}
+	if !containsColor(extractForegroundTrueColors(errorLine), m.palette().errorColor) {
+		t.Fatalf("expected collapsed patch error summary to use error foreground, got %q", errorLine)
+	}
+}
+
+func TestCollapsedToolErrorSummariesStayRedInDetail(t *testing.T) {
+	tests := []struct {
+		name        string
+		callText    string
+		toolCall    *transcript.ToolCallMeta
+		wantSymbol  string
+		wantSummary string
+	}{
+		{
+			name:        "generic",
+			callText:    "custom tool input",
+			wantSymbol:  "•",
+			wantSummary: "generic failed visibly",
+		},
+		{
+			name:     "shell",
+			callText: "go test ./...",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName: string(toolspec.ToolExecCommand),
+				IsShell:  true,
+				Command:  "go test ./...",
+			},
+			wantSymbol:  "$",
+			wantSummary: "shell failed visibly",
+		},
+		{
+			name:     "patch",
+			callText: "Edited: ./main.go +1 -1",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName:     "patch",
+				PatchSummary: "Edited: ./main.go +1 -1",
+				PatchDetail:  "Edited:\n./main.go\n-old\n+new",
+			},
+			wantSymbol:  "⇄",
+			wantSummary: "patch failed visibly",
+		},
+		{
+			name:     "question",
+			callText: "ask_question",
+			toolCall: &transcript.ToolCallMeta{
+				Question: "Pick one",
+			},
+			wantSymbol:  "?",
+			wantSummary: "question failed visibly",
+		},
+		{
+			name:     "web_search",
+			callText: "search docs",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName: string(toolspec.ToolWebSearch),
+				Command:  "search docs",
+			},
+			wantSymbol:  "@",
+			wantSummary: "web search failed visibly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       tt.callText,
+				ToolCallID: "call_" + tt.name,
+				ToolCall:   tt.toolCall,
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:              "tool_result_error",
+				ToolCallID:        "call_" + tt.name,
+				Text:              tt.wantSummary,
+				ToolResultSummary: tt.wantSummary,
+			})
+			m = updateModel(t, m, ToggleModeMsg{})
+
+			detail := m.View()
+			if !strings.Contains(plainTranscript(detail), tt.wantSymbol) {
+				t.Fatalf("expected collapsed %s tool error symbol %q, got %q", tt.name, tt.wantSymbol, plainTranscript(detail))
+			}
+			line := lineContaining(detail, tt.wantSummary)
+			if line == "" {
+				t.Fatalf("expected collapsed %s tool error summary, got %q", tt.name, detail)
+			}
+			if !containsColor(extractForegroundTrueColors(line), m.palette().errorColor) {
+				t.Fatalf("expected collapsed %s tool error summary to use error foreground, got %q", tt.name, line)
+			}
+		})
+	}
+}
+
+func TestCollapsedPatchMismatchErrorWrapsWithRedTreeGuideLines(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 104})
+	mismatchText := "Patch failed: mismatch between file content and model-provided patch in /Users/nek/.builder/worktrees/builder-cli-c2f75fc8-68f5-4deb-a23c-21cc5820436d/detail-mode-v2/cli/tui/model_test.go.\nReason: hunk 1: patch hunk did not match file content"
+	lines := m.detailCollapsedToolLines("tool_patch_error", TranscriptEntry{
+		Role: "tool_call",
+		Text: "Edited: cli/tui/model_test.go +1 -1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: "Edited: cli/tui/model_test.go +1 -1",
+			PatchDetail:  "Edited:\ncli/tui/model_test.go\n-old\n+new",
+		},
+	}, mismatchText)
+	rendered := strings.Join(lines, "\n")
+
+	for _, fragment := range []string{"Patch failed: mismatch", "21cc5820436d/detail-mode-v2", "Reason: hunk 1"} {
+		line := lineContaining(rendered, fragment)
+		if line == "" {
+			t.Fatalf("expected collapsed patch mismatch line containing %q, got %q", fragment, rendered)
+		}
+		if !containsColor(extractForegroundTrueColors(line), m.palette().errorColor) {
+			t.Fatalf("expected collapsed patch mismatch line containing %q to use error foreground, got %q", fragment, line)
+		}
+	}
+	if !strings.Contains(plainTranscript(rendered), "│") || !strings.Contains(plainTranscript(rendered), "└") {
+		t.Fatalf("expected collapsed patch mismatch to keep tree guides, got %q", rendered)
 	}
 }
 

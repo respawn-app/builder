@@ -38,14 +38,15 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 	}
 }
 
-func TestCompactDetailNavigatesByMessageAndKeepsMultipleExpanded(t *testing.T) {
+func TestCompactDetailKeepsMultipleExpanded(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first user\nhidden"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first assistant\nhidden"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	rendered := xansi.Strip(m.View())
@@ -54,6 +55,159 @@ func TestCompactDetailNavigatesByMessageAndKeepsMultipleExpanded(t *testing.T) {
 	}
 	if strings.Contains(rendered, "▶︎") || strings.Contains(rendered, "▼") {
 		t.Fatalf("expected compact detail without collapsed/expanded glyphs, got %q", rendered)
+	}
+}
+
+func TestCompactDetailArrowScrollsExpandedItemByLineAndTracksFirstVisible(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 30)
+	for idx := 0; idx < 30; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	beforeSelected := m.detailSelectedEntry
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got, want := m.DetailScroll(), 1; got != want {
+		t.Fatalf("expected arrow scroll to move by one rendered line, got %d want %d", got, want)
+	}
+	firstVisible := firstVisibleSelectableDetailEntry(t, m)
+	if !m.detailSelectedActive || m.detailSelectedEntry != firstVisible {
+		t.Fatalf("expected arrow scroll to select first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+	if m.detailSelectedEntry != beforeSelected {
+		t.Fatalf("expected one-line scroll inside expanded command to keep same selected item, got %d want %d", m.detailSelectedEntry, beforeSelected)
+	}
+}
+
+func TestCompactDetailLineScrollSelectionChangesOnlyAtNextVisibleItem(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "first-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "first-command"},
+	})
+	outputLines := make([]string, 0, 20)
+	for idx := 0; idx < 20; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("first output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "second-command",
+		ToolCallID: "call_2",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "second-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_2", Text: "second output"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "third-command",
+		ToolCallID: "call_3",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "third-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_3", Text: "third output"})
+	for idx := 0; idx < 10; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("tail entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	for step := 1; step <= 10; step++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.DetailScroll(); got != step {
+			t.Fatalf("step %d: expected one-line scroll, got %d", step, got)
+		}
+		if firstVisible := firstVisibleSelectableDetailEntry(t, m); firstVisible != 0 {
+			t.Fatalf("step %d: expected first expanded item to remain first visible, got %d", step, firstVisible)
+		}
+		if !m.detailSelectedActive || m.detailSelectedEntry != 0 {
+			t.Fatalf("step %d: expected selection to remain on first item, active=%v entry=%d", step, m.detailSelectedActive, m.detailSelectedEntry)
+		}
+	}
+
+	for guard := 0; guard < 40 && firstVisibleSelectableDetailEntry(t, m) == 0; guard++ {
+		before := m.DetailScroll()
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.DetailScroll(); got != before+1 {
+			t.Fatalf("expected crossing scroll to move by one rendered line, got %d want %d", got, before+1)
+		}
+	}
+	if firstVisible := firstVisibleSelectableDetailEntry(t, m); firstVisible != 2 {
+		t.Fatalf("expected second item first visible after crossing expanded item, got %d", firstVisible)
+	}
+	if !m.detailSelectedActive || m.detailSelectedEntry != 2 {
+		t.Fatalf("expected selection to move to second item only after it becomes first visible, active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
+	}
+}
+
+func TestCompactDetailLineScrollPreservesNonTopVisibleSelection(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 10; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected at least two visible detail entries, got %+v", visible)
+	}
+	selected := visible[1]
+	m.detailSelectedEntry = selected
+	m.detailSelectedActive = true
+	beforeScroll := m.DetailScroll()
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.DetailScroll(); got != beforeScroll-1 {
+		t.Fatalf("expected up to scroll by one line while selection remains visible, got %d want %d", got, beforeScroll-1)
+	}
+	if !m.detailSelectedActive || m.detailSelectedEntry != selected {
+		t.Fatalf("expected line scroll to preserve non-top visible selection %d, got active=%v entry=%d", selected, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+	if firstVisible := firstVisibleSelectableDetailEntry(t, m); firstVisible == selected {
+		t.Fatalf("expected selected entry %d to remain below first visible entry after scroll", selected)
+	}
+}
+
+func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 8; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	for guard := 0; guard < 20 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if got, want := m.DetailScroll(), m.maxDetailScroll(); got != want {
+		t.Fatalf("expected setup to reach bottom scroll, got %d want %d", got, want)
+	}
+	firstVisible := firstVisibleSelectableDetailEntry(t, m)
+	m.detailSelectedEntry = firstVisible
+	m.detailSelectedActive = true
+
+	beforeScroll := m.DetailScroll()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected down at transcript bottom to keep line scroll pinned, got %d want %d", got, beforeScroll)
+	}
+	if !m.detailSelectedActive || m.detailSelectedEntry <= firstVisible {
+		t.Fatalf("expected down at transcript bottom to move selection below first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
 	}
 }
 

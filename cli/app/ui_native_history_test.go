@@ -167,13 +167,76 @@ func TestNativeScrollbackStartupReplayKeepsPatchSuccessStateAfterEmptyToolResult
 		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
 	}
 	plain := stripANSIPreserve(msg.Text)
-	if !strings.Contains(plain, "• apply patch") {
+	if !strings.Contains(plain, "⇄ apply patch") {
 		t.Fatalf("expected patch replay to show tool call text, got %q", plain)
 	}
 	tokens := sharedtheme.ResolvePalette(m.theme)
-	expectedSuccessBullet := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("•")
-	if !strings.Contains(msg.Text, expectedSuccessBullet) {
-		t.Fatalf("expected patch replay to use success-colored bullet after empty result, got %q", msg.Text)
+	expectedSuccessSymbol := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("⇄")
+	if !strings.Contains(msg.Text, expectedSuccessSymbol) {
+		t.Fatalf("expected patch replay to use success-colored patch symbol after empty result, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackStartupReplayKeepsPatchErrorSymbol(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "Edited: ./main.go +1 -1",
+			ToolCallID: "call_patch",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited: ./main.go +1 -1", PatchDetail: "Edited:\n./main.go\n-old\n+new"},
+		},
+		{Role: "tool_result_error", Text: "Patch failed", ToolCallID: "call_patch"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, "⇄ Edited: ./main.go +1 -1") {
+		t.Fatalf("expected patch replay to show error patch symbol and summary, got %q", plain)
+	}
+	tokens := sharedtheme.ResolvePalette(m.theme)
+	expectedErrorSymbol := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()).Render("⇄")
+	if !strings.Contains(msg.Text, expectedErrorSymbol) {
+		t.Fatalf("expected patch replay to use error-colored patch symbol, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackStartupReplayKeepsMultiFilePatchHeaderFullStrength(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	summary := "Edited:\n./cli/app/ui_diff_render_test.go +2 -2\n./cli/app/ui_mode_flow_test.go +1 -1"
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       summary,
+			ToolCallID: "call_patch",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: summary, PatchDetail: summary},
+		},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	headerLine := lineContaining(msg.Text, "Edited:")
+	if headerLine == "" {
+		t.Fatalf("expected native replay patch summary header, got %q", msg.Text)
+	}
+	if strings.Contains(headerLine, ";2m") {
+		t.Fatalf("expected native replay multi-file patch header to render full-strength, got %q", headerLine)
 	}
 }
 
