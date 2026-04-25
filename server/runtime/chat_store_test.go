@@ -785,6 +785,9 @@ func TestChatStoreSnapshotIncludesDeveloperCompactionSoonReminderAsWarningRole(t
 	if snap.Entries[1].Role != "warning" || snap.Entries[1].Text != "heads up" {
 		t.Fatalf("expected compaction reminder mapped to warning role, got %+v", snap.Entries[1])
 	}
+	if snap.Entries[1].CompactLabel != "Compaction reminder" {
+		t.Fatalf("expected compaction reminder compact label, got %+v", snap.Entries[1])
+	}
 }
 
 func TestChatStoreSnapshotIncludesHeadlessModeVariantsAsDeveloperContext(t *testing.T) {

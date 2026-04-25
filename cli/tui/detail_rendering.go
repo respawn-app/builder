@@ -127,7 +127,7 @@ func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, rol
 		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 	}
 	if strings.TrimSpace(role) == "reviewer_suggestions" {
-		if label := strings.TrimSpace(entry.OngoingText); label != "" && !strings.Contains(label, "\n") {
+		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 		}
 		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, "Supervisor suggestions", false, nil, symbolOverride), false, symbolOverride)
@@ -156,7 +156,7 @@ func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text
 		return label != trimmedText
 	}
 	if strings.TrimSpace(role) == "reviewer_suggestions" {
-		if label := strings.TrimSpace(entry.OngoingText); label != "" && !strings.Contains(label, "\n") {
+		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return label != trimmedText
 		}
 		return trimmedText != "Supervisor suggestions"
@@ -172,6 +172,13 @@ func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text
 	}
 	preview := m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role))
 	return preview != trimmedText || m.detailRenderedContentLineCount(role, text) > 1
+}
+
+func reviewerSuggestionsCollapsedLabel(entry TranscriptEntry) string {
+	if label := strings.TrimSpace(entry.OngoingText); label != "" && !strings.Contains(label, "\n") {
+		return label
+	}
+	return ""
 }
 
 func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resultSummary string) []string {
