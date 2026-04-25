@@ -456,6 +456,38 @@ func TestCompactDetailLineScrollFocusesCenterVisibleSelection(t *testing.T) {
 	}
 }
 
+func TestCompactDetailReverseInputWalksOffCenterSelectionBeforeCameraScroll(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 16; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 4
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 6 {
+		t.Fatalf("expected visible entries, got %+v", visible)
+	}
+	m.detailSelectedEntry = visible[len(visible)-2]
+	m.detailSelectedActive = true
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance <= 1 {
+		t.Fatalf("expected selected entry below center, distance=%d visible=%+v", beforeDistance, visible)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected camera to hold while off-center selection walks toward center, got %d want %d", got, beforeScroll)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
+		t.Fatalf("expected selected row to move one visual line toward center, got distance=%d want=%d", got, beforeDistance-1)
+	}
+}
+
 func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.KeyMsg{Type: tea.KeyDown})
 }

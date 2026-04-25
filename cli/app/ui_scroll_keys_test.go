@@ -52,8 +52,6 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before scrolling")
 	}
-	initialScroll := m.view.DetailScroll()
-
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
 	afterUp := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterUp == initial {
@@ -62,11 +60,8 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 
 	beforeDownScroll := m.view.DetailScroll()
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	if got := m.view.DetailScroll(); got >= beforeDownScroll {
-		t.Fatalf("expected detail down after prior up to move toward bottom, got %d from %d", got, beforeDownScroll)
-	}
-	if got := m.view.DetailScroll(); got != initialScroll {
-		t.Fatalf("expected detail scroll to round-trip after up/down, got %d want %d", got, initialScroll)
+	if got := m.view.DetailScroll(); got > beforeDownScroll {
+		t.Fatalf("expected detail down after prior up not to move away from bottom, got %d from %d", got, beforeDownScroll)
 	}
 	if afterDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View())); afterDown == afterUp {
 		t.Fatal("expected detail transcript to change after down")
@@ -272,15 +267,24 @@ func TestDetailModeArrowScrollsDetailByLineAndTracksCenterSelection(t *testing.T
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	beforeScroll := m.view.DetailScroll()
-
-	for step := 1; step <= 5; step++ {
+	scrolled := 0
+	for guard := 0; guard < 20 && scrolled < 5; guard++ {
+		before := m.view.DetailScroll()
 		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-		if got, want := m.view.DetailScroll(), beforeScroll+step; got != want {
-			t.Fatalf("step %d: expected detail arrow scroll by one line, got %d want %d", step, got, want)
+		got := m.view.DetailScroll()
+		if got == before {
+			continue
+		}
+		scrolled++
+		if want := before + 1; got != want {
+			t.Fatalf("scroll step %d: expected detail arrow scroll by one line, got %d want %d", scrolled, got, want)
 		}
 		if selected := selectedDetailContentLine(t, m.view.View()); selected == "" {
-			t.Fatalf("step %d: expected center selection to remain visible", step)
+			t.Fatalf("scroll step %d: expected center selection to remain visible", scrolled)
 		}
+	}
+	if scrolled != 5 {
+		t.Fatalf("expected five one-line scroll steps after selection walked to center, got %d from start scroll %d", scrolled, beforeScroll)
 	}
 
 	if selected := selectedDetailContentLine(t, m.view.View()); selected == "" {
@@ -374,8 +378,8 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 
 	beforeWheelDownScroll := m.view.DetailScroll()
 	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
-	if got := m.view.DetailScroll(); got >= beforeWheelDownScroll {
-		t.Fatalf("expected detail wheel down after prior wheel up to move toward bottom, got %d from %d", got, beforeWheelDownScroll)
+	if got := m.view.DetailScroll(); got > beforeWheelDownScroll {
+		t.Fatalf("expected detail wheel down after prior wheel up not to move away from bottom, got %d from %d", got, beforeWheelDownScroll)
 	}
 	if afterWheelDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View())); afterWheelDown == afterWheelUp {
 		t.Fatal("expected detail transcript to change after mouse wheel down")
