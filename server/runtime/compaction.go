@@ -793,6 +793,9 @@ func (e *Engine) compactWithRetry(ctx context.Context, stepID string, client llm
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		resp, err := client.Compact(ctx, request)
+		if err != nil && ctx.Err() != nil {
+			return llm.CompactionResponse{}, ctx.Err()
+		}
 		if err == nil {
 			if err := e.observePromptCacheResponse(stepID, prepared, resp.Usage); err != nil {
 				return llm.CompactionResponse{}, err

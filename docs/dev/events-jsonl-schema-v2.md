@@ -293,6 +293,8 @@ Minimal v2 keeps `items` as typed `[]llm.ResponseItem`. This is already restore-
 {"cache_key":"...","scope":"conversation","reason":"reuse_dropped","lost_input_tokens":79000}
 ```
 
+Runtime emits cache warnings only when provider usage reports a positive cached-input-token loss. Legacy restored warnings may omit `lost_input_tokens`.
+
 ## Kind Mapping
 
 Current persisted v1 kinds mapped to v2 event types and current replay consumers:

@@ -125,15 +125,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		if m.busy {
-			_ = m.interruptRuntime()
-			m.preSubmitCheckToken++
-			c.releaseLockedInjectedInput(true)
-			c.restorePendingInjectedIntoInput()
-			c.restoreQueuedMessagesIntoInput()
-			m.pendingPreSubmitText = ""
-			m.busy = false
-			m.activity = uiActivityInterrupted
-			m.clearReviewerState()
+			c.interruptBusyRuntime()
 			return m, nil
 		}
 		m.exitAction = UIActionExit

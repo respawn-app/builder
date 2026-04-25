@@ -43,7 +43,7 @@ func entryVisibility(entry TranscriptEntry) transcript.EntryVisibility {
 func defaultEntryVisibilityForRole(role string) transcript.EntryVisibility {
 	normalized := transcript.NormalizeEntryRole(role)
 	switch normalized {
-	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, "error", "warning", "cache_warning":
+	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, roleInterruption, "error", "warning", "cache_warning":
 		return transcript.EntryVisibilityDetailOnly
 	default:
 		if transcriptMessageStyleForRole(normalized) == transcriptMessageStyleWarning {

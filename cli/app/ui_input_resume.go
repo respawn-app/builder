@@ -39,17 +39,18 @@ func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 
 func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {
 	m := c.model
+	token := m.beginSubmitAttempt("")
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return newSubmitDoneMsg("", "", errors.New("runtime engine is not configured"))
+			return newSubmitDoneMsg(token, "", "", errors.New("runtime engine is not configured"))
 		}
 		msg, err := m.submitQueuedRuntimeUserMessages(context.Background())
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return newSubmitDoneMsg("", "", errSubmissionInterrupted)
+				return newSubmitDoneMsg(token, "", "", errSubmissionInterrupted)
 			}
-			return newSubmitDoneMsg("", "", err)
+			return newSubmitDoneMsg(token, "", "", err)
 		}
-		return newSubmitDoneMsg(msg, "", nil)
+		return newSubmitDoneMsg(token, msg, "", nil)
 	}
 }

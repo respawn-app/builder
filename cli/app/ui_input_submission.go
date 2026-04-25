@@ -71,35 +71,89 @@ func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string
 
 func (c uiInputController) submitCmd(text string) tea.Cmd {
 	m := c.model
+	token := m.beginSubmitAttempt(text)
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return newSubmitDoneMsg("", text, errors.New("runtime engine is not configured"))
+			return newSubmitDoneMsg(token, "", text, errors.New("runtime engine is not configured"))
 		}
 		message, err := m.submitRuntimeUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return newSubmitDoneMsg("", text, errSubmissionInterrupted)
+				return newSubmitDoneMsg(token, "", text, errSubmissionInterrupted)
 			}
-			return newSubmitDoneMsg("", text, err)
+			return newSubmitDoneMsg(token, "", text, err)
 		}
-		return newSubmitDoneMsg(message, text, nil)
+		return newSubmitDoneMsg(token, message, text, nil)
 	}
 }
 
 func (c uiInputController) submitUserShellCmd(originalText, command string) tea.Cmd {
 	m := c.model
+	token := m.beginSubmitAttempt(originalText)
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return newSubmitDoneMsg("", originalText, errors.New("runtime engine is not configured"))
+			return newSubmitDoneMsg(token, "", originalText, errors.New("runtime engine is not configured"))
 		}
 		err := m.submitRuntimeUserShellCommand(context.Background(), command)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return newSubmitDoneMsg("", originalText, errSubmissionInterrupted)
+				return newSubmitDoneMsg(token, "", originalText, errSubmissionInterrupted)
 			}
-			return newSubmitDoneMsg("", originalText, err)
+			return newSubmitDoneMsg(token, "", originalText, err)
 		}
-		return newSubmitDoneMsg("", originalText, nil)
+		return newSubmitDoneMsg(token, "", originalText, nil)
+	}
+}
+
+func (m *uiModel) beginSubmitAttempt(text string) uint64 {
+	if m == nil {
+		return 0
+	}
+	m.submitToken++
+	if m.submitToken == 0 {
+		m.submitToken++
+	}
+	m.activeSubmit = activeSubmitState{token: m.submitToken, text: text}
+	return m.submitToken
+}
+
+func (m *uiModel) markActiveSubmitFlushed(evt clientui.Event) {
+	if m == nil || m.activeSubmit.token == 0 {
+		return
+	}
+	switch evt.Kind {
+	case clientui.EventRunStateChanged:
+		if evt.RunState == nil || !evt.RunState.Busy || strings.TrimSpace(m.activeSubmit.stepID) != "" {
+			return
+		}
+		m.activeSubmit.stepID = strings.TrimSpace(evt.StepID)
+	case clientui.EventUserMessageFlushed:
+		m.markActiveSubmitUserMessageFlushed(evt)
+	}
+}
+
+func (m *uiModel) markActiveSubmitUserMessageFlushed(evt clientui.Event) {
+	if m == nil || m.activeSubmit.token == 0 {
+		return
+	}
+	active := strings.TrimSpace(m.activeSubmit.text)
+	if active == "" {
+		return
+	}
+	if activeStepID := strings.TrimSpace(m.activeSubmit.stepID); activeStepID != "" || strings.TrimSpace(evt.StepID) != "" {
+		if activeStepID == "" || strings.TrimSpace(evt.StepID) != activeStepID {
+			return
+		}
+	}
+	if strings.TrimSpace(evt.UserMessage) == active {
+		m.activeSubmit.flushed = true
+		return
+	}
+	for _, message := range evt.UserMessageBatch {
+		if strings.TrimSpace(message) == active {
+			m.activeSubmit.flushed = true
+			return
+		}
 	}
 }
 
@@ -173,6 +227,17 @@ func (c uiInputController) notifyTurnQueueDrainedIfIdle() {
 
 func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
+	if msg.token == 0 && m.activeSubmit.token != 0 && strings.TrimSpace(msg.submittedText) != "" {
+		return m, nil
+	}
+	if msg.token != 0 && msg.token != m.activeSubmit.token {
+		return m, nil
+	}
+	restoreSubmittedText := true
+	if msg.token != 0 && m.activeSubmit.flushed {
+		restoreSubmittedText = false
+	}
+	m.activeSubmit = activeSubmitState{}
 	c.finishBusyActivity(false)
 	m.pendingPreSubmitText = ""
 	if msg.err != nil {
@@ -181,7 +246,9 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		}
 		c.unlockInputAfterSubmissionError()
 		c.restorePendingInjectedIntoInput()
-		c.restoreSubmittedTextIntoInput(msg.submittedText)
+		if restoreSubmittedText {
+			c.restoreSubmittedTextIntoInput(msg.submittedText)
+		}
 		c.restoreQueuedMessagesIntoInput()
 		if isInterruptedRuntimeError(msg.err) {
 			m.activity = uiActivityInterrupted
