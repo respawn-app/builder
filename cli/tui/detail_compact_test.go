@@ -461,10 +461,19 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 }
 
 func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
-	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 }
 
-func TestCompactDetailWheelReverseFromEndKeepsLineScrollSmooth(t *testing.T) {
+func TestCompactDetailKeyReverseFromEndRecentersBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyUp})
+}
+
+func TestCompactDetailWheelReverseFromEndRecentersBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+}
+
+func assertCompactDetailReverseFromEndRecentersBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
 	for idx := 0; idx < 14; idx++ {
@@ -473,10 +482,10 @@ func TestCompactDetailWheelReverseFromEndKeepsLineScrollSmooth(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 	m.ensureDetailScrollResolved()
 	for guard := 0; guard < 40 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
-		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	}
 	for idx := 0; idx < 3; idx++ {
-		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	}
 	beforeScroll := m.DetailScroll()
 	beforeDistance := selectedDetailDistanceFromCenter(t, m)
@@ -484,13 +493,18 @@ func TestCompactDetailWheelReverseFromEndKeepsLineScrollSmooth(t *testing.T) {
 		t.Fatalf("expected setup to place selection below center by more than one entry, distance=%d", beforeDistance)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateModel(t, m, reverse)
 
 	if got := m.DetailScroll(); got != beforeScroll {
-		t.Fatalf("expected reverse wheel from bottom edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
+		t.Fatalf("expected reverse input from bottom edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
-		t.Fatalf("expected reverse wheel to move selection one entry toward center, got distance=%d want %d", got, beforeDistance-1)
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected reverse input to snap selection to center before line scrolling, got distance=%d before=%d", got, beforeDistance)
+	}
+
+	m = updateModel(t, m, reverse)
+	if got := m.DetailScroll(); got != beforeScroll-1 {
+		t.Fatalf("expected second reverse input to resume line scroll, got %d want %d", got, beforeScroll-1)
 	}
 }
 
@@ -537,7 +551,7 @@ func TestCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
 }
 
 func TestCompactDetailWheelTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
-	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 }
 
 func assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T, scroll tea.Msg) {
@@ -570,10 +584,19 @@ func assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T, scro
 }
 
 func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
-	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 }
 
-func TestCompactDetailWheelReverseFromStartKeepsLineScrollSmooth(t *testing.T) {
+func TestCompactDetailKeyReverseFromStartRecentersBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyDown})
+}
+
+func TestCompactDetailWheelReverseFromStartRecentersBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+}
+
+func assertCompactDetailReverseFromStartRecentersBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
 	for idx := 0; idx < 14; idx++ {
@@ -590,7 +613,7 @@ func TestCompactDetailWheelReverseFromStartKeepsLineScrollSmooth(t *testing.T) {
 	m.detailSelectedEntry = centerVisibleSelectableDetailEntry(t, m)
 	m.detailSelectedActive = true
 	for idx := 0; idx < 3; idx++ {
-		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
 	}
 	beforeScroll := m.DetailScroll()
 	beforeDistance := selectedDetailDistanceFromCenter(t, m)
@@ -598,13 +621,18 @@ func TestCompactDetailWheelReverseFromStartKeepsLineScrollSmooth(t *testing.T) {
 		t.Fatalf("expected setup to place selection above center by more than one entry, distance=%d", beforeDistance)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateModel(t, m, reverse)
 
 	if got := m.DetailScroll(); got != beforeScroll {
-		t.Fatalf("expected reverse wheel from top edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
+		t.Fatalf("expected reverse input from top edge to recenter selection before scrolling, got %d want %d", got, beforeScroll)
 	}
-	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance+1 {
-		t.Fatalf("expected reverse wheel to move selection one entry toward center, got distance=%d want %d", got, beforeDistance+1)
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected reverse input to snap selection to center before line scrolling, got distance=%d before=%d", got, beforeDistance)
+	}
+
+	m = updateModel(t, m, reverse)
+	if got := m.DetailScroll(); got != beforeScroll+1 {
+		t.Fatalf("expected second reverse input to resume line scroll, got %d want %d", got, beforeScroll+1)
 	}
 }
 
@@ -728,7 +756,7 @@ func TestCompactDetailScrollFocusesCenterVisibleEntryForExpansion(t *testing.T) 
 	}{
 		{
 			name:   "mouse wheel up",
-			scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp},
+			scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp},
 		},
 		{
 			name:   "page up",

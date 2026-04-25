@@ -711,7 +711,7 @@ func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
 	if delta > 0 && current >= center {
 		return false
 	}
-	return m.selectVisibleDetailEntry(entries[clamp(current+delta, 0, len(entries)-1)])
+	return m.selectVisibleDetailEntry(centerEntry)
 }
 
 func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {

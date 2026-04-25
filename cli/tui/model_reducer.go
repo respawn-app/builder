@@ -143,19 +143,19 @@ func (m *Model) reduceDetailKeyMsg(msg tea.KeyMsg) {
 }
 
 func (m *Model) reduceOngoingMouseMsg(msg tea.MouseMsg) {
-	switch msg.Type {
-	case tea.MouseWheelUp:
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
 		*m = m.scrollOngoing(-1)
-	case tea.MouseWheelDown:
+	case tea.MouseButtonWheelDown:
 		*m = m.scrollOngoing(1)
 	}
 }
 
 func (m *Model) reduceDetailMouseMsg(msg tea.MouseMsg) {
-	switch msg.Type {
-	case tea.MouseWheelUp:
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
 		*m = m.scrollDetail(-1)
-	case tea.MouseWheelDown:
+	case tea.MouseButtonWheelDown:
 		*m = m.scrollDetail(1)
 	}
 }

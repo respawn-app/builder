@@ -696,6 +696,29 @@ func TestApplyProjectedTranscriptEntriesForwardsCompactMetadataToLiveView(t *tes
 	}
 }
 
+func TestAppendTranscriptMsgFromEntryPreservesSyntheticCompactMetadata(t *testing.T) {
+	entry := transcriptEntryFromProjectedChatEntry(clientui.ChatEntry{
+		Visibility:        transcript.EntryVisibilityDetailOnly,
+		Role:              "warning",
+		Text:              "synthetic warning body",
+		OngoingText:       "synthetic warning",
+		Phase:             string(llm.MessagePhaseFinal),
+		MessageType:       string(llm.MessageTypeCompactionSoonReminder),
+		SourcePath:        "  docs/dev/decisions.md  ",
+		CompactLabel:      "Compaction reminder",
+		ToolResultSummary: "summary text",
+		ToolCallID:        " call-1 ",
+	}, true, false)
+
+	got := appendTranscriptMsgFromEntry(entry)
+	if !got.Transient || got.Committed || got.Visibility != transcript.EntryVisibilityDetailOnly || got.Role != "warning" || got.OngoingText != "synthetic warning" || got.Phase != llm.MessagePhaseFinal {
+		t.Fatalf("expected synthetic append state preserved, got %+v", got)
+	}
+	if got.MessageType != llm.MessageTypeCompactionSoonReminder || got.SourcePath != "docs/dev/decisions.md" || got.CompactLabel != "Compaction reminder" || got.ToolResultSummary != "summary text" || got.ToolCallID != "call-1" {
+		t.Fatalf("expected synthetic append to preserve compact metadata, got %+v", got)
+	}
+}
+
 func TestSkippedCommittedEventBeforeCurrentWindowStillAdvancesRevisionAndCount(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

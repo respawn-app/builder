@@ -868,6 +868,23 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	}
 }
 
+func TestChatStoreSnapshotBackgroundNoticeWithoutCompactTextUsesPreviewFallback(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeBackgroundNotice,
+		Content:     "Background shell 1000 completed.\nExit code: 0",
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].CompactLabel != "" {
+		t.Fatalf("expected background notice without compact content to avoid developer fallback label, got %+v", snap.Entries[0])
+	}
+}
+
 func TestChatStoreSnapshotShowsManualCompactionCarryoverAsDetailOnlyMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{

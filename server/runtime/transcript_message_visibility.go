@@ -101,6 +101,8 @@ func compactLabelForMessage(msg llm.Message) string {
 		return "You interrupted"
 	case llm.MessageTypeErrorFeedback:
 		return ""
+	case llm.MessageTypeBackgroundNotice:
+		return ""
 	case llm.MessageTypeCompactionSoonReminder:
 		return "Compaction reminder"
 	case llm.MessageTypeHandoffFutureMessage:
