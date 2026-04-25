@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"builder/server/tools/shell/shellenv"
 	"builder/shared/toolspec"
 )
 
@@ -61,6 +63,7 @@ func (r *Runner) applyHook(ctx context.Context, req Request, originalOutput stri
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, hookPath)
+	cmd.Env = shellenv.Enrich(os.Environ())
 	cmd.Stdin = bytes.NewReader(payload)
 	stdout := newLimitedBuffer(maxHookOutputBytes)
 	stderr := newLimitedBuffer(maxHookOutputBytes)

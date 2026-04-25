@@ -107,14 +107,24 @@ func envSliceToMap(t *testing.T, in []string) map[string]string {
 func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	env := envSliceToMap(t, enrichEnv([]string{
 		"TERM=xterm-256color",
+		"AGENT=other",
 		"GIT_EDITOR=vim",
 		"PAGER=less",
 		"NO_COLOR=0",
+		"DOCKER_CLI_HINTS=true",
+		"BUILDKIT_PROGRESS=auto",
+		"COMPOSE_PROGRESS=auto",
+		"COMPOSE_ANSI=always",
+		"npm_config_progress=true",
+		"YARN_ENABLE_PROGRESS_BARS=true",
 		"KEEP=1",
 	}))
 
 	if env["TERM"] != "dumb" {
 		t.Fatalf("TERM = %q, want dumb", env["TERM"])
+	}
+	if env["AGENT"] != "builder" {
+		t.Fatalf("AGENT = %q, want builder", env["AGENT"])
 	}
 	if env["GIT_EDITOR"] != ":" {
 		t.Fatalf("GIT_EDITOR = %q, want :", env["GIT_EDITOR"])
@@ -127,6 +137,24 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	}
 	if env["GIT_TERMINAL_PROMPT"] != "0" {
 		t.Fatalf("GIT_TERMINAL_PROMPT = %q, want 0", env["GIT_TERMINAL_PROMPT"])
+	}
+	if env["DOCKER_CLI_HINTS"] != "false" {
+		t.Fatalf("DOCKER_CLI_HINTS = %q, want false", env["DOCKER_CLI_HINTS"])
+	}
+	if env["BUILDKIT_PROGRESS"] != "plain" {
+		t.Fatalf("BUILDKIT_PROGRESS = %q, want plain", env["BUILDKIT_PROGRESS"])
+	}
+	if env["COMPOSE_PROGRESS"] != "plain" {
+		t.Fatalf("COMPOSE_PROGRESS = %q, want plain", env["COMPOSE_PROGRESS"])
+	}
+	if env["COMPOSE_ANSI"] != "never" {
+		t.Fatalf("COMPOSE_ANSI = %q, want never", env["COMPOSE_ANSI"])
+	}
+	if env["npm_config_progress"] != "false" {
+		t.Fatalf("npm_config_progress = %q, want false", env["npm_config_progress"])
+	}
+	if env["YARN_ENABLE_PROGRESS_BARS"] != "false" {
+		t.Fatalf("YARN_ENABLE_PROGRESS_BARS = %q, want false", env["YARN_ENABLE_PROGRESS_BARS"])
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
@@ -399,9 +427,71 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	waitForManagerCount(t, manager, 0, time.Second)
 }
 
+func TestExecCommandExportsAgentEnv(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "printf '%s' \"$AGENT\"",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 1_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "agent-env", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if got := decodeStringToolOutput(t, result); !strings.Contains(got, "builder") {
+		t.Fatalf("expected AGENT=builder in shell output, got %q", got)
+	}
+}
+
+func TestExecCommandBackgroundProcessExportsAgentEnv(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "sleep 0.35; printf '%s' \"$AGENT\"",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "agent-env-bg-start", Name: toolspec.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	if got := decodeStringToolOutput(t, result); !strings.Contains(got, "Process moved to background with ID 1000.") {
+		t.Fatalf("expected background transition, got %q", got)
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    1000,
+		"yield_time_ms": 800,
+	})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "agent-env-bg-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if pollResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
+	}
+	if got := decodeStringToolOutput(t, pollResult); !strings.Contains(got, "builder") {
+		t.Fatalf("expected AGENT=builder in background shell output, got %q", got)
+	}
+}
+
 func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	workspace := t.TempDir()
-	hookPath := writeExecutableScript(t, "#!/bin/sh\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
+	hookPath := writeExecutableScript(t, "#!/bin/sh\nif [ \"$AGENT\" != builder ]; then printf '{\"processed\":true,\"replaced_output\":\"MISSING_AGENT\"}'; exit 0; fi\nprintf '{\"processed\":true,\"replaced_output\":\"HOOKED\"}\n'")
 	manager, err := NewManager(
 		WithMinimumExecToBgTime(250*time.Millisecond),
 		WithCloseTimeouts(20*time.Millisecond, 200*time.Millisecond),
