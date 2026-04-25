@@ -195,7 +195,7 @@ func TestPersistedTranscriptScanProjectsUnknownDeveloperAndToolSummaryMetadata(t
 		t.Fatalf("len(page.Entries) = %d, want 3 (%+v)", got, page.Entries)
 	}
 	developer := page.Entries[0]
-	if developer.Role != string(transcript.EntryRoleDeveloperContext) || developer.Visibility != transcript.EntryVisibilityAll || developer.MessageType != llm.MessageType("custom_internal") || developer.CompactLabel != "Developer context: custom_internal" {
+	if developer.Role != string(transcript.EntryRoleDeveloperContext) || developer.Visibility != transcript.EntryVisibilityDetailOnly || developer.MessageType != llm.MessageType("custom_internal") || developer.CompactLabel != "Developer context: custom_internal" {
 		t.Fatalf("unexpected unknown developer projection: %+v", developer)
 	}
 	result := page.Entries[2]
