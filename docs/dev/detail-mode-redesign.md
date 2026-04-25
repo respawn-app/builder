@@ -33,6 +33,7 @@ Success metrics:
 - `Tab` or the existing mode toggle returns to ongoing.
 
 Selection is message-oriented, not line-oriented. If the selected message is outside the viewport after navigation or expansion, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
+Viewport scrolling (`PgUp`/`PgDn` and mouse wheel) re-focuses compact detail selection to the first visible selectable item. This keeps `Enter` aligned with the top visible row after pointer/trackpad scrolling without requiring repeated keyboard navigation.
 
 Collapsed/expanded state is shown with a mandatory chevron marker:
 

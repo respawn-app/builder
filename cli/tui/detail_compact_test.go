@@ -76,6 +76,25 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	}
 }
 
+func TestCompactDetailScrollFocusesFirstVisibleEntryForExpansion(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(4))
+	for idx := 0; idx < 8; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	firstVisible := firstVisibleSelectableDetailEntry(t, m)
+	if !m.detailSelectedActive || m.detailSelectedEntry != firstVisible {
+		t.Fatalf("expected scroll to focus first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if _, ok := m.detailExpandedEntries[firstVisible]; !ok {
+		t.Fatalf("expected enter after scroll to expand first visible entry %d, got %+v", firstVisible, m.detailExpandedEntries)
+	}
+}
+
 func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
@@ -176,4 +195,17 @@ func TestCompactDetailCollapsedShellErrorKeepsSummary(t *testing.T) {
 	if strings.Contains(rendered, "printf 'two") || strings.Contains(rendered, "full output hidden") {
 		t.Fatalf("expected collapsed shell error to stay compact, got %q", rendered)
 	}
+}
+
+func firstVisibleSelectableDetailEntry(t *testing.T, m Model) int {
+	t.Helper()
+
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		return entryIndex
+	}
+	t.Fatalf("expected visible selectable detail entry, owners=%+v", m.detailLineEntryIndices)
+	return -1
 }
