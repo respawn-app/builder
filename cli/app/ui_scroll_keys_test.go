@@ -9,6 +9,7 @@ import (
 	"builder/cli/tui"
 	"builder/server/runtime"
 	"builder/shared/transcript"
+	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -47,19 +48,19 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 
-	initial := stripANSIAndTrimRight(m.view.View())
+	initial := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before scrolling")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
-	afterUp := stripANSIAndTrimRight(m.view.View())
+	afterUp := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterUp == initial {
 		t.Fatal("expected detail transcript to change after up")
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	afterDown := stripANSIAndTrimRight(m.view.View())
+	afterDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterDown != initial {
 		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
 	}
@@ -248,19 +249,19 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 
-	initial := stripANSIAndTrimRight(m.view.View())
+	initial := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before mouse scrolling")
 	}
 
 	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	afterWheelUp := stripANSIAndTrimRight(m.view.View())
+	afterWheelUp := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterWheelUp == initial {
 		t.Fatal("expected detail transcript to change after mouse wheel up")
 	}
 
 	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	afterWheelDown := stripANSIAndTrimRight(m.view.View())
+	afterWheelDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterWheelDown != initial {
 		t.Fatalf("expected detail transcript to return after mouse wheel down, got %q want %q", afterWheelDown, initial)
 	}
@@ -365,6 +366,16 @@ func firstVisibleDetailCommandIndex(t *testing.T, view string) int {
 	}
 	t.Fatalf("expected visible detail command in %q", stripANSIAndTrimRight(view))
 	return -1
+}
+
+func stripDetailSelectionRail(view string) string {
+	lines := strings.Split(view, "\n")
+	for idx, line := range lines {
+		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) {
+			lines[idx] = uiglyphs.SelectionRailBlank + strings.TrimPrefix(line, uiglyphs.SelectionRailGlyph)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {

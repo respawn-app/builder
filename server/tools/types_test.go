@@ -196,7 +196,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 		t.Fatalf("expected patch aliases normalized, got %+v", patchMeta)
 	}
 	freeformPatchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`"*** Begin Patch\n*** Update File: custom.go\n-old\n+new\n*** End Patch\n"`))
-	if freeformPatchMeta.PatchSummary != "Edited: ./custom.go +1 -1" {
+	if freeformPatchMeta.PatchSummary != "./custom.go +1 -1" {
 		t.Fatalf("expected custom freeform patch input summary, got %+v", freeformPatchMeta)
 	}
 

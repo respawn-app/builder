@@ -356,7 +356,7 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	if rendered.ToolCall.PatchRender == nil {
 		t.Fatalf("expected typed patch render metadata, got %+v", rendered.ToolCall)
 	}
-	if !strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
+	if strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
 		t.Fatalf("unexpected summary output: %q", summary)
 	}
 	if !strings.Contains(detail, "/workspace/dir/a.go") || !strings.Contains(detail, "/workspace/b.go") {
@@ -389,7 +389,7 @@ func TestCustomPatchToolCallFormattingUsesFreeformInput(t *testing.T) {
 	if strings.Contains(rendered.ToolCall.PatchSummary, "*** Begin Patch") {
 		t.Fatalf("expected ongoing summary to hide raw patch payload, got %q", rendered.ToolCall.PatchSummary)
 	}
-	if rendered.ToolCall.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+	if rendered.ToolCall.PatchSummary != "./cli/app/ui_status.go +2 -1" {
 		t.Fatalf("unexpected custom patch summary: %q", rendered.ToolCall.PatchSummary)
 	}
 	if rendered.ToolCall.PatchRender == nil {
@@ -415,7 +415,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	}
 	summary := rendered.ToolCall.PatchSummary
 	detail := rendered.ToolCall.PatchDetail
-	if summary != "Edited: ./dir/a.go +1 -1" {
+	if summary != "./dir/a.go +1 -1" {
 		t.Fatalf("unexpected one-line summary: %q", summary)
 	}
 	if rendered.ToolCall.PatchRender == nil {
@@ -424,7 +424,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	if strings.Contains(summary, "\n") {
 		t.Fatalf("expected one-line summary, got %q", summary)
 	}
-	if !strings.HasPrefix(detail, "Edited: /workspace/dir/a.go") {
+	if !strings.HasPrefix(detail, "/workspace/dir/a.go") {
 		t.Fatalf("expected one-line detail header, got %q", detail)
 	}
 }
@@ -448,7 +448,7 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 	if rendered.ToolCall.RenderHint == nil || rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindDiff {
 		t.Fatalf("expected diff render hint for patch fallback, got %+v", rendered.ToolCall.RenderHint)
 	}
-	if rendered.ToolCall.PatchSummary != "Edited:" {
+	if rendered.ToolCall.PatchSummary != "Patch" {
 		t.Fatalf("expected fallback patch summary, got %q", rendered.ToolCall.PatchSummary)
 	}
 	if rendered.ToolCall.PatchRender == nil {

@@ -9,6 +9,7 @@ import (
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	patchformat "builder/shared/transcript/patchformat"
+	"builder/shared/uiglyphs"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -243,14 +244,14 @@ func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 func TestDetailPatchErrorAppearsAfterDiffWithBlankSeparator(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
-	detail := "Edited: ./main.go +1 -1\n+package main\n-old"
+	detail := "./main.go +1 -1\n+package main\n-old"
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
 		Text: detail,
 		ToolCall: &transcript.ToolCallMeta{
 			PatchDetail: detail,
 			PatchRender: testPatchRender(
-				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go +1 -1", FileIndex: 0, Path: "main.go"},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
 			),
@@ -673,7 +674,7 @@ func absInt(v int) int {
 	return v
 }
 
-func TestDetailUsesRequestedSymbolsAndBlankLineSeparators(t *testing.T) {
+func TestDetailUsesRequestedSymbolsAndRoleGroupSeparators(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
@@ -700,7 +701,7 @@ func TestDetailUsesRequestedSymbolsAndBlankLineSeparators(t *testing.T) {
 		}
 	}
 	if !containsInOrder(view, "hello\n\n", "hi\n\n", "call", "result") {
-		t.Fatalf("expected blank lines between detail items, got %q", view)
+		t.Fatalf("expected blank lines between detail role groups, got %q", view)
 	}
 }
 
@@ -715,6 +716,81 @@ func TestFlatDetailTranscriptUsesBlankLineSeparators(t *testing.T) {
 	}
 	if !containsInOrder(view, "hello\n\n", "hi") {
 		t.Fatalf("expected flat detail transcript to separate items with a blank line, got %q", view)
+	}
+}
+
+func TestFlatDetailTranscriptDensifiesConsecutiveToolGroups(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "cmd 1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "cmd 1",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "cmd 2",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "cmd 2",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	view := plainTranscript(m.renderFlatDetailTranscript())
+	if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") {
+		t.Fatalf("expected consecutive detail tool rows to stay dense, got %q", view)
+	}
+	if !containsInOrder(view, "$ cmd 1\n$ cmd 2\n\n", "done") {
+		t.Fatalf("expected blank separator after dense tool group, got %q", view)
+	}
+}
+
+func TestDetailViewportAndFlatProjectionUseSameDenseToolGrouping(t *testing.T) {
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "start"})
+	m = appendShellToolCall(t, m, "cmd 1")
+	m = appendShellToolCall(t, m, "cmd 2")
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	flat := plainTranscript(m.renderFlatDetailTranscript())
+	m = updateModel(t, m, ToggleModeMsg{})
+	viewport := trimTrailingBlankLines(plainTranscript(m.View()))
+
+	for name, view := range map[string]string{"flat": flat, "viewport": viewport} {
+		if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") {
+			t.Fatalf("%s detail should keep consecutive tools dense, got %q", name, view)
+		}
+		if !containsInOrder(view, "start\n\n", "$ cmd 1\n$ cmd 2\n\n", "done") {
+			t.Fatalf("%s detail should use one blank line at role-group boundaries, got %q", name, view)
+		}
+	}
+}
+
+func TestDetailViewportKeepsDenseToolBurstAtBottomGroupBoundary(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(7))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 7, Width: 80})
+	for idx := 0; idx < 4; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("filler %d", idx)})
+	}
+	m = appendShellToolCall(t, m, "cmd 1")
+	m = appendShellToolCall(t, m, "cmd 2")
+	m = appendShellToolCall(t, m, "cmd 3")
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "next user"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "final"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := trimTrailingBlankLines(plainTranscript(m.View()))
+	if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") || strings.Contains(view, "$ cmd 2\n\n$ cmd 3") {
+		t.Fatalf("expected bottom tool burst to stay dense, got %q", view)
+	}
+	gutter := uiglyphs.SelectionRailBlank
+	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+gutter+"$ cmd 3\n\n", gutter+"❯ next user\n\n", uiglyphs.SelectionRailGlyph+"❮ final") {
+		t.Fatalf("expected bottom viewport to preserve dense tool burst and role-group blanks, got %q", view)
 	}
 }
 
@@ -966,8 +1042,11 @@ func TestDetailGroupsReasoningEntriesWithoutMarkdownFormatting(t *testing.T) {
 	if !strings.Contains(view, "`second` details") {
 		t.Fatalf("expected reasoning text to preserve inline formatting markers, got %q", view)
 	}
-	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
-		t.Fatalf("expected 2 dividers for user/reasoning/assistant groups, got %d in %q", got, view)
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected detail groups to use blank separators, got %q", view)
+	}
+	if !containsInOrder(view, "u\n\n", "**First step**", "**third**\n\n", "done") {
+		t.Fatalf("expected blank separators between user/reasoning/assistant groups, got %q", view)
 	}
 }
 
@@ -1498,8 +1577,8 @@ func TestPatchToolRoleSymbols(t *testing.T) {
 }
 
 func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) {
-	summary := "Edited:\n./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
-	detail := "Edited:\n/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
+	summary := "./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
+	detail := "/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
 
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
@@ -1510,7 +1589,6 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 			PatchSummary: summary,
 			PatchDetail:  detail,
 			PatchRender: testPatchRender(
-				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "/abs/path/to/file/1.go", FileIndex: 0, Path: "/abs/path/to/file/1.go"},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new line", FileIndex: 0},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old line", FileIndex: 0},
@@ -1525,14 +1603,14 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	if !strings.Contains(plainTranscript(ongoing), "⇄") {
 		t.Fatalf("expected patch tool symbol in ongoing mode, got %q", plainTranscript(ongoing))
 	}
-	ongoingEditedLine := lineContaining(ongoing, "Edited:")
-	if ongoingEditedLine == "" {
-		t.Fatalf("expected ongoing patch summary header, got %q", ongoing)
+	ongoingSummaryLine := lineContaining(ongoing, "./path/to/file/1.go")
+	if ongoingSummaryLine == "" {
+		t.Fatalf("expected ongoing patch summary line, got %q", ongoing)
 	}
-	if strings.Contains(ongoingEditedLine, ";2m") || containsColor(extractForegroundTrueColors(ongoingEditedLine), m.palette().previewColor) {
-		t.Fatalf("expected ongoing multi-file patch header to render full-strength, got %q", ongoingEditedLine)
+	if strings.Contains(ongoingSummaryLine, ";2m") || containsColor(extractForegroundTrueColors(ongoingSummaryLine), m.palette().previewColor) {
+		t.Fatalf("expected ongoing multi-file patch summary to render full-strength, got %q", ongoingSummaryLine)
 	}
-	if !strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
+	if strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
 		t.Fatalf("expected patch summary in ongoing mode, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "/abs/path/to/file/1.go") || strings.Contains(ongoing, "+new line") {
@@ -1556,8 +1634,8 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 }
 
 func TestPatchErrorRendersPatchSymbolInOngoingAndDetail(t *testing.T) {
-	summary := "Edited: ./main.go +1 -1"
-	detailText := "Edited:\n./main.go\n-old\n+new"
+	summary := "./main.go +1 -1"
+	detailText := "./main.go\n-old\n+new"
 
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
@@ -1569,7 +1647,6 @@ func TestPatchErrorRendersPatchSymbolInOngoingAndDetail(t *testing.T) {
 			PatchSummary: summary,
 			PatchDetail:  detailText,
 			PatchRender: testPatchRender(
-				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
@@ -1663,6 +1740,7 @@ func TestCollapsedToolErrorSummariesStayRedInDetail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 220})
 			m = updateModel(t, m, AppendTranscriptMsg{
 				Role:       "tool_call",
 				Text:       tt.callText,
@@ -1726,11 +1804,11 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 	rawPatch := "*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch"
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
-		Text: "Edited:",
+		Text: "Patch",
 		ToolCall: &transcript.ToolCallMeta{
 			ToolName:     "patch",
-			PatchSummary: "Edited:",
-			PatchDetail:  "Edited:\n" + rawPatch,
+			PatchSummary: "Patch",
+			PatchDetail:  "Patch\n" + rawPatch,
 			PatchRender: func() *patchformat.RenderedPatch {
 				rendered := patchformat.Raw(rawPatch)
 				return &rendered
@@ -1741,7 +1819,7 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
 
 	ongoing := plainTranscript(m.View())
-	if !strings.Contains(ongoing, "Edited:") {
+	if !strings.Contains(ongoing, "Patch") {
 		t.Fatalf("expected patch summary in ongoing, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "*** Begin Patch") {
@@ -1925,15 +2003,15 @@ func TestTriggerHandoffRuntimeProjectedMetadataUsesCompactOngoingAndDetailedView
 
 func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	m := NewModel()
-	counts := m.styleToolLine("./file.go +13 -9")
+	counts := m.styleToolLine("./file.go +13 -9", true)
 	if !strings.Contains(counts, "+13") || !strings.Contains(counts, "-9") {
 		t.Fatalf("expected patch counts preserved, got %q", counts)
 	}
-	added := m.styleToolLine("+added")
+	added := m.styleToolLine("+added", true)
 	if !strings.Contains(added, "+added") {
 		t.Fatalf("expected addition line preserved, got %q", added)
 	}
-	removed := m.styleToolLine("-removed")
+	removed := m.styleToolLine("-removed", true)
 	if !strings.Contains(removed, "-removed") {
 		t.Fatalf("expected removal line preserved, got %q", removed)
 	}
@@ -1944,8 +2022,8 @@ func TestStyleToolLineStylesOnlyDiffMarkerWhenSyntaxPresent(t *testing.T) {
 	inputAdded := "+\x1b[38;5;81mpackage\x1b[0m main"
 	inputRemoved := "-\x1b[38;5;81mfunc\x1b[0m main() {}"
 
-	added := m.styleToolLine(inputAdded)
-	removed := m.styleToolLine(inputRemoved)
+	added := m.styleToolLine(inputAdded, true)
+	removed := m.styleToolLine(inputRemoved, true)
 
 	if !strings.Contains(added, m.palette().toolSuccess.Render("+")) {
 		t.Fatalf("expected added diff marker to use tool success style, got %q", added)
@@ -2115,15 +2193,6 @@ func TestDetailDiffLayeringKeepsBackgroundAndTokenColorForAddAndRemove(t *testin
 	}
 	if !strings.Contains(removeLine, removeBg) || !strings.Contains(removeLine, "\x1b[38;") {
 		t.Fatalf("expected removed line to include both background tint and token color, got %q", removeLine)
-	}
-}
-
-func TestIsEditedToolBlockDetectsAnsiHeader(t *testing.T) {
-	if !isEditedToolBlock([]string{"", "\x1b[38;5;81mEdited:\x1b[0m", "./file.go +1"}) {
-		t.Fatal("expected Edited header with ansi to be detected")
-	}
-	if isEditedToolBlock([]string{"", "regular output"}) {
-		t.Fatal("did not expect non-Edited content to be detected as Edited block")
 	}
 }
 
@@ -3300,6 +3369,27 @@ func plainTranscript(view string) string {
 		lines[i] = strings.TrimRight(lines[i], " ")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func trimTrailingBlankLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendShellToolCall(t *testing.T, m Model, command string) Model {
+	t.Helper()
+	return updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  command,
+		},
+	})
 }
 
 func containsInOrder(text string, parts ...string) bool {

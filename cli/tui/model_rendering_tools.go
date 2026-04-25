@@ -22,6 +22,10 @@ func ongoingDividerGroup(role string) string {
 	return normalized
 }
 
+func transcriptRoleGroupsNeedSeparator(previousRole string, currentRole string) bool {
+	return ongoingDividerGroup(previousRole) != ongoingDividerGroup(currentRole)
+}
+
 func normalizeOngoingDividerRole(role string) string {
 	normalized := strings.ToLower(strings.TrimSpace(role))
 	if normalized == "assistant_commentary" {
@@ -240,6 +244,18 @@ func isPatchToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && (meta.HasPatchDetail() || strings.TrimSpace(meta.ToolName) == "patch")
 }
 
+func isPatchToolBlock(role string, meta *transcript.ToolCallMeta) bool {
+	if meta != nil && (isPatchToolCall(meta) || meta.PatchRender != nil) {
+		return true
+	}
+	switch strings.TrimSpace(role) {
+	case "tool_patch", "tool_patch_success", "tool_patch_error":
+		return true
+	default:
+		return false
+	}
+}
+
 func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && meta.UsesAskQuestionRendering()
 }
@@ -320,7 +336,7 @@ func (m Model) diffLineBackgroundEscapes() (string, string) {
 	return bgEscape(p.diffAddBackground), bgEscape(p.diffRemoveBackground)
 }
 
-func (m Model) styleToolLine(line string) string {
+func (m Model) styleToolLine(line string, isPatchBlock bool) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return line
@@ -333,7 +349,7 @@ func (m Model) styleToolLine(line string) string {
 	}
 	successCountStyle := m.palette().toolSuccess
 	errorCountStyle := m.palette().toolError
-	if strings.HasPrefix(trimmed, "Edited:") {
+	if isPatchBlock {
 		return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
 			if strings.HasPrefix(token, "+") {
 				return successCountStyle.Render(token)
