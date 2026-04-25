@@ -40,13 +40,13 @@ func StripEditedLabel(text string) string {
 	}
 	out := make([]string, 0, len(lines))
 	for idx, line := range lines {
-		trimmed := strings.TrimSpace(line)
 		if idx == 0 {
-			if trimmed == "Edited:" {
+			fields := strings.Fields(line)
+			if len(fields) == 1 && fields[0] == "Edited:" {
 				continue
 			}
-			if rest, ok := strings.CutPrefix(trimmed, "Edited: "); ok {
-				out = append(out, rest)
+			if len(fields) > 1 && fields[0] == "Edited:" {
+				out = append(out, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0])))
 				continue
 			}
 		}

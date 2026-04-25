@@ -1223,10 +1223,3 @@ func selectedDetailDistanceFromCenter(t *testing.T, m Model) int {
 	}
 	return selected - center
 }
-
-func detailAbs(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
-}

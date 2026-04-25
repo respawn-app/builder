@@ -1083,11 +1083,25 @@ func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLin
 }
 
 func (m Model) shouldInsertDetailSelectionSpacerBefore(lineIndex int, firstSelectedLine int) bool {
-	return lineIndex == firstSelectedLine && m.detailScroll == 0 && m.detailViewportLineOwnsSelectableEntry(firstSelectedLine-1)
+	return lineIndex == firstSelectedLine && m.detailAtTopEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(firstSelectedLine-1)
 }
 
 func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelectedLine int) bool {
-	return lineIndex == lastSelectedLine && m.detailScroll == m.maxDetailScroll() && m.detailViewportLineOwnsSelectableEntry(lastSelectedLine+1)
+	return lineIndex == lastSelectedLine && m.detailAtBottomEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(lastSelectedLine+1)
+}
+
+func (m Model) detailAtTopEdgeForSelectionSpacer() bool {
+	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		return m.detailBottomOffset == 0
+	}
+	return m.detailScroll == 0
+}
+
+func (m Model) detailAtBottomEdgeForSelectionSpacer() bool {
+	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		return false
+	}
+	return m.detailScroll == m.maxDetailScroll()
 }
 
 func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int) bool {
