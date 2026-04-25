@@ -786,7 +786,7 @@ func TestDetailViewportSelectedCardSeparatesBottomGroupBoundary(t *testing.T) {
 
 	view := trimTrailingBlankLines(plainTranscript(m.View()))
 	gutter := uiglyphs.SelectionRailBlank
-	if !containsInOrder(view, gutter+"$ cmd 1\n"+uiglyphs.SelectionRailGlyph+"\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n"+uiglyphs.SelectionRailGlyph+"\n", gutter+"❯ next user\n\n", gutter+"❮ final") {
+	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n"+uiglyphs.SelectionRailGlyph+"\n", gutter+"❯ next user\n\n", gutter+"❮ final") {
 		t.Fatalf("expected selected tool row to get highlighted blank separators while preserving role-group blanks, got %q", view)
 	}
 }
