@@ -23,14 +23,16 @@ import (
 )
 
 type submitDoneMsg struct {
+	token         uint64
 	message       string
 	submittedText string
 	silentFinal   bool
 	err           error
 }
 
-func newSubmitDoneMsg(message string, submittedText string, err error) submitDoneMsg {
+func newSubmitDoneMsg(token uint64, message string, submittedText string, err error) submitDoneMsg {
 	return submitDoneMsg{
+		token:         token,
 		message:       message,
 		submittedText: submittedText,
 		silentFinal:   isNoopFinalText(message),
@@ -51,6 +53,13 @@ type promptHistoryPersistErrMsg struct {
 
 type compactDoneMsg struct {
 	err error
+}
+
+type activeSubmitState struct {
+	token   uint64
+	stepID  string
+	text    string
+	flushed bool
 }
 
 type spinnerTickMsg struct {
@@ -480,6 +489,8 @@ type uiModel struct {
 	queued               []string
 	preSubmitCheckToken  uint64
 	pendingPreSubmitText string
+	submitToken          uint64
+	activeSubmit         activeSubmitState
 
 	pendingInjected   []string
 	lockedInjectText  string
@@ -1472,6 +1483,9 @@ func (m *uiModel) setTransientStatus(message string) tea.Cmd {
 }
 
 func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNoticeKind) tea.Cmd {
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
 	m.transientStatusToken++
 	token := m.transientStatusToken
 	m.transientStatus = strings.TrimSpace(message)

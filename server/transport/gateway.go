@@ -883,6 +883,9 @@ func protocolError(err error) (int, string) {
 		return protocol.ErrCodeInternalError, "internal error"
 	}
 	message := strings.TrimSpace(err.Error())
+	if errors.Is(err, context.Canceled) {
+		return protocol.ErrCodeRequestCanceled, message
+	}
 	if errors.Is(err, serverapi.ErrStreamGap) {
 		return protocol.ErrCodeStreamGap, message
 	}

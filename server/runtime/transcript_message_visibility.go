@@ -44,7 +44,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	case llm.MessageTypeCompactionSummary:
 		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content, MessageType: msg.MessageType, SourcePath: strings.TrimSpace(msg.SourcePath), CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeInterruption:
-		return ChatEntry{Role: string(transcript.EntryRoleInterruption), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
+		return ChatEntry{Visibility: transcript.EntryVisibilityDetailOnly, Role: string(transcript.EntryRoleInterruption), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeErrorFeedback:
 		return ChatEntry{Role: string(transcript.EntryRoleDeveloperFeedback), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeReviewerFeedback:

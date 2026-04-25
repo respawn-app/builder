@@ -10,6 +10,10 @@ import (
 const JSONRPCVersion = "2.0"
 
 const (
+	// JSON-RPC reserves -32000..-32099 for implementation-defined server
+	// errors. These values are part of Builder's wire contract; clients must
+	// map ErrCodeRequestCanceled back to context.Canceled so user interrupts
+	// remain normal cancellation flow instead of transcript-visible errors.
 	ErrCodeParseError               = -32700
 	ErrCodeInvalidRequest           = -32600
 	ErrCodeMethodNotFound           = -32601
@@ -28,6 +32,7 @@ const (
 	ErrCodePromptNotFound           = -32020
 	ErrCodePromptResolved           = -32021
 	ErrCodePromptUnsupported        = -32022
+	ErrCodeRequestCanceled          = -32023
 )
 
 type Request struct {

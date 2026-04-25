@@ -92,6 +92,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		"sync_session_view":     strconv.FormatBool(effectiveSyncSessionView),
 		"record_prompt_history": strconv.FormatBool(update.RecordPromptHistory),
 	})
+	m.markActiveSubmitFlushed(evt)
 	a.applyRuntimeEventUpdate(update)
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
