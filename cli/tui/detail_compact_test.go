@@ -82,7 +82,7 @@ func TestCompactDetailArrowScrollsExpandedItemByLineAndTracksCenterSelection(t *
 	if got, want := m.DetailScroll(), 1; got != want {
 		t.Fatalf("expected arrow scroll to move by one rendered line, got %d want %d", got, want)
 	}
-	firstVisible := topVisibleSelectableDetailEntry(t, m)
+	topVisible := leadingViewportSelectableDetailEntry(t, m)
 	centerVisible := centerVisibleSelectableDetailEntry(t, m)
 	if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
 		t.Fatalf("expected arrow scroll to select center visible entry %d, got active=%v entry=%d", centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
@@ -90,36 +90,13 @@ func TestCompactDetailArrowScrollsExpandedItemByLineAndTracksCenterSelection(t *
 	if m.detailSelectedEntry != beforeSelected {
 		t.Fatalf("expected one-line scroll inside expanded command to keep same selected item, got %d want %d", m.detailSelectedEntry, beforeSelected)
 	}
-	if firstVisible != beforeSelected {
-		t.Fatalf("expected expanded command to remain top visible, got %d want %d", firstVisible, beforeSelected)
+	if topVisible != beforeSelected {
+		t.Fatalf("expected expanded command to remain top visible, got %d want %d", topVisible, beforeSelected)
 	}
 }
 
 func TestCompactDetailLineScrollRailTracksCenterInsideTallExpandedEntry(t *testing.T) {
-	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
-	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "intro line 0\nintro line 1\nintro line 2"})
-	m = updateModel(t, m, AppendTranscriptMsg{
-		Role:       "tool_call",
-		Text:       "long-command",
-		ToolCallID: "call_1",
-		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
-	})
-	outputLines := make([]string, 0, 12)
-	for idx := 0; idx < 12; idx++ {
-		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
-	}
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "tail"})
-	m = updateModel(t, m, ToggleModeMsg{})
-	m.detailSelectedEntry = 1
-	m.detailSelectedActive = true
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	m.detailBottomAnchor = false
-	m.detailScroll = 0
-	m.refreshDetailViewport()
-	m.detailSelectedEntry = 0
-	m.detailSelectedActive = true
+	m := newTallExpandedCenterRailModel(t)
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
@@ -130,13 +107,35 @@ func TestCompactDetailLineScrollRailTracksCenterInsideTallExpandedEntry(t *testi
 	if !m.detailSelectedActive || m.detailSelectedEntry != 1 {
 		t.Fatalf("expected center selection to move to expanded tool entry, active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
 	}
-	lines := strings.Split(xansi.Strip(m.View()), "\n")
-	center := m.viewportLines / 2
-	if center >= len(lines) {
-		t.Fatalf("center line %d outside rendered lines %d", center, len(lines))
+	assertCenterRailOnExpandedOutput(t, m)
+}
+
+func TestCompactDetailPageScrollRailTracksCenterInsideTallExpandedEntry(t *testing.T) {
+	tests := []struct {
+		name       string
+		start      int
+		key        tea.KeyType
+		wantScroll int
+	}{
+		{name: "page down", start: 0, key: tea.KeyPgDown, wantScroll: 5},
+		{name: "page up", start: 8, key: tea.KeyPgUp, wantScroll: 3},
 	}
-	if !strings.HasPrefix(lines[center], uiglyphs.SelectionRailGlyph) || !strings.Contains(lines[center], "output line") {
-		t.Fatalf("expected selected rail on center output line, got center=%q view=%q", lines[center], xansi.Strip(m.View()))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTallExpandedCenterRailModel(t)
+			m.detailScroll = tt.start
+			m.refreshDetailViewport()
+			m = updateModel(t, m, tea.KeyMsg{Type: tt.key})
+
+			if got := m.DetailScroll(); got != tt.wantScroll {
+				t.Fatalf("expected %s scroll %d, got %d", tt.name, tt.wantScroll, got)
+			}
+			if !m.detailSelectedActive || m.detailSelectedEntry != 1 {
+				t.Fatalf("expected %s center selection to stay on expanded tool entry, active=%v entry=%d", tt.name, m.detailSelectedActive, m.detailSelectedEntry)
+			}
+			assertCenterRailOnExpandedOutput(t, m)
+		})
 	}
 }
 
@@ -181,8 +180,8 @@ func TestCompactDetailLineScrollSelectionTracksCenterItem(t *testing.T) {
 		if got := m.DetailScroll(); got != step {
 			t.Fatalf("step %d: expected one-line scroll, got %d", step, got)
 		}
-		if firstVisible := topVisibleSelectableDetailEntry(t, m); firstVisible != 0 {
-			t.Fatalf("step %d: expected first expanded item to remain first visible, got %d", step, firstVisible)
+		if topVisible := leadingViewportSelectableDetailEntry(t, m); topVisible != 0 {
+			t.Fatalf("step %d: expected top expanded item to remain top visible, got %d", step, topVisible)
 		}
 		centerVisible := centerVisibleSelectableDetailEntry(t, m)
 		if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
@@ -190,15 +189,15 @@ func TestCompactDetailLineScrollSelectionTracksCenterItem(t *testing.T) {
 		}
 	}
 
-	for guard := 0; guard < 40 && topVisibleSelectableDetailEntry(t, m) == 0; guard++ {
+	for guard := 0; guard < 40 && leadingViewportSelectableDetailEntry(t, m) == 0; guard++ {
 		before := m.DetailScroll()
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
 		if got := m.DetailScroll(); got != before+1 {
 			t.Fatalf("expected crossing scroll to move by one rendered line, got %d want %d", got, before+1)
 		}
 	}
-	if firstVisible := topVisibleSelectableDetailEntry(t, m); firstVisible != 2 {
-		t.Fatalf("expected second item first visible after crossing expanded item, got %d", firstVisible)
+	if topVisible := leadingViewportSelectableDetailEntry(t, m); topVisible != 2 {
+		t.Fatalf("expected second item top visible after crossing expanded item, got %d", topVisible)
 	}
 	centerVisible := centerVisibleSelectableDetailEntry(t, m)
 	if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
@@ -247,8 +246,8 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 	if got, want := m.DetailScroll(), m.maxDetailScroll(); got != want {
 		t.Fatalf("expected setup to reach bottom scroll, got %d want %d", got, want)
 	}
-	firstVisible := topVisibleSelectableDetailEntry(t, m)
-	m.detailSelectedEntry = firstVisible
+	topVisible := leadingViewportSelectableDetailEntry(t, m)
+	m.detailSelectedEntry = topVisible
 	m.detailSelectedActive = true
 
 	beforeScroll := m.DetailScroll()
@@ -256,8 +255,8 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 	if got := m.DetailScroll(); got != beforeScroll {
 		t.Fatalf("expected down at transcript bottom to keep line scroll pinned, got %d want %d", got, beforeScroll)
 	}
-	if !m.detailSelectedActive || m.detailSelectedEntry <= firstVisible {
-		t.Fatalf("expected down at transcript bottom to move selection below first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	if !m.detailSelectedActive || m.detailSelectedEntry <= topVisible {
+		t.Fatalf("expected down at transcript bottom to move selection below top visible entry %d, got active=%v entry=%d", topVisible, m.detailSelectedActive, m.detailSelectedEntry)
 	}
 }
 
@@ -565,7 +564,7 @@ func TestCompactDetailCollapsedShellErrorKeepsSummary(t *testing.T) {
 	}
 }
 
-func topVisibleSelectableDetailEntry(t *testing.T, m Model) int {
+func leadingViewportSelectableDetailEntry(t *testing.T, m Model) int {
 	t.Helper()
 
 	for _, entryIndex := range m.detailLineEntryIndices {
@@ -576,6 +575,49 @@ func topVisibleSelectableDetailEntry(t *testing.T, m Model) int {
 	}
 	t.Fatalf("expected visible selectable detail entry, owners=%+v", m.detailLineEntryIndices)
 	return -1
+}
+
+func newTallExpandedCenterRailModel(t *testing.T) Model {
+	t.Helper()
+
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "intro line 0\nintro line 1\nintro line 2"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 12)
+	for idx := 0; idx < 12; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "tail"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.detailBottomAnchor = false
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
+	return m
+}
+
+func assertCenterRailOnExpandedOutput(t *testing.T, m Model) {
+	t.Helper()
+
+	lines := strings.Split(xansi.Strip(m.View()), "\n")
+	center := m.viewportLines / 2
+	if center >= len(lines) {
+		t.Fatalf("center line %d outside rendered lines %d", center, len(lines))
+	}
+	if !strings.HasPrefix(lines[center], uiglyphs.SelectionRailGlyph) || !strings.Contains(lines[center], "output line") {
+		t.Fatalf("expected selected rail on center output line, got center=%q view=%q", lines[center], xansi.Strip(m.View()))
+	}
 }
 
 func centerVisibleSelectableDetailEntry(t *testing.T, m Model) int {
