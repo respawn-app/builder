@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"unicode"
 
 	"builder/cli/app/commands"
+	"builder/server/auth"
 )
 
 const slashCommandPickerLines = 7
@@ -58,10 +60,15 @@ func normalizeSlashCommandToken(token string) string {
 func (m *uiModel) refreshSlashCommandFilterFromInput() {
 	parsed := parseSlashCommandInput(m.input)
 	if !parsed.active || parsed.argumentMode {
+		m.authSlashSessionOpen = false
 		m.slashCommandFilter = ""
 		m.slashCommandFilterSet = false
 		m.slashCommandSelection = 0
 		return
+	}
+	if !m.authSlashSessionOpen {
+		m.refreshAuthSlashCommandState()
+		m.authSlashSessionOpen = true
 	}
 	normalized := normalizeSlashCommandToken(parsed.token)
 	if !m.slashCommandFilterSet || m.slashCommandFilter != normalized {
@@ -115,9 +122,45 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 		if command.Name == "copy" && !m.hasAssistantFinalAnswerToCopy() {
 			continue
 		}
+		if isAuthSlashCommand(command.Name) && command.Name != m.authSlashCommandName {
+			continue
+		}
 		filtered = append(filtered, command)
 	}
 	return filtered
+}
+
+func isAuthSlashCommand(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "login", "logout":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *uiModel) refreshAuthSlashCommandState() {
+	name, err := m.resolveAuthSlashCommandName()
+	m.authSlashCommandName = name
+	if err != nil {
+		m.authSlashCommandErr = err.Error()
+		return
+	}
+	m.authSlashCommandErr = ""
+}
+
+func (m *uiModel) resolveAuthSlashCommandName() (string, error) {
+	if m == nil || m.statusConfig.AuthManager == nil {
+		return "login", nil
+	}
+	state, err := m.statusConfig.AuthManager.Load(context.Background())
+	if err != nil {
+		return "", err
+	}
+	if state.Method.Type == auth.MethodOAuth {
+		return "logout", nil
+	}
+	return "login", nil
 }
 
 func (m *uiModel) resumeCommandAvailable() bool {
