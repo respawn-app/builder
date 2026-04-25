@@ -8,6 +8,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/runtime"
+	"builder/shared/clientui"
 	"builder/shared/transcript"
 	"builder/shared/uiglyphs"
 
@@ -351,6 +352,34 @@ func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T
 	}
 	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
 		t.Fatalf("expected locked input state preserved, input=%q locked=%t inject=%q", updated.input, updated.inputSubmitLocked, updated.lockedInjectText)
+	}
+}
+
+func TestDetailModeEnterDoesNotRequestTranscriptPage(t *testing.T) {
+	client := &recordingTranscriptRuntimeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 80
+	m.termHeight = 12
+	m.syncViewport()
+	for idx := 0; idx < 4; idx++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d\nhidden", idx)})
+	}
+	m.detailTranscript.replace(clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Offset:       100,
+		TotalEntries: 200,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	controller := uiInputController{model: m}
+	next, cmd := controller.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected detail enter to avoid transcript paging command, got %T", cmd)
+	}
+	_ = next
+	if got := len(client.loadRequests); got != 0 {
+		t.Fatalf("expected no transcript page loads on detail enter, got %d", got)
 	}
 }
 

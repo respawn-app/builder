@@ -741,6 +741,26 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	}
 }
 
+func TestCompactDetailClearsExpandedEntriesWhenReplacementReusesIndexes(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 0, Entries: []TranscriptEntry{
+		{Role: "assistant", Text: "old intro"},
+		{Role: "assistant", Text: "old expanded\nold hidden"},
+	}})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailExpandedEntries = make(map[int]struct{})
+	m.detailExpandedEntries[1] = struct{}{}
+
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 0, Entries: []TranscriptEntry{
+		{Role: "assistant", Text: "new intro"},
+		{Role: "assistant", Text: "new unrelated\nnew hidden"},
+	}})
+
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("expected replacement at same indexes to clear expanded entries, got %+v", m.detailExpandedEntries)
+	}
+}
+
 func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
 	m = updateModel(t, m, AppendTranscriptMsg{
