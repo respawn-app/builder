@@ -1036,7 +1036,7 @@ func (m Model) renderDetailSnapshot() string {
 	}
 	for i, line := range lines {
 		selected := highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry
-		if m.compactDetail && highlightSelected && (i == firstSelectedLine-1 || i == lastSelectedLine+1) {
+		if m.compactDetail && highlightSelected && m.shouldRenderDetailSelectionSpacer(i, firstSelectedLine, lastSelectedLine) {
 			out = append(out, m.renderDetailSelectionSpacerLine())
 			continue
 		}
@@ -1047,6 +1047,26 @@ func (m Model) renderDetailSnapshot() string {
 		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLine int, lastSelectedLine int) bool {
+	if firstSelectedLine < 0 || lastSelectedLine < 0 {
+		return false
+	}
+	if lineIndex == firstSelectedLine-1 {
+		return m.detailScroll > 0 || !m.detailViewportLineOwnsSelectableEntry(lineIndex)
+	}
+	if lineIndex == lastSelectedLine+1 {
+		return m.detailScroll < m.maxDetailScroll() || !m.detailViewportLineOwnsSelectableEntry(lineIndex)
+	}
+	return false
+}
+
+func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int) bool {
+	if lineIndex < 0 || lineIndex >= len(m.detailLineEntryIndices) {
+		return false
+	}
+	return m.detailBlockIndexForEntry(m.detailLineEntryIndices[lineIndex]) >= 0
 }
 
 type detailExpansionSymbolState struct {

@@ -307,7 +307,7 @@ func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
 			m.refreshDetailViewport()
 
 			collapsed := m.View()
-			selectedLine := lineContaining(collapsed, "selected-command")
+			selectedLine := lineContaining(collapsed, "▶ selected-command")
 			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▶ ") || strings.Contains(plain, "$ selected-command") {
 				t.Fatalf("expected selected collapsed expandable item to replace role symbol with chevron, got %q in %q", plain, xansi.Strip(collapsed))
 			}
@@ -321,7 +321,7 @@ func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
 
 			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 			expanded := m.View()
-			selectedLine = lineContaining(expanded, "selected-command")
+			selectedLine = lineContaining(expanded, "▼ selected-command")
 			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▼ ") || strings.Contains(plain, "$ selected-command") {
 				t.Fatalf("expected selected expanded item to replace role symbol with expanded chevron, got %q in %q", plain, xansi.Strip(expanded))
 			}
@@ -530,6 +530,25 @@ func assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T
 
 func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.KeyMsg{Type: tea.KeyUp})
+}
+
+func TestCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 6; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	m.detailSelectedEntry = 3
+	m.detailSelectedActive = true
+
+	plain := xansi.Strip(m.View())
+	if !containsInOrder(plain, "entry 00", "entry 01", "entry 02", "entry 03", "entry 04") {
+		t.Fatalf("expected top-pinned selected spacer not to hide real rows above selection, got %q", plain)
+	}
 }
 
 func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
@@ -753,20 +772,6 @@ func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *te
 		t.Fatalf("did not expect compact detail selection to force foreground, got %q", selectedLine)
 	}
 
-	lines := strings.Split(raw, "\n")
-	selectedIndex := -1
-	for idx, line := range lines {
-		if strings.Contains(xansi.Strip(line), "selected detail entry") {
-			selectedIndex = idx
-			break
-		}
-	}
-	if selectedIndex <= 0 || selectedIndex >= len(lines)-1 {
-		t.Fatalf("expected selected line to have surrounding spacer lines, selected=%d lines=%q", selectedIndex, xansi.Strip(raw))
-	}
-	for _, idx := range []int{selectedIndex - 1, selectedIndex + 1} {
-		assertRailBearingSpacerLine(t, lines[idx], modeBg, m.palette().primaryColor)
-	}
 }
 
 func TestCompactDetailShortSelectedMessagesDoNotShowExpansionAffordance(t *testing.T) {
