@@ -1,14 +1,6 @@
 package runtime
 
 import (
-	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-	"time"
-
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
@@ -16,6 +8,13 @@ import (
 	"builder/shared/config"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
 )
 
 func TestApplyPersistedCacheWarningUsesCacheWarningModeVisibility(t *testing.T) {
@@ -79,6 +78,63 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 	}
 	if warnings[0].LostInputTokens != 7 {
 		t.Fatalf("warning lost input tokens = %d, want 7", warnings[0].LostInputTokens)
+	}
+}
+
+func TestGenerateWithRetryClient_SuppressesExactNonPostfixWarningWhenProviderReuseIncreases(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 2_432}},
+		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 12_160}},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err != nil {
+		t.Fatalf("second generate: %v", err)
+	}
+
+	if warnings := persistedCacheWarnings(t, store); len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0: %+v", len(warnings), warnings)
+	}
+	if got := persistedCacheWarningEventCount(t, store); got != 0 {
+		t.Fatalf("cache_warning event count = %d, want 0", got)
+	}
+}
+
+func TestGenerateWithRetryClient_SuppressesExactNonPostfixWarningWithoutProviderCacheMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{Usage: llm.Usage{InputTokens: 10}},
+		{Usage: llm.Usage{InputTokens: 12}},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err != nil {
+		t.Fatalf("second generate: %v", err)
+	}
+
+	if got := persistedCacheWarningEventCount(t, store); got != 0 {
+		t.Fatalf("cache_warning event count = %d, want 0", got)
 	}
 }
 
@@ -698,7 +754,12 @@ func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}, {Usage: llm.Usage{InputTokens: 12}}}}
+	client := &fakeClient{responses: []llm.Response{
+		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 8}},
+		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 6}},
+		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 10}},
+		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 0}},
+	}}
 	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -845,161 +906,4 @@ func TestGenerateWithRetryClient_RestorePreservesRotatedCompactionKeyWithoutWarn
 	if len(warnings) != 0 {
 		t.Fatalf("warning count = %d, want 0", len(warnings))
 	}
-}
-
-func TestGenerateWithRetryClient_RestoreSkipsDigestVersionMismatch(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	legacyRequest := persistedCacheRequestObserved{
-		DigestVersion: 999,
-		CacheKey:      "cache-key-1",
-		Scope:         cachewarn.ScopeConversation,
-		ChunkCount:    1,
-		TerminalHash:  "legacy-hash",
-	}
-	legacyResponse := persistedCacheResponseObserved{
-		DigestVersion:        999,
-		CacheKey:             "cache-key-1",
-		Scope:                cachewarn.ScopeConversation,
-		ChunkCount:           1,
-		TerminalHash:         "legacy-hash",
-		HasCachedInputTokens: true,
-		CachedInputTokens:    42,
-	}
-	if _, err := store.AppendEvent("legacy-request", sessionEventCacheRequestObserved, legacyRequest); err != nil {
-		t.Fatalf("append legacy request: %v", err)
-	}
-	if _, err := store.AppendEvent("legacy-response", sessionEventCacheResponseObserved, legacyResponse); err != nil {
-		t.Fatalf("append legacy response: %v", err)
-	}
-
-	reopened, err := session.Open(store.Dir())
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
-	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err != nil {
-		t.Fatalf("generate after reopen: %v", err)
-	}
-
-	warnings := persistedCacheWarnings(t, reopened)
-	if len(warnings) != 0 {
-		t.Fatalf("warning count = %d, want 0", len(warnings))
-	}
-}
-
-func TestGenerateWithRetryClient_DoesNotInventCompactionCauseWithoutPriorLineageOnReopen(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	if _, err := store.AppendEvent("legacy-compact", "history_replaced", historyReplacementPayload{
-		Engine: "local",
-		Mode:   string(compactionModeManual),
-		Items:  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}),
-	}); err != nil {
-		t.Fatalf("append history_replaced: %v", err)
-	}
-
-	reopened, err := session.Open(store.Dir())
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
-	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(reopened.Meta().SessionID, "beta"), nil, nil, nil); err != nil {
-		t.Fatalf("generate after reopen: %v", err)
-	}
-
-	warnings := persistedCacheWarnings(t, reopened)
-	if len(warnings) != 0 {
-		t.Fatalf("warning count = %d, want 0", len(warnings))
-	}
-}
-
-func testPromptCacheRequest(cacheKey string, messages ...string) llm.Request {
-	items := make([]llm.ResponseItem, 0, len(messages))
-	for _, message := range messages {
-		items = append(items, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: message}})...)
-	}
-	return llm.Request{
-		Model:            "gpt-5",
-		SystemPrompt:     "system",
-		PromptCacheKey:   cacheKey,
-		PromptCacheScope: cachewarn.ScopeConversation,
-		Items:            items,
-	}
-}
-
-func testReviewerPromptCacheRequest(cacheKey string, messages ...string) llm.Request {
-	request := testPromptCacheRequest(cacheKey, messages...)
-	request.PromptCacheScope = cachewarn.ScopeReviewer
-	return request
-}
-
-func mustMarshalOpenAIResponsesPayloadForLineage(t *testing.T, request llm.Request, options llm.OpenAIResponsesPayloadOptions) []byte {
-	t.Helper()
-	data, err := llm.MarshalOpenAIResponsesRequestJSON(request, options)
-	if err != nil {
-		t.Fatalf("marshal openai responses payload: %v", err)
-	}
-	return data
-}
-
-func mustDecodeJSONMap(t *testing.T, data []byte) map[string]any {
-	t.Helper()
-	var decoded map[string]any
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("decode json map: %v", err)
-	}
-	return decoded
-}
-
-func mustMarshalCanonicalJSONForLineage(t *testing.T, value any) []byte {
-	t.Helper()
-	data, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal canonical json: %v", err)
-	}
-	return data
-}
-
-func stringValue(value any) string {
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return ""
-}
-
-func persistedCacheWarnings(t *testing.T, store *session.Store) []cachewarn.Warning {
-	t.Helper()
-	events, err := store.ReadEvents()
-	if err != nil {
-		t.Fatalf("read events: %v", err)
-	}
-	warnings := make([]cachewarn.Warning, 0, len(events))
-	for _, evt := range events {
-		if evt.Kind != sessionEventCacheWarning {
-			continue
-		}
-		var warning cachewarn.Warning
-		if err := json.Unmarshal(evt.Payload, &warning); err != nil {
-			t.Fatalf("decode warning: %v", err)
-		}
-		warnings = append(warnings, warning)
-	}
-	return warnings
 }

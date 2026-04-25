@@ -1,0 +1,510 @@
+package metadata
+
+import (
+	"builder/server/metadata/sqlitegen"
+	"builder/server/session"
+	"builder/shared/clientui"
+	"builder/shared/config"
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestResolvePersistedSessionRejectsEscapingArtifactRelpath(t *testing.T) {
+	ctx := context.Background()
+	store, _, binding := newMetadataTestStore(t)
+	now := time.Now().UTC().UnixMilli()
+	if err := store.queries.UpsertSession(ctx, sqlitegen.UpsertSessionParams{
+		ID:                 "session-escape",
+		ProjectID:          binding.ProjectID,
+		WorkspaceID:        binding.WorkspaceID,
+		WorktreeID:         sql.NullString{},
+		ArtifactRelpath:    "../escape",
+		Name:               "",
+		FirstPromptPreview: "",
+		InputDraft:         "",
+		ParentSessionID:    "",
+		CreatedAtUnixMs:    now,
+		UpdatedAtUnixMs:    now,
+		LastSequence:       0,
+		ModelRequestCount:  0,
+		InFlightStep:       0,
+		AgentsInjected:     0,
+		LaunchVisible:      0,
+		CwdRelpath:         ".",
+		ContinuationJson:   "{}",
+		LockedJson:         "{}",
+		UsageStateJson:     "{}",
+		MetadataJson:       "{}",
+	}); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
+	}
+	_, err := store.ResolvePersistedSession(ctx, "session-escape")
+	if err == nil || !strings.Contains(err.Error(), "escapes persistence root") {
+		t.Fatalf("expected escaping artifact relpath error, got %v", err)
+	}
+}
+
+func TestSessionExecutionTargetClampsEscapingCwdRelpath(t *testing.T) {
+	target := sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
+		WorkspaceID:           "workspace-1",
+		WorkspaceName:         "workspace",
+		WorkspaceRoot:         "/tmp/workspace",
+		WorkspaceAvailability: "available",
+		WorktreeRoot:          "",
+		CwdRelpath:            "../../other-project",
+	})
+	if target.CwdRelpath != "." {
+		t.Fatalf("cwd relpath = %q, want .", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != "/tmp/workspace" {
+		t.Fatalf("effective workdir = %q, want /tmp/workspace", target.EffectiveWorkdir)
+	}
+
+	target = sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
+		WorkspaceID:           "workspace-1",
+		WorkspaceName:         "workspace",
+		WorkspaceRoot:         "/tmp/workspace",
+		WorkspaceAvailability: "available",
+		WorktreeRoot:          "/tmp/workspace/worktree-a",
+		CwdRelpath:            "/tmp/absolute",
+	})
+	if target.CwdRelpath != "." {
+		t.Fatalf("absolute cwd relpath = %q, want .", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != "/tmp/workspace/worktree-a" {
+		t.Fatalf("absolute effective workdir = %q, want /tmp/workspace/worktree-a", target.EffectiveWorkdir)
+	}
+}
+
+func TestResolveSessionExecutionTargetUsesMetadataAuthority(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+
+	target, err := store.ResolveSessionExecutionTarget(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if target.WorkspaceID != binding.WorkspaceID {
+		t.Fatalf("workspace id = %q, want %q", target.WorkspaceID, binding.WorkspaceID)
+	}
+	if target.WorkspaceRoot != canonicalRoot {
+		t.Fatalf("workspace root = %q, want %q", target.WorkspaceRoot, canonicalRoot)
+	}
+	if target.CwdRelpath != "." {
+		t.Fatalf("cwd relpath = %q, want .", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != canonicalRoot {
+		t.Fatalf("effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalRoot)
+	}
+}
+
+func TestObservedSessionMetadataPersistencePreservesExecutionTarget(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-a")
+	worktreeSubdir := filepath.Join(worktreeRoot, "pkg")
+	if err := os.MkdirAll(worktreeSubdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeSubdir: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	if err := store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, binding.WorkspaceID, "worktree-a", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID: %v", err)
+	}
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	if err := reopened.SetName("hello"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	target, err := store.ResolveSessionExecutionTarget(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget: %v", err)
+	}
+	if target.WorktreeID != "worktree-a" {
+		t.Fatalf("worktree id = %q, want worktree-a", target.WorktreeID)
+	}
+	if target.WorktreeRoot != canonicalWorktreeRoot {
+		t.Fatalf("worktree root = %q, want %q", target.WorktreeRoot, canonicalWorktreeRoot)
+	}
+	if target.CwdRelpath != "pkg" {
+		t.Fatalf("cwd relpath = %q, want pkg", target.CwdRelpath)
+	}
+	canonicalWorktreeSubdir, err := config.CanonicalWorkspaceRoot(worktreeSubdir)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot worktreeSubdir: %v", err)
+	}
+	if target.EffectiveWorkdir != canonicalWorktreeSubdir {
+		t.Fatalf("effective workdir = %q, want %q", target.EffectiveWorkdir, canonicalWorktreeSubdir)
+	}
+}
+
+func TestUpdateSessionExecutionTargetByIDRejectsCrossWorkspaceWorktree(t *testing.T) {
+	ctx := context.Background()
+	store, cfgA, bindingA := newMetadataTestStore(t)
+	workspaceB := t.TempDir()
+	cfgB, err := config.Load(workspaceB, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspaceB: %v", err)
+	}
+	bindingB, err := store.RegisterWorkspaceBinding(ctx, cfgB.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding workspaceB: %v", err)
+	}
+	projectSessionsDir := config.ProjectSessionsRoot(cfgA, bindingA.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfgA.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfgB.WorkspaceRoot, "wt-b")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktreeRoot: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := store.UpsertWorktreeRecord(ctx, WorktreeRecord{
+		ID:              "worktree-b",
+		WorkspaceID:     bindingB.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+
+	err = store.UpdateSessionExecutionTargetByID(ctx, sess.Meta().SessionID, bindingA.WorkspaceID, "worktree-b", ".")
+	if err == nil || err.Error() != "worktree \"worktree-b\" does not belong to workspace \""+bindingA.WorkspaceID+"\"" {
+		t.Fatalf("UpdateSessionExecutionTargetByID error = %v", err)
+	}
+}
+
+func TestUpsertWorktreeRecordRejectsMissingRequiredFields(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	baseRecord := WorktreeRecord{
+		ID:              "worktree-a",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   filepath.Join(cfg.WorkspaceRoot, "wt-a"),
+		DisplayName:     "wt-a",
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}
+	tests := []struct {
+		name   string
+		mutate func(*WorktreeRecord)
+		want   string
+	}{
+		{name: "id", mutate: func(record *WorktreeRecord) { record.ID = "  " }, want: "worktree id is required"},
+		{name: "workspace id", mutate: func(record *WorktreeRecord) { record.WorkspaceID = "  " }, want: "workspace id is required"},
+		{name: "display name", mutate: func(record *WorktreeRecord) { record.DisplayName = "  " }, want: "worktree display name is required"},
+		{name: "availability", mutate: func(record *WorktreeRecord) { record.Availability = "  " }, want: "worktree availability is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := baseRecord
+			tt.mutate(&record)
+			err := store.UpsertWorktreeRecord(ctx, record)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("UpsertWorktreeRecord error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePersistedSessionUsesReboundWorkspaceRoot(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.SetName("hello"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	oldWorkspace := cfg.WorkspaceRoot
+	newWorkspace := filepath.Join(t.TempDir(), "workspace-moved")
+	if err := os.Rename(oldWorkspace, newWorkspace); err != nil {
+		t.Fatalf("Rename workspace: %v", err)
+	}
+	if _, err := store.RebindWorkspace(ctx, oldWorkspace, newWorkspace); err != nil {
+		t.Fatalf("RebindWorkspace: %v", err)
+	}
+	record, err := store.ResolvePersistedSession(ctx, sess.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolvePersistedSession: %v", err)
+	}
+	canonicalNewWorkspace, err := config.CanonicalWorkspaceRoot(newWorkspace)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot newWorkspace: %v", err)
+	}
+	if record.Meta == nil {
+		t.Fatal("expected resolved metadata")
+	}
+	if record.Meta.WorkspaceRoot != canonicalNewWorkspace {
+		t.Fatalf("resolved workspace root = %q, want %q", record.Meta.WorkspaceRoot, canonicalNewWorkspace)
+	}
+}
+
+func TestRuntimeLeaseLifecycleIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+
+	lease, err := store.CreateRuntimeLease(ctx, sess.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	if !lease.Active() {
+		t.Fatalf("expected active lease, got %+v", lease)
+	}
+
+	released, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	}
+	if released.Active() {
+		t.Fatalf("expected released lease, got %+v", released)
+	}
+	if released.ReleasedAt.IsZero() {
+		t.Fatal("expected released_at to be populated")
+	}
+
+	again, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease second call: %v", err)
+	}
+	if again.Active() {
+		t.Fatalf("expected second release to remain released, got %+v", again)
+	}
+}
+
+func TestHiddenDurableSessionStaysOutOfProjectListingsUntilVisible(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, binding := newMetadataTestStore(t)
+	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sess.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+
+	projects, err := store.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("ListProjects before visibility: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected one project, got %+v", projects)
+	}
+	if projects[0].SessionCount != 0 {
+		t.Fatalf("hidden durable session must not affect project session count, got %+v", projects[0])
+	}
+
+	sessions, err := store.ListSessionsByProject(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListSessionsByProject before visibility: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected hidden durable session to stay out of listings, got %+v", sessions)
+	}
+
+	if err := sess.SetName("incident triage"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	projects, err = store.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("ListProjects after visibility: %v", err)
+	}
+	if projects[0].SessionCount != 1 {
+		t.Fatalf("visible session must affect project session count, got %+v", projects[0])
+	}
+
+	sessions, err = store.ListSessionsByProject(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListSessionsByProject after visibility: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionID != sess.Meta().SessionID {
+		t.Fatalf("expected newly visible session in listings, got %+v", sessions)
+	}
+	if sessions[0].Name != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", sessions[0].Name)
+	}
+}
+
+func TestSessionLaunchVisibilityTransitions(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*testing.T, *session.Store)
+		wantVisible bool
+	}{
+		{
+			name:        "input draft makes session launch-visible",
+			wantVisible: true,
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if err := sess.SetInputDraft("draft prompt"); err != nil {
+					t.Fatalf("SetInputDraft: %v", err)
+				}
+			},
+		},
+		{
+			name:        "parent linkage makes session launch-visible",
+			wantVisible: true,
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if err := sess.SetParentSessionID("session-parent"); err != nil {
+					t.Fatalf("SetParentSessionID: %v", err)
+				}
+			},
+		},
+		{
+			name:        "first user prompt makes session launch-visible",
+			wantVisible: true,
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "user", "content": "Investigate broken startup flow\nmore detail"}); err != nil {
+					t.Fatalf("AppendEvent: %v", err)
+				}
+			},
+		},
+		{
+			name:        "non-user events keep prepared session hidden",
+			wantVisible: false,
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "assistant", "content": "warming up"}); err != nil {
+					t.Fatalf("AppendEvent: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, cfg, binding := newMetadataTestStore(t)
+			projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+			sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+			if err != nil {
+				t.Fatalf("session.Create: %v", err)
+			}
+			if err := sess.EnsureDurable(); err != nil {
+				t.Fatalf("EnsureDurable: %v", err)
+			}
+
+			assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, 0)
+
+			tc.mutate(t, sess)
+
+			wantCount := 0
+			if tc.wantVisible {
+				wantCount = 1
+			}
+			listed := assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, wantCount)
+			if !tc.wantVisible {
+				return
+			}
+			if listed[0].SessionID != sess.Meta().SessionID {
+				t.Fatalf("listed session id = %q, want %q", listed[0].SessionID, sess.Meta().SessionID)
+			}
+		})
+	}
+}
+
+func assertProjectSessionListingCount(t *testing.T, ctx context.Context, store *Store, projectID string, want int) []clientui.SessionSummary {
+	t.Helper()
+	projects, err := store.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected one project, got %+v", projects)
+	}
+	if projects[0].SessionCount != want {
+		t.Fatalf("project session count = %d, want %d", projects[0].SessionCount, want)
+	}
+	sessions, err := store.ListSessionsByProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListSessionsByProject: %v", err)
+	}
+	if len(sessions) != want {
+		t.Fatalf("listed session count = %d, want %d, sessions=%+v", len(sessions), want, sessions)
+	}
+	return sessions
+}
+
+func newMetadataTestStore(t *testing.T) (*Store, config.App, Binding) {
+	t.Helper()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	return store, cfg, binding
+}

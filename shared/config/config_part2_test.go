@@ -1,0 +1,908 @@
+package config
+
+import (
+	"builder/shared/toolspec"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadCapabilityOverridesFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.5"
+
+[model_capabilities]
+supports_reasoning_effort = true
+supports_vision_inputs = true
+
+[provider_capabilities]
+provider_id = "custom-provider"
+supports_responses_api = true
+supports_responses_compact = false
+supports_request_input_token_count = false
+supports_prompt_cache_key = true
+supports_native_web_search = true
+supports_reasoning_encrypted = false
+supports_server_side_context_edit = false
+is_openai_first_party = false
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected model capability overrides from file, got %+v", cfg.Settings.ModelCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+		t.Fatalf("expected provider capability overrides from file, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.SupportsRequestInputTokenCount {
+		t.Fatalf("expected supports_request_input_token_count override from file, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "file" {
+		t.Fatalf("expected model_capabilities.supports_reasoning_effort source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "file" {
+		t.Fatalf("expected provider_capabilities.provider_id source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.supports_request_input_token_count"]; got != "file" {
+		t.Fatalf("expected provider_capabilities.supports_request_input_token_count source file, got %q", got)
+	}
+}
+
+func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY", "false")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected model capability overrides from env, got %+v", cfg.Settings.ModelCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+		t.Fatalf("expected provider capability overrides from env, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.SupportsRequestInputTokenCount {
+		t.Fatalf("expected supports_request_input_token_count override from env, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "env" {
+		t.Fatalf("expected model_capabilities.supports_reasoning_effort source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "env" {
+		t.Fatalf("expected provider_capabilities.provider_id source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.supports_request_input_token_count"]; got != "env" {
+		t.Fatalf("expected provider_capabilities.supports_request_input_token_count source env, got %q", got)
+	}
+}
+
+func TestLoadProviderOverrideFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"OpenAI\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ProviderOverride != "openai" {
+		t.Fatalf("expected normalized provider_override from file, got %q", cfg.Settings.ProviderOverride)
+	}
+	if got := cfg.Source.Sources["provider_override"]; got != "file" {
+		t.Fatalf("expected provider_override source file, got %q", got)
+	}
+}
+
+func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("provider_override = \"openai\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected provider_override without model override to fail")
+	}
+	if !strings.Contains(err.Error(), "provider_override requires an explicit model override") {
+		t.Fatalf("expected provider_override/model override validation error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"openrouter\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected invalid provider_override to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid provider_override") {
+		t.Fatalf("expected invalid provider_override validation error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"anthropic\"\nopenai_base_url = \"https://example.openrouter.ai/api/v1\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected provider_override/openai_base_url conflict to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicts with openai_base_url") {
+		t.Fatalf("expected provider_override/openai_base_url conflict error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{ProviderOverride: "openai"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ProviderOverride != "openai" {
+		t.Fatalf("expected cli provider_override, got %q", cfg.Settings.ProviderOverride)
+	}
+	if got := cfg.Source.Sources["provider_override"]; got != "cli" {
+		t.Fatalf("expected provider_override source cli, got %q", got)
+	}
+}
+
+func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected validation error when provider capability override is set without provider_id")
+	}
+	if !strings.Contains(err.Error(), "provider_capabilities.provider_id") {
+		t.Fatalf("expected provider_id validation error, got %v", err)
+	}
+}
+
+func TestLoadPriorityRequestModeFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("priority_request_mode = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.PriorityRequestMode {
+		t.Fatal("expected priority_request_mode=true from file")
+	}
+	if got := cfg.Source.Sources["priority_request_mode"]; got != "file" {
+		t.Fatalf("expected priority_request_mode source file, got %q", got)
+	}
+}
+
+func TestLoadModelVerbosityFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_verbosity = \"high\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ModelVerbosity != ModelVerbosityHigh {
+		t.Fatalf("expected model_verbosity=high from file, got %q", cfg.Settings.ModelVerbosity)
+	}
+	if got := cfg.Source.Sources["model_verbosity"]; got != "file" {
+		t.Fatalf("expected model_verbosity source file, got %q", got)
+	}
+}
+
+func TestLoadRejectsInvalidModelVerbosityFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_verbosity = \"verbose\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected validation error for invalid model_verbosity")
+	}
+	if !strings.Contains(err.Error(), "model_verbosity") {
+		t.Fatalf("expected model_verbosity validation error, got %v", err)
+	}
+}
+
+func TestResolveWorkspaceContainerUsesSessionsSubdirectory(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	containerName, containerDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName == "" {
+		t.Fatal("expected non-empty container name")
+	}
+	wantParent := filepath.Join(cfg.PersistenceRoot, sessionsDirName)
+	if filepath.Dir(containerDir) != wantParent {
+		t.Fatalf("expected container under %q, got %q", wantParent, containerDir)
+	}
+	if _, err := os.Stat(containerDir); err != nil {
+		t.Fatalf("expected container dir to exist: %v", err)
+	}
+
+	againName, againDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container second time: %v", err)
+	}
+	if againName != containerName || againDir != containerDir {
+		t.Fatalf("expected stable workspace container, got %q %q after %q %q", againName, againDir, containerName, containerDir)
+	}
+	canonicalRoot, err := canonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical workspace root: %v", err)
+	}
+	wantName := deterministicWorkspaceContainerName(canonicalRoot)
+	if containerName != wantName {
+		t.Fatalf("expected deterministic container name %q, got %q", wantName, containerName)
+	}
+}
+
+func TestResolveWorkspaceContainerUsesLegacyWorkspaceIndexMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	legacyContainer := "workspace-a-legacy"
+	indexPath := filepath.Join(cfg.PersistenceRoot, workspaceIndexName)
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(workspaceIndex{Entries: map[string]string{cfg.WorkspaceRoot: legacyContainer}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	containerName, containerDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName != legacyContainer {
+		t.Fatalf("expected legacy workspace container %q, got %q", legacyContainer, containerName)
+	}
+	if got := filepath.Base(containerDir); got != legacyContainer {
+		t.Fatalf("expected legacy container dir %q, got %q", legacyContainer, got)
+	}
+	if _, err := os.Stat(containerDir); err != nil {
+		t.Fatalf("expected legacy container dir to exist: %v", err)
+	}
+}
+
+func TestResolveWorkspaceContainerRejectsInvalidLegacyWorkspaceIndexMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	indexPath := filepath.Join(cfg.PersistenceRoot, workspaceIndexName)
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(workspaceIndex{Entries: map[string]string{cfg.WorkspaceRoot: "../outside"}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	_, _, err = ResolveWorkspaceContainer(cfg)
+	if err == nil {
+		t.Fatal("expected invalid legacy container error")
+	}
+	if !strings.Contains(err.Error(), "invalid legacy workspace container") {
+		t.Fatalf("expected invalid legacy container error, got %v", err)
+	}
+}
+
+func TestResolveWorkspaceContainerCanonicalizesSymlinkedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	realWorkspace := t.TempDir()
+	linkParent := t.TempDir()
+	symlinkPath := filepath.Join(linkParent, "workspace-link")
+	if err := os.Symlink(realWorkspace, symlinkPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	realCfg, err := Load(realWorkspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load real workspace: %v", err)
+	}
+	realName, realDir, err := ResolveWorkspaceContainer(realCfg)
+	if err != nil {
+		t.Fatalf("resolve real workspace container: %v", err)
+	}
+
+	symlinkCfg, err := Load(symlinkPath, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load symlink workspace: %v", err)
+	}
+	symlinkName, symlinkDir, err := ResolveWorkspaceContainer(symlinkCfg)
+	if err != nil {
+		t.Fatalf("resolve symlink workspace container: %v", err)
+	}
+
+	if symlinkName != realName || symlinkDir != realDir {
+		t.Fatalf("expected symlinked workspace to reuse deterministic container, got %q %q want %q %q", symlinkName, symlinkDir, realName, realDir)
+	}
+	realProjectID, err := ProjectIDForWorkspaceRoot(realCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("project id for real workspace: %v", err)
+	}
+	symlinkProjectID, err := ProjectIDForWorkspaceRoot(symlinkCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("project id for symlink workspace: %v", err)
+	}
+	if symlinkProjectID != realProjectID {
+		t.Fatalf("expected symlinked workspace to reuse project id, got %q want %q", symlinkProjectID, realProjectID)
+	}
+	if symlinkProjectID == symlinkName {
+		t.Fatalf("expected project id to differ from workspace container name %q", symlinkName)
+	}
+}
+
+func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[reviewer]
+frequency = "all"
+model = "gpt-file-reviewer"
+thinking_level = "medium"
+timeout_seconds = 45
+verbose_output = true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Reviewer.Frequency != "all" {
+		t.Fatalf("expected file reviewer.frequency=all, got %q", cfg.Settings.Reviewer.Frequency)
+	}
+	if got := cfg.Source.Sources["reviewer.frequency"]; got != "file" {
+		t.Fatalf("expected reviewer.frequency source file, got %q", got)
+	}
+	if cfg.Settings.Reviewer.Model != "gpt-file-reviewer" {
+		t.Fatalf("expected file reviewer.model, got %q", cfg.Settings.Reviewer.Model)
+	}
+	if got := cfg.Source.Sources["reviewer.model"]; got != "file" {
+		t.Fatalf("expected reviewer.model source file, got %q", got)
+	}
+	if !cfg.Settings.Reviewer.VerboseOutput {
+		t.Fatalf("expected file reviewer.verbose_output=true")
+	}
+	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "file" {
+		t.Fatalf("expected reviewer.verbose_output source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "off")
+	t.Setenv("BUILDER_REVIEWER_MODEL", "gpt-env-reviewer")
+	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "high")
+	t.Setenv("BUILDER_REVIEWER_TIMEOUT_SECONDS", "30")
+	t.Setenv("BUILDER_REVIEWER_VERBOSE_OUTPUT", "false")
+
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Reviewer.Frequency != "off" {
+		t.Fatalf("expected env reviewer.frequency=off, got %q", cfg.Settings.Reviewer.Frequency)
+	}
+	if got := cfg.Source.Sources["reviewer.frequency"]; got != "env" {
+		t.Fatalf("expected reviewer.frequency source env, got %q", got)
+	}
+	if cfg.Settings.Reviewer.Model != "gpt-env-reviewer" {
+		t.Fatalf("expected env reviewer.model, got %q", cfg.Settings.Reviewer.Model)
+	}
+	if got := cfg.Source.Sources["reviewer.model"]; got != "env" {
+		t.Fatalf("expected reviewer.model source env, got %q", got)
+	}
+	if cfg.Settings.Reviewer.VerboseOutput {
+		t.Fatalf("expected env reviewer.verbose_output=false")
+	}
+	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "env" {
+		t.Fatalf("expected reviewer.verbose_output source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "sometimes")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid reviewer frequency")
+	}
+}
+
+func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("web_search = \"native\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.WebSearch != "native" {
+		t.Fatalf("expected file web_search=native, got %q", cfg.Settings.WebSearch)
+	}
+	if got := cfg.Source.Sources["web_search"]; got != "file" {
+		t.Fatalf("expected web_search source file, got %q", got)
+	}
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
+		t.Fatalf("expected web_search tool to remain enabled by default")
+	}
+
+	t.Setenv("BUILDER_WEB_SEARCH", "off")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.WebSearch != "off" {
+		t.Fatalf("expected env web_search=off, got %q", cfg.Settings.WebSearch)
+	}
+	if got := cfg.Source.Sources["web_search"]; got != "env" {
+		t.Fatalf("expected web_search source env, got %q", got)
+	}
+	if !cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
+		t.Fatalf("expected web_search tool to stay enabled when only web_search mode is off")
+	}
+
+	t.Setenv("BUILDER_WEB_SEARCH", "custom")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected web_search=custom validation error")
+	}
+}
+
+func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("web_search = \"native\"\n[tools]\nweb_search = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
+		t.Fatalf("expected explicit tools.web_search=false to stay disabled")
+	}
+	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
+		t.Fatalf("expected tools.web_search source file, got %q", got)
+	}
+}
+
+func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[tools]\ntrigger_handoff = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
+		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
+	}
+	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "file" {
+		t.Fatalf("expected tools.trigger_handoff source file, got %q", got)
+	}
+}
+
+func TestLoadSkillTogglesFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\nApiResult = false\n\"Local Helper\" = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.SkillToggles["apiresult"] {
+		t.Fatalf("expected apiresult skill to be explicitly disabled, got %+v", cfg.Settings.SkillToggles)
+	}
+	if !cfg.Settings.SkillToggles["local helper"] {
+		t.Fatalf("expected quoted skill key to stay enabled, got %+v", cfg.Settings.SkillToggles)
+	}
+	if got := cfg.Source.Sources["skills.apiresult"]; got != "file" {
+		t.Fatalf("expected skills.apiresult source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["skills.local helper"]; got != "file" {
+		t.Fatalf("expected skills.local helper source file, got %q", got)
+	}
+}
+
+func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\napiresult = \"off\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid skills type error")
+	} else if !strings.Contains(err.Error(), "skills.apiresult") {
+		t.Fatalf("expected skills.apiresult in error, got %v", err)
+	}
+}
+
+func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\nApiResult = false\napiresult = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected duplicate normalized skills key error")
+	} else {
+		for _, want := range []string{"ApiResult", "apiresult", "both normalize to"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected %q in error, got %v", want, err)
+			}
+		}
+	}
+}
+
+func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("notification_method = \"bel\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.NotificationMethod != "bel" {
+		t.Fatalf("expected file notification_method=bel, got %q", cfg.Settings.NotificationMethod)
+	}
+	if got := cfg.Source.Sources["notification_method"]; got != "file" {
+		t.Fatalf("expected notification_method source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_NOTIFICATION_METHOD", "osc9")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.NotificationMethod != "osc9" {
+		t.Fatalf("expected env notification_method=osc9, got %q", cfg.Settings.NotificationMethod)
+	}
+	if got := cfg.Source.Sources["notification_method"]; got != "env" {
+		t.Fatalf("expected notification_method source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_NOTIFICATION_METHOD", "bad")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid notification_method validation error")
+	}
+}
+
+func TestLoadToolPreamblesPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("tool_preambles = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ToolPreambles {
+		t.Fatalf("expected file tool_preambles=false")
+	}
+	if got := cfg.Source.Sources["tool_preambles"]; got != "file" {
+		t.Fatalf("expected tool_preambles source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_TOOL_PREAMBLES", "true")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if !cfg.Settings.ToolPreambles {
+		t.Fatalf("expected env tool_preambles=true")
+	}
+	if got := cfg.Source.Sources["tool_preambles"]; got != "env" {
+		t.Fatalf("expected tool_preambles source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_TOOL_PREAMBLES", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_TOOL_PREAMBLES error")
+	}
+}
+
+func TestLoadTUIAlternateScreenPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("tui_alternate_screen = \"always\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAlways {
+		t.Fatalf("expected file tui_alternate_screen=always, got %q", cfg.Settings.TUIAlternateScreen)
+	}
+	if got := cfg.Source.Sources["tui_alternate_screen"]; got != "file" {
+		t.Fatalf("expected tui_alternate_screen source file, got %q", got)
+	}
+
+	if err := os.WriteFile(configPath, []byte("tui_alternate_screen = \"Always\"\n"), 0o644); err != nil {
+		t.Fatalf("write config mixed case: %v", err)
+	}
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load mixed-case file value: %v", err)
+	}
+	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAlways {
+		t.Fatalf("expected mixed-case file value normalized to always, got %q", cfg.Settings.TUIAlternateScreen)
+	}
+
+	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "never")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenNever {
+		t.Fatalf("expected env tui_alternate_screen=never, got %q", cfg.Settings.TUIAlternateScreen)
+	}
+	if got := cfg.Source.Sources["tui_alternate_screen"]; got != "env" {
+		t.Fatalf("expected tui_alternate_screen source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "NEVER")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load mixed-case env value: %v", err)
+	}
+	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenNever {
+		t.Fatalf("expected mixed-case env value normalized to never, got %q", cfg.Settings.TUIAlternateScreen)
+	}
+
+	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid tui_alternate_screen validation error")
+	}
+}
+
+func TestLoadPrecedenceCLIOverEnvOverFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-file"
+thinking_level = "low"
+theme = "light"
+
+[tools]
+shell = true
+patch = false
+ask_question = true
+
+[timeouts]
+model_request_seconds = 45
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_MODEL", "gpt-env")
+	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
+	t.Setenv("BUILDER_TOOLS", "shell,patch")
+
+	cfg, err := Load(workspace, LoadOptions{Model: "gpt-cli", ThinkingLevel: "xhigh"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Model != "gpt-cli" {
+		t.Fatalf("expected cli model, got %q", cfg.Settings.Model)
+	}
+	if cfg.Settings.ThinkingLevel != "xhigh" {
+		t.Fatalf("expected cli thinking_level, got %q", cfg.Settings.ThinkingLevel)
+	}
+	if !cfg.Settings.EnabledTools[toolspec.ToolPatch] {
+		t.Fatalf("expected env tool override to enable patch")
+	}
+	if got := cfg.Source.Sources["model"]; got != "cli" {
+		t.Fatalf("expected model source cli, got %q", got)
+	}
+	if got := cfg.Source.Sources["thinking_level"]; got != "cli" {
+		t.Fatalf("expected thinking_level source cli, got %q", got)
+	}
+}
