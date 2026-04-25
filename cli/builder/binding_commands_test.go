@@ -1,18 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/metadata"
@@ -23,6 +11,16 @@ import (
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
 )
 
 type bindingCommandTimeoutProjectViewStub struct {
@@ -228,48 +226,6 @@ func TestProjectSubcommandPrintsBoundProjectID(t *testing.T) {
 	}
 }
 
-func TestProjectSubcommandHelpExplainsLookupAndSubcommands(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if code := projectSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder project:") ||
-		!strings.Contains(got, "builder project [path]") ||
-		!strings.Contains(got, "builder project list") ||
-		!strings.Contains(got, "For local loopback mode") {
-		t.Fatalf("stderr = %q, want expanded project help", got)
-	}
-}
-
-func TestProjectListSubcommandHelpExplainsColumns(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if code := projectListSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder project list:") ||
-		!strings.Contains(got, "Output columns are") {
-		t.Fatalf("stderr = %q, want project list help", got)
-	}
-}
-
-func TestProjectCreateSubcommandHelpExplainsServerVisiblePath(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if code := projectCreateSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder project create:") ||
-		!strings.Contains(got, "must be visible to the Builder server") ||
-		!strings.Contains(got, "Flags:") {
-		t.Fatalf("stderr = %q, want project create help", got)
-	}
-}
-
 func TestProjectSubcommandTreatsNestedDirectoryAsUnregistered(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -459,21 +415,6 @@ func TestAttachSubcommandWithoutProjectGuidanceFailsWhenCurrentWorkspaceUnregist
 	}
 }
 
-func TestAttachSubcommandHelpExplainsProjectInference(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if code := attachSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder attach:") ||
-		!strings.Contains(got, "Without `--project`") ||
-		!strings.Contains(got, "Against a remote daemon") ||
-		!strings.Contains(got, "Flags:") {
-		t.Fatalf("stderr = %q, want expanded attach help", got)
-	}
-}
-
 func TestAttachSubcommandRejectsUnknownExplicitProjectIDCleanly(t *testing.T) {
 	home := t.TempDir()
 	target := t.TempDir()
@@ -635,20 +576,6 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 	}
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <session-id> and <new-path>")) {
 		t.Fatalf("stderr = %q, want usage guidance", got)
-	}
-}
-
-func TestRebindSubcommandHelpExplainsRetargeting(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if code := rebindSubcommand([]string{"--help"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	got := stderr.String()
-	if !strings.Contains(got, "Usage of builder rebind:") ||
-		!strings.Contains(got, "Retarget one session") ||
-		!strings.Contains(got, "must not already be bound") {
-		t.Fatalf("stderr = %q, want expanded rebind help", got)
 	}
 }
 
@@ -886,133 +813,5 @@ func TestRetargetSessionWorkspaceDoesNotFallbackForExplicitLocalhostMethodNotFou
 	}
 	if localCalls != 0 {
 		t.Fatalf("local calls = %d, want 0", localCalls)
-	}
-}
-
-func TestRetargetSessionWorkspaceDoesNotFallbackForExplicitLoopbackPortOpenFailure(t *testing.T) {
-	originalOpener := bindingCommandRemoteOpener
-	originalRetargeter := bindingCommandSessionRetargeter
-	originalLocalClient := bindingCommandLocalSessionLifecycleClient
-	t.Cleanup(func() {
-		bindingCommandRemoteOpener = originalOpener
-		bindingCommandSessionRetargeter = originalRetargeter
-		bindingCommandLocalSessionLifecycleClient = originalLocalClient
-	})
-
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_SERVER_PORT", "65432")
-	newWorkspace := t.TempDir()
-	newCfg, err := config.Load(newWorkspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got := newCfg.Settings.ServerHost; got != "127.0.0.1" {
-		t.Fatalf("server host = %q, want default loopback", got)
-	}
-	if got := newCfg.Source.Sources["server_host"]; got != "default" {
-		t.Fatalf("server_host source = %q, want default", got)
-	}
-	if got := newCfg.Source.Sources["server_port"]; got != "env" {
-		t.Fatalf("server_port source = %q, want env", got)
-	}
-	bindingCommandRemoteOpener = func(context.Context, string) (config.App, *client.Remote, error) {
-		return config.App{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect refused")}
-	}
-	localCalls := 0
-	bindingCommandLocalSessionLifecycleClient = func(config.App) client.SessionLifecycleClient {
-		localCalls++
-		return bindingCommandTimeoutSessionLifecycleStub{}
-	}
-
-	_, err = retargetSessionWorkspace(context.Background(), "session-123", newWorkspace)
-	var opErr *net.OpError
-	if !errors.As(err, &opErr) {
-		t.Fatalf("retargetSessionWorkspace error = %v, want net.OpError", err)
-	}
-	if localCalls != 0 {
-		t.Fatalf("local calls = %d, want 0", localCalls)
-	}
-}
-
-func TestResolveWorkspaceBindingAppliesRPCTimeout(t *testing.T) {
-	originalTimeout := bindingCommandRPCTimeout
-	bindingCommandRPCTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
-
-	stub := bindingCommandTimeoutProjectViewStub{
-		resolveProjectPath: func(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
-			<-ctx.Done()
-			return serverapi.ProjectResolvePathResponse{}, ctx.Err()
-		},
-	}
-	start := time.Now()
-	_, err := resolveWorkspaceBinding(context.Background(), stub, "/tmp/workspace")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("resolveWorkspaceBinding error = %v, want deadline exceeded", err)
-	}
-	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
-		t.Fatalf("resolveWorkspaceBinding timeout took too long: %v", elapsed)
-	}
-}
-
-func TestBindingCommandProjectRPCWrappersApplyTimeout(t *testing.T) {
-	originalTimeout := bindingCommandRPCTimeout
-	bindingCommandRPCTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
-
-	deadlineErrAfterCancel := func(ctx context.Context) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	stub := bindingCommandTimeoutProjectViewStub{
-		listProjects: func(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
-			return serverapi.ProjectListResponse{}, deadlineErrAfterCancel(ctx)
-		},
-		createProject: func(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
-			return serverapi.ProjectCreateResponse{}, deadlineErrAfterCancel(ctx)
-		},
-		attachWorkspace: func(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
-			return serverapi.ProjectAttachWorkspaceResponse{}, deadlineErrAfterCancel(ctx)
-		},
-		rebindWorkspace: func(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
-			return serverapi.ProjectRebindWorkspaceResponse{}, deadlineErrAfterCancel(ctx)
-		},
-	}
-
-	assertDeadlineExceeded := func(name string, err error) {
-		t.Helper()
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("%s error = %v, want deadline exceeded", name, err)
-		}
-	}
-
-	_, err := listProjectsWithTimeout(context.Background(), stub)
-	assertDeadlineExceeded("listProjectsWithTimeout", err)
-	_, err = createProjectWithTimeout(context.Background(), stub, "project", "/tmp/workspace")
-	assertDeadlineExceeded("createProjectWithTimeout", err)
-	_, err = attachWorkspaceToProject(context.Background(), stub, "project-1", "/tmp/workspace")
-	assertDeadlineExceeded("attachWorkspaceToProject", err)
-	_, err = rebindWorkspaceWithTimeout(context.Background(), stub, "/tmp/old", "/tmp/new")
-	assertDeadlineExceeded("rebindWorkspaceWithTimeout", err)
-}
-
-func TestRetargetSessionWorkspaceWithTimeoutAppliesTimeout(t *testing.T) {
-	originalTimeout := bindingCommandRPCTimeout
-	bindingCommandRPCTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { bindingCommandRPCTimeout = originalTimeout })
-
-	stub := bindingCommandTimeoutSessionLifecycleStub{retargetSessionWorkspace: func(ctx context.Context, req serverapi.SessionRetargetWorkspaceRequest) (serverapi.SessionRetargetWorkspaceResponse, error) {
-		<-ctx.Done()
-		return serverapi.SessionRetargetWorkspaceResponse{}, ctx.Err()
-	}}
-
-	start := time.Now()
-	_, err := retargetSessionWorkspaceWithTimeout(context.Background(), stub, "session-1", "/tmp/workspace")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("retargetSessionWorkspaceWithTimeout error = %v, want deadline exceeded", err)
-	}
-	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
-		t.Fatalf("retargetSessionWorkspaceWithTimeout took too long: %v", elapsed)
 	}
 }

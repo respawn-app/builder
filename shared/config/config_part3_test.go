@@ -1,0 +1,740 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadRejectsUnknownLegacyTimeoutSettingNames(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[timeouts]
+bash_default_seconds = 42
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unknown bash_default_seconds settings key error")
+	}
+}
+
+func TestLoadShellOutputMaxCharsPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("shell_output_max_chars = 12000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ShellOutputMaxChars != 12000 {
+		t.Fatalf("expected file shell_output_max_chars=12000, got %d", cfg.Settings.ShellOutputMaxChars)
+	}
+	if got := cfg.Source.Sources["shell_output_max_chars"]; got != "file" {
+		t.Fatalf("expected shell_output_max_chars source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "18000")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.ShellOutputMaxChars != 18000 {
+		t.Fatalf("expected env shell_output_max_chars=18000, got %d", cfg.Settings.ShellOutputMaxChars)
+	}
+	if got := cfg.Source.Sources["shell_output_max_chars"]; got != "env" {
+		t.Fatalf("expected shell_output_max_chars source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "0")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid shell_output_max_chars")
+	}
+}
+
+func TestLoadMinimumExecToBgSecondsPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("minimum_exec_to_bg_seconds = 21\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.MinimumExecToBgSeconds != 21 {
+		t.Fatalf("expected file minimum_exec_to_bg_seconds=21, got %d", cfg.Settings.MinimumExecToBgSeconds)
+	}
+	if got := cfg.Source.Sources["minimum_exec_to_bg_seconds"]; got != "file" {
+		t.Fatalf("expected minimum_exec_to_bg_seconds source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "18")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.MinimumExecToBgSeconds != 18 {
+		t.Fatalf("expected env minimum_exec_to_bg_seconds=18, got %d", cfg.Settings.MinimumExecToBgSeconds)
+	}
+	if got := cfg.Source.Sources["minimum_exec_to_bg_seconds"]; got != "env" {
+		t.Fatalf("expected minimum_exec_to_bg_seconds source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "0")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid minimum_exec_to_bg_seconds")
+	}
+}
+
+func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("bg_shells_output = \"concise\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.BGShellsOutput != BGShellsOutputConcise {
+		t.Fatalf("expected file bg_shells_output=concise, got %q", cfg.Settings.BGShellsOutput)
+	}
+	if got := cfg.Source.Sources["bg_shells_output"]; got != "file" {
+		t.Fatalf("expected bg_shells_output source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "verbose")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.BGShellsOutput != BGShellsOutputVerbose {
+		t.Fatalf("expected env bg_shells_output=verbose, got %q", cfg.Settings.BGShellsOutput)
+	}
+	if got := cfg.Source.Sources["bg_shells_output"]; got != "env" {
+		t.Fatalf("expected bg_shells_output source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "loud")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid bg_shells_output")
+	}
+}
+
+func TestLoadShellPostprocessingPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[shell]\npostprocessing_mode = \"all\"\npostprocess_hook = \"/tmp/file-hook\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeAll {
+		t.Fatalf("expected file shell.postprocessing_mode=all, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/file-hook" {
+		t.Fatalf("expected file shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "file" {
+		t.Fatalf("expected shell.postprocessing_mode source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "file" {
+		t.Fatalf("expected shell.postprocess_hook source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "user")
+	t.Setenv("BUILDER_SHELL_POSTPROCESS_HOOK", "/tmp/env-hook")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Shell.PostprocessingMode != ShellPostprocessingModeUser {
+		t.Fatalf("expected env shell.postprocessing_mode=user, got %q", cfg.Settings.Shell.PostprocessingMode)
+	}
+	if cfg.Settings.Shell.PostprocessHook != "/tmp/env-hook" {
+		t.Fatalf("expected env shell.postprocess_hook, got %q", cfg.Settings.Shell.PostprocessHook)
+	}
+	if got := cfg.Source.Sources["shell.postprocessing_mode"]; got != "env" {
+		t.Fatalf("expected shell.postprocessing_mode source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["shell.postprocess_hook"]; got != "env" {
+		t.Fatalf("expected shell.postprocess_hook source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_POSTPROCESSING_MODE", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid shell.postprocessing_mode")
+	}
+}
+
+func TestLoadAcceptsCustomThinkingLevel(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_THINKING_LEVEL", "ultra")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ThinkingLevel != "ultra" {
+		t.Fatalf("expected custom thinking level preserved, got %q", cfg.Settings.ThinkingLevel)
+	}
+}
+
+func TestLoadExpandsTildePersistenceRootFromEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PERSISTENCE_ROOT", "~/.builder-custom")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder-custom") {
+		t.Fatalf("expanded persistence root mismatch: %q", got)
+	}
+}
+
+func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`openai_base_url = "http://file.local/v1"`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://env.local/v1")
+	cfg, err := Load(workspace, LoadOptions{OpenAIBaseURL: "http://cli.local/v1"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.OpenAIBaseURL != "http://cli.local/v1" {
+		t.Fatalf("expected cli openai base url, got %q", cfg.Settings.OpenAIBaseURL)
+	}
+	if got := cfg.Source.Sources["openai_base_url"]; got != "cli" {
+		t.Fatalf("expected openai_base_url source cli, got %q", got)
+	}
+}
+
+func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInheritance(t *testing.T) {
+	settings := defaultSettings()
+	settings.Model = "gpt-5.5"
+	settings.ThinkingLevel = ""
+	settings.Reviewer = ReviewerSettings{
+		Frequency:      "edits",
+		Model:          "",
+		ThinkingLevel:  "",
+		TimeoutSeconds: defaultReviewerTimeoutSec,
+		VerboseOutput:  false,
+	}
+
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		t.Fatalf("normalize settings for persistence: %v", err)
+	}
+	if normalized.Reviewer.Model != "gpt-5.5" {
+		t.Fatalf("expected reviewer model to inherit main model, got %q", normalized.Reviewer.Model)
+	}
+	if normalized.Reviewer.ThinkingLevel != "" {
+		t.Fatalf("expected reviewer thinking to stay disabled, got %q", normalized.Reviewer.ThinkingLevel)
+	}
+}
+
+func TestNormalizeSettingsForPersistence_AllowsProviderOverrideWithExplicitPersistedModel(t *testing.T) {
+	settings := defaultSettings()
+	settings.Model = "my-team-alias"
+	settings.ProviderOverride = "openai"
+
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		t.Fatalf("normalize settings for persistence: %v", err)
+	}
+	if normalized.ProviderOverride != "openai" {
+		t.Fatalf("expected provider_override preserved, got %q", normalized.ProviderOverride)
+	}
+}
+
+func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Timeouts.ModelRequestSeconds != 123 {
+		t.Fatalf("expected canonical env model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
+	}
+	if got := cfg.Source.Sources["timeouts.model_request_seconds"]; got != "env" {
+		t.Fatalf("expected timeouts.model_request_seconds source env, got %q", got)
+	}
+}
+
+func TestLoadStorePrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`store = true`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.Store {
+		t.Fatalf("expected file store=true")
+	}
+	if got := cfg.Source.Sources["store"]; got != "file" {
+		t.Fatalf("expected store source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_STORE", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Store {
+		t.Fatalf("expected env store=false")
+	}
+	if got := cfg.Source.Sources["store"]; got != "env" {
+		t.Fatalf("expected store source env, got %q", got)
+	}
+}
+
+func TestLoadIgnoresUnknownBuilderEnvVars(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
+	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("BUILDER_MODEL_TIMEOUT_SECONDS", "123")
+	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
+	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "15")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatal("expected unknown legacy env vars to be ignored")
+	}
+	if cfg.Settings.Timeouts.ModelRequestSeconds != defaultModelTimeoutSeconds {
+		t.Fatalf("expected unknown legacy env vars not to affect model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
+	}
+	if cfg.Settings.CompactionMode != CompactionModeLocal {
+		t.Fatalf("expected unknown legacy env vars not to affect compaction mode, got %q", cfg.Settings.CompactionMode)
+	}
+}
+
+func TestLoadRejectsRemovedReviewerMaxSuggestionsFileKey(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[reviewer]\nmax_suggestions = 15\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected removed reviewer.max_suggestions file key to be rejected")
+	}
+}
+
+func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`allow_non_cwd_edits = true`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.AllowNonCwdEdits {
+		t.Fatalf("expected file allow_non_cwd_edits=true")
+	}
+	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "file" {
+		t.Fatalf("expected allow_non_cwd_edits source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_ALLOW_NON_CWD_EDITS", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.AllowNonCwdEdits {
+		t.Fatalf("expected env allow_non_cwd_edits=false")
+	}
+	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "env" {
+		t.Fatalf("expected allow_non_cwd_edits source env, got %q", got)
+	}
+}
+
+func TestLoadDebugPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("debug = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.Debug {
+		t.Fatalf("expected file debug=true")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "file" {
+		t.Fatalf("expected debug source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Debug {
+		t.Fatalf("expected env debug=false")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "env" {
+		t.Fatalf("expected debug source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_DEBUG error")
+	}
+}
+
+func TestLoadServerHostPortPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("server_host = \"127.0.0.2\"\nserver_port = 54321\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ServerHost != "127.0.0.2" || cfg.Settings.ServerPort != 54321 {
+		t.Fatalf("unexpected server settings from file: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "file" {
+		t.Fatalf("expected server_host source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "file" {
+		t.Fatalf("expected server_port source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_HOST", "::1")
+	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.ServerHost != "::1" || cfg.Settings.ServerPort != 65432 {
+		t.Fatalf("unexpected server settings from env: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "env" {
+		t.Fatalf("expected server_host source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "env" {
+		t.Fatalf("expected server_port source env, got %q", got)
+	}
+	if got := ServerListenAddress(cfg); got != "[::1]:65432" {
+		t.Fatalf("ServerListenAddress = %q, want [::1]:65432", got)
+	}
+	if got := ServerHTTPBaseURL(cfg); got != "http://[::1]:65432" {
+		t.Fatalf("ServerHTTPBaseURL = %q, want http://[::1]:65432", got)
+	}
+	if got := ServerRPCURL(cfg); got != "ws://[::1]:65432/rpc" {
+		t.Fatalf("ServerRPCURL = %q, want ws://[::1]:65432/rpc", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_PORT", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_SERVER_PORT error")
+	}
+}
+
+func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`context_compaction_threshold_tokens = 123456`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS", "234567")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ContextCompactionThresholdTokens != 234567 {
+		t.Fatalf("expected env threshold override, got %d", cfg.Settings.ContextCompactionThresholdTokens)
+	}
+	if got := cfg.Source.Sources["context_compaction_threshold_tokens"]; got != "env" {
+		t.Fatalf("expected threshold source env, got %q", got)
+	}
+}
+
+func TestLoadCompactionModePrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("compaction_mode = \"local\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.CompactionMode != CompactionModeLocal {
+		t.Fatalf("expected file override compaction_mode=local, got %q", cfg.Settings.CompactionMode)
+	}
+	if got := cfg.Source.Sources["compaction_mode"]; got != "file" {
+		t.Fatalf("expected compaction_mode source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_COMPACTION_MODE", "none")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.CompactionMode != CompactionModeNone {
+		t.Fatalf("expected env override compaction_mode=none, got %q", cfg.Settings.CompactionMode)
+	}
+	if got := cfg.Source.Sources["compaction_mode"]; got != "env" {
+		t.Fatalf("expected compaction_mode source env, got %q", got)
+	}
+}
+
+func TestLoadRejectsRemovedUseNativeCompactionSetting(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("use_native_compaction = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unsupported use_native_compaction settings key error")
+	}
+}
+
+func TestLoadRejectsUnrelatedUnknownSettingKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-5\"\nfoo = 1\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unknown settings key error")
+	} else if !strings.Contains(err.Error(), "foo") {
+		t.Fatalf("expected unknown key name in error, got %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidCompactionMode(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("compaction_mode = \"remote\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid compaction_mode validation error")
+	}
+}
+
+func TestLoadModelContextWindowPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 350000\ncontext_compaction_threshold_tokens = 250000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_MODEL_CONTEXT_WINDOW", "420000")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ModelContextWindow != 420000 {
+		t.Fatalf("expected env model context window override, got %d", cfg.Settings.ModelContextWindow)
+	}
+	if got := cfg.Source.Sources["model_context_window"]; got != "env" {
+		t.Fatalf("expected model_context_window source env, got %q", got)
+	}
+}
+
+func TestLoadRejectsCompactionThresholdNotBelowContextWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 300000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected threshold/window validation error")
+	}
+}
+
+func TestLoadRejectsCompactionThresholdBelowHalfWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 149999\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected threshold minimum-window-percent validation error")
+	} else if !strings.Contains(err.Error(), "context_compaction_threshold_tokens must be >= 150000") {
+		t.Fatalf("expected threshold minimum-window-percent validation detail, got %v", err)
+	}
+}
+
+func TestLoadRejectsPreSubmitLeadBandBelowHalfWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 200000\npre_submit_compaction_lead_tokens = 100000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected pre-submit effective threshold validation error")
+	} else if !strings.Contains(err.Error(), "effective pre-submit threshold 100000, below 150000") {
+		t.Fatalf("expected pre-submit effective threshold validation detail, got %v", err)
+	}
+}

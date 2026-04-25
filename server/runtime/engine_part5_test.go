@@ -1,0 +1,811 @@
+package runtime
+
+import (
+	"builder/prompts"
+	"builder/server/llm"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/toolspec"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once for frequency=all, got %d", len(reviewerClient.calls))
+	}
+}
+
+func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:           "gpt-5",
+		FastModeEnabled: true,
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once, got %d", len(reviewerClient.calls))
+	}
+	if !reviewerClient.calls[0].FastMode {
+		t.Fatal("expected reviewer request to inherit fast mode")
+	}
+}
+
+func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["x"]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "" {
+		t.Fatalf("assistant content = %q, want empty", msg.Content)
+	}
+	if len(mainClient.calls) != 1 {
+		t.Fatalf("expected one main model call, got %d", len(mainClient.calls))
+	}
+	if len(reviewerClient.calls) != 0 {
+		t.Fatalf("expected reviewer not to run for NO_OP final, got %d calls", len(reviewerClient.calls))
+	}
+
+	finalAssistantContents := make([]string, 0)
+	noopFinalCount := 0
+	for _, persisted := range eng.snapshotMessages() {
+		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
+			finalAssistantContents = append(finalAssistantContents, persisted.Content)
+		}
+		if isNoopFinalAnswer(persisted) {
+			noopFinalCount++
+		}
+	}
+	if noopFinalCount != 1 {
+		t.Fatalf("noop final count = %d, want 1; messages=%+v", noopFinalCount, eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 1 || finalAssistantContents[0] != reviewerNoopToken {
+		t.Fatalf("expected hidden persisted noop final assistant message, got %q", finalAssistantContents)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	for _, entry := range snapshot.Entries {
+		if strings.Contains(entry.Text, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantEvents := 0
+	modelResponseEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventAssistantMessage {
+			assistantEvents++
+		}
+		if evt.Kind == EventModelResponse {
+			modelResponseEvents++
+		}
+	}
+	if assistantEvents != 0 {
+		t.Fatalf("expected no assistant_message events for NO_OP final, got %d", assistantEvents)
+	}
+	if modelResponseEvents != 0 {
+		t.Fatalf("expected no model_response_received events for NO_OP final, got %d", modelResponseEvents)
+	}
+}
+
+func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Custom: true, CustomInput: "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "edits",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "edit file")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once after patch edit, got %d", len(reviewerClient.calls))
+	}
+}
+
+func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global rule"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS: %v", err)
+	}
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Double-check test output before final handoff."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "original final" {
+		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected one reviewer call, got %d", len(reviewerClient.calls))
+	}
+	if len(mainClient.calls) != 3 {
+		t.Fatalf("expected 3 main calls (tool loop + final + follow-up), got %d", len(mainClient.calls))
+	}
+
+	req := mainClient.calls[2]
+	foundReviewInstruction := false
+	for _, message := range requestMessages(req) {
+		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Supervisor agent gave you suggestions") {
+			if message.MessageType != llm.MessageTypeReviewerFeedback {
+				t.Fatalf("expected reviewer feedback message type, got %+v", message)
+			}
+			foundReviewInstruction = true
+			break
+		}
+	}
+	if !foundReviewInstruction {
+		t.Fatalf("expected reviewer suggestions developer message in follow-up request")
+	}
+
+	reviewerReq := reviewerClient.calls[0]
+	if reviewerReq.SystemPrompt != prompts.ReviewerSystemPrompt {
+		t.Fatalf("unexpected reviewer prompt")
+	}
+	if reviewerReq.SessionID != reviewerSessionID(store.Meta().SessionID) {
+		t.Fatalf("expected reviewer session id suffix, got %q", reviewerReq.SessionID)
+	}
+	if len(requestMessages(reviewerReq)) == 0 {
+		t.Fatalf("expected reviewer request to include transcript entry messages")
+	}
+	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected reviewer message[0] to be environment meta developer message, got %+v", requestMessages(reviewerReq)[0])
+	}
+	agentsIdx := -1
+	environmentIdx := -1
+	boundaryIdx := -1
+	skillsMetaIdx := -1
+	for idx, message := range requestMessages(reviewerReq) {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD && strings.Contains(message.Content, "source: "+globalPath) {
+			agentsIdx = idx
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
+			environmentIdx = idx
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeSkills {
+			skillsMetaIdx = idx
+		}
+		if message.Role == llm.RoleDeveloper && message.Content == reviewerMetaBoundaryMessage {
+			boundaryIdx = idx
+			break
+		}
+	}
+	if environmentIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include environment context, got %+v", requestMessages(reviewerReq))
+	}
+	if boundaryIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", requestMessages(reviewerReq))
+	}
+	if agentsIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include AGENTS context, got %+v", requestMessages(reviewerReq))
+	}
+	if environmentIdx >= boundaryIdx {
+		t.Fatalf("expected environment metadata before boundary, env=%d boundary=%d", environmentIdx, boundaryIdx)
+	}
+	if agentsIdx <= environmentIdx {
+		t.Fatalf("expected AGENTS metadata after environment, agents=%d env=%d", agentsIdx, environmentIdx)
+	}
+	if skillsMetaIdx >= 0 && (skillsMetaIdx <= environmentIdx || skillsMetaIdx >= agentsIdx) {
+		t.Fatalf("expected skills metadata between environment and AGENTS when present, skills=%d env=%d agents=%d", skillsMetaIdx, environmentIdx, agentsIdx)
+	}
+	foundAgentLabel := false
+	foundToolCallEntry := false
+	foundToolResultEntry := false
+	for _, message := range requestMessages(reviewerReq)[boundaryIdx+1:] {
+		if message.Role != llm.RoleUser {
+			t.Fatalf("expected reviewer transcript entries after metadata to be user role messages, got %q", message.Role)
+		}
+		if strings.Contains(message.Content, "Agent:") {
+			foundAgentLabel = true
+		}
+		if strings.Contains(message.Content, "Tool call:") && strings.Contains(message.Content, "pwd") {
+			foundToolCallEntry = true
+		}
+		if strings.Contains(message.Content, "Tool result:") && strings.Contains(message.Content, "{\"tool\":\"exec_command\"}") {
+			foundToolResultEntry = true
+		}
+	}
+	if !foundAgentLabel {
+		t.Fatalf("expected reviewer request to include agent labels, messages=%+v", requestMessages(reviewerReq))
+	}
+	if !foundToolCallEntry {
+		t.Fatalf("expected reviewer request to include tool call transcript entries, messages=%+v", requestMessages(reviewerReq))
+	}
+	if !foundToolResultEntry {
+		t.Fatalf("expected reviewer request to include tool result transcript entries, messages=%+v", requestMessages(reviewerReq))
+	}
+	if len(reviewerReq.Items) == 0 {
+		t.Fatalf("expected reviewer request items to carry canonical transcript history")
+	}
+	if len(reviewerReq.Tools) != 0 {
+		t.Fatalf("expected reviewer request with no tools")
+	}
+	if reviewerReq.StructuredOutput == nil {
+		t.Fatalf("expected reviewer request structured output")
+	}
+	if reviewerReq.StructuredOutput.Name != "reviewer_suggestions" {
+		t.Fatalf("unexpected reviewer structured output name: %+v", reviewerReq.StructuredOutput)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundReviewerStatus := false
+	for _, entry := range snapshot.Entries {
+		if strings.Contains(entry.Text, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
+		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran") {
+			foundReviewerStatus = true
+		}
+	}
+	if !foundReviewerStatus {
+		t.Fatalf("expected reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	eventsMu.Lock()
+	recordedEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
+	reviewerStatusEventIdx := -1
+	for idx, evt := range recordedEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_status" {
+			reviewerStatusEventIdx = idx
+		}
+	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer events, got %+v", recordedEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event, got %+v", recordedEvents)
+	}
+	if reviewerStatusEventIdx < 0 {
+		t.Fatalf("expected reviewer status local entry event, got %+v", recordedEvents)
+	}
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > reviewerStatusEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> reviewer status event order, got %+v", recordedEvents)
+	}
+}
+
+func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundNoSuggestionsStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "no suggestions") {
+			foundNoSuggestionsStatus = true
+			break
+		}
+	}
+	if !foundNoSuggestionsStatus {
+		t.Fatalf("expected no-suggestions reviewer status entry, got %+v", snapshot.Entries)
+	}
+}
+
+func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `["should","be","ignored"]`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundNoSuggestionsStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "no suggestions") {
+			foundNoSuggestionsStatus = true
+			break
+		}
+	}
+	if !foundNoSuggestionsStatus {
+		t.Fatalf("expected no-suggestions reviewer status entry for array payload, got %+v", snapshot.Entries)
+	}
+}
+
+func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &streamRequiredClient{response: llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Check output formatting."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "original final" {
+		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	}
+	if reviewerClient.StreamCalls() != 1 {
+		t.Fatalf("expected one reviewer stream call, got %d", reviewerClient.StreamCalls())
+	}
+}
+
+func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundFollowUpAssistant := false
+	foundAppliedStatus := false
+	suggestionsIdx := -1
+	followUpIdx := -1
+	for idx, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_suggestions" && strings.Contains(entry.Text, "Supervisor suggested:") {
+			suggestionsIdx = idx
+			if entry.OngoingText != "Supervisor made 1 suggestion." {
+				t.Fatalf("expected compact reviewer suggestions ongoing text, got %+v", entry)
+			}
+		}
+		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
+			foundFollowUpAssistant = true
+			if followUpIdx < 0 {
+				followUpIdx = idx
+			}
+		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran: 1 suggestion, applied.") {
+			foundAppliedStatus = true
+		}
+	}
+	if suggestionsIdx < 0 {
+		t.Fatalf("expected reviewer suggestions status entry in snapshot, got %+v", snapshot.Entries)
+	}
+	if !foundFollowUpAssistant {
+		t.Fatalf("expected follow-up assistant message in snapshot, got %+v", snapshot.Entries)
+	}
+	if followUpIdx >= 0 && suggestionsIdx > followUpIdx {
+		t.Fatalf("expected reviewer suggestions to appear before follow-up assistant output, got %+v", snapshot.Entries)
+	}
+	if !foundAppliedStatus {
+		t.Fatalf("expected applied reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	eventsMu.Lock()
+	deferredEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	originalFinalEventIdx := -1
+	reviewerSuggestionsEventIdx := -1
+	assistantEventIdx := -1
+	reviewerStatusIdx := -1
+	reviewerEventIdx := -1
+	for idx, evt := range deferredEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			originalFinalEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_suggestions" {
+			reviewerSuggestionsEventIdx = idx
+		}
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
+			assistantEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_status" && strings.Contains(evt.LocalEntry.Text, "applied") {
+			reviewerStatusIdx = idx
+		}
+		if evt.Kind == EventReviewerCompleted && evt.Reviewer != nil && evt.Reviewer.Outcome == "applied" {
+			reviewerEventIdx = idx
+			if evt.CommittedTranscriptChanged {
+				t.Fatalf("expected reviewer completion to avoid committed transcript advancement, got %+v", evt)
+			}
+		}
+	}
+	if assistantEventIdx < 0 {
+		t.Fatalf("expected follow-up assistant event, got %+v", deferredEvents)
+	}
+	if originalFinalEventIdx < 0 {
+		t.Fatalf("expected original final assistant event before reviewer follow-up, got %+v", deferredEvents)
+	}
+	if reviewerSuggestionsEventIdx < 0 {
+		t.Fatalf("expected reviewer suggestions local entry event before reviewer follow-up, got %+v", deferredEvents)
+	}
+	if reviewerStatusIdx < 0 {
+		t.Fatalf("expected reviewer status local entry event, got %+v", deferredEvents)
+	}
+	if reviewerEventIdx < 0 {
+		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
+	}
+	if originalFinalEventIdx > reviewerSuggestionsEventIdx || reviewerSuggestionsEventIdx > assistantEventIdx || assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
+		t.Fatalf("expected original final -> reviewer suggestions -> updated final -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	restoredSnapshot := restored.ChatSnapshot()
+	foundRestoredSuggestions := false
+	for _, entry := range restoredSnapshot.Entries {
+		if entry.Role != "reviewer_suggestions" || !strings.Contains(entry.Text, "Supervisor suggested:") {
+			continue
+		}
+		foundRestoredSuggestions = true
+		if entry.OngoingText != "Supervisor made 1 suggestion." {
+			t.Fatalf("expected restored compact reviewer suggestions ongoing text, got %+v", entry)
+		}
+	}
+	if !foundRestoredSuggestions {
+		t.Fatalf("expected restored reviewer suggestions entry, got %+v", restoredSnapshot.Entries)
+	}
+}

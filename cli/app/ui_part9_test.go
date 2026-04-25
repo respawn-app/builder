@@ -1,0 +1,531 @@
+package app
+
+import (
+	"builder/cli/tui"
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/tools"
+	"builder/server/tools/askquestion"
+	"builder/shared/toolspec"
+	"context"
+	"encoding/json"
+	"errors"
+	tea "github.com/charmbracelet/bubbletea"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestReviewerProgressKeepsInputEditable(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "keep this draft"
+
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
+	started := next.(*uiModel)
+	if !started.reviewerBlocking {
+		t.Fatal("expected reviewer state to be marked running")
+	}
+	lines := started.renderInputLines(80, uiThemeStyles("dark"))
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "keep this draft") {
+		t.Fatalf("expected original draft visible while reviewer runs, got %q", plain)
+	}
+
+	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	locked := next.(*uiModel)
+	if locked.input != "keep this draftx" {
+		t.Fatalf("expected key input accepted while reviewer runs, got %q", locked.input)
+	}
+
+	next, _ = locked.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerCompleted}))
+	completed := next.(*uiModel)
+	if completed.reviewerBlocking {
+		t.Fatal("expected reviewer state cleared after completion")
+	}
+	lines = completed.renderInputLines(80, uiThemeStyles("dark"))
+	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "keep this draftx") {
+		t.Fatalf("expected edited draft retained after reviewer completion, got %q", plain)
+	}
+}
+
+func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "steer after review"
+
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
+	started := next.(*uiModel)
+	if !started.reviewerRunning {
+		t.Fatal("expected reviewer to be running")
+	}
+	if started.isInputLocked() {
+		t.Fatal("did not expect input lock while reviewer is running")
+	}
+
+	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 0 {
+		t.Fatalf("did not expect post-turn queue for reviewer steering, got %+v", updated.queued)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "steer after review" {
+		t.Fatalf("expected reviewer steering injected for earliest flush, got %+v", updated.pendingInjected)
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock while waiting for reviewer steering flush")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared immediately after queueing reviewer steering, got %q", updated.input)
+	}
+}
+
+func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;74;25M")})
+	updated := next.(*uiModel)
+	if updated.input != "draft" {
+		t.Fatalf("expected mouse sgr sequence ignored, got %q", updated.input)
+	}
+
+	longBurst := "[<64;81;40M[<64;81;40M[<64;80;40M[<64;80;40M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(longBurst)})
+	updated = next.(*uiModel)
+	if updated.input != "draft" {
+		t.Fatalf("expected long mouse sgr burst ignored, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected normal runes to still insert, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;63;24M")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected up-scroll mouse sgr ignored, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<65;69;20M")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected down-scroll mouse sgr ignored, got %q", updated.input)
+	}
+}
+
+func TestMouseSGRSplitEscAndRunesDoNotArmRollback(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected esc to arm rollback window before potential sgr continuation")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;63;24M")})
+	updated = next.(*uiModel)
+	if !updated.lastEscAt.IsZero() {
+		t.Fatal("expected split mouse sgr continuation to clear rollback esc arming")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected split sgr payload ignored, got %q", updated.input)
+	}
+}
+
+type statusLineFakeClient struct{}
+
+type statusLineFastClient struct{}
+
+type statusLineAzureClient struct{}
+
+type busyToggleFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	calls     int
+	delay     time.Duration
+}
+
+type requestCaptureFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	requests  []llm.Request
+}
+
+func (f *busyToggleFakeClient) Generate(ctx context.Context, _ llm.Request) (llm.Response, error) {
+	if f.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return llm.Response{}, ctx.Err()
+		case <-time.After(f.delay):
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *busyToggleFakeClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *requestCaptureFakeClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *requestCaptureFakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
+}
+
+func (f *requestCaptureFakeClient) Requests() []llm.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]llm.Request, len(f.requests))
+	copy(out, f.requests)
+	return out
+}
+
+type busyTogglePatchTool struct {
+	delay time.Duration
+}
+
+func (t busyTogglePatchTool) Name() toolspec.ID {
+	return toolspec.ToolPatch
+}
+
+func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
+	if t.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return tools.Result{}, ctx.Err()
+		case <-time.After(t.delay):
+		}
+	}
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: json.RawMessage(`{"ok":true}`)}, nil
+}
+
+func (statusLineFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineFastClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineFastClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
+}
+
+func (statusLineAzureClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}, nil
+}
+
+func TestHelpDismissesOnRegisteredKeyAndAppliesAction(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected help dismissed by registered key")
+	}
+	if updated.input != "x" {
+		t.Fatalf("expected keypress to keep its normal behavior, got %q", updated.input)
+	}
+}
+
+func TestHelpDismissesOnAnyKeypress(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: "Proceed?", Suggestions: []string{"Yes", "No"}}})
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected any keypress to dismiss help")
+	}
+	if testAskFreeform(updated) {
+		t.Fatal("did not expect plain rune key to alter ask prompt state")
+	}
+}
+
+func TestQuestionMarkTogglesHelpWhenInputIsEmpty(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected ? to open help from an empty prompt")
+	}
+}
+
+func TestQuestionMarkInsertsLiteralWhenInputIsNotEmpty(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("did not expect ? to open help while a draft is present")
+	}
+	if updated.input != "draft?" {
+		t.Fatalf("expected ? to be inserted into the draft, got %q", updated.input)
+	}
+}
+
+func TestAltQuestionMarkTogglesHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}, Alt: true})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected alt+? to open help")
+	}
+}
+
+func TestF1TogglesHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected f1 to open help")
+	}
+}
+
+func TestAltSlashTogglesHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected alt+/ to open help")
+	}
+}
+
+func TestHelpToggleClearsRollbackEscArming(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected first esc to arm rollback window")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true})
+	updated = next.(*uiModel)
+	if !updated.helpVisible {
+		t.Fatal("expected alt+/ to open help")
+	}
+	if !updated.lastEscAt.IsZero() {
+		t.Fatal("expected help toggle to clear rollback esc arming")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.helpVisible {
+		t.Fatal("expected esc to dismiss help")
+	}
+	if testRollbackSelecting(updated) {
+		t.Fatal("did not expect esc after help toggle to open rollback selection")
+	}
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected esc after help toggle to start a fresh rollback arming window")
+	}
+}
+
+func TestCmdSlashCSIUTogglesHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(adaptCustomKeyMsg(testBubbleTeaUnknownCSISequence("\x1b[47;10u")))
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected cmd+/ CSI-u sequence to open help")
+	}
+}
+
+func TestHelpToggleKeyHidesVisibleHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(customKeyMsg{Kind: customKeyHelp})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected help toggle key to hide visible help")
+	}
+}
+
+func TestHelpToggleIgnoredInDetailMode(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.forwardToView(tui.ToggleModeMsg{})
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("did not expect help to open in detail mode")
+	}
+}
+
+func TestTranscriptToggleClosesVisibleHelp(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected transcript toggle to hide help")
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode after transcript toggle, got %q", updated.view.Mode())
+	}
+}
+
+func TestHelpRollbackSelectionDismissesAndMovesSelection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "one"}, {Role: "assistant", Text: "a"}, {Role: "user", Text: "two"}}
+	if !m.startRollbackSelectionMode() {
+		t.Fatal("expected rollback selection mode to start")
+	}
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	updated.rollback.selection = 0
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected rollback selection key to dismiss help")
+	}
+	if testRollbackSelection(updated) != 1 {
+		t.Fatalf("expected rollback selection to move, got %d", testRollbackSelection(updated))
+	}
+}
+
+func TestHelpRollbackEditDismissesAndReturnsToSelection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "one"}, {Role: "assistant", Text: "a"}, {Role: "user", Text: "two"}}
+	if !m.startRollbackSelectionMode() {
+		t.Fatal("expected rollback selection mode to start")
+	}
+	if _, ok := m.beginRollbackEditing(); !ok {
+		t.Fatal("expected rollback editing mode to start")
+	}
+	m.input = ""
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected rollback edit key to dismiss help")
+	}
+	if !testRollbackSelecting(updated) || testRollbackEditing(updated) {
+		t.Fatalf("expected esc to return to rollback selection, rollbackMode=%t rollbackEditing=%t", testRollbackSelecting(updated), testRollbackEditing(updated))
+	}
+}

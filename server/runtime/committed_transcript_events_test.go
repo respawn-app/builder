@@ -80,7 +80,8 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 			Scope:  cachewarn.ScopeConversation,
 			Reason: cachewarn.ReasonNonPostfix,
 		},
-	}, llm.Usage{}); err != nil {
+		previousCachedInputTokens: 10,
+	}, llm.Usage{HasCachedInputTokens: true, CachedInputTokens: 0}); err != nil {
 		t.Fatalf("observe prompt cache response: %v", err)
 	}
 	assertEventFlags(t, events[start:], []eventFlagExpectation{{kind: EventCacheWarning, stepID: "cache-step", committedChanged: true}})

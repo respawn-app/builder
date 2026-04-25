@@ -1,36 +1,29 @@
 package app
 
 import (
-	"context"
-	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
-
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	"builder/server/metadata"
-	"builder/server/primaryrun"
 	"builder/server/projectview"
 	"builder/server/registry"
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
 	"builder/server/sessionlaunch"
 	"builder/server/sessionlifecycle"
-	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
-	"builder/shared/testopenai"
+	"context"
+	"errors"
 	"github.com/google/uuid"
+	"io"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 )
 
 type testEmbeddedServer struct {
@@ -142,8 +135,11 @@ func (s *testEmbeddedServer) Close() error {
 	s.metadataStore = nil
 	return err
 }
-func (s *testEmbeddedServer) OwnsServer() bool   { return true }
+
+func (s *testEmbeddedServer) OwnsServer() bool { return true }
+
 func (s *testEmbeddedServer) Config() config.App { return s.cfg }
+
 func (s *testEmbeddedServer) BindProject(_ context.Context, projectID string) (embeddedServer, error) {
 	if s == nil {
 		return nil, errors.New("test embedded server is required")
@@ -193,6 +189,7 @@ func (s *testEmbeddedServer) BindProjectWorkspace(ctx context.Context, projectID
 	}
 	return bound, nil
 }
+
 func (s *testEmbeddedServer) ProjectID() string {
 	if strings.TrimSpace(s.projectID) != "" {
 		return s.projectID
@@ -244,37 +241,53 @@ func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient {
 	}
 	return client.NewLoopbackProjectViewClient(service)
 }
+
 func (s *testEmbeddedServer) AskViewClient() client.AskViewClient { return s.askViewClient }
+
 func (s *testEmbeddedServer) ApprovalViewClient() client.ApprovalViewClient {
 	return s.approvalViewClient
 }
+
 func (s *testEmbeddedServer) PromptControlClient() client.PromptControlClient {
 	return s.promptControlClient
 }
+
 func (s *testEmbeddedServer) PromptActivityClient() client.PromptActivityClient {
 	return s.promptActivityClient
 }
-func (s *testEmbeddedServer) ContainerDir() string                  { return s.containerDir }
+
+func (s *testEmbeddedServer) ContainerDir() string { return s.containerDir }
+
 func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
-func (s *testEmbeddedServer) AuthManager() *auth.Manager            { return s.authManager }
+
+func (s *testEmbeddedServer) AuthManager() *auth.Manager { return s.authManager }
+
 func (s *testEmbeddedServer) AuthStatusClient() client.AuthStatusClient {
 	return nil
 }
+
 func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState { return s.fastModeState }
-func (s *testEmbeddedServer) Background() *shelltool.Manager        { return s.background }
+
+func (s *testEmbeddedServer) Background() *shelltool.Manager { return s.background }
+
 func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter {
 	return s.backgroundRouter
 }
+
 func (s *testEmbeddedServer) RunPromptClient() client.RunPromptClient { return s.runPromptClient }
+
 func (s *testEmbeddedServer) ProcessControlClient() client.ProcessControlClient {
 	return s.processControlClient
 }
+
 func (s *testEmbeddedServer) ProcessOutputClient() client.ProcessOutputClient {
 	return s.processOutputClient
 }
+
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
 }
+
 func (s *testEmbeddedServer) RuntimeControlClient() client.RuntimeControlClient {
 	if s.runtimeControlClient != nil {
 		return s.runtimeControlClient
@@ -282,12 +295,14 @@ func (s *testEmbeddedServer) RuntimeControlClient() client.RuntimeControlClient 
 	registry := registry.NewRuntimeRegistry()
 	return client.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry, registry))
 }
+
 func (s *testEmbeddedServer) sessionStoreRegistry() *registry.SessionStoreRegistry {
 	if s.sessionStores == nil {
 		s.sessionStores = registry.NewSessionStoreRegistry()
 	}
 	return s.sessionStores
 }
+
 func (s *testEmbeddedServer) SessionLaunchClient() client.SessionLaunchClient {
 	if s.sessionLaunch != nil {
 		return s.sessionLaunch
@@ -304,9 +319,11 @@ func (s *testEmbeddedServer) SessionLaunchClient() client.SessionLaunchClient {
 	service := sessionlaunch.NewService(launch.Planner{Config: s.cfg, ContainerDir: s.containerDir}, s.sessionStoreRegistry())
 	return client.NewLoopbackSessionLaunchClient(service)
 }
+
 func (s *testEmbeddedServer) SessionActivityClient() client.SessionActivityClient {
 	return s.sessionActivity
 }
+
 func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s.sessionLifecycle != nil {
 		return s.sessionLifecycle
@@ -331,21 +348,26 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 	service := sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager).WithPersistenceRoot(s.cfg.PersistenceRoot).WithControllerLeaseVerifier(noopEmbeddedSessionLifecycleLeaseVerifier{})
 	return client.NewLoopbackSessionLifecycleClient(service)
 }
+
 func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient {
 	return s.sessionRuntime
 }
+
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
 }
+
 func (s *testEmbeddedServer) WorktreeClient() client.WorktreeClient {
 	return nil
 }
+
 func (s *testEmbeddedServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s.prepareRuntime != nil {
 		return s.prepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
 	}
 	return nil, errors.New("test embedded server prepare runtime not configured")
 }
+
 func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
 	if s.reauthenticate != nil {
 		return s.reauthenticate(ctx, interactor)
@@ -897,625 +919,4 @@ func waitForSessionActivityEvent(t *testing.T, sub serverapi.SessionActivitySubs
 	}
 	t.Fatal("timed out waiting for matching session activity event")
 	return clientui.Event{}
-}
-
-func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-
-	activity := server.inner.SessionActivityClient()
-	if activity == nil {
-		t.Fatal("expected session activity client")
-	}
-	sub, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
-	if err != nil {
-		t.Fatalf("SubscribeSessionActivity: %v", err)
-	}
-	defer func() { _ = sub.Close() }()
-
-	processID := "bg-1000"
-	server.inner.BackgroundRouter().Handle(shelltool.Event{
-		Type:             shelltool.EventCompleted,
-		NoticeSuppressed: true,
-		Snapshot: shelltool.Snapshot{
-			ID:             processID,
-			OwnerSessionID: plan.SessionID,
-			State:          "completed",
-			Command:        "sleep 1; printf done",
-			Workdir:        workspace,
-			LogPath:        "/tmp/bg-1000.log",
-		},
-		Preview: "done",
-	})
-
-	evt := waitForSessionActivityEvent(t, sub, 5*time.Second, func(evt clientui.Event) bool {
-		return evt.Kind == clientui.EventBackgroundUpdated && evt.Background != nil && evt.Background.ID == processID && evt.Background.Type == "completed"
-	})
-	if evt.Background.State != "completed" {
-		t.Fatalf("background state = %q, want completed", evt.Background.State)
-	}
-	if !evt.Background.NoticeSuppressed {
-		t.Fatal("expected delivery-only test event to stay suppressed")
-	}
-}
-
-func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test projected background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-
-	processID := "bg-1001"
-	server.inner.BackgroundRouter().Handle(shelltool.Event{
-		Type:             shelltool.EventCompleted,
-		NoticeSuppressed: true,
-		Snapshot: shelltool.Snapshot{
-			ID:             processID,
-			OwnerSessionID: plan.SessionID,
-			State:          "completed",
-			Command:        "sleep 1; printf done",
-			Workdir:        workspace,
-			LogPath:        "/tmp/bg-1001.log",
-		},
-		Preview: "done",
-	})
-
-	select {
-	case evt := <-runtimePlan.Wiring.runtimeEvents:
-		if evt.Kind != clientui.EventBackgroundUpdated {
-			t.Fatalf("projected event kind = %q, want %q", evt.Kind, clientui.EventBackgroundUpdated)
-		}
-		if evt.Background == nil || evt.Background.ID != processID || evt.Background.Type != "completed" {
-			t.Fatalf("unexpected projected background event: %+v", evt.Background)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for projected background completion event")
-	}
-}
-
-func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process control")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-	if runtimePlan.Wiring.processControls == nil {
-		t.Fatal("expected PrepareRuntime to wire process control client")
-	}
-
-	controls := &stubEmbeddedProcessControlClient{inlineResp: serverapi.ProcessInlineOutputResponse{Output: "remote preview", LogPath: "/tmp/remote.log"}}
-	runtimePlan.Wiring.processControls = controls
-	processClient := newUIProcessClientWithReads(nil, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
-
-	preview, logPath, err := processClient.InlineOutput("proc-1", 12_000)
-	if err != nil {
-		t.Fatalf("InlineOutput: %v", err)
-	}
-	if preview != "remote preview" || logPath != "/tmp/remote.log" {
-		t.Fatalf("unexpected inline output payload preview=%q logPath=%q", preview, logPath)
-	}
-	if err := processClient.KillProcess("proc-1"); err != nil {
-		t.Fatalf("KillProcess: %v", err)
-	}
-	if len(controls.killed) != 1 || controls.killed[0] != "proc-1" {
-		t.Fatalf("expected shared process control client to handle kill, got %+v", controls.killed)
-	}
-}
-
-func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process output")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-	if runtimePlan.Wiring.processOutput == nil {
-		t.Fatal("expected PrepareRuntime to wire process output client")
-	}
-}
-
-func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded prompt activity parity")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-
-	askDone := make(chan struct {
-		resp askquestion.Response
-		err  error
-	}, 1)
-	go func() {
-		resp, err := server.inner.AwaitPromptResponse(context.Background(), plan.SessionID, askquestion.Request{
-			ID:                     "ask-embedded-1",
-			Question:               "Pick one",
-			Suggestions:            []string{"one", "two"},
-			RecommendedOptionIndex: 2,
-		})
-		askDone <- struct {
-			resp askquestion.Response
-			err  error
-		}{resp: resp, err: err}
-	}()
-	waitForPendingAskResources(t, server.AskViewClient(), plan.SessionID, 1)
-	askEvt := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
-	if askEvt.req.ID != "ask-embedded-1" || askEvt.req.Question != "Pick one" {
-		t.Fatalf("unexpected ask event: %+v", askEvt.req)
-	}
-	askEvt.reply <- askReply{response: askquestion.Response{RequestID: askEvt.req.ID, SelectedOptionNumber: 2}}
-	select {
-	case result := <-askDone:
-		if result.err != nil {
-			t.Fatalf("AwaitPromptResponse ask: %v", result.err)
-		}
-		if result.resp.RequestID != "ask-embedded-1" || result.resp.SelectedOptionNumber != 2 {
-			t.Fatalf("unexpected ask response: %+v", result.resp)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for embedded ask response")
-	}
-	waitForPendingAskResources(t, server.AskViewClient(), plan.SessionID, 0)
-
-	approvalDone := make(chan struct {
-		resp askquestion.Response
-		err  error
-	}, 1)
-	go func() {
-		resp, err := server.inner.AwaitPromptResponse(context.Background(), plan.SessionID, askquestion.Request{
-			ID:              "approval-embedded-1",
-			Question:        "Approve it?",
-			Approval:        true,
-			ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}},
-		})
-		approvalDone <- struct {
-			resp askquestion.Response
-			err  error
-		}{resp: resp, err: err}
-	}()
-	waitForPendingApprovalResources(t, server.ApprovalViewClient(), plan.SessionID, 1)
-	approvalEvt := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
-	if !approvalEvt.req.Approval || approvalEvt.req.ID != "approval-embedded-1" {
-		t.Fatalf("unexpected approval event: %+v", approvalEvt.req)
-	}
-	approvalEvt.reply <- askReply{response: askquestion.Response{RequestID: approvalEvt.req.ID, Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce, Commentary: "trusted"}}}
-	select {
-	case result := <-approvalDone:
-		if result.err != nil {
-			t.Fatalf("AwaitPromptResponse approval: %v", result.err)
-		}
-		if result.resp.RequestID != "approval-embedded-1" || result.resp.Approval == nil || result.resp.Approval.Decision != askquestion.ApprovalDecisionAllowOnce || result.resp.Approval.Commentary != "trusted" {
-			t.Fatalf("unexpected approval response: %+v", result.resp)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for embedded approval response")
-	}
-	waitForPendingApprovalResources(t, server.ApprovalViewClient(), plan.SessionID, 0)
-}
-
-func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-
-	manager := server.inner.Background()
-	if manager == nil {
-		t.Fatal("expected server background manager")
-	}
-	manager.SetMinimumExecToBgTime(fastBackgroundTestYield)
-	result, err := manager.Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"/bin/sh", "-lc", "printf 'embedded process output\n'; sleep 1"},
-		DisplayCommand: "printf 'embedded process output'; sleep 1",
-		Workdir:        workspace,
-		YieldTime:      fastBackgroundTestYield,
-		OwnerSessionID: plan.SessionID,
-	})
-	if err != nil {
-		t.Fatalf("Background().Start: %v", err)
-	}
-	if !result.Backgrounded {
-		t.Fatal("expected backgrounded process")
-	}
-
-	proc := waitForRemoteProcess(t, server.ProcessViewClient(), plan.SessionID, result.SessionID)
-	if proc.OwnerSessionID != plan.SessionID {
-		t.Fatalf("unexpected process owner: %+v", proc)
-	}
-
-	outputSub, err := server.ProcessOutputClient().SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID, OffsetBytes: 0})
-	if err != nil {
-		t.Fatalf("SubscribeProcessOutput: %v", err)
-	}
-	defer func() { _ = outputSub.Close() }()
-	chunk, err := outputSub.Next(context.Background())
-	if err != nil {
-		t.Fatalf("ProcessOutput Next: %v", err)
-	}
-	if !strings.Contains(chunk.Text, "embedded process output") {
-		t.Fatalf("unexpected process output chunk: %+v", chunk)
-	}
-
-	inlineResp := waitForRemoteInlineOutput(t, server.ProcessControlClient(), result.SessionID)
-	if !strings.Contains(inlineResp.Output, "embedded process output") {
-		t.Fatalf("unexpected inline output: %q", inlineResp.Output)
-	}
-
-	if _, err := server.ProcessControlClient().KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: uuid.NewString(), ProcessID: result.SessionID}); err != nil {
-		t.Fatalf("KillProcess: %v", err)
-	}
-	waitForRemoteProcessExit(t, server.ProcessViewClient(), result.SessionID)
-}
-
-func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	registerAppWorkspace(t, workspace)
-
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime primary run gate")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-	if runtimePlan.Wiring.runtimeClient == nil {
-		t.Fatal("expected PrepareRuntime to wire guarded runtime client")
-	}
-
-	lease, err := server.inner.AcquirePrimaryRun(plan.SessionID)
-	if err != nil {
-		t.Fatalf("AcquirePrimaryRun: %v", err)
-	}
-	defer lease.Release()
-	if _, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
-		t.Fatalf("SubmitUserMessage error = %v, want active primary run", err)
-	}
-}
-
-func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunInFlight(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
-	registerAppWorkspace(t, workspace)
-
-	firstStarted := make(chan struct{})
-	firstRelease := make(chan struct{})
-	var requests atomic.Int32
-	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if testopenai.HandleInputTokenCount(w, r, 11) {
-			return
-		}
-		if r.URL.Path != "/responses" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
-			t.Fatal("expected authorization header")
-		}
-		index := int(requests.Add(1))
-		switch index {
-		case 1:
-			close(firstStarted)
-			<-firstRelease
-		case 2:
-		default:
-			t.Fatalf("unexpected responses request index %d", index)
-		}
-		reply := map[int]string{1: "first reply", 2: "second reply"}[index]
-		testopenai.WriteCompletedResponseStream(w, reply, 11, 7)
-	}))
-	defer responseServer.Close()
-
-	server, err := startEmbeddedServer(context.Background(), Options{
-		WorkspaceRoot:         workspace,
-		WorkspaceRootExplicit: true,
-		Model:                 "gpt-5",
-		OpenAIBaseURL:         responseServer.URL,
-		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractor())
-	if err != nil {
-		t.Fatalf("start embedded server: %v", err)
-	}
-	defer func() { _ = server.Close() }()
-
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime in-flight primary run gate")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
-	defer runtimePlan.Close()
-
-	type submitResult struct {
-		message string
-		err     error
-	}
-	firstDone := make(chan submitResult, 1)
-	go func() {
-		message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "first prompt")
-		firstDone <- submitResult{message: message, err: err}
-	}()
-
-	select {
-	case <-firstStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for first submit to start")
-	}
-
-	if _, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "second prompt"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
-		t.Fatalf("second SubmitUserMessage error = %v, want active primary run", err)
-	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("responses request count during rejected concurrent submit = %d, want 1", got)
-	}
-
-	close(firstRelease)
-	select {
-	case result := <-firstDone:
-		if result.err != nil {
-			t.Fatalf("first SubmitUserMessage error: %v", result.err)
-		}
-		if result.message != "first reply" {
-			t.Fatalf("first SubmitUserMessage message = %q, want first reply", result.message)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for first submit to finish")
-	}
-
-	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "third prompt")
-	if err != nil {
-		t.Fatalf("third SubmitUserMessage error: %v", err)
-	}
-	if message != "second reply" {
-		t.Fatalf("third SubmitUserMessage message = %q, want second reply", message)
-	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("responses request count after third submit = %d, want 2", got)
-	}
-}
-
-func TestPrepareSharedRuntimeUsesCallerContextForAttachRPCs(t *testing.T) {
-	ctxKey := struct{}{}
-	ctxValue := "attach-context"
-	promptErr := errors.New("prompt subscribe failed")
-	server := &testEmbeddedServer{
-		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
-				if got := ctx.Value(ctxKey); got != ctxValue {
-					t.Fatalf("activate context value = %v, want %v", got, ctxValue)
-				}
-				if req.SessionID != "session-1" {
-					t.Fatalf("unexpected activate request: %+v", req)
-				}
-				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
-			},
-			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
-				return serverapi.SessionRuntimeReleaseResponse{}, nil
-			},
-		},
-		sessionActivity: &recordingSessionActivityClient{
-			subscribe: func(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
-				if got := ctx.Value(ctxKey); got != ctxValue {
-					t.Fatalf("session activity context value = %v, want %v", got, ctxValue)
-				}
-				if req.SessionID != "session-1" {
-					t.Fatalf("unexpected session activity request: %+v", req)
-				}
-				return noOpSessionActivitySubscription{}, nil
-			},
-		},
-		promptActivityClient: &recordingPromptActivityClient{
-			subscribe: func(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
-				if got := ctx.Value(ctxKey); got != ctxValue {
-					t.Fatalf("prompt activity context value = %v, want %v", got, ctxValue)
-				}
-				if req.SessionID != "session-1" {
-					t.Fatalf("unexpected prompt activity request: %+v", req)
-				}
-				return nil, promptErr
-			},
-		},
-	}
-
-	_, err := prepareSharedRuntime(context.WithValue(context.Background(), ctxKey, ctxValue), server, sessionLaunchPlan{SessionID: "session-1", WorkspaceRoot: "/tmp/workspace"}, io.Discard, "test")
-	if !errors.Is(err, promptErr) {
-		t.Fatalf("prepareSharedRuntime error = %v, want %v", err, promptErr)
-	}
-}
-
-func TestPrepareSharedRuntimeReleaseUsesBoundedContextOnFailure(t *testing.T) {
-	promptErr := errors.New("prompt subscribe failed")
-	released := make(chan context.Context, 1)
-	server := &testEmbeddedServer{
-		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
-				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
-			},
-			release: func(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
-				released <- ctx
-				if req.SessionID != "session-1" {
-					t.Fatalf("unexpected release request: %+v", req)
-				}
-				if req.LeaseID != "lease-1" {
-					t.Fatalf("release lease id = %q, want lease-1", req.LeaseID)
-				}
-				return serverapi.SessionRuntimeReleaseResponse{}, nil
-			},
-		},
-		sessionActivity: &recordingSessionActivityClient{
-			subscribe: func(context.Context, serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
-				return noOpSessionActivitySubscription{}, nil
-			},
-		},
-		promptActivityClient: &recordingPromptActivityClient{
-			subscribe: func(context.Context, serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
-				return nil, promptErr
-			},
-		},
-	}
-
-	_, err := prepareSharedRuntime(context.Background(), server, sessionLaunchPlan{SessionID: "session-1", WorkspaceRoot: "/tmp/workspace"}, io.Discard, "test")
-	if !errors.Is(err, promptErr) {
-		t.Fatalf("prepareSharedRuntime error = %v, want %v", err, promptErr)
-	}
-	select {
-	case ctx := <-released:
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatal("expected bounded release context deadline")
-		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 || remaining > runtimeReleaseTimeout {
-			t.Fatalf("unexpected bounded release deadline remaining=%v timeout=%v", remaining, runtimeReleaseTimeout)
-		}
-	default:
-		t.Fatal("expected runtime release on prompt subscribe failure")
-	}
-}
-
-func TestPrepareSharedRuntimeInstallsTurnQueueHook(t *testing.T) {
-	server := &testEmbeddedServer{
-		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
-				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
-			},
-			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
-				return serverapi.SessionRuntimeReleaseResponse{}, nil
-			},
-		},
-		sessionActivity: &recordingSessionActivityClient{
-			subscribe: func(context.Context, serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
-				return noOpSessionActivitySubscription{}, nil
-			},
-		},
-		promptActivityClient: &recordingPromptActivityClient{
-			subscribe: func(context.Context, serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
-				return nil, nil
-			},
-		},
-		sessionViewClient: &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionName: "shared session"}}},
-	}
-
-	plan, err := prepareSharedRuntime(context.Background(), server, sessionLaunchPlan{SessionID: "session-1", SessionName: "fallback session", WorkspaceRoot: "/tmp/workspace", ActiveSettings: config.Settings{NotificationMethod: "bel"}}, io.Discard, "test")
-	if err != nil {
-		t.Fatalf("prepareSharedRuntime: %v", err)
-	}
-	defer plan.Close()
-	if plan.Wiring == nil || plan.Wiring.turnQueueHook == nil {
-		t.Fatal("expected shared runtime wiring to install turn queue hook")
-	}
 }
