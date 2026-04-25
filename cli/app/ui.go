@@ -541,6 +541,7 @@ type uiModel struct {
 	statusCollector              uiStatusCollector
 	statusRepository             uiStatusRepository
 	status                       uiStatusOverlayState
+	statusGitBackgroundInFlight  bool
 	clipboardImagePaster         uiClipboardImagePaster
 	clipboardTextCopier          uiClipboardTextCopier
 
@@ -709,6 +710,10 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	}
 	if startupNativeHistoryCmd != nil {
 		m.startupCmds = append(m.startupCmds, startupNativeHistoryCmd)
+	}
+	if gitStartupCmd := m.statusLineGitStartupCmd(); gitStartupCmd != nil {
+		m.statusGitBackgroundInFlight = true
+		m.startupCmds = append(m.startupCmds, gitStartupCmd)
 	}
 	if m.pathReferenceSearch != nil && strings.TrimSpace(m.statusConfig.WorkspaceRoot) != "" {
 		m.startupCmds = append(m.startupCmds, func() tea.Msg {
@@ -1284,7 +1289,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case statusGitRefreshDoneMsg:
-		if msg.token != m.status.refreshToken {
+		if msg.background {
+			m.statusGitBackgroundInFlight = false
+		}
+		if msg.token != m.status.refreshToken && !m.shouldApplyBackgroundGitRefresh(msg) {
 			m.syncViewport()
 			return m, nil
 		}

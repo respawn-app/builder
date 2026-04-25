@@ -1568,8 +1568,14 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 	if len(lines) != 12 {
 		t.Fatalf("expected fresh conversation to fill full terminal height, got %d lines", len(lines))
 	}
-	if !strings.Contains(lines[len(lines)-1], "ongoing") {
+	if !strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator) {
 		t.Fatalf("expected status line at terminal bottom, got %q", lines[len(lines)-1])
+	}
+	if strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in status line, got %q", lines[len(lines)-1])
 	}
 	if strings.TrimSpace(lines[0]) != "" {
 		t.Fatalf("expected top of fresh conversation live region to stay blank, got %q", lines[0])
@@ -1604,8 +1610,15 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 	if strings.TrimSpace(stripANSIPreserve(view)) == "" {
 		t.Fatalf("expected non-empty native render under tight height, got %q", view)
 	}
-	if !strings.Contains(stripANSIPreserve(view), "ongoing") {
+	plain := stripANSIPreserve(view)
+	if !strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator) {
 		t.Fatalf("expected status line visible under tight height, got %q", view)
+	}
+	if strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(plain, statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(plain, statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in status line, got %q", view)
 	}
 }
 

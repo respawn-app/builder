@@ -6,6 +6,8 @@ Detail mode becomes a fast transcript inspector, not a raw transcript dump. The 
 
 Ongoing remains the native-scroll, append-only transcript surface. Detail is an alt-screen inspection surface, but it must still preserve native text selection. Mouse capture must not be enabled for ongoing or detail; detail may enable terminal alternate-scroll while active for wheel-friendly navigation on terminals that support it.
 
+The shared app status line is intentionally compact across ongoing and detail. Its left side starts with the activity indicator followed by one plain space, then branch/model/process/server metadata separated with ` · `. The dot separator must not appear immediately after the activity indicator.
+
 Success metrics:
 
 - Opening detail on a transcript with long command/file outputs shows mostly one row per message/tool, not hundreds of output lines.

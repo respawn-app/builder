@@ -558,7 +558,7 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 		t.Fatalf("expected native mode to avoid frame-sized whitespace rewrites")
 	}
 	plain := xansi.Strip(raw)
-	if occurrences := strings.Count(plain, "ongoing | "); occurrences > 12 {
+	if occurrences := strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator); occurrences > 12 {
 		t.Fatalf("expected bounded status redraw output, got %d occurrences", occurrences)
 	}
 }
@@ -669,7 +669,7 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 		t.Fatalf("expected committed history to replay at least once after debounced width resize burst, got %q", normalizedOutput(raw))
 	}
 	for _, line := range strings.Split(plain, "\n") {
-		if strings.Count(line, "ongoing | ") > 1 {
+		if strings.Count(line, statusStateCircleGlyph+statusLineSpinnerSeparator) > 1 {
 			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
 		}
 	}
@@ -682,8 +682,8 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	if borderLines > 24 {
 		t.Fatalf("expected bounded border redraw count during resize, got %d", borderLines)
 	}
-	if strings.Count(plain, "ongoing | ") > 16 {
-		t.Fatalf("expected bounded status redraw count during resize, got %d", strings.Count(plain, "ongoing | "))
+	if strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator) > 16 {
+		t.Fatalf("expected bounded status redraw count during resize, got %d", strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator))
 	}
 }
 
@@ -742,7 +742,7 @@ func TestNativeResizeClearWithoutHistoryRedrawsSingleLiveRegion(t *testing.T) {
 		t.Fatalf("expected multiline input to remain visible after repeated resizes, got %q", plain)
 	}
 	for _, line := range strings.Split(plain, "\n") {
-		if strings.Count(line, "ongoing | ") > 1 {
+		if strings.Count(line, statusStateCircleGlyph+statusLineSpinnerSeparator) > 1 {
 			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
 		}
 		if strings.Count(line, "› ") > 1 {
@@ -758,8 +758,8 @@ func TestNativeResizeClearWithoutHistoryRedrawsSingleLiveRegion(t *testing.T) {
 	if borderLines > 16 {
 		t.Fatalf("expected bounded border redraw count in no-history resize path, got %d", borderLines)
 	}
-	if strings.Count(plain, "ongoing | ") > 12 {
-		t.Fatalf("expected bounded status redraw count in no-history resize path, got %d", strings.Count(plain, "ongoing | "))
+	if strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator) > 12 {
+		t.Fatalf("expected bounded status redraw count in no-history resize path, got %d", strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator))
 	}
 }
 
@@ -1943,11 +1943,11 @@ func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 		t.Fatalf("expected post-submit flush exactly once, got %d", strings.Count(normalized, "post-submit replay"))
 	}
 	for _, line := range strings.Split(plain, "\n") {
-		if strings.Count(line, "ongoing | ") > 1 {
+		if strings.Count(line, statusStateCircleGlyph+statusLineSpinnerSeparator) > 1 {
 			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
 		}
 	}
-	if occurrences := strings.Count(plain, "ongoing | "); occurrences > 16 {
+	if occurrences := strings.Count(plain, statusStateCircleGlyph+statusLineSpinnerSeparator); occurrences > 16 {
 		t.Fatalf("expected bounded status redraw count after submit+flush, got %d", occurrences)
 	}
 }
@@ -3043,7 +3043,7 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 		t.Fatalf("expected streamed line order preserved, got %q", normalized)
 	}
 	for _, line := range strings.Split(plain, "\n") {
-		if strings.Count(line, "ongoing | ") > 1 {
+		if strings.Count(line, statusStateCircleGlyph+statusLineSpinnerSeparator) > 1 {
 			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
 		}
 	}
