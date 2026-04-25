@@ -789,7 +789,7 @@ func TestDetailViewportKeepsDenseToolBurstAtBottomGroupBoundary(t *testing.T) {
 		t.Fatalf("expected bottom tool burst to stay dense, got %q", view)
 	}
 	gutter := uiglyphs.SelectionRailBlank
-	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+gutter+"$ cmd 3\n\n", gutter+"❯ next user\n\n", uiglyphs.SelectionRailGlyph+"❮ final") {
+	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n\n", gutter+"❯ next user\n\n", gutter+"❮ final") {
 		t.Fatalf("expected bottom viewport to preserve dense tool burst and role-group blanks, got %q", view)
 	}
 }

@@ -892,11 +892,11 @@ func TestStatusLineShowsCachedGitBranchWhenAvailable(t *testing.T) {
 	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "feature/statusline"}
 
 	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(status, "feature/statusline", "gpt-5") {
-		t.Fatalf("expected branch before model in status line, got %q", status)
+	if !containsInOrder(status, "gpt-5", "feature/statusline") {
+		t.Fatalf("expected branch after model in status line, got %q", status)
 	}
-	if !strings.Contains(status, statusStateCircleGlyph+statusLineSpinnerSeparator+"feature/statusline") {
-		t.Fatalf("expected plain space between spinner and branch, got %q", status)
+	if !strings.Contains(status, statusStateCircleGlyph+statusLineSpinnerSeparator+"gpt-5") {
+		t.Fatalf("expected plain space between spinner and model, got %q", status)
 	}
 	if strings.Contains(status, statusStateCircleGlyph+statusLineSeparator) {
 		t.Fatalf("did not expect dot separator immediately after spinner, got %q", status)

@@ -506,7 +506,7 @@ func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
 			m.detailStale = false
 		}
 		if m.compactDetail {
-			m.ensureDetailSelection()
+			m.focusCenterVisibleDetailEntry()
 		}
 		m.refreshDetailViewport()
 	case ModeOngoing:
@@ -528,7 +528,7 @@ func (m Model) scrollOngoing(delta int) Model {
 
 func (m Model) scrollDetail(delta int) Model {
 	m.scrollDetailLine(delta)
-	m.focusFirstVisibleDetailEntry()
+	m.focusCenterVisibleDetailEntry()
 	return m
 }
 
@@ -572,22 +572,44 @@ func (m *Model) ensureDetailSelection() {
 	m.detailSelectedActive = false
 }
 
-func (m *Model) focusFirstVisibleDetailEntry() {
+func (m *Model) focusCenterVisibleDetailEntry() {
 	if m == nil || !m.compactDetail {
 		return
 	}
 	if m.detailDirty {
 		m.rebuildDetailSnapshot()
 	}
-	for _, entryIndex := range m.detailLineEntryIndices {
+	if len(m.detailLineEntryIndices) == 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	anchor := m.viewportLines / 2
+	if anchor >= len(m.detailLineEntryIndices) {
+		anchor = len(m.detailLineEntryIndices) - 1
+	}
+	if anchor < 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	bestEntry := -1
+	bestDistance := len(m.detailLineEntryIndices) + 1
+	for lineIndex, entryIndex := range m.detailLineEntryIndices {
 		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
 			continue
 		}
-		m.detailSelectedEntry = entryIndex
-		m.detailSelectedActive = true
+		distance := detailLineDistance(lineIndex, anchor)
+		if distance >= bestDistance {
+			continue
+		}
+		bestEntry = entryIndex
+		bestDistance = distance
+	}
+	if bestEntry < 0 {
+		m.ensureDetailSelection()
 		return
 	}
-	m.ensureDetailSelection()
+	m.detailSelectedEntry = bestEntry
+	m.detailSelectedActive = true
 }
 
 func (m *Model) focusDetailViewportEdge(delta int) {
@@ -627,6 +649,14 @@ func (m *Model) visibleSelectableDetailEntries() []int {
 		entries = append(entries, entryIndex)
 	}
 	return entries
+}
+
+func detailLineDistance(left int, right int) int {
+	distance := left - right
+	if distance < 0 {
+		return -distance
+	}
+	return distance
 }
 
 func detailVisibleEntryIndex(entries []int, entryIndex int) int {

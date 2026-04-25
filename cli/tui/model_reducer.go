@@ -330,36 +330,8 @@ func (m *Model) navigateDetailSelection(delta int) {
 	if m.detailDirty {
 		m.rebuildDetailSnapshot()
 	}
-	m.ensureDetailSelection()
-	if !m.detailSelectedActive {
-		return
-	}
-	previous := m.detailSelectedEntry
-	if m.scrollDetailLine(delta) {
-		if detailVisibleEntryIndex(m.visibleSelectableDetailEntries(), previous) >= 0 {
-			m.detailSelectedEntry = previous
-			m.detailSelectedActive = true
-		} else {
-			m.focusDetailViewportEdge(-delta)
-		}
-		m.refreshDetailViewport()
-		return
-	}
-	visible := m.visibleSelectableDetailEntries()
-	if len(visible) == 0 {
-		return
-	}
-	if current := detailVisibleEntryIndex(visible, m.detailSelectedEntry); current >= 0 {
-		next := current + delta
-		if next >= 0 && next < len(visible) {
-			m.detailSelectedEntry = visible[next]
-			m.detailSelectedActive = true
-			m.refreshDetailViewport()
-			return
-		}
-	}
-	m.focusDetailViewportEdge(delta)
-	m.refreshDetailViewport()
+	m.scrollDetailLine(delta)
+	m.focusCenterVisibleDetailEntry()
 }
 
 func (m *Model) toggleSelectedDetailExpansion() {

@@ -29,10 +29,10 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	if modeLabel := l.statusModeLabel(); modeLabel != "" {
 		segments = append(segments, style.meta.Render(modeLabel))
 	}
+	segments = append(segments, style.meta.Render(l.statusModelLabel()))
 	if branchLabel := l.statusBranchLabel(); branchLabel != "" {
 		segments = append(segments, style.meta.Render(branchLabel))
 	}
-	segments = append(segments, style.meta.Render(l.statusModelLabel()))
 	if label := processCountLabel(m.listProcesses()); label != "" {
 		segments = append(segments, style.meta.Render(label))
 	}
