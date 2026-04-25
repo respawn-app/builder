@@ -74,7 +74,7 @@ func (e *Engine) emitProjectedHistoryReplacementEntries(stepID string, start int
 	}
 	// Live subscribers must observe the same committed transcript progression that
 	// restart hydration reconstructs from history_replaced. Emit projected
-	// compaction rows before any post-compaction local entries.
+	// compaction rows before any later local entry.
 	if start < 0 {
 		start = 0
 	}

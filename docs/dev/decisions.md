@@ -327,9 +327,8 @@
 - `agents.md`: `D`
 - `skills`: `D`
 - `environment`: `D`
-- `compaction_notice`: `O`
-- `compaction_summary`: `D`
-- `interruption`: `D`
+- `compaction_summary`: `O` when projected from a completed compaction, using the ordinal compact label in ongoing/collapsed detail and preserving full summary text for expansion.
+- `interruption`: `O`
 - `error_feedback`: `O`
 - `compaction_soon_reminder`: `D`
 - `reviewer_feedback`: represented in transcript by reviewer transcript roles, not by rendering the raw developer reviewer prompt directly. Effective visibility is `OC` or `O` depending on reviewer verbosity config.

@@ -335,8 +335,6 @@ func defaultDetailLabelForRole(role string) string {
 		return "Reasoning summary"
 	case "thinking_trace":
 		return "Reasoning trace"
-	case "compaction_notice":
-		return "Context compacted"
 	case roleDeveloperContext:
 		return "Developer context"
 	case roleDeveloperFeedback:
