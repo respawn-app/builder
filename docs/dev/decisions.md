@@ -162,6 +162,7 @@
 - Durability strategy: async capture with append-only turn writes and configurable fsync policy.
 - Tool results persist at tool-completion boundary.
 - History replacement during compaction persists as atomic `history_replaced` events.
+- Compaction completion is represented in transcript projections by the persisted `compaction_summary` entry's `CompactLabel`/`OngoingText`; Builder must not persist or synthesize a separate `compaction_notice` transcript row for completed compactions.
 - Crash-loss tolerance allows losing up to one in-flight tool call.
 - No session event compression.
 
