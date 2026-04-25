@@ -660,6 +660,42 @@ func TestHandleProjectedRuntimeEventAppendsCommittedSuffixWhenOverlapStartsBefor
 	}
 }
 
+func TestApplyProjectedTranscriptEntriesForwardsCompactMetadataToLiveView(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.forwardToView(tui.SetConversationMsg{Entries: []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}})
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	entry := clientui.ChatEntry{
+		Role:              "warning",
+		Text:              "long warning body",
+		MessageType:       string(llm.MessageTypeCompactionSoonReminder),
+		SourcePath:        "  docs/dev/decisions.md  ",
+		CompactLabel:      "Compaction reminder",
+		ToolResultSummary: "summary text",
+		ToolCallID:        " call-1 ",
+	}
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{entry},
+	}, false)
+
+	if cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected direct metadata append, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
+	}
+	viewEntries := m.view.LoadedTranscriptEntries()
+	if got, want := len(viewEntries), 2; got != want {
+		t.Fatalf("view transcript entry count = %d, want %d", got, want)
+	}
+	got := viewEntries[1]
+	if got.MessageType != llm.MessageTypeCompactionSoonReminder || got.SourcePath != "docs/dev/decisions.md" || got.CompactLabel != "Compaction reminder" || got.ToolResultSummary != "summary text" || got.ToolCallID != "call-1" {
+		t.Fatalf("expected live view append to preserve compact metadata, got %+v", got)
+	}
+}
+
 func TestSkippedCommittedEventBeforeCurrentWindowStillAdvancesRevisionAndCount(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
