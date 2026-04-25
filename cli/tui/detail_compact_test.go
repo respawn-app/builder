@@ -24,7 +24,7 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	collapsed := xansi.Strip(m.View())
-	if !strings.Contains(collapsed, "▶︎ $ cat large.txt") {
+	if !strings.Contains(collapsed, "$ cat large.txt") {
 		t.Fatalf("expected collapsed tool input, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -33,7 +33,7 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := xansi.Strip(m.View())
-	if !strings.Contains(expanded, "▼ $ cat large.txt") || !strings.Contains(expanded, "line 2") {
+	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 3") {
 		t.Fatalf("expected expanded tool input and output, got %q", expanded)
 	}
 }
@@ -49,8 +49,11 @@ func TestCompactDetailNavigatesByMessageAndKeepsMultipleExpanded(t *testing.T) {
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	rendered := xansi.Strip(m.View())
-	if strings.Count(rendered, "▼") != 2 {
+	if !strings.Contains(rendered, "hidden") || !strings.Contains(rendered, "first assistant") {
 		t.Fatalf("expected both messages expanded, got %q", rendered)
+	}
+	if strings.Contains(rendered, "▶︎") || strings.Contains(rendered, "▼") {
+		t.Fatalf("expected compact detail without collapsed/expanded glyphs, got %q", rendered)
 	}
 }
 
@@ -73,6 +76,30 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	}
 	if len(m.detailExpandedEntries) != 0 {
 		t.Fatalf("expected stale expanded entries cleared, got %+v", m.detailExpandedEntries)
+	}
+}
+
+func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "reviewer_suggestions",
+		Text:        "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer.",
+		OngoingText: "Supervisor made 2 suggestions.",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "Supervisor made 2 suggestions.") {
+		t.Fatalf("expected collapsed reviewer suggestions summary, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := xansi.Strip(m.View())
+	if !strings.Contains(expanded, "Add app-level coverage") || !strings.Contains(expanded, "Rebuild before final answer") {
+		t.Fatalf("expected expanded reviewer suggestions to show full text, got %q", expanded)
 	}
 }
 
@@ -158,7 +185,7 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	rendered := xansi.Strip(m.View())
-	if !strings.Contains(rendered, "▶︎ $ printf 'one\\n'…") {
+	if !strings.Contains(rendered, "$ printf 'one\\n'…") {
 		t.Fatalf("expected completed shell call to stay compact, got %q", rendered)
 	}
 	if strings.Contains(rendered, "printf 'two") {
@@ -181,19 +208,107 @@ func TestCompactDetailDefaultLabelsCoverInternalRoles(t *testing.T) {
 	}
 }
 
-func TestCompactDetailLeftMarkerStaysWithinViewportWidth(t *testing.T) {
+func TestCompactDetailFirstLineStaysWithinViewportWidth(t *testing.T) {
 	const viewportWidth = 24
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("a", 80)})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	line := lineContaining(m.View(), "▶︎")
+	line := lineContaining(m.View(), "❮")
 	if line == "" {
-		t.Fatalf("expected collapsed detail marker, got %q", m.View())
+		t.Fatalf("expected collapsed detail row, got %q", m.View())
 	}
 	if width := lipgloss.Width(line); width > viewportWidth {
-		t.Fatalf("expected marked row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+		t.Fatalf("expected detail row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+}
+
+func TestCompactDetailTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) {
+	const viewportWidth = 40
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "git status --short && git diff --stat && git add cli/tui/detail_compact_test.go cli/app/ui_scroll_keys_test.go",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "git status --short && git diff --stat && git add cli/tui/detail_compact_test.go cli/app/ui_scroll_keys_test.go",
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "$ git status") {
+		t.Fatalf("expected truncated shell row to preserve shell prefix spacing, got %q", rendered)
+	}
+}
+
+func TestCompactDetailWrappedAssistantUsesTreeGuide(t *testing.T) {
+	const viewportWidth = 24
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("assistant ", 20)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	firstLine := lineContaining(rendered, "❮")
+	if !strings.HasPrefix(firstLine, "❮ assistant") {
+		t.Fatalf("expected assistant first row to preserve role prefix, got %q", firstLine)
+	}
+	if !strings.Contains(rendered, "│ assistant") || !strings.Contains(rendered, "└ assistant") {
+		t.Fatalf("expected wrapped assistant preview to use tree guide, got %q", rendered)
+	}
+	if width := lipgloss.Width(firstLine); width > viewportWidth {
+		t.Fatalf("expected assistant first row width <= %d, got %d in %q", viewportWidth, width, firstLine)
+	}
+}
+
+func TestCompactDetailNarrowWrappedAssistantKeepsTreeGuideWithinViewport(t *testing.T) {
+	const viewportWidth = 8
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "abcdef abcdef abcdef"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	firstLine := lineContaining(rendered, "❮")
+	if !strings.HasPrefix(firstLine, "❮ ") {
+		t.Fatalf("expected narrow assistant first row to keep normal role prefix, got %q", firstLine)
+	}
+	if !strings.Contains(rendered, "│ ") || !strings.Contains(rendered, "└ ") {
+		t.Fatalf("expected narrow wrapped assistant preview to keep tree guide, got %q", rendered)
+	}
+	for _, line := range splitLines(rendered) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if width := lipgloss.Width(line); width > viewportWidth {
+			t.Fatalf("expected narrow detail line width <= %d, got %d in %q", viewportWidth, width, line)
+		}
+	}
+}
+
+func TestCompactDetailNarrowTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) {
+	const viewportWidth = 8
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "git status --short",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "git status --short"},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), "$")
+	if !strings.HasPrefix(xansi.Strip(line), "$ ") {
+		t.Fatalf("expected narrow truncated shell row to preserve shell prefix spacing, got %q", xansi.Strip(line))
+	}
+	if width := lipgloss.Width(line); width > viewportWidth {
+		t.Fatalf("expected narrow shell row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
 	}
 }
 

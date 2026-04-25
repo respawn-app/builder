@@ -20,7 +20,7 @@ Success metrics:
 - Unknown or malformed entries with recoverable text are visible in ongoing and detail. Empty unknown/malformed entries are detail-only diagnostics.
 - Multiple messages may be expanded at once.
 - Tool calls with error results do not auto-expand; collapsed detail shows compact input plus structured error summary when runtime/projection provides one.
-- Chevron markers are mandatory: `▶︎` collapsed and `▼` expanded.
+- Detail does not use dedicated collapsed/expanded glyphs. Multi-line detail items use tree-style continuation guides after the first rendered line: `│` for middle lines and `└` for the last line.
 - Selection never changes foreground colors. Selection background/fill has the lowest background priority.
 
 ## Interaction Model
@@ -35,10 +35,7 @@ Success metrics:
 Selection is message-oriented, not line-oriented. If the selected message is outside the viewport after navigation or expansion, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
 Viewport scrolling (`PgUp`/`PgDn` and mouse wheel) re-focuses compact detail selection to the first visible selectable item. This keeps `Enter` aligned with the top visible row after pointer/trackpad scrolling without requiring repeated keyboard navigation.
 
-Collapsed/expanded state is shown with a mandatory chevron marker:
-
-- `▶︎` means collapsed.
-- `▼` means expanded.
+Detail rows do not show a dedicated collapsed/expanded glyph. The first rendered line keeps the normal role/tool symbol. When an item renders more than one line, continuation lines replace the role-prefix column with a faint tree guide: `│` for middle lines and `└` for the last rendered line.
 
 The selected message uses a selection background/fill across every rendered line of that message and across the full terminal width. Selection must not change foreground colors. Selection background is lowest priority: any semantic background already present on a cell, such as patch diff backgrounds or syntax-highlight backgrounds, wins over selection background.
 
@@ -74,6 +71,8 @@ Collapsed rows should usually fit in one rendered line. User and assistant text 
 Expansion renders the same full content detail mode renders today, unless this spec says otherwise. Tool calls expand to show the full tool input and full tool output/result. If a tool call has no matching result yet, expansion shows full input and no synthetic empty output.
 
 Detail state is per message item, not per rendered line. Lines are a viewport projection of message items. Selection, expansion state, and viewport anchors reference item identity/ranges, then render into lines after collapse/expand decisions.
+
+Detail items are separated by a blank line rather than a divider rule. Dividers remain an ongoing/native transcript grouping affordance; detail relies on role symbols, tree-style continuation guides, selection, and vertical rhythm to reduce chrome while preserving scanability.
 
 Performance rules:
 
@@ -342,7 +341,7 @@ Projection rules:
 
 Owns table-driven decisions. Candidate files:
 
-- `cli/tui/detail_classifier.go`: classify a `TranscriptEntry` or grouped call/result item into a detail kind, visibility expectation, collapsed behavior, expanded renderer, marker state, and diagnostics.
+- `cli/tui/detail_classifier.go`: classify a `TranscriptEntry` or grouped call/result item into a detail kind, visibility expectation, collapsed behavior, expanded renderer, tree-guide state, and diagnostics.
 - `cli/tui/detail_classifier_test.go`: exhaustive matrix tests for message types and transcript roles.
 
 Classifier rules:
@@ -564,7 +563,7 @@ Deliverables:
 - Collapsed tool renderers matching ongoing input previews.
 - Structured tool-error summary display when available.
 - Developer/context labels from metadata.
-- Chevron markers.
+- Tree-style continuation guides for multi-line detail items.
 
 Exit criteria:
 
