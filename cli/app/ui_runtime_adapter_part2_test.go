@@ -428,7 +428,7 @@ func TestHandleProjectedRuntimeEventDoesNotAppendPrePersistCompactionStatusEntry
 	}
 }
 
-func TestProjectedCompactionStatusAppendsSyntheticOngoingNoticeWithoutTranscriptMutation(t *testing.T) {
+func TestProjectedCompactionStatusClearsCompactingWithoutSyntheticNotice(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
@@ -460,21 +460,15 @@ func TestProjectedCompactionStatusAppendsSyntheticOngoingNoticeWithoutTranscript
 		}
 	}
 	if got, want := len(m.transcriptEntries), 1; got != want {
-		t.Fatalf("transcript entry count after synthetic compaction notice = %d, want %d", got, want)
+		t.Fatalf("transcript entry count after compaction status = %d, want %d", got, want)
 	}
 	loaded := m.view.LoadedTranscriptEntries()
-	if got, want := len(loaded), 2; got != want {
+	if got, want := len(loaded), 1; got != want {
 		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
-	}
-	if got := loaded[1].Role; got != "compaction_notice" {
-		t.Fatalf("synthetic compaction role = %q, want compaction_notice", got)
-	}
-	if !loaded[1].Transient || loaded[1].Committed {
-		t.Fatalf("expected synthetic compaction notice to stay transient-only, got %+v", loaded[1])
 	}
 }
 
-func TestProjectedCompactionStatusSkipsSyntheticOngoingNoticeWhenCommittedNoticeAlreadyLoaded(t *testing.T) {
+func TestProjectedCompactionStatusDoesNotDuplicateCommittedSummary(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
@@ -488,7 +482,7 @@ func TestProjectedCompactionStatusSkipsSyntheticOngoingNoticeWhenCommittedNotice
 		TotalEntries: 2,
 		Entries: []clientui.ChatEntry{
 			{Role: "assistant", Text: "seed"},
-			{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+			{Role: "compaction_summary", Text: "summary", OngoingText: "context compacted for the 1st time", CompactLabel: "context compacted for the 1st time"},
 		},
 	}
 	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
@@ -510,12 +504,12 @@ func TestProjectedCompactionStatusSkipsSyntheticOngoingNoticeWhenCommittedNotice
 	}
 	notices := 0
 	for _, entry := range loaded {
-		if entry.Role == "compaction_notice" && entry.Text == "context compacted for the 1st time" {
+		if entry.Role == "compaction_summary" && entry.CompactLabel == "context compacted for the 1st time" {
 			notices++
 		}
 	}
 	if notices != 1 {
-		t.Fatalf("expected exactly one loaded compaction notice, got %d (%+v)", notices, loaded)
+		t.Fatalf("expected exactly one loaded compaction summary, got %d (%+v)", notices, loaded)
 	}
 }
 

@@ -74,7 +74,7 @@ func (e *Engine) emitProjectedHistoryReplacementEntries(stepID string, start int
 	}
 	// Live subscribers must observe the same committed transcript progression that
 	// restart hydration reconstructs from history_replaced. Emit projected
-	// compaction rows first, then the persisted compaction_notice/error local entry.
+	// compaction rows before any post-compaction local entries.
 	if start < 0 {
 		start = 0
 	}
@@ -110,14 +110,6 @@ func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compac
 		})
 		return nil
 	case EventCompactionCompleted:
-		if err := e.appendPersistedLocalEntry(stepID, "compaction_notice", CompactionNoticeText(status.Count)); err != nil {
-			e.emit(Event{
-				Kind:       kind,
-				StepID:     stepID,
-				Compaction: status,
-			})
-			return err
-		}
 		e.emit(Event{
 			Kind:       kind,
 			StepID:     stepID,

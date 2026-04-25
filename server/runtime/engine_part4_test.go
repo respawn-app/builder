@@ -439,35 +439,24 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 	eventsSnapshot := append([]Event(nil), events...)
 	eventsMu.Unlock()
 	compactionIdx := -1
-	localEntryIdx := -1
 	for idx, evt := range eventsSnapshot {
 		if evt.Kind == EventCompactionCompleted {
 			compactionIdx = idx
 		}
 		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "compaction_notice" {
-			localEntryIdx = idx
+			t.Fatalf("did not expect separate compaction notice local entry event, got %+v", eventsSnapshot)
 		}
 	}
 	if compactionIdx < 0 {
 		t.Fatalf("expected compaction completed event, got %+v", eventsSnapshot)
 	}
-	if localEntryIdx < 0 {
-		t.Fatalf("expected compaction notice local entry event, got %+v", eventsSnapshot)
-	}
 	compactionEvt := eventsSnapshot[compactionIdx]
 	if compactionEvt.CommittedEntryStartSet {
 		t.Fatalf("expected compaction status event to stay pre-commit, got %+v", compactionEvt)
 	}
-	localEntryEvt := eventsSnapshot[localEntryIdx]
-	if !localEntryEvt.CommittedEntryStartSet {
-		t.Fatalf("expected persisted local entry to publish committed start, got %+v", localEntryEvt)
-	}
-	if localEntryIdx >= compactionIdx {
-		t.Fatalf("expected persisted local entry before compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, eventsSnapshot)
-	}
 }
 
-func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice(t *testing.T) {
+func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionStatus(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -500,15 +489,13 @@ func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice
 	}
 
 	var projected []Event
-	var notice *Event
 	for idx := range events {
 		evt := events[idx]
 		if evt.Kind != EventLocalEntryAdded || evt.LocalEntry == nil {
 			continue
 		}
 		if evt.LocalEntry.Role == "compaction_notice" {
-			notice = &events[idx]
-			continue
+			t.Fatalf("did not expect separate compaction notice event, got %+v", events)
 		}
 		projected = append(projected, evt)
 	}
@@ -526,12 +513,6 @@ func TestReplaceHistoryPublishesProjectedTranscriptEntriesBeforeCompactionNotice
 	}
 	if !projected[1].CommittedEntryStartSet || projected[1].CommittedEntryStart != 2 {
 		t.Fatalf("unexpected second projected committed start: %+v", projected[1])
-	}
-	if notice == nil {
-		t.Fatalf("expected compaction notice event, got %+v", events)
-	}
-	if !notice.CommittedEntryStartSet || notice.CommittedEntryStart != 3 {
-		t.Fatalf("unexpected compaction notice committed start: %+v", *notice)
 	}
 	conversationUpdatedCount := 0
 	for _, evt := range events {

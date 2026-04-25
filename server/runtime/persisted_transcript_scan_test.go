@@ -369,8 +369,8 @@ func TestPersistedTranscriptScanMaterializesCompactedDeveloperContextInDetailPag
 	}
 
 	page := scan.CollectedPageSnapshot()
-	if got := len(page.Entries); got != 5 {
-		t.Fatalf("len(page.Entries) = %d, want 5 (%+v)", got, page.Entries)
+	if got := len(page.Entries); got != 4 {
+		t.Fatalf("len(page.Entries) = %d, want 4 (%+v)", got, page.Entries)
 	}
 	if got := page.Entries[0]; got.Role != "user" || got.Text != "before compaction" {
 		t.Fatalf("entry[0] = %+v, want preserved pre-compaction user entry", got)
@@ -381,11 +381,8 @@ func TestPersistedTranscriptScanMaterializesCompactedDeveloperContextInDetailPag
 	if got := page.Entries[2]; got.Role != "developer_context" || got.Text != "environment info" {
 		t.Fatalf("entry[2] = %+v, want compacted developer context", got)
 	}
-	if got := page.Entries[3]; got.Role != "compaction_summary" || got.Text != "condensed summary" {
-		t.Fatalf("entry[3] = %+v, want compacted summary", got)
-	}
-	if got := page.Entries[4]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
-		t.Fatalf("entry[4] = %+v, want post-compaction local entry", got)
+	if got := page.Entries[3]; got.Role != "compaction_summary" || got.Text != "condensed summary" || got.CompactLabel != "after replace notice" || got.OngoingText != "after replace notice" {
+		t.Fatalf("entry[3] = %+v, want compacted summary with folded notice label", got)
 	}
 }
 

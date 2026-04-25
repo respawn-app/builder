@@ -162,7 +162,7 @@ func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *t
 	}
 }
 
-func TestReduceRuntimeEvent_CompactionCompletedProducesSyntheticOngoingNotice(t *testing.T) {
+func TestReduceRuntimeEvent_CompactionCompletedClearsCompactingWithoutSyntheticNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{Compacting: true},
 		PendingInputState{},
@@ -173,14 +173,8 @@ func TestReduceRuntimeEvent_CompactionCompletedProducesSyntheticOngoingNotice(t 
 	if update.State.Compacting {
 		t.Fatal("expected compaction completed to clear compacting state")
 	}
-	if update.SyntheticOngoingEntry == nil {
-		t.Fatal("expected synthetic ongoing compaction notice")
-	}
-	if update.SyntheticOngoingEntry.Role != "compaction_notice" {
-		t.Fatalf("synthetic role = %q, want compaction_notice", update.SyntheticOngoingEntry.Role)
-	}
-	if update.SyntheticOngoingEntry.Text != "context compacted for the 2nd time" {
-		t.Fatalf("synthetic text = %q", update.SyntheticOngoingEntry.Text)
+	if update.SyntheticOngoingEntry != nil {
+		t.Fatalf("did not expect synthetic ongoing compaction notice, got %+v", update.SyntheticOngoingEntry)
 	}
 }
 

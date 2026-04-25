@@ -6,6 +6,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 	"context"
 	"encoding/json"
 	"errors"
@@ -284,7 +285,7 @@ func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 		compactionResponses: []llm.CompactionResponse{
 			{
 				OutputItems: []llm.ResponseItem{
-					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"},
 					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
@@ -309,7 +310,7 @@ func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 	}
 }
 
-func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
+func TestCompactionLabelsSingleSummaryEntry(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -320,7 +321,7 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 		compactionResponses: []llm.CompactionResponse{
 			{
 				OutputItems: []llm.ResponseItem{
-					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"},
 					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
 				},
 				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
@@ -342,106 +343,20 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 	}
 
 	snap := eng.ChatSnapshot()
-	notices := 0
+	summaries := 0
 	for _, entry := range snap.Entries {
-		if entry.Role == "compaction_notice" {
-			notices++
-			if entry.Text != "context compacted for the 1st time" {
-				t.Fatalf("unexpected compaction notice text: %q", entry.Text)
+		if entry.Role == string(transcript.EntryRoleCompactionSummary) {
+			summaries++
+			if entry.CompactLabel != "context compacted for the 1st time" || entry.OngoingText != "context compacted for the 1st time" {
+				t.Fatalf("unexpected compaction summary label: %+v", entry)
 			}
 		}
 		if strings.Contains(strings.ToLower(entry.Text), "compaction started") || strings.Contains(strings.ToLower(entry.Text), "compaction completed") {
 			t.Fatalf("unexpected start/completed status entry: %+v", entry)
 		}
 	}
-	if notices != 1 {
-		t.Fatalf("expected one compaction notice, got %d entries=%+v", notices, snap.Entries)
-	}
-}
-
-func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
-	localEntryErr := errors.New("injected compaction notice persistence failure")
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-
-	client := &fakeCompactionClient{
-		compactionResponses: []llm.CompactionResponse{
-			{
-				OutputItems: []llm.ResponseItem{
-					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
-					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
-				},
-				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
-			},
-		},
-	}
-
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		Model: "gpt-5",
-	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
-		if entry.Role == "compaction_notice" {
-			return localEntryErr
-		}
-		return nil
-	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
-		t.Fatalf("append seed message: %v", err)
-	}
-	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
-
-	err = eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto)
-	if err == nil {
-		t.Fatal("expected auto compaction to fail when notice persistence fails")
-	}
-	if !errors.Is(err, localEntryErr) {
-		t.Fatalf("expected injected compaction notice failure, got %v", err)
-	}
-}
-
-func TestEmitCompactionStatusStillPublishesTerminalEventWhenNoticePersistenceFails(t *testing.T) {
-	localEntryErr := errors.New("injected compaction notice persistence failure")
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		Model:   "gpt-5",
-		OnEvent: func(evt Event) { events = append(events, evt) },
-	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
-		if entry.Role == "compaction_notice" {
-			return localEntryErr
-		}
-		return nil
-	}
-
-	err = eng.emitCompactionStatus("step-1", EventCompactionCompleted, compactionModeAuto, "remote", "openai", 4, 2, "")
-	if !errors.Is(err, localEntryErr) {
-		t.Fatalf("emitCompactionStatus error = %v, want %v", err, localEntryErr)
-	}
-	terminalEvents := 0
-	for _, evt := range events {
-		if evt.Kind == EventLocalEntryAdded {
-			t.Fatalf("did not expect persisted local entry event after notice persistence failure, got %+v", events)
-		}
-		if evt.Kind == EventCompactionCompleted {
-			terminalEvents++
-		}
-	}
-	if terminalEvents != 1 {
-		t.Fatalf("expected one compaction completed event despite notice persistence failure, got %+v", events)
+	if summaries != 1 {
+		t.Fatalf("expected one compaction summary, got %d entries=%+v", summaries, snap.Entries)
 	}
 }
 
