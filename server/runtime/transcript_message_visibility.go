@@ -58,7 +58,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	case llm.MessageTypeManualCompactionCarryover:
 		return ChatEntry{Visibility: transcript.EntryVisibilityDetailOnly, Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	default:
-		return developerContextEntry(msg, transcript.EntryVisibilityAll), true
+		return developerContextEntry(msg, transcript.EntryVisibilityDetailOnly), true
 	}
 }
 
