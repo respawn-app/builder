@@ -1117,8 +1117,11 @@ func TestDeveloperContextRoleUsesInfoSymbol(t *testing.T) {
 	if !strings.Contains(symbol, "ℹ") {
 		t.Fatalf("expected developer context role symbol to include ℹ, got %q", symbol)
 	}
-	if !containsColor(extractForegroundTrueColors(symbol), m.palette().previewColor) {
-		t.Fatalf("expected developer context role symbol to use preview color, got %q", symbol)
+	if !containsColor(extractForegroundTrueColors(symbol), m.palette().foregroundColor) {
+		t.Fatalf("expected developer context role symbol to use main foreground color, got %q", symbol)
+	}
+	if containsColor(extractForegroundTrueColors(symbol), m.palette().previewColor) {
+		t.Fatalf("did not expect developer context role symbol to use preview color, got %q", symbol)
 	}
 	if strings.Contains(symbol, ";2m") {
 		t.Fatalf("expected developer context role symbol to use full-strength styling without faint, got %q", symbol)

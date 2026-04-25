@@ -169,7 +169,7 @@ func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
 	case "tool_question_error", roleDeveloperFeedback, roleInterruption:
 		return roleSymbolColorStyle{color: p.errorColor}
 	case roleDeveloperContext:
-		return roleSymbolColorStyle{color: p.previewColor}
+		return roleSymbolColorStyle{color: p.foregroundColor}
 	case "tool", "tool_shell", "tool_patch", "tool_web_search":
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
