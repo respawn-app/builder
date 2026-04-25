@@ -239,8 +239,8 @@ func TestChatStoreTranscriptPageSnapshotPreservesHistoryAcrossCompaction(t *test
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	page := s.transcriptPageSnapshot(0, 0)
-	if got := len(page.Snapshot.Entries); got != 4 {
-		t.Fatalf("entry count = %d, want 4 (%+v)", got, page.Snapshot.Entries)
+	if got := len(page.Snapshot.Entries); got != 5 {
+		t.Fatalf("entry count = %d, want 5 (%+v)", got, page.Snapshot.Entries)
 	}
 	if got := page.Snapshot.Entries[0]; got.Role != "user" || got.Text != "before compaction" {
 		t.Fatalf("entry[0] = %+v, want preserved pre-compaction user entry", got)
@@ -251,8 +251,11 @@ func TestChatStoreTranscriptPageSnapshotPreservesHistoryAcrossCompaction(t *test
 	if got := page.Snapshot.Entries[2]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
 		t.Fatalf("entry[2] = %+v, want compacted developer context", got)
 	}
-	if got := page.Snapshot.Entries[3]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" || got.CompactLabel != "after replace notice" || got.OngoingText != "after replace notice" {
-		t.Fatalf("entry[3] = %+v, want compacted summary with folded notice label", got)
+	if got := page.Snapshot.Entries[3]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" || got.CompactLabel != "Context compacted" || got.OngoingText != "Context compacted" {
+		t.Fatalf("entry[3] = %+v, want compacted summary", got)
+	}
+	if got := page.Snapshot.Entries[4]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[4] = %+v, want legacy local entry preserved without special handling", got)
 	}
 }
 
@@ -266,11 +269,11 @@ func TestChatStoreOngoingTailUsesLatestCompactionBoundaryAsFloor(t *testing.T) {
 	s.appendLocalEntry("compaction_notice", "after replace notice")
 
 	window := s.ongoingTailSnapshot(1)
-	if got := len(window.Snapshot.Entries); got != 2 {
-		t.Fatalf("entry count = %d, want 2 (%+v)", got, window.Snapshot.Entries)
+	if got := len(window.Snapshot.Entries); got != 3 {
+		t.Fatalf("entry count = %d, want 3 (%+v)", got, window.Snapshot.Entries)
 	}
-	if got := window.TotalEntries; got != 3 {
-		t.Fatalf("total entries = %d, want 3", got)
+	if got := window.TotalEntries; got != 4 {
+		t.Fatalf("total entries = %d, want 4", got)
 	}
 	if got := window.Offset; got != 1 {
 		t.Fatalf("offset = %d, want 1", got)
@@ -278,8 +281,11 @@ func TestChatStoreOngoingTailUsesLatestCompactionBoundaryAsFloor(t *testing.T) {
 	if got := window.Snapshot.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "environment info" {
 		t.Fatalf("entry[0] = %+v, want compacted developer context", got)
 	}
-	if got := window.Snapshot.Entries[1]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" || got.CompactLabel != "after replace notice" || got.OngoingText != "after replace notice" {
-		t.Fatalf("entry[1] = %+v, want compacted summary with folded notice label", got)
+	if got := window.Snapshot.Entries[1]; got.Role != string(transcript.EntryRoleCompactionSummary) || got.Text != "condensed summary" || got.CompactLabel != "Context compacted" || got.OngoingText != "Context compacted" {
+		t.Fatalf("entry[1] = %+v, want compacted summary", got)
+	}
+	if got := window.Snapshot.Entries[2]; got.Role != "compaction_notice" || got.Text != "after replace notice" {
+		t.Fatalf("entry[2] = %+v, want legacy local entry preserved without special handling", got)
 	}
 }
 

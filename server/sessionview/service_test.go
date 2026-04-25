@@ -549,17 +549,20 @@ func TestServiceGetSessionTranscriptPagePreservesHistoryAcrossActiveCompaction(t
 	if err != nil {
 		t.Fatalf("get session transcript page: %v", err)
 	}
-	if len(resp.Transcript.Entries) != 3 {
-		t.Fatalf("entries = %d, want 3 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	if len(resp.Transcript.Entries) != 4 {
+		t.Fatalf("entries = %d, want 4 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
 	}
 	if resp.Transcript.Entries[0].Role != "user" || resp.Transcript.Entries[0].Text != "before compaction" {
 		t.Fatalf("expected preserved pre-compaction entry, got %+v", resp.Transcript.Entries[0])
 	}
-	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" || resp.Transcript.Entries[1].CompactLabel != "after replace notice" || resp.Transcript.Entries[1].OngoingText != "after replace notice" {
-		t.Fatalf("expected projected compaction summary with folded notice label, got %+v", resp.Transcript.Entries[1])
+	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed provider summary" || resp.Transcript.Entries[1].CompactLabel != "Context compacted" || resp.Transcript.Entries[1].OngoingText != "Context compacted" {
+		t.Fatalf("expected projected compaction summary, got %+v", resp.Transcript.Entries[1])
 	}
-	if resp.Transcript.Entries[2].Role != "assistant" || resp.Transcript.Entries[2].Text != "live local" {
-		t.Fatalf("expected live local entry after compaction, got %+v", resp.Transcript.Entries[2])
+	if resp.Transcript.Entries[2].Role != "compaction_notice" || resp.Transcript.Entries[2].Text != "after replace notice" {
+		t.Fatalf("expected legacy local entry preserved without special handling, got %+v", resp.Transcript.Entries[2])
+	}
+	if resp.Transcript.Entries[3].Role != "assistant" || resp.Transcript.Entries[3].Text != "live local" {
+		t.Fatalf("expected live local entry after compaction, got %+v", resp.Transcript.Entries[3])
 	}
 }
 
@@ -596,8 +599,8 @@ func TestServiceGetSessionTranscriptPagePaginatesBeforeActiveCompactionBoundary(
 	if err != nil {
 		t.Fatalf("get paginated session transcript page: %v", err)
 	}
-	if resp.Transcript.TotalEntries != 4 {
-		t.Fatalf("total entries = %d, want 4", resp.Transcript.TotalEntries)
+	if resp.Transcript.TotalEntries != 5 {
+		t.Fatalf("total entries = %d, want 5", resp.Transcript.TotalEntries)
 	}
 	if len(resp.Transcript.Entries) != 2 {
 		t.Fatalf("entries = %d, want 2 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
