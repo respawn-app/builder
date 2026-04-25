@@ -366,14 +366,14 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 		t.Fatal("expected detail transcript visible before mouse scrolling")
 	}
 
-	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	afterWheelUp := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
 	if afterWheelUp == initial {
 		t.Fatal("expected detail transcript to change after mouse wheel up")
 	}
 
 	beforeWheelDownScroll := m.view.DetailScroll()
-	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	if got := m.view.DetailScroll(); got >= beforeWheelDownScroll {
 		t.Fatalf("expected detail wheel down after prior wheel up to move toward bottom, got %d from %d", got, beforeWheelDownScroll)
 	}
@@ -387,7 +387,7 @@ func TestDetailModeScrollThenEnterExpandsCenterSelectedItem(t *testing.T) {
 		name   string
 		scroll tea.Msg
 	}{
-		{name: "mouse wheel", scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp}},
+		{name: "mouse wheel", scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp}},
 		{name: "page key", scroll: tea.KeyMsg{Type: tea.KeyPgUp}},
 	}
 

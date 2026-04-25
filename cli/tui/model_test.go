@@ -472,13 +472,13 @@ func TestMouseWheelScrollsOngoingView(t *testing.T) {
 		t.Fatalf("expected ongoing mode to start at bottom, got ongoingScroll=%d", start)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	afterUp := m.OngoingScroll()
 	if afterUp >= start {
 		t.Fatalf("expected wheel up to scroll ongoing view up, got %d from %d", afterUp, start)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	if got := m.OngoingScroll(); got != start {
 		t.Fatalf("expected wheel down to return ongoing scroll to start, got %d want %d", got, start)
 	}
@@ -499,7 +499,7 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 	initial := plainTranscript(m.View())
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	if m.DetailMetricsResolved() {
 		t.Fatal("expected first detail navigation to stay lazy")
 	}
@@ -514,7 +514,7 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 		t.Fatalf("expected detail wheel scroll to leave ongoing scroll untouched, got %d want %d", got, ongoingStart)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	if got := m.DetailScroll(); got != 0 {
 		t.Fatalf("expected wheel down to return lazy detail offset to bottom, got %d", got)
 	}

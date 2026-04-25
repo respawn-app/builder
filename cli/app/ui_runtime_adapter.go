@@ -97,17 +97,8 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	transcriptMutated := false
 	awaitsHydration := false
 	if shouldAppendSyntheticOngoingEntry(m, update.SyntheticOngoingEntry) {
-		m.forwardToView(tui.AppendTranscriptMsg{
-			Visibility:  update.SyntheticOngoingEntry.Visibility,
-			Transient:   true,
-			Committed:   false,
-			Role:        update.SyntheticOngoingEntry.Role,
-			Text:        update.SyntheticOngoingEntry.Text,
-			OngoingText: update.SyntheticOngoingEntry.OngoingText,
-			Phase:       llm.MessagePhase(update.SyntheticOngoingEntry.Phase),
-			ToolCallID:  strings.TrimSpace(update.SyntheticOngoingEntry.ToolCallID),
-			ToolCall:    transcriptToolCallMeta(update.SyntheticOngoingEntry.ToolCall),
-		})
+		entry := transcriptEntryFromProjectedChatEntry(*update.SyntheticOngoingEntry, true, false)
+		m.forwardToView(appendTranscriptMsgFromEntry(entry))
 	}
 	if evt.Kind == clientui.EventConversationUpdated && effectiveSyncSessionView {
 		m.invalidateTransientTranscriptState()
