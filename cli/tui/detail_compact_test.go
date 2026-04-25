@@ -464,6 +464,36 @@ func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptEnd(t *testin
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
 }
 
+func TestCompactDetailWheelReverseFromEndKeepsLineScrollSmooth(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 14; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	for guard := 0; guard < 40 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
+		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	}
+	for idx := 0; idx < 3; idx++ {
+		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	}
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance <= 1 {
+		t.Fatalf("expected setup to place selection below center by more than one entry, distance=%d", beforeDistance)
+	}
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+
+	if got := m.DetailScroll(); got != beforeScroll-1 {
+		t.Fatalf("expected reverse wheel from bottom edge to keep one-line scroll, got %d want %d", got, beforeScroll-1)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got == 0 || detailAbs(got) > detailAbs(beforeDistance)+1 {
+		t.Fatalf("expected reverse wheel to avoid snapping selection to center, got distance=%d before=%d", got, beforeDistance)
+	}
+}
+
 func assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T, scroll tea.Msg) {
 	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
@@ -504,6 +534,41 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T
 
 func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
 	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+}
+
+func TestCompactDetailWheelReverseFromStartKeepsLineScrollSmooth(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 14; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected visible entries, got %+v", visible)
+	}
+	m.detailSelectedEntry = centerVisibleSelectableDetailEntry(t, m)
+	m.detailSelectedActive = true
+	for idx := 0; idx < 3; idx++ {
+		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	}
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance >= -1 {
+		t.Fatalf("expected setup to place selection above center by more than one entry, distance=%d", beforeDistance)
+	}
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+
+	if got := m.DetailScroll(); got != beforeScroll+1 {
+		t.Fatalf("expected reverse wheel from top edge to keep one-line scroll, got %d want %d", got, beforeScroll+1)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got == 0 || detailAbs(got) > detailAbs(beforeDistance)+1 {
+		t.Fatalf("expected reverse wheel to avoid snapping selection to center, got distance=%d before=%d", got, beforeDistance)
+	}
 }
 
 func assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T, scroll tea.Msg) {
@@ -1021,4 +1086,26 @@ func centerVisibleSelectableDetailEntry(t *testing.T, m Model) int {
 		t.Fatalf("expected center visible selectable detail entry, owners=%+v", m.detailLineEntryIndices)
 	}
 	return bestEntry
+}
+
+func selectedDetailDistanceFromCenter(t *testing.T, m Model) int {
+	t.Helper()
+
+	visible := m.visibleSelectableDetailEntries()
+	selected := detailVisibleEntryIndex(visible, m.detailSelectedEntry)
+	if !m.detailSelectedActive || selected < 0 {
+		t.Fatalf("expected selected entry in visible entries, selected=%d active=%v visible=%+v", m.detailSelectedEntry, m.detailSelectedActive, visible)
+	}
+	center := detailVisibleEntryIndex(visible, centerVisibleSelectableDetailEntry(t, m))
+	if center < 0 {
+		t.Fatalf("expected center entry in visible entries, visible=%+v", visible)
+	}
+	return selected - center
+}
+
+func detailAbs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
