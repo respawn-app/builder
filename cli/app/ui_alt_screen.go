@@ -141,27 +141,19 @@ func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
 	}
 	if next == tui.ModeDetail && !m.altScreenActive {
 		m.altScreenActive = true
-		return tea.Sequence(tea.EnterAltScreen, enableDetailMouseCmd(), enableAlternateScrollCmd())
+		return tea.Sequence(tea.EnterAltScreen, enableAlternateScrollCmd())
 	}
 	if next == tui.ModeDetail && m.altScreenActive {
-		return tea.Sequence(enableDetailMouseCmd(), enableAlternateScrollCmd())
+		return enableAlternateScrollCmd()
 	}
 	if prev == tui.ModeDetail && m.altScreenActive && m.tuiAlternateScreen != config.TUIAlternateScreenAlways {
 		m.altScreenActive = false
-		return tea.Sequence(disableAlternateScrollCmd(), disableDetailMouseCmd(), tea.ExitAltScreen)
+		return tea.Sequence(disableAlternateScrollCmd(), tea.ExitAltScreen)
 	}
 	if prev == tui.ModeDetail && m.altScreenActive {
-		return tea.Sequence(disableAlternateScrollCmd(), disableDetailMouseCmd())
+		return disableAlternateScrollCmd()
 	}
 	return nil
-}
-
-func enableDetailMouseCmd() tea.Cmd {
-	return tea.EnableMouseCellMotion
-}
-
-func disableDetailMouseCmd() tea.Cmd {
-	return tea.DisableMouse
 }
 
 func enableAlternateScrollCmd() tea.Cmd {

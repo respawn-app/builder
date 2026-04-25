@@ -384,8 +384,8 @@
 - Ongoing mode keeps mouse capture disabled to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
-- Mouse handling is allowed only on alt-screen/overlay surfaces where Builder does not need strict native scrollback, native text selection, or prompt typing behavior. Detail may enable the mouse/alternate-scroll handling needed for wheel-driven transcript navigation while active, and must disable it again on leaving detail.
-- Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation and message selection are prioritized.
+- Detail does not enable terminal mouse capture because it blocks native text selection in common terminals. Detail may enable terminal alternate-scroll (`?1007`) while active, and must disable it again on leaving detail.
+- Rationale: ongoing must preserve long-lived normal-buffer scrollback; detail still needs smooth native selection/copy, so selection wins over app-level pointer capture. Wheel navigation is best-effort through terminal alternate-scroll and any mouse events the terminal can deliver without capture.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
