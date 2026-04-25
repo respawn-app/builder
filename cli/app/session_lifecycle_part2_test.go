@@ -1,0 +1,181 @@
+package app
+
+import (
+	"builder/cli/tui"
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/config"
+	"context"
+	tea "github.com/charmbracelet/bubbletea"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
+	tests := []struct {
+		name                string
+		childMessages       []llm.Message
+		childOngoing        string
+		childActivity       uiActivity
+		existingParentDraft string
+		want                string
+	}{
+		{name: "copy idle child final assistant reply", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, childActivity: uiActivityIdle, want: "test"},
+		{name: "copy latest child final assistant reply past reminder entry", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}, {Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "heads up"}}, childActivity: uiActivityIdle, want: "test"},
+		{name: "copy latest child final assistant reply past trailing error feedback", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}, {Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch"}}, childActivity: uiActivityIdle, want: "test"},
+		{name: "ignore interrupted child streaming reply", childOngoing: "review findings", childActivity: uiActivityInterrupted, want: ""},
+		{name: "preserve existing parent draft", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, childActivity: uiActivityIdle, existingParentDraft: "keep existing", want: "keep existing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			parentStore, err := session.Create(root, "workspace-x", "/tmp/work")
+			if err != nil {
+				t.Fatalf("create parent store: %v", err)
+			}
+			if err := parentStore.SetInputDraft(tt.existingParentDraft); err != nil {
+				t.Fatalf("set parent draft: %v", err)
+			}
+
+			childStore, err := session.Create(root, "workspace-x", "/tmp/work")
+			if err != nil {
+				t.Fatalf("create child store: %v", err)
+			}
+			if err := childStore.SetParentSessionID(parentStore.Meta().SessionID); err != nil {
+				t.Fatalf("set child parent id: %v", err)
+			}
+
+			for idx, message := range tt.childMessages {
+				if _, err := childStore.AppendEvent("step-1", "message", message); err != nil {
+					t.Fatalf("append child transcript message %d: %v", idx, err)
+				}
+			}
+			childEngine, err := runtime.New(childStore, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+			if err != nil {
+				t.Fatalf("new child engine after transcript seed: %v", err)
+			}
+			childModel := newProjectedEngineUIModel(childEngine)
+			childModel.activity = tt.childActivity
+			if tt.childOngoing != "" {
+				childModel.forwardToView(tui.SetConversationMsg{Entries: childModel.transcriptEntries, Ongoing: tt.childOngoing})
+			}
+			childModel.input = "/back"
+			server := &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}
+
+			next, cmd := childModel.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updatedChild := next.(*uiModel)
+			if cmd == nil {
+				t.Fatal("expected quit cmd for /back")
+			}
+			if err := persistSessionDraftToServer(context.Background(), server, childStore.Meta().SessionID, "lease-test-controller", updatedChild); err != nil {
+				t.Fatalf("persist child draft: %v", err)
+			}
+
+			resolved, err := resolveSessionAction(context.Background(), server, nil, childStore.Meta().SessionID, "lease-test-controller", updatedChild.Transition())
+			if err != nil {
+				t.Fatalf("resolve session action: %v", err)
+			}
+			if !resolved.ShouldContinue {
+				t.Fatal("expected lifecycle to continue")
+			}
+			if resolved.NextSessionID != parentStore.Meta().SessionID {
+				t.Fatalf("expected parent session target, got %q", resolved.NextSessionID)
+			}
+
+			reopenedParent, err := session.Open(parentStore.Dir())
+			if err != nil {
+				t.Fatalf("reopen parent store: %v", err)
+			}
+			parentEngine, err := runtime.New(reopenedParent, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+			if err != nil {
+				t.Fatalf("new parent engine: %v", err)
+			}
+			parentModel := newProjectedEngineUIModel(
+				parentEngine,
+				WithUIInitialInput(sessionLaunchInitialInputFromServer(context.Background(), server, reopenedParent.Meta().SessionID, resolved.InitialInput)),
+			)
+
+			if parentModel.input != tt.want {
+				t.Fatalf("expected parent draft %q, got %q", tt.want, parentModel.input)
+			}
+			if parentModel.busy {
+				t.Fatal("did not expect parent draft to auto-submit")
+			}
+
+			next, _ = parentModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+			editable := next.(*uiModel)
+			if editable.input != tt.want+"x" {
+				t.Fatalf("expected editable parent draft, got %q", editable.input)
+			}
+		})
+	}
+}
+
+func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append u1: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append a1: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append u2: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", llm.Message{Role: llm.RoleAssistant, Content: "a2"}); err != nil {
+		t.Fatalf("append a2: %v", err)
+	}
+
+	resolved, err := resolveSessionAction(
+		context.Background(),
+		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root},
+		nil,
+		store.Meta().SessionID,
+		"lease-test-controller",
+		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if !resolved.ShouldContinue {
+		t.Fatal("expected lifecycle to continue for fork rollback action")
+	}
+
+	forkedStore, err := session.Open(filepath.Join(root, resolved.NextSessionID))
+	if err != nil {
+		t.Fatalf("open fork session store: %v", err)
+	}
+	eng, err := runtime.New(forkedStore, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new runtime for fork: %v", err)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected native startup replay command for fork session")
+	}
+	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIAndTrimRight(flushMsg.Text)
+	if !strings.Contains(plain, "u1") || !strings.Contains(plain, "a1") {
+		t.Fatalf("expected startup replay to include fork base history, got %q", plain)
+	}
+	if strings.Contains(plain, "u2") || strings.Contains(plain, "a2") {
+		t.Fatalf("expected startup replay to exclude trimmed history after fork point, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 2 {
+		t.Fatalf("expected forked transcript to include only two committed entries, got %d", len(updated.transcriptEntries))
+	}
+}

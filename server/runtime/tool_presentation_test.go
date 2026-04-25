@@ -7,15 +7,6 @@ import (
 	"testing"
 )
 
-func TestCurrentTranscriptDefaultShellPathFallsBackToComSpec(t *testing.T) {
-	t.Setenv("SHELL", "")
-	t.Setenv("COMSPEC", `C:\\Windows\\System32\\cmd.exe`)
-
-	if got, want := currentTranscriptDefaultShellPath(), `C:\\Windows\\System32\\cmd.exe`; got != want {
-		t.Fatalf("default shell path = %q, want %q", got, want)
-	}
-}
-
 func TestNormalizeToolCallForTranscriptUsesCustomPatchInput(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
 	call := llm.ToolCall{

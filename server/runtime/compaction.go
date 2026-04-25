@@ -654,6 +654,8 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		return compactionResult{}, errors.Join(err, statusErr)
 	}
 
+	compactionNumber := e.compactionCountSnapshot() + 1
+	result.items = withCompactionSummaryLabel(result.items, CompactionNoticeText(compactionNumber))
 	if err := e.replaceHistory(stepID, result.engine, mode, result.items); err != nil {
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, errors.Join(err, statusErr)
@@ -668,7 +670,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if err := e.appendPostCompactionMessages(stepID, e.postCompactionMessages(mode, manualCarryover, wasHeadless)); err != nil {
 		return compactionResult{}, err
 	}
-	compactionNumber := e.nextCompactionCount()
+	compactionNumber = e.nextCompactionCount()
 	windowTokens := result.usage.WindowTokens
 	if windowTokens <= 0 {
 		windowTokens = e.contextWindowTokens()
@@ -793,6 +795,9 @@ func (e *Engine) compactWithRetry(ctx context.Context, stepID string, client llm
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		resp, err := client.Compact(ctx, request)
+		if err != nil && ctx.Err() != nil {
+			return llm.CompactionResponse{}, ctx.Err()
+		}
 		if err == nil {
 			if err := e.observePromptCacheResponse(stepID, prepared, resp.Usage); err != nil {
 				return llm.CompactionResponse{}, err
@@ -1066,6 +1071,22 @@ func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string)
 	}
 	e.clearPendingHandoffRequest()
 	return nil
+}
+
+func withCompactionSummaryLabel(items []llm.ResponseItem, label string) []llm.ResponseItem {
+	label = strings.TrimSpace(label)
+	if label == "" || len(items) == 0 {
+		return llm.CloneResponseItems(items)
+	}
+	out := llm.CloneResponseItems(items)
+	for idx := range out {
+		if out[idx].MessageType != llm.MessageTypeCompactionSummary {
+			continue
+		}
+		out[idx].CompactContent = label
+		return out
+	}
+	return out
 }
 
 func (e *Engine) buildCanonicalCompactionReplacement(prefix []llm.ResponseItem) ([]llm.ResponseItem, error) {

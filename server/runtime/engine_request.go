@@ -254,26 +254,11 @@ func (e *Engine) requestTools(ctx context.Context) []llm.Tool {
 }
 
 func (e *Engine) supportsCustomPatchTool(ctx context.Context) bool {
-	caps, ok := e.activeProviderCapabilities(ctx)
-	return ok && caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
-}
-
-func (e *Engine) activeProviderCapabilities(ctx context.Context) (llm.ProviderCapabilities, bool) {
-	if e == nil {
-		return llm.ProviderCapabilities{}, false
-	}
-	if e.cfg.ProviderCapabilitiesOverride != nil {
-		return *e.cfg.ProviderCapabilitiesOverride, true
-	}
-	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
-	if !ok {
-		return llm.ProviderCapabilities{}, false
-	}
-	caps, err := provider.ProviderCapabilities(ctx)
+	caps, err := e.providerCapabilities(ctx)
 	if err != nil {
-		return llm.ProviderCapabilities{}, false
+		return false
 	}
-	return caps, true
+	return caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
 }
 
 func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {

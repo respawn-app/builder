@@ -113,7 +113,7 @@ func TestNoopFinalAbortsPendingTurnCompletionBell(t *testing.T) {
 	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}}})
 	updated = next.(*uiModel)
 
-	next, _ = updated.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	next, _ = updated.Update(newSubmitDoneMsg(0, uiNoopFinalToken, "", nil))
 	updated = next.(*uiModel)
 	if got := ringer.Count(); got != 0 {
 		t.Fatalf("ring count = %d after NO_OP final, want 0", got)
@@ -141,7 +141,7 @@ func TestQueuedFollowUpAfterNoopFinalDoesNotLeakTurnCompletionBell(t *testing.T)
 	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "working"}}}})
 	updated = next.(*uiModel)
 
-	next, cmd := updated.Update(newSubmitDoneMsg(uiNoopFinalToken, "", nil))
+	next, cmd := updated.Update(newSubmitDoneMsg(0, uiNoopFinalToken, "", nil))
 	updated = next.(*uiModel)
 	if cmd == nil {
 		t.Fatal("expected queued follow-up to start after NO_OP final")

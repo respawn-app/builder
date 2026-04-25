@@ -1,0 +1,882 @@
+package app
+
+import (
+	"builder/cli/tui"
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/clientui"
+	"builder/shared/transcript"
+	"context"
+	"errors"
+	tea "github.com/charmbracelet/bubbletea"
+	"strings"
+	"testing"
+)
+
+func TestMainInputViewportTracksCursorLine(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 20
+	m.termHeight = 6
+	m.windowSizeKnown = true
+	m.input = "first\nsecond\nthird\nfourth"
+	m.inputCursor = 1
+	m.syncViewport()
+
+	plain := stripANSIAndTrimRight(strings.Join(m.renderInputLines(20, uiThemeStyles("dark")), "\n"))
+	if !strings.Contains(plain, "› first") || !strings.Contains(plain, "second") {
+		t.Fatalf("expected viewport to keep cursor line visible, got %q", plain)
+	}
+	if strings.Contains(plain, "fourth") {
+		t.Fatalf("expected viewport not to pin to tail while cursor is near top, got %q", plain)
+	}
+}
+
+func TestArrowNavigationDoesNotMutateInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "abcdef"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	updated = next.(*uiModel)
+
+	if updated.input != "abcdef" {
+		t.Fatalf("expected navigation keys not to mutate input, got %q", updated.input)
+	}
+}
+
+func TestBusyEnterQueuesSteeringUntilFlushed(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing steering, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "please continue with tests",
+		UserMessageBatch: []string{"please continue with tests"},
+	}))
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input lock after flush")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after flush, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected queued steering cleared after flush, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestBusyEnterCanQueueMultipleSteeringMessages(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "first steering message"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "second steering message"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 2 {
+		t.Fatalf("expected two queued steering messages, got %+v", updated.pendingInjected)
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing multiple steering messages, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "first steering message\n\nsecond steering message",
+		UserMessageBatch: []string{"first steering message", "second steering message"},
+	}))
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected queued steering cleared after batched flush, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "first steering message"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "second steering message"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	updated.input = "queued after turn"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 2 {
+		t.Fatalf("expected two queued steering messages, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "queued after turn" {
+		t.Fatalf("expected normal queued input preserved, got %+v", updated.queued)
+	}
+
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "first steering message\n\nsecond steering message",
+		UserMessageBatch: []string{"first steering message", "second steering message"},
+	}))
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected steering queue cleared after batched flush, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "queued after turn" {
+		t.Fatalf("expected post-turn queue preserved until turn completion, got %+v", updated.queued)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected post-turn queue to start draining after turn completion")
+	}
+	if !updated.busy {
+		t.Fatal("expected queued post-turn input to begin submission after steering flush")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected post-turn queue drained in order, got %+v", updated.queued)
+	}
+}
+
+func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "$ pwd"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock for queued user shell command")
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "$ pwd" {
+		t.Fatalf("expected queued raw user shell input, got %+v", updated.queued)
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing user shell command, got %q", updated.input)
+	}
+}
+
+func TestSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	updated.queued = append(updated.queued, "follow-up")
+	next, cmd := updated.Update(submitDoneMsg{err: errors.New("network failure")})
+	updated = next.(*uiModel)
+	if cmd != nil {
+		t.Fatal("did not expect follow-up queued submission to start while restored steering input is present")
+	}
+	if updated.busy {
+		t.Fatal("did not expect busy after submission error")
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock after submission error")
+	}
+	if updated.input != "please continue with tests\n\nfollow-up" {
+		t.Fatalf("expected queued steering and queued drafts restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injection queue cleared after restore, got %d", len(updated.pendingInjected))
+	}
+}
+
+func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	m.busy = true
+	m.input = "restored steering"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(submitDoneMsg{err: errors.New("network failure")})
+	updated = next.(*uiModel)
+
+	if updated.input != "restored steering" {
+		t.Fatalf("expected steering restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "fresh prompt")
+	if err != nil {
+		t.Fatalf("submit fresh prompt: %v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("assistant content = %q, want ok", msg.Content)
+	}
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
+	}
+	for _, message := range requestMessages(requests[0]) {
+		if message.Role == llm.RoleUser && message.Content == "restored steering" {
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
+		}
+	}
+}
+
+func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "queue this"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 {
+		t.Fatalf("expected one queued post-turn message, got %d", len(updated.queued))
+	}
+	if updated.queued[0] != "queue this" {
+		t.Fatalf("unexpected queued message: %q", updated.queued[0])
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect injected steering message, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after tab while busy, got %q", updated.input)
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock for tab queue")
+	}
+}
+
+func TestQueueInjectedInputIgnoresBlankTextWithoutClearingInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "keep this draft"
+	m.activity = uiActivityIdle
+
+	m.queueInjectedInput("   \n\t  ")
+
+	if m.input != "keep this draft" {
+		t.Fatalf("expected blank injected input to leave draft untouched, got %q", m.input)
+	}
+	if len(m.pendingInjected) != 0 {
+		t.Fatalf("expected no queued injected messages, got %+v", m.pendingInjected)
+	}
+	if m.activity != uiActivityIdle {
+		t.Fatalf("expected blank injected input to leave activity unchanged, got %q", m.activity)
+	}
+}
+
+func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.queued = []string{"first queued", "second queued", "third queued"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("expected busy=false after ctrl+c interrupt")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued list to be restored into input and cleared, got %d", len(updated.queued))
+	}
+	if updated.input != "first queued\n\nsecond queued\n\nthird queued" {
+		t.Fatalf("unexpected restored input text: %q", updated.input)
+	}
+	if updated.inputCursor != -1 {
+		t.Fatalf("expected cursor moved to tail after restore, got %d", updated.inputCursor)
+	}
+}
+
+func TestCtrlCWhileBusyRestoresQueuedSlashCommandsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.queued = []string{"/name queued title"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("expected busy=false after ctrl+c interrupt")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued slash command restored into input and cleared, got %+v", updated.queued)
+	}
+	if updated.input != "/name queued title" {
+		t.Fatalf("expected queued slash command restored into input, got %q", updated.input)
+	}
+}
+
+func TestCtrlCWhileBusyRestoresMixedQueuedInputsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.queued = []string{"draft one", "draft two", "/name queued title", "later draft"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.input != "draft one\n\ndraft two\n\n/name queued title\n\nlater draft" {
+		t.Fatalf("expected all queued inputs restored into input, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queue cleared after restore, got %+v", updated.queued)
+	}
+}
+
+func TestCtrlCWhileBusyUnlocksSubmitLockedInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.inputSubmitLocked = true
+	m.lockedInjectText = "keep this message"
+	m.pendingInjected = []string{"keep this message", "another"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.inputSubmitLocked {
+		t.Fatal("expected ctrl+c to unlock input")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected queue restored into input and cleared, got %+v", updated.pendingInjected)
+	}
+	if updated.input != "another" {
+		t.Fatalf("expected remaining queued steering restored into input, got %q", updated.input)
+	}
+}
+
+func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	m.busy = true
+	m.input = "restored steering"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+
+	if updated.input != "restored steering" {
+		t.Fatalf("expected steering restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "fresh prompt")
+	if err != nil {
+		t.Fatalf("submit fresh prompt: %v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("assistant content = %q, want ok", msg.Content)
+	}
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
+	}
+	for _, message := range requestMessages(requests[0]) {
+		if message.Role == llm.RoleUser && message.Content == "restored steering" {
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
+		}
+	}
+}
+
+func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.queued = []string{"first", "second"}
+
+	next, cmd := m.Update(submitDoneMsg{err: errSubmissionInterrupted})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect follow-up submission command after interruption")
+	}
+	if updated.busy {
+		t.Fatal("expected busy=false after interrupted submit completion")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queue restored into input and cleared, got %d", len(updated.queued))
+	}
+	if updated.input != "first\n\nsecond" {
+		t.Fatalf("unexpected restored input text: %q", updated.input)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(strings.ToLower(plain), "interrupted") {
+		t.Fatalf("did not expect interruption to be rendered as error transcript, got %q", plain)
+	}
+}
+
+func TestInterruptedSubmitDoneDoesNotRestoreFlushedSubmittedText(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.activeSubmit = activeSubmitState{token: 7, text: "already flushed"}
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		StepID:   "step-1",
+		RunState: &clientui.RunState{Busy: true},
+	}})
+	updated := next.(*uiModel)
+
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         1,
+		CommittedEntryCount:        1,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		UserMessage:                "already flushed",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "already flushed"}},
+	}})
+	updated = next.(*uiModel)
+
+	next, _ = updated.Update(submitDoneMsg{token: 7, submittedText: "already flushed", err: errSubmissionInterrupted})
+	updated = next.(*uiModel)
+
+	if updated.input != "" {
+		t.Fatalf("did not expect already-flushed submitted text restored into input, got %q", updated.input)
+	}
+	if got := len(updated.transcriptEntries); got != 1 {
+		t.Fatalf("expected one committed transcript entry, got %d", got)
+	}
+	if updated.transcriptEntries[0].Text != "already flushed" {
+		t.Fatalf("unexpected transcript entry: %+v", updated.transcriptEntries[0])
+	}
+}
+
+func TestDelayedMatchingUserFlushFromOldStepDoesNotMarkActiveSubmitFlushed(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.activeSubmit = activeSubmitState{token: 11, stepID: "new-step", text: "repeat"}
+
+	m.markActiveSubmitFlushed(clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		StepID:      "old-step",
+		UserMessage: "repeat",
+	})
+
+	if m.activeSubmit.flushed {
+		t.Fatal("old-step flush with matching text marked new active submit flushed")
+	}
+}
+
+func TestStaleSubmitDoneAfterInterruptDoesNotRestoreSubmittedText(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.activeSubmit = activeSubmitState{token: 9, text: "previous"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+	if updated.input != "" {
+		t.Fatalf("did not expect ctrl+c to restore active submitted text, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(submitDoneMsg{token: 9, submittedText: "previous", err: errSubmissionInterrupted})
+	updated = next.(*uiModel)
+	if updated.input != "" {
+		t.Fatalf("stale submit completion restored submitted text, got %q", updated.input)
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+}
+
+func TestVerboseReviewerSuggestionsStaySingleAfterInterruptAndNextSubmit(t *testing.T) {
+	suggestions := "Supervisor suggested:\n1. Add final verification notes."
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.activeSubmit = activeSubmitState{token: 21, text: suggestions}
+
+	events := []clientui.Event{
+		{Kind: clientui.EventRunStateChanged, StepID: "step-1", RunState: &clientui.RunState{Busy: true}},
+		{
+			Kind:                       clientui.EventUserMessageFlushed,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         1,
+			CommittedEntryCount:        1,
+			CommittedEntryStart:        0,
+			CommittedEntryStartSet:     true,
+			UserMessage:                suggestions,
+			TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: suggestions}},
+		},
+		{
+			Kind:                       clientui.EventLocalEntryAdded,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         2,
+			CommittedEntryCount:        2,
+			CommittedEntryStart:        1,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:        "reviewer_suggestions",
+				Text:        suggestions,
+				OngoingText: "Supervisor made 1 suggestion.",
+			}},
+		},
+		{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "applying suggestion"},
+	}
+	var next tea.Model = m
+	for _, evt := range events {
+		next, _ = next.(*uiModel).Update(runtimeEventMsg{event: evt})
+	}
+	updated := next.(*uiModel)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(submitDoneMsg{token: 21, submittedText: suggestions, err: errSubmissionInterrupted})
+	updated = next.(*uiModel)
+	if strings.Contains(updated.input, suggestions) {
+		t.Fatalf("stale reviewer suggestions were restored into input: %q", updated.input)
+	}
+
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		StepID:   "step-2",
+		RunState: &clientui.RunState{Busy: true},
+	}})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-2",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         3,
+		CommittedEntryCount:        3,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
+		UserMessage:                "next request",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "next request"}},
+	}})
+	updated = next.(*uiModel)
+
+	count := 0
+	for _, entry := range updated.transcriptEntries {
+		if entry.Role == "reviewer_suggestions" && entry.Text == suggestions {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected reviewer suggestions once after interrupt and next submit, got %d entries=%+v", count, updated.transcriptEntries)
+	}
+}
+
+func TestSubmitErrorRestoresPendingInjectedSubmittedAndQueuedInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.pendingInjected = []string{"steer"}
+	m.queued = []string{"queued"}
+
+	next, cmd := m.Update(submitDoneMsg{submittedText: "sent", err: errors.New("transport down")})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect follow-up command after failed submit")
+	}
+	if updated.busy {
+		t.Fatal("expected busy=false after failed submit")
+	}
+	if updated.input != "steer\n\nsent\n\nqueued" {
+		t.Fatalf("expected full rollback into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected cleared after rollback, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity, got %v", updated.activity)
+	}
+}
+
+func TestPreSubmitCheckErrorRestoresQueuedDraftsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.preSubmitCheckToken = 1
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
+		token: 1,
+		text:  "submitted",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected pre-submit rollback to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+}
+
+func TestPreSubmitCheckCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.preSubmitCheckToken = 1
+	m.activity = uiActivityRunning
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
+		token: 1,
+		text:  "submitted",
+		err:   context.Canceled,
+	})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected pre-submit cancellation to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("did not expect transcript error entry, got %+v", updated.transcriptEntries)
+	}
+}
+
+func TestCompactFailureRestoresQueuedDraftsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.compacting = true
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(compactDoneMsg{err: errors.New("compact failed")})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected compaction rollback to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+}
+
+func TestCompactCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(compactDoneMsg{err: context.Canceled})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected compaction cancellation to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.transcriptEntries) != 0 {
+		t.Fatalf("did not expect transcript error entry, got %+v", updated.transcriptEntries)
+	}
+}
+
+func TestCompactDoneKeepsQueuedSteeringPending(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	next, _ = updated.Update(compactDoneMsg{})
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock after compaction completion")
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "please continue with tests" {
+		t.Fatalf("expected queued steering preserved across compaction completion, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestCompactDoneSurfacesQueuedRuntimeWorkProbeFailure(t *testing.T) {
+	client := &runtimeControlFakeClient{err: errors.New("daemon stalled")}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+
+	next, _ := m.Update(compactDoneMsg{})
+	updated := next.(*uiModel)
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity after queued runtime work probe failure, got %v", updated.activity)
+	}
+	if client.appendedRole != string(transcript.EntryRoleDeveloperErrorFeedback) || !strings.Contains(client.appendedText, "daemon stalled") {
+		t.Fatalf("expected runtime error entry with probe failure, role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
+func TestCompactDoneSuppressesQueuedRuntimeWorkProbeCancellation(t *testing.T) {
+	client := &runtimeControlFakeClient{hasQueuedUserWorkErr: context.Canceled}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+
+	next, _ := m.Update(compactDoneMsg{})
+	updated := next.(*uiModel)
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity after queued runtime work probe cancellation, got %v", updated.activity)
+	}
+	if client.appendedRole != "" || client.appendedText != "" {
+		t.Fatalf("did not expect appended runtime error entry, role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
+func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 20
+	m.termHeight = 12
+
+	m.input = "short"
+	chatShort := m.calcChatLines()
+
+	m.input = strings.Repeat("x", 120)
+	chatLong := m.calcChatLines()
+
+	if chatLong >= chatShort {
+		t.Fatalf("expected wrapped input to reduce chat lines: short=%d long=%d", chatShort, chatLong)
+	}
+}
+
+func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 20
+	m.termHeight = 12
+	m.input = strings.Repeat("x", 80)
+	m.queued = []string{"one", "two", "three", "four", "five", "six"}
+	m.refreshSlashCommandFilterFromInput()
+
+	base := m.calcChatLines()
+	if base >= m.termHeight-1 {
+		t.Fatalf("expected ongoing chat lines to reserve non-chat panes, got %d", base)
+	}
+
+	m.forwardToView(tui.ToggleModeMsg{})
+	detail := m.calcChatLines()
+	if detail != m.termHeight-1 {
+		t.Fatalf("expected detail chat lines to use full height minus status line: got %d want %d", detail, m.termHeight-1)
+	}
+}
+
+func TestCalcChatLinesRemainsViewportBasedDuringActiveWork(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.busy = true
+	m.sawAssistantDelta = true
+
+	if got := m.calcChatLines(); got <= 1 {
+		t.Fatalf("expected viewport-based ongoing mode to keep multi-line chat area during active work, got %d", got)
+	}
+}

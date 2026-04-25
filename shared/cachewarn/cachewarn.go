@@ -28,7 +28,11 @@ type Warning struct {
 }
 
 func Text(w Warning) string {
-	return fmt.Sprintf("Cache miss: %s, -%s tokens", reasonText(w), formatTokenDeltaThousands(w.LostInputTokens))
+	text := fmt.Sprintf("Cache miss: %s", reasonText(w))
+	if w.LostInputTokens <= 0 {
+		return text
+	}
+	return fmt.Sprintf("%s, -%s tokens", text, formatTokenDeltaThousands(w.LostInputTokens))
 }
 
 func reasonText(w Warning) string {

@@ -126,6 +126,9 @@ func formatSubmissionError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if isInterruptedRuntimeError(err) {
+		return ""
+	}
 	if errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
 		return "session is controlled by another client; retry to take over"
 	}
@@ -151,6 +154,20 @@ func isInterruptedRuntimeError(err error) bool {
 		return false
 	}
 	return errors.Is(err, errSubmissionInterrupted) || errors.Is(err, context.Canceled)
+}
+
+func (c uiInputController) interruptBusyRuntime() {
+	m := c.model
+	_ = m.interruptRuntime()
+	m.preSubmitCheckToken++
+	m.activeSubmit = activeSubmitState{}
+	c.releaseLockedInjectedInput(true)
+	c.restorePendingInjectedIntoInput()
+	c.restoreQueuedMessagesIntoInput()
+	m.pendingPreSubmitText = ""
+	m.busy = false
+	m.activity = uiActivityInterrupted
+	m.clearReviewerState()
 }
 
 func parseUserShellCommand(text string) (string, bool) {

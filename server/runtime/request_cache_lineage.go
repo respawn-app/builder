@@ -201,12 +201,18 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	events := make([]session.EventInput, 0, 3)
 	var warning *cachewarn.Warning
 	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
-		warning = prepared.exactWarning
-		warning.LostInputTokens = lostCachedInputTokens(prepared, usage)
-		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
+		lostInputTokens := lostCachedInputTokens(prepared, usage)
+		if lostInputTokens > 0 {
+			warning = prepared.exactWarning
+			warning.LostInputTokens = lostInputTokens
+			events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
+		}
 	} else if shouldWarnOnCacheReuseDrop(e.cfg.CacheWarningMode, prepared, usage) {
-		warning = &cachewarn.Warning{Scope: prepared.request.Scope, Reason: cachewarn.ReasonReuseDropped, CacheKey: prepared.request.CacheKey, LostInputTokens: lostCachedInputTokens(prepared, usage)}
-		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
+		lostInputTokens := lostCachedInputTokens(prepared, usage)
+		if lostInputTokens > 0 {
+			warning = &cachewarn.Warning{Scope: prepared.request.Scope, Reason: cachewarn.ReasonReuseDropped, CacheKey: prepared.request.CacheKey, LostInputTokens: lostInputTokens}
+			events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
+		}
 	}
 	events = append(events, session.EventInput{Kind: sessionEventCacheResponseObserved, Payload: response})
 	if _, err := e.store.AppendTurnAtomic(stepID, events); err != nil {
