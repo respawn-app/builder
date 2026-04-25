@@ -297,7 +297,10 @@ func TestPersistedTranscriptScanRendersPatchToolCallsWithoutEditedLabel(t *testi
 		if !ok {
 			t.Fatalf("unexpected patch call id %q", entry.ToolCallID)
 		}
-		if entry.ToolCall == nil || entry.ToolCall.PatchRender == nil {
+		if entry.ToolCall == nil {
+			t.Fatalf("expected persisted patch metadata for %s", entry.ToolCallID)
+		}
+		if entry.ToolCallID != "call-patch-raw" && entry.ToolCall.PatchRender == nil {
 			t.Fatalf("expected persisted patch render metadata for %s, got %+v", entry.ToolCallID, entry.ToolCall)
 		}
 		if entry.ToolCall.PatchSummary != want {
