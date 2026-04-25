@@ -457,6 +457,15 @@ func TestCompactDetailLineScrollFocusesCenterVisibleSelection(t *testing.T) {
 }
 
 func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.KeyMsg{Type: tea.KeyDown})
+}
+
+func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+}
+
+func assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T, scroll tea.Msg) {
+	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
 	for idx := 0; idx < 8; idx++ {
@@ -480,7 +489,7 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 	}
 
 	beforeScroll := m.DetailScroll()
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateModel(t, m, scroll)
 	if got := m.DetailScroll(); got != beforeScroll {
 		t.Fatalf("expected down at transcript bottom to keep line scroll pinned, got %d want %d", got, beforeScroll)
 	}
@@ -490,6 +499,15 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) 
 }
 
 func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.KeyMsg{Type: tea.KeyUp})
+}
+
+func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+}
+
+func assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T, scroll tea.Msg) {
+	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
 	for idx := 0; idx < 8; idx++ {
@@ -512,7 +530,7 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T
 	m.detailSelectedEntry = visible[len(visible)-1]
 	m.detailSelectedActive = true
 
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateModel(t, m, scroll)
 	if got := m.DetailScroll(); got != 0 {
 		t.Fatalf("expected up at transcript top to keep line scroll pinned, got %d", got)
 	}
