@@ -77,21 +77,50 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 }
 
 func TestCompactDetailScrollFocusesFirstVisibleEntryForExpansion(t *testing.T) {
-	m := NewModel(WithCompactDetail(), WithPreviewLines(4))
-	for idx := 0; idx < 8; idx++ {
-		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d", idx)})
+	tests := []struct {
+		name   string
+		setup  []tea.Msg
+		scroll tea.Msg
+	}{
+		{
+			name:   "mouse wheel up",
+			scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp},
+		},
+		{
+			name:   "page up",
+			scroll: tea.KeyMsg{Type: tea.KeyPgUp},
+		},
+		{
+			name: "page down",
+			setup: []tea.Msg{
+				tea.KeyMsg{Type: tea.KeyPgUp},
+			},
+			scroll: tea.KeyMsg{Type: tea.KeyPgDown},
+		},
 	}
-	m = updateModel(t, m, ToggleModeMsg{})
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	firstVisible := firstVisibleSelectableDetailEntry(t, m)
-	if !m.detailSelectedActive || m.detailSelectedEntry != firstVisible {
-		t.Fatalf("expected scroll to focus first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(4))
+			for idx := 0; idx < 8; idx++ {
+				m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d", idx)})
+			}
+			m = updateModel(t, m, ToggleModeMsg{})
+			for _, msg := range tt.setup {
+				m = updateModel(t, m, msg)
+			}
 
-	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if _, ok := m.detailExpandedEntries[firstVisible]; !ok {
-		t.Fatalf("expected enter after scroll to expand first visible entry %d, got %+v", firstVisible, m.detailExpandedEntries)
+			m = updateModel(t, m, tt.scroll)
+			firstVisible := firstVisibleSelectableDetailEntry(t, m)
+			if !m.detailSelectedActive || m.detailSelectedEntry != firstVisible {
+				t.Fatalf("expected scroll to focus first visible entry %d, got active=%v entry=%d", firstVisible, m.detailSelectedActive, m.detailSelectedEntry)
+			}
+
+			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			if _, ok := m.detailExpandedEntries[firstVisible]; !ok {
+				t.Fatalf("expected enter after scroll to expand first visible entry %d, got %+v", firstVisible, m.detailExpandedEntries)
+			}
+		})
 	}
 }
 

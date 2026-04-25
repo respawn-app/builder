@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -154,6 +155,51 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 	}
 }
 
+func TestDetailModeScrollThenEnterExpandsFirstVisibleItem(t *testing.T) {
+	tests := []struct {
+		name   string
+		scroll tea.Msg
+	}{
+		{name: "mouse wheel", scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp}},
+		{name: "page key", scroll: tea.KeyMsg{Type: tea.KeyPgUp}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newProjectedStaticUIModel()
+			m.termWidth = 80
+			m.termHeight = 8
+			m.syncViewport()
+
+			for idx := 0; idx < 8; idx++ {
+				callID := fmt.Sprintf("call_%d", idx)
+				command := fmt.Sprintf("cmd %d", idx)
+				m.forwardToView(tui.AppendTranscriptMsg{
+					Role:       "tool_call",
+					Text:       command,
+					ToolCallID: callID,
+					ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: command},
+				})
+				m.forwardToView(tui.AppendTranscriptMsg{
+					Role:       "tool_result_ok",
+					ToolCallID: callID,
+					Text:       fmt.Sprintf("output %d line 1\noutput %d line 2", idx, idx),
+				})
+			}
+			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+			m = updateUIModel(t, m, tt.scroll)
+
+			firstVisible := firstVisibleDetailCommandIndex(t, m.view.View())
+			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+			expanded := stripANSIAndTrimRight(m.view.View())
+			if !strings.Contains(expanded, fmt.Sprintf("▼ $ cmd %d", firstVisible)) || !strings.Contains(expanded, fmt.Sprintf("output %d line 2", firstVisible)) {
+				t.Fatalf("expected enter after %s scroll to expand first visible command %d, got %q", tt.name, firstVisible, expanded)
+			}
+		})
+	}
+}
+
 func TestUpDownRouteByTranscriptMode(t *testing.T) {
 	m := newProjectedStaticUIModel(WithUIPromptHistory([]string{"hello"}))
 	m.termWidth = 80
@@ -190,6 +236,24 @@ func TestUpDownRouteByTranscriptMode(t *testing.T) {
 	if m.input != "hello" {
 		t.Fatalf("expected detail mode scrolling not to mutate recalled input, got %q", m.input)
 	}
+}
+
+func firstVisibleDetailCommandIndex(t *testing.T, view string) int {
+	t.Helper()
+
+	for _, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
+		_, suffix, ok := strings.Cut(line, "$ cmd ")
+		if !ok {
+			continue
+		}
+		value, parseErr := strconv.Atoi(strings.TrimSpace(suffix))
+		if parseErr != nil {
+			t.Fatalf("failed to parse command index from %q: %v", line, parseErr)
+		}
+		return value
+	}
+	t.Fatalf("expected visible detail command in %q", stripANSIAndTrimRight(view))
+	return -1
 }
 
 func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {
