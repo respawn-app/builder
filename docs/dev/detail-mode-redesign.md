@@ -4,7 +4,7 @@
 
 Detail mode becomes a fast transcript inspector, not a raw transcript dump. The default view is compact and navigable by message. Full content stays available by expanding individual messages.
 
-Ongoing remains the native-scroll, append-only transcript surface. Detail is an alt-screen inspection surface, so mouse handling and alternate-scroll are allowed there. Mouse handling must not be enabled for ongoing mode or any normal-buffer surface where it would compromise native text selection, native scrollback, or typing behavior.
+Ongoing remains the native-scroll, append-only transcript surface. Detail is an alt-screen inspection surface, but it must still preserve native text selection. Mouse capture must not be enabled for ongoing or detail; detail may enable terminal alternate-scroll while active for wheel-friendly navigation on terminals that support it.
 
 Success metrics:
 
@@ -29,7 +29,7 @@ Success metrics:
 - `Down` selects the next expandable message.
 - `Enter` toggles the selected message between collapsed and expanded.
 - `PgUp`/`PgDn` keep page scrolling detail content.
-- Mouse wheel keeps scrolling detail content.
+- Mouse wheel keeps scrolling detail content when the terminal can deliver wheel navigation without mouse capture.
 - `Tab` or the existing mode toggle returns to ongoing.
 
 Selection is message-oriented, not line-oriented. If the selected message is outside the viewport after navigation or expansion, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
@@ -413,8 +413,8 @@ Keyboard behavior:
 Owns terminal mode toggles:
 
 - Ongoing remains mouse-neutral.
-- Detail may enable mouse handling only while running as alt-screen overlay.
-- Leaving detail restores previous mouse state even after errors/interruption.
+- Detail may enable alternate-scroll only while running as alt-screen overlay.
+- Leaving detail restores alternate-scroll state even after errors/interruption.
 
 ## State Reconciliation
 
@@ -453,7 +453,7 @@ Regression snapshots must include selected user text, selected patch diff add/re
 
 ## Mouse Scope
 
-Mouse capture/alternate-scroll wiring belongs to app/overlay lifecycle, not renderer. Detail may request mouse handling only while running as an alt-screen overlay. Leaving detail must restore previous mouse state. Ongoing mode must not enable mouse capture or alternate-scroll, including after toggling detail open/closed.
+Alternate-scroll wiring belongs to app/overlay lifecycle, not renderer. Detail may request terminal alternate-scroll only while running as an alt-screen overlay. Detail must not enable terminal mouse capture because it blocks native text selection in common terminals. Leaving detail must restore alternate-scroll state. Ongoing mode must not enable mouse capture or alternate-scroll, including after toggling detail open/closed.
 
 ## Minimum Test Matrix
 
@@ -499,8 +499,8 @@ State/navigation tests:
 Mouse/app tests:
 
 - Ongoing never enables mouse capture or `?1007`.
-- Entering detail alt-screen enables only detail-required mouse handling.
-- Leaving detail restores prior mouse state.
+- Entering detail alt-screen enables alternate-scroll (`?1007`) but does not enable mouse capture (`?1000`, `?1002`, `?1003`, `?1006`).
+- Leaving detail restores prior alternate-scroll state.
 - Visiting detail and returning to ongoing does not change ongoing key behavior.
 
 ## Implementation Plan
