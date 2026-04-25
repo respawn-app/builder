@@ -60,12 +60,16 @@ func normalizeSlashCommandToken(token string) string {
 func (m *uiModel) refreshSlashCommandFilterFromInput() {
 	parsed := parseSlashCommandInput(m.input)
 	if !parsed.active || parsed.argumentMode {
+		m.authSlashSessionOpen = false
 		m.slashCommandFilter = ""
 		m.slashCommandFilterSet = false
 		m.slashCommandSelection = 0
 		return
 	}
-	m.refreshAuthSlashCommandState()
+	if !m.authSlashSessionOpen {
+		m.refreshAuthSlashCommandState()
+		m.authSlashSessionOpen = true
+	}
 	normalized := normalizeSlashCommandToken(parsed.token)
 	if !m.slashCommandFilterSet || m.slashCommandFilter != normalized {
 		m.slashCommandSelection = 0

@@ -499,6 +499,7 @@ type uiModel struct {
 	hasOtherSessionsKnown bool
 	authSlashCommandName  string
 	authSlashCommandErr   string
+	authSlashSessionOpen  bool
 	slashCommandFilter    string
 	slashCommandFilterSet bool
 	slashCommandSelection int

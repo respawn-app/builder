@@ -338,6 +338,38 @@ func TestSlashCommandPickerRefreshesAuthStateAfterModelInit(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerLoadsAuthStateOncePerSlashSession(t *testing.T) {
+	store := &countingAuthStore{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				TokenType:   "Bearer",
+			},
+		},
+	}}
+	manager := auth.NewManager(store, nil, nil)
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{AuthManager: manager}))
+	loadsAfterInit := store.loads
+
+	for _, input := range []string{"/", "/l", "/lo"} {
+		m.input = input
+		m.refreshSlashCommandFilterFromInput()
+	}
+	if got := store.loads - loadsAfterInit; got != 1 {
+		t.Fatalf("expected one auth load while editing one slash session, got %d", got)
+	}
+
+	m.input = "ordinary prompt"
+	m.refreshSlashCommandFilterFromInput()
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+	if got := store.loads - loadsAfterInit; got != 2 {
+		t.Fatalf("expected auth load after starting a new slash session, got %d", got)
+	}
+}
+
 type errorAuthStore struct {
 	err error
 }
@@ -347,6 +379,21 @@ func (s errorAuthStore) Load(context.Context) (auth.State, error) {
 }
 
 func (s errorAuthStore) Save(context.Context, auth.State) error {
+	return nil
+}
+
+type countingAuthStore struct {
+	state auth.State
+	loads int
+}
+
+func (s *countingAuthStore) Load(context.Context) (auth.State, error) {
+	s.loads++
+	return s.state, nil
+}
+
+func (s *countingAuthStore) Save(_ context.Context, state auth.State) error {
+	s.state = state
 	return nil
 }
 
