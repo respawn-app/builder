@@ -13,7 +13,7 @@ const interruptionUserVisibleText = "You interrupted"
 
 func isCompactionRole(role string) bool {
 	switch transcript.NormalizeEntryRole(role) {
-	case "compaction_notice", roleCompactionSummary, roleManualCompactionCarryover:
+	case roleCompactionSummary, roleManualCompactionCarryover:
 		return true
 	default:
 		return false
