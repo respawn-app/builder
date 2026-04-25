@@ -467,11 +467,6 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate", "recovery_cause": string(recoveryCause)})
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
-		m.nativeProjection = tui.TranscriptProjection{}
-		m.nativeRenderedProjection = tui.TranscriptProjection{}
-		m.nativeFlushedEntryCount = 0
-		m.nativeRenderedSnapshot = ""
-		m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	}
 	previousWindowTitle := m.windowTitle()
 	if transcriptPageSessionChanged(m.sessionID, page.SessionID) {

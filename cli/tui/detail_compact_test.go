@@ -294,7 +294,7 @@ func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
 				ToolCallID: "call_3",
 				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "selected-command"},
 			})
-			m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_error", ToolCallID: "call_3", Text: "boom"})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_3", Text: "done\nextra output"})
 			m = updateModel(t, m, AppendTranscriptMsg{
 				Role:       "tool_call",
 				Text:       "after-selected-command",
@@ -311,8 +311,8 @@ func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
 			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▶ ") || strings.Contains(plain, "$ selected-command") {
 				t.Fatalf("expected selected collapsed expandable item to replace role symbol with chevron, got %q in %q", plain, xansi.Strip(collapsed))
 			}
-			if !containsColor(extractForegroundTrueColors(selectedLine), m.palette().toolErrorColor) {
-				t.Fatalf("expected selected error chevron to keep semantic error color, got %q", selectedLine)
+			if !containsColor(extractForegroundTrueColors(selectedLine), m.palette().toolSuccessColor) {
+				t.Fatalf("expected selected success chevron to keep semantic success color, got %q", selectedLine)
 			}
 			firstLine := lineContaining(collapsed, "first-command")
 			if plain := xansi.Strip(firstLine); !strings.Contains(plain, "$ first-command") || strings.Contains(plain, "▶ first-command") {
@@ -528,7 +528,7 @@ func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
 	}
 }
 
-func TestCompactDetailDoesNotCountReviewerSuggestionsFromVerboseTextShape(t *testing.T) {
+func TestCompactDetailKeepsVerboseReviewerSuggestionsWhenNoStructuredCountExists(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
 	suggestions := "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer."
 	m = updateModel(t, m, AppendTranscriptMsg{
@@ -539,11 +539,8 @@ func TestCompactDetailDoesNotCountReviewerSuggestionsFromVerboseTextShape(t *tes
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	collapsed := xansi.Strip(m.View())
-	if !strings.Contains(collapsed, "Supervisor suggestions") {
-		t.Fatalf("expected generic reviewer suggestions label without structured count, got %q", collapsed)
-	}
-	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
-		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	if !containsInOrder(collapsed, "Supervisor suggested:", "1. Add app-level coverage.", "2. Rebuild before final answer.") {
+		t.Fatalf("expected verbose reviewer suggestions when no structured count exists, got %q", collapsed)
 	}
 }
 

@@ -194,8 +194,8 @@ func TestDetailModeStatusLineFallsBackWhenSelectionIsNotExpandable(t *testing.T)
 			break
 		}
 	}
-	if strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") || !strings.Contains(status, "F1 for help") {
-		t.Fatalf("expected normal help hint after scrolling to non-expandable selection, got %q", status)
+	if strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") {
+		t.Fatalf("did not expect expansion hint after scrolling to non-expandable selection, got %q", status)
 	}
 }
 

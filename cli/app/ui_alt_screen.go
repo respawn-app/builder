@@ -113,6 +113,20 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 	if m.canFinalizeNativeStreamingCommit(committedEntries, len(committedEntries)) {
 		return m.syncNativeHistoryFromTranscript()
 	}
+	if len(committedEntries) > 0 && !m.nativeProjection.Empty() {
+		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		if _, ok := projection.RenderAppendDeltaFrom(m.nativeProjection, tui.TranscriptDivider); !ok {
+			m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
+			m.acceptNativeProjectionWithoutReplay(projection)
+			return nil
+		}
+	}
+	if m.nativeProjection.Empty() && len(committedEntries) > 0 {
+		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
+		m.acceptNativeProjectionWithoutReplay(projection)
+		return nil
+	}
 	return m.emitCurrentNativeScrollbackState(false)
 }
 

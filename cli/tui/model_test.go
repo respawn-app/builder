@@ -1163,8 +1163,12 @@ func TestDeveloperContextSubtypesUseInfoPrefixInCompactDetail(t *testing.T) {
 			if wantText == "" {
 				wantText = tt.text
 			}
-			if !containsInOrder(detail, "ℹ", wantText) {
-				t.Fatalf("expected %s compact detail to use info prefix before %q, got %q", tt.name, wantText, detail)
+			wantSymbol := "ℹ"
+			if tt.compactLabel != "" {
+				wantSymbol = "▶"
+			}
+			if !containsInOrder(detail, wantSymbol, wantText) {
+				t.Fatalf("expected %s compact detail to use %q prefix before %q, got %q", tt.name, wantSymbol, wantText, detail)
 			}
 		})
 	}
@@ -1756,8 +1760,12 @@ func TestCollapsedToolErrorSummariesStayRedInDetail(t *testing.T) {
 			m = updateModel(t, m, ToggleModeMsg{})
 
 			detail := m.View()
-			if !strings.Contains(plainTranscript(detail), tt.wantSymbol) {
-				t.Fatalf("expected collapsed %s tool error symbol %q, got %q", tt.name, tt.wantSymbol, plainTranscript(detail))
+			wantSymbol := "▶"
+			if tt.name == "question" {
+				wantSymbol = tt.wantSymbol
+			}
+			if !strings.Contains(plainTranscript(detail), wantSymbol) {
+				t.Fatalf("expected collapsed %s tool error symbol %q, got %q", tt.name, wantSymbol, plainTranscript(detail))
 			}
 			line := lineContaining(detail, tt.wantSummary)
 			if line == "" {

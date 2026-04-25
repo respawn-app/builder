@@ -68,8 +68,8 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 		}),
 	)
 
-	if len(m.startupCmds) != 0 {
-		t.Fatalf("expected startup native history replay deferred until window size, got %d startup cmd(s)", len(m.startupCmds))
+	if _, ok := startupCmdMessage[nativeHistoryFlushMsg](m.startupCmds); ok {
+		t.Fatal("expected startup native history replay deferred until window size")
 	}
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	updated, ok := next.(*uiModel)

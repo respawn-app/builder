@@ -702,16 +702,21 @@ func TestStartupHydrationKeepsDefaultCacheWarningDetailOnly(t *testing.T) {
 }
 
 func startupRuntimeTranscriptRefreshedMsg(cmds []tea.Cmd) (runtimeTranscriptRefreshedMsg, bool) {
+	return startupCmdMessage[runtimeTranscriptRefreshedMsg](cmds)
+}
+
+func startupCmdMessage[T tea.Msg](cmds []tea.Cmd) (T, bool) {
+	var zero T
 	for _, cmd := range cmds {
 		if cmd == nil {
 			continue
 		}
-		msg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+		msg, ok := cmd().(T)
 		if ok {
 			return msg, true
 		}
 	}
-	return runtimeTranscriptRefreshedMsg{}, false
+	return zero, false
 }
 
 func appendTranscriptMessage(t *testing.T, store *session.Store, role llm.Role, text string) {

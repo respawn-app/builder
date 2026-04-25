@@ -28,6 +28,7 @@ import (
 	"builder/shared/theme"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -3649,7 +3650,7 @@ func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 	}
 }
 
-func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
+func TestRenderChatPanelRendersSelectedSpacer(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	style := uiThemeStyles("dark")
 
@@ -3659,17 +3660,17 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 
 	width := 44
 	lines := m.renderChatPanel(width, 8, style)
-	expected := style.meta.Render(strings.Repeat("─", width))
 
 	found := false
 	for _, line := range lines {
-		if line == expected {
+		plain := stripANSIAndTrimRight(line)
+		if strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) == "" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected full-width meta divider in chat panel, got %q", strings.Join(lines, "\n"))
+		t.Fatalf("expected selected spacer in chat panel, got %q", strings.Join(lines, "\n"))
 	}
 }
 
