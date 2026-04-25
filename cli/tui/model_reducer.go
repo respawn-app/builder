@@ -334,13 +334,10 @@ func (m *Model) navigateDetailSelection(delta int) {
 		return
 	}
 	if moved := m.scrollDetailLine(delta); moved {
-		m.detailEdgeSelection = false
 		m.focusCenterVisibleDetailEntry()
 		return
 	}
-	if m.moveDetailSelectionWithinViewport(delta) {
-		m.detailEdgeSelection = true
-	}
+	m.moveDetailSelectionWithinViewport(delta)
 }
 
 func (m *Model) toggleSelectedDetailExpansion() {
