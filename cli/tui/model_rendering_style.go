@@ -298,6 +298,7 @@ type palette struct {
 	foregroundColor          rgbColor
 	selectionForegroundColor rgbColor
 	selectionBackgroundColor rgbColor
+	primaryColor             rgbColor
 	preview                  lipgloss.Style
 	previewColor             rgbColor
 	userColor                rgbColor
@@ -331,6 +332,7 @@ func (m Model) palette() palette {
 		foregroundColor:          rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
 		selectionForegroundColor: rgbColorFromHex(tokens.Transcript.SelectionForeground.TrueColor),
 		selectionBackgroundColor: rgbColorFromHex(tokens.Transcript.SelectionBackground.TrueColor),
+		primaryColor:             rgbColorFromHex(tokens.App.Primary.TrueColor),
 		preview:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
 		previewColor:             rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
 		userColor:                rgbColorFromHex(tokens.Transcript.User.TrueColor),

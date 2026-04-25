@@ -7,7 +7,7 @@ import (
 )
 
 func (m Model) renderFlatDetailTranscript() string {
-	return m.DetailProjection(true, true).RenderWithBlockSeparator(detailItemSeparator)
+	return m.DetailProjection(true, true).Render(detailItemSeparator)
 }
 
 func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []ongoingBlock {
@@ -562,7 +562,7 @@ func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {
 	blocks := m.buildOngoingBlocks(true)
 	lineOffset := 0
 	for idx, block := range blocks {
-		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(blocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		start := lineOffset
@@ -591,7 +591,7 @@ func (m Model) detailLineRangeForEntry(entryIndex int) (int, int, bool) {
 	blocks := m.buildDetailBlocks(true, false)
 	lineOffset := 0
 	for idx, block := range blocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(blocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		start := lineOffset

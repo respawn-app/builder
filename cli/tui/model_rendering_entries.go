@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/shared/transcript"
+	"builder/shared/uiglyphs"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -54,32 +55,25 @@ func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, t
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
 	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
-	return m.flattenEntryContent(role, content, renderWidth, muteText, symbolOverride)
+	return m.flattenEntryContent(role, content, renderWidth, muteText, isPatchToolBlock(role, toolMeta), symbolOverride)
 }
 
-func (m Model) flattenEntryContent(role string, content transcriptRenderContent, renderWidth int, muteText bool, symbolOverride string) []string {
+func (m Model) flattenEntryContent(role string, content transcriptRenderContent, renderWidth int, muteText bool, isPatchBlock bool, symbolOverride string) []string {
 	content = m.applyEntrySemanticTransformStage(content)
 	if muteText && isShellPreviewRole(role) {
 		return m.flattenSingleLineShellPreview(role, content, renderWidth, symbolOverride)
 	}
 	content = m.wrapEntryContentStage(content, renderWidth)
-	plainLines := make([]string, 0, len(content.Lines))
-	for _, line := range content.Lines {
-		plainLines = append(plainLines, line.Text)
-	}
-	isEditedBlock := isEditedToolBlock(plainLines)
 	laidOut := m.layoutEntryContentStage(role, content, symbolOverride)
-	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, muteText, isEditedBlock)
+	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, muteText, isPatchBlock)
 	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
 	return m.attachRoleSymbolStage(role, decorated, symbolOverride)
 }
 
 func (m Model) flattenSingleLineShellPreview(role string, content transcriptRenderContent, renderWidth int, symbolOverride string) []string {
 	first, forceEllipsis := firstShellPreviewRenderLine(content)
-	plainLines := []string{first.Text}
-	isEditedBlock := isEditedToolBlock(plainLines)
 	laidOut := m.layoutEntryContentStage(role, transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: []transcriptRenderLine{first}}, symbolOverride)
-	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, true, isEditedBlock)
+	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, true, false)
 	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
 	out := m.attachRoleSymbolStage(role, decorated, symbolOverride)
 	if len(out) == 0 {
@@ -283,11 +277,11 @@ func (m Model) applyDeferredDecoratedLayoutTransformStage(lines []transcriptLayo
 	return out
 }
 
-func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool) []transcriptLayoutLine {
+func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isPatchBlock bool) []transcriptLayoutLine {
 	out := make([]transcriptLayoutLine, 0, len(lines))
 	for idx, line := range lines {
 		display := line.Text
-		if isEditedBlock && line.Intents.Has(Subdued) {
+		if isPatchBlock && line.Intents.Has(Subdued) {
 			line.Intents &^= Subdued
 			line.Intents |= ThemeForeground
 		}
@@ -295,12 +289,12 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 			if idx == 0 {
 				display = m.renderToolHeadline(display, renderWidth)
 			}
-			display = m.styleToolLine(display)
+			display = m.styleToolLine(display, isPatchBlock)
 		}
 		if !strings.Contains(display, "\x1b[") {
 			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), line.Intents)
 		}
-		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) && !line.Intents.Has(Faint) {
+		if muteText && strings.TrimSpace(display) != "" && !isPatchBlock && !line.Intents.Has(Subdued) && !line.Intents.Has(Faint) {
 			display = m.palette().preview.Faint(true).Render(display)
 		} else if isStyledMetaRole(role) {
 			display = styleForRole(role, m.palette()).Render(display)
@@ -361,17 +355,6 @@ func (m Model) flattenThinkingEntry(role, text string, renderWidth int) []string
 	return out
 }
 
-func isEditedToolBlock(lines []string) bool {
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(xansi.Strip(line))
-		if trimmed == "" {
-			continue
-		}
-		return strings.HasPrefix(trimmed, "Edited:")
-	}
-	return false
-}
-
 func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.ToolCallMeta) ([]transcriptRenderLine, bool) {
 	_ = text
 	if toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
@@ -429,7 +412,7 @@ func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallM
 	if len(content.Lines) == 0 {
 		return m.flattenEntryWithMeta(role, toolMeta.PatchDetail, false, toolMeta)
 	}
-	return m.flattenEntryContent(role, content, renderWidth, false, "")
+	return m.flattenEntryContent(role, content, renderWidth, false, true, "")
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
@@ -510,6 +493,35 @@ func (m Model) renderSelectedTranscriptLine(line string) string {
 		return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
 	}
 	return applySelectionBackground(padded, themeModeBackgroundColor(m.theme))
+}
+
+func (m Model) renderDetailViewportLine(line string, selected bool) string {
+	if !m.compactDetail {
+		if selected {
+			return m.renderSelectedTranscriptLine(line)
+		}
+		return line
+	}
+	originalWidth := lipgloss.Width(line)
+	rail := uiglyphs.SelectionRailBlank
+	if selected {
+		rail = renderRoleSymbol(uiglyphs.SelectionRailGlyph, roleSymbolColorStyle{color: m.palette().primaryColor})
+	}
+	line = rail + line
+	if originalWidth <= m.viewportWidth {
+		for overflow := lipgloss.Width(line) - m.viewportWidth; overflow > 0; overflow = lipgloss.Width(line) - m.viewportWidth {
+			trimmed := removeExtraSpacesFromLongestRunLongerThan(line, overflow, 2)
+			if trimmed == line {
+				break
+			}
+			line = trimmed
+		}
+		line = truncateRenderedLineToWidthWithEllipsis(line, max(1, m.viewportWidth), false)
+	}
+	if !selected {
+		return line
+	}
+	return applySelectionBackground(padRenderedLineToWidth(line, m.viewportWidth), themeModeBackgroundColor(m.theme))
 }
 
 func padRenderedLineToWidth(line string, width int) string {

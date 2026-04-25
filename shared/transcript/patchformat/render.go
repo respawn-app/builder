@@ -21,8 +21,8 @@ func Render(src, cwd string) RenderedPatch {
 }
 
 func Raw(src string) RenderedPatch {
-	summary := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1}}
-	detail := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1}}
+	summary := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Patch", FileIndex: -1}}
+	detail := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Patch", FileIndex: -1}}
 	trimmed := strings.TrimSpace(src)
 	if trimmed == "" {
 		return RenderedPatch{SummaryLines: summary, DetailLines: detail}
@@ -31,6 +31,32 @@ func Raw(src string) RenderedPatch {
 		detail = append(detail, RenderedLine{Kind: RenderedLineKindRaw, Text: line, FileIndex: -1})
 	}
 	return RenderedPatch{SummaryLines: summary, DetailLines: detail}
+}
+
+func StripEditedLabel(text string) string {
+	lines := textutil.SplitLinesCRLF(strings.TrimSpace(text))
+	if len(lines) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if idx == 0 {
+			if trimmed == "Edited:" {
+				continue
+			}
+			if rest, ok := strings.CutPrefix(trimmed, "Edited: "); ok {
+				out = append(out, rest)
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	stripped := strings.TrimSpace(strings.Join(out, "\n"))
+	if stripped == "" {
+		return "Patch"
+	}
+	return stripped
 }
 
 func Format(doc Document, cwd string) RenderedPatch {
@@ -44,13 +70,13 @@ func Format(doc Document, cwd string) RenderedPatch {
 		file := files[0]
 		rendered.SummaryLines = []RenderedLine{{
 			Kind:      RenderedLineKindFile,
-			Text:      "Edited: " + summaryLine(file),
+			Text:      summaryLine(file),
 			FileIndex: 0,
 			Path:      file.RelPath,
 		}}
 		rendered.DetailLines = append(rendered.DetailLines, RenderedLine{
 			Kind:      RenderedLineKindFile,
-			Text:      "Edited: " + detailHeader(file),
+			Text:      detailHeader(file),
 			FileIndex: 0,
 			Path:      detailPath(file),
 		})
@@ -60,8 +86,6 @@ func Format(doc Document, cwd string) RenderedPatch {
 		return rendered
 	}
 
-	rendered.SummaryLines = append(rendered.SummaryLines, RenderedLine{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1})
-	rendered.DetailLines = append(rendered.DetailLines, RenderedLine{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1})
 	for idx, file := range files {
 		rendered.SummaryLines = append(rendered.SummaryLines, RenderedLine{
 			Kind:      RenderedLineKindFile,

@@ -183,6 +183,7 @@ func (m Model) CommittedOngoingProjectionForEntries(entries []TranscriptEntry) T
 }
 
 func (m Model) DetailProjection(includeStreaming bool, applySelection bool) TranscriptProjection {
+	m.mode = ModeDetail
 	return projectionFromDetailBlocks(m.buildDetailBlocks(includeStreaming, applySelection))
 }
 
@@ -205,7 +206,7 @@ func projectionFromDetailBlocks(blocks []ongoingBlock) TranscriptProjection {
 	for _, block := range blocks {
 		projection.Blocks = append(projection.Blocks, TranscriptProjectionBlock{
 			Role:         block.role,
-			DividerGroup: "detail",
+			DividerGroup: ongoingDividerGroup(block.role),
 			EntryIndex:   block.entryIndex,
 			EntryEnd:     block.entryEnd,
 			Lines:        append([]string(nil), block.lines...),

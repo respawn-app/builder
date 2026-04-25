@@ -857,9 +857,8 @@ func (m Model) renderDetailSnapshot() string {
 	out := make([]string, 0, m.viewportLines)
 	selectedEntry, highlightSelected := m.resolveDetailSelection()
 	for i, line := range lines {
-		if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
-			line = m.renderSelectedTranscriptLine(line)
-		}
+		selected := highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry
+		line = m.renderDetailViewportLine(line, selected)
 		out = append(out, line)
 	}
 	for len(out) < m.viewportLines {
@@ -946,7 +945,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 	}
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		blockLines := m.detailBlockLinesAt(idx)
@@ -1013,10 +1012,10 @@ func (m *Model) detailViewportFromBottomOffset(offset int) ([]string, []VisibleL
 			kinds = append(kinds, VisibleLineContent)
 			owners = append(owners, block.entryIndex)
 		}
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			totalLines++
 		}
-		if idx > 0 && len(lines) < m.viewportLines {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) && len(lines) < m.viewportLines {
 			if remainingSkip > 0 {
 				remainingSkip--
 				continue
@@ -1047,7 +1046,7 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 	owners := make([]int, 0, m.viewportLines)
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			if lineOffset >= start && lineOffset < end {
 				lines = append(lines, detailItemSeparator)
 				kinds = append(kinds, VisibleLineContent)

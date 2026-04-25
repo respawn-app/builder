@@ -32,7 +32,7 @@ Success metrics:
 - Mouse wheel keeps scrolling detail content when the terminal can deliver wheel navigation without mouse capture.
 - `Tab` or the existing mode toggle returns to ongoing.
 
-Selection is message-oriented, not line-oriented. Scrolling is line-oriented. After line/page/wheel scrolling, compact detail re-focuses selection to the first visible selectable item. This keeps `Enter` aligned with the top visible row without forcing large item jumps when expanded output is taller than the terminal. If expansion makes the selected message leave the viewport, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
+Selection is message-oriented, not line-oriented. Scrolling is line-oriented. `Up`/`Down` move the viewport by one rendered line when scrolling is possible and preserve the selected item while it remains visible; at transcript boundaries they move selection within the visible entries. Page and wheel scrolling re-focus compact detail to the first visible selectable item so `Enter` stays aligned with the top visible row after coarse scrolls. If expansion makes the selected message leave the viewport, detail scrolls just enough to reveal it. Selection state is UI-ephemeral and is not persisted.
 
 Detail rows do not show a dedicated collapsed/expanded glyph. The first rendered line keeps the normal role/tool symbol. When an item renders more than one line, continuation lines replace the role-prefix column with a faint tree guide: `│` for middle lines and `└` for the last rendered line.
 
@@ -71,7 +71,7 @@ Expansion renders the same full content detail mode renders today, unless this s
 
 Detail state is per message item, not per rendered line. Lines are a viewport projection of message items. Selection, expansion state, and viewport anchors reference item identity/ranges, then render into lines after collapse/expand decisions.
 
-Detail items are separated by a blank line rather than a divider rule. Dividers remain an ongoing/native transcript grouping affordance; detail relies on role symbols, tree-style continuation guides, selection, and vertical rhythm to reduce chrome while preserving scanability.
+Detail uses the same role-group separator policy as ongoing/native transcript rendering, but renders group breaks as blank lines rather than divider rules. Consecutive tool rows form dense chunks; transitions between role groups get one blank line. Detail relies on role symbols, tree-style continuation guides, selection, and vertical rhythm to reduce chrome while preserving scanability.
 
 Performance rules:
 

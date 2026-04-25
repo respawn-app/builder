@@ -77,7 +77,6 @@ func newDiffSnapshot(t *testing.T, theme string) string {
 	meta := &transcript.ToolCallMeta{
 		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
-			{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 			{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "-func removed() {}", FileIndex: 0},
@@ -99,10 +98,10 @@ func newPatchErrorSnapshot(t *testing.T, theme string) string {
 	t.Helper()
 	m := NewModel(WithTheme(theme))
 	meta := &transcript.ToolCallMeta{
-		PatchDetail: "Edited: ./main.go +1 -1\n+package main\n-old",
+		PatchDetail: "./main.go +1 -1\n+package main\n-old",
 		RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
-			{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+			{Kind: patchformat.RenderedLineKindFile, Text: "./main.go +1 -1", FileIndex: 0, Path: "main.go"},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
 		}},

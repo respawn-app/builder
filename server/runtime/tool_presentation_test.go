@@ -33,7 +33,7 @@ func TestNormalizeToolCallForTranscriptUsesCustomPatchInput(t *testing.T) {
 	if !meta.HasPatchSummary() || !meta.HasPatchDetail() || meta.PatchRender == nil {
 		t.Fatalf("expected patch summary/detail/render metadata, got %+v", meta)
 	}
-	if meta.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+	if meta.PatchSummary != "./cli/app/ui_status.go +2 -1" {
 		t.Fatalf("unexpected custom patch summary: %q", meta.PatchSummary)
 	}
 	if meta.Command == patchText {

@@ -83,6 +83,10 @@ func (m Model) truncateDetailLine(line string) string {
 }
 
 func removeExtraSpacesFromLongestRun(line string, count int) string {
+	return removeExtraSpacesFromLongestRunLongerThan(line, count, 1)
+}
+
+func removeExtraSpacesFromLongestRunLongerThan(line string, count int, minLen int) string {
 	if count <= 0 || line == "" {
 		return line
 	}
@@ -97,7 +101,7 @@ func removeExtraSpacesFromLongestRun(line string, count int) string {
 		for idx < len(line) && line[idx] == ' ' {
 			idx++
 		}
-		if length := idx - start; length > 1 && length > bestLen {
+		if length := idx - start; length > minLen && length > bestLen {
 			bestStart = start
 			bestLen = length
 		}

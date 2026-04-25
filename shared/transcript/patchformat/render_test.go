@@ -6,20 +6,20 @@ func TestRenderFormatsSummaryAndDetailFromParsedPatch(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n-old\n+new\n*** Add File: b.go\n+hello\n*** End Patch\n"
 	rendered := Render(patchText, "/workspace")
 
-	if got := rendered.SummaryText(); got != "Edited:\n./dir/a.go +1 -1\n./b.go +1" {
+	if got := rendered.SummaryText(); got != "./dir/a.go +1 -1\n./b.go +1" {
 		t.Fatalf("unexpected summary: %q", got)
 	}
-	if got := rendered.DetailText(); got != "Edited:\n/workspace/dir/a.go\n-old\n+new\n/workspace/b.go\n+hello" {
+	if got := rendered.DetailText(); got != "/workspace/dir/a.go\n-old\n+new\n/workspace/b.go\n+hello" {
 		t.Fatalf("unexpected detail: %q", got)
 	}
-	if len(rendered.DetailLines) != 6 {
+	if len(rendered.DetailLines) != 5 {
 		t.Fatalf("expected detail line metadata, got %+v", rendered.DetailLines)
 	}
-	if rendered.DetailLines[1].Kind != RenderedLineKindFile || rendered.DetailLines[1].Path != "/workspace/dir/a.go" {
-		t.Fatalf("expected first detail file header metadata, got %+v", rendered.DetailLines[1])
+	if rendered.DetailLines[0].Kind != RenderedLineKindFile || rendered.DetailLines[0].Path != "/workspace/dir/a.go" {
+		t.Fatalf("expected first detail file header metadata, got %+v", rendered.DetailLines[0])
 	}
-	if rendered.DetailLines[4].Kind != RenderedLineKindFile || rendered.DetailLines[4].Path != "/workspace/b.go" {
-		t.Fatalf("expected second detail file header metadata, got %+v", rendered.DetailLines[4])
+	if rendered.DetailLines[3].Kind != RenderedLineKindFile || rendered.DetailLines[3].Path != "/workspace/b.go" {
+		t.Fatalf("expected second detail file header metadata, got %+v", rendered.DetailLines[3])
 	}
 }
 
@@ -41,10 +41,10 @@ func TestParseHeredocRequiresExactEOFDelimiter(t *testing.T) {
 func TestRenderFallsBackToRawForUnparseablePatch(t *testing.T) {
 	rendered := Render("not a structured patch payload", "/workspace")
 
-	if got := rendered.SummaryText(); got != "Edited:" {
+	if got := rendered.SummaryText(); got != "Patch" {
 		t.Fatalf("unexpected raw summary: %q", got)
 	}
-	if got := rendered.DetailText(); got != "Edited:\nnot a structured patch payload" {
+	if got := rendered.DetailText(); got != "Patch\nnot a structured patch payload" {
 		t.Fatalf("unexpected raw detail: %q", got)
 	}
 	if len(rendered.Files) != 0 {
@@ -68,7 +68,7 @@ func TestFormatUsesMoveTargetForRenderedPaths(t *testing.T) {
 	if rendered.Files[0].AbsPath != "/workspace/dest.txt" || rendered.Files[0].RelPath != "./dest.txt" {
 		t.Fatalf("expected move target paths, got %+v", rendered.Files[0])
 	}
-	if got := rendered.DetailText(); got != "Edited: /workspace/dest.txt\n-old\n+new" {
+	if got := rendered.DetailText(); got != "/workspace/dest.txt\n-old\n+new" {
 		t.Fatalf("unexpected moved detail: %q", got)
 	}
 }
@@ -100,7 +100,7 @@ func TestFormatPreservesRelativeOutsideWorkspacePath(t *testing.T) {
 	if rendered.Files[0].RelPath != "../outside.go" {
 		t.Fatalf("expected outside-workspace relative path preserved, got %+v", rendered.Files[0])
 	}
-	if got := rendered.SummaryText(); got != "Edited: ../outside.go +1" {
+	if got := rendered.SummaryText(); got != "../outside.go +1" {
 		t.Fatalf("unexpected summary: %q", got)
 	}
 }

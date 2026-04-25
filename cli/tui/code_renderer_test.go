@@ -243,8 +243,8 @@ func TestRenderDiffLinesKeepsPreviousLexerWhenNextPathHasNoMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 5 {
-		t.Fatalf("expected at least 5 rendered lines, got %d", len(lines))
+	if len(lines) < 4 {
+		t.Fatalf("expected at least 4 rendered lines, got %d", len(lines))
 	}
 	lastAdded := lines[len(lines)-1].Text
 	if !strings.HasPrefix(ansi.Strip(lastAdded), "+func main() {}") {
@@ -267,11 +267,11 @@ func TestRenderDiffLinesHighlightsGoForAbsoluteDetailPath(t *testing.T) {
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 3 {
-		t.Fatalf("expected at least 3 rendered lines, got %d", len(lines))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 rendered lines, got %d", len(lines))
 	}
-	addedKeyword := lines[1].Text
-	addedFunc := lines[2].Text
+	addedKeyword := lines[0].Text
+	addedFunc := lines[1].Text
 	if !strings.Contains(addedKeyword, "\x1b[") || !strings.Contains(addedFunc, "\x1b[") {
 		t.Fatalf("expected go syntax highlighting for absolute detail path lines, got %q / %q", addedKeyword, addedFunc)
 	}
@@ -280,18 +280,17 @@ func TestRenderDiffLinesHighlightsGoForAbsoluteDetailPath(t *testing.T) {
 func TestRenderDiffLinesFallsBackToAnalyseWhenNoPathLexer(t *testing.T) {
 	r := newCodeRenderer("dark")
 	lines, ok := r.renderDiffLines(renderedDiff(
-		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: -1},
 		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+func main() {}", FileIndex: -1},
 	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 3 {
-		t.Fatalf("expected at least 3 rendered lines, got %d", len(lines))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 rendered lines, got %d", len(lines))
 	}
-	if !strings.Contains(lines[1].Text, "\x1b[") {
-		t.Fatalf("expected syntax highlight via analyse fallback for go keyword line, got %q", lines[1].Text)
+	if !strings.Contains(lines[0].Text, "\x1b[") {
+		t.Fatalf("expected syntax highlight via analyse fallback for go keyword line, got %q", lines[0].Text)
 	}
 }
 

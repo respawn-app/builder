@@ -13,6 +13,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/clientui"
 	"builder/shared/textutil"
+	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,7 +23,11 @@ const (
 	processListHeaderLines = 1
 	processListEntryLines  = 4
 	processListFooterLines = 1
-	processListRailGlyph   = "│"
+)
+
+var (
+	processListRailGlyph = uiglyphs.SelectionRailGlyph
+	processListRailBlank = uiglyphs.SelectionRailBlank
 )
 
 func (m *uiModel) refreshProcessEntries() {
@@ -401,7 +406,7 @@ func renderProcessListFooter(width int, style uiStyles) string {
 func renderProcessListEntry(entry clientui.BackgroundProcess, selected bool, width int, theme string, spinnerFrame int, style uiStyles) []string {
 	palette := uiPalette(theme)
 	entryStyles := newProcessListEntryStyles(theme, selected, processStateColor(entry, palette))
-	railGlyph := " "
+	railGlyph := processListRailBlank
 	separatorGlyph := ""
 	if selected {
 		railGlyph = processListRailGlyph

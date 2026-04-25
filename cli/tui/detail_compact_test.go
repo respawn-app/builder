@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"builder/shared/transcript"
+	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -378,6 +379,25 @@ func TestCompactDetailFirstLineStaysWithinViewportWidth(t *testing.T) {
 	}
 }
 
+func TestCompactDetailSelectedLongCollapsedRowKeepsWideRailWithinViewport(t *testing.T) {
+	const viewportWidth = 16
+	m := NewModel(WithCompactDetail(), WithPreviewLines(4), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 4, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("abcdef ", 20)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), uiglyphs.SelectionRailGlyph)
+	if line == "" {
+		t.Fatalf("expected selected compact detail row to include wide rail, got %q", m.View())
+	}
+	if width := lipgloss.Width(line); width != viewportWidth {
+		t.Fatalf("expected selected row with wide rail to stay exactly viewport width %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+	if !strings.Contains(xansi.Strip(line), "❮ ") {
+		t.Fatalf("expected selected row with wide rail to keep role symbol visible, got %q", xansi.Strip(line))
+	}
+}
+
 func TestCompactDetailTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) {
 	const viewportWidth = 40
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
@@ -409,7 +429,7 @@ func TestCompactDetailWrappedAssistantUsesTreeGuide(t *testing.T) {
 
 	rendered := xansi.Strip(m.View())
 	firstLine := lineContaining(rendered, "❮")
-	if !strings.HasPrefix(firstLine, "❮ assistant") {
+	if !strings.Contains(firstLine, "❮ assistant") {
 		t.Fatalf("expected assistant first row to preserve role prefix, got %q", firstLine)
 	}
 	if !strings.Contains(rendered, "│ assistant") || !strings.Contains(rendered, "└ assistant") {
@@ -429,7 +449,7 @@ func TestCompactDetailNarrowWrappedAssistantKeepsTreeGuideWithinViewport(t *test
 
 	rendered := xansi.Strip(m.View())
 	firstLine := lineContaining(rendered, "❮")
-	if !strings.HasPrefix(firstLine, "❮ ") {
+	if !strings.Contains(firstLine, "❮ ") {
 		t.Fatalf("expected narrow assistant first row to keep normal role prefix, got %q", firstLine)
 	}
 	if !strings.Contains(rendered, "│ ") || !strings.Contains(rendered, "└ ") {
@@ -458,7 +478,7 @@ func TestCompactDetailNarrowTruncatedShellPreservesCommandPrefixSpacing(t *testi
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	line := lineContaining(m.View(), "$")
-	if !strings.HasPrefix(xansi.Strip(line), "$ ") {
+	if !strings.Contains(xansi.Strip(line), "$ ") {
 		t.Fatalf("expected narrow truncated shell row to preserve shell prefix spacing, got %q", xansi.Strip(line))
 	}
 	if width := lipgloss.Width(line); width > viewportWidth {
@@ -468,6 +488,7 @@ func TestCompactDetailNarrowTruncatedShellPreservesCommandPrefixSpacing(t *testi
 
 func TestCompactDetailCollapsedShellErrorKeepsSummary(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 220})
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role:       "tool_call",
 		Text:       "printf 'one\\n'\nprintf 'two\\n'",

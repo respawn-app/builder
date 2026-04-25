@@ -248,17 +248,31 @@ func TestFormatPersistedToolCallBuildsFallbackMetadata(t *testing.T) {
 	}
 }
 
-func TestPersistedTranscriptScanRendersCustomPatchToolCallFromFreeformInput(t *testing.T) {
-	patchText := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
+func TestPersistedTranscriptScanRendersPatchToolCallsWithoutEditedLabel(t *testing.T) {
+	singlePatch := "*** Begin Patch\n*** Update File: cli/app/ui_status.go\n@@\n type uiStatusAuthInfo struct {\n-\tSummary string\n+\tSummary string\n+\tReady bool\n }\n*** End Patch\n"
+	multiPatch := "*** Begin Patch\n*** Update File: a.go\n+new\n*** Update File: b.go\n-old\n*** End Patch\n"
+	rawPatch := "not a structured patch payload"
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
 	events := []session.Event{
 		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
-			ID:          "call-patch",
+			ID:          "call-patch-single",
 			Name:        string(toolspec.ToolPatch),
 			Custom:      true,
-			CustomInput: patchText,
+			CustomInput: singlePatch,
+		}, {
+			ID:          "call-patch-multi",
+			Name:        string(toolspec.ToolPatch),
+			Custom:      true,
+			CustomInput: multiPatch,
+		}, {
+			ID:          "call-patch-raw",
+			Name:        string(toolspec.ToolPatch),
+			Custom:      true,
+			CustomInput: rawPatch,
 		}}}),
-		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-patch", Name: string(toolspec.ToolPatch), MessageType: llm.MessageTypeCustomToolCallOutput, Content: `{}`}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-patch-single", Name: string(toolspec.ToolPatch), MessageType: llm.MessageTypeCustomToolCallOutput, Content: `{}`}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-patch-multi", Name: string(toolspec.ToolPatch), MessageType: llm.MessageTypeCustomToolCallOutput, Content: `{}`}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-patch-raw", Name: string(toolspec.ToolPatch), MessageType: llm.MessageTypeCustomToolCallOutput, Content: `{}`}),
 	}
 	for _, evt := range events {
 		if err := scan.ApplyPersistedEvent(evt); err != nil {
@@ -267,21 +281,35 @@ func TestPersistedTranscriptScanRendersCustomPatchToolCallFromFreeformInput(t *t
 	}
 
 	page := scan.CollectedPageSnapshot()
-	if len(page.Entries) != 2 {
-		t.Fatalf("len(page.Entries) = %d, want 2 (%+v)", len(page.Entries), page.Entries)
+	if len(page.Entries) != 6 {
+		t.Fatalf("len(page.Entries) = %d, want 6 (%+v)", len(page.Entries), page.Entries)
 	}
-	call := page.Entries[0]
-	if call.Role != "tool_call" || call.ToolCallID != "call-patch" {
-		t.Fatalf("expected persisted patch tool call entry, got %+v", call)
+	wantSummaries := map[string]string{
+		"call-patch-single": "./cli/app/ui_status.go +2 -1",
+		"call-patch-multi":  "./a.go +1\n./b.go -1",
+		"call-patch-raw":    "Patch",
 	}
-	if call.ToolCall == nil || call.ToolCall.PatchRender == nil {
-		t.Fatalf("expected persisted custom patch render metadata, got %+v", call.ToolCall)
+	for _, entry := range page.Entries {
+		if entry.Role != "tool_call" {
+			continue
+		}
+		want, ok := wantSummaries[entry.ToolCallID]
+		if !ok {
+			t.Fatalf("unexpected patch call id %q", entry.ToolCallID)
+		}
+		if entry.ToolCall == nil || entry.ToolCall.PatchRender == nil {
+			t.Fatalf("expected persisted patch render metadata for %s, got %+v", entry.ToolCallID, entry.ToolCall)
+		}
+		if entry.ToolCall.PatchSummary != want {
+			t.Fatalf("unexpected persisted patch summary for %s: got %q want %q", entry.ToolCallID, entry.ToolCall.PatchSummary, want)
+		}
+		if strings.Contains(entry.ToolCall.PatchSummary, "Edited:") || strings.Contains(entry.ToolCall.PatchDetail, "Edited:") || strings.Contains(entry.ToolCall.PatchSummary, "*** Begin Patch") {
+			t.Fatalf("expected persisted patch metadata without Edited/raw payload for %s, got %+v", entry.ToolCallID, entry.ToolCall)
+		}
+		delete(wantSummaries, entry.ToolCallID)
 	}
-	if call.ToolCall.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
-		t.Fatalf("unexpected persisted custom patch summary: %q", call.ToolCall.PatchSummary)
-	}
-	if strings.Contains(call.ToolCall.PatchSummary, "*** Begin Patch") {
-		t.Fatalf("expected persisted summary to hide raw patch, got %q", call.ToolCall.PatchSummary)
+	if len(wantSummaries) != 0 {
+		t.Fatalf("missing persisted patch calls: %+v", wantSummaries)
 	}
 }
 

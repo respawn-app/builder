@@ -102,7 +102,7 @@ func TestCustomPatchToolCallRendersSummaryOngoingAndHighlightedDiffDetail(t *tes
 	}))
 
 	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
-	if !strings.Contains(ongoing, "Edited: ./cli/app/ui_status.go +2 -1") {
+	if !strings.Contains(ongoing, "⇄ ./cli/app/ui_status.go +2 -1") || strings.Contains(ongoing, "Edited:") {
 		t.Fatalf("expected custom patch summary in ongoing transcript, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "*** Begin Patch") || strings.Contains(ongoing, "+\tReady bool") {
