@@ -34,6 +34,7 @@ func VisibleChatEntriesFromPersistedEvent(evt session.Event, cacheWarningMode co
 			Name:    toolspec.ID(completion.Name),
 			IsError: completion.IsError,
 			Output:  completion.Output,
+			Summary: completion.Summary,
 		})
 		return []ChatEntry{entry}, false, nil
 	case "local_entry":

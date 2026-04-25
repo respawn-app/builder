@@ -97,17 +97,8 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	transcriptMutated := false
 	awaitsHydration := false
 	if shouldAppendSyntheticOngoingEntry(m, update.SyntheticOngoingEntry) {
-		m.forwardToView(tui.AppendTranscriptMsg{
-			Visibility:  update.SyntheticOngoingEntry.Visibility,
-			Transient:   true,
-			Committed:   false,
-			Role:        update.SyntheticOngoingEntry.Role,
-			Text:        update.SyntheticOngoingEntry.Text,
-			OngoingText: update.SyntheticOngoingEntry.OngoingText,
-			Phase:       llm.MessagePhase(update.SyntheticOngoingEntry.Phase),
-			ToolCallID:  strings.TrimSpace(update.SyntheticOngoingEntry.ToolCallID),
-			ToolCall:    transcriptToolCallMeta(update.SyntheticOngoingEntry.ToolCall),
-		})
+		entry := transcriptEntryFromProjectedChatEntry(*update.SyntheticOngoingEntry, true, false)
+		m.forwardToView(appendTranscriptMsgFromEntry(entry))
 	}
 	if evt.Kind == clientui.EventConversationUpdated && effectiveSyncSessionView {
 		m.invalidateTransientTranscriptState()
@@ -313,17 +304,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		for _, transcriptEntry := range convertedEntries {
 			m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
 			if showTransientInCurrentView && !replaceLoadedSyntheticEntries {
-				m.forwardToView(tui.AppendTranscriptMsg{
-					Visibility:  transcriptEntry.Visibility,
-					Transient:   transcriptEntry.Transient,
-					Committed:   transcriptEntry.Committed,
-					Role:        transcriptEntry.Role,
-					Text:        transcriptEntry.Text,
-					OngoingText: transcriptEntry.OngoingText,
-					Phase:       transcriptEntry.Phase,
-					ToolCallID:  transcriptEntry.ToolCallID,
-					ToolCall:    transcriptEntry.ToolCall,
-				})
+				m.forwardToView(appendTranscriptMsgFromEntry(transcriptEntry))
 			}
 		}
 	} else {
@@ -467,11 +448,6 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate", "recovery_cause": string(recoveryCause)})
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
-		m.nativeProjection = tui.TranscriptProjection{}
-		m.nativeRenderedProjection = tui.TranscriptProjection{}
-		m.nativeFlushedEntryCount = 0
-		m.nativeRenderedSnapshot = ""
-		m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	}
 	previousWindowTitle := m.windowTitle()
 	if transcriptPageSessionChanged(m.sessionID, page.SessionID) {
@@ -942,15 +918,37 @@ func committedTranscriptProjectionForApp(view tui.Model, entries []tui.Transcrip
 
 func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient bool, committed bool) tui.TranscriptEntry {
 	return tui.TranscriptEntry{
-		Visibility:  entry.Visibility,
-		Transient:   transient,
-		Committed:   committed,
-		Role:        entry.Role,
-		Text:        entry.Text,
-		OngoingText: entry.OngoingText,
-		Phase:       llm.MessagePhase(entry.Phase),
-		ToolCallID:  entry.ToolCallID,
-		ToolCall:    transcriptToolCallMeta(entry.ToolCall),
+		Visibility:        entry.Visibility,
+		Transient:         transient,
+		Committed:         committed,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             llm.MessagePhase(entry.Phase),
+		MessageType:       llm.MessageType(entry.MessageType),
+		SourcePath:        strings.TrimSpace(entry.SourcePath),
+		CompactLabel:      strings.TrimSpace(entry.CompactLabel),
+		ToolResultSummary: strings.TrimSpace(entry.ToolResultSummary),
+		ToolCallID:        entry.ToolCallID,
+		ToolCall:          transcriptToolCallMeta(entry.ToolCall),
+	}
+}
+
+func appendTranscriptMsgFromEntry(entry tui.TranscriptEntry) tui.AppendTranscriptMsg {
+	return tui.AppendTranscriptMsg{
+		Visibility:        entry.Visibility,
+		Transient:         entry.Transient,
+		Committed:         entry.Committed,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             entry.Phase,
+		MessageType:       entry.MessageType,
+		SourcePath:        strings.TrimSpace(entry.SourcePath),
+		CompactLabel:      strings.TrimSpace(entry.CompactLabel),
+		ToolResultSummary: strings.TrimSpace(entry.ToolResultSummary),
+		ToolCallID:        strings.TrimSpace(entry.ToolCallID),
+		ToolCall:          entry.ToolCall,
 	}
 }
 
@@ -1435,6 +1433,10 @@ func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clie
 		existing.Text == incoming.Text &&
 		existing.OngoingText == incoming.OngoingText &&
 		existing.Phase == llm.MessagePhase(incoming.Phase) &&
+		existing.MessageType == llm.MessageType(incoming.MessageType) &&
+		strings.TrimSpace(existing.SourcePath) == strings.TrimSpace(incoming.SourcePath) &&
+		strings.TrimSpace(existing.CompactLabel) == strings.TrimSpace(incoming.CompactLabel) &&
+		strings.TrimSpace(existing.ToolResultSummary) == strings.TrimSpace(incoming.ToolResultSummary) &&
 		strings.TrimSpace(existing.ToolCallID) == strings.TrimSpace(incoming.ToolCallID)
 }
 

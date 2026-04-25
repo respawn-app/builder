@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"builder/server/llm"
@@ -21,9 +23,9 @@ func visibleUserTranscriptEntry(msg llm.Message) (ChatEntry, bool) {
 		return ChatEntry{}, false
 	}
 	if msg.MessageType == llm.MessageTypeCompactionSummary {
-		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true
+		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content, MessageType: msg.MessageType, SourcePath: strings.TrimSpace(msg.SourcePath), CompactLabel: compactLabelForMessage(msg)}, true
 	}
-	return ChatEntry{Role: "user", Text: msg.Content}, true
+	return ChatEntry{Role: "user", Text: msg.Content, MessageType: msg.MessageType, SourcePath: strings.TrimSpace(msg.SourcePath), CompactLabel: compactLabelForMessage(msg)}, true
 }
 
 func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
@@ -38,24 +40,86 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		llm.MessageTypeHeadlessModeExit,
 		llm.MessageTypeWorktreeMode,
 		llm.MessageTypeWorktreeModeExit:
-		return detailOnlyDeveloperContextEntry(msg.Content), true
+		return developerContextEntry(msg, transcript.EntryVisibilityDetailOnly), true
 	case llm.MessageTypeCompactionSummary:
-		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true
+		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content, MessageType: msg.MessageType, SourcePath: strings.TrimSpace(msg.SourcePath), CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeInterruption:
-		return ChatEntry{Role: string(transcript.EntryRoleInterruption), Text: msg.Content}, true
+		return ChatEntry{Role: string(transcript.EntryRoleInterruption), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeErrorFeedback:
-		return ChatEntry{Role: string(transcript.EntryRoleDeveloperFeedback), Text: msg.Content}, true
+		return ChatEntry{Role: string(transcript.EntryRoleDeveloperFeedback), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeReviewerFeedback:
 		return ChatEntry{}, false
 	case llm.MessageTypeCompactionSoonReminder:
-		return ChatEntry{Role: "warning", Text: msg.Content}, true
+		return ChatEntry{Role: "warning", Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeBackgroundNotice:
-		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
+		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	case llm.MessageTypeHandoffFutureMessage:
-		return detailOnlyDeveloperContextEntry(msg.Content), true
+		return developerContextEntry(msg, transcript.EntryVisibilityDetailOnly), true
 	case llm.MessageTypeManualCompactionCarryover:
-		return ChatEntry{Visibility: transcript.EntryVisibilityDetailOnly, Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content}, true
+		return ChatEntry{Visibility: transcript.EntryVisibilityDetailOnly, Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content, MessageType: msg.MessageType, CompactLabel: compactLabelForMessage(msg)}, true
 	default:
-		return detailOnlyDeveloperContextEntry(msg.Content), true
+		return developerContextEntry(msg, transcript.EntryVisibilityDetailOnly), true
 	}
+}
+
+func developerContextEntry(msg llm.Message, visibility transcript.EntryVisibility) ChatEntry {
+	return ChatEntry{
+		Visibility:   visibility,
+		Role:         string(transcript.EntryRoleDeveloperContext),
+		Text:         msg.Content,
+		MessageType:  msg.MessageType,
+		SourcePath:   strings.TrimSpace(msg.SourcePath),
+		CompactLabel: compactLabelForMessage(msg),
+	}
+}
+
+func compactLabelForMessage(msg llm.Message) string {
+	if label := strings.TrimSpace(msg.CompactContent); label != "" {
+		return label
+	}
+	switch msg.MessageType {
+	case llm.MessageTypeAgentsMD:
+		if sourcePath := strings.TrimSpace(msg.SourcePath); sourcePath != "" {
+			return fmt.Sprintf("%s file content", sourcePath)
+		}
+		return "AGENTS.md file content"
+	case llm.MessageTypeSkills:
+		return "Skill guidance"
+	case llm.MessageTypeEnvironment:
+		return "Environment info"
+	case llm.MessageTypeHeadlessMode:
+		return "Headless mode instructions"
+	case llm.MessageTypeHeadlessModeExit:
+		return "Interactive mode restored"
+	case llm.MessageTypeWorktreeMode:
+		return worktreeLabel("Switched to worktree", "Switched worktree", msg.SourcePath)
+	case llm.MessageTypeWorktreeModeExit:
+		return worktreeLabel("Returned from worktree", "Returned from worktree", msg.SourcePath)
+	case llm.MessageTypeCompactionSummary:
+		return "Context compacted"
+	case llm.MessageTypeInterruption:
+		return "You interrupted"
+	case llm.MessageTypeErrorFeedback:
+		return ""
+	case llm.MessageTypeBackgroundNotice:
+		return ""
+	case llm.MessageTypeCompactionSoonReminder:
+		return "Compaction reminder"
+	case llm.MessageTypeHandoffFutureMessage:
+		return "Future-agent context"
+	case llm.MessageTypeManualCompactionCarryover:
+		return "Last user message preserved for compaction"
+	default:
+		if msg.Role == llm.RoleDeveloper && strings.TrimSpace(string(msg.MessageType)) != "" {
+			return "Developer context: " + strings.TrimSpace(string(msg.MessageType))
+		}
+		return ""
+	}
+}
+
+func worktreeLabel(prefix, fallback, sourcePath string) string {
+	if name := strings.TrimSpace(filepath.Base(strings.TrimSpace(sourcePath))); name != "" && name != "." && name != string(filepath.Separator) {
+		return prefix + " " + name
+	}
+	return fallback
 }

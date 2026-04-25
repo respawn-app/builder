@@ -12,6 +12,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	statusLineSeparator        = " · "
+	statusLineSpinnerSeparator = " "
+)
+
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
@@ -20,10 +25,13 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	} else if m.compacting {
 		spin = renderCompactionStatus(m.spinnerFrame)
 	}
-	segments := []string{
-		spin,
-		style.meta.Render(l.statusModeLabel()),
-		style.meta.Render(l.statusModelLabel()),
+	segments := make([]string, 0, 5)
+	if modeLabel := l.statusModeLabel(); modeLabel != "" {
+		segments = append(segments, style.meta.Render(modeLabel))
+	}
+	segments = append(segments, style.meta.Render(l.statusModelLabel()))
+	if branchLabel := l.statusBranchLabel(); branchLabel != "" {
+		segments = append(segments, style.meta.Render(branchLabel))
 	}
 	if label := processCountLabel(m.listProcesses()); label != "" {
 		segments = append(segments, style.meta.Render(label))
@@ -31,8 +39,8 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	if serverOwnershipSection := l.renderServerOwnershipSection(style); serverOwnershipSection != "" {
 		segments = append(segments, serverOwnershipSection)
 	}
-	separator := style.meta.Render(" | ")
-	left := strings.Join(segments, separator)
+	separator := style.meta.Render(statusLineSeparator)
+	left := renderStatusLineLeft(spin, segments, separator)
 	if lipgloss.Width(left) >= width {
 		return padANSIRight(truncateANSIRight(left, width), width)
 	}
@@ -47,15 +55,34 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
 }
 
+func renderStatusLineLeft(spin string, segments []string, separator string) string {
+	if len(segments) == 0 {
+		return spin
+	}
+	return spin + statusLineSpinnerSeparator + strings.Join(segments, separator)
+}
+
 func (l uiViewLayout) statusModeLabel() string {
 	if l.model.rollback.isActive() {
 		return "editing"
 	}
-	return string(l.model.view.Mode())
+	return ""
+}
+
+func (l uiViewLayout) statusBranchLabel() string {
+	git := l.model.status.snapshot.Git
+	if !git.Visible || strings.TrimSpace(git.Error) != "" {
+		return ""
+	}
+	branch := strings.TrimSpace(git.Branch)
+	if branch == "" || branch == "unknown" {
+		return ""
+	}
+	return branch
 }
 
 func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyles) string {
-	separator := style.meta.Render(" | ")
+	separator := style.meta.Render(statusLineSeparator)
 	separatorWidth := lipgloss.Width(separator)
 	available := width - lipgloss.Width(left) - 1
 	if available <= 0 {
@@ -136,6 +163,9 @@ func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string
 	}
 	if strings.TrimSpace(l.model.transientStatus) != "" {
 		return ""
+	}
+	if action, ok := l.model.view.DetailSelectedExpansionAction(); ok {
+		return style.meta.Render(truncateQueuedMessageLine("Enter to "+action, available))
 	}
 	if !l.shouldRenderHelpHint() {
 		return ""

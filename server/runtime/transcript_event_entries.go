@@ -95,10 +95,13 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 		if evt.Background.Type != "completed" && evt.Background.Type != "killed" {
 			return nil
 		}
+		compact := formatBackgroundShellCompact(*evt.Background)
 		return []ChatEntry{{
-			Role:        "system",
-			Text:        formatBackgroundShellNotice(*evt.Background),
-			OngoingText: formatBackgroundShellCompact(*evt.Background),
+			Role:         "system",
+			Text:         formatBackgroundShellNotice(*evt.Background),
+			OngoingText:  compact,
+			MessageType:  llm.MessageTypeBackgroundNotice,
+			CompactLabel: compact,
 		}}
 	default:
 		return nil
@@ -111,8 +114,9 @@ func toolResultChatEntry(result tools.Result) ChatEntry {
 		role = "tool_result_error"
 	}
 	return ChatEntry{
-		Role:       role,
-		Text:       formatToolResult(result),
-		ToolCallID: strings.TrimSpace(result.CallID),
+		Role:              role,
+		Text:              formatToolResult(result),
+		ToolCallID:        strings.TrimSpace(result.CallID),
+		ToolResultSummary: strings.TrimSpace(result.Summary),
 	}
 }

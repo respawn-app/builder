@@ -38,6 +38,7 @@ type stubProgressiveStatusCollector struct {
 	authResult uiStatusAuthStageResult
 	gitResult  uiStatusGitStageResult
 	envResult  uiStatusEnvironmentStageResult
+	gitCalls   int
 }
 
 func (s *stubProgressiveStatusCollector) Collect(_ context.Context, _ uiStatusRequest) (uiStatusSnapshot, error) {
@@ -62,6 +63,7 @@ func (s *stubProgressiveStatusCollector) CollectAuth(_ context.Context, _ uiStat
 }
 
 func (s *stubProgressiveStatusCollector) CollectGit(_ context.Context, _ uiStatusRequest, _ uiStatusSnapshot) uiStatusGitStageResult {
+	s.gitCalls++
 	return s.gitResult
 }
 
@@ -243,6 +245,46 @@ func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
 		t.Fatalf("expected parallel git render before base snapshot, got %q", plain)
 	}
 
+}
+
+func TestStatusCommandRunsForegroundGitRefreshWhileStartupGitInFlight(t *testing.T) {
+	collector := &stubProgressiveStatusCollector{
+		base: uiStatusSnapshot{
+			CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+			Workdir:     "/tmp/workdir",
+			SessionName: "incident",
+			SessionID:   "session-123",
+			Model:       uiStatusModelInfo{Summary: "gpt-5 high fast"},
+		},
+		gitResult: uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "foreground"}},
+	}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.statusGitBackgroundInFlight = true
+	m.input = "/status"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected status refresh command")
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if git, ok := msg.(statusGitRefreshDoneMsg); ok && git.token == updated.status.refreshToken && !git.background {
+			next, _ = updated.Update(git)
+			updated = next.(*uiModel)
+			if !strings.Contains(stripANSIAndTrimRight(updated.View()), "foreground") {
+				t.Fatalf("expected foreground git result in status overlay, got %q", stripANSIAndTrimRight(updated.View()))
+			}
+			return
+		}
+	}
+	t.Fatalf("expected foreground git refresh command while background git is in flight; git calls=%d", collector.gitCalls)
 }
 
 func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
@@ -879,8 +921,91 @@ func TestStatusLineShowsEditingModeDuringRollbackFlow(t *testing.T) {
 	if !strings.Contains(status, "editing") {
 		t.Fatalf("expected rollback editing to show editing mode, got %q", status)
 	}
-	if strings.Contains(status, "ongoing") || strings.Contains(status, "detail") {
+	if strings.Contains(status, statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(status, statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(status, statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(status, statusLineSeparator+"detail"+statusLineSeparator) {
 		t.Fatalf("did not expect transcript mode label during rollback editing, got %q", status)
+	}
+}
+
+func TestStatusLineShowsCachedGitBranchWhenAvailable(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "feature/statusline"}
+
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(status, "gpt-5", "feature/statusline") {
+		t.Fatalf("expected branch after model in status line, got %q", status)
+	}
+	if !strings.Contains(status, statusStateCircleGlyph+statusLineSpinnerSeparator+"gpt-5") {
+		t.Fatalf("expected plain space between spinner and model, got %q", status)
+	}
+	if strings.Contains(status, statusStateCircleGlyph+statusLineSeparator) {
+		t.Fatalf("did not expect dot separator immediately after spinner, got %q", status)
+	}
+}
+
+func TestStatusLineHidesGitBranchWhenUnavailable(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "feature/statusline", Error: "git status failed"}
+
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(status, "feature/statusline") {
+		t.Fatalf("did not expect errored git branch in status line, got %q", status)
+	}
+}
+
+func TestStatusLineGitStartupRefreshCachesBranch(t *testing.T) {
+	repoRoot := initStatusLineGitRepo(t, "statusline-branch")
+	search := newStubUIPathReferenceSearch()
+	close(search.events)
+	m := newProjectedTestUIModel(
+		nil,
+		closedProjectedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIPathReferenceSearch(search),
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: repoRoot}),
+	)
+
+	updated := drainStatusLineStartupCommands(t, m, m.Init())
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "statusline-branch") {
+		t.Fatalf("expected startup git branch in status line, got %q", status)
+	}
+}
+
+func initStatusLineGitRepo(t *testing.T, branch string) string {
+	t.Helper()
+	repoRoot := t.TempDir()
+	cmd := exec.Command("git", "-C", repoRoot, "init", "-b", branch)
+	cmd.Env = sanitizedGitEnv(os.Environ())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init -b %s: %v (%s)", branch, err, out)
+	}
+	return repoRoot
+}
+
+func drainStatusLineStartupCommands(t *testing.T, m *uiModel, cmd tea.Cmd) *uiModel {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	switch typed := msg.(type) {
+	case nil:
+		return m
+	case tea.BatchMsg:
+		for _, child := range typed {
+			m = drainStatusLineStartupCommands(t, m, child)
+		}
+		return m
+	default:
+		next, nextCmd := m.Update(msg)
+		updated, ok := next.(*uiModel)
+		if !ok {
+			t.Fatalf("unexpected model type %T", next)
+		}
+		return drainStatusLineStartupCommands(t, updated, nextCmd)
 	}
 }
 

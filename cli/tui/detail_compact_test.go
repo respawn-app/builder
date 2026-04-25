@@ -1,0 +1,1225 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
+	"builder/shared/uiglyphs"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
+)
+
+func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "cat large.txt",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "cat large.txt"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2\nline 3"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "▶ cat large.txt") {
+		t.Fatalf("expected collapsed tool input, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "line 2") {
+		t.Fatalf("expected collapsed detail to hide tool output, got %q", collapsed)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := xansi.Strip(m.View())
+	if !strings.Contains(expanded, "▼ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 3") {
+		t.Fatalf("expected expanded tool input and output, got %q", expanded)
+	}
+}
+
+func TestCompactDetailKeepsMultipleExpanded(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first user\nhidden"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first assistant\nhidden"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "hidden") || !strings.Contains(rendered, "first assistant") {
+		t.Fatalf("expected both messages expanded, got %q", rendered)
+	}
+	if strings.Contains(rendered, "▶") || strings.Contains(rendered, "▼") {
+		t.Fatalf("did not expect chevrons when expanded state reveals no hidden content, got %q", rendered)
+	}
+}
+
+func TestCompactDetailArrowScrollsExpandedItemByLineAndTracksCenterSelection(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 30)
+	for idx := 0; idx < 30; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	beforeSelected := m.detailSelectedEntry
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got, want := m.DetailScroll(), 1; got != want {
+		t.Fatalf("expected arrow scroll to move by one rendered line, got %d want %d", got, want)
+	}
+	topVisible := leadingViewportSelectableDetailEntry(t, m)
+	centerVisible := centerVisibleSelectableDetailEntry(t, m)
+	if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
+		t.Fatalf("expected arrow scroll to select center visible entry %d, got active=%v entry=%d", centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+	if m.detailSelectedEntry != beforeSelected {
+		t.Fatalf("expected one-line scroll inside expanded command to keep same selected item, got %d want %d", m.detailSelectedEntry, beforeSelected)
+	}
+	if topVisible != beforeSelected {
+		t.Fatalf("expected expanded command to remain top visible, got %d want %d", topVisible, beforeSelected)
+	}
+}
+
+func TestCompactDetailLineScrollRailTracksCenterInsideTallExpandedEntry(t *testing.T) {
+	m := newTallExpandedCenterRailModel(t)
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+
+	if got, want := m.DetailScroll(), 2; got != want {
+		t.Fatalf("expected one-line scroll, got %d want %d", got, want)
+	}
+	if !m.detailSelectedActive || m.detailSelectedEntry != 1 {
+		t.Fatalf("expected center selection to move to expanded tool entry, active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
+	}
+	assertCenterRailOnExpandedOutput(t, m)
+}
+
+func TestCompactDetailSelectedSpacerRowsAreVisualOnlyWithTallExpandedEntry(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "intro"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 10)
+	for idx := 0; idx < 10; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "target-command",
+		ToolCallID: "call_2",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "target-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command",
+		ToolCallID: "call_3",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command-2",
+		ToolCallID: "call_4",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command-2"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command-3",
+		ToolCallID: "call_5",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command-3"},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.ensureDetailMetricsResolved()
+	targetEntry := 3
+	targetStart, _, ok := m.detailLineRangeForEntry(targetEntry)
+	if !ok {
+		t.Fatal("expected target row detail range")
+	}
+	center := m.viewportLines / 2
+	m.detailBottomAnchor = false
+	m.detailScroll = targetStart - center
+	m.refreshDetailViewport()
+	m.detailSelectedEntry = targetEntry
+	m.detailSelectedActive = true
+
+	beforeScroll := m.DetailScroll()
+	beforeFirst, beforeLast, beforeRangeOK := m.DetailVisibleEntryRange()
+	raw := m.View()
+	afterFirst, afterLast, afterRangeOK := m.DetailVisibleEntryRange()
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected visual spacers not to mutate detail scroll, got %d want %d", got, beforeScroll)
+	}
+	if beforeFirst != afterFirst || beforeLast != afterLast || beforeRangeOK != afterRangeOK {
+		t.Fatalf("expected visual spacers not to mutate visible range, before=(%d,%d,%v) after=(%d,%d,%v)", beforeFirst, beforeLast, beforeRangeOK, afterFirst, afterLast, afterRangeOK)
+	}
+
+	lines := strings.Split(raw, "\n")
+	if center <= 0 || center >= len(lines)-1 {
+		t.Fatalf("center line %d outside spacer assertion range, lines=%d", center, len(lines))
+	}
+	if centerLine := xansi.Strip(lines[center]); !strings.HasPrefix(centerLine, uiglyphs.SelectionRailGlyph) || !strings.Contains(centerLine, "target-command") {
+		t.Fatalf("expected selected target at center, got %q in %q", centerLine, xansi.Strip(raw))
+	}
+	modeBg := themeModeBackgroundColor("dark")
+	assertRailBearingSpacerLine(t, lines[center-1], modeBg, m.palette().primaryColor)
+	assertRailBearingSpacerLine(t, lines[center+1], modeBg, m.palette().primaryColor)
+}
+
+func TestCompactDetailSelectedSpacerRowsExtendRailAroundSemanticMultilineEntry(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(12))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before patch"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "./main.go +1 -1",
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: "./main.go +1 -1",
+			PatchDetail:  "./main.go\n-old\n+new",
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
+			),
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after patch"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	raw := m.View()
+	lines := strings.Split(raw, "\n")
+	contentIndexes := make([]int, 0, 3)
+	for idx, line := range lines {
+		plain := xansi.Strip(line)
+		if strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) != "" {
+			contentIndexes = append(contentIndexes, idx)
+		}
+	}
+	if len(contentIndexes) < 3 {
+		t.Fatalf("expected selected multiline patch content, got %q", xansi.Strip(raw))
+	}
+	firstContent := contentIndexes[0]
+	lastContent := contentIndexes[len(contentIndexes)-1]
+	if firstContent <= 0 || lastContent >= len(lines)-1 {
+		t.Fatalf("expected selected patch content to have adjacent spacer rows, content=%v view=%q", contentIndexes, xansi.Strip(raw))
+	}
+
+	modeBg := themeModeBackgroundColor("dark")
+	assertRailBearingSpacerLine(t, lines[firstContent-1], modeBg, m.palette().primaryColor)
+	assertRailBearingSpacerLine(t, lines[lastContent+1], modeBg, m.palette().primaryColor)
+	if diffLine := lineContaining(raw, "+new"); !strings.HasPrefix(xansi.Strip(diffLine), uiglyphs.SelectionRailGlyph) || !containsBackgroundSGR(diffLine) {
+		t.Fatalf("expected selected semantic diff line to keep rail and background, got %q", diffLine)
+	}
+}
+
+func TestCompactDetailSelectedSpacerRailUsesThemePrimaryColor(t *testing.T) {
+	for _, themeName := range []string{"dark", "light"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithTheme(themeName), WithPreviewLines(6))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before detail entry"})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after detail entry"})
+			m = updateModel(t, m, ToggleModeMsg{})
+			m.detailSelectedEntry = 1
+			m.detailSelectedActive = true
+
+			lines := strings.Split(m.View(), "\n")
+			selectedIndex := -1
+			for idx, line := range lines {
+				if strings.Contains(xansi.Strip(line), "selected detail entry") {
+					selectedIndex = idx
+					break
+				}
+			}
+			if selectedIndex <= 0 || selectedIndex >= len(lines)-1 {
+				t.Fatalf("expected selected line to have rail-bearing spacers, selected=%d lines=%q", selectedIndex, xansi.Strip(m.View()))
+			}
+			for _, idx := range []int{selectedIndex - 1, selectedIndex + 1} {
+				assertRailBearingSpacerLine(t, lines[idx], themeModeBackgroundColor(themeName), m.palette().primaryColor)
+			}
+		})
+	}
+}
+
+func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
+	for _, themeName := range []string{"dark", "light"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithTheme(themeName), WithPreviewLines(6))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "first-command",
+				ToolCallID: "call_1",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "first-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "before-selected-command",
+				ToolCallID: "call_2",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "before-selected-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "selected-command",
+				ToolCallID: "call_3",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "selected-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_3", Text: "done\nextra output"})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "after-selected-command",
+				ToolCallID: "call_4",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-selected-command"},
+			})
+			m = updateModel(t, m, ToggleModeMsg{})
+			m.detailSelectedEntry = 2
+			m.detailSelectedActive = true
+			m.refreshDetailViewport()
+
+			collapsed := m.View()
+			selectedLine := lineContaining(collapsed, "▶ selected-command")
+			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▶ ") || strings.Contains(plain, "$ selected-command") {
+				t.Fatalf("expected selected collapsed expandable item to replace role symbol with chevron, got %q in %q", plain, xansi.Strip(collapsed))
+			}
+			if !containsColor(extractForegroundTrueColors(selectedLine), m.palette().toolSuccessColor) {
+				t.Fatalf("expected selected success chevron to keep semantic success color, got %q", selectedLine)
+			}
+			firstLine := lineContaining(collapsed, "first-command")
+			if plain := xansi.Strip(firstLine); !strings.Contains(plain, "$ first-command") || strings.Contains(plain, "▶ first-command") {
+				t.Fatalf("expected unselected expandable item to keep role symbol, got %q", plain)
+			}
+
+			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			expanded := m.View()
+			selectedLine = lineContaining(expanded, "▼ selected-command")
+			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▼ ") || strings.Contains(plain, "$ selected-command") {
+				t.Fatalf("expected selected expanded item to replace role symbol with expanded chevron, got %q in %q", plain, xansi.Strip(expanded))
+			}
+			if action, ok := m.DetailSelectedExpansionAction(); !ok || action != "collapse" {
+				t.Fatalf("expected selected expanded item action collapse, got %q ok=%v", action, ok)
+			}
+		})
+	}
+}
+
+func TestCompactDetailPageScrollRailTracksCenterInsideTallExpandedEntry(t *testing.T) {
+	tests := []struct {
+		name       string
+		start      int
+		key        tea.KeyType
+		wantScroll int
+	}{
+		{name: "page down", start: 0, key: tea.KeyPgDown, wantScroll: 5},
+		{name: "page up", start: 8, key: tea.KeyPgUp, wantScroll: 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTallExpandedCenterRailModel(t)
+			m.detailScroll = tt.start
+			m.refreshDetailViewport()
+			m = updateModel(t, m, tea.KeyMsg{Type: tt.key})
+
+			if got := m.DetailScroll(); got != tt.wantScroll {
+				t.Fatalf("expected %s scroll %d, got %d", tt.name, tt.wantScroll, got)
+			}
+			if !m.detailSelectedActive || m.detailSelectedEntry != 1 {
+				t.Fatalf("expected %s center selection to stay on expanded tool entry, active=%v entry=%d", tt.name, m.detailSelectedActive, m.detailSelectedEntry)
+			}
+			assertCenterRailOnExpandedOutput(t, m)
+		})
+	}
+}
+
+func TestCompactDetailLineScrollSelectionTracksCenterItem(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "first-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "first-command"},
+	})
+	outputLines := make([]string, 0, 20)
+	for idx := 0; idx < 20; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("first output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "second-command",
+		ToolCallID: "call_2",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "second-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_2", Text: "second output"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "third-command",
+		ToolCallID: "call_3",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "third-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_3", Text: "third output"})
+	for idx := 0; idx < 10; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("tail entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	for step := 1; step <= 10; step++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.DetailScroll(); got != step {
+			t.Fatalf("step %d: expected one-line scroll, got %d", step, got)
+		}
+		if topVisible := leadingViewportSelectableDetailEntry(t, m); topVisible != 0 {
+			t.Fatalf("step %d: expected top expanded item to remain top visible, got %d", step, topVisible)
+		}
+		centerVisible := centerVisibleSelectableDetailEntry(t, m)
+		if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
+			t.Fatalf("step %d: expected selection to track center visible item %d, active=%v entry=%d", step, centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
+		}
+	}
+
+	for guard := 0; guard < 40 && leadingViewportSelectableDetailEntry(t, m) == 0; guard++ {
+		before := m.DetailScroll()
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.DetailScroll(); got != before+1 {
+			t.Fatalf("expected crossing scroll to move by one rendered line, got %d want %d", got, before+1)
+		}
+	}
+	if topVisible := leadingViewportSelectableDetailEntry(t, m); topVisible != 2 {
+		t.Fatalf("expected second item top visible after crossing expanded item, got %d", topVisible)
+	}
+	centerVisible := centerVisibleSelectableDetailEntry(t, m)
+	if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
+		t.Fatalf("expected selection to track center visible item %d after crossing expanded item, active=%v entry=%d", centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+}
+
+func TestCompactDetailLineScrollFocusesCenterVisibleSelection(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 10; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = max(1, m.maxDetailScroll()/2)
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected at least two visible detail entries, got %+v", visible)
+	}
+	selected := visible[1]
+	m.detailSelectedEntry = selected
+	m.detailSelectedActive = true
+	beforeScroll := m.DetailScroll()
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.DetailScroll(); got != beforeScroll-1 {
+		t.Fatalf("expected up to scroll by one line while selection remains visible, got %d want %d", got, beforeScroll-1)
+	}
+	centerVisible := centerVisibleSelectableDetailEntry(t, m)
+	if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
+		t.Fatalf("expected line scroll to focus center visible selection %d, got active=%v entry=%d", centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
+	}
+}
+
+func TestCompactDetailReverseInputWalksOffCenterSelectionBeforeCameraScroll(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 16; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 4
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 6 {
+		t.Fatalf("expected visible entries, got %+v", visible)
+	}
+	m.detailSelectedEntry = visible[len(visible)-2]
+	m.detailSelectedActive = true
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance <= 1 {
+		t.Fatalf("expected selected entry below center, distance=%d visible=%+v", beforeDistance, visible)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected camera to hold while off-center selection walks toward center, got %d want %d", got, beforeScroll)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
+		t.Fatalf("expected selected row to move one visual line toward center, got distance=%d want=%d", got, beforeDistance-1)
+	}
+}
+
+func TestCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.KeyMsg{Type: tea.KeyDown})
+}
+
+func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+}
+
+func TestCompactDetailKeyReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyUp})
+}
+
+func TestCompactDetailWheelReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+}
+
+func assertCompactDetailReverseFromEndWalksTowardCenterBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+	t.Helper()
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 14; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	for guard := 0; guard < 40 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	for idx := 0; idx < 3; idx++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance <= 1 {
+		t.Fatalf("expected setup to place selection below center by more than one entry, distance=%d", beforeDistance)
+	}
+
+	m = updateModel(t, m, reverse)
+
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected reverse input from bottom edge to hold camera before scrolling, got %d want %d", got, beforeScroll)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance-1 {
+		t.Fatalf("expected reverse input to move selection one visual row toward center, got distance=%d want=%d", got, beforeDistance-1)
+	}
+
+	for guard := 0; guard < 20 && selectedDetailDistanceFromCenter(t, m) > 0; guard++ {
+		if before := m.DetailScroll(); before != beforeScroll {
+			t.Fatalf("expected camera pinned until selection reaches center, got %d want %d", before, beforeScroll)
+		}
+		m = updateModel(t, m, reverse)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected repeated reverse input to reach center, got distance=%d", got)
+	}
+	m = updateModel(t, m, reverse)
+	if got := m.DetailScroll(); got != beforeScroll-1 {
+		t.Fatalf("expected reverse input after center to resume line scroll, got %d want %d", got, beforeScroll-1)
+	}
+}
+
+func assertCompactDetailSelectionMovesWithinViewportAtTranscriptEnd(t *testing.T, scroll tea.Msg) {
+	t.Helper()
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 8; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	for guard := 0; guard < 20 && m.DetailScroll() < m.maxDetailScroll(); guard++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if got, want := m.DetailScroll(), m.maxDetailScroll(); got != want {
+		t.Fatalf("expected setup to reach bottom scroll, got %d want %d", got, want)
+	}
+	topVisible := leadingViewportSelectableDetailEntry(t, m)
+	m.detailSelectedEntry = topVisible
+	m.detailSelectedActive = true
+	visible := m.visibleSelectableDetailEntries()
+	topVisibleIndex := detailVisibleEntryIndex(visible, topVisible)
+	if topVisibleIndex < 0 || topVisibleIndex+1 >= len(visible) {
+		t.Fatalf("expected selectable entry below top visible entry, visible=%+v top=%d", visible, topVisible)
+	}
+
+	beforeScroll := m.DetailScroll()
+	m = updateModel(t, m, scroll)
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected down at transcript bottom to keep line scroll pinned, got %d want %d", got, beforeScroll)
+	}
+	if want := visible[topVisibleIndex+1]; !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected down at transcript bottom to move selection one visible entry to %d, got active=%v entry=%d visible=%+v", want, m.detailSelectedActive, m.detailSelectedEntry, visible)
+	}
+}
+
+func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.KeyMsg{Type: tea.KeyUp})
+}
+
+func TestCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
+	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, nil)
+}
+
+func TestCompactDetailWheelTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
+	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+}
+
+func assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T, scroll tea.Msg) {
+	t.Helper()
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 6; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	if scroll == nil {
+		m.detailSelectedEntry = 3
+	} else {
+		m.detailSelectedEntry = centerVisibleSelectableDetailEntry(t, m)
+	}
+	m.detailSelectedActive = true
+	if scroll != nil {
+		for idx := 0; idx < 2; idx++ {
+			m = updateModel(t, m, scroll)
+		}
+	}
+
+	plain := xansi.Strip(m.View())
+	if !containsInOrder(plain, "entry 00", "entry 01", "entry 02") {
+		t.Fatalf("expected top-pinned selected spacer not to hide real rows above selection, got %q", plain)
+	}
+}
+
+func TestCompactDetailWheelSelectionMovesWithinViewportAtTranscriptStart(t *testing.T) {
+	assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+}
+
+func TestCompactDetailKeyReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t, tea.KeyMsg{Type: tea.KeyDown})
+}
+
+func TestCompactDetailWheelReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T) {
+	assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+}
+
+func assertCompactDetailReverseFromStartWalksTowardCenterBeforeLineScroll(t *testing.T, reverse tea.Msg) {
+	t.Helper()
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 14; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected visible entries, got %+v", visible)
+	}
+	m.detailSelectedEntry = centerVisibleSelectableDetailEntry(t, m)
+	m.detailSelectedActive = true
+	for idx := 0; idx < 3; idx++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	beforeScroll := m.DetailScroll()
+	beforeDistance := selectedDetailDistanceFromCenter(t, m)
+	if beforeDistance >= -1 {
+		t.Fatalf("expected setup to place selection above center by more than one entry, distance=%d", beforeDistance)
+	}
+
+	m = updateModel(t, m, reverse)
+
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected reverse input from top edge to hold camera before scrolling, got %d want %d", got, beforeScroll)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != beforeDistance+1 {
+		t.Fatalf("expected reverse input to move selection one visual row toward center, got distance=%d want=%d", got, beforeDistance+1)
+	}
+
+	for guard := 0; guard < 20 && selectedDetailDistanceFromCenter(t, m) < 0; guard++ {
+		if before := m.DetailScroll(); before != beforeScroll {
+			t.Fatalf("expected camera pinned until selection reaches center, got %d want %d", before, beforeScroll)
+		}
+		m = updateModel(t, m, reverse)
+	}
+	if got := selectedDetailDistanceFromCenter(t, m); got != 0 {
+		t.Fatalf("expected repeated reverse input to reach center, got distance=%d", got)
+	}
+	m = updateModel(t, m, reverse)
+	if got := m.DetailScroll(); got != beforeScroll+1 {
+		t.Fatalf("expected reverse input after center to resume line scroll, got %d want %d", got, beforeScroll+1)
+	}
+}
+
+func assertCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T, scroll tea.Msg) {
+	t.Helper()
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	for idx := 0; idx < 8; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.ensureDetailScrollResolved()
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	for guard := 0; guard < 20 && m.DetailScroll() > 0; guard++ {
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if got := m.DetailScroll(); got != 0 {
+		t.Fatalf("expected setup to reach top scroll, got %d", got)
+	}
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) < 2 {
+		t.Fatalf("expected at least two visible selectable entries at top, got %+v", visible)
+	}
+	m.detailSelectedEntry = visible[len(visible)-1]
+	m.detailSelectedActive = true
+
+	m = updateModel(t, m, scroll)
+	if got := m.DetailScroll(); got != 0 {
+		t.Fatalf("expected up at transcript top to keep line scroll pinned, got %d", got)
+	}
+	if want := visible[len(visible)-2]; !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected up at transcript top to move selection one visible entry to %d, got active=%v entry=%d visible=%+v", want, m.detailSelectedActive, m.detailSelectedEntry, visible)
+	}
+}
+
+func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 10, Entries: []TranscriptEntry{
+		{Role: "user", Text: "older"},
+		{Role: "assistant", Text: "newer\nhidden line 1\nhidden line 2\nhidden line 3"},
+	}})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if _, ok := m.detailExpandedEntries[11]; !ok {
+		t.Fatalf("expected entry 11 expanded, got %+v", m.detailExpandedEntries)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 20, Entries: []TranscriptEntry{{Role: "assistant", Text: "replacement"}}})
+	if !m.detailSelectedActive || m.detailSelectedEntry != 20 {
+		t.Fatalf("expected detail selection re-anchored to replacement, got active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
+	}
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("expected stale expanded entries cleared, got %+v", m.detailExpandedEntries)
+	}
+}
+
+func TestCompactDetailClearsExpandedEntriesWhenReplacementReusesIndexes(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 0, Entries: []TranscriptEntry{
+		{Role: "assistant", Text: "old intro"},
+		{Role: "assistant", Text: "old expanded\nold hidden"},
+	}})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailExpandedEntries = make(map[int]struct{})
+	m.detailExpandedEntries[1] = struct{}{}
+
+	m = updateModel(t, m, SetConversationMsg{BaseOffset: 0, Entries: []TranscriptEntry{
+		{Role: "assistant", Text: "new intro"},
+		{Role: "assistant", Text: "new unrelated\nnew hidden"},
+	}})
+
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("expected replacement at same indexes to clear expanded entries, got %+v", m.detailExpandedEntries)
+	}
+}
+
+func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "reviewer_suggestions",
+		Text:        "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer.",
+		OngoingText: "Supervisor made 2 suggestions.",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "Supervisor made 2 suggestions.") {
+		t.Fatalf("expected collapsed reviewer suggestions summary, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := xansi.Strip(m.View())
+	if !strings.Contains(expanded, "Add app-level coverage") || !strings.Contains(expanded, "Rebuild before final answer") {
+		t.Fatalf("expected expanded reviewer suggestions to show full text, got %q", expanded)
+	}
+}
+
+func TestCompactDetailKeepsVerboseReviewerSuggestionsWhenNoStructuredCountExists(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	suggestions := "Supervisor suggested:\n1. Add app-level coverage.\n2. Rebuild before final answer."
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "reviewer_suggestions",
+		Text:        suggestions,
+		OngoingText: suggestions,
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !containsInOrder(collapsed, "Supervisor suggested:", "1. Add app-level coverage.", "2. Rebuild before final answer.") {
+		t.Fatalf("expected verbose reviewer suggestions when no structured count exists, got %q", collapsed)
+	}
+}
+
+func TestCompactDetailDoesNotGuessReviewerSuggestionCountForUnnumberedLegacyText(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(10))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "reviewer_suggestions",
+		Text: "Supervisor suggested:\nAdd app-level coverage.\nRebuild before final answer.",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, "Supervisor suggestions") || strings.Contains(collapsed, "Supervisor made") {
+		t.Fatalf("expected generic reviewer suggestions label for unstructured legacy text, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Add app-level coverage") || strings.Contains(collapsed, "Rebuild before final answer") {
+		t.Fatalf("expected collapsed reviewer suggestions to hide full suggestion text, got %q", collapsed)
+	}
+}
+
+func TestCompactDetailScrollFocusesCenterVisibleEntryForExpansion(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  []tea.Msg
+		scroll tea.Msg
+	}{
+		{
+			name:   "mouse wheel up",
+			scroll: tea.MouseMsg{Button: tea.MouseButtonWheelUp},
+		},
+		{
+			name:   "page up",
+			scroll: tea.KeyMsg{Type: tea.KeyPgUp},
+		},
+		{
+			name: "page down",
+			setup: []tea.Msg{
+				tea.KeyMsg{Type: tea.KeyPgUp},
+			},
+			scroll: tea.KeyMsg{Type: tea.KeyPgDown},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(4))
+			for idx := 0; idx < 8; idx++ {
+				m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d\nhidden %d a\nhidden %d b\nhidden %d c", idx, idx, idx, idx)})
+			}
+			m = updateModel(t, m, ToggleModeMsg{})
+			for _, msg := range tt.setup {
+				m = updateModel(t, m, msg)
+			}
+
+			m = updateModel(t, m, tt.scroll)
+			centerVisible := centerVisibleSelectableDetailEntry(t, m)
+			if !m.detailSelectedActive || m.detailSelectedEntry != centerVisible {
+				t.Fatalf("expected scroll to focus center visible entry %d, got active=%v entry=%d", centerVisible, m.detailSelectedActive, m.detailSelectedEntry)
+			}
+
+			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			if _, ok := m.detailExpandedEntries[centerVisible]; !ok {
+				t.Fatalf("expected enter after scroll to expand center visible entry %d, got %+v", centerVisible, m.detailExpandedEntries)
+			}
+		})
+	}
+}
+
+func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before detail entry"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after detail entry"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+
+	raw := m.View()
+	selectedLine := lineContaining(raw, "selected detail entry")
+	if selectedLine == "" {
+		t.Fatalf("expected selected detail line, got %q", raw)
+	}
+	modeBg := themeModeBackgroundColor("dark")
+	if !strings.Contains(selectedLine, fmt.Sprintf("48;2;%d;%d;%d", modeBg.r, modeBg.g, modeBg.b)) {
+		t.Fatalf("expected compact detail selection to use mode background, got %q", selectedLine)
+	}
+	if strings.Contains(selectedLine, "38;2;215;218;224") {
+		t.Fatalf("did not expect compact detail selection to force foreground, got %q", selectedLine)
+	}
+
+}
+
+func TestCompactDetailShortSelectedMessagesDoNotShowExpansionAffordance(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "short user"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "short assistant"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := xansi.Strip(m.View())
+	if strings.Contains(view, "▶") || strings.Contains(view, "▼") {
+		t.Fatalf("did not expect chevron for selected short message, got %q", view)
+	}
+	if action, ok := m.DetailSelectedExpansionAction(); ok || action != "" {
+		t.Fatalf("did not expect expansion action for short message, got %q ok=%v", action, ok)
+	}
+	before := m.View()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("did not expect enter on short message to mutate expansion state, got %+v", m.detailExpandedEntries)
+	}
+	after := m.View()
+	if xansi.Strip(after) != xansi.Strip(before) || strings.Contains(xansi.Strip(after), "▶") || strings.Contains(xansi.Strip(after), "▼") {
+		t.Fatalf("did not expect enter on short message to change affordance/view, before=%q after=%q", xansi.Strip(before), xansi.Strip(after))
+	}
+}
+
+func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "printf 'one\\n'\nprintf 'two\\n'",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "printf 'one\\n'\nprintf 'two\\n'",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "done"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "▶ printf 'one\\n'…") {
+		t.Fatalf("expected completed shell call to stay compact, got %q", rendered)
+	}
+	if strings.Contains(rendered, "printf 'two") {
+		t.Fatalf("expected collapsed completed shell call to hide second command line, got %q", rendered)
+	}
+}
+
+func TestCompactDetailDefaultLabelsCoverInternalRoles(t *testing.T) {
+	tests := map[string]string{
+		"thinking":          "Reasoning summary",
+		"reasoning":         "Reasoning summary",
+		"thinking_trace":    "Reasoning trace",
+		"compaction_notice": "Context compacted",
+	}
+
+	for role, want := range tests {
+		if got := defaultDetailLabelForRole(role); got != want {
+			t.Fatalf("defaultDetailLabelForRole(%q) = %q, want %q", role, got, want)
+		}
+	}
+}
+
+func TestCompactDetailFirstLineStaysWithinViewportWidth(t *testing.T) {
+	const viewportWidth = 24
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("a", 80)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), "❮")
+	if line == "" {
+		t.Fatalf("expected collapsed detail row, got %q", m.View())
+	}
+	if width := lipgloss.Width(line); width > viewportWidth {
+		t.Fatalf("expected detail row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+}
+
+func TestCompactDetailSelectedLongCollapsedRowKeepsWideRailWithinViewport(t *testing.T) {
+	const viewportWidth = 16
+	m := NewModel(WithCompactDetail(), WithPreviewLines(4), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 4, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("abcdef ", 20)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), uiglyphs.SelectionRailGlyph)
+	if line == "" {
+		t.Fatalf("expected selected compact detail row to include wide rail, got %q", m.View())
+	}
+	if width := lipgloss.Width(line); width != viewportWidth {
+		t.Fatalf("expected selected row with wide rail to stay exactly viewport width %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+	if !strings.Contains(xansi.Strip(line), "▶ ") {
+		t.Fatalf("expected selected row with wide rail to keep expansion chevron visible, got %q", xansi.Strip(line))
+	}
+}
+
+func TestCompactDetailTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) {
+	const viewportWidth = 40
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "git status --short && git diff --stat && git add cli/tui/detail_compact_test.go cli/app/ui_scroll_keys_test.go",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "git status --short && git diff --stat && git add cli/tui/detail_compact_test.go cli/app/ui_scroll_keys_test.go",
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "▶ git status") {
+		t.Fatalf("expected truncated shell row to preserve shell prefix spacing, got %q", rendered)
+	}
+}
+
+func TestCompactDetailWrappedAssistantUsesTreeGuide(t *testing.T) {
+	const viewportWidth = 24
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: strings.Repeat("assistant ", 20)})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	firstLine := lineContaining(rendered, "▶")
+	if !strings.Contains(firstLine, "▶ assistant") {
+		t.Fatalf("expected selected assistant first row to use expansion chevron, got %q", firstLine)
+	}
+	if !strings.Contains(rendered, "│ assistant") || !strings.Contains(rendered, "└ assistant") {
+		t.Fatalf("expected wrapped assistant preview to use tree guide, got %q", rendered)
+	}
+	if width := lipgloss.Width(firstLine); width > viewportWidth {
+		t.Fatalf("expected assistant first row width <= %d, got %d in %q", viewportWidth, width, firstLine)
+	}
+}
+
+func TestCompactDetailNarrowWrappedAssistantKeepsTreeGuideWithinViewport(t *testing.T) {
+	const viewportWidth = 8
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "abcdef abcdef abcdef"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	firstLine := lineContaining(rendered, "❮")
+	if !strings.Contains(firstLine, "❮ ") {
+		t.Fatalf("expected narrow selected assistant first row without hidden content to keep normal prefix, got %q", firstLine)
+	}
+	if !strings.Contains(rendered, "│ ") || !strings.Contains(rendered, "└ ") {
+		t.Fatalf("expected narrow wrapped assistant preview to keep tree guide, got %q", rendered)
+	}
+	for _, line := range splitLines(rendered) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if width := lipgloss.Width(line); width > viewportWidth {
+			t.Fatalf("expected narrow detail line width <= %d, got %d in %q", viewportWidth, width, line)
+		}
+	}
+}
+
+func TestCompactDetailNarrowTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) {
+	const viewportWidth = 8
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: viewportWidth})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "git status --short",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "git status --short"},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	line := lineContaining(m.View(), "▶")
+	if !strings.Contains(xansi.Strip(line), "▶ ") {
+		t.Fatalf("expected narrow truncated shell row to preserve expansion chevron prefix spacing, got %q", xansi.Strip(line))
+	}
+	if width := lipgloss.Width(line); width > viewportWidth {
+		t.Fatalf("expected narrow shell row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
+	}
+}
+
+func TestCompactDetailCollapsedShellErrorKeepsSummary(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 220})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "printf 'one\\n'\nprintf 'two\\n'",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "printf 'one\\n'\nprintf 'two\\n'",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:              "tool_result_error",
+		ToolCallID:        "call_1",
+		Text:              "full output hidden while collapsed",
+		ToolResultSummary: "permission denied",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	rendered := xansi.Strip(m.View())
+	if !strings.Contains(rendered, "permission denied") {
+		t.Fatalf("expected collapsed shell error summary, got %q", rendered)
+	}
+	if strings.Contains(rendered, "printf 'two") || strings.Contains(rendered, "full output hidden") {
+		t.Fatalf("expected collapsed shell error to stay compact, got %q", rendered)
+	}
+}
+
+func leadingViewportSelectableDetailEntry(t *testing.T, m Model) int {
+	t.Helper()
+
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		return entryIndex
+	}
+	t.Fatalf("expected visible selectable detail entry, owners=%+v", m.detailLineEntryIndices)
+	return -1
+}
+
+func newTallExpandedCenterRailModel(t *testing.T) Model {
+	t.Helper()
+
+	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "intro line 0\nintro line 1\nintro line 2"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 12)
+	for idx := 0; idx < 12; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "tail"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.detailBottomAnchor = false
+	m.detailScroll = 0
+	m.refreshDetailViewport()
+	m.detailSelectedEntry = 0
+	m.detailSelectedActive = true
+	return m
+}
+
+func assertCenterRailOnExpandedOutput(t *testing.T, m Model) {
+	t.Helper()
+
+	lines := strings.Split(xansi.Strip(m.View()), "\n")
+	center := m.viewportLines / 2
+	if center >= len(lines) {
+		t.Fatalf("center line %d outside rendered lines %d", center, len(lines))
+	}
+	if !strings.HasPrefix(lines[center], uiglyphs.SelectionRailGlyph) || !strings.Contains(lines[center], "output line") {
+		t.Fatalf("expected selected rail on center output line, got center=%q view=%q", lines[center], xansi.Strip(m.View()))
+	}
+}
+
+func assertRailBearingSpacerLine(t *testing.T, line string, modeBg rgbColor, railColor rgbColor) {
+	t.Helper()
+
+	plain := xansi.Strip(line)
+	if !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) {
+		t.Fatalf("expected spacer line to extend selection rail, got %q", plain)
+	}
+	if strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) != "" {
+		t.Fatalf("expected highlighted spacer line to be blank after rail, got %q", plain)
+	}
+	if !strings.Contains(line, fmt.Sprintf("48;2;%d;%d;%d", modeBg.r, modeBg.g, modeBg.b)) {
+		t.Fatalf("expected spacer line to use mode background, got %q", line)
+	}
+	if !containsColor(extractForegroundTrueColors(line), railColor) {
+		t.Fatalf("expected spacer rail to use selected rail color, got %q", line)
+	}
+}
+
+func centerVisibleSelectableDetailEntry(t *testing.T, m Model) int {
+	t.Helper()
+
+	if len(m.detailLineEntryIndices) == 0 {
+		t.Fatal("expected visible detail entries")
+	}
+	anchor := m.viewportLines / 2
+	if anchor >= len(m.detailLineEntryIndices) {
+		anchor = len(m.detailLineEntryIndices) - 1
+	}
+	bestEntry := -1
+	bestDistance := len(m.detailLineEntryIndices) + 1
+	for lineIndex, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		distance := detailLineDistance(lineIndex, anchor)
+		if distance >= bestDistance {
+			continue
+		}
+		bestEntry = entryIndex
+		bestDistance = distance
+	}
+	if bestEntry < 0 {
+		t.Fatalf("expected center visible selectable detail entry, owners=%+v", m.detailLineEntryIndices)
+	}
+	return bestEntry
+}
+
+func selectedDetailDistanceFromCenter(t *testing.T, m Model) int {
+	t.Helper()
+
+	visible := m.visibleSelectableDetailEntries()
+	selected := detailVisibleEntryIndex(visible, m.detailSelectedEntry)
+	if !m.detailSelectedActive || selected < 0 {
+		t.Fatalf("expected selected entry in visible entries, selected=%d active=%v visible=%+v", m.detailSelectedEntry, m.detailSelectedActive, visible)
+	}
+	center := detailVisibleEntryIndex(visible, centerVisibleSelectableDetailEntry(t, m))
+	if center < 0 {
+		t.Fatalf("expected center entry in visible entries, visible=%+v", visible)
+	}
+	return selected - center
+}

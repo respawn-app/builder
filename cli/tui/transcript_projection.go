@@ -51,6 +51,20 @@ func (p TranscriptProjection) Render(divider string) string {
 	return strings.Join(out, "\n")
 }
 
+func (p TranscriptProjection) RenderWithBlockSeparator(separator string) string {
+	if len(p.Blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(p.Blocks)*2)
+	for idx, block := range p.Blocks {
+		if idx > 0 {
+			lines = append(lines, separator)
+		}
+		lines = append(lines, block.Lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (p TranscriptProjection) RenderAppendDeltaFrom(previous TranscriptProjection, divider string) (string, bool) {
 	if len(previous.Blocks) == 0 {
 		return p.Render(divider), true
@@ -169,6 +183,7 @@ func (m Model) CommittedOngoingProjectionForEntries(entries []TranscriptEntry) T
 }
 
 func (m Model) DetailProjection(includeStreaming bool, applySelection bool) TranscriptProjection {
+	m.mode = ModeDetail
 	return projectionFromDetailBlocks(m.buildDetailBlocks(includeStreaming, applySelection))
 }
 
@@ -191,7 +206,7 @@ func projectionFromDetailBlocks(blocks []ongoingBlock) TranscriptProjection {
 	for _, block := range blocks {
 		projection.Blocks = append(projection.Blocks, TranscriptProjectionBlock{
 			Role:         block.role,
-			DividerGroup: "detail",
+			DividerGroup: ongoingDividerGroup(block.role),
 			EntryIndex:   block.entryIndex,
 			EntryEnd:     block.entryEnd,
 			Lines:        append([]string(nil), block.lines...),

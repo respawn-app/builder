@@ -25,13 +25,9 @@ func TestHandleRenderDiagnosticRoutesThroughUpdateAndAutoClears(t *testing.T) {
 		Message:   "markdown renderer disabled, falling back to plain text: boom",
 		Severity:  tui.RenderDiagnosticSeverityWarn,
 	})
-	if len(m.startupCmds) != 1 {
-		t.Fatalf("expected diagnostic queued as startup cmd, got %d", len(m.startupCmds))
-	}
-	msg := m.startupCmds[0]()
-	renderMsg, ok := msg.(renderDiagnosticMsg)
+	renderMsg, ok := startupCmdMessage[renderDiagnosticMsg](m.startupCmds)
 	if !ok {
-		t.Fatalf("expected renderDiagnosticMsg, got %T", msg)
+		t.Fatalf("expected renderDiagnosticMsg in startup commands, got %d command(s)", len(m.startupCmds))
 	}
 	next, cmd := m.Update(renderMsg)
 	updated := next.(*uiModel)
@@ -74,10 +70,9 @@ func TestApplyRunLoggerDiagnosticSetsErrorTransientStatus(t *testing.T) {
 		Kind:    "write_failed",
 		Message: "run log write failed; observability degraded: disk full",
 	})
-	msg := m.startupCmds[0]()
-	runLogMsg, ok := msg.(runLoggerDiagnosticMsg)
+	runLogMsg, ok := startupCmdMessage[runLoggerDiagnosticMsg](m.startupCmds)
 	if !ok {
-		t.Fatalf("expected runLoggerDiagnosticMsg, got %T", msg)
+		t.Fatalf("expected runLoggerDiagnosticMsg in startup commands, got %d command(s)", len(m.startupCmds))
 	}
 	next, _ := m.Update(runLogMsg)
 	updated := next.(*uiModel)

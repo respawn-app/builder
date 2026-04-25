@@ -154,13 +154,17 @@ func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {
 	out := make([]clientui.ChatEntry, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, clientui.ChatEntry{
-			Visibility:  clientui.EntryVisibility(entry.Visibility),
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       string(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    cloneToolCallMeta(entry.ToolCall),
+			Visibility:        clientui.EntryVisibility(entry.Visibility),
+			Role:              entry.Role,
+			Text:              entry.Text,
+			OngoingText:       entry.OngoingText,
+			Phase:             string(entry.Phase),
+			MessageType:       string(entry.MessageType),
+			SourcePath:        entry.SourcePath,
+			CompactLabel:      entry.CompactLabel,
+			ToolResultSummary: entry.ToolResultSummary,
+			ToolCallID:        entry.ToolCallID,
+			ToolCall:          cloneToolCallMeta(entry.ToolCall),
 		})
 	}
 	return out
@@ -201,13 +205,17 @@ func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapsho
 			continue
 		}
 		entries = append(entries, clientui.ChatEntry{
-			Visibility:  clientui.EntryVisibility(entry.Visibility),
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       string(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    cloneToolCallMeta(entry.ToolCall),
+			Visibility:        clientui.EntryVisibility(entry.Visibility),
+			Role:              entry.Role,
+			Text:              entry.Text,
+			OngoingText:       entry.OngoingText,
+			Phase:             string(entry.Phase),
+			MessageType:       string(entry.MessageType),
+			SourcePath:        entry.SourcePath,
+			CompactLabel:      entry.CompactLabel,
+			ToolResultSummary: entry.ToolResultSummary,
+			ToolCallID:        entry.ToolCallID,
+			ToolCall:          cloneToolCallMeta(entry.ToolCall),
 		})
 	}
 	ongoing := snapshot.Ongoing

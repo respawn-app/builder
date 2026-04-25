@@ -9,6 +9,7 @@ import (
 	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/uiglyphs"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,10 +21,14 @@ const (
 	worktreeOverlayHeaderLines    = 3
 	worktreeOverlayFooterLines    = 1
 	worktreeOverlayRowLines       = 3
-	worktreeOverlayRailGlyph      = "│"
 	worktreeCreateRowID           = "__create__"
 	worktreeOverlayMaxErrorLines  = 4
 	worktreeCreateResolveDebounce = 150 * time.Millisecond
+)
+
+var (
+	worktreeOverlayRailGlyph = uiglyphs.SelectionRailGlyph
+	worktreeOverlayRailBlank = uiglyphs.SelectionRailBlank
 )
 
 type uiWorktreeOverlayPhase string
@@ -1068,7 +1073,7 @@ func renderWorktreeCreateRow(selected bool, width int, theme string, style uiSty
 	}
 	titleStyle := line.Foreground(p.primary).Bold(true)
 	railStyle := line.Foreground(p.primary).Bold(true)
-	rail := " "
+	rail := worktreeOverlayRailBlank
 	sep := ""
 	if selected {
 		rail = worktreeOverlayRailGlyph
@@ -1092,7 +1097,7 @@ func renderWorktreeEntry(item serverapi.WorktreeView, selected bool, width int, 
 	titleStyle := line.Bold(true)
 	railStyle := line.Foreground(p.primary).Bold(true)
 	metaStyle := line.Foreground(p.muted).Faint(true)
-	rail := " "
+	rail := worktreeOverlayRailBlank
 	sep := ""
 	if selected {
 		rail = worktreeOverlayRailGlyph

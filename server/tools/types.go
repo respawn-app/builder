@@ -21,6 +21,7 @@ type Result struct {
 	Name    toolspec.ID     `json:"name"`
 	Output  json.RawMessage `json:"output"`
 	IsError bool            `json:"is_error"`
+	Summary string          `json:"summary,omitempty"`
 }
 
 type Definition struct {
