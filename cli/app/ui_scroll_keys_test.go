@@ -386,6 +386,40 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 	}
 }
 
+func TestDetailModeUpAfterBottomScrollbackWalksHighlightOneVisualLine(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for idx := 0; idx < 24; idx++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %02d", idx)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	centerLine := m.termHeight / 2
+	for guard := 0; guard < 12; guard++ {
+		if selectedDetailLineIndex(t, m.view.View()) > centerLine {
+			break
+		}
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	beforeLine := selectedDetailLineIndex(t, m.view.View())
+	if beforeLine <= centerLine {
+		t.Fatalf("expected bottom scrollback repro to place selected row below center, line=%d center=%d view=%q", beforeLine, centerLine, stripANSIAndTrimRight(m.view.View()))
+	}
+	beforeScroll := m.view.DetailScroll()
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if got := m.view.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected camera to hold while selected row walks toward center, got scroll %d want %d", got, beforeScroll)
+	}
+	if got := selectedDetailLineIndex(t, m.view.View()); got != beforeLine-1 {
+		t.Fatalf("expected selected row to move up one visual line, got %d want %d view=%q", got, beforeLine-1, stripANSIAndTrimRight(m.view.View()))
+	}
+}
+
 func TestDetailModeScrollThenEnterExpandsCenterSelectedItem(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -495,6 +529,18 @@ func selectedDetailContentLine(t *testing.T, view string) string {
 	}
 	t.Fatalf("expected selected detail line in %q", stripANSIAndTrimRight(view))
 	return ""
+}
+
+func selectedDetailLineIndex(t *testing.T, view string) int {
+	t.Helper()
+
+	for idx, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
+		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(line, uiglyphs.SelectionRailGlyph)) != "" {
+			return idx
+		}
+	}
+	t.Fatalf("expected selected detail line in %q", stripANSIAndTrimRight(view))
+	return -1
 }
 
 func selectedDetailSpacerLine(t *testing.T, view string) string {

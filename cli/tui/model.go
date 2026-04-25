@@ -216,7 +216,6 @@ type Model struct {
 	detailMetricsResolved   bool
 	detailBottomAnchor      bool
 	detailBottomOffset      int
-	detailEdgeSelection     bool
 	detailDirty             bool
 	detailStale             bool
 	detailRebuildCount      int
@@ -552,13 +551,10 @@ func (m Model) scrollDetail(delta int) Model {
 		return m
 	}
 	if moved := m.scrollDetailLine(delta); moved {
-		m.detailEdgeSelection = false
 		m.focusCenterVisibleDetailEntry()
 		return m
 	}
-	if m.moveDetailSelectionWithinViewport(delta) {
-		m.detailEdgeSelection = true
-	}
+	m.moveDetailSelectionWithinViewport(delta)
 	return m
 }
 
