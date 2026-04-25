@@ -313,17 +313,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		for _, transcriptEntry := range convertedEntries {
 			m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
 			if showTransientInCurrentView && !replaceLoadedSyntheticEntries {
-				m.forwardToView(tui.AppendTranscriptMsg{
-					Visibility:  transcriptEntry.Visibility,
-					Transient:   transcriptEntry.Transient,
-					Committed:   transcriptEntry.Committed,
-					Role:        transcriptEntry.Role,
-					Text:        transcriptEntry.Text,
-					OngoingText: transcriptEntry.OngoingText,
-					Phase:       transcriptEntry.Phase,
-					ToolCallID:  transcriptEntry.ToolCallID,
-					ToolCall:    transcriptEntry.ToolCall,
-				})
+				m.forwardToView(appendTranscriptMsgFromEntry(transcriptEntry))
 			}
 		}
 	} else {
@@ -950,6 +940,24 @@ func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient b
 		ToolResultSummary: strings.TrimSpace(entry.ToolResultSummary),
 		ToolCallID:        entry.ToolCallID,
 		ToolCall:          transcriptToolCallMeta(entry.ToolCall),
+	}
+}
+
+func appendTranscriptMsgFromEntry(entry tui.TranscriptEntry) tui.AppendTranscriptMsg {
+	return tui.AppendTranscriptMsg{
+		Visibility:        entry.Visibility,
+		Transient:         entry.Transient,
+		Committed:         entry.Committed,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             entry.Phase,
+		MessageType:       entry.MessageType,
+		SourcePath:        strings.TrimSpace(entry.SourcePath),
+		CompactLabel:      strings.TrimSpace(entry.CompactLabel),
+		ToolResultSummary: strings.TrimSpace(entry.ToolResultSummary),
+		ToolCallID:        strings.TrimSpace(entry.ToolCallID),
+		ToolCall:          entry.ToolCall,
 	}
 }
 
