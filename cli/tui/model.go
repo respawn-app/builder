@@ -533,11 +533,13 @@ func (m Model) scrollDetail(delta int) Model {
 		}
 		m.detailBottomOffset = nextOffset
 		m.refreshDetailViewport()
+		m.focusFirstVisibleDetailEntry()
 		return m
 	}
 	m.ensureDetailScrollResolved()
 	m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
 	m.refreshDetailViewport()
+	m.focusFirstVisibleDetailEntry()
 	return m
 }
 
@@ -561,6 +563,24 @@ func (m *Model) ensureDetailSelection() {
 	}
 	m.detailSelectedEntry = -1
 	m.detailSelectedActive = false
+}
+
+func (m *Model) focusFirstVisibleDetailEntry() {
+	if m == nil || !m.compactDetail {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		m.detailSelectedEntry = entryIndex
+		m.detailSelectedActive = true
+		return
+	}
+	m.ensureDetailSelection()
 }
 
 func (m Model) detailBlockIndexForEntry(entryIndex int) int {
