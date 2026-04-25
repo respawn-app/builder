@@ -68,8 +68,8 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 		}),
 	)
 
-	if len(m.startupCmds) != 0 {
-		t.Fatalf("expected startup native history replay deferred until window size, got %d startup cmd(s)", len(m.startupCmds))
+	if _, ok := startupCmdMessage[nativeHistoryFlushMsg](m.startupCmds); ok {
+		t.Fatal("expected startup native history replay deferred until window size")
 	}
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	updated, ok := next.(*uiModel)
@@ -167,13 +167,123 @@ func TestNativeScrollbackStartupReplayKeepsPatchSuccessStateAfterEmptyToolResult
 		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
 	}
 	plain := stripANSIPreserve(msg.Text)
-	if !strings.Contains(plain, "• apply patch") {
+	if !strings.Contains(plain, "⇄ apply patch") {
 		t.Fatalf("expected patch replay to show tool call text, got %q", plain)
 	}
 	tokens := sharedtheme.ResolvePalette(m.theme)
-	expectedSuccessBullet := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("•")
-	if !strings.Contains(msg.Text, expectedSuccessBullet) {
-		t.Fatalf("expected patch replay to use success-colored bullet after empty result, got %q", msg.Text)
+	expectedSuccessSymbol := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("⇄")
+	if !strings.Contains(msg.Text, expectedSuccessSymbol) {
+		t.Fatalf("expected patch replay to use success-colored patch symbol after empty result, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackStartupReplayKeepsPatchErrorSymbol(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "Edited: ./main.go +1 -1",
+			ToolCallID: "call_patch",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited: ./main.go +1 -1", PatchDetail: "Edited:\n./main.go\n-old\n+new"},
+		},
+		{Role: "tool_result_error", Text: "Patch failed", ToolCallID: "call_patch"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, "⇄ ./main.go +1 -1") || strings.Contains(plain, "Edited:") {
+		t.Fatalf("expected patch replay to show error patch symbol and summary, got %q", plain)
+	}
+	tokens := sharedtheme.ResolvePalette(m.theme)
+	expectedErrorSymbol := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()).Render("⇄")
+	if !strings.Contains(msg.Text, expectedErrorSymbol) {
+		t.Fatalf("expected patch replay to use error-colored patch symbol, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackStartupReplayKeepsMultiFilePatchHeaderFullStrength(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	summary := "./cli/app/ui_diff_render_test.go +2 -2\n./cli/app/ui_mode_flow_test.go +1 -1"
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       summary,
+			ToolCallID: "call_patch",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: summary, PatchDetail: summary},
+		},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	headerLine := lineContaining(msg.Text, "./cli/app/ui_diff_render_test.go")
+	if headerLine == "" {
+		t.Fatalf("expected native replay patch summary line, got %q", msg.Text)
+	}
+	if strings.Contains(headerLine, ";2m") {
+		t.Fatalf("expected native replay multi-file patch summary to render full-strength, got %q", headerLine)
+	}
+}
+
+func TestPatchEditedLabelOmittedInLiveViewAndNativeReplay(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	entries := []tui.TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "Edited: ./single.go +1 -1",
+			ToolCallID: "single",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited: ./single.go +1 -1", PatchDetail: "Edited:\n./single.go\n-old\n+new"},
+		},
+		{Role: "tool_result_ok", ToolCallID: "single"},
+		{
+			Role:       "tool_call",
+			Text:       "Edited:\n./a.go +1\n./b.go -1",
+			ToolCallID: "multi",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:\n./a.go +1\n./b.go -1", PatchDetail: "Edited:\n./a.go\n+new\n./b.go\n-old"},
+		},
+		{Role: "tool_result_ok", ToolCallID: "multi"},
+		{
+			Role:       "tool_call",
+			Text:       "Edited:",
+			ToolCallID: "raw",
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:", PatchDetail: "Edited:\nnot a structured patch payload"},
+		},
+		{Role: "tool_result_ok", ToolCallID: "raw"},
+	}
+	m.transcriptEntries = entries
+	m.forwardToView(tui.SetConversationMsg{Entries: entries})
+
+	live := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if strings.Contains(live, "Edited:") || !strings.Contains(live, "⇄ ./single.go +1 -1") || !strings.Contains(live, "./a.go +1") || !strings.Contains(live, "⇄ Patch") {
+		t.Fatalf("expected live patch summaries without Edited label, got %q", live)
+	}
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	replay := stripANSIPreserve(msg.Text)
+	if strings.Contains(replay, "Edited:") || !strings.Contains(replay, "⇄ ./single.go +1 -1") || !strings.Contains(replay, "./a.go +1") || !strings.Contains(replay, "⇄ Patch") {
+		t.Fatalf("expected native replay patch summaries without Edited label, got %q", replay)
 	}
 }
 
@@ -1458,8 +1568,14 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 	if len(lines) != 12 {
 		t.Fatalf("expected fresh conversation to fill full terminal height, got %d lines", len(lines))
 	}
-	if !strings.Contains(lines[len(lines)-1], "ongoing") {
+	if !strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator) {
 		t.Fatalf("expected status line at terminal bottom, got %q", lines[len(lines)-1])
+	}
+	if strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(lines[len(lines)-1], statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in status line, got %q", lines[len(lines)-1])
 	}
 	if strings.TrimSpace(lines[0]) != "" {
 		t.Fatalf("expected top of fresh conversation live region to stay blank, got %q", lines[0])
@@ -1494,8 +1610,15 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 	if strings.TrimSpace(stripANSIPreserve(view)) == "" {
 		t.Fatalf("expected non-empty native render under tight height, got %q", view)
 	}
-	if !strings.Contains(stripANSIPreserve(view), "ongoing") {
+	plain := stripANSIPreserve(view)
+	if !strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator) {
 		t.Fatalf("expected status line visible under tight height, got %q", view)
+	}
+	if strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(plain, statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(plain, statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(plain, statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in status line, got %q", view)
 	}
 }
 

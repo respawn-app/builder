@@ -85,6 +85,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 		if baseRole == "tool_web_search" {
 			return "tool_web_search_error"
 		}
+		if baseRole == "tool_patch" {
+			return "tool_patch_error"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_error"
 		}
@@ -97,6 +100,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 		if baseRole == "tool_web_search" {
 			return "tool_web_search_success"
 		}
+		if baseRole == "tool_patch" {
+			return "tool_patch_success"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_success"
 		}
@@ -107,6 +113,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 	}
 	if baseRole == "tool_web_search" {
 		return "tool_web_search"
+	}
+	if baseRole == "tool_patch" {
+		return "tool_patch"
 	}
 	return "tool"
 }
@@ -121,9 +130,9 @@ func (m Model) roleSymbol(role string) string {
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	}
 	switch role {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_patch", "tool_patch_success", "tool_patch_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case roleDeveloperFeedback, roleInterruption:
+	case roleDeveloperContext, roleDeveloperFeedback, roleInterruption:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
 		if isCompactionRole(role) {
@@ -151,15 +160,17 @@ func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
 		return roleSymbolColorStyle{color: p.errorColor}
 	}
 	switch role {
-	case "tool_success", "tool_shell_success", "tool_web_search_success":
+	case "tool_success", "tool_shell_success", "tool_patch_success", "tool_web_search_success":
 		return roleSymbolColorStyle{color: p.toolSuccessColor}
-	case "tool_error", "tool_shell_error", "tool_web_search_error":
+	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_web_search_error":
 		return roleSymbolColorStyle{color: p.toolErrorColor}
 	case "tool_question":
 		return roleSymbolColorStyle{color: p.userColor}
 	case "tool_question_error", roleDeveloperFeedback, roleInterruption:
 		return roleSymbolColorStyle{color: p.errorColor}
-	case "tool", "tool_shell", "tool_web_search":
+	case roleDeveloperContext:
+		return roleSymbolColorStyle{color: p.foregroundColor}
+	case "tool", "tool_shell", "tool_patch", "tool_web_search":
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
 		return roleSymbolColorStyle{color: p.foregroundColor}
@@ -189,8 +200,12 @@ func rolePrefix(role string) string {
 		return "@"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
+	case "tool_patch", "tool_patch_success", "tool_patch_error":
+		return "⇄"
 	case "tool_question", "tool_question_error":
 		return "?"
+	case roleDeveloperContext:
+		return "ℹ"
 	case roleDeveloperFeedback:
 		return "!"
 	case roleInterruption:
@@ -246,6 +261,12 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.toolSuccess
 	case "tool_shell_error":
 		return p.toolError
+	case "tool_patch":
+		return p.tool
+	case "tool_patch_success":
+		return p.toolSuccess
+	case "tool_patch_error":
+		return p.toolError
 	case "tool_question":
 		return p.user
 	case "tool_question_error":
@@ -277,6 +298,7 @@ type palette struct {
 	foregroundColor          rgbColor
 	selectionForegroundColor rgbColor
 	selectionBackgroundColor rgbColor
+	primaryColor             rgbColor
 	preview                  lipgloss.Style
 	previewColor             rgbColor
 	userColor                rgbColor
@@ -310,6 +332,7 @@ func (m Model) palette() palette {
 		foregroundColor:          rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
 		selectionForegroundColor: rgbColorFromHex(tokens.Transcript.SelectionForeground.TrueColor),
 		selectionBackgroundColor: rgbColorFromHex(tokens.Transcript.SelectionBackground.TrueColor),
+		primaryColor:             rgbColorFromHex(tokens.App.Primary.TrueColor),
 		preview:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
 		previewColor:             rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
 		userColor:                rgbColorFromHex(tokens.Transcript.User.TrueColor),
@@ -354,6 +377,10 @@ func themeForegroundColor(themeName string) rgbColor {
 
 func themePreviewColor(themeName string) rgbColor {
 	return rgbColorFromHex(theme.ResolvePalette(themeName).Transcript.Subdued.TrueColor)
+}
+
+func themeModeBackgroundColor(themeName string) rgbColor {
+	return rgbColorFromHex(theme.ResolvePalette(themeName).App.ModeBg.TrueColor)
 }
 
 func themeSuccessColor(themeName string) rgbColor {

@@ -297,9 +297,13 @@
 - Detail compact labels are metadata-first. Runtime/client projection must preserve source message type, source path, compact content/label, and tool presentation metadata where available. Legacy sessions that lack this metadata degrade by role and text-preview fallback only; Builder must not parse old prompt/reminder text to reclassify AGENTS, skills, environment, worktree, patch, or handoff messages.
 - Unknown roles, unknown message types, and invalid/missing presentation metadata must stay visible and expandable. If recoverable text exists, unknown/malformed entries are visible in ongoing and detail; empty unknown/malformed entries are detail-only diagnostics. Production rendering emits diagnostics and uses deterministic fallback labels; debug mode may hard-fail only on internal detail-item invariants, not on old or unknown transcript data.
 - Detail tool calls with error results stay collapsed by default but may show compact input plus a structured error summary supplied by runtime/projection; expanding reveals full input/output.
-- Detail navigation is message-oriented: `Up`/`Down` select previous/next transcript message, `Enter` expands/collapses the selected message, and `PgUp`/`PgDn` keep page-scrolling the detail viewport.
-- Detail rows use mandatory chevron markers: `▶︎` collapsed and `▼` expanded.
+- Detail scrolling is line-oriented. `Up`/`Down` move by one rendered line when the viewport can scroll. After line, page, wheel, or alternate-scroll movement, compact detail selects the visible selectable item nearest the viewport center, so `Enter` toggles the item the user is visually centered on. Tall expanded entries remain selected while their body crosses that center anchor.
+- Detail rows do not use dedicated collapsed/expanded glyphs. The first rendered line keeps the normal role/tool symbol; continuation lines in multi-line detail items use faint tree guides (`│` for middle lines, `└` for the last line).
+- Patch/edit tools use `⇄` in ongoing, detail, and native replay. The symbol inherits pending/success/error tool color by result state.
+- Detail items use the same role-group separator policy as ongoing/native transcript rendering, but with blank lines instead of divider rules. Consecutive tool rows form dense chunks; role-group transitions get one blank line.
 - Detail selection uses full-width selected background/fill only. It must not change foreground colors, and selected background has the lowest priority so more specific backgrounds such as patch diff add/remove or syntax backgrounds win.
+- Compact detail selection has visual-only highlighted blank spacer rows above and below the selected item when adjacent viewport rows exist. These spacers extend the selected side rail, reduce focus noise, and do not change detail scroll metrics or transcript line counts.
+- Compact detail replaces the selected expandable item's role symbol with `▶` when collapsed and `▼` when expanded. The affordance is selected-only; unselected rows keep normal role symbols to avoid chevron noise. Detail status line mirrors the selected action as `Enter to expand` or `Enter to collapse`.
 - Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
 - Style ownership is fixed by layer:
 - Formatter config owns syntax backgrounds and formatter base foreground.
@@ -384,11 +388,12 @@
 - Ongoing mode keeps mouse capture disabled to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
-- Mouse handling is allowed only on alt-screen/overlay surfaces where Builder does not need strict native scrollback, native text selection, or prompt typing behavior. Detail may enable the mouse/alternate-scroll handling needed for wheel-driven transcript navigation while active, and must disable it again on leaving detail.
-- Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation and message selection are prioritized.
+- Detail does not enable terminal mouse capture because it blocks native text selection in common terminals. Detail may enable terminal alternate-scroll (`?1007`) while active, and must disable it again on leaving detail.
+- Rationale: ongoing must preserve long-lived normal-buffer scrollback; detail still needs smooth native selection/copy, so selection wins over app-level pointer capture. Wheel navigation is best-effort through terminal alternate-scroll and any mouse events the terminal can deliver without capture.
+- Compact detail viewport scrolling (`Up`/`Down`, `PgUp`/`PgDn`, wheel, and alternate-scroll key events) auto-focuses the selectable item nearest the viewport center so `Enter` expands what the user is visually centered on.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
-- Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
+- Main status line is compact and fixed: activity indicator, optional git branch, model label, process/server metadata, transient warning; context meter is right-aligned. The activity indicator is followed by one plain space. Later metadata segments use ` · ` separators.
 - Model label appends thinking level when reasoning effort is supported by the resolved model contract; unknown non-empty model ids default to reasoning-capable.
 - Status line includes right-aligned context meter (10-char bar + `% ctx window`, green/yellow/red at `<50%`, `50-<80%`, `>=80%`).
 

@@ -13,13 +13,17 @@ import (
 )
 
 type ChatEntry struct {
-	Visibility  transcript.EntryVisibility
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       llm.MessagePhase
-	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	Visibility        transcript.EntryVisibility
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             llm.MessagePhase
+	MessageType       llm.MessageType
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *transcript.ToolCallMeta
 }
 
 type ChatSnapshot struct {
@@ -39,6 +43,7 @@ type storedToolCompletion struct {
 	Name    string          `json:"name"`
 	IsError bool            `json:"is_error"`
 	Output  json.RawMessage `json:"output"`
+	Summary string          `json:"summary,omitempty"`
 }
 
 type chatStore struct {
@@ -153,6 +158,7 @@ func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
 		Name:    toolspec.ID(completion.Name),
 		IsError: completion.IsError,
 		Output:  completion.Output,
+		Summary: completion.Summary,
 	})
 	return nil
 }

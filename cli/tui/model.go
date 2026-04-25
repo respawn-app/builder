@@ -18,20 +18,25 @@ const (
 
 	DefaultPreviewLines = 8
 	TranscriptDivider   = "────────────────────────"
+	detailItemSeparator = ""
 )
 
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Visibility  transcript.EntryVisibility
-	Transient   bool
-	Committed   bool
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       llm.MessagePhase
-	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	Visibility        transcript.EntryVisibility
+	Transient         bool
+	Committed         bool
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             llm.MessagePhase
+	MessageType       llm.MessageType
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *transcript.ToolCallMeta
 }
 
 type VisibleLineKind uint8
@@ -70,15 +75,19 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Visibility  transcript.EntryVisibility
-	Transient   bool
-	Committed   bool
-	Role        string
-	Text        string
-	OngoingText string
-	Phase       llm.MessagePhase
-	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	Visibility        transcript.EntryVisibility
+	Transient         bool
+	Committed         bool
+	Role              string
+	Text              string
+	OngoingText       string
+	Phase             llm.MessagePhase
+	MessageType       llm.MessageType
+	SourcePath        string
+	CompactLabel      string
+	ToolResultSummary string
+	ToolCallID        string
+	ToolCall          *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -167,9 +176,16 @@ func WithRenderDiagnosticHandler(handler RenderDiagnosticHandler) Option {
 	}
 }
 
+func WithCompactDetail() Option {
+	return func(m *Model) {
+		m.compactDetail = true
+	}
+}
+
 type Model struct {
 	mode Mode
 
+	compactDetail               bool
 	viewportLines               int
 	viewportWidth               int
 	ongoingScroll               int
@@ -184,6 +200,9 @@ type Model struct {
 
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
+	detailSelectedEntry      int
+	detailSelectedActive     bool
+	detailExpandedEntries    map[int]struct{}
 
 	detailSnapshot          string
 	detailLines             []string
@@ -235,6 +254,25 @@ func (m Model) DetailMetricsResolved() bool {
 
 func (m Model) DetailRebuildCount() int {
 	return m.detailRebuildCount
+}
+
+func (m Model) DetailSelectedEntry() (int, bool) {
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok {
+		return 0, false
+	}
+	return selectedEntry, true
+}
+
+func (m Model) DetailSelectedExpansionAction() (string, bool) {
+	state, ok := m.detailSelectedExpansionState()
+	if !ok {
+		return "", false
+	}
+	if state.expanded {
+		return "collapse", true
+	}
+	return "expand", true
 }
 
 func (m Model) TranscriptBaseOffset() int {
@@ -314,7 +352,10 @@ type detailBlockSpec struct {
 	role       string
 	entryIndex int
 	entryEnd   int
-	render     func(Model) []string
+	selectable bool
+	expanded   bool
+	expandable bool
+	render     func(Model, string) []string
 }
 
 func NewModel(opts ...Option) Model {
@@ -485,6 +526,9 @@ func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
 			m.detailStale = false
 		}
 		m.refreshDetailViewport()
+		if m.compactDetail {
+			m.focusCenterVisibleDetailEntry()
+		}
 	case ModeOngoing:
 		m.mode = ModeOngoing
 		// Ongoing mode is the live tail view, so exiting detail always snaps to
@@ -503,19 +547,280 @@ func (m Model) scrollOngoing(delta int) Model {
 }
 
 func (m Model) scrollDetail(delta int) Model {
+	if m.moveDetailSelectionTowardCenterAtScrollEdge(delta) {
+		return m
+	}
+	if moved := m.scrollDetailLine(delta); moved {
+		m.focusCenterVisibleDetailEntry()
+		return m
+	}
+	m.moveDetailSelectionWithinViewport(delta)
+	return m
+}
+
+func (m *Model) scrollDetailLine(delta int) bool {
 	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		before := m.detailBottomOffset
 		nextOffset := m.detailBottomOffset - delta
 		if nextOffset < 0 {
 			nextOffset = 0
 		}
 		m.detailBottomOffset = nextOffset
 		m.refreshDetailViewport()
-		return m
+		return m.detailBottomOffset != before
 	}
 	m.ensureDetailScrollResolved()
+	before := m.detailScroll
 	m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
 	m.refreshDetailViewport()
-	return m
+	return m.detailScroll != before
+}
+
+func (m *Model) ensureDetailSelection() {
+	if m == nil {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	if m.detailSelectedActive && m.detailBlockIndexForEntry(m.detailSelectedEntry) >= 0 {
+		return
+	}
+	for idx := len(m.detailBlocks) - 1; idx >= 0; idx-- {
+		if !m.detailBlocks[idx].selectable {
+			continue
+		}
+		m.detailSelectedEntry = m.detailBlocks[idx].entryIndex
+		m.detailSelectedActive = true
+		return
+	}
+	m.detailSelectedEntry = -1
+	m.detailSelectedActive = false
+}
+
+func (m *Model) focusCenterVisibleDetailEntry() {
+	if m == nil || !m.compactDetail {
+		return
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	if len(m.detailLineEntryIndices) == 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	anchor := m.viewportLines / 2
+	if anchor >= len(m.detailLineEntryIndices) {
+		anchor = len(m.detailLineEntryIndices) - 1
+	}
+	if anchor < 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	bestEntry := -1
+	bestDistance := len(m.detailLineEntryIndices) + 1
+	for lineIndex, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		distance := detailLineDistance(lineIndex, anchor)
+		if distance >= bestDistance {
+			continue
+		}
+		bestEntry = entryIndex
+		bestDistance = distance
+	}
+	if bestEntry < 0 {
+		m.ensureDetailSelection()
+		return
+	}
+	previousEntry := m.detailSelectedEntry
+	previousActive := m.detailSelectedActive
+	m.detailSelectedEntry = bestEntry
+	m.detailSelectedActive = true
+	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
+		m.refreshDetailViewport()
+	}
+}
+
+func (m *Model) moveDetailSelectionWithinViewport(delta int) bool {
+	if m == nil || !m.compactDetail {
+		return false
+	}
+	if len(m.visibleSelectableDetailEntries()) == 0 {
+		m.ensureDetailSelection()
+		return false
+	}
+	first, last, ok := m.visibleDetailEntryLineRange(m.detailSelectedEntry)
+	if !m.detailSelectedActive || !ok {
+		m.focusCenterVisibleDetailEntry()
+		return false
+	}
+	startLine := first - 1
+	if delta > 0 {
+		startLine = last + 1
+	}
+	return m.selectVisibleDetailEntryInLineDirection(startLine, delta)
+}
+
+func (m *Model) moveDetailSelectionTowardCenterAtScrollEdge(delta int) bool {
+	if m == nil || !m.compactDetail || (delta != -1 && delta != 1) {
+		return false
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	first, last, ok := m.visibleDetailEntryLineRange(m.detailSelectedEntry)
+	if !m.detailSelectedActive || !ok {
+		return false
+	}
+	centerEntry := m.centerVisibleSelectableDetailEntry()
+	centerFirst, centerLast, ok := m.visibleDetailEntryLineRange(centerEntry)
+	if !ok {
+		return false
+	}
+	centerLine := (centerFirst + centerLast) / 2
+	if delta < 0 && first <= centerLine {
+		return false
+	}
+	if delta > 0 && last >= centerLine {
+		return false
+	}
+	startLine := first - 1
+	if delta > 0 {
+		startLine = last + 1
+	}
+	return m.selectVisibleDetailEntryInLineDirection(startLine, delta)
+}
+
+func (m *Model) selectVisibleDetailEntry(entryIndex int) bool {
+	if m == nil || entryIndex < 0 {
+		return false
+	}
+	if detailVisibleEntryIndex(m.visibleSelectableDetailEntries(), entryIndex) < 0 {
+		return false
+	}
+	previousEntry := m.detailSelectedEntry
+	previousActive := m.detailSelectedActive
+	m.detailSelectedEntry = entryIndex
+	m.detailSelectedActive = true
+	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
+		m.refreshDetailViewport()
+	}
+	return true
+}
+
+func (m *Model) selectVisibleDetailEntryInLineDirection(startLine int, delta int) bool {
+	if m == nil || delta == 0 {
+		return false
+	}
+	for lineIndex := startLine; lineIndex >= 0 && lineIndex < len(m.detailLineEntryIndices); lineIndex += delta {
+		entryIndex := m.detailLineEntryIndices[lineIndex]
+		if entryIndex < 0 || entryIndex == m.detailSelectedEntry || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		return m.selectVisibleDetailEntry(entryIndex)
+	}
+	return false
+}
+
+func (m Model) visibleDetailEntryLineRange(entryIndex int) (int, int, bool) {
+	if entryIndex < 0 {
+		return -1, -1, false
+	}
+	first := -1
+	last := -1
+	for lineIndex, owner := range m.detailLineEntryIndices {
+		if owner != entryIndex {
+			continue
+		}
+		if first < 0 {
+			first = lineIndex
+		}
+		last = lineIndex
+	}
+	return first, last, first >= 0
+}
+
+func (m *Model) visibleSelectableDetailEntries() []int {
+	if m == nil {
+		return nil
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	entries := make([]int, 0, len(m.detailLineEntryIndices))
+	seen := make(map[int]struct{}, len(m.detailLineEntryIndices))
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		if _, ok := seen[entryIndex]; ok {
+			continue
+		}
+		seen[entryIndex] = struct{}{}
+		entries = append(entries, entryIndex)
+	}
+	return entries
+}
+
+func (m *Model) centerVisibleSelectableDetailEntry() int {
+	if m == nil {
+		return -1
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	if len(m.detailLineEntryIndices) == 0 {
+		return -1
+	}
+	anchor := m.viewportLines / 2
+	if anchor >= len(m.detailLineEntryIndices) {
+		anchor = len(m.detailLineEntryIndices) - 1
+	}
+	if anchor < 0 {
+		return -1
+	}
+	bestEntry := -1
+	bestDistance := len(m.detailLineEntryIndices) + 1
+	for lineIndex, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+			continue
+		}
+		distance := detailLineDistance(lineIndex, anchor)
+		if distance >= bestDistance {
+			continue
+		}
+		bestEntry = entryIndex
+		bestDistance = distance
+	}
+	return bestEntry
+}
+
+func detailLineDistance(left int, right int) int {
+	distance := left - right
+	if distance < 0 {
+		return -distance
+	}
+	return distance
+}
+
+func detailVisibleEntryIndex(entries []int, entryIndex int) int {
+	for idx, candidate := range entries {
+		if candidate == entryIndex {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (m Model) detailBlockIndexForEntry(entryIndex int) int {
+	for idx, block := range m.detailBlocks {
+		if block.selectable && block.entryIndex == entryIndex {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (m Model) maxOngoingScroll() int {
@@ -725,18 +1030,120 @@ func (m Model) renderDetailSnapshot() string {
 		lines = []string{""}
 	}
 
-	selectedEntry, highlightSelected := m.selectedUserTranscriptEntry()
 	out := make([]string, 0, m.viewportLines)
-	for i, line := range lines {
-		if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
-			line = m.renderSelectedTranscriptLine(line)
+	selectedEntry, highlightSelected := m.resolveDetailSelection()
+	firstSelectedLine := -1
+	lastSelectedLine := -1
+	if highlightSelected && m.compactDetail {
+		for i, entryIndex := range m.detailLineEntryIndices {
+			if entryIndex != selectedEntry {
+				continue
+			}
+			if firstSelectedLine < 0 {
+				firstSelectedLine = i
+			}
+			lastSelectedLine = i
 		}
+	}
+	for i, line := range lines {
+		selected := highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerBefore(i, firstSelectedLine) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+		}
+		if m.compactDetail && highlightSelected && m.shouldRenderDetailSelectionSpacer(i, firstSelectedLine, lastSelectedLine) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+			continue
+		}
+		line = m.renderDetailViewportLine(line, selected)
 		out = append(out, line)
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerAfter(i, lastSelectedLine) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+		}
+	}
+	if len(out) > m.viewportLines {
+		out = out[:m.viewportLines]
 	}
 	for len(out) < m.viewportLines {
 		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLine int, lastSelectedLine int) bool {
+	if firstSelectedLine < 0 || lastSelectedLine < 0 {
+		return false
+	}
+	if lineIndex == firstSelectedLine-1 {
+		return !m.shouldInsertDetailSelectionSpacerBefore(firstSelectedLine, firstSelectedLine)
+	}
+	if lineIndex == lastSelectedLine+1 {
+		return !m.shouldInsertDetailSelectionSpacerAfter(lastSelectedLine, lastSelectedLine)
+	}
+	return false
+}
+
+func (m Model) shouldInsertDetailSelectionSpacerBefore(lineIndex int, firstSelectedLine int) bool {
+	return lineIndex == firstSelectedLine && m.detailAtTopEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(firstSelectedLine-1)
+}
+
+func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelectedLine int) bool {
+	return lineIndex == lastSelectedLine && m.detailAtBottomEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(lastSelectedLine+1)
+}
+
+func (m Model) detailAtTopEdgeForSelectionSpacer() bool {
+	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		return m.detailBottomOffset == 0
+	}
+	return m.detailScroll == 0
+}
+
+func (m Model) detailAtBottomEdgeForSelectionSpacer() bool {
+	if m.detailBottomAnchor && !m.detailMetricsResolved {
+		return false
+	}
+	return m.detailScroll == m.maxDetailScroll()
+}
+
+func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int) bool {
+	if lineIndex < 0 || lineIndex >= len(m.detailLineEntryIndices) {
+		return false
+	}
+	return m.detailBlockIndexForEntry(m.detailLineEntryIndices[lineIndex]) >= 0
+}
+
+type detailExpansionSymbolState struct {
+	role     string
+	expanded bool
+}
+
+func (m Model) detailSelectedExpansionState() (detailExpansionSymbolState, bool) {
+	if !m.compactDetail || m.mode != ModeDetail {
+		return detailExpansionSymbolState{}, false
+	}
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok {
+		return detailExpansionSymbolState{}, false
+	}
+	blockIndex := m.detailBlockIndexForEntry(selectedEntry)
+	if blockIndex < 0 || blockIndex >= len(m.detailBlocks) {
+		return detailExpansionSymbolState{}, false
+	}
+	block := m.detailBlocks[blockIndex]
+	if !block.selectable || !block.expandable {
+		return detailExpansionSymbolState{}, false
+	}
+	return detailExpansionSymbolState{role: block.role, expanded: block.expanded}, true
+}
+
+func (m Model) detailExpansionSymbolOverride(block detailBlockSpec) string {
+	if !m.compactDetail || m.mode != ModeDetail || !block.selectable || !block.expandable {
+		return ""
+	}
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok || selectedEntry != block.entryIndex {
+		return ""
+	}
+	return m.detailExpansionSymbolPrefix(block.role, block.expanded)
 }
 
 func (m *Model) invalidateDetailSnapshot() {
@@ -817,7 +1224,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 	}
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		blockLines := m.detailBlockLinesAt(idx)
@@ -846,12 +1253,17 @@ func (m *Model) detailBlockLinesAt(idx int) []string {
 	if m == nil || idx < 0 || idx >= len(m.detailBlocks) {
 		return []string{""}
 	}
-	if len(m.detailBlockLines[idx]) > 0 {
+	block := m.detailBlocks[idx]
+	symbolOverride := m.detailExpansionSymbolOverride(block)
+	if symbolOverride == "" && len(m.detailBlockLines[idx]) > 0 {
 		return m.detailBlockLines[idx]
 	}
-	lines := m.detailBlocks[idx].render(*m)
+	lines := block.render(*m, symbolOverride)
 	if len(lines) == 0 {
 		lines = []string{""}
+	}
+	if symbolOverride != "" {
+		return append([]string(nil), lines...)
 	}
 	m.detailBlockLines[idx] = append([]string(nil), lines...)
 	return m.detailBlockLines[idx]
@@ -884,16 +1296,16 @@ func (m *Model) detailViewportFromBottomOffset(offset int) ([]string, []VisibleL
 			kinds = append(kinds, VisibleLineContent)
 			owners = append(owners, block.entryIndex)
 		}
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			totalLines++
 		}
-		if idx > 0 && len(lines) < m.viewportLines {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) && len(lines) < m.viewportLines {
 			if remainingSkip > 0 {
 				remainingSkip--
 				continue
 			}
-			lines = append(lines, detailDivider())
-			kinds = append(kinds, VisibleLineDivider)
+			lines = append(lines, detailItemSeparator)
+			kinds = append(kinds, VisibleLineContent)
 			owners = append(owners, -1)
 		}
 	}
@@ -918,10 +1330,10 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 	owners := make([]int, 0, m.viewportLines)
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
 			if lineOffset >= start && lineOffset < end {
-				lines = append(lines, detailDivider())
-				kinds = append(kinds, VisibleLineDivider)
+				lines = append(lines, detailItemSeparator)
+				kinds = append(kinds, VisibleLineContent)
 				owners = append(owners, -1)
 			}
 			lineOffset++

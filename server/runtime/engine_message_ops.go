@@ -21,12 +21,16 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		e.ensureOrchestrationCollaborators()
 		e.backgroundFlow.ConsumePendingBackgroundNotice(sessionID)
 	}
-	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
+	payload := map[string]any{
 		"call_id":  r.CallID,
 		"name":     string(r.Name),
 		"is_error": r.IsError,
 		"output":   json.RawMessage(r.Output),
-	})
+	}
+	if r.Summary != "" {
+		payload["summary"] = r.Summary
+	}
+	_, err := e.store.AppendEvent(stepID, "tool_completed", payload)
 	if err == nil {
 		e.markCurrentRequestShapeDirtyForSignificantMutation()
 		e.chat.recordToolCompletion(r)

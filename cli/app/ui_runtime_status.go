@@ -126,12 +126,16 @@ func (m *uiModel) localRuntimeTranscript() clientui.TranscriptPage {
 	entries := make([]clientui.ChatEntry, 0, len(committedEntries))
 	for _, entry := range committedEntries {
 		entries = append(entries, clientui.ChatEntry{
-			Visibility:  entry.Visibility,
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       string(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
+			Visibility:        entry.Visibility,
+			Role:              entry.Role,
+			Text:              entry.Text,
+			OngoingText:       entry.OngoingText,
+			Phase:             string(entry.Phase),
+			MessageType:       string(entry.MessageType),
+			SourcePath:        entry.SourcePath,
+			CompactLabel:      entry.CompactLabel,
+			ToolResultSummary: entry.ToolResultSummary,
+			ToolCallID:        entry.ToolCallID,
 		})
 	}
 	totalEntries := m.transcriptTotalEntries

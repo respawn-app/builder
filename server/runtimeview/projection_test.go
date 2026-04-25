@@ -365,13 +365,17 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	snapshot := ChatSnapshotFromRuntime(runtime.ChatSnapshot{
 		Entries: []runtime.ChatEntry{{
-			Visibility:  transcript.EntryVisibilityDetailOnly,
-			Role:        "assistant",
-			Text:        "hello",
-			OngoingText: "hel",
-			Phase:       llm.MessagePhaseFinal,
-			ToolCallID:  "call-1",
-			ToolCall:    toolCall,
+			Visibility:        transcript.EntryVisibilityDetailOnly,
+			Role:              "assistant",
+			Text:              "hello",
+			OngoingText:       "hel",
+			Phase:             llm.MessagePhaseFinal,
+			MessageType:       llm.MessageTypeEnvironment,
+			SourcePath:        "/tmp/source",
+			CompactLabel:      "compact",
+			ToolResultSummary: "summary",
+			ToolCallID:        "call-1",
+			ToolCall:          toolCall,
 		}},
 		Ongoing:      "ongoing",
 		OngoingError: "warn",
@@ -385,6 +389,9 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	if entry.Visibility != clientui.EntryVisibilityDetailOnly {
 		t.Fatalf("entry visibility = %q, want %q", entry.Visibility, clientui.EntryVisibilityDetailOnly)
+	}
+	if entry.MessageType != string(llm.MessageTypeEnvironment) || entry.SourcePath != "/tmp/source" || entry.CompactLabel != "compact" || entry.ToolResultSummary != "summary" {
+		t.Fatalf("metadata was not projected: %+v", entry)
 	}
 	if len(entry.ToolCall.Suggestions) != 2 {
 		t.Fatalf("expected copied suggestions, got %+v", entry.ToolCall.Suggestions)

@@ -6,6 +6,7 @@ import (
 
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"builder/shared/transcript/patchformat"
 )
 
 const (
@@ -299,10 +300,10 @@ func SplitInlineMeta(line string) (string, string) {
 
 func CompactToolCallText(meta *transcript.ToolCallMeta, text string) string {
 	if meta != nil && meta.HasCompactText() {
-		return strings.TrimSpace(meta.CompactText)
+		return patchformat.StripEditedLabel(meta.CompactText)
 	}
 	if meta != nil && meta.HasPatchSummary() {
-		return strings.TrimSpace(meta.PatchSummary)
+		return patchformat.StripEditedLabel(meta.PatchSummary)
 	}
 	if meta != nil && strings.TrimSpace(meta.Command) != "" {
 		return strings.TrimSpace(meta.Command)

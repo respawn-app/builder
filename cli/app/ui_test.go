@@ -28,6 +28,7 @@ import (
 	"builder/shared/theme"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -751,6 +752,35 @@ func TestDetailModeHidesInputBox(t *testing.T) {
 	}
 	if strings.Contains(view, "› ") {
 		t.Fatalf("expected detail mode to hide input prompt, got %q", view)
+	}
+}
+
+func TestDetailModeStatusLineOmitsModeLabel(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIModelName("gpt-5"),
+	)
+	m.termWidth = 80
+	m.termHeight = 16
+	m.windowSizeKnown = true
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "detail-mode-v2"}
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated := next.(*uiModel)
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode=%q want detail", updated.view.Mode())
+	}
+
+	lines := strings.Split(ansi.Strip(updated.View()), "\n")
+	statusLine := lines[len(lines)-1]
+	if want := statusStateCircleGlyph + statusLineSpinnerSeparator + "gpt-5 · detail-mode-v2"; !strings.HasPrefix(statusLine, want) {
+		t.Fatalf("detail status line prefix = %q, want prefix %q", statusLine, want)
+	}
+	if strings.Contains(statusLine, statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(statusLine, statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(statusLine, statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(statusLine, statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in detail status line, got %q", statusLine)
 	}
 }
 
@@ -3620,7 +3650,7 @@ func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 	}
 }
 
-func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
+func TestRenderChatPanelRendersSelectedSpacer(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	style := uiThemeStyles("dark")
 
@@ -3630,17 +3660,17 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 
 	width := 44
 	lines := m.renderChatPanel(width, 8, style)
-	expected := style.meta.Render(strings.Repeat("─", width))
 
 	found := false
 	for _, line := range lines {
-		if line == expected {
+		plain := stripANSIAndTrimRight(line)
+		if strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) == "" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected full-width meta divider in chat panel, got %q", strings.Join(lines, "\n"))
+		t.Fatalf("expected selected spacer in chat panel, got %q", strings.Join(lines, "\n"))
 	}
 }
 
@@ -6879,6 +6909,40 @@ func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 	}
 }
 
+func TestStatusLineUsesDotSeparators(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng)
+	m.setTransientStatusWithKind("done", uiStatusNoticeSuccess)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if want := statusStateCircleGlyph + statusLineSpinnerSeparator + "gpt-5"; !strings.HasPrefix(line, want) {
+		t.Fatalf("ongoing status line prefix = %q, want prefix %q", line, want)
+	}
+	if strings.Contains(line, statusStateCircleGlyph+statusLineSeparator) {
+		t.Fatalf("did not expect dot separator immediately after spinner, got %q", line)
+	}
+	if !strings.Contains(line, "done · 0%") {
+		t.Fatalf("expected dot separator between right-side status segments, got %q", line)
+	}
+	if strings.Contains(line, statusStateCircleGlyph+statusLineSpinnerSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(line, statusStateCircleGlyph+statusLineSpinnerSeparator+"detail"+statusLineSeparator) ||
+		strings.Contains(line, statusLineSeparator+"ongoing"+statusLineSeparator) ||
+		strings.Contains(line, statusLineSeparator+"detail"+statusLineSeparator) {
+		t.Fatalf("did not expect transcript mode label in status line, got %q", line)
+	}
+	if strings.Contains(line, " | ") {
+		t.Fatalf("did not expect bar separators in status line, got %q", line)
+	}
+}
+
 func TestStatusLineShowsFastAfterThinkingLevelWhenAvailableAndEnabled(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
@@ -6916,7 +6980,7 @@ func TestStatusLineRightAlignsTransientNotice(t *testing.T) {
 	if !strings.HasSuffix(strings.TrimRight(line, " "), "done") {
 		t.Fatalf("expected notice at right edge, got %q", line)
 	}
-	if !containsInOrder(line, "ongoing", "gpt-5", "done") {
+	if !containsInOrder(line, "gpt-5", "done") {
 		t.Fatalf("expected notice after left metadata, got %q", line)
 	}
 	parts := strings.SplitN(line, "done", 2)
@@ -7866,7 +7930,7 @@ func lineContaining(text, substring string) string {
 }
 
 func themeSelectionBackgroundEscape(themeName string) string {
-	hex := strings.TrimPrefix(theme.ResolvePalette(themeName).Transcript.SelectionBackground.TrueColor, "#")
+	hex := strings.TrimPrefix(theme.ResolvePalette(themeName).App.ModeBg.TrueColor, "#")
 	var r, g, b int
 	if _, err := fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &b); err != nil {
 		return ""

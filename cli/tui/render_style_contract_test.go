@@ -76,7 +76,6 @@ func TestRenderStyleContractsByTheme(t *testing.T) {
 			meta := &transcript.ToolCallMeta{
 				RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 				PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
-					{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 					{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
 					{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 					{Kind: patchformat.RenderedLineKindDiff, Text: "-func removed() {}", FileIndex: 0},

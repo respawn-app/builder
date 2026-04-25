@@ -7,14 +7,14 @@ import (
 )
 
 func (m Model) renderFlatDetailTranscript() string {
-	return m.DetailProjection(true, true).Render(detailDivider())
+	return m.DetailProjection(true, true).Render(detailItemSeparator)
 }
 
 func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []ongoingBlock {
 	specs := m.buildDetailBlockSpecs(includeStreaming)
 	blocks := make([]ongoingBlock, 0, len(specs))
 	for _, spec := range specs {
-		lines := spec.render(m)
+		lines := spec.render(m, "")
 		if applySelection {
 			lines = m.maybeSelectedUserBlock(spec.entryIndex, spec.role, lines)
 		}
@@ -47,8 +47,14 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				role:       blockRole,
 				entryIndex: absoluteIndex,
 				entryEnd:   absoluteIndex,
-				render: func(model Model) []string {
-					return model.flattenEntry(blockRole, text)
+				selectable: true,
+				expanded:   m.detailEntryExpanded(absoluteIndex),
+				expandable: m.detailToolResultExpandable(blockRole, text),
+				render: func(model Model, symbolOverride string) []string {
+					if model.detailEntryExpanded(absoluteIndex) || blockRole == "tool_error" {
+						return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, text, false, nil, symbolOverride), true, symbolOverride)
+					}
+					return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, model.firstDetailPreviewLine(text, "Tool output"), false, nil, symbolOverride), false, symbolOverride)
 				},
 			})
 		default:
@@ -146,7 +152,7 @@ func (m Model) prefixedReasoningBlockSpec(entryIndex int, consumed map[int]struc
 		role:       "reasoning",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("reasoning", thinkingText)
 		},
 	}, true
@@ -179,6 +185,8 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
 		blockRole = "tool_web_search"
+	} else if isPatchToolCall(entry.ToolCall) {
+		blockRole = "tool_patch"
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
@@ -203,15 +211,19 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
 		blockRole = "tool_web_search"
+	} else if isPatchToolCall(entry.ToolCall) {
+		blockRole = "tool_patch"
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
 	combined := toolCallDisplayText(entry.ToolCall, entry.Text)
 	entryEnd := entryIndex
 	resultText := ""
+	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcript[resultIdx]
 		resultRole := strings.TrimSpace(resultEntry.Role)
+		resultSummary = strings.TrimSpace(resultEntry.ToolResultSummary)
 		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != "tool_result_error"
 		if trimmedResultText := strings.TrimSpace(resultEntry.Text); trimmedResultText != "" && !omitSuccessfulResult {
 			combined += "\n" + resultEntry.Text
@@ -230,11 +242,17 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		role:       blockRole,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteEnd,
-		render: func(model Model) []string {
-			if meta != nil && meta.PatchRender != nil {
-				return model.flattenPatchToolBlock(blockRole, meta, resultText)
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
+		expandable: m.detailToolCallExpandable(blockRole, entry, resultSummary, combined, meta, resultText),
+		render: func(model Model, symbolOverride string) []string {
+			if !model.detailEntryExpanded(absoluteIndex) {
+				return model.detailCollapsedToolLinesWithSymbol(blockRole, entry, resultSummary, symbolOverride)
 			}
-			return model.flattenEntryWithMeta(blockRole, combined, false, meta)
+			if meta != nil && meta.PatchRender != nil {
+				return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenPatchToolBlockWithSymbol(blockRole, meta, resultText, symbolOverride), true, symbolOverride)
+			}
+			return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, combined, false, meta, symbolOverride), true, symbolOverride)
 		},
 	}
 }
@@ -263,10 +281,12 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 	blockRole := "tool_question"
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
+	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 		if isToolResultRole(nextRole) {
 			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
+			resultSummary = strings.TrimSpace(m.transcript[resultIdx].ToolResultSummary)
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 			consumed[resultIdx] = struct{}{}
 		}
@@ -276,8 +296,18 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 		role:       blockRole,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteIndex,
-		render: func(model Model) []string {
-			return model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true)
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
+		expandable: m.detailAskQuestionExpandable(blockRole, question, suggestions, recommendedOptionIndex, answer, resultSummary),
+		render: func(model Model, symbolOverride string) []string {
+			if model.detailEntryExpanded(absoluteIndex) {
+				return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenAskQuestionEntryWithSymbol(blockRole, question, suggestions, recommendedOptionIndex, answer, true, symbolOverride), true, symbolOverride)
+			}
+			collapsedAnswer := ""
+			if resultSummary != "" {
+				collapsedAnswer = resultSummary
+			}
+			return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenAskQuestionEntryWithSymbol(blockRole, question, nil, 0, collapsedAnswer, false, symbolOverride), false, symbolOverride)
 		},
 	}
 }
@@ -287,7 +317,7 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts
 		return toolCallDisplayText(entry.ToolCall, entry.Text)
 	}
 	combined := compactToolCallText(entry.ToolCall, entry.Text)
-	if blockRole == "tool_shell" {
+	if isShellPreviewRole(blockRole) {
 		combined = compactOngoingShellPreviewText(combined)
 	}
 	return combined
@@ -349,8 +379,14 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		role:       role,
 		entryIndex: absoluteIndex,
 		entryEnd:   absoluteIndex,
-		render: func(model Model) []string {
-			return model.flattenEntry(role, text)
+		selectable: true,
+		expanded:   m.detailEntryExpanded(absoluteIndex),
+		expandable: m.detailStandardExpandable(entry, role, text),
+		render: func(model Model, symbolOverride string) []string {
+			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
+				return model.detailWithTreeGuideWithSymbol(role, model.flattenEntryWithMetaAndSymbol(role, text, false, nil, symbolOverride), true, symbolOverride)
+			}
+			return model.detailCollapsedStandardLinesWithSymbol(entry, role, text, symbolOverride)
 		},
 	}
 }
@@ -431,7 +467,7 @@ func (m Model) detailStreamingReasoningSpec() (detailBlockSpec, bool) {
 		role:       "reasoning",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("reasoning", combined)
 		},
 	}, true
@@ -446,7 +482,7 @@ func (m Model) detailStreamingAssistantSpec() (detailBlockSpec, bool) {
 		role:       "assistant",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("assistant", text)
 		},
 	}, true
@@ -530,7 +566,7 @@ func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {
 	blocks := m.buildOngoingBlocks(true)
 	lineOffset := 0
 	for idx, block := range blocks {
-		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(blocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		start := lineOffset
@@ -559,7 +595,7 @@ func (m Model) detailLineRangeForEntry(entryIndex int) (int, int, bool) {
 	blocks := m.buildDetailBlocks(true, false)
 	lineOffset := 0
 	for idx, block := range blocks {
-		if idx > 0 {
+		if idx > 0 && transcriptRoleGroupsNeedSeparator(blocks[idx-1].role, block.role) {
 			lineOffset++
 		}
 		start := lineOffset

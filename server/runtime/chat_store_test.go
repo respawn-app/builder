@@ -356,7 +356,7 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	if rendered.ToolCall.PatchRender == nil {
 		t.Fatalf("expected typed patch render metadata, got %+v", rendered.ToolCall)
 	}
-	if !strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
+	if strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
 		t.Fatalf("unexpected summary output: %q", summary)
 	}
 	if !strings.Contains(detail, "/workspace/dir/a.go") || !strings.Contains(detail, "/workspace/b.go") {
@@ -389,7 +389,7 @@ func TestCustomPatchToolCallFormattingUsesFreeformInput(t *testing.T) {
 	if strings.Contains(rendered.ToolCall.PatchSummary, "*** Begin Patch") {
 		t.Fatalf("expected ongoing summary to hide raw patch payload, got %q", rendered.ToolCall.PatchSummary)
 	}
-	if rendered.ToolCall.PatchSummary != "Edited: ./cli/app/ui_status.go +2 -1" {
+	if rendered.ToolCall.PatchSummary != "./cli/app/ui_status.go +2 -1" {
 		t.Fatalf("unexpected custom patch summary: %q", rendered.ToolCall.PatchSummary)
 	}
 	if rendered.ToolCall.PatchRender == nil {
@@ -415,7 +415,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	}
 	summary := rendered.ToolCall.PatchSummary
 	detail := rendered.ToolCall.PatchDetail
-	if summary != "Edited: ./dir/a.go +1 -1" {
+	if summary != "./dir/a.go +1 -1" {
 		t.Fatalf("unexpected one-line summary: %q", summary)
 	}
 	if rendered.ToolCall.PatchRender == nil {
@@ -424,7 +424,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	if strings.Contains(summary, "\n") {
 		t.Fatalf("expected one-line summary, got %q", summary)
 	}
-	if !strings.HasPrefix(detail, "Edited: /workspace/dir/a.go") {
+	if !strings.HasPrefix(detail, "/workspace/dir/a.go") {
 		t.Fatalf("expected one-line detail header, got %q", detail)
 	}
 }
@@ -448,7 +448,7 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 	if rendered.ToolCall.RenderHint == nil || rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindDiff {
 		t.Fatalf("expected diff render hint for patch fallback, got %+v", rendered.ToolCall.RenderHint)
 	}
-	if rendered.ToolCall.PatchSummary != "Edited:" {
+	if rendered.ToolCall.PatchSummary != "Patch" {
 		t.Fatalf("expected fallback patch summary, got %q", rendered.ToolCall.PatchSummary)
 	}
 	if rendered.ToolCall.PatchRender == nil {
@@ -724,6 +724,9 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsOngoingVisibleRole(t *
 	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperFeedback) || snap.Entries[1].Text != "phase mismatch warning" {
 		t.Fatalf("expected developer error feedback mapped to ongoing-visible role, got %+v", snap.Entries[1])
 	}
+	if snap.Entries[1].CompactLabel != "" {
+		t.Fatalf("expected developer error feedback to avoid generic compact label, got %+v", snap.Entries[1])
+	}
 }
 
 func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T) {
@@ -754,7 +757,7 @@ func TestChatStoreSnapshotIncludesUnknownDeveloperMessagesAsDetailOnlyContext(t 
 	if len(snap.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityDetailOnly {
+	if got := snap.Entries[0]; got.Role != string(transcript.EntryRoleDeveloperContext) || got.Text != "Internal developer note" || got.Visibility != transcript.EntryVisibilityDetailOnly || got.MessageType != llm.MessageType("custom_internal") || got.CompactLabel != "Developer context: custom_internal" {
 		t.Fatalf("unexpected unknown developer context entry: %+v", got)
 	}
 }
@@ -784,6 +787,9 @@ func TestChatStoreSnapshotIncludesDeveloperCompactionSoonReminderAsWarningRole(t
 	}
 	if snap.Entries[1].Role != "warning" || snap.Entries[1].Text != "heads up" {
 		t.Fatalf("expected compaction reminder mapped to warning role, got %+v", snap.Entries[1])
+	}
+	if snap.Entries[1].CompactLabel != "Compaction reminder" {
+		t.Fatalf("expected compaction reminder compact label, got %+v", snap.Entries[1])
 	}
 }
 
@@ -859,6 +865,23 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	}
 	if snap.Entries[0].OngoingText != "Background shell 1000 completed (exit 0)" {
 		t.Fatalf("unexpected ongoing text: %+v", snap.Entries[0])
+	}
+}
+
+func TestChatStoreSnapshotBackgroundNoticeWithoutCompactTextUsesPreviewFallback(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeBackgroundNotice,
+		Content:     "Background shell 1000 completed.\nExit code: 0",
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].CompactLabel != "" {
+		t.Fatalf("expected background notice without compact content to avoid developer fallback label, got %+v", snap.Entries[0])
 	}
 }
 

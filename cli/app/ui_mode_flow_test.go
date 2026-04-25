@@ -622,13 +622,9 @@ func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
 	if strings.Contains(seededOngoing, "summary line one") || strings.Contains(seededOngoing, "summary line two") {
 		t.Fatalf("expected compaction summary hidden in ongoing startup seed, got %q", seededOngoing)
 	}
-	if len(updated.startupCmds) != 1 || updated.startupCmds[0] == nil {
-		t.Fatalf("expected queued startup hydration command, got %d command(s)", len(updated.startupCmds))
-	}
-
-	hydrationMsg, ok := updated.startupCmds[0]().(runtimeTranscriptRefreshedMsg)
+	hydrationMsg, ok := startupRuntimeTranscriptRefreshedMsg(updated.startupCmds)
 	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %T", updated.startupCmds[0]())
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %d command(s)", len(updated.startupCmds))
 	}
 	hydrated := updateUIModel(t, updated, hydrationMsg)
 	hydratedOngoing := stripANSIAndTrimRight(hydrated.view.OngoingSnapshot())
@@ -640,6 +636,7 @@ func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
 	}
 
 	detail := updateUIModel(t, hydrated, tea.KeyMsg{Type: tea.KeyCtrlT})
+	detail = updateUIModel(t, detail, tea.KeyMsg{Type: tea.KeyEnter})
 	if detail.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected detail mode after toggle, got %q", detail.view.Mode())
 	}
@@ -684,9 +681,9 @@ func TestStartupHydrationKeepsDefaultCacheWarningDetailOnly(t *testing.T) {
 		t.Fatalf("expected default cache warning hidden in ongoing startup seed, got %q", seededOngoing)
 	}
 
-	hydrationMsg, ok := updated.startupCmds[0]().(runtimeTranscriptRefreshedMsg)
+	hydrationMsg, ok := startupRuntimeTranscriptRefreshedMsg(updated.startupCmds)
 	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %T", updated.startupCmds[0]())
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %d command(s)", len(updated.startupCmds))
 	}
 	hydrated := updateUIModel(t, updated, hydrationMsg)
 	hydratedOngoing := stripANSIAndTrimRight(hydrated.view.OngoingSnapshot())
@@ -702,6 +699,24 @@ func TestStartupHydrationKeepsDefaultCacheWarningDetailOnly(t *testing.T) {
 	if !containsInOrder(detailView, "latest answer", warningText) {
 		t.Fatalf("expected assistant answer plus cache warning in detail after hydration, got %q", detailView)
 	}
+}
+
+func startupRuntimeTranscriptRefreshedMsg(cmds []tea.Cmd) (runtimeTranscriptRefreshedMsg, bool) {
+	return startupCmdMessage[runtimeTranscriptRefreshedMsg](cmds)
+}
+
+func startupCmdMessage[T tea.Msg](cmds []tea.Cmd) (T, bool) {
+	var zero T
+	for _, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		msg, ok := cmd().(T)
+		if ok {
+			return msg, true
+		}
+	}
+	return zero, false
 }
 
 func appendTranscriptMessage(t *testing.T, store *session.Store, role llm.Role, text string) {

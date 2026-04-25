@@ -50,7 +50,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			stepID,
 			"reviewer_suggestions",
 			reviewerSuggestionsText(suggestions),
-			reviewerSuggestionsText(suggestions),
+			reviewerSuggestionsCompactLabel(len(suggestions)),
 		)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	patchformat "builder/shared/transcript/patchformat"
+	"builder/shared/uiglyphs"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -188,7 +189,7 @@ func TestDetailSetConversationPreservesFocusedAbsoluteEntryAcrossBaseOffsetShift
 }
 
 func TestOngoingShowsFullConversationContext(t *testing.T) {
-	m := NewModel(WithPreviewLines(20))
+	m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first answer"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "second question"})
@@ -243,14 +244,14 @@ func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 func TestDetailPatchErrorAppearsAfterDiffWithBlankSeparator(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
-	detail := "Edited: ./main.go +1 -1\n+package main\n-old"
+	detail := "./main.go +1 -1\n+package main\n-old"
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
 		Text: detail,
 		ToolCall: &transcript.ToolCallMeta{
 			PatchDetail: detail,
 			PatchRender: testPatchRender(
-				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go +1 -1", FileIndex: 0, Path: "main.go"},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
 			),
@@ -471,13 +472,13 @@ func TestMouseWheelScrollsOngoingView(t *testing.T) {
 		t.Fatalf("expected ongoing mode to start at bottom, got ongoingScroll=%d", start)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	afterUp := m.OngoingScroll()
 	if afterUp >= start {
 		t.Fatalf("expected wheel up to scroll ongoing view up, got %d from %d", afterUp, start)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	if got := m.OngoingScroll(); got != start {
 		t.Fatalf("expected wheel down to return ongoing scroll to start, got %d want %d", got, start)
 	}
@@ -498,7 +499,7 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 	initial := plainTranscript(m.View())
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	if m.DetailMetricsResolved() {
 		t.Fatal("expected first detail navigation to stay lazy")
 	}
@@ -513,7 +514,7 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 		t.Fatalf("expected detail wheel scroll to leave ongoing scroll untouched, got %d want %d", got, ongoingStart)
 	}
 
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	if got := m.DetailScroll(); got != 0 {
 		t.Fatalf("expected wheel down to return lazy detail offset to bottom, got %d", got)
 	}
@@ -673,7 +674,7 @@ func absInt(v int) int {
 	return v
 }
 
-func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
+func TestDetailUsesRequestedSymbolsAndRoleGroupSeparators(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
@@ -691,8 +692,102 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	if !strings.Contains(view, "•") || !strings.Contains(view, "call") || !strings.Contains(view, "result") {
 		t.Fatalf("expected tool call/result pair with tool symbol, got %q", view)
 	}
-	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
-		t.Fatalf("expected 2 dividers for 3 blocks, got %d in %q", got, view)
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected detail items separated without divider rule, got %q", view)
+	}
+	for idx, kind := range m.VisibleLineKinds() {
+		if kind == VisibleLineDivider {
+			t.Fatalf("expected detail separator line %d to avoid divider styling, got kinds %+v", idx, m.VisibleLineKinds())
+		}
+	}
+	if !containsInOrder(view, "hello\n\n", "hi\n\n", "call", "result") {
+		t.Fatalf("expected blank lines between detail role groups, got %q", view)
+	}
+}
+
+func TestFlatDetailTranscriptUsesBlankLineSeparators(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
+
+	view := plainTranscript(m.renderFlatDetailTranscript())
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected flat detail transcript without divider rule, got %q", view)
+	}
+	if !containsInOrder(view, "hello\n\n", "hi") {
+		t.Fatalf("expected flat detail transcript to separate items with a blank line, got %q", view)
+	}
+}
+
+func TestFlatDetailTranscriptDensifiesConsecutiveToolGroups(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "cmd 1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "cmd 1",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "cmd 2",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "cmd 2",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	view := plainTranscript(m.renderFlatDetailTranscript())
+	if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") {
+		t.Fatalf("expected consecutive detail tool rows to stay dense, got %q", view)
+	}
+	if !containsInOrder(view, "$ cmd 1\n$ cmd 2\n\n", "done") {
+		t.Fatalf("expected blank separator after dense tool group, got %q", view)
+	}
+}
+
+func TestDetailViewportAndFlatProjectionUseSameDenseToolGrouping(t *testing.T) {
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "start"})
+	m = appendShellToolCall(t, m, "cmd 1")
+	m = appendShellToolCall(t, m, "cmd 2")
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	flat := plainTranscript(m.renderFlatDetailTranscript())
+	m = updateModel(t, m, ToggleModeMsg{})
+	viewport := trimTrailingBlankLines(plainTranscript(m.View()))
+
+	for name, view := range map[string]string{"flat": flat, "viewport": viewport} {
+		if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") {
+			t.Fatalf("%s detail should keep consecutive tools dense, got %q", name, view)
+		}
+		if !containsInOrder(view, "start\n\n", "$ cmd 1\n$ cmd 2\n\n", "done") {
+			t.Fatalf("%s detail should use one blank line at role-group boundaries, got %q", name, view)
+		}
+	}
+}
+
+func TestDetailViewportSelectedCardSeparatesBottomGroupBoundary(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(7))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 7, Width: 80})
+	for idx := 0; idx < 4; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("filler %d", idx)})
+	}
+	m = appendShellToolCall(t, m, "cmd 1")
+	m = appendShellToolCall(t, m, "cmd 2")
+	m = appendShellToolCall(t, m, "cmd 3")
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "next user"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "final"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := trimTrailingBlankLines(plainTranscript(m.View()))
+	gutter := uiglyphs.SelectionRailBlank
+	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+uiglyphs.SelectionRailGlyph+"\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n"+uiglyphs.SelectionRailGlyph+"\n", gutter+"❯ next user") {
+		t.Fatalf("expected selected tool row to get highlighted blank separators while preserving role-group blanks, got %q", view)
 	}
 }
 
@@ -944,8 +1039,11 @@ func TestDetailGroupsReasoningEntriesWithoutMarkdownFormatting(t *testing.T) {
 	if !strings.Contains(view, "`second` details") {
 		t.Fatalf("expected reasoning text to preserve inline formatting markers, got %q", view)
 	}
-	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
-		t.Fatalf("expected 2 dividers for user/reasoning/assistant groups, got %d in %q", got, view)
+	if strings.Contains(view, TranscriptDivider) {
+		t.Fatalf("expected detail groups to use blank separators, got %q", view)
+	}
+	if !containsInOrder(view, "u\n\n", "**First step**", "**third**\n\n", "done") {
+		t.Fatalf("expected blank separators between user/reasoning/assistant groups, got %q", view)
 	}
 }
 
@@ -1002,8 +1100,77 @@ func TestDeveloperContextRendersDetailOnly(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "AGENTS context block", "❮", "done") {
+	if !containsInOrder(detail, "ℹ", "AGENTS context block", "❮", "done") {
 		t.Fatalf("expected developer context visible in detail view, got %q", detail)
+	}
+}
+
+func TestDeveloperContextRoleUsesInfoSymbol(t *testing.T) {
+	m := NewModel()
+	if got := rolePrefix(roleDeveloperContext); got != "ℹ" {
+		t.Fatalf("rolePrefix(%q) = %q, want ℹ", roleDeveloperContext, got)
+	}
+	symbol := m.roleSymbol(roleDeveloperContext)
+	if !strings.Contains(symbol, "ℹ") {
+		t.Fatalf("expected developer context role symbol to include ℹ, got %q", symbol)
+	}
+	if !containsColor(extractForegroundTrueColors(symbol), m.palette().foregroundColor) {
+		t.Fatalf("expected developer context role symbol to use main foreground color, got %q", symbol)
+	}
+	if containsColor(extractForegroundTrueColors(symbol), m.palette().previewColor) {
+		t.Fatalf("did not expect developer context role symbol to use preview color, got %q", symbol)
+	}
+	if strings.Contains(symbol, ";2m") {
+		t.Fatalf("expected developer context role symbol to use full-strength styling without faint, got %q", symbol)
+	}
+}
+
+func TestDeveloperContextSubtypesUseInfoPrefixInCompactDetail(t *testing.T) {
+	tests := []struct {
+		name         string
+		messageType  llm.MessageType
+		compactLabel string
+		text         string
+	}{
+		{name: "agents md", messageType: llm.MessageTypeAgentsMD, compactLabel: "AGENTS.md file content", text: "agents full content"},
+		{name: "skills", messageType: llm.MessageTypeSkills, compactLabel: "Skill guidance", text: "skill full content"},
+		{name: "environment", messageType: llm.MessageTypeEnvironment, compactLabel: "Environment info", text: "environment full content"},
+		{name: "headless mode", messageType: llm.MessageTypeHeadlessMode, compactLabel: "Headless mode instructions", text: "headless full content"},
+		{name: "headless mode exit", messageType: llm.MessageTypeHeadlessModeExit, compactLabel: "Interactive mode restored", text: "interactive full content"},
+		{name: "worktree mode", messageType: llm.MessageTypeWorktreeMode, compactLabel: "Switched to worktree feature-x", text: "worktree full content"},
+		{name: "worktree mode exit", messageType: llm.MessageTypeWorktreeModeExit, compactLabel: "Returned from worktree feature-x", text: "worktree exit full content"},
+		{name: "handoff future", messageType: llm.MessageTypeHandoffFutureMessage, compactLabel: "Future-agent context", text: "handoff full content"},
+		{name: "fallback developer context", text: "fallback developer context"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:         roleDeveloperContext,
+				Text:         tt.text,
+				MessageType:  tt.messageType,
+				CompactLabel: tt.compactLabel,
+			})
+
+			if ongoing := plainTranscript(m.View()); strings.Contains(ongoing, tt.text) || (tt.compactLabel != "" && strings.Contains(ongoing, tt.compactLabel)) {
+				t.Fatalf("expected %s developer context hidden in ongoing view, got %q", tt.name, ongoing)
+			}
+
+			m = updateModel(t, m, ToggleModeMsg{})
+			detail := plainTranscript(m.View())
+			wantText := tt.compactLabel
+			if wantText == "" {
+				wantText = tt.text
+			}
+			wantSymbol := "ℹ"
+			if tt.compactLabel != "" {
+				wantSymbol = "▶"
+			}
+			if !containsInOrder(detail, wantSymbol, wantText) {
+				t.Fatalf("expected %s compact detail to use %q prefix before %q, got %q", tt.name, wantSymbol, wantText, detail)
+			}
+		})
 	}
 }
 
@@ -1095,7 +1262,7 @@ func TestHeadlessModeContextVariantsRenderDetailOnly(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "headless mode instructions", "interactive mode instructions", "❮", "done") {
+	if !containsInOrder(detail, "ℹ", "headless mode instructions", "ℹ", "interactive mode instructions", "❮", "done") {
 		t.Fatalf("expected headless context variants visible in detail view, got %q", detail)
 	}
 }
@@ -1392,11 +1559,30 @@ func TestToolBlockRoleFromResult(t *testing.T) {
 	if got := toolBlockRoleFromResult("tool_result_error", "tool_shell"); got != "tool_shell_error" {
 		t.Fatalf("unexpected role for shell error result: %q", got)
 	}
+	if got := toolBlockRoleFromResult("tool_result_ok", "tool_patch"); got != "tool_patch_success" {
+		t.Fatalf("unexpected role for patch success result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result_error", "tool_patch"); got != "tool_patch_error" {
+		t.Fatalf("unexpected role for patch error result: %q", got)
+	}
+}
+
+func TestPatchToolRoleSymbols(t *testing.T) {
+	m := NewModel()
+	tests := []string{"tool_patch", "tool_patch_success", "tool_patch_error"}
+	for _, role := range tests {
+		if got := rolePrefix(role); got != "⇄" {
+			t.Fatalf("rolePrefix(%q) = %q, want ⇄", role, got)
+		}
+		if symbol := plainTranscript(m.roleSymbol(role)); !strings.Contains(symbol, "⇄") {
+			t.Fatalf("expected roleSymbol(%q) to contain ⇄, got %q", role, symbol)
+		}
+	}
 }
 
 func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) {
-	summary := "Edited:\n./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
-	detail := "Edited:\n/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
+	summary := "./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
+	detail := "/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
 
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
@@ -1407,7 +1593,6 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 			PatchSummary: summary,
 			PatchDetail:  detail,
 			PatchRender: testPatchRender(
-				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "/abs/path/to/file/1.go", FileIndex: 0, Path: "/abs/path/to/file/1.go"},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new line", FileIndex: 0},
 				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old line", FileIndex: 0},
@@ -1419,7 +1604,17 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
 
 	ongoing := m.View()
-	if !strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
+	if !strings.Contains(plainTranscript(ongoing), "⇄") {
+		t.Fatalf("expected patch tool symbol in ongoing mode, got %q", plainTranscript(ongoing))
+	}
+	ongoingSummaryLine := lineContaining(ongoing, "./path/to/file/1.go")
+	if ongoingSummaryLine == "" {
+		t.Fatalf("expected ongoing patch summary line, got %q", ongoing)
+	}
+	if strings.Contains(ongoingSummaryLine, ";2m") || containsColor(extractForegroundTrueColors(ongoingSummaryLine), m.palette().previewColor) {
+		t.Fatalf("expected ongoing multi-file patch summary to render full-strength, got %q", ongoingSummaryLine)
+	}
+	if strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
 		t.Fatalf("expected patch summary in ongoing mode, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "/abs/path/to/file/1.go") || strings.Contains(ongoing, "+new line") {
@@ -1428,6 +1623,9 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detailView := m.View()
+	if !strings.Contains(plainTranscript(detailView), "⇄") {
+		t.Fatalf("expected patch tool symbol in detail mode, got %q", plainTranscript(detailView))
+	}
 	if !strings.Contains(detailView, "/abs/path/to/file/1.go") || !strings.Contains(detailView, "/abs/path/to/file/2.go") {
 		t.Fatalf("expected absolute file paths in detail mode, got %q", detailView)
 	}
@@ -1439,16 +1637,186 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	}
 }
 
+func TestPatchErrorRendersPatchSymbolInOngoingAndDetail(t *testing.T) {
+	summary := "./main.go +1 -1"
+	detailText := "./main.go\n-old\n+new"
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       summary,
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: summary,
+			PatchDetail:  detailText,
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
+			),
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:              "tool_result_error",
+		ToolCallID:        "call_patch",
+		Text:              "Patch failed: mismatch",
+		ToolResultSummary: "Patch failed",
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "⇄") || !strings.Contains(ongoing, summary) {
+		t.Fatalf("expected patch error symbol and summary in ongoing, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := m.View()
+	detail := plainTranscript(detailView)
+	if !strings.Contains(detail, "⇄") || !strings.Contains(detail, "Patch failed") {
+		t.Fatalf("expected patch error symbol and summary in detail, got %q", detail)
+	}
+	errorLine := lineContaining(detailView, "Patch failed")
+	if errorLine == "" {
+		t.Fatalf("expected patch error summary line in detail, got %q", detailView)
+	}
+	if !containsColor(extractForegroundTrueColors(errorLine), m.palette().errorColor) {
+		t.Fatalf("expected collapsed patch error summary to use error foreground, got %q", errorLine)
+	}
+}
+
+func TestCollapsedToolErrorSummariesStayRedInDetail(t *testing.T) {
+	tests := []struct {
+		name        string
+		callText    string
+		toolCall    *transcript.ToolCallMeta
+		wantSymbol  string
+		wantSummary string
+	}{
+		{
+			name:        "generic",
+			callText:    "custom tool input",
+			wantSymbol:  "•",
+			wantSummary: "generic failed visibly",
+		},
+		{
+			name:     "shell",
+			callText: "go test ./...",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName: string(toolspec.ToolExecCommand),
+				IsShell:  true,
+				Command:  "go test ./...",
+			},
+			wantSymbol:  "$",
+			wantSummary: "shell failed visibly",
+		},
+		{
+			name:     "patch",
+			callText: "Edited: ./main.go +1 -1",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName:     "patch",
+				PatchSummary: "Edited: ./main.go +1 -1",
+				PatchDetail:  "Edited:\n./main.go\n-old\n+new",
+			},
+			wantSymbol:  "⇄",
+			wantSummary: "patch failed visibly",
+		},
+		{
+			name:     "question",
+			callText: "ask_question",
+			toolCall: &transcript.ToolCallMeta{
+				Question: "Pick one",
+			},
+			wantSymbol:  "?",
+			wantSummary: "question failed visibly",
+		},
+		{
+			name:     "web_search",
+			callText: "search docs",
+			toolCall: &transcript.ToolCallMeta{
+				ToolName: string(toolspec.ToolWebSearch),
+				Command:  "search docs",
+			},
+			wantSymbol:  "@",
+			wantSummary: "web search failed visibly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 220})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       tt.callText,
+				ToolCallID: "call_" + tt.name,
+				ToolCall:   tt.toolCall,
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:              "tool_result_error",
+				ToolCallID:        "call_" + tt.name,
+				Text:              tt.wantSummary,
+				ToolResultSummary: tt.wantSummary,
+			})
+			m = updateModel(t, m, ToggleModeMsg{})
+
+			detail := m.View()
+			wantSymbol := "▶"
+			if tt.name == "question" {
+				wantSymbol = tt.wantSymbol
+			}
+			if !strings.Contains(plainTranscript(detail), wantSymbol) {
+				t.Fatalf("expected collapsed %s tool error symbol %q, got %q", tt.name, wantSymbol, plainTranscript(detail))
+			}
+			line := lineContaining(detail, tt.wantSummary)
+			if line == "" {
+				t.Fatalf("expected collapsed %s tool error summary, got %q", tt.name, detail)
+			}
+			if !containsColor(extractForegroundTrueColors(line), m.palette().errorColor) {
+				t.Fatalf("expected collapsed %s tool error summary to use error foreground, got %q", tt.name, line)
+			}
+		})
+	}
+}
+
+func TestCollapsedPatchMismatchErrorWrapsWithRedTreeGuideLines(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(20), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 104})
+	mismatchText := "Patch failed: mismatch between file content and model-provided patch in /Users/nek/.builder/worktrees/builder-cli-c2f75fc8-68f5-4deb-a23c-21cc5820436d/detail-mode-v2/cli/tui/model_test.go.\nReason: hunk 1: patch hunk did not match file content"
+	lines := m.detailCollapsedToolLines("tool_patch_error", TranscriptEntry{
+		Role: "tool_call",
+		Text: "Edited: cli/tui/model_test.go +1 -1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: "Edited: cli/tui/model_test.go +1 -1",
+			PatchDetail:  "Edited:\ncli/tui/model_test.go\n-old\n+new",
+		},
+	}, mismatchText)
+	rendered := strings.Join(lines, "\n")
+
+	for _, fragment := range []string{"Patch failed: mismatch", "21cc5820436d/detail-mode-v2", "Reason: hunk 1"} {
+		line := lineContaining(rendered, fragment)
+		if line == "" {
+			t.Fatalf("expected collapsed patch mismatch line containing %q, got %q", fragment, rendered)
+		}
+		if !containsColor(extractForegroundTrueColors(line), m.palette().errorColor) {
+			t.Fatalf("expected collapsed patch mismatch line containing %q to use error foreground, got %q", fragment, line)
+		}
+	}
+	if !strings.Contains(plainTranscript(rendered), "│") || !strings.Contains(plainTranscript(rendered), "└") {
+		t.Fatalf("expected collapsed patch mismatch to keep tree guides, got %q", rendered)
+	}
+}
+
 func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	rawPatch := "*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch"
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
-		Text: "Edited:",
+		Text: "Patch",
 		ToolCall: &transcript.ToolCallMeta{
 			ToolName:     "patch",
-			PatchSummary: "Edited:",
-			PatchDetail:  "Edited:\n" + rawPatch,
+			PatchSummary: "Patch",
+			PatchDetail:  "Patch\n" + rawPatch,
 			PatchRender: func() *patchformat.RenderedPatch {
 				rendered := patchformat.Raw(rawPatch)
 				return &rendered
@@ -1459,7 +1827,7 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
 
 	ongoing := plainTranscript(m.View())
-	if !strings.Contains(ongoing, "Edited:") {
+	if !strings.Contains(ongoing, "Patch") {
 		t.Fatalf("expected patch summary in ongoing, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "*** Begin Patch") {
@@ -1643,15 +2011,15 @@ func TestTriggerHandoffRuntimeProjectedMetadataUsesCompactOngoingAndDetailedView
 
 func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	m := NewModel()
-	counts := m.styleToolLine("./file.go +13 -9")
+	counts := m.styleToolLine("./file.go +13 -9", true)
 	if !strings.Contains(counts, "+13") || !strings.Contains(counts, "-9") {
 		t.Fatalf("expected patch counts preserved, got %q", counts)
 	}
-	added := m.styleToolLine("+added")
+	added := m.styleToolLine("+added", true)
 	if !strings.Contains(added, "+added") {
 		t.Fatalf("expected addition line preserved, got %q", added)
 	}
-	removed := m.styleToolLine("-removed")
+	removed := m.styleToolLine("-removed", true)
 	if !strings.Contains(removed, "-removed") {
 		t.Fatalf("expected removal line preserved, got %q", removed)
 	}
@@ -1662,8 +2030,8 @@ func TestStyleToolLineStylesOnlyDiffMarkerWhenSyntaxPresent(t *testing.T) {
 	inputAdded := "+\x1b[38;5;81mpackage\x1b[0m main"
 	inputRemoved := "-\x1b[38;5;81mfunc\x1b[0m main() {}"
 
-	added := m.styleToolLine(inputAdded)
-	removed := m.styleToolLine(inputRemoved)
+	added := m.styleToolLine(inputAdded, true)
+	removed := m.styleToolLine(inputRemoved, true)
 
 	if !strings.Contains(added, m.palette().toolSuccess.Render("+")) {
 		t.Fatalf("expected added diff marker to use tool success style, got %q", added)
@@ -1833,15 +2201,6 @@ func TestDetailDiffLayeringKeepsBackgroundAndTokenColorForAddAndRemove(t *testin
 	}
 	if !strings.Contains(removeLine, removeBg) || !strings.Contains(removeLine, "\x1b[38;") {
 		t.Fatalf("expected removed line to include both background tint and token color, got %q", removeLine)
-	}
-}
-
-func TestIsEditedToolBlockDetectsAnsiHeader(t *testing.T) {
-	if !isEditedToolBlock([]string{"", "\x1b[38;5;81mEdited:\x1b[0m", "./file.go +1"}) {
-		t.Fatal("expected Edited header with ansi to be detected")
-	}
-	if isEditedToolBlock([]string{"", "regular output"}) {
-		t.Fatal("did not expect non-Edited content to be detected as Edited block")
 	}
 }
 
@@ -3018,6 +3377,27 @@ func plainTranscript(view string) string {
 		lines[i] = strings.TrimRight(lines[i], " ")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func trimTrailingBlankLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendShellToolCall(t *testing.T, m Model, command string) Model {
+	t.Helper()
+	return updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  command,
+		},
+	})
 }
 
 func containsInOrder(text string, parts ...string) bool {

@@ -202,9 +202,10 @@ type statusAuthRefreshDoneMsg struct {
 }
 
 type statusGitRefreshDoneMsg struct {
-	token    uint64
-	cacheKey string
-	result   uiStatusGitStageResult
+	token      uint64
+	cacheKey   string
+	result     uiStatusGitStageResult
+	background bool
 }
 
 type statusEnvironmentRefreshDoneMsg struct {
@@ -1131,6 +1132,31 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 	}
 }
 
+func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
+	request := m.newStatusRequest(time.Now())
+	workdir := statusWorkdir(request.WorkspaceRoot, statusExecutionTarget(request))
+	trimmedWorkdir := strings.TrimSpace(workdir)
+	if trimmedWorkdir == "" {
+		return nil
+	}
+	if info, err := os.Stat(trimmedWorkdir); err != nil || !info.IsDir() {
+		return nil
+	}
+	token := m.status.refreshToken
+	request.CurrentTime = time.Now()
+	collector := m.statusCollector
+	if collector == nil {
+		collector = defaultUIStatusCollector{}
+	}
+	progressive, ok := collector.(uiStatusProgressiveCollector)
+	if !ok {
+		progressive = defaultUIStatusCollector{}
+	}
+	base := progressive.CollectBase(request)
+	cacheKey := statusGitCacheKey(base.Workdir)
+	return m.statusGitRefreshCmd(token, cacheKey, request, progressive, base, true)
+}
+
 func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
@@ -1147,11 +1173,12 @@ func (m *uiModel) statusAuthRefreshCmd(token uint64, cacheKey string, request ui
 	}
 }
 
-func (m *uiModel) statusGitRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
+func (m *uiModel) statusGitRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot, background ...bool) tea.Cmd {
+	isBackground := len(background) > 0 && background[0]
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
-		return statusGitRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectGit(ctx, request, base)}
+		return statusGitRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectGit(ctx, request, base), background: isBackground}
 	}
 }
 

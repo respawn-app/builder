@@ -53,6 +53,9 @@ func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
 		t.Fatalf("expected detail alt-screen enter/leave sequences, got %q", raw)
 	}
+	if strings.Contains(raw, "\x1b[?1000h") || strings.Contains(raw, "\x1b[?1002h") || strings.Contains(raw, "\x1b[?1003h") || strings.Contains(raw, "\x1b[?1006h") {
+		t.Fatalf("did not expect detail alt-screen to enable mouse capture because it blocks native selection, got %q", raw)
+	}
 	sequenceRaw := seq.String()
 	if !strings.Contains(sequenceRaw, "\x1b[?1007h") || !strings.Contains(sequenceRaw, "\x1b[?1007l") {
 		t.Fatalf("expected alternate-scroll enable/disable sequences, got %q", sequenceRaw)
@@ -100,6 +103,9 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 	raw := out.String()
 	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
 		t.Fatalf("expected detail alt-screen enter/leave sequences in alt config mode, got %q", raw)
+	}
+	if strings.Contains(raw, "\x1b[?1000h") || strings.Contains(raw, "\x1b[?1002h") || strings.Contains(raw, "\x1b[?1003h") || strings.Contains(raw, "\x1b[?1006h") {
+		t.Fatalf("did not expect detail alt-screen to enable mouse capture because it blocks native selection, got %q", raw)
 	}
 	sequenceRaw := seq.String()
 	if !strings.Contains(sequenceRaw, "\x1b[?1007h") || !strings.Contains(sequenceRaw, "\x1b[?1007l") {

@@ -20,6 +20,10 @@ func TestRenderSnapshots(t *testing.T) {
 		{name: "ongoing_shell_preview_light", theme: "light", render: func(t *testing.T) string { return newShellPreviewModel(t, "light", false).View() }},
 		{name: "detail_shell_preview_dark", theme: "dark", render: func(t *testing.T) string { return newShellPreviewModel(t, "dark", true).View() }},
 		{name: "detail_shell_preview_light", theme: "light", render: func(t *testing.T) string { return newShellPreviewModel(t, "light", true).View() }},
+		{name: "ongoing_developer_context_dark", theme: "dark", render: func(t *testing.T) string { return newDeveloperContextSnapshot(t, "dark", false) }},
+		{name: "ongoing_developer_context_light", theme: "light", render: func(t *testing.T) string { return newDeveloperContextSnapshot(t, "light", false) }},
+		{name: "detail_developer_context_dark", theme: "dark", render: func(t *testing.T) string { return newDeveloperContextSnapshot(t, "dark", true) }},
+		{name: "detail_developer_context_light", theme: "light", render: func(t *testing.T) string { return newDeveloperContextSnapshot(t, "light", true) }},
 		{name: "markdown_dark", theme: "dark", render: func(t *testing.T) string { return newMarkdownSnapshotModel(t, "dark") }},
 		{name: "markdown_light", theme: "light", render: func(t *testing.T) string { return newMarkdownSnapshotModel(t, "light") }},
 		{name: "diff_file_lines_dark", theme: "dark", render: func(t *testing.T) string { return newDiffSnapshot(t, "dark") }},
@@ -71,13 +75,27 @@ func newMarkdownSnapshotModel(t *testing.T, theme string) string {
 	return strings.Join(m.flattenEntryWithMeta("assistant", "# Heading\n\n- one\n- two\n\n```go\nfmt.Println(\"hi\")\n```", false, nil), "\n")
 }
 
+func newDeveloperContextSnapshot(t *testing.T, theme string, detail bool) string {
+	t.Helper()
+	m := NewModel(WithTheme(theme), WithPreviewLines(4))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 4, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       roleDeveloperContext,
+		Visibility: transcript.EntryVisibilityAll,
+		Text:       "Developer context visible",
+	})
+	if detail {
+		m = updateModel(t, m, ToggleModeMsg{})
+	}
+	return m.View()
+}
+
 func newDiffSnapshot(t *testing.T, theme string) string {
 	t.Helper()
 	m := NewModel(WithTheme(theme))
 	meta := &transcript.ToolCallMeta{
 		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
-			{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
 			{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "-func removed() {}", FileIndex: 0},
@@ -99,10 +117,10 @@ func newPatchErrorSnapshot(t *testing.T, theme string) string {
 	t.Helper()
 	m := NewModel(WithTheme(theme))
 	meta := &transcript.ToolCallMeta{
-		PatchDetail: "Edited: ./main.go +1 -1\n+package main\n-old",
+		PatchDetail: "./main.go +1 -1\n+package main\n-old",
 		RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		PatchRender: &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
-			{Kind: patchformat.RenderedLineKindFile, Text: "Edited: ./main.go +1 -1", FileIndex: 0, Path: "main.go"},
+			{Kind: patchformat.RenderedLineKindFile, Text: "./main.go +1 -1", FileIndex: 0, Path: "main.go"},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
 			{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
 		}},
