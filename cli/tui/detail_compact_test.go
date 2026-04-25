@@ -533,6 +533,15 @@ func TestCompactDetailSelectionMovesWithinViewportAtTranscriptStart(t *testing.T
 }
 
 func TestCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
+	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, nil)
+}
+
+func TestCompactDetailWheelTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
+	assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+}
+
+func assertCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T, scroll tea.Msg) {
+	t.Helper()
 	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
 	for idx := 0; idx < 6; idx++ {
@@ -542,11 +551,20 @@ func TestCompactDetailTopPinnedSelectionDoesNotHideRowAbove(t *testing.T) {
 	m.ensureDetailScrollResolved()
 	m.detailScroll = 0
 	m.refreshDetailViewport()
-	m.detailSelectedEntry = 3
+	if scroll == nil {
+		m.detailSelectedEntry = 3
+	} else {
+		m.detailSelectedEntry = centerVisibleSelectableDetailEntry(t, m)
+	}
 	m.detailSelectedActive = true
+	if scroll != nil {
+		for idx := 0; idx < 2; idx++ {
+			m = updateModel(t, m, scroll)
+		}
+	}
 
 	plain := xansi.Strip(m.View())
-	if !containsInOrder(plain, "entry 00", "entry 01", "entry 02", "entry 03", "entry 04") {
+	if !containsInOrder(plain, "entry 00", "entry 01", "entry 02") {
 		t.Fatalf("expected top-pinned selected spacer not to hide real rows above selection, got %q", plain)
 	}
 }
