@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 	"builder/shared/uiglyphs"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,7 +26,7 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	collapsed := xansi.Strip(m.View())
-	if !strings.Contains(collapsed, "$ cat large.txt") {
+	if !strings.Contains(collapsed, "▶ cat large.txt") {
 		t.Fatalf("expected collapsed tool input, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -34,7 +35,7 @@ func TestCompactDetailCollapsesToolOutputUntilExpanded(t *testing.T) {
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := xansi.Strip(m.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 3") {
+	if !strings.Contains(expanded, "▼ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 3") {
 		t.Fatalf("expected expanded tool input and output, got %q", expanded)
 	}
 }
@@ -54,8 +55,8 @@ func TestCompactDetailKeepsMultipleExpanded(t *testing.T) {
 	if !strings.Contains(rendered, "hidden") || !strings.Contains(rendered, "first assistant") {
 		t.Fatalf("expected both messages expanded, got %q", rendered)
 	}
-	if strings.Contains(rendered, "▶︎") || strings.Contains(rendered, "▼") {
-		t.Fatalf("expected compact detail without collapsed/expanded glyphs, got %q", rendered)
+	if strings.Contains(rendered, "▶") || strings.Contains(rendered, "▼") {
+		t.Fatalf("did not expect chevrons when expanded state reveals no hidden content, got %q", rendered)
 	}
 }
 
@@ -108,6 +109,227 @@ func TestCompactDetailLineScrollRailTracksCenterInsideTallExpandedEntry(t *testi
 		t.Fatalf("expected center selection to move to expanded tool entry, active=%v entry=%d", m.detailSelectedActive, m.detailSelectedEntry)
 	}
 	assertCenterRailOnExpandedOutput(t, m)
+}
+
+func TestCompactDetailSelectedSpacerRowsAreVisualOnlyWithTallExpandedEntry(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "intro"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "long-command",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "long-command"},
+	})
+	outputLines := make([]string, 0, 10)
+	for idx := 0; idx < 10; idx++ {
+		outputLines = append(outputLines, fmt.Sprintf("output line %02d", idx))
+	}
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: strings.Join(outputLines, "\n")})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "target-command",
+		ToolCallID: "call_2",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "target-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command",
+		ToolCallID: "call_3",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command-2",
+		ToolCallID: "call_4",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command-2"},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "after-target-command-3",
+		ToolCallID: "call_5",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-target-command-3"},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.ensureDetailMetricsResolved()
+	targetEntry := 3
+	targetStart, _, ok := m.detailLineRangeForEntry(targetEntry)
+	if !ok {
+		t.Fatal("expected target row detail range")
+	}
+	center := m.viewportLines / 2
+	m.detailBottomAnchor = false
+	m.detailScroll = targetStart - center
+	m.refreshDetailViewport()
+	m.detailSelectedEntry = targetEntry
+	m.detailSelectedActive = true
+
+	beforeScroll := m.DetailScroll()
+	beforeFirst, beforeLast, beforeRangeOK := m.DetailVisibleEntryRange()
+	raw := m.View()
+	afterFirst, afterLast, afterRangeOK := m.DetailVisibleEntryRange()
+	if got := m.DetailScroll(); got != beforeScroll {
+		t.Fatalf("expected visual spacers not to mutate detail scroll, got %d want %d", got, beforeScroll)
+	}
+	if beforeFirst != afterFirst || beforeLast != afterLast || beforeRangeOK != afterRangeOK {
+		t.Fatalf("expected visual spacers not to mutate visible range, before=(%d,%d,%v) after=(%d,%d,%v)", beforeFirst, beforeLast, beforeRangeOK, afterFirst, afterLast, afterRangeOK)
+	}
+
+	lines := strings.Split(raw, "\n")
+	if center <= 0 || center >= len(lines)-1 {
+		t.Fatalf("center line %d outside spacer assertion range, lines=%d", center, len(lines))
+	}
+	if centerLine := xansi.Strip(lines[center]); !strings.HasPrefix(centerLine, uiglyphs.SelectionRailGlyph) || !strings.Contains(centerLine, "target-command") {
+		t.Fatalf("expected selected target at center, got %q in %q", centerLine, xansi.Strip(raw))
+	}
+	modeBg := themeModeBackgroundColor("dark")
+	assertRailBearingSpacerLine(t, lines[center-1], modeBg, m.palette().primaryColor)
+	assertRailBearingSpacerLine(t, lines[center+1], modeBg, m.palette().primaryColor)
+}
+
+func TestCompactDetailSelectedSpacerRowsExtendRailAroundSemanticMultilineEntry(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(12))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before patch"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "./main.go +1 -1",
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: "./main.go +1 -1",
+			PatchDetail:  "./main.go\n-old\n+new",
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
+			),
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after patch"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	raw := m.View()
+	lines := strings.Split(raw, "\n")
+	contentIndexes := make([]int, 0, 3)
+	for idx, line := range lines {
+		plain := xansi.Strip(line)
+		if strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) != "" {
+			contentIndexes = append(contentIndexes, idx)
+		}
+	}
+	if len(contentIndexes) < 3 {
+		t.Fatalf("expected selected multiline patch content, got %q", xansi.Strip(raw))
+	}
+	firstContent := contentIndexes[0]
+	lastContent := contentIndexes[len(contentIndexes)-1]
+	if firstContent <= 0 || lastContent >= len(lines)-1 {
+		t.Fatalf("expected selected patch content to have adjacent spacer rows, content=%v view=%q", contentIndexes, xansi.Strip(raw))
+	}
+
+	modeBg := themeModeBackgroundColor("dark")
+	assertRailBearingSpacerLine(t, lines[firstContent-1], modeBg, m.palette().primaryColor)
+	assertRailBearingSpacerLine(t, lines[lastContent+1], modeBg, m.palette().primaryColor)
+	if diffLine := lineContaining(raw, "+new"); !strings.HasPrefix(xansi.Strip(diffLine), uiglyphs.SelectionRailGlyph) || !containsBackgroundSGR(diffLine) {
+		t.Fatalf("expected selected semantic diff line to keep rail and background, got %q", diffLine)
+	}
+}
+
+func TestCompactDetailSelectedSpacerRailUsesThemePrimaryColor(t *testing.T) {
+	for _, themeName := range []string{"dark", "light"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithTheme(themeName), WithPreviewLines(6))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before detail entry"})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after detail entry"})
+			m = updateModel(t, m, ToggleModeMsg{})
+			m.detailSelectedEntry = 1
+			m.detailSelectedActive = true
+
+			lines := strings.Split(m.View(), "\n")
+			selectedIndex := -1
+			for idx, line := range lines {
+				if strings.Contains(xansi.Strip(line), "selected detail entry") {
+					selectedIndex = idx
+					break
+				}
+			}
+			if selectedIndex <= 0 || selectedIndex >= len(lines)-1 {
+				t.Fatalf("expected selected line to have rail-bearing spacers, selected=%d lines=%q", selectedIndex, xansi.Strip(m.View()))
+			}
+			for _, idx := range []int{selectedIndex - 1, selectedIndex + 1} {
+				assertRailBearingSpacerLine(t, lines[idx], themeModeBackgroundColor(themeName), m.palette().primaryColor)
+			}
+		})
+	}
+}
+
+func TestCompactDetailSelectedExpandableItemUsesChevronSymbol(t *testing.T) {
+	for _, themeName := range []string{"dark", "light"} {
+		t.Run(themeName, func(t *testing.T) {
+			m := NewModel(WithCompactDetail(), WithTheme(themeName), WithPreviewLines(6))
+			m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "first-command",
+				ToolCallID: "call_1",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "first-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "before-selected-command",
+				ToolCallID: "call_2",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "before-selected-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "selected-command",
+				ToolCallID: "call_3",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "selected-command"},
+			})
+			m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_error", ToolCallID: "call_3", Text: "boom"})
+			m = updateModel(t, m, AppendTranscriptMsg{
+				Role:       "tool_call",
+				Text:       "after-selected-command",
+				ToolCallID: "call_4",
+				ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "after-selected-command"},
+			})
+			m = updateModel(t, m, ToggleModeMsg{})
+			m.detailSelectedEntry = 2
+			m.detailSelectedActive = true
+			m.refreshDetailViewport()
+
+			collapsed := m.View()
+			selectedLine := lineContaining(collapsed, "selected-command")
+			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▶ ") || strings.Contains(plain, "$ selected-command") {
+				t.Fatalf("expected selected collapsed expandable item to replace role symbol with chevron, got %q in %q", plain, xansi.Strip(collapsed))
+			}
+			if !containsColor(extractForegroundTrueColors(selectedLine), m.palette().toolErrorColor) {
+				t.Fatalf("expected selected error chevron to keep semantic error color, got %q", selectedLine)
+			}
+			firstLine := lineContaining(collapsed, "first-command")
+			if plain := xansi.Strip(firstLine); !strings.Contains(plain, "$ first-command") || strings.Contains(plain, "▶ first-command") {
+				t.Fatalf("expected unselected expandable item to keep role symbol, got %q", plain)
+			}
+
+			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			expanded := m.View()
+			selectedLine = lineContaining(expanded, "selected-command")
+			if plain := xansi.Strip(selectedLine); !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph+"▼ ") || strings.Contains(plain, "$ selected-command") {
+				t.Fatalf("expected selected expanded item to replace role symbol with expanded chevron, got %q in %q", plain, xansi.Strip(expanded))
+			}
+			if action, ok := m.DetailSelectedExpansionAction(); !ok || action != "collapse" {
+				t.Fatalf("expected selected expanded item action collapse, got %q ok=%v", action, ok)
+			}
+		})
+	}
 }
 
 func TestCompactDetailPageScrollRailTracksCenterInsideTallExpandedEntry(t *testing.T) {
@@ -264,7 +486,7 @@ func TestCompactDetailReconcilesSelectionAndExpansionAfterRefresh(t *testing.T) 
 	m := NewModel(WithCompactDetail(), WithPreviewLines(12))
 	m = updateModel(t, m, SetConversationMsg{BaseOffset: 10, Entries: []TranscriptEntry{
 		{Role: "user", Text: "older"},
-		{Role: "assistant", Text: "newer"},
+		{Role: "assistant", Text: "newer\nhidden line 1\nhidden line 2\nhidden line 3"},
 	}})
 	m = updateModel(t, m, ToggleModeMsg{})
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -333,7 +555,7 @@ func TestCompactDetailScrollFocusesCenterVisibleEntryForExpansion(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewModel(WithCompactDetail(), WithPreviewLines(4))
 			for idx := 0; idx < 8; idx++ {
-				m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d", idx)})
+				m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("entry %d\nhidden %d a\nhidden %d b\nhidden %d c", idx, idx, idx, idx)})
 			}
 			m = updateModel(t, m, ToggleModeMsg{})
 			for _, msg := range tt.setup {
@@ -356,12 +578,17 @@ func TestCompactDetailScrollFocusesCenterVisibleEntryForExpansion(t *testing.T) 
 
 func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "before detail entry"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected detail entry"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "after detail entry"})
 	m = updateModel(t, m, ToggleModeMsg{})
+	m.detailSelectedEntry = 1
+	m.detailSelectedActive = true
 
-	selectedLine := lineContaining(m.View(), "selected detail entry")
+	raw := m.View()
+	selectedLine := lineContaining(raw, "selected detail entry")
 	if selectedLine == "" {
-		t.Fatalf("expected selected detail line, got %q", m.View())
+		t.Fatalf("expected selected detail line, got %q", raw)
 	}
 	modeBg := themeModeBackgroundColor("dark")
 	if !strings.Contains(selectedLine, fmt.Sprintf("48;2;%d;%d;%d", modeBg.r, modeBg.g, modeBg.b)) {
@@ -369,6 +596,45 @@ func TestCompactDetailSelectionUsesModeBackgroundWithoutForegroundOverride(t *te
 	}
 	if strings.Contains(selectedLine, "38;2;215;218;224") {
 		t.Fatalf("did not expect compact detail selection to force foreground, got %q", selectedLine)
+	}
+
+	lines := strings.Split(raw, "\n")
+	selectedIndex := -1
+	for idx, line := range lines {
+		if strings.Contains(xansi.Strip(line), "selected detail entry") {
+			selectedIndex = idx
+			break
+		}
+	}
+	if selectedIndex <= 0 || selectedIndex >= len(lines)-1 {
+		t.Fatalf("expected selected line to have surrounding spacer lines, selected=%d lines=%q", selectedIndex, xansi.Strip(raw))
+	}
+	for _, idx := range []int{selectedIndex - 1, selectedIndex + 1} {
+		assertRailBearingSpacerLine(t, lines[idx], modeBg, m.palette().primaryColor)
+	}
+}
+
+func TestCompactDetailShortSelectedMessagesDoNotShowExpansionAffordance(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithTheme("dark"), WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "short user"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "short assistant"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := xansi.Strip(m.View())
+	if strings.Contains(view, "▶") || strings.Contains(view, "▼") {
+		t.Fatalf("did not expect chevron for selected short message, got %q", view)
+	}
+	if action, ok := m.DetailSelectedExpansionAction(); ok || action != "" {
+		t.Fatalf("did not expect expansion action for short message, got %q ok=%v", action, ok)
+	}
+	before := m.View()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.detailExpandedEntries) != 0 {
+		t.Fatalf("did not expect enter on short message to mutate expansion state, got %+v", m.detailExpandedEntries)
+	}
+	after := m.View()
+	if xansi.Strip(after) != xansi.Strip(before) || strings.Contains(xansi.Strip(after), "▶") || strings.Contains(xansi.Strip(after), "▼") {
+		t.Fatalf("did not expect enter on short message to change affordance/view, before=%q after=%q", xansi.Strip(before), xansi.Strip(after))
 	}
 }
 
@@ -388,7 +654,7 @@ func TestCompactDetailCollapsedCompletedShellUsesSingleLinePreview(t *testing.T)
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	rendered := xansi.Strip(m.View())
-	if !strings.Contains(rendered, "$ printf 'one\\n'…") {
+	if !strings.Contains(rendered, "▶ printf 'one\\n'…") {
 		t.Fatalf("expected completed shell call to stay compact, got %q", rendered)
 	}
 	if strings.Contains(rendered, "printf 'two") {
@@ -441,8 +707,8 @@ func TestCompactDetailSelectedLongCollapsedRowKeepsWideRailWithinViewport(t *tes
 	if width := lipgloss.Width(line); width != viewportWidth {
 		t.Fatalf("expected selected row with wide rail to stay exactly viewport width %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
 	}
-	if !strings.Contains(xansi.Strip(line), "❮ ") {
-		t.Fatalf("expected selected row with wide rail to keep role symbol visible, got %q", xansi.Strip(line))
+	if !strings.Contains(xansi.Strip(line), "▶ ") {
+		t.Fatalf("expected selected row with wide rail to keep expansion chevron visible, got %q", xansi.Strip(line))
 	}
 }
 
@@ -463,7 +729,7 @@ func TestCompactDetailTruncatedShellPreservesCommandPrefixSpacing(t *testing.T) 
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	rendered := xansi.Strip(m.View())
-	if !strings.Contains(rendered, "$ git status") {
+	if !strings.Contains(rendered, "▶ git status") {
 		t.Fatalf("expected truncated shell row to preserve shell prefix spacing, got %q", rendered)
 	}
 }
@@ -476,9 +742,9 @@ func TestCompactDetailWrappedAssistantUsesTreeGuide(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	rendered := xansi.Strip(m.View())
-	firstLine := lineContaining(rendered, "❮")
-	if !strings.Contains(firstLine, "❮ assistant") {
-		t.Fatalf("expected assistant first row to preserve role prefix, got %q", firstLine)
+	firstLine := lineContaining(rendered, "▶")
+	if !strings.Contains(firstLine, "▶ assistant") {
+		t.Fatalf("expected selected assistant first row to use expansion chevron, got %q", firstLine)
 	}
 	if !strings.Contains(rendered, "│ assistant") || !strings.Contains(rendered, "└ assistant") {
 		t.Fatalf("expected wrapped assistant preview to use tree guide, got %q", rendered)
@@ -498,7 +764,7 @@ func TestCompactDetailNarrowWrappedAssistantKeepsTreeGuideWithinViewport(t *test
 	rendered := xansi.Strip(m.View())
 	firstLine := lineContaining(rendered, "❮")
 	if !strings.Contains(firstLine, "❮ ") {
-		t.Fatalf("expected narrow assistant first row to keep normal role prefix, got %q", firstLine)
+		t.Fatalf("expected narrow selected assistant first row without hidden content to keep normal prefix, got %q", firstLine)
 	}
 	if !strings.Contains(rendered, "│ ") || !strings.Contains(rendered, "└ ") {
 		t.Fatalf("expected narrow wrapped assistant preview to keep tree guide, got %q", rendered)
@@ -525,9 +791,9 @@ func TestCompactDetailNarrowTruncatedShellPreservesCommandPrefixSpacing(t *testi
 	})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	line := lineContaining(m.View(), "$")
-	if !strings.Contains(xansi.Strip(line), "$ ") {
-		t.Fatalf("expected narrow truncated shell row to preserve shell prefix spacing, got %q", xansi.Strip(line))
+	line := lineContaining(m.View(), "▶")
+	if !strings.Contains(xansi.Strip(line), "▶ ") {
+		t.Fatalf("expected narrow truncated shell row to preserve expansion chevron prefix spacing, got %q", xansi.Strip(line))
 	}
 	if width := lipgloss.Width(line); width > viewportWidth {
 		t.Fatalf("expected narrow shell row width <= %d, got %d in %q", viewportWidth, width, xansi.Strip(line))
@@ -617,6 +883,24 @@ func assertCenterRailOnExpandedOutput(t *testing.T, m Model) {
 	}
 	if !strings.HasPrefix(lines[center], uiglyphs.SelectionRailGlyph) || !strings.Contains(lines[center], "output line") {
 		t.Fatalf("expected selected rail on center output line, got center=%q view=%q", lines[center], xansi.Strip(m.View()))
+	}
+}
+
+func assertRailBearingSpacerLine(t *testing.T, line string, modeBg rgbColor, railColor rgbColor) {
+	t.Helper()
+
+	plain := xansi.Strip(line)
+	if !strings.HasPrefix(plain, uiglyphs.SelectionRailGlyph) {
+		t.Fatalf("expected spacer line to extend selection rail, got %q", plain)
+	}
+	if strings.TrimSpace(strings.TrimPrefix(plain, uiglyphs.SelectionRailGlyph)) != "" {
+		t.Fatalf("expected highlighted spacer line to be blank after rail, got %q", plain)
+	}
+	if !strings.Contains(line, fmt.Sprintf("48;2;%d;%d;%d", modeBg.r, modeBg.g, modeBg.b)) {
+		t.Fatalf("expected spacer line to use mode background, got %q", line)
+	}
+	if !containsColor(extractForegroundTrueColors(line), railColor) {
+		t.Fatalf("expected spacer rail to use selected rail color, got %q", line)
 	}
 }
 

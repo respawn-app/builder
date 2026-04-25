@@ -52,6 +52,7 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 	if initial == "" {
 		t.Fatal("expected detail transcript visible before scrolling")
 	}
+	initialScroll := m.view.DetailScroll()
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
 	afterUp := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
@@ -59,10 +60,47 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 		t.Fatal("expected detail transcript to change after up")
 	}
 
+	beforeDownScroll := m.view.DetailScroll()
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	afterDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
-	if afterDown != initial {
-		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
+	if got := m.view.DetailScroll(); got >= beforeDownScroll {
+		t.Fatalf("expected detail down after prior up to move toward bottom, got %d from %d", got, beforeDownScroll)
+	}
+	if got := m.view.DetailScroll(); got != initialScroll {
+		t.Fatalf("expected detail scroll to round-trip after up/down, got %d want %d", got, initialScroll)
+	}
+	if afterDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View())); afterDown == afterUp {
+		t.Fatal("expected detail transcript to change after down")
+	}
+}
+
+func TestDetailModeLineScrollRoundTripsScrollAndSelectionState(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for idx := 0; idx < 20; idx++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("state entry %02d", idx)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	startScroll := m.view.DetailScroll()
+	startSelected, startSelectedOK := m.view.DetailSelectedEntry()
+	if !startSelectedOK {
+		t.Fatal("expected selected detail entry before state round-trip")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.view.DetailScroll(); got != startScroll+1 {
+		t.Fatalf("expected up to move detail scroll state by one line, got %d want %d", got, startScroll+1)
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.view.DetailScroll(); got != startScroll {
+		t.Fatalf("expected up/down detail scroll state to round-trip, got %d want %d", got, startScroll)
+	}
+	selected, selectedOK := m.view.DetailSelectedEntry()
+	if !selectedOK || selected != startSelected {
+		t.Fatalf("expected selected entry state to round-trip, got %d ok=%v want %d", selected, selectedOK, startSelected)
 	}
 }
 
@@ -81,7 +119,7 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
 	collapsed := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(collapsed, "$ cat large.txt") {
+	if !strings.Contains(collapsed, "▶ cat large.txt") {
 		t.Fatalf("expected collapsed compact tool row, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "line 2") {
@@ -90,8 +128,97 @@ func TestDetailModeCompactExpansionRoutesThroughUIModel(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	expanded := stripANSIAndTrimRight(m.view.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
+	if !strings.Contains(expanded, "▼ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
 		t.Fatalf("expected UI-routed enter to expand tool output, got %q", expanded)
+	}
+}
+
+func TestDetailModeStatusLineShowsSelectedExpansionAction(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 12
+	m.syncViewport()
+	m.forwardToView(tui.AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "cat large.txt",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: "cat large.txt"},
+	})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_1", Text: "line 1\nline 2"})
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Enter to expand") {
+		t.Fatalf("expected detail status line expansion hint, got %q", status)
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Enter to collapse") {
+		t.Fatalf("expected detail status line collapse hint, got %q", status)
+	}
+}
+
+func TestDetailModeStatusLineFallsBackWhenSelectionIsNotExpandable(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	errorLines := make([]string, 0, 16)
+	for idx := 0; idx < 16; idx++ {
+		errorLines = append(errorLines, fmt.Sprintf("non expandable error line %02d", idx))
+	}
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: strings.Join(errorLines, "\n")})
+	for idx := 0; idx < 12; idx++ {
+		callID := fmt.Sprintf("call_%d", idx)
+		command := fmt.Sprintf("cmd %d", idx)
+		m.forwardToView(tui.AppendTranscriptMsg{
+			Role:       "tool_call",
+			Text:       command,
+			ToolCallID: callID,
+			ToolCall:   &transcript.ToolCallMeta{ToolName: "exec_command", IsShell: true, Command: command},
+		})
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: callID, Text: "line 1\nline 2"})
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Enter to expand") {
+		t.Fatalf("expected expandable selection hint before scrolling, got %q", status)
+	}
+
+	for guard := 0; guard < 8; guard++ {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+		status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+		if !strings.Contains(status, "Enter to expand") && !strings.Contains(status, "Enter to collapse") {
+			break
+		}
+	}
+	if strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") || !strings.Contains(status, "F1 for help") {
+		t.Fatalf("expected normal help hint after scrolling to non-expandable selection, got %q", status)
+	}
+}
+
+func TestDetailModeEnterOnShortSelectedMessageDoesNotShowExpansionHintOrMutateState(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "short user"})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "short assistant"})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	beforeView := stripANSIAndTrimRight(m.view.View())
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(beforeView, "▶") || strings.Contains(beforeView, "▼") || strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") {
+		t.Fatalf("did not expect expansion affordance for selected short message, view=%q status=%q", beforeView, status)
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	afterView := stripANSIAndTrimRight(m.view.View())
+	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if afterView != beforeView || strings.Contains(afterView, "▶") || strings.Contains(afterView, "▼") || strings.Contains(status, "Enter to expand") || strings.Contains(status, "Enter to collapse") {
+		t.Fatalf("expected enter on selected short message to be no-op with normal help, before=%q after=%q status=%q", beforeView, afterView, status)
 	}
 }
 
@@ -151,13 +278,16 @@ func TestDetailModeArrowScrollsDetailByLineAndTracksCenterSelection(t *testing.T
 		if got, want := m.view.DetailScroll(), beforeScroll+step; got != want {
 			t.Fatalf("step %d: expected detail arrow scroll by one line, got %d want %d", step, got, want)
 		}
-		if selected := selectedDetailLine(t, m.view.View()); selected == "" {
+		if selected := selectedDetailContentLine(t, m.view.View()); selected == "" {
 			t.Fatalf("step %d: expected center selection to remain visible", step)
 		}
 	}
 
-	if selected := selectedDetailLine(t, m.view.View()); selected == "" {
+	if selected := selectedDetailContentLine(t, m.view.View()); selected == "" {
 		t.Fatal("expected centered selection after line scrolling")
+	}
+	if spacer := selectedDetailSpacerLine(t, m.view.View()); spacer == "" {
+		t.Fatal("expected selected card spacer rail after line scrolling")
 	}
 }
 
@@ -212,7 +342,7 @@ func TestDetailModeEnterRoutesThroughInputControllerWhenInputLocked(t *testing.T
 	}
 	updated := next.(*uiModel)
 	expanded := stripANSIAndTrimRight(updated.view.View())
-	if !strings.Contains(expanded, "$ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
+	if !strings.Contains(expanded, "▼ cat large.txt") || !strings.Contains(expanded, "│ line 1") || !strings.Contains(expanded, "└ line 2") {
 		t.Fatalf("expected input-controller enter to expand detail even while input locked, got %q", expanded)
 	}
 	if updated.input != "locked draft" || !updated.inputSubmitLocked || updated.lockedInjectText != "locked draft" {
@@ -242,10 +372,13 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 		t.Fatal("expected detail transcript to change after mouse wheel up")
 	}
 
+	beforeWheelDownScroll := m.view.DetailScroll()
 	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	afterWheelDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View()))
-	if afterWheelDown != initial {
-		t.Fatalf("expected detail transcript to return after mouse wheel down, got %q want %q", afterWheelDown, initial)
+	if got := m.view.DetailScroll(); got >= beforeWheelDownScroll {
+		t.Fatalf("expected detail wheel down after prior wheel up to move toward bottom, got %d from %d", got, beforeWheelDownScroll)
+	}
+	if afterWheelDown := stripDetailSelectionRail(stripANSIAndTrimRight(m.view.View())); afterWheelDown == afterWheelUp {
+		t.Fatal("expected detail transcript to change after mouse wheel down")
 	}
 }
 
@@ -287,7 +420,7 @@ func TestDetailModeScrollThenEnterExpandsCenterSelectedItem(t *testing.T) {
 			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 			expanded := stripANSIAndTrimRight(m.view.View())
-			if !strings.Contains(expanded, fmt.Sprintf("$ cmd %d", selected)) || !strings.Contains(expanded, fmt.Sprintf("└ output %d line 2", selected)) {
+			if !strings.Contains(expanded, fmt.Sprintf("▼ cmd %d", selected)) || !strings.Contains(expanded, fmt.Sprintf("└ output %d line 2", selected)) {
 				t.Fatalf("expected enter after %s scroll to expand selected center command %d, got %q", tt.name, selected, expanded)
 			}
 		})
@@ -335,8 +468,9 @@ func TestUpDownRouteByTranscriptMode(t *testing.T) {
 func selectedDetailCommandIndex(t *testing.T, view string) int {
 	t.Helper()
 
-	line := selectedDetailLine(t, view)
-	_, suffix, ok := strings.Cut(line, "$ cmd ")
+	line := strings.TrimPrefix(selectedDetailContentLine(t, view), uiglyphs.SelectionRailGlyph)
+	line = strings.TrimSpace(line)
+	_, suffix, ok := strings.Cut(line, " cmd ")
 	if !ok {
 		t.Fatalf("expected selected command line, got %q in %q", line, stripANSIAndTrimRight(view))
 	}
@@ -347,15 +481,27 @@ func selectedDetailCommandIndex(t *testing.T, view string) int {
 	return value
 }
 
-func selectedDetailLine(t *testing.T, view string) string {
+func selectedDetailContentLine(t *testing.T, view string) string {
 	t.Helper()
 
 	for _, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
-		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) {
+		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(line, uiglyphs.SelectionRailGlyph)) != "" {
 			return line
 		}
 	}
 	t.Fatalf("expected selected detail line in %q", stripANSIAndTrimRight(view))
+	return ""
+}
+
+func selectedDetailSpacerLine(t *testing.T, view string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
+		if strings.HasPrefix(line, uiglyphs.SelectionRailGlyph) && strings.TrimSpace(strings.TrimPrefix(line, uiglyphs.SelectionRailGlyph)) == "" {
+			return line
+		}
+	}
+	t.Fatalf("expected selected detail spacer line in %q", stripANSIAndTrimRight(view))
 	return ""
 }
 

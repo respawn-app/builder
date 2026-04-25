@@ -345,6 +345,10 @@ func (m *Model) toggleSelectedDetailExpansion() {
 	if !m.detailSelectedActive {
 		return
 	}
+	blockIndex := m.detailBlockIndexForEntry(m.detailSelectedEntry)
+	if blockIndex < 0 || blockIndex >= len(m.detailBlocks) || !m.detailBlocks[blockIndex].expandable {
+		return
+	}
 	if m.detailExpandedEntries == nil {
 		m.detailExpandedEntries = make(map[int]struct{})
 	}

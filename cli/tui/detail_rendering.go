@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/server/tools"
+	"builder/shared/transcript"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -24,6 +25,10 @@ func (m Model) detailEntryExpanded(entryIndex int) bool {
 }
 
 func (m Model) detailWithTreeGuide(role string, lines []string, expanded bool) []string {
+	return m.detailWithTreeGuideWithSymbol(role, lines, expanded, "")
+}
+
+func (m Model) detailWithTreeGuideWithSymbol(role string, lines []string, expanded bool, symbolOverride string) []string {
 	if !m.compactDetail {
 		return lines
 	}
@@ -35,12 +40,12 @@ func (m Model) detailWithTreeGuide(role string, lines []string, expanded bool) [
 		out[0] = m.truncateDetailLine(out[0])
 	}
 	for idx := 1; idx < len(out); idx++ {
-		out[idx] = m.detailTreeGuideLine(role, out[idx], idx == len(out)-1, expanded)
+		out[idx] = m.detailTreeGuideLine(role, out[idx], idx == len(out)-1, expanded, symbolOverride)
 	}
 	return out
 }
 
-func (m Model) detailTreeGuideLine(role string, line string, last bool, expanded bool) string {
+func (m Model) detailTreeGuideLine(role string, line string, last bool, expanded bool, symbolOverride string) string {
 	connector := detailTreeMiddle
 	if last {
 		connector = detailTreeLast
@@ -52,7 +57,7 @@ func (m Model) detailTreeGuideLine(role string, line string, last bool, expanded
 		}
 		return m.truncateDetailLine(value)
 	}
-	prefixWidth := m.entryPrefixWidth(role, "")
+	prefixWidth := m.entryPrefixWidth(role, symbolOverride)
 	if prefixWidth <= 0 {
 		return formatLine(styledConnector + " " + strings.TrimLeft(line, " "))
 	}
@@ -114,28 +119,66 @@ func removeExtraSpacesFromLongestRunLongerThan(line string, count int, minLen in
 }
 
 func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role string, text string) []string {
+	return m.detailCollapsedStandardLinesWithSymbol(entry, role, text, "")
+}
+
+func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, role string, text string, symbolOverride string) []string {
 	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
-		return m.detailWithTreeGuide(role, m.flattenEntry(role, label), false)
+		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 	}
 	if strings.TrimSpace(role) == "reviewer_suggestions" {
 		if label := strings.TrimSpace(entry.OngoingText); label != "" && !strings.Contains(label, "\n") {
-			return m.detailWithTreeGuide(role, m.flattenEntry(role, label), false)
+			return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 		}
-		return m.detailWithTreeGuide(role, m.flattenEntry(role, "Supervisor suggestions"), false)
+		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, "Supervisor suggestions", false, nil, symbolOverride), false, symbolOverride)
 	}
 	if label := strings.TrimSpace(entry.OngoingText); label != "" {
-		return m.detailWithTreeGuide(role, m.flattenEntry(role, label), false)
+		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 	}
 	if isThreeLinePreviewRole(role) {
-		return m.detailWithTreeGuide(role, firstNRenderedLines(m.flattenEntry(role, text), 3), false)
+		return m.detailWithTreeGuideWithSymbol(role, firstNRenderedLines(m.flattenEntryWithMetaAndSymbol(role, text, false, nil, symbolOverride), 3), false, symbolOverride)
 	}
 	if label := m.knownDetailLabel(entry, role); label != "" {
-		return m.detailWithTreeGuide(role, m.flattenEntry(role, label), false)
+		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 	}
-	return m.detailWithTreeGuide(role, m.flattenEntry(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role))), false)
+	return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role)), false, nil, symbolOverride), false, symbolOverride)
+}
+
+func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text string) bool {
+	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
+		return false
+	}
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return false
+	}
+	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
+		return label != trimmedText
+	}
+	if strings.TrimSpace(role) == "reviewer_suggestions" {
+		if label := strings.TrimSpace(entry.OngoingText); label != "" && !strings.Contains(label, "\n") {
+			return label != trimmedText
+		}
+		return trimmedText != "Supervisor suggestions"
+	}
+	if label := strings.TrimSpace(entry.OngoingText); label != "" {
+		return label != trimmedText
+	}
+	if isThreeLinePreviewRole(role) {
+		return m.detailRenderedContentLineCount(role, text) > 3
+	}
+	if label := m.knownDetailLabel(entry, role); label != "" {
+		return label != trimmedText
+	}
+	preview := m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role))
+	return preview != trimmedText || m.detailRenderedContentLineCount(role, text) > 1
 }
 
 func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resultSummary string) []string {
+	return m.detailCollapsedToolLinesWithSymbol(role, entry, resultSummary, "")
+}
+
+func (m Model) detailCollapsedToolLinesWithSymbol(role string, entry TranscriptEntry, resultSummary string, symbolOverride string) []string {
 	compact := m.toolCallDisplayText(entry, role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
 	if strings.TrimSpace(compact) == "" {
 		compact = "Tool call"
@@ -144,18 +187,58 @@ func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resu
 		if isShellPreviewRole(role) {
 			compact = attachShellSummaryToFirstLine(compact, summary)
 		} else {
-			lines := m.flattenEntryWithMeta(role, compact, true, entry.ToolCall)
+			lines := m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride)
 			if isToolErrorHeadlineRole(role) {
-				summaryLines := m.flattenToolErrorText(role, summary, m.entryContinuationPrefix(role, ""))
-				return m.detailWithTreeGuide(role, append(lines, summaryLines...), false)
+				summaryLines := m.flattenToolErrorText(role, summary, m.entryContinuationPrefix(role, symbolOverride))
+				return m.detailWithTreeGuideWithSymbol(role, append(lines, summaryLines...), false, symbolOverride)
 			}
 			compact += "\n" + summary
 		}
 	}
 	if isToolErrorHeadlineRole(role) {
-		return m.detailWithTreeGuide(role, m.flattenToolErrorText(role, compact, ""), false)
+		return m.detailWithTreeGuideWithSymbol(role, m.flattenToolErrorText(role, compact, symbolOverride), false, symbolOverride)
 	}
-	return m.detailWithTreeGuide(role, m.flattenEntryWithMeta(role, compact, true, entry.ToolCall), false)
+	return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride), false, symbolOverride)
+}
+
+func (m Model) detailToolResultExpandable(role string, text string) bool {
+	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
+		return false
+	}
+	return m.detailRenderedContentLineCount(role, text) > 1
+}
+
+func (m Model) detailToolCallExpandable(role string, entry TranscriptEntry, resultSummary string, combined string, meta *transcript.ToolCallMeta, resultText string) bool {
+	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
+		return false
+	}
+	if strings.TrimSpace(resultText) != "" || m.detailRenderedContentLineCount(role, combined) > 1 {
+		return true
+	}
+	if meta != nil && meta.PatchRender != nil {
+		return strings.TrimSpace(meta.PatchDetail) != ""
+	}
+	compact := m.toolCallDisplayText(entry, role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
+	return strings.TrimSpace(compact) != strings.TrimSpace(combined)
+}
+
+func (m Model) detailAskQuestionExpandable(role string, question string, suggestions []string, recommendedOptionIndex int, answer string, resultSummary string) bool {
+	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
+		return false
+	}
+	return len(suggestions) > 0 ||
+		recommendedOptionIndex > 0 ||
+		(strings.TrimSpace(answer) != "" && strings.TrimSpace(answer) != strings.TrimSpace(resultSummary)) ||
+		m.detailRenderedContentLineCount(role, question) > 1
+}
+
+func (m Model) detailRenderedContentLineCount(role string, text string) int {
+	renderWidth := m.entryRenderWidth(role, "")
+	lines := splitLines(wrapTextForViewport(transcriptDisplayText(role, text), renderWidth))
+	if len(lines) == 0 {
+		return 1
+	}
+	return len(lines)
 }
 
 func attachShellSummaryToFirstLine(text string, summary string) string {

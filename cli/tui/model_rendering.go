@@ -14,7 +14,7 @@ func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []o
 	specs := m.buildDetailBlockSpecs(includeStreaming)
 	blocks := make([]ongoingBlock, 0, len(specs))
 	for _, spec := range specs {
-		lines := spec.render(m)
+		lines := spec.render(m, "")
 		if applySelection {
 			lines = m.maybeSelectedUserBlock(spec.entryIndex, spec.role, lines)
 		}
@@ -49,11 +49,12 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				entryEnd:   absoluteIndex,
 				selectable: true,
 				expanded:   m.detailEntryExpanded(absoluteIndex),
-				render: func(model Model) []string {
+				expandable: m.detailToolResultExpandable(blockRole, text),
+				render: func(model Model, symbolOverride string) []string {
 					if model.detailEntryExpanded(absoluteIndex) || blockRole == "tool_error" {
-						return model.detailWithTreeGuide(blockRole, model.flattenEntry(blockRole, text), true)
+						return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, text, false, nil, symbolOverride), true, symbolOverride)
 					}
-					return model.detailWithTreeGuide(blockRole, model.flattenEntry(blockRole, model.firstDetailPreviewLine(text, "Tool output")), false)
+					return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, model.firstDetailPreviewLine(text, "Tool output"), false, nil, symbolOverride), false, symbolOverride)
 				},
 			})
 		default:
@@ -151,7 +152,7 @@ func (m Model) prefixedReasoningBlockSpec(entryIndex int, consumed map[int]struc
 		role:       "reasoning",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("reasoning", thinkingText)
 		},
 	}, true
@@ -243,14 +244,15 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 		entryEnd:   absoluteEnd,
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
-		render: func(model Model) []string {
+		expandable: m.detailToolCallExpandable(blockRole, entry, resultSummary, combined, meta, resultText),
+		render: func(model Model, symbolOverride string) []string {
 			if !model.detailEntryExpanded(absoluteIndex) {
-				return model.detailCollapsedToolLines(blockRole, entry, resultSummary)
+				return model.detailCollapsedToolLinesWithSymbol(blockRole, entry, resultSummary, symbolOverride)
 			}
 			if meta != nil && meta.PatchRender != nil {
-				return model.detailWithTreeGuide(blockRole, model.flattenPatchToolBlock(blockRole, meta, resultText), true)
+				return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenPatchToolBlockWithSymbol(blockRole, meta, resultText, symbolOverride), true, symbolOverride)
 			}
-			return model.detailWithTreeGuide(blockRole, model.flattenEntryWithMeta(blockRole, combined, false, meta), true)
+			return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, combined, false, meta, symbolOverride), true, symbolOverride)
 		},
 	}
 }
@@ -296,15 +298,16 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 		entryEnd:   absoluteIndex,
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
-		render: func(model Model) []string {
+		expandable: m.detailAskQuestionExpandable(blockRole, question, suggestions, recommendedOptionIndex, answer, resultSummary),
+		render: func(model Model, symbolOverride string) []string {
 			if model.detailEntryExpanded(absoluteIndex) {
-				return model.detailWithTreeGuide(blockRole, model.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, true), true)
+				return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenAskQuestionEntryWithSymbol(blockRole, question, suggestions, recommendedOptionIndex, answer, true, symbolOverride), true, symbolOverride)
 			}
 			collapsedAnswer := ""
 			if resultSummary != "" {
 				collapsedAnswer = resultSummary
 			}
-			return model.detailWithTreeGuide(blockRole, model.flattenAskQuestionEntry(blockRole, question, nil, 0, collapsedAnswer, false), false)
+			return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenAskQuestionEntryWithSymbol(blockRole, question, nil, 0, collapsedAnswer, false, symbolOverride), false, symbolOverride)
 		},
 	}
 }
@@ -378,11 +381,12 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		entryEnd:   absoluteIndex,
 		selectable: true,
 		expanded:   m.detailEntryExpanded(absoluteIndex),
-		render: func(model Model) []string {
+		expandable: m.detailStandardExpandable(entry, role, text),
+		render: func(model Model, symbolOverride string) []string {
 			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
-				return model.detailWithTreeGuide(role, model.flattenEntry(role, text), true)
+				return model.detailWithTreeGuideWithSymbol(role, model.flattenEntryWithMetaAndSymbol(role, text, false, nil, symbolOverride), true, symbolOverride)
 			}
-			return model.detailCollapsedStandardLines(entry, role, text)
+			return model.detailCollapsedStandardLinesWithSymbol(entry, role, text, symbolOverride)
 		},
 	}
 }
@@ -463,7 +467,7 @@ func (m Model) detailStreamingReasoningSpec() (detailBlockSpec, bool) {
 		role:       "reasoning",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("reasoning", combined)
 		},
 	}, true
@@ -478,7 +482,7 @@ func (m Model) detailStreamingAssistantSpec() (detailBlockSpec, bool) {
 		role:       "assistant",
 		entryIndex: -1,
 		entryEnd:   -1,
-		render: func(model Model) []string {
+		render: func(model Model, symbolOverride string) []string {
 			return model.flattenEntry("assistant", text)
 		},
 	}, true

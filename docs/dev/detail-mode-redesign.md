@@ -38,7 +38,7 @@ Selection is message-oriented, not line-oriented. Scrolling is line-oriented. `U
 
 Detail rows do not show a dedicated collapsed/expanded glyph. The first rendered line keeps the normal role/tool symbol. When an item renders more than one line, continuation lines replace the role-prefix column with a faint tree guide: `│` for middle lines and `└` for the last rendered line.
 
-The selected message uses a selection background/fill across every rendered line of that message and across the full terminal width. Selection must not change foreground colors. Selection background is lowest priority: any semantic background already present on a cell, such as patch diff backgrounds or syntax-highlight backgrounds, wins over selection background.
+The selected message uses a selection background/fill across every rendered line of that message and across the full terminal width. Compact detail also renders highlighted blank spacer rows with the selected side rail immediately above and below the selected message when adjacent viewport rows are available; these spacers are visual-only viewport decoration and do not participate in scroll metrics or transcript line counts. When the selected item can expand, its leading role symbol is replaced with `▶` while collapsed and `▼` while expanded; unselected items keep their normal role symbols. The status line mirrors this affordance with `Enter to expand` or `Enter to collapse`. Selection must not change foreground colors. Selection background is lowest priority: any semantic background already present on a cell, such as patch diff backgrounds or syntax-highlight backgrounds, wins over selection background.
 
 ## Three Axes
 
