@@ -202,9 +202,10 @@ type statusAuthRefreshDoneMsg struct {
 }
 
 type statusGitRefreshDoneMsg struct {
-	token    uint64
-	cacheKey string
-	result   uiStatusGitStageResult
+	token      uint64
+	cacheKey   string
+	result     uiStatusGitStageResult
+	background bool
 }
 
 type statusEnvironmentRefreshDoneMsg struct {
@@ -1024,6 +1025,13 @@ func (m *uiModel) finishStatusSectionRefresh(section uiStatusSection, warning st
 	m.status.snapshot.CollectorWarning = m.statusCombinedWarnings()
 }
 
+func (m *uiModel) shouldApplyBackgroundGitRefresh(msg statusGitRefreshDoneMsg) bool {
+	if !msg.background {
+		return false
+	}
+	return m.status.pendingSections != nil && m.status.pendingSections[uiStatusSectionGit]
+}
+
 func (m *uiModel) statusCombinedWarnings() string {
 	if len(m.status.sectionWarnings) == 0 {
 		return ""
@@ -1111,6 +1119,9 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 			case uiStatusSectionAuth:
 				cmds = append(cmds, m.statusAuthRefreshCmd(token, statusAuthCacheKey(request), request, progressive, base))
 			case uiStatusSectionGit:
+				if m.statusGitBackgroundInFlight {
+					continue
+				}
 				cmds = append(cmds, m.statusGitRefreshCmd(token, statusGitCacheKey(base.Workdir), request, progressive, base))
 			case uiStatusSectionEnvironment:
 				cmds = append(cmds, m.statusEnvironmentRefreshCmd(token, statusEnvironmentCacheKey(request), request, progressive, base))
@@ -1131,6 +1142,23 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 	}
 }
 
+func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
+	request := m.newStatusRequest(time.Now())
+	workdir := statusWorkdir(request.WorkspaceRoot, statusExecutionTarget(request))
+	trimmedWorkdir := strings.TrimSpace(workdir)
+	if trimmedWorkdir == "" {
+		return nil
+	}
+	if info, err := os.Stat(trimmedWorkdir); err != nil || !info.IsDir() {
+		return nil
+	}
+	token := m.status.refreshToken
+	cacheKey := statusGitCacheKey(trimmedWorkdir)
+	request.CurrentTime = time.Now()
+	base := defaultUIStatusCollector{}.CollectBase(request)
+	return m.statusGitRefreshCmd(token, cacheKey, request, defaultUIStatusCollector{}, base, true)
+}
+
 func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
@@ -1147,11 +1175,12 @@ func (m *uiModel) statusAuthRefreshCmd(token uint64, cacheKey string, request ui
 	}
 }
 
-func (m *uiModel) statusGitRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
+func (m *uiModel) statusGitRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot, background ...bool) tea.Cmd {
+	isBackground := len(background) > 0 && background[0]
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
-		return statusGitRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectGit(ctx, request, base)}
+		return statusGitRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectGit(ctx, request, base), background: isBackground}
 	}
 }
 

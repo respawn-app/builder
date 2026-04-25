@@ -391,7 +391,7 @@
 - Compact detail viewport scrolling (`PgUp`/`PgDn` and mouse wheel) auto-focuses the first visible selectable item so `Enter` expands what the user scrolled to.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
-- Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
+- Main status line is compact and fixed: activity indicator, optional git branch, model label, process/server metadata, transient warning; context meter is right-aligned. The activity indicator is followed by one plain space. Later metadata segments use ` · ` separators.
 - Model label appends thinking level when reasoning effort is supported by the resolved model contract; unknown non-empty model ids default to reasoning-capable.
 - Status line includes right-aligned context meter (10-char bar + `% ctx window`, green/yellow/red at `<50%`, `50-<80%`, `>=80%`).
 
