@@ -38,6 +38,9 @@ func (m *uiModel) canToggleHelpWithQuestionMark() bool {
 }
 
 func (m *uiModel) statusHelpHint() string {
+	if m != nil && m.view.Mode() == tui.ModeDetail {
+		return "F1 for help"
+	}
 	if m != nil && m.canToggleHelpWithQuestionMark() {
 		return "F1 or ? for help"
 	}
@@ -45,7 +48,12 @@ func (m *uiModel) statusHelpHint() string {
 }
 
 func (m *uiModel) canShowHelp() bool {
-	return m.view.Mode() == tui.ModeOngoing
+	switch m.view.Mode() {
+	case tui.ModeOngoing, tui.ModeDetail:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *uiModel) helpSections() []uiHelpSection {

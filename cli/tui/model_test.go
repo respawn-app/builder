@@ -771,7 +771,7 @@ func TestDetailViewportAndFlatProjectionUseSameDenseToolGrouping(t *testing.T) {
 	}
 }
 
-func TestDetailViewportKeepsDenseToolBurstAtBottomGroupBoundary(t *testing.T) {
+func TestDetailViewportSelectedCardSeparatesBottomGroupBoundary(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(7))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 7, Width: 80})
 	for idx := 0; idx < 4; idx++ {
@@ -785,12 +785,9 @@ func TestDetailViewportKeepsDenseToolBurstAtBottomGroupBoundary(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	view := trimTrailingBlankLines(plainTranscript(m.View()))
-	if strings.Contains(view, "$ cmd 1\n\n$ cmd 2") || strings.Contains(view, "$ cmd 2\n\n$ cmd 3") {
-		t.Fatalf("expected bottom tool burst to stay dense, got %q", view)
-	}
 	gutter := uiglyphs.SelectionRailBlank
-	if !containsInOrder(view, gutter+"$ cmd 1\n"+gutter+"$ cmd 2\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n\n", gutter+"❯ next user\n\n", gutter+"❮ final") {
-		t.Fatalf("expected bottom viewport to preserve dense tool burst and role-group blanks, got %q", view)
+	if !containsInOrder(view, gutter+"$ cmd 1\n"+uiglyphs.SelectionRailGlyph+"\n"+uiglyphs.SelectionRailGlyph+"$ cmd 3\n"+uiglyphs.SelectionRailGlyph+"\n", gutter+"❯ next user\n\n", gutter+"❮ final") {
+		t.Fatalf("expected selected tool row to get highlighted blank separators while preserving role-group blanks, got %q", view)
 	}
 }
 

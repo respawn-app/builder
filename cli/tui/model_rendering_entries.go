@@ -32,6 +32,34 @@ func (m Model) entryPrefix(role, symbolOverride string) string {
 	return symbol + " "
 }
 
+func (m Model) detailExpansionSymbolPrefix(role string, expanded bool) string {
+	symbol := "▶"
+	if expanded {
+		symbol = "▼"
+	}
+	return renderRoleSymbol(symbol, m.detailExpansionSymbolStyle(role)) + " "
+}
+
+func (m Model) detailExpansionSymbolStyle(role string) roleSymbolColorStyle {
+	p := m.palette()
+	switch transcriptMessageStyleForRole(role) {
+	case transcriptMessageStyleSuccess:
+		return roleSymbolColorStyle{color: p.successColor}
+	case transcriptMessageStyleWarning:
+		return roleSymbolColorStyle{color: p.warningColor}
+	case transcriptMessageStyleError:
+		return roleSymbolColorStyle{color: p.errorColor}
+	}
+	switch role {
+	case "tool_success", "tool_shell_success", "tool_patch_success", "tool_web_search_success":
+		return roleSymbolColorStyle{color: p.toolSuccessColor}
+	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_web_search_error", "tool_question_error", roleDeveloperFeedback, roleInterruption:
+		return roleSymbolColorStyle{color: p.toolErrorColor}
+	default:
+		return roleSymbolColorStyle{color: p.primaryColor}
+	}
+}
+
 func (m Model) entryPrefixWidth(role, symbolOverride string) int {
 	return lipgloss.Width(m.entryPrefix(role, symbolOverride))
 }
@@ -388,10 +416,14 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 }
 
 func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallMeta, resultText string) []string {
+	return m.flattenPatchToolBlockWithSymbol(role, toolMeta, resultText, "")
+}
+
+func (m Model) flattenPatchToolBlockWithSymbol(role string, toolMeta *transcript.ToolCallMeta, resultText string, symbolOverride string) []string {
 	if toolMeta == nil || toolMeta.PatchRender == nil {
-		return m.flattenEntryWithMeta(role, resultText, false, toolMeta)
+		return m.flattenEntryWithMetaAndSymbol(role, resultText, false, toolMeta, symbolOverride)
 	}
-	renderWidth := m.entryRenderWidth(role, "")
+	renderWidth := m.entryRenderWidth(role, symbolOverride)
 	content := transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved}
 	if diffLines, ok := m.renderDiffToolLines(toolMeta.PatchDetail, renderWidth, toolMeta); ok {
 		content.Lines = append(content.Lines, diffLines...)
@@ -410,9 +442,9 @@ func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallM
 		}
 	}
 	if len(content.Lines) == 0 {
-		return m.flattenEntryWithMeta(role, toolMeta.PatchDetail, false, toolMeta)
+		return m.flattenEntryWithMetaAndSymbol(role, toolMeta.PatchDetail, false, toolMeta, symbolOverride)
 	}
-	return m.flattenEntryContent(role, content, renderWidth, false, true, "")
+	return m.flattenEntryContent(role, content, renderWidth, false, true, symbolOverride)
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
@@ -505,7 +537,7 @@ func (m Model) renderDetailViewportLine(line string, selected bool) string {
 	originalWidth := lipgloss.Width(line)
 	rail := uiglyphs.SelectionRailBlank
 	if selected {
-		rail = renderRoleSymbol(uiglyphs.SelectionRailGlyph, roleSymbolColorStyle{color: m.palette().primaryColor})
+		rail = m.renderSelectedDetailRail()
 	}
 	line = rail + line
 	if originalWidth <= m.viewportWidth {
@@ -522,6 +554,18 @@ func (m Model) renderDetailViewportLine(line string, selected bool) string {
 		return line
 	}
 	return applySelectionBackground(padRenderedLineToWidth(line, m.viewportWidth), themeModeBackgroundColor(m.theme))
+}
+
+func (m Model) renderDetailSelectionSpacerLine() string {
+	if !m.compactDetail {
+		return m.renderSelectedTranscriptLine("")
+	}
+	line := m.renderSelectedDetailRail()
+	return applySelectionBackground(padRenderedLineToWidth(line, m.viewportWidth), themeModeBackgroundColor(m.theme))
+}
+
+func (m Model) renderSelectedDetailRail() string {
+	return renderRoleSymbol(uiglyphs.SelectionRailGlyph, roleSymbolColorStyle{color: m.palette().primaryColor})
 }
 
 func padRenderedLineToWidth(line string, width int) string {

@@ -302,6 +302,8 @@
 - Patch/edit tools use `⇄` in ongoing, detail, and native replay. The symbol inherits pending/success/error tool color by result state.
 - Detail items use the same role-group separator policy as ongoing/native transcript rendering, but with blank lines instead of divider rules. Consecutive tool rows form dense chunks; role-group transitions get one blank line.
 - Detail selection uses full-width selected background/fill only. It must not change foreground colors, and selected background has the lowest priority so more specific backgrounds such as patch diff add/remove or syntax backgrounds win.
+- Compact detail selection has visual-only highlighted blank spacer rows above and below the selected item when adjacent viewport rows exist. These spacers extend the selected side rail, reduce focus noise, and do not change detail scroll metrics or transcript line counts.
+- Compact detail replaces the selected expandable item's role symbol with `▶` when collapsed and `▼` when expanded. The affordance is selected-only; unselected rows keep normal role symbols to avoid chevron noise. Detail status line mirrors the selected action as `Enter to expand` or `Enter to collapse`.
 - Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
 - Style ownership is fixed by layer:
 - Formatter config owns syntax backgrounds and formatter base foreground.

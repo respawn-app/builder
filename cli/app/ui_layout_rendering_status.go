@@ -164,6 +164,9 @@ func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string
 	if strings.TrimSpace(l.model.transientStatus) != "" {
 		return ""
 	}
+	if action, ok := l.model.view.DetailSelectedExpansionAction(); ok {
+		return style.meta.Render(truncateQueuedMessageLine("Enter to "+action, available))
+	}
 	if !l.shouldRenderHelpHint() {
 		return ""
 	}

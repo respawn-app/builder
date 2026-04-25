@@ -256,6 +256,25 @@ func (m Model) DetailRebuildCount() int {
 	return m.detailRebuildCount
 }
 
+func (m Model) DetailSelectedEntry() (int, bool) {
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok {
+		return 0, false
+	}
+	return selectedEntry, true
+}
+
+func (m Model) DetailSelectedExpansionAction() (string, bool) {
+	state, ok := m.detailSelectedExpansionState()
+	if !ok {
+		return "", false
+	}
+	if state.expanded {
+		return "collapse", true
+	}
+	return "expand", true
+}
+
 func (m Model) TranscriptBaseOffset() int {
 	return m.transcriptBaseOffset
 }
@@ -335,7 +354,8 @@ type detailBlockSpec struct {
 	entryEnd   int
 	selectable bool
 	expanded   bool
-	render     func(Model) []string
+	expandable bool
+	render     func(Model, string) []string
 }
 
 func NewModel(opts ...Option) Model {
@@ -505,10 +525,10 @@ func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
 			m.rebuildDetailSnapshot()
 			m.detailStale = false
 		}
+		m.refreshDetailViewport()
 		if m.compactDetail {
 			m.focusCenterVisibleDetailEntry()
 		}
-		m.refreshDetailViewport()
 	case ModeOngoing:
 		m.mode = ModeOngoing
 		// Ongoing mode is the live tail view, so exiting detail always snaps to
@@ -608,8 +628,13 @@ func (m *Model) focusCenterVisibleDetailEntry() {
 		m.ensureDetailSelection()
 		return
 	}
+	previousEntry := m.detailSelectedEntry
+	previousActive := m.detailSelectedActive
 	m.detailSelectedEntry = bestEntry
 	m.detailSelectedActive = true
+	if previousEntry != m.detailSelectedEntry || previousActive != m.detailSelectedActive {
+		m.refreshDetailViewport()
+	}
 }
 
 func (m *Model) focusDetailViewportEdge(delta int) {
@@ -886,8 +911,25 @@ func (m Model) renderDetailSnapshot() string {
 
 	out := make([]string, 0, m.viewportLines)
 	selectedEntry, highlightSelected := m.resolveDetailSelection()
+	firstSelectedLine := -1
+	lastSelectedLine := -1
+	if highlightSelected && m.compactDetail {
+		for i, entryIndex := range m.detailLineEntryIndices {
+			if entryIndex != selectedEntry {
+				continue
+			}
+			if firstSelectedLine < 0 {
+				firstSelectedLine = i
+			}
+			lastSelectedLine = i
+		}
+	}
 	for i, line := range lines {
 		selected := highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry
+		if m.compactDetail && highlightSelected && (i == firstSelectedLine-1 || i == lastSelectedLine+1) {
+			out = append(out, m.renderDetailSelectionSpacerLine())
+			continue
+		}
 		line = m.renderDetailViewportLine(line, selected)
 		out = append(out, line)
 	}
@@ -895,6 +937,41 @@ func (m Model) renderDetailSnapshot() string {
 		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
+}
+
+type detailExpansionSymbolState struct {
+	role     string
+	expanded bool
+}
+
+func (m Model) detailSelectedExpansionState() (detailExpansionSymbolState, bool) {
+	if !m.compactDetail || m.mode != ModeDetail {
+		return detailExpansionSymbolState{}, false
+	}
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok {
+		return detailExpansionSymbolState{}, false
+	}
+	blockIndex := m.detailBlockIndexForEntry(selectedEntry)
+	if blockIndex < 0 || blockIndex >= len(m.detailBlocks) {
+		return detailExpansionSymbolState{}, false
+	}
+	block := m.detailBlocks[blockIndex]
+	if !block.selectable || !block.expandable {
+		return detailExpansionSymbolState{}, false
+	}
+	return detailExpansionSymbolState{role: block.role, expanded: block.expanded}, true
+}
+
+func (m Model) detailExpansionSymbolOverride(block detailBlockSpec) string {
+	if !m.compactDetail || m.mode != ModeDetail || !block.selectable || !block.expandable {
+		return ""
+	}
+	selectedEntry, ok := m.resolveDetailSelection()
+	if !ok || selectedEntry != block.entryIndex {
+		return ""
+	}
+	return m.detailExpansionSymbolPrefix(block.role, block.expanded)
 }
 
 func (m *Model) invalidateDetailSnapshot() {
@@ -1004,12 +1081,17 @@ func (m *Model) detailBlockLinesAt(idx int) []string {
 	if m == nil || idx < 0 || idx >= len(m.detailBlocks) {
 		return []string{""}
 	}
-	if len(m.detailBlockLines[idx]) > 0 {
+	block := m.detailBlocks[idx]
+	symbolOverride := m.detailExpansionSymbolOverride(block)
+	if symbolOverride == "" && len(m.detailBlockLines[idx]) > 0 {
 		return m.detailBlockLines[idx]
 	}
-	lines := m.detailBlocks[idx].render(*m)
+	lines := block.render(*m, symbolOverride)
 	if len(lines) == 0 {
 		lines = []string{""}
+	}
+	if symbolOverride != "" {
+		return append([]string(nil), lines...)
 	}
 	m.detailBlockLines[idx] = append([]string(nil), lines...)
 	return m.detailBlockLines[idx]
