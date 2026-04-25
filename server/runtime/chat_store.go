@@ -228,11 +228,36 @@ func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ong
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	messageCount := s.messageCount
+	entry := ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)}
+	if s.foldCompactionNoticeIntoPreviousSummaryLocked(entry) {
+		return
+	}
 	s.local = append(s.local, localChatEntry{
-		Entry:             ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
+		Entry:             entry,
 		AfterMessageCount: messageCount,
 	})
 	s.transcriptEntryCount++
+}
+
+func (s *chatStore) foldCompactionNoticeIntoPreviousSummaryLocked(entry ChatEntry) bool {
+	if transcript.NormalizeEntryRole(entry.Role) != "compaction_notice" {
+		return false
+	}
+	label := strings.TrimSpace(entry.Text)
+	if label == "" {
+		return false
+	}
+	for idx := len(s.local) - 1; idx >= 0; idx-- {
+		previous := &s.local[idx].Entry
+		if transcript.NormalizeEntryRole(previous.Role) != string(transcript.EntryRoleCompactionSummary) {
+			continue
+		}
+		previous.CompactLabel = label
+		previous.OngoingText = label
+		previous.Visibility = transcript.EntryVisibilityAll
+		return true
+	}
+	return false
 }
 
 func (s *chatStore) appendProjectedEntry(entry ChatEntry) {
