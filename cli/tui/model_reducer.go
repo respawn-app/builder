@@ -224,6 +224,8 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 
 func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUpdateResult) {
 	anchorEntry, anchorOffset, preserveAnchor := m.detailViewportAnchor()
+	previousBaseOffset := m.transcriptBaseOffset
+	previousEntries := append([]TranscriptEntry(nil), m.transcript...)
 	entries := make([]TranscriptEntry, len(msg.Entries))
 	copy(entries, msg.Entries)
 	for i := range entries {
@@ -252,7 +254,7 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	if _, ok := m.localTranscriptIndex(m.detailSelectedEntry); !ok {
 		m.detailSelectedActive = false
 	}
-	m.reconcileDetailExpandedEntries()
+	m.reconcileDetailExpandedEntries(previousBaseOffset, previousEntries)
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
@@ -275,15 +277,40 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	}
 }
 
-func (m *Model) reconcileDetailExpandedEntries() {
+func (m *Model) reconcileDetailExpandedEntries(previousBaseOffset int, previousEntries []TranscriptEntry) {
 	if m == nil || len(m.detailExpandedEntries) == 0 {
 		return
 	}
 	for entryIndex := range m.detailExpandedEntries {
-		if _, ok := m.localTranscriptIndex(entryIndex); !ok {
+		currentLocal, currentOK := m.localTranscriptIndex(entryIndex)
+		previousLocal, previousOK := transcriptLocalIndex(previousBaseOffset, len(previousEntries), entryIndex)
+		if !currentOK || !previousOK || !detailExpansionEntryMatches(previousEntries[previousLocal], m.transcript[currentLocal]) {
 			delete(m.detailExpandedEntries, entryIndex)
 		}
 	}
+}
+
+func transcriptLocalIndex(baseOffset int, entryCount int, entryIndex int) (int, bool) {
+	local := entryIndex - baseOffset
+	if local < 0 || local >= entryCount {
+		return 0, false
+	}
+	return local, true
+}
+
+func detailExpansionEntryMatches(left TranscriptEntry, right TranscriptEntry) bool {
+	return left.Visibility == right.Visibility &&
+		left.Transient == right.Transient &&
+		left.Committed == right.Committed &&
+		left.Role == right.Role &&
+		left.Text == right.Text &&
+		left.OngoingText == right.OngoingText &&
+		left.Phase == right.Phase &&
+		left.MessageType == right.MessageType &&
+		left.SourcePath == right.SourcePath &&
+		left.CompactLabel == right.CompactLabel &&
+		left.ToolResultSummary == right.ToolResultSummary &&
+		left.ToolCallID == right.ToolCallID
 }
 
 func (m *Model) moveDetailSelection(delta int) {
