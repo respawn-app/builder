@@ -130,18 +130,18 @@ func TestDetailModeArrowScrollsDetailByLineAndTracksCenterSelection(t *testing.T
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	firstVisible := 0
+	topVisible := 0
 	ok := false
 	for guard := 0; guard < 20; guard++ {
-		firstVisible, _, ok = m.view.DetailVisibleEntryRange()
-		if ok && firstVisible == 0 {
+		topVisible, _, ok = m.view.DetailVisibleEntryRange()
+		if ok && topVisible == 0 {
 			break
 		}
 		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
 	}
-	firstVisible, _, ok = m.view.DetailVisibleEntryRange()
-	if !ok || firstVisible != 0 {
-		t.Fatalf("expected first command visible before expansion, range=(%d, ok=%v) view=%q", firstVisible, ok, stripANSIAndTrimRight(m.view.View()))
+	topVisible, _, ok = m.view.DetailVisibleEntryRange()
+	if !ok || topVisible != 0 {
+		t.Fatalf("expected top command visible before expansion, range=(%d, ok=%v) view=%q", topVisible, ok, stripANSIAndTrimRight(m.view.View()))
 	}
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	beforeScroll := m.view.DetailScroll()
@@ -249,7 +249,7 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 	}
 }
 
-func TestDetailModeScrollThenEnterExpandsFirstVisibleItem(t *testing.T) {
+func TestDetailModeScrollThenEnterExpandsCenterSelectedItem(t *testing.T) {
 	tests := []struct {
 		name   string
 		scroll tea.Msg
@@ -330,24 +330,6 @@ func TestUpDownRouteByTranscriptMode(t *testing.T) {
 	if m.input != "hello" {
 		t.Fatalf("expected detail mode scrolling not to mutate recalled input, got %q", m.input)
 	}
-}
-
-func firstVisibleDetailCommandIndex(t *testing.T, view string) int {
-	t.Helper()
-
-	for _, line := range strings.Split(stripANSIAndTrimRight(view), "\n") {
-		_, suffix, ok := strings.Cut(line, "$ cmd ")
-		if !ok {
-			continue
-		}
-		value, parseErr := strconv.Atoi(strings.TrimSpace(suffix))
-		if parseErr != nil {
-			t.Fatalf("failed to parse command index from %q: %v", line, parseErr)
-		}
-		return value
-	}
-	t.Fatalf("expected visible detail command in %q", stripANSIAndTrimRight(view))
-	return -1
 }
 
 func selectedDetailCommandIndex(t *testing.T, view string) int {
