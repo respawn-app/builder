@@ -38,6 +38,37 @@ func TestWindowsInstallWithoutForceRejectsExistingDifferentScript(t *testing.T) 
 	}
 }
 
+func TestWindowsInstallWithoutForceReRegistersOrphanScript(t *testing.T) {
+	spec := windowsServiceTestSpec(t)
+	if err := os.MkdirAll(filepath.Dir(windowsTaskScriptPath(spec)), 0o755); err != nil {
+		t.Fatalf("mkdir task script dir: %v", err)
+	}
+	if err := os.WriteFile(windowsTaskScriptPath(spec), []byte("old script"), 0o644); err != nil {
+		t.Fatalf("write existing task script: %v", err)
+	}
+	calls := captureWindowsServiceCommands(t, func(ctx context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch name {
+		case "schtasks":
+			if len(args) > 0 && args[0] == "/Query" {
+				return serviceCommandResult{}, errors.New("task missing")
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	if err := (scheduledTaskServiceBackend{}).Install(context.Background(), spec, false, false); err != nil {
+		t.Fatalf("install with orphan script: %v", err)
+	}
+	if string(mustReadFile(t, windowsTaskScriptPath(spec))) == "old script" {
+		t.Fatal("expected orphan script to be rewritten")
+	}
+	if len(*calls) != 2 || (*calls)[1][0] != "schtasks" || (*calls)[1][1] != "/Create" {
+		t.Fatalf("calls = %+v, want query then create", *calls)
+	}
+}
+
 func TestWindowsStopStartupFallbackKillsTaskScriptProcess(t *testing.T) {
 	spec := windowsServiceTestSpec(t)
 	if err := os.MkdirAll(filepath.Dir(windowsStartupItemPath()), 0o755); err != nil {
@@ -100,6 +131,41 @@ func TestWindowsStatusReportsRegisteredServerPID(t *testing.T) {
 	}
 	if status.PID != 222 {
 		t.Fatalf("status PID = %d, want registered server PID 222", status.PID)
+	}
+}
+
+func TestWindowsStatusDoesNotTreatBareServerProcessAsServiceRunning(t *testing.T) {
+	spec := windowsServiceTestSpec(t)
+	if err := os.MkdirAll(filepath.Dir(windowsTaskScriptPath(spec)), 0o755); err != nil {
+		t.Fatalf("mkdir task script dir: %v", err)
+	}
+	if err := os.WriteFile(windowsTaskScriptPath(spec), []byte(renderWindowsTaskScript(spec)), 0o644); err != nil {
+		t.Fatalf("write task script: %v", err)
+	}
+	captureWindowsServiceCommands(t, func(ctx context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch name {
+		case "schtasks":
+			return serviceCommandResult{Stdout: "Status: Ready\r\n"}, nil
+		case "powershell":
+			script := strings.Join(args, " ")
+			if strings.Contains(script, windowsTaskScriptPath(spec)) {
+				return serviceCommandResult{}, nil
+			}
+			if strings.Contains(script, spec.Executable) {
+				return serviceCommandResult{Stdout: "222\r\n"}, nil
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	status, err := (scheduledTaskServiceBackend{}).Status(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Running || status.PID != 0 {
+		t.Fatalf("status running=%v pid=%d, want stopped with no service PID", status.Running, status.PID)
 	}
 }
 

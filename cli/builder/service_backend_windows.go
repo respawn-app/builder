@@ -31,7 +31,7 @@ func (scheduledTaskServiceBackend) Install(ctx context.Context, spec serviceSpec
 	startupInstalled := windowsStartupItemInstalled()
 	existingScript, scriptErr := os.ReadFile(scriptPath)
 	scriptExists := scriptErr == nil
-	if !force && (installed || startupInstalled || scriptExists) {
+	if !force && (installed || startupInstalled) {
 		if !scriptExists || string(existingScript) != nextScript {
 			return fmt.Errorf("Builder background service is already installed; use --force to rewrite it")
 		}
@@ -116,9 +116,9 @@ func (scheduledTaskServiceBackend) Status(ctx context.Context, spec serviceSpec)
 	}
 	taskScriptPIDs := windowsTaskScriptPIDs(ctx, spec)
 	serverPIDs := windowsRegisteredCommandPIDs(ctx, spec)
-	running := len(taskScriptPIDs) > 0 || len(serverPIDs) > 0
+	running := len(taskScriptPIDs) > 0
 	pid := 0
-	if len(serverPIDs) > 0 {
+	if running && len(serverPIDs) > 0 {
 		pid = serverPIDs[0]
 	}
 	return serviceStatus{
