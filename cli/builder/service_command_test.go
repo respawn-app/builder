@@ -352,6 +352,30 @@ func TestServiceRestartRejectsRunningServerWhenOwnershipPIDMissingAndCommandDiff
 	}
 }
 
+func TestServiceRestartAllowsUnhealthyListenerWhenServiceRunning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, `{"status":"starting","pid":123}`, http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	want := []serviceAction{serviceActionStatus, serviceActionRestart}
+	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
+		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
+	}
+}
+
 func TestServiceActionErrorReturnsOne(t *testing.T) {
 	backend := &stubServiceBackend{err: errors.New("boom")}
 	withServiceCommandTestBackend(t, backend)

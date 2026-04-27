@@ -69,6 +69,37 @@ func TestWindowsInstallWithoutForceReRegistersOrphanScript(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallRemovesStartupFallbackAfterScheduledTaskRegistration(t *testing.T) {
+	spec := windowsServiceTestSpec(t)
+	if err := os.MkdirAll(filepath.Dir(windowsStartupItemPath()), 0o755); err != nil {
+		t.Fatalf("mkdir startup dir: %v", err)
+	}
+	if err := os.WriteFile(windowsStartupItemPath(), []byte("fallback"), 0o644); err != nil {
+		t.Fatalf("write startup item: %v", err)
+	}
+	calls := captureWindowsServiceCommands(t, func(ctx context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch name {
+		case "schtasks":
+			if len(args) > 0 && args[0] == "/Query" {
+				return serviceCommandResult{}, errors.New("task missing")
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	if err := (scheduledTaskServiceBackend{}).Install(context.Background(), spec, true, false); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(windowsStartupItemPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("startup fallback stat err = %v, want not exist", err)
+	}
+	if len(*calls) != 2 || (*calls)[1][0] != "schtasks" || (*calls)[1][1] != "/Create" {
+		t.Fatalf("calls = %+v, want query then create", *calls)
+	}
+}
+
 func TestWindowsStopStartupFallbackKillsTaskScriptProcess(t *testing.T) {
 	spec := windowsServiceTestSpec(t)
 	if err := os.MkdirAll(filepath.Dir(windowsStartupItemPath()), 0o755); err != nil {
