@@ -308,11 +308,13 @@ func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 	if err := store.MarkModelDispatchLocked(LockedContract{
-		Model:           "gpt-5",
-		Temperature:     1,
-		MaxOutputToken:  0,
-		SystemPrompt:    "locked system prompt",
-		HasSystemPrompt: true,
+		Model:             "gpt-5",
+		Temperature:       1,
+		MaxOutputToken:    0,
+		SystemPrompt:      "locked system prompt",
+		HasSystemPrompt:   true,
+		ReviewerPrompt:    "locked reviewer prompt",
+		HasReviewerPrompt: true,
 	}); err != nil {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
@@ -332,6 +334,9 @@ func TestLockedContractPersistenceIncludesSystemPromptButNotToolSchema(t *testin
 	locked := opened.Meta().Locked
 	if locked == nil || locked.SystemPrompt != "locked system prompt" || !locked.HasSystemPrompt {
 		t.Fatalf("locked system prompt = %+v, want persisted snapshot marker", locked)
+	}
+	if locked.ReviewerPrompt != "locked reviewer prompt" || !locked.HasReviewerPrompt {
+		t.Fatalf("locked reviewer prompt = %+v, want persisted snapshot marker", locked)
 	}
 }
 

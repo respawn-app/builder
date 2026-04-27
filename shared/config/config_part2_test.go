@@ -475,6 +475,7 @@ func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {
 frequency = "all"
 model = "gpt-file-reviewer"
 thinking_level = "medium"
+system_prompt_file = "~/reviewer-global.md"
 timeout_seconds = 45
 verbose_output = true
 `), 0o644); err != nil {
@@ -500,8 +501,29 @@ verbose_output = true
 	if !cfg.Settings.Reviewer.VerboseOutput {
 		t.Fatalf("expected file reviewer.verbose_output=true")
 	}
+	if cfg.Settings.Reviewer.SystemPromptFile != "~/reviewer-global.md" {
+		t.Fatalf("expected file reviewer.system_prompt_file, got %q", cfg.Settings.Reviewer.SystemPromptFile)
+	}
 	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "file" {
 		t.Fatalf("expected reviewer.verbose_output source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["reviewer.system_prompt_file"]; got != "file" {
+		t.Fatalf("expected reviewer.system_prompt_file source file, got %q", got)
+	}
+
+	workspaceConfigPath := filepath.Join(workspace, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(workspaceConfigPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace config dir: %v", err)
+	}
+	if err := os.WriteFile(workspaceConfigPath, []byte("[reviewer]\nsystem_prompt_file = \"workspace-reviewer.md\"\n"), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with workspace config: %v", err)
+	}
+	if cfg.Settings.Reviewer.SystemPromptFile != "workspace-reviewer.md" {
+		t.Fatalf("expected workspace reviewer.system_prompt_file override, got %q", cfg.Settings.Reviewer.SystemPromptFile)
 	}
 
 	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "off")

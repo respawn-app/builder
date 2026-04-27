@@ -76,6 +76,7 @@ postprocessing_mode = "all" # shell output token optimizations by Builder, or "a
 frequency = "edits"
 timeout_seconds = 60
 verbose_output = false # show in ongoing transcript
+# system_prompt_file = "~/.builder/reviewer_system_prompt.md"
 
 # custom subagent roles config, fast is the default one, always provided
 [subagents.fast]
@@ -147,6 +148,7 @@ Configure the supervisor agent that oversees model changes.
 | `reviewer.frequency` | string | `edits` | `BUILDER_REVIEWER_FREQUENCY` | Allowed: `off`, `all`, `edits`. `all` runs the reviewer after every completed assistant turn. `edits` runs it only after successful `patch` edits. |
 | `reviewer.model` | string | inherits `model` | `BUILDER_REVIEWER_MODEL` | Separate model for the reviewer pass. If unset, Builder uses main `model`. |
 | `reviewer.thinking_level` | string | inherits `thinking_level` | `BUILDER_REVIEWER_THINKING_LEVEL` | Allowed: `low`, `medium`, `high`, `xhigh`. |
+| `reviewer.system_prompt_file` | string | `""` |  | Path to a custom supervisor system prompt file. Workspace config overrides global config; no CLI or environment override is provided. |
 | `reviewer.timeout_seconds` | int | `60` | `BUILDER_REVIEWER_TIMEOUT_SECONDS` | Reviewer HTTP timeout. Must be `> 0`. |
 | `reviewer.verbose_output` | bool | `false` | `BUILDER_REVIEWER_VERBOSE_OUTPUT` | Controls whether reviewer suggestion text is shown at all. When `false`, Builder only shows the concise reviewer result/status line. When `true`, Builder shows the full suggestion list at the moment the reviewer issues it, and the later reviewer status stays concise after the follow-up is applied or ignored. |
 

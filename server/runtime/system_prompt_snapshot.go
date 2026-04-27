@@ -119,3 +119,100 @@ func pathWithinRoot(path string, root string) bool {
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
+
+func (e *Engine) reviewerSystemPrompt() (string, error) {
+	if prompt, ok := e.lockedReviewerPromptSnapshot(); ok {
+		return prompt, nil
+	}
+	prompt, err := e.buildReviewerPromptSnapshot()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(e.cfg.Reviewer.SystemPromptFile) == "" {
+		return prompt, nil
+	}
+	if err := e.store.BackfillLockedReviewerPrompt(prompt); err != nil {
+		return "", err
+	}
+	if prompt, ok := e.lockedReviewerPromptSnapshot(); ok {
+		return prompt, nil
+	}
+	e.mu.Lock()
+	if e.locked != nil && !e.locked.HasReviewerPrompt {
+		e.locked.ReviewerPrompt = prompt
+		e.locked.HasReviewerPrompt = true
+	}
+	e.mu.Unlock()
+	return prompt, nil
+}
+
+func (e *Engine) lockedReviewerPromptSnapshot() (string, bool) {
+	if e == nil {
+		return "", false
+	}
+	if meta := e.store.Meta(); meta.Locked != nil {
+		if meta.Locked.HasReviewerPrompt {
+			return strings.TrimSpace(meta.Locked.ReviewerPrompt), true
+		}
+		if prompt := strings.TrimSpace(meta.Locked.ReviewerPrompt); prompt != "" {
+			return prompt, true
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.locked == nil {
+		return "", false
+	}
+	if e.locked.HasReviewerPrompt {
+		return strings.TrimSpace(e.locked.ReviewerPrompt), true
+	}
+	if prompt := strings.TrimSpace(e.locked.ReviewerPrompt); prompt != "" {
+		return prompt, true
+	}
+	return "", false
+}
+
+func (e *Engine) buildReviewerPromptSnapshot() (string, error) {
+	path := strings.TrimSpace(e.cfg.Reviewer.SystemPromptFile)
+	if path == "" {
+		return prompts.ReviewerSystemPrompt, nil
+	}
+	resolved, err := resolveConfiguredPromptFile(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve reviewer.system_prompt_file %q: %w", path, err)
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", fmt.Errorf("read reviewer.system_prompt_file %q: %w", resolved, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func resolveConfiguredPromptFile(path string) (string, error) {
+	expanded, err := expandTildePromptPath(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(expanded)
+}
+
+func expandTildePromptPath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "~") {
+		return trimmed, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	if trimmed == "~" {
+		return home, nil
+	}
+	if strings.HasPrefix(trimmed, "~/") {
+		return filepath.Join(home, strings.TrimPrefix(trimmed, "~/")), nil
+	}
+	if strings.HasPrefix(trimmed, "~\\") {
+		return filepath.Join(home, strings.TrimPrefix(trimmed, "~\\")), nil
+	}
+	return trimmed, nil
+}

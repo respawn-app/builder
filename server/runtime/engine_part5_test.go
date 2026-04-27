@@ -57,6 +57,178 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 	}
 }
 
+func TestReviewerSystemPromptFileIsLazyLockedAndReused(t *testing.T) {
+	dir := t.TempDir()
+	reviewerPromptPath := filepath.Join(dir, "reviewer-prompt.md")
+	writeTestFile(t, reviewerPromptPath, "custom reviewer prompt")
+
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:        "all",
+			Model:            "gpt-5",
+			SystemPromptFile: reviewerPromptPath,
+			Client:           reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := reviewerClient.calls[0].SystemPrompt; got != "custom reviewer prompt" {
+		t.Fatalf("reviewer system prompt = %q, want custom reviewer prompt", got)
+	}
+	if locked := store.Meta().Locked; locked == nil || !locked.HasReviewerPrompt || locked.ReviewerPrompt != "custom reviewer prompt" {
+		t.Fatalf("locked reviewer prompt = %+v, want custom reviewer prompt snapshot", locked)
+	}
+
+	writeTestFile(t, reviewerPromptPath, "changed reviewer prompt")
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close engine: %v", err)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	reopenedReviewer := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reopenedEngine, err := New(reopened, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Model:            "gpt-5",
+			SystemPromptFile: reviewerPromptPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	if _, err := reopenedEngine.runReviewerSuggestions(context.Background(), "step-2", reopenedReviewer); err != nil {
+		t.Fatalf("run reviewer suggestions: %v", err)
+	}
+	if got := reopenedReviewer.calls[0].SystemPrompt; got != "custom reviewer prompt" {
+		t.Fatalf("reopened reviewer system prompt = %q, want locked custom reviewer prompt", got)
+	}
+}
+
+func TestReviewerSystemPromptFileResolvesTilde(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	t.Setenv("HOME", home)
+	reviewerPromptPath := filepath.Join(home, "reviewer-prompt.md")
+	writeTestFile(t, reviewerPromptPath, "tilde reviewer prompt")
+
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Model:            "gpt-5",
+			SystemPromptFile: "~/reviewer-prompt.md",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
+		t.Fatalf("run reviewer suggestions: %v", err)
+	}
+	if got := reviewerClient.calls[0].SystemPrompt; got != "tilde reviewer prompt" {
+		t.Fatalf("reviewer system prompt = %q, want tilde reviewer prompt", got)
+	}
+}
+
+func TestReviewerSystemPromptFileMissingFailsWithoutSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	missingPromptPath := filepath.Join(dir, "missing-reviewer-prompt.md")
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Model:            "gpt-5",
+			SystemPromptFile: missingPromptPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.ensureLocked(); err != nil {
+		t.Fatalf("ensure locked: %v", err)
+	}
+	_, err = eng.runReviewerSuggestions(context.Background(), "step-1", &fakeClient{})
+	if err == nil {
+		t.Fatal("expected missing reviewer system prompt file error")
+	}
+	if !strings.Contains(err.Error(), "read reviewer.system_prompt_file") {
+		t.Fatalf("expected reviewer prompt read error, got %v", err)
+	}
+	if locked := store.Meta().Locked; locked == nil || locked.HasReviewerPrompt || locked.ReviewerPrompt != "" {
+		t.Fatalf("locked reviewer prompt = %+v, want no reviewer prompt snapshot", locked)
+	}
+}
+
+func TestReviewerFrequencyOffDoesNotReadSystemPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	missingPromptPath := filepath.Join(dir, "missing-reviewer-prompt.md")
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:        "off",
+			Model:            "gpt-5",
+			SystemPromptFile: missingPromptPath,
+			Client:           reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(reviewerClient.calls) != 0 {
+		t.Fatalf("expected reviewer not to run, got %d calls", len(reviewerClient.calls))
+	}
+	if locked := store.Meta().Locked; locked == nil || locked.HasReviewerPrompt || locked.ReviewerPrompt != "" {
+		t.Fatalf("locked reviewer prompt = %+v, want no reviewer prompt snapshot", locked)
+	}
+}
+
 func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

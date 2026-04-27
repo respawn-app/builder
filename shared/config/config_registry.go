@@ -377,6 +377,13 @@ func newSettingsRegistry() settingsRegistry {
 					return "<inherits thinking_level when unset>"
 				},
 			}),
+		newStringSetting("reviewer.system_prompt_file", "",
+			func(state *settingsState, value string) { state.Settings.Reviewer.SystemPromptFile = value },
+			func(state settingsState) string { return state.Settings.Reviewer.SystemPromptFile },
+			"",
+			nil,
+			nil,
+			settingDocOptions{}),
 		newIntSetting("reviewer.timeout_seconds", defaultReviewerTimeoutSec,
 			func(state *settingsState, value int) { state.Settings.Reviewer.TimeoutSeconds = value },
 			func(state settingsState) int { return state.Settings.Reviewer.TimeoutSeconds },

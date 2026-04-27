@@ -140,12 +140,13 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		ToolPreambles:                 active.ToolPreambles,
 		TranscriptWorkingDir:          workspaceRoot,
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:     active.Reviewer.Frequency,
-			Model:         active.Reviewer.Model,
-			ThinkingLevel: active.Reviewer.ThinkingLevel,
-			VerboseOutput: active.Reviewer.VerboseOutput,
-			Client:        reviewerClient,
-			ClientFactory: newReviewerClient,
+			Frequency:        active.Reviewer.Frequency,
+			Model:            active.Reviewer.Model,
+			ThinkingLevel:    active.Reviewer.ThinkingLevel,
+			SystemPromptFile: active.Reviewer.SystemPromptFile,
+			VerboseOutput:    active.Reviewer.VerboseOutput,
+			Client:           reviewerClient,
+			ClientFactory:    newReviewerClient,
 		},
 		OnEvent: func(evt runtime.Event) {
 			if opts.OnEvent != nil {
