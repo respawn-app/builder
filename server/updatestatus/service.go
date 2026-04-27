@@ -56,6 +56,9 @@ func NewService(currentVersion string, opts ...Option) *Service {
 		opt(s)
 	}
 	s.disabled = !isComparableVersion(s.currentVersion)
+	if s.disabled {
+		s.status.Checked = true
+	}
 	return s
 }
 

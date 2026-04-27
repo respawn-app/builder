@@ -150,7 +150,6 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
 	authStatusService := authstatus.NewService(authSupport.AuthManager)
 	updateStatusService := updatestatus.NewService(buildinfo.Version)
-	updateStatusService.Start()
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode).WithUpdateStatusProvider(updateStatusService)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
@@ -210,6 +209,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 			}
 		}
 	}
+	updateStatusService.Start()
 	return core, nil
 }
 
