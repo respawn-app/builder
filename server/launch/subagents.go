@@ -160,6 +160,8 @@ func applySubagentRoleOverrides(settings *config.Settings, role config.SubagentR
 			settings.Reviewer.Model = role.Settings.Reviewer.Model
 		case "reviewer.thinking_level":
 			settings.Reviewer.ThinkingLevel = role.Settings.Reviewer.ThinkingLevel
+		case "reviewer.system_prompt_file":
+			settings.Reviewer.SystemPromptFile = role.Settings.Reviewer.SystemPromptFile
 		case "reviewer.timeout_seconds":
 			settings.Reviewer.TimeoutSeconds = role.Settings.Reviewer.TimeoutSeconds
 		case "reviewer.verbose_output":
