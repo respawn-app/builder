@@ -14,7 +14,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lxzan/gws v1.9.1
 	github.com/mattn/go-runewidth v0.0.23
-	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.32.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/sahilm/fuzzy v0.1.1
@@ -23,7 +22,7 @@ require (
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.50.0
 	mvdan.cc/sh/v3 v3.13.1
 )
 
@@ -52,6 +51,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
+	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
