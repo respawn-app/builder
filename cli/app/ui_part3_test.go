@@ -121,6 +121,38 @@ func TestStartupUpdateNoticeShowsAvailableVersionOnce(t *testing.T) {
 	}
 }
 
+func TestStartupUpdateNoticeMarksShownOnlyAfterDisplay(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	initialClear := m.setTransientStatusWithKind("busy", uiStatusNoticeNeutral)
+	if initialClear == nil {
+		t.Fatal("expected initial notice clear command")
+	}
+
+	next, cmd := m.Update(startupUpdateNoticeMsg{version: "1.2.3"})
+	updated := next.(*uiModel)
+	if cmd != nil {
+		t.Fatalf("expected queued update notice to wait for active clear, got %T", cmd())
+	}
+	if updated.startupUpdateShown {
+		t.Fatal("did not expect startup update notice marked shown while queued")
+	}
+	if updated.transientStatus != "busy" {
+		t.Fatalf("active notice = %q, want busy", updated.transientStatus)
+	}
+
+	next, cmd = updated.Update(clearTransientStatusMsg{token: updated.transientStatusToken})
+	updated = next.(*uiModel)
+	if updated.transientStatus != "update available: 1.2.3" {
+		t.Fatalf("promoted startup update notice = %q", updated.transientStatus)
+	}
+	if !updated.startupUpdateShown {
+		t.Fatal("expected startup update notice marked shown after promotion")
+	}
+	if cmd == nil {
+		t.Fatal("expected promoted update notice clear command")
+	}
+}
+
 func TestMainInputSupportsInlineCursorEditing(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.input = "hello world"
