@@ -445,8 +445,8 @@ func (defaultUIStatusCollector) CollectAuth(ctx context.Context, req uiStatusReq
 	return result
 }
 
-func (defaultUIStatusCollector) CollectGit(ctx context.Context, _ uiStatusRequest, base uiStatusSnapshot) uiStatusGitStageResult {
-	return uiStatusGitStageResult{Git: collectGitStatus(ctx, base.Workdir)}
+func (defaultUIStatusCollector) CollectGit(ctx context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusGitStageResult {
+	return uiStatusGitStageResult{Git: collectGitStatus(ctx, statusGitRoot(req))}
 }
 
 func (defaultUIStatusCollector) CollectEnvironment(_ context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusEnvironmentStageResult {
@@ -498,6 +498,20 @@ func statusWorkdir(workspaceRoot string, target clientui.SessionExecutionTarget)
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		return strings.TrimSpace(cwd)
+	}
+	return ""
+}
+
+func statusGitRoot(req uiStatusRequest) string {
+	target := statusExecutionTarget(req)
+	if worktreeRoot := strings.TrimSpace(target.WorktreeRoot); worktreeRoot != "" {
+		return worktreeRoot
+	}
+	if workspaceRoot := strings.TrimSpace(req.WorkspaceRoot); workspaceRoot != "" {
+		return workspaceRoot
+	}
+	if workspaceRoot := strings.TrimSpace(target.WorkspaceRoot); workspaceRoot != "" {
+		return workspaceRoot
 	}
 	return ""
 }
@@ -1112,7 +1126,7 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 			case uiStatusSectionAuth:
 				cmds = append(cmds, m.statusAuthRefreshCmd(token, statusAuthCacheKey(request), request, progressive, base))
 			case uiStatusSectionGit:
-				cmds = append(cmds, m.statusGitRefreshCmd(token, statusGitCacheKey(base.Workdir), request, progressive, base))
+				cmds = append(cmds, m.statusGitRefreshCmd(token, statusGitCacheKey(statusGitRoot(request)), request, progressive, base))
 			case uiStatusSectionEnvironment:
 				cmds = append(cmds, m.statusEnvironmentRefreshCmd(token, statusEnvironmentCacheKey(request), request, progressive, base))
 			}
@@ -1134,14 +1148,6 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 
 func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
 	request := m.newStatusRequest(time.Now())
-	workdir := statusWorkdir(request.WorkspaceRoot, statusExecutionTarget(request))
-	trimmedWorkdir := strings.TrimSpace(workdir)
-	if trimmedWorkdir == "" {
-		return nil
-	}
-	if info, err := os.Stat(trimmedWorkdir); err != nil || !info.IsDir() {
-		return nil
-	}
 	token := m.status.refreshToken
 	request.CurrentTime = time.Now()
 	collector := m.statusCollector
@@ -1153,7 +1159,13 @@ func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
 		progressive = defaultUIStatusCollector{}
 	}
 	base := progressive.CollectBase(request)
-	cacheKey := statusGitCacheKey(base.Workdir)
+	gitRoot := statusGitRoot(request)
+	if trimmedGitRoot := strings.TrimSpace(gitRoot); trimmedGitRoot == "" {
+		return nil
+	} else if info, err := os.Stat(trimmedGitRoot); err != nil || !info.IsDir() {
+		return nil
+	}
+	cacheKey := statusGitCacheKey(gitRoot)
 	return m.statusGitRefreshCmd(token, cacheKey, request, progressive, base, true)
 }
 
