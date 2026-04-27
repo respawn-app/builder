@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"builder/shared/config"
+	"builder/shared/protocol"
 )
 
 type stubServiceBackend struct {
@@ -178,6 +179,36 @@ func TestServiceStatusJSON(t *testing.T) {
 	}
 	if !decoded.Installed || !decoded.Running || decoded.PID != 123 || decoded.Backend != "stub" {
 		t.Fatalf("decoded status = %+v", decoded)
+	}
+}
+
+func TestServiceStatusKeepsManualHealthSeparateFromServiceRunningState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"status", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	var decoded serviceStatus
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode status json: %v; raw=%q", err, stdout.String())
+	}
+	if decoded.Running {
+		t.Fatalf("running = true, want false for backend stopped status: %+v", decoded)
+	}
+	if decoded.HealthStatus != protocol.HealthStatusOK || decoded.HealthPID != 123 {
+		t.Fatalf("health status = %q pid=%d, want ok/123", decoded.HealthStatus, decoded.HealthPID)
 	}
 }
 
