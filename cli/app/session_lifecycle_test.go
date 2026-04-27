@@ -838,15 +838,14 @@ func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 	}
 }
 
-func TestConsumeStartupUpdateNoticeFlagOnlyOnce(t *testing.T) {
-	enabled := true
-	if !consumeStartupUpdateNoticeFlag(&enabled) {
-		t.Fatal("expected first session to consume startup update notice")
+func TestShouldRetryStartupUpdateNoticeUntilShown(t *testing.T) {
+	if shouldRetryStartupUpdateNotice(&uiModel{}, true) != true {
+		t.Fatal("expected retry when startup update notice was not shown")
 	}
-	if enabled {
-		t.Fatal("expected startup update notice flag to be disabled after first consume")
+	if shouldRetryStartupUpdateNotice(&uiModel{startupUpdateShown: true}, true) {
+		t.Fatal("did not expect retry after startup update notice was shown")
 	}
-	if consumeStartupUpdateNoticeFlag(&enabled) {
-		t.Fatal("did not expect later sessions to show startup update notice")
+	if shouldRetryStartupUpdateNotice(&uiModel{}, false) {
+		t.Fatal("did not expect retry when startup update notices are disabled")
 	}
 }

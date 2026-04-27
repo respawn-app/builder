@@ -1576,11 +1576,24 @@ func (m *uiModel) advanceTransientStatusQueue() tea.Cmd {
 }
 
 func (m *uiModel) startupUpdateNoticeCmd(status clientui.UpdateStatus) tea.Cmd {
-	if !status.Available || strings.TrimSpace(status.LatestVersion) == "" {
+	if status.Available && strings.TrimSpace(status.LatestVersion) != "" {
+		return func() tea.Msg {
+			return startupUpdateNoticeMsg{version: status.LatestVersion}
+		}
+	}
+	if status.Checked {
+		return nil
+	}
+	client := m.runtimeClient()
+	if client == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		return startupUpdateNoticeMsg{version: status.LatestVersion}
+		refreshed, err := client.RefreshMainView()
+		if err != nil || !refreshed.Status.Update.Available || strings.TrimSpace(refreshed.Status.Update.LatestVersion) == "" {
+			return nil
+		}
+		return startupUpdateNoticeMsg{version: refreshed.Status.Update.LatestVersion}
 	}
 }
 

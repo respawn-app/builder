@@ -64,7 +64,6 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		initialInput := sessionLaunchInitialInputFromServer(ctx, server, plan.SessionID, nextSessionInitialInput)
 
-		startupUpdateNotice := consumeStartupUpdateNoticeFlag(&showStartupUpdateNotice)
 		finalModel, runErr := runUILoopWithInitialPrompt(
 			runtimePlan.Wiring,
 			plan.ActiveSettings,
@@ -76,8 +75,9 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			plan.ModelContractLocked,
 			plan.ConfiguredModelName,
 			plan.StatusConfig,
-			startupUpdateNotice,
+			showStartupUpdateNotice,
 		)
+		showStartupUpdateNotice = shouldRetryStartupUpdateNotice(finalModel, showStartupUpdateNotice)
 		nextSessionInitialPrompt = ""
 		nextSessionInitialInput = ""
 		if runErr != nil {
@@ -106,12 +106,12 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 	}
 }
 
-func consumeStartupUpdateNoticeFlag(enabled *bool) bool {
-	if enabled == nil || !*enabled {
+func shouldRetryStartupUpdateNotice(model any, enabled bool) bool {
+	if !enabled {
 		return false
 	}
-	*enabled = false
-	return true
+	ui, ok := model.(*uiModel)
+	return !ok || ui == nil || !ui.startupUpdateShown
 }
 
 func shouldCloseReboundServer(original embeddedServer, rebound embeddedServer) bool {
