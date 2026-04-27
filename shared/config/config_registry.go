@@ -94,6 +94,13 @@ func newSettingsRegistry() settingsRegistry {
 			nil,
 			normalizeModelVerbosity,
 			settingDocOptions{}),
+		newStringSetting("system_prompt_file", "",
+			func(state *settingsState, value string) { state.Settings.SystemPromptFile = value },
+			func(state settingsState) string { return state.Settings.SystemPromptFile },
+			"",
+			nil,
+			nil,
+			settingDocOptions{commented: true}),
 		newBoolSetting("model_capabilities.supports_reasoning_effort", false,
 			func(state *settingsState, value bool) {
 				state.Settings.ModelCapabilities.SupportsReasoningEffort = value
@@ -933,6 +940,15 @@ func parseSubagentRole(raw settingsFile, settingsPath string, roleKey string) (S
 	}
 	if err := validateSubagentRoleState(roleState, explicitSources); err != nil {
 		return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+	}
+	if _, ok := explicitSources["system_prompt_file"]; ok {
+		resolved, err := resolveConfigRelativePath(roleState.Settings.SystemPromptFile, settingsPath)
+		if err != nil {
+			return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+		}
+		if strings.TrimSpace(resolved) != "" {
+			roleState.Settings.SystemPromptFiles = []SystemPromptFile{{Path: resolved, Scope: SystemPromptFileScopeSubagent}}
+		}
 	}
 	roleState.Settings.Subagents = nil
 	return SubagentRole{Settings: roleState.Settings, Sources: explicitSources}, nil

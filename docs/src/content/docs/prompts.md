@@ -16,18 +16,26 @@ Workspace instructions are included after global instructions. Builder injects t
 
 ## System Prompt
 
-`SYSTEM.md` replaces Builder's built-in main system prompt for new sessions:
+System prompt files replace Builder's built-in main system prompt for new sessions.
 
+Priority, lowest to highest:
+
+- Built-in system prompt
 - `~/.builder/SYSTEM.md`
+- `~/.builder/config.toml` `system_prompt_file`
 - `<workspace-root>/.builder/SYSTEM.md`
+- `<workspace-root>/.builder/config.toml` `system_prompt_file`
+- Selected `[subagents.<role>]` `system_prompt_file`
 
-The workspace file takes priority. If neither file exists, Builder uses the built-in system prompt.
+Only non-empty, non-whitespace prompt files count. Empty files are skipped.
 
-Builder reads and renders `SYSTEM.md` once when the session sends its first model request, stores the fully rendered result in the `system_prompt` session metadata, and reuses that snapshot for later requests. After a session has stored that snapshot, editing `SYSTEM.md` affects new sessions only. Sessions without `system_prompt` capture the current `SYSTEM.md` on their next model request.
+`system_prompt_file` paths are resolved relative to the containing `config.toml` directory unless absolute. If no prompt file has content, Builder uses the built-in system prompt.
+
+Builder reads and renders the selected system prompt file once when the session sends its first model request, stores the fully rendered result in the `system_prompt` session metadata, and reuses that snapshot for later requests. After a session has stored that snapshot, editing prompt files affects new sessions only. Sessions without `system_prompt` capture the current prompt file on their next model request.
 
 ## Placeholders
 
-`SYSTEM.md` uses Go template syntax with these fields:
+System prompt files use Go template syntax with these fields:
 
 | Placeholder | Value |
 | --- | --- |

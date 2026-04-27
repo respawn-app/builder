@@ -75,8 +75,14 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 	if err := configRegistry.applyFile(homeFileConfig, homeSettingsPath, &state, sources); err != nil {
 		return App{}, err
 	}
+	if err := appendSystemPromptFileFromConfig(homeFileConfig, homeSettingsPath, SystemPromptFileScopeHomeConfig, &state); err != nil {
+		return App{}, err
+	}
 	if includeWorkspaceLayer {
 		if err := configRegistry.applyFile(workspaceFileConfig, workspaceSettingsPath, &state, sources); err != nil {
+			return App{}, err
+		}
+		if err := appendSystemPromptFileFromConfig(workspaceFileConfig, workspaceSettingsPath, SystemPromptFileScopeWorkspaceConfig, &state); err != nil {
 			return App{}, err
 		}
 	}
@@ -127,4 +133,39 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 			Sources:                       sources,
 		},
 	}, nil
+}
+
+func appendSystemPromptFileFromConfig(raw settingsFile, settingsPath string, scope SystemPromptFileScope, state *settingsState) error {
+	path, ok, err := lookupFileString(raw, []string{"system_prompt_file"})
+	if err != nil || !ok {
+		return err
+	}
+	resolved, err := resolveConfigRelativePath(path, settingsPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved) == "" {
+		return nil
+	}
+	state.Settings.SystemPromptFiles = append(state.Settings.SystemPromptFiles, SystemPromptFile{Path: resolved, Scope: scope})
+	return nil
+}
+
+func resolveConfigRelativePath(path string, settingsPath string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", nil
+	}
+	expanded, err := expandTildePath(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return filepath.Abs(expanded)
+	}
+	baseDir := strings.TrimSpace(filepath.Dir(settingsPath))
+	if baseDir == "" || baseDir == "." {
+		return filepath.Abs(expanded)
+	}
+	return filepath.Abs(filepath.Join(baseDir, expanded))
 }

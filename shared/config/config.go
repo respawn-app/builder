@@ -82,10 +82,25 @@ type SubagentRole struct {
 	Sources  map[string]string
 }
 
+type SystemPromptFileScope string
+
+const (
+	SystemPromptFileScopeHomeConfig      SystemPromptFileScope = "home_config"
+	SystemPromptFileScopeWorkspaceConfig SystemPromptFileScope = "workspace_config"
+	SystemPromptFileScopeSubagent        SystemPromptFileScope = "subagent"
+)
+
+type SystemPromptFile struct {
+	Path  string
+	Scope SystemPromptFileScope
+}
+
 type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
 	ModelVerbosity                   ModelVerbosity
+	SystemPromptFile                 string
+	SystemPromptFiles                []SystemPromptFile
 	ModelCapabilities                ModelCapabilitiesOverride
 	Theme                            string
 	TUIAlternateScreen               TUIAlternateScreenPolicy

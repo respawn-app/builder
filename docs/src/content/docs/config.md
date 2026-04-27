@@ -48,6 +48,7 @@ Changing `persistence_root` does not move either config file. `persistence_root`
 model = "gpt-5.5"
 thinking_level = "medium" # low, medium, high, xhigh
 model_verbosity = "medium" # or "low"
+# system_prompt_file = "SYSTEM.md" # relative to this config.toml directory
 theme = "auto" # or light / dark
 web_search = "native"
 compaction_mode = "local" # or "native" (if supported)
@@ -107,6 +108,7 @@ verbose_output = false # show in ongoing transcript
 | `model` | string | `gpt-5.5` | `BUILDER_MODEL` | `builder run --model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
 | `thinking_level` | string | `medium` | `BUILDER_THINKING_LEVEL` | `builder run --thinking-level` | Provider-specific reasoning effort string. |
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
+| `system_prompt_file` | string | `""` |  |  | Main system prompt file. Relative paths resolve from the containing `config.toml` directory. Empty files are skipped. |
 | `theme` | string | `auto` | `BUILDER_THEME` | `builder run --theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
 | `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
 | `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification backend. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
@@ -199,6 +201,7 @@ Notes:
 
 `[subagents.<role>]` is a file-only table for named headless subagent roles. Fast is always-present, but you can add custom agents here.
 Subagent roles inherit the main config and then override only the keys set in that role table.
+Set `system_prompt_file` inside a subagent role to use a role-specific main system prompt for `builder run --agent <role>`.
 
 ```toml
 [subagents.fast]
