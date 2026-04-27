@@ -188,6 +188,22 @@ class ${formula_class} < Formula
     system "bash", "scripts/build.sh", "--output", bin/"builder"
   end
 
+  def post_install
+    output = Utils.safe_popen_read(bin/"builder", "service", "restart", "--if-installed").strip
+    ohai output unless output.empty?
+  rescue => e
+    opoo "Builder background service restart failed after update: #{e.message}"
+  end
+
+  def caveats
+    <<~EOS
+      Homebrew does not install the Builder server background service.
+
+      If you want one shared background server for all Builder frontends (~70 MB RAM), run:
+        builder service install
+    EOS
+  end
+
   test do
     assert_match "Usage of builder:", shell_output("#{bin}/builder --help 2>&1")
   end

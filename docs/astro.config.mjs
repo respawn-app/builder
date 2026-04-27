@@ -53,6 +53,10 @@ export default defineConfig({
           link: '/headless/',
         },
         {
+          label: 'Builder Server',
+          link: '/server/',
+        },
+        {
           label: 'Configuration',
           link: '/config/',
         },
