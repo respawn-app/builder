@@ -154,6 +154,10 @@ func TestSlashAutoCompactionTogglesAndShowsStatus(t *testing.T) {
 	if !strings.Contains(plain, "Auto-compaction disabled") {
 		t.Fatalf("expected transcript notice for /autocompaction toggle, got %q", plain)
 	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, _ = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
 
 	updated.input = "/autocompaction on"
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})

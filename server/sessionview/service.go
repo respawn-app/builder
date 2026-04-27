@@ -27,10 +27,15 @@ type ExecutionTargetResolver interface {
 	ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error)
 }
 
+type UpdateStatusProvider interface {
+	Status(ctx context.Context) clientui.UpdateStatus
+}
+
 type Service struct {
 	sessions         SessionStoreResolver
 	runtimes         RuntimeResolver
 	targets          ExecutionTargetResolver
+	updates          UpdateStatusProvider
 	dormant          *dormantTranscriptCache
 	cacheWarningMu   sync.RWMutex
 	cacheWarningMode config.CacheWarningMode
@@ -59,6 +64,14 @@ func (s *Service) WithCacheWarningMode(mode config.CacheWarningMode) *Service {
 	if changed && s.dormant != nil {
 		s.dormant.clear()
 	}
+	return s
+}
+
+func (s *Service) WithUpdateStatusProvider(provider UpdateStatusProvider) *Service {
+	if s == nil {
+		return nil
+	}
+	s.updates = provider
 	return s
 }
 
@@ -232,6 +245,9 @@ func (s *Service) enrichMainViewWithExecutionTarget(ctx context.Context, view cl
 		return clientui.RuntimeMainView{}, err
 	}
 	view.Session = sessionView
+	if s.updates != nil {
+		view.Status.Update = s.updates.Status(ctx)
+	}
 	return view, nil
 }
 

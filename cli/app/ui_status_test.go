@@ -82,6 +82,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		Model: uiStatusModelInfo{
 			Summary: "gpt-5 high fast",
 		},
+		Update: uiStatusUpdateInfo{Checked: true, Available: true, LatestVersion: "1.2.3"},
 		Config: uiStatusConfigInfo{
 			SettingsPath:    "/Users/test/.builder/config.toml",
 			OverrideSources: []string{"ENV", "CLI ARGS"},
@@ -138,7 +139,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
