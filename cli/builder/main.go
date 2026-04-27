@@ -100,6 +100,9 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	if len(args) > 0 && args[0] == "serve" {
 		return serveSubcommand(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "service" {
+		return serviceSubcommand(args[1:], stdout, stderr)
+	}
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
 	rootFS.SetOutput(stderr)

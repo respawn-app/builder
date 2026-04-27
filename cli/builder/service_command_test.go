@@ -1,0 +1,337 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"builder/shared/config"
+)
+
+type stubServiceBackend struct {
+	status        serviceStatus
+	installStart  bool
+	installForce  bool
+	uninstallStop bool
+	calls         []serviceAction
+	err           error
+}
+
+func (s *stubServiceBackend) Name() string { return "stub" }
+
+func (s *stubServiceBackend) Install(_ context.Context, _ serviceSpec, force bool, start bool) error {
+	s.calls = append(s.calls, serviceActionInstall)
+	s.installForce = force
+	s.installStart = start
+	return s.err
+}
+
+func (s *stubServiceBackend) Uninstall(_ context.Context, _ serviceSpec, stop bool) error {
+	s.calls = append(s.calls, serviceActionUninstall)
+	s.uninstallStop = stop
+	return s.err
+}
+
+func (s *stubServiceBackend) Start(context.Context, serviceSpec) error {
+	s.calls = append(s.calls, serviceActionStart)
+	return s.err
+}
+
+func (s *stubServiceBackend) Stop(context.Context, serviceSpec) error {
+	s.calls = append(s.calls, serviceActionStop)
+	return s.err
+}
+
+func (s *stubServiceBackend) Restart(context.Context, serviceSpec) error {
+	s.calls = append(s.calls, serviceActionRestart)
+	return s.err
+}
+
+func (s *stubServiceBackend) Status(context.Context, serviceSpec) (serviceStatus, error) {
+	s.calls = append(s.calls, serviceActionStatus)
+	return s.status, s.err
+}
+
+func withServiceCommandTestBackend(t *testing.T, backend *stubServiceBackend) {
+	withServiceCommandTestBackendEndpoint(t, backend, "http://127.0.0.1:1")
+}
+
+func withServiceCommandTestBackendEndpoint(t *testing.T, backend *stubServiceBackend, endpoint string) {
+	t.Helper()
+	originalLoadSpec := loadServiceSpec
+	originalBackendFactory := serviceBackendFactory
+	t.Cleanup(func() {
+		loadServiceSpec = originalLoadSpec
+		serviceBackendFactory = originalBackendFactory
+	})
+	loadServiceSpec = func() (serviceSpec, error) {
+		host, portText, _ := net.SplitHostPort(strings.TrimPrefix(endpoint, "http://"))
+		port := parsePositiveInt(portText)
+		return serviceSpec{
+			Config:        config.App{PersistenceRoot: t.TempDir(), Settings: config.Settings{ServerHost: host, ServerPort: port}},
+			Executable:    "/usr/local/bin/builder",
+			Arguments:     []string{"serve"},
+			LogDir:        "/tmp/builder/logs",
+			StdoutLogPath: "/tmp/builder/logs/server.log",
+			StderrLogPath: "/tmp/builder/logs/server.err.log",
+			Endpoint:      endpoint,
+		}, nil
+	}
+	serviceBackendFactory = func() serviceBackend {
+		return backend
+	}
+}
+
+func TestServiceInstallNoStartAndForce(t *testing.T) {
+	backend := &stubServiceBackend{}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"install", "--force", "--no-start"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !backend.installForce || backend.installStart {
+		t.Fatalf("install flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
+	}
+	if !strings.Contains(stdout.String(), "Started: no") {
+		t.Fatalf("stdout = %q, want Started: no", stdout.String())
+	}
+}
+
+func TestServiceUninstallKeepRunning(t *testing.T) {
+	backend := &stubServiceBackend{}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"uninstall", "--keep-running"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if backend.uninstallStop {
+		t.Fatal("expected --keep-running to skip stop")
+	}
+}
+
+func TestServiceRestartIfInstalledSkipsMissingService(t *testing.T) {
+	backend := &stubServiceBackend{status: serviceStatus{Installed: false}}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("stdout = %q, want quiet no-op", stdout.String())
+	}
+}
+
+func TestServiceRestartIfInstalledRefreshesRegistrationBeforeRestart(t *testing.T) {
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall}
+	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
+		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
+	}
+	if !backend.installForce || !backend.installStart {
+		t.Fatalf("refresh flags force=%v start=%v, want force true start true", backend.installForce, backend.installStart)
+	}
+	if !strings.Contains(stdout.String(), "sessions may fail briefly") {
+		t.Fatalf("stdout = %q, want restart warning", stdout.String())
+	}
+}
+
+func TestServiceStatusJSON(t *testing.T) {
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"status", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	var decoded serviceStatus
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode status json: %v; raw=%q", err, stdout.String())
+	}
+	if !decoded.Installed || !decoded.Running || decoded.PID != 123 || decoded.Backend != "stub" {
+		t.Fatalf("decoded status = %+v", decoded)
+	}
+}
+
+func actionsToStrings(actions []serviceAction) []string {
+	out := make([]string, 0, len(actions))
+	for _, action := range actions {
+		out = append(out, string(action))
+	}
+	return out
+}
+
+func TestServiceInstallRejectsUnmanagedRunningServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{Installed: false, Loaded: false, Running: false}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"install"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+	if !strings.Contains(stderr.String(), "outside the background service") {
+		t.Fatalf("stderr = %q, want unmanaged conflict", stderr.String())
+	}
+}
+
+func TestServiceInstallAllowsHealthyServerOwnedByLoadedService(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"install", "--force"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if len(backend.calls) != 2 || backend.calls[0] != serviceActionStatus || backend.calls[1] != serviceActionInstall {
+		t.Fatalf("calls = %+v, want status then install", backend.calls)
+	}
+}
+
+func TestServiceStartRejectsUnmanagedRunningServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"start"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+}
+
+func TestServiceRestartRejectsRunningServerWhenServicePIDMismatches(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{
+		Installed: true,
+		Loaded:    true,
+		Running:   true,
+		PID:       456,
+		Command:   []string{"/other/builder", "serve"},
+	}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+	if !strings.Contains(stderr.String(), "outside the background service") {
+		t.Fatalf("stderr = %q, want unmanaged conflict", stderr.String())
+	}
+}
+
+func TestServiceRestartRejectsRunningServerWhenOwnershipPIDMissingAndCommandDiffers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{
+		Installed: true,
+		Loaded:    true,
+		Running:   true,
+		Command:   []string{"/other/builder", "serve"},
+	}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+}
+
+func TestServiceActionErrorReturnsOne(t *testing.T) {
+	backend := &stubServiceBackend{err: errors.New("boom")}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"start"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "boom") {
+		t.Fatalf("stderr = %q, want boom", stderr.String())
+	}
+}

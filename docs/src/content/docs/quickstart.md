@@ -22,6 +22,17 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/in
 
 Check the installed version with: `builder --version`
 
+## Optional: Install the Background Service
+
+Run this if you want one shared Builder server to start at login:
+
+```bash
+builder service install
+```
+
+It uses about 70 MB of RAM, lets unlimited frontends stay lightweight by connecting to one local orchestrator, and makes background shells reliable when a terminal frontend exits.
+See [Builder Server](../server/) for details and service management commands.
+
 ## First Authentication
 
 Start Builder CLI with: `builder`
