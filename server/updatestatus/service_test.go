@@ -31,7 +31,7 @@ func TestStatusSkipsDevVersion(t *testing.T) {
 	service := NewService("dev", WithLatestReleaseURL(server.URL), WithHTTPClient(server.Client()))
 	status := service.Status(context.Background())
 
-	if status.Checked || status.Available || calls != 0 {
+	if !status.Checked || status.Available || calls != 0 {
 		t.Fatalf("unexpected dev status=%+v calls=%d", status, calls)
 	}
 }
