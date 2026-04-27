@@ -162,6 +162,15 @@ container_exists() {
 	docker container inspect "$container_name" >/dev/null 2>&1
 }
 
+require_host_port_available() {
+	if [ "$dry_run" = "true" ]; then
+		return 0
+	fi
+	if (echo >/dev/tcp/127.0.0.1/"$host_port") >/dev/null 2>&1; then
+		die "host port ${host_port} is already in use. Stop the owner or pass --host-port <free-port>."
+	fi
+}
+
 wait_for_ready() {
 	if [ "$dry_run" = "true" ]; then
 		printf '[dry-run] poll http://127.0.0.1:%s/healthz until transport is ready\n' "$host_port"
@@ -226,13 +235,14 @@ run_up() {
 	home_volume="${home_volume:-${container_name}-home}"
 	serve_args=("${passthrough_args[@]}")
 	ensure_docker
-	build_image
-	collect_container_env
-	collect_seed_mounts
 	if container_exists; then
 		log "replace existing container ${container_name}"
 		run docker container rm -f "$container_name"
 	fi
+	require_host_port_available
+	build_image
+	collect_container_env
+	collect_seed_mounts
 	run docker volume create "$workspace_volume"
 	run docker volume create "$home_volume"
 	log "start sandbox container ${container_name}"

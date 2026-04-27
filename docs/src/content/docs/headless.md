@@ -7,6 +7,8 @@ Builder supports a headless, non-interactive run mode via `builder run`.
 When the interactive Builder session uses subagents, it does so by launching separate headless Builder runs. In other words:
 This keeps the subagent path transparent and scriptable: the feature Builder uses internally is also directly available to human users.
 
+For a shared local server that starts at login, use [`builder service`](../server/).
+
 Run a single prompt:
 
 ```bash

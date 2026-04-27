@@ -28,6 +28,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder [flags]",
 		"  builder run [flags] <prompt>",
 		"  builder serve [flags]",
+		"  builder service <status|install|uninstall|start|stop|restart>",
 		"  builder project [path]",
 		"  builder project list",
 		"  builder project create --path <server-path> --name <project-name>",
@@ -38,11 +39,13 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  `builder` without a subcommand starts the interactive TUI.",
 		"  `builder run` executes one headless prompt and exits.",
 		"  `builder serve` starts the app server in daemon mode.",
+		"  `builder service` manages the Builder server background service.",
 		"  `builder project` / `attach` / `rebind` inspect or repair workspace bindings.",
 	)
 	writeHelpSection(out, "Commands:",
 		"  run      Execute a headless prompt against a workspace and print the final result.",
 		"  serve    Start the Builder app server and keep serving until interrupted.",
+		"  service  Install, inspect, or restart the Builder server background service.",
 		"  project  Inspect project bindings, list projects, or create a project.",
 		"  attach   Attach another workspace path to an existing project.",
 		"  rebind   Retarget one session to a different workspace root.",
@@ -50,6 +53,8 @@ func writeRootUsage(fs *flag.FlagSet) {
 	writeHelpSection(out, "Examples:",
 		"  builder",
 		"  builder run --fast \"summarize the repo\"",
+		"  builder service status",
+		"  builder service install",
 		"  builder project",
 		"  builder attach ../other-checkout",
 		"  builder rebind <session-id> ../moved-workspace",
@@ -224,6 +229,93 @@ func writeServeUsage(fs *flag.FlagSet) {
 	writeHelpSection(out, "Examples:",
 		"  builder serve",
 		"  builder project create --path /srv/repos/app --name app",
+	)
+	writeHelpSection(out, "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeServiceUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service:",
+		"  builder service status [--json]",
+		"  builder service install [--force] [--no-start]",
+		"  builder service uninstall [--keep-running]",
+		"  builder service start",
+		"  builder service stop",
+		"  builder service restart [--if-installed]",
+	)
+	writeHelpSection(out, "What This Does:",
+		"  Manage the Builder server background service for one shared local `builder serve`.",
+		"  The service starts at login and is supervised by the OS.",
+	)
+	writeHelpSection(out, "Backends:",
+		"  macOS: launchd LaunchAgent.",
+		"  Linux/WSL2: systemd --user unit.",
+		"  Windows: Scheduled Task, with Startup folder fallback when needed.",
+	)
+	writeHelpSection(out, "Examples:",
+		"  builder service status",
+		"  builder service install",
+		"  builder service restart",
+	)
+}
+
+func writeServiceStatusUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service status:",
+		"  builder service status [--json]",
+	)
+	writeHelpSection(out, "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeServiceInstallUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service install:",
+		"  builder service install [--force] [--no-start]",
+	)
+	writeHelpSection(out, "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeServiceUninstallUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service uninstall:",
+		"  builder service uninstall [--keep-running]",
+	)
+	writeHelpSection(out, "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeServiceLifecycleUsage(fs *flag.FlagSet, action serviceAction) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service "+string(action)+":",
+		"  builder service "+string(action),
+	)
+}
+
+func writeServiceRestartUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder service restart:",
+		"  builder service restart [--if-installed]",
 	)
 	writeHelpSection(out, "Flags:")
 	fs.PrintDefaults()
