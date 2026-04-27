@@ -46,3 +46,12 @@ Prefer small, reviewable commits.
 ```
 
 Tool preambles are appended after the rendered `SYSTEM.md` when `tool_preambles = true` for the locked session.
+
+## Supervisor System Prompt
+
+`reviewer.system_prompt_file` replaces Builder's built-in supervisor system prompt:
+
+- `~/.builder/config.toml`
+- `<workspace-root>/.builder/config.toml`
+
+The workspace config value takes priority. Builder reads the referenced file when the supervisor first runs for a session, stores the prompt with the session, and reuses that snapshot for later supervisor requests. Editing the file affects only sessions that have not run the supervisor with that override.
