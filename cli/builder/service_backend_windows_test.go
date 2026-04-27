@@ -67,6 +67,14 @@ func TestWindowsStopStartupFallbackKillsTaskScriptProcess(t *testing.T) {
 	}
 }
 
+func TestParseWindowsCommandLinePreservesPathBackslashes(t *testing.T) {
+	got := parseWindowsCommandLine(`"C:\Users\Nek\AppData\Local\Builder\builder.exe" serve`)
+	want := []string{`C:\Users\Nek\AppData\Local\Builder\builder.exe`, "serve"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseWindowsCommandLine = %#v, want %#v", got, want)
+	}
+}
+
 func windowsServiceTestSpec(t *testing.T) serviceSpec {
 	t.Helper()
 	temp := t.TempDir()
