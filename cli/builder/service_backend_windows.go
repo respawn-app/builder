@@ -57,6 +57,9 @@ func (scheduledTaskServiceBackend) Install(ctx context.Context, spec serviceSpec
 		}
 		return nil
 	}
+	if err := os.Remove(windowsStartupItemPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove Startup folder fallback after scheduled task registration: %w", err)
+	}
 	if start {
 		if _, err := runServiceCommand(ctx, "schtasks", "/Run", "/TN", serviceWindowsTaskName); err != nil {
 			return err

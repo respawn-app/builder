@@ -287,6 +287,9 @@ func ensureNoUnmanagedServerConflict(ctx context.Context, backend serviceBackend
 		return fmt.Errorf("Builder server is already running on %s, but the background service is not loaded. Stop the manual server or run `builder service restart` after fixing service state", spec.Endpoint)
 	}
 	if !healthRunning {
+		if status.Installed && status.Loaded && status.Running {
+			return nil
+		}
 		dialer := net.Dialer{Timeout: 500 * time.Millisecond}
 		conn, err := dialer.DialContext(ctx, "tcp", config.ServerListenAddress(spec.Config))
 		if err == nil {
