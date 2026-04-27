@@ -4,6 +4,7 @@ import (
 	"builder/server/auth"
 	"builder/server/sessionview"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"context"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,6 +33,41 @@ func TestStatusLineGitStartupRefreshCachesBranch(t *testing.T) {
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "statusline-branch") {
 		t.Fatalf("expected startup git branch in status line, got %q", status)
+	}
+}
+
+func TestStatusLineGitStartupUsesRuntimeWorktreeRootBranch(t *testing.T) {
+	processRoot := initStatusLineGitRepo(t, "main")
+	workspaceRoot := initStatusLineGitRepo(t, "workspace-branch")
+	worktreeRoot := initStatusLineGitRepo(t, "worktree-branch")
+	t.Chdir(processRoot)
+
+	runtimeClient := &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{
+		ExecutionTarget: clientui.SessionExecutionTarget{
+			WorkspaceRoot:    workspaceRoot,
+			WorktreeRoot:     worktreeRoot,
+			EffectiveWorkdir: processRoot,
+		},
+	}}
+	search := newStubUIPathReferenceSearch()
+	close(search.events)
+	m := newProjectedTestUIModel(
+		runtimeClient,
+		closedProjectedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIPathReferenceSearch(search),
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: workspaceRoot}),
+	)
+
+	updated := drainStatusLineStartupCommands(t, m, m.Init())
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "worktree-branch") {
+		t.Fatalf("expected worktree git branch in status line, got %q", status)
+	}
+	for _, unexpected := range []string{"main", "workspace-branch"} {
+		if strings.Contains(status, unexpected) {
+			t.Fatalf("did not expect %q branch in status line, got %q", unexpected, status)
+		}
 	}
 }
 

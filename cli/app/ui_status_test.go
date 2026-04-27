@@ -6,6 +6,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"context"
 	tea "github.com/charmbracelet/bubbletea"
@@ -504,6 +505,57 @@ func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
 	}
 	if !strings.Contains(git.Error, context.Canceled.Error()) {
 		t.Fatalf("expected git error to include underlying failure, got %+v", git)
+	}
+}
+
+func TestStatusCollectorUsesRuntimeWorkspaceRootForGitBranch(t *testing.T) {
+	processRoot := initStatusLineGitRepo(t, "main")
+	sessionRoot := initStatusLineGitRepo(t, "session-branch")
+	t.Chdir(processRoot)
+	collector := defaultUIStatusCollector{}
+
+	snapshot, err := collector.Collect(context.Background(), uiStatusRequest{
+		Runtime: &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{
+			ExecutionTarget: clientui.SessionExecutionTarget{
+				EffectiveWorkdir: processRoot,
+			},
+		}},
+		WorkspaceRoot: sessionRoot,
+	})
+	if err != nil {
+		t.Fatalf("collect status: %v", err)
+	}
+	if !snapshot.Git.Visible {
+		t.Fatalf("expected git section visible for session root, got %+v", snapshot.Git)
+	}
+	if snapshot.Git.Branch != "session-branch" {
+		t.Fatalf("git branch = %q, want session-branch", snapshot.Git.Branch)
+	}
+}
+
+func TestStatusCollectorPrefersWorktreeRootForGitBranch(t *testing.T) {
+	workspaceRoot := initStatusLineGitRepo(t, "main")
+	worktreeRoot := initStatusLineGitRepo(t, "worktree-branch")
+	collector := defaultUIStatusCollector{}
+
+	snapshot, err := collector.Collect(context.Background(), uiStatusRequest{
+		Runtime: &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{
+			ExecutionTarget: clientui.SessionExecutionTarget{
+				WorkspaceRoot:    workspaceRoot,
+				WorktreeRoot:     worktreeRoot,
+				EffectiveWorkdir: filepath.Join(worktreeRoot, "pkg"),
+			},
+		}},
+		WorkspaceRoot: workspaceRoot,
+	})
+	if err != nil {
+		t.Fatalf("collect status: %v", err)
+	}
+	if !snapshot.Git.Visible {
+		t.Fatalf("expected git section visible for worktree root, got %+v", snapshot.Git)
+	}
+	if snapshot.Git.Branch != "worktree-branch" {
+		t.Fatalf("git branch = %q, want worktree-branch", snapshot.Git.Branch)
 	}
 }
 
