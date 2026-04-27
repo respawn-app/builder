@@ -40,6 +40,14 @@ func (systemdServiceBackend) Install(ctx context.Context, spec serviceSpec, forc
 	if err := os.WriteFile(path, []byte(renderSystemdUnit(spec)), 0o644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
+	installed := false
+	defer func() {
+		if installed {
+			return
+		}
+		_ = os.Remove(path)
+		_, _ = runServiceCommand(ctx, "systemctl", "--user", "daemon-reload")
+	}()
 	if _, err := runServiceCommand(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		return err
 	}
@@ -51,6 +59,7 @@ func (systemdServiceBackend) Install(ctx context.Context, spec serviceSpec, forc
 			return err
 		}
 	}
+	installed = true
 	return nil
 }
 
@@ -71,25 +80,26 @@ func (systemdServiceBackend) Uninstall(ctx context.Context, spec serviceSpec, st
 }
 
 func (systemdServiceBackend) Start(ctx context.Context, spec serviceSpec) error {
-	if _, err := os.Stat(mustSystemdUnitPath()); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return errors.New("Builder background service is not installed; run `builder service install`")
-		}
-		return fmt.Errorf("stat systemd unit: %w", err)
+	if err := requireSystemdUnitInstalled(); err != nil {
+		return err
 	}
 	_, err := runServiceCommand(ctx, "systemctl", "--user", "start", serviceSystemdUnitName)
 	return err
 }
 
 func (systemdServiceBackend) Stop(ctx context.Context, spec serviceSpec) error {
-	_, err := runServiceCommand(ctx, "systemctl", "--user", "stop", serviceSystemdUnitName)
-	if err != nil && strings.Contains(err.Error(), "not loaded") {
+	loadState, err := systemdLoadState(ctx)
+	if err != nil || loadState != "loaded" {
 		return nil
 	}
+	_, err = runServiceCommand(ctx, "systemctl", "--user", "stop", serviceSystemdUnitName)
 	return err
 }
 
 func (systemdServiceBackend) Restart(ctx context.Context, spec serviceSpec) error {
+	if err := requireSystemdUnitInstalled(); err != nil {
+		return err
+	}
 	_, err := runServiceCommand(ctx, "systemctl", "--user", "restart", serviceSystemdUnitName)
 	return err
 }
@@ -105,9 +115,10 @@ func (systemdServiceBackend) Status(ctx context.Context, spec serviceSpec) (serv
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return serviceStatus{}, fmt.Errorf("stat systemd unit: %w", err)
 	}
-	activeResult, activeErr := runServiceCommand(ctx, "systemctl", "--user", "is-active", serviceSystemdUnitName)
-	loaded := activeErr == nil || strings.TrimSpace(activeResult.Stdout) == "active"
+	activeResult, _ := runServiceCommand(ctx, "systemctl", "--user", "is-active", serviceSystemdUnitName)
 	running := strings.TrimSpace(activeResult.Stdout) == "active"
+	loadState, _ := systemdLoadState(ctx)
+	loaded := loadState == "loaded"
 	showResult, _ := runServiceCommand(ctx, "systemctl", "--user", "show", serviceSystemdUnitName, "--property=MainPID", "--value")
 	pid := parsePositiveInt(showResult.Stdout)
 	return serviceStatus{
@@ -124,6 +135,28 @@ func (systemdServiceBackend) Status(ctx context.Context, spec serviceSpec) (serv
 			"On headless Linux, run `loginctl enable-linger $USER` if the service should survive logout.",
 		},
 	}, nil
+}
+
+func requireSystemdUnitInstalled() error {
+	path, err := systemdUnitPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("Builder background service is not installed; run `builder service install`")
+		}
+		return fmt.Errorf("stat systemd unit: %w", err)
+	}
+	return nil
+}
+
+func systemdLoadState(ctx context.Context) (string, error) {
+	result, err := runServiceCommand(ctx, "systemctl", "--user", "show", serviceSystemdUnitName, "--property=LoadState", "--value")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.Stdout), nil
 }
 
 func readSystemdRegisteredCommand(path string) []string {
@@ -191,14 +224,6 @@ func systemdUnitPath() (string, error) {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
 	return filepath.Join(home, ".config", "systemd", "user", serviceSystemdUnitName), nil
-}
-
-func mustSystemdUnitPath() string {
-	path, err := systemdUnitPath()
-	if err != nil {
-		return ""
-	}
-	return path
 }
 
 func renderSystemdUnit(spec serviceSpec) string {

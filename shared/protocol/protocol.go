@@ -6,6 +6,7 @@ const (
 	Version           = "1"
 	RPCPath           = "/rpc"
 	HealthPath        = "/healthz"
+	HealthStatusOK    = "ok"
 	ReadinessPath     = "/readyz"
 	DiscoveryFilename = "app-server.json"
 )

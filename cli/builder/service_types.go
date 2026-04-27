@@ -201,7 +201,7 @@ func applyHealthProbe(ctx context.Context, status serviceStatus, spec serviceSpe
 		return status
 	}
 	status.HealthStatus = healthStatus
-	if status.HealthStatus == "ok" {
+	if status.HealthStatus == protocol.HealthStatusOK {
 		status.Running = true
 	}
 	if pid > 0 {
@@ -229,7 +229,7 @@ func probeServiceHealth(ctx context.Context, spec serviceSpec) (string, int) {
 		return "", 0
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return strings.TrimSpace(health.Status), health.PID
+		return "", 0
 	}
 	return strings.TrimSpace(health.Status), health.PID
 }
