@@ -80,6 +80,4 @@ RUN chmod +x /usr/local/bin/builder /usr/local/bin/builder-sandbox-entrypoint \
 	&& git -C /opt/builder-sandbox-seed commit -qm "chore: sandbox seed ${SANDBOX_SNAPSHOT_REF}" \
 	&& chown -R builder:builder /go /home/builder /opt/builder-sandbox-seed /workspace
 
-USER builder
-
 ENTRYPOINT ["tini", "--", "/usr/local/bin/builder-sandbox-entrypoint"]

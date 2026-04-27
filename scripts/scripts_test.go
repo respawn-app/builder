@@ -1,10 +1,12 @@
 package scripts_test
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -96,6 +98,38 @@ func TestUpdateDepsUnknownArgument(t *testing.T) {
 	}
 	if !strings.Contains(text, "Usage: scripts/update-deps.sh") {
 		t.Fatalf("expected usage output, got %q", text)
+	}
+}
+
+func TestSandboxServeUpReportsHostPortInUse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on local port: %v", err)
+	}
+	defer listener.Close()
+
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "sandbox-serve.sh")
+	port := listener.Addr().(*net.TCPAddr).Port
+	binDir := t.TempDir()
+	fakeDocker := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(fakeDocker, []byte("#!/usr/bin/env bash\nif [ \"${1:-}\" = info ]; then exit 0; fi\nif [ \"${1:-}\" = container ] && [ \"${2:-}\" = inspect ]; then exit 1; fi\necho unexpected docker \"$@\" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	cmd := exec.Command("bash", script, "up", "--host-port", strconv.Itoa(port))
+	cmd.Dir = root
+	cmd.Env = append(sanitizedScriptTestEnv(os.Environ()), "PATH="+binDir+string(os.PathListSeparator)+mustLookupEnv(t, "PATH"))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected occupied host port failure")
+	}
+	text := string(output)
+	expected := "host port " + strconv.Itoa(port) + " is already in use"
+	if !strings.Contains(text, expected) {
+		t.Fatalf("expected %q in output, got %q", expected, text)
+	}
+	if strings.Contains(text, "build sandbox image") {
+		t.Fatalf("expected port preflight before image build, got %q", text)
 	}
 }
 
