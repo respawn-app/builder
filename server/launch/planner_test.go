@@ -551,6 +551,55 @@ func TestApplyRunPromptOverridesSubagentProviderOverrideCanInheritBaseModel(t *t
 	}
 }
 
+func TestApplyRunPromptOverridesSubagentReviewerSystemPromptFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"gpt-5.5\"",
+		"",
+		"[reviewer]",
+		"system_prompt_file = \"base-reviewer.md\"",
+		"",
+		"[subagents.worker.reviewer]",
+		"system_prompt_file = \"worker-reviewer.md\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := session.Create(filepath.Join(t.TempDir(), "sessions", "workspace-a"), "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store:               store,
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
+
+	updated, warnings, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: "worker"}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+	if want := filepath.Join(home, ".builder", "worker-reviewer.md"); updated.ActiveSettings.Reviewer.SystemPromptFile != want {
+		t.Fatalf("reviewer system prompt file = %q, want %q", updated.ActiveSettings.Reviewer.SystemPromptFile, want)
+	}
+}
+
 func TestApplyRunPromptOverridesRoleModelOverrideRecomputesContextBudget(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

@@ -265,6 +265,9 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 		"model = \"gpt-5.4-mini\"",
 		"thinking_level = \"low\"",
 		"",
+		"[subagents.fast.reviewer]",
+		"system_prompt_file = \"fast-reviewer.md\"",
+		"",
 		"[subagents.fast.tools]",
 		"patch = false",
 	}, "\n")
@@ -289,7 +292,10 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 	if role.Settings.EnabledTools[toolspec.ToolPatch] {
 		t.Fatalf("expected fast role patch tool disabled, got %+v", role.Settings.EnabledTools)
 	}
-	if role.Sources["model"] != "file" || role.Sources["thinking_level"] != "file" || role.Sources["tools.patch"] != "file" {
+	if want := filepath.Join(home, ".builder", "fast-reviewer.md"); role.Settings.Reviewer.SystemPromptFile != want {
+		t.Fatalf("role reviewer system prompt file = %q, want %q", role.Settings.Reviewer.SystemPromptFile, want)
+	}
+	if role.Sources["model"] != "file" || role.Sources["thinking_level"] != "file" || role.Sources["tools.patch"] != "file" || role.Sources["reviewer.system_prompt_file"] != "file" {
 		t.Fatalf("unexpected role sources: %+v", role.Sources)
 	}
 	if _, exists := role.Sources["reviewer.model"]; exists {
