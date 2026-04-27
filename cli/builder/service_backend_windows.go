@@ -157,7 +157,6 @@ func parseWindowsCommandLine(value string) []string {
 	args := []string{}
 	var builder strings.Builder
 	inQuote := false
-	escaped := false
 	flush := func() {
 		if builder.Len() == 0 {
 			return
@@ -166,14 +165,7 @@ func parseWindowsCommandLine(value string) []string {
 		builder.Reset()
 	}
 	for _, r := range value {
-		if escaped {
-			builder.WriteRune(r)
-			escaped = false
-			continue
-		}
 		switch r {
-		case '\\':
-			escaped = true
 		case '"':
 			inQuote = !inQuote
 		case ' ', '\t':
@@ -185,9 +177,6 @@ func parseWindowsCommandLine(value string) []string {
 		default:
 			builder.WriteRune(r)
 		}
-	}
-	if escaped {
-		builder.WriteByte('\\')
 	}
 	flush()
 	return args
