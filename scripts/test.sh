@@ -6,6 +6,18 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$repo_root"
 
+if [ "${BUILDER_TEST_INHERIT_ENV:-}" != "1" ]; then
+    while IFS= read -r name; do
+        case "$name" in
+            BUILDER_TEST_INHERIT_ENV)
+                ;;
+            BUILDER_*)
+                unset "$name"
+                ;;
+        esac
+    done < <(compgen -e BUILDER_ || true)
+fi
+
 log_file="$(mktemp -t builder-go-test.XXXXXX.log)"
 cleanup() {
     rm -f "$log_file"

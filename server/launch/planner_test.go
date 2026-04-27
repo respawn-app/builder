@@ -404,6 +404,36 @@ func TestApplyRunPromptOverridesFastRoleWarnsWhenHeuristicDoesNothing(t *testing
 	}
 }
 
+func TestApplySubagentRoleOverridesAppendsRoleSystemPromptFile(t *testing.T) {
+	mainPrompt := filepath.Join(t.TempDir(), "main-system.md")
+	rolePrompt := filepath.Join(t.TempDir(), "worker-system.md")
+	settings := config.Settings{
+		SystemPromptFiles: []config.SystemPromptFile{{Path: mainPrompt, Scope: config.SystemPromptFileScopeHomeConfig}},
+	}
+	role := config.SubagentRole{
+		Settings: config.Settings{
+			SystemPromptFile:  "worker-system.md",
+			SystemPromptFiles: []config.SystemPromptFile{{Path: rolePrompt, Scope: config.SystemPromptFileScopeSubagent}},
+		},
+		Sources: map[string]string{"system_prompt_file": "file"},
+	}
+	applySubagentRoleOverrides(&settings, role, true)
+
+	if settings.SystemPromptFile != "worker-system.md" {
+		t.Fatalf("system_prompt_file = %q, want worker-system.md", settings.SystemPromptFile)
+	}
+	files := settings.SystemPromptFiles
+	if len(files) != 2 {
+		t.Fatalf("system prompt files = %+v, want base and role entries", files)
+	}
+	if got := files[0]; got.Path != mainPrompt || got.Scope != config.SystemPromptFileScopeHomeConfig {
+		t.Fatalf("base system prompt file = %+v, want %q %s", got, mainPrompt, config.SystemPromptFileScopeHomeConfig)
+	}
+	if got := files[1]; got.Path != rolePrompt || got.Scope != config.SystemPromptFileScopeSubagent {
+		t.Fatalf("role system prompt file = %+v, want %q %s", got, rolePrompt, config.SystemPromptFileScopeSubagent)
+	}
+}
+
 func TestApplyRunPromptOverridesFastRoleAppliesBuiltInHeuristics(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

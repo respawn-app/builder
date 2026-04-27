@@ -4,11 +4,13 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/config"
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -291,7 +293,7 @@ func TestLegacyLockedSessionBackfillsSystemPromptSnapshotOnce(t *testing.T) {
 	}
 }
 
-func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
+func TestEmptySystemPromptFileIsSkippedAndFallbackSnapshotIsReused(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -328,11 +330,12 @@ func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
 	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if got := client.calls[0].SystemPrompt; got != "" {
-		t.Fatalf("first system prompt = %q, want empty", got)
+	firstPrompt := client.calls[0].SystemPrompt
+	if strings.TrimSpace(firstPrompt) == "" || firstPrompt == "changed" {
+		t.Fatalf("first system prompt = %q, want built-in fallback", firstPrompt)
 	}
-	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
-		t.Fatalf("locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	if locked := store.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != firstPrompt {
+		t.Fatalf("locked system prompt snapshot = %+v, want built-in fallback snapshot", locked)
 	}
 	if err := eng.Close(); err != nil {
 		t.Fatalf("close engine: %v", err)
@@ -342,8 +345,8 @@ func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
-		t.Fatalf("reopened locked system prompt snapshot = %+v, want empty marked snapshot", locked)
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != firstPrompt {
+		t.Fatalf("reopened locked system prompt snapshot = %+v, want built-in fallback snapshot", locked)
 	}
 	reopenedClient := &fakeClient{responses: []llm.Response{{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "still ok"},
@@ -361,10 +364,10 @@ func TestEmptySystemPromptSnapshotIsReused(t *testing.T) {
 	if _, err := reopenedEngine.SubmitUserMessage(context.Background(), "again"); err != nil {
 		t.Fatalf("submit again: %v", err)
 	}
-	if got := reopenedClient.calls[0].SystemPrompt; got != "" {
-		t.Fatalf("second system prompt = %q, want empty snapshot", got)
+	if got := reopenedClient.calls[0].SystemPrompt; got != firstPrompt {
+		t.Fatalf("second system prompt = %q, want locked fallback snapshot %q", got, firstPrompt)
 	}
-	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != "" {
+	if locked := reopened.Meta().Locked; locked == nil || !locked.HasSystemPrompt || locked.SystemPrompt != firstPrompt {
 		t.Fatalf("stored system prompt snapshot changed: %+v", locked)
 	}
 }
@@ -855,5 +858,97 @@ func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 	}
 	if !changed || mode != "edits" {
 		t.Fatalf("expected changed=true mode=edits, got changed=%v mode=%q", changed, mode)
+	}
+}
+
+func TestReadSystemPromptTemplateUsesConfiguredPriorityAndSkipsEmptyFiles(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{filepath.Join(home, agentsGlobalDirName), filepath.Join(workspace, agentsGlobalDirName)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	homeConfigPrompt := filepath.Join(home, "home-config-system.md")
+	workspaceConfigPrompt := filepath.Join(workspace, "workspace-config-system.md")
+	writeTestFile(t, filepath.Join(home, agentsGlobalDirName, systemPromptFileName), "home SYSTEM")
+	writeTestFile(t, homeConfigPrompt, "home config")
+	writeTestFile(t, filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName), "workspace SYSTEM")
+	writeTestFile(t, workspaceConfigPrompt, "workspace config")
+
+	opts := systemPromptSnapshotOptions{
+		WorkspaceRoot: workspace,
+		SystemPromptFiles: []config.SystemPromptFile{
+			{Path: homeConfigPrompt, Scope: config.SystemPromptFileScopeHomeConfig},
+			{Path: workspaceConfigPrompt, Scope: config.SystemPromptFileScopeWorkspaceConfig},
+		},
+	}
+	template, sourcePath, ok, err := readSystemPromptTemplate(opts)
+	if err != nil {
+		t.Fatalf("read system prompt template: %v", err)
+	}
+	if !ok || template != "workspace config" || sourcePath != workspaceConfigPrompt {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want workspace config from %q", template, sourcePath, ok, workspaceConfigPrompt)
+	}
+
+	writeTestFile(t, workspaceConfigPrompt, " \n\t")
+	template, sourcePath, ok, err = readSystemPromptTemplate(opts)
+	if err != nil {
+		t.Fatalf("read system prompt template after empty workspace config: %v", err)
+	}
+	if !ok || template != "workspace SYSTEM" {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want workspace SYSTEM", template, sourcePath, ok)
+	}
+
+	writeTestFile(t, filepath.Join(workspace, agentsGlobalDirName, systemPromptFileName), "\n")
+	template, sourcePath, ok, err = readSystemPromptTemplate(opts)
+	if err != nil {
+		t.Fatalf("read system prompt template after empty workspace SYSTEM: %v", err)
+	}
+	if !ok || template != "home config" || sourcePath != homeConfigPrompt {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want home config from %q", template, sourcePath, ok, homeConfigPrompt)
+	}
+
+	writeTestFile(t, homeConfigPrompt, " ")
+	template, sourcePath, ok, err = readSystemPromptTemplate(opts)
+	if err != nil {
+		t.Fatalf("read system prompt template after empty home config: %v", err)
+	}
+	if !ok || template != "home SYSTEM" {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want home SYSTEM", template, sourcePath, ok)
+	}
+
+	writeTestFile(t, filepath.Join(home, agentsGlobalDirName, systemPromptFileName), "\n")
+	template, sourcePath, ok, err = readSystemPromptTemplate(opts)
+	if err != nil {
+		t.Fatalf("read system prompt template after all files empty: %v", err)
+	}
+	if ok || template != "" || sourcePath != "" {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want built-in fallback marker", template, sourcePath, ok)
+	}
+}
+
+func TestReadSystemPromptTemplateSubagentConfigOverridesWorkspaceConfig(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	subagentPrompt := filepath.Join(home, "subagent-system.md")
+	workspaceConfigPrompt := filepath.Join(workspace, "workspace-config-system.md")
+	writeTestFile(t, subagentPrompt, "subagent")
+	writeTestFile(t, workspaceConfigPrompt, "workspace config")
+
+	template, sourcePath, ok, err := readSystemPromptTemplate(systemPromptSnapshotOptions{
+		WorkspaceRoot: workspace,
+		SystemPromptFiles: []config.SystemPromptFile{
+			{Path: workspaceConfigPrompt, Scope: config.SystemPromptFileScopeWorkspaceConfig},
+			{Path: subagentPrompt, Scope: config.SystemPromptFileScopeSubagent},
+		},
+	})
+	if err != nil {
+		t.Fatalf("read system prompt template: %v", err)
+	}
+	if !ok || template != "subagent" || sourcePath != subagentPrompt {
+		t.Fatalf("template=%q sourcePath=%q ok=%t, want subagent from %q", template, sourcePath, ok, subagentPrompt)
 	}
 }
