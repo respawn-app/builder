@@ -80,7 +80,7 @@ func (r *memoryUIStatusRepository) SeedSnapshot(req uiStatusRequest, base uiStat
 		seed.PendingSections = append(seed.PendingSections, uiStatusSectionAuth)
 	}
 
-	gitEntry, gitCached := r.gitByKey[statusGitCacheKey(base.Workdir)]
+	gitEntry, gitCached := r.gitByKey[statusGitCacheKey(statusGitRoot(req))]
 	if gitCached {
 		seed.Snapshot.Git = gitEntry.result.Git
 	}
