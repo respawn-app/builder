@@ -48,21 +48,23 @@ type settingsRegistry struct {
 }
 
 type settingDocOptions struct {
-	commented    bool
-	omitInTOML   bool
-	defaultValue func(settingsState) any
+	commented                    bool
+	omitInTOML                   bool
+	resolveRelativeToSettingsDir bool
+	defaultValue                 func(settingsState) any
 }
 
 type scalarSetting[T any] struct {
-	key          string
-	defaultValue T
-	apply        func(*settingsState, T)
-	get          func(settingsState) T
-	decodeFile   func(settingsFile, []string) (T, bool, error)
-	envName      string
-	decodeEnv    func(string, string) (T, error)
-	decodeCLI    func(LoadOptions) (T, bool, error)
-	doc          settingDocOptions
+	key                string
+	defaultValue       T
+	apply              func(*settingsState, T)
+	get                func(settingsState) T
+	decodeFile         func(settingsFile, []string) (T, bool, error)
+	transformFileValue func(T, string) (T, error)
+	envName            string
+	decodeEnv          func(string, string) (T, error)
+	decodeCLI          func(LoadOptions) (T, bool, error)
+	doc                settingDocOptions
 }
 
 type toolsSetting struct{}
@@ -383,7 +385,7 @@ func newSettingsRegistry() settingsRegistry {
 			"",
 			nil,
 			nil,
-			settingDocOptions{}),
+			settingDocOptions{resolveRelativeToSettingsDir: true}),
 		newIntSetting("reviewer.timeout_seconds", defaultReviewerTimeoutSec,
 			func(state *settingsState, value int) { state.Settings.Reviewer.TimeoutSeconds = value },
 			func(state settingsState) int { return state.Settings.Reviewer.TimeoutSeconds },
@@ -522,11 +524,19 @@ func newStringSetting[T ~string](
 	normalize func(string) T,
 	doc settingDocOptions,
 ) scalarSetting[T] {
+	var transformFileValue func(T, string) (T, error)
+	if doc.resolveRelativeToSettingsDir {
+		transformFileValue = func(value T, settingsPath string) (T, error) {
+			resolved, err := resolveFileSettingRelativeToSettingsPath(string(value), settingsPath)
+			return T(resolved), err
+		}
+	}
 	return scalarSetting[T]{
-		key:          key,
-		defaultValue: defaultValue,
-		apply:        apply,
-		get:          get,
+		key:                key,
+		defaultValue:       defaultValue,
+		apply:              apply,
+		get:                get,
+		transformFileValue: transformFileValue,
 		decodeFile: func(raw settingsFile, path []string) (T, bool, error) {
 			value, ok, err := lookupFileString(raw, path)
 			if err != nil || !ok {
@@ -623,7 +633,7 @@ func (s scalarSetting[T]) initSources(sources map[string]string) {
 	sources[s.key] = "default"
 }
 
-func (s scalarSetting[T]) applyFile(raw settingsFile, _ string, state *settingsState, sources map[string]string) error {
+func (s scalarSetting[T]) applyFile(raw settingsFile, settingsPath string, state *settingsState, sources map[string]string) error {
 	value, ok, err := s.decodeFile(raw, splitSettingKey(s.key))
 	if err != nil {
 		return err
@@ -631,9 +641,34 @@ func (s scalarSetting[T]) applyFile(raw settingsFile, _ string, state *settingsS
 	if !ok {
 		return nil
 	}
+	if s.transformFileValue != nil {
+		value, err = s.transformFileValue(value, settingsPath)
+		if err != nil {
+			return err
+		}
+	}
 	s.apply(state, value)
 	sources[s.key] = "file"
 	return nil
+}
+
+func resolveFileSettingRelativeToSettingsPath(value string, settingsPath string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	expanded, err := expandTildePath(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return filepath.Abs(expanded)
+	}
+	baseDir := strings.TrimSpace(filepath.Dir(settingsPath))
+	if baseDir == "" || baseDir == "." {
+		return filepath.Abs(expanded)
+	}
+	return filepath.Abs(filepath.Join(baseDir, expanded))
 }
 
 func (s scalarSetting[T]) applyEnv(lookup envLookup, state *settingsState, sources map[string]string) error {
