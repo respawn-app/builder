@@ -190,6 +190,8 @@ func statusNoticeStyle(theme string, kind uiStatusNoticeKind) lipgloss.Style {
 	switch kind {
 	case uiStatusNoticeSuccess:
 		color = palette.secondary
+	case uiStatusNoticeUpdateAvailable:
+		color = statusGreenColor()
 	case uiStatusNoticeError:
 		color = statusRedColor()
 	}
