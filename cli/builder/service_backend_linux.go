@@ -37,6 +37,8 @@ func (systemdServiceBackend) Install(ctx context.Context, spec serviceSpec, forc
 			return fmt.Errorf("Builder background service is already installed at %s; use --force to rewrite it", path)
 		}
 	}
+	previousUnit, previousErr := os.ReadFile(path)
+	previousExists := previousErr == nil
 	if err := os.WriteFile(path, []byte(renderSystemdUnit(spec)), 0o644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
@@ -45,7 +47,11 @@ func (systemdServiceBackend) Install(ctx context.Context, spec serviceSpec, forc
 		if installed {
 			return
 		}
-		_ = os.Remove(path)
+		if previousExists {
+			_ = os.WriteFile(path, previousUnit, 0o644)
+		} else {
+			_ = os.Remove(path)
+		}
 		_, _ = runServiceCommand(ctx, "systemctl", "--user", "daemon-reload")
 	}()
 	if _, err := runServiceCommand(ctx, "systemctl", "--user", "daemon-reload"); err != nil {

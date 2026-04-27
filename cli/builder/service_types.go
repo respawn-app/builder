@@ -50,6 +50,7 @@ type serviceStatus struct {
 	Detail       string   `json:"detail,omitempty"`
 	Hints        []string `json:"hints,omitempty"`
 	HealthStatus string   `json:"health_status,omitempty"`
+	HealthPID    int      `json:"health_pid,omitempty"`
 }
 
 type serviceBackend interface {
@@ -201,11 +202,8 @@ func applyHealthProbe(ctx context.Context, status serviceStatus, spec serviceSpe
 		return status
 	}
 	status.HealthStatus = healthStatus
-	if status.HealthStatus == protocol.HealthStatusOK {
-		status.Running = true
-	}
 	if pid > 0 {
-		status.PID = pid
+		status.HealthPID = pid
 	}
 	return status
 }

@@ -272,14 +272,14 @@ func windowsProcessPIDsMatchingAll(ctx context.Context, needles []string) []int 
 		return nil
 	}
 	var script strings.Builder
-	script.WriteString("$needles = @(")
+	script.WriteString("$self = $PID; $needles = @(")
 	for i, needle := range filteredNeedles {
 		if i > 0 {
 			script.WriteString(", ")
 		}
 		script.WriteString(windowsPowerShellSingleQuote(needle))
 	}
-	script.WriteString("); Get-CimInstance Win32_Process | Where-Object { $cmd = ($_.CommandLine -replace '/', '\\'); $ok = $true; foreach ($needle in $needles) { if ($cmd.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $ok = $false; break } }; $ok } | ForEach-Object { $_.ProcessId }")
+	script.WriteString("); Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $self -and $_.CommandLine } | Where-Object { $cmd = ($_.CommandLine -replace '/', '\\'); $ok = $true; foreach ($needle in $needles) { if ($cmd.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $ok = $false; break } }; $ok } | ForEach-Object { $_.ProcessId }")
 	result, err := runServiceCommand(ctx, "powershell", "-NoProfile", "-Command", script.String())
 	if err != nil {
 		return nil

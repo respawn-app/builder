@@ -317,13 +317,15 @@ func writeServiceStatus(stdout io.Writer, status serviceStatus) {
 		state = "running"
 	} else if status.Installed {
 		state = "stopped"
-	} else if status.Running {
+	} else if status.HealthStatus == protocol.HealthStatusOK {
 		state = "not installed (server running manually)"
 	}
 	fmt.Fprintf(stdout, "Builder background service: %s\n", state)
 	fmt.Fprintf(stdout, "Backend: %s\n", status.Backend)
 	if status.PID > 0 {
 		fmt.Fprintf(stdout, "PID: %d\n", status.PID)
+	} else if status.HealthPID > 0 {
+		fmt.Fprintf(stdout, "PID: %d\n", status.HealthPID)
 	}
 	if len(status.Command) > 0 {
 		fmt.Fprintf(stdout, "Command: %s\n", commandString(status.Command))
