@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"builder/shared/config"
@@ -64,6 +65,41 @@ func TestWindowsStopStartupFallbackKillsTaskScriptProcess(t *testing.T) {
 	want := []string{"taskkill", "/T", "/F", "/PID", "123"}
 	if len(*calls) != 3 || !reflect.DeepEqual((*calls)[2], want) {
 		t.Fatalf("calls = %+v, want final %v", *calls, want)
+	}
+}
+
+func TestWindowsStatusReportsRegisteredServerPID(t *testing.T) {
+	spec := windowsServiceTestSpec(t)
+	if err := os.MkdirAll(filepath.Dir(windowsTaskScriptPath(spec)), 0o755); err != nil {
+		t.Fatalf("mkdir task script dir: %v", err)
+	}
+	if err := os.WriteFile(windowsTaskScriptPath(spec), []byte(renderWindowsTaskScript(spec)), 0o644); err != nil {
+		t.Fatalf("write task script: %v", err)
+	}
+	captureWindowsServiceCommands(t, func(ctx context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch name {
+		case "schtasks":
+			return serviceCommandResult{Stdout: "Status: Running\r\n"}, nil
+		case "powershell":
+			script := strings.Join(args, " ")
+			if strings.Contains(script, windowsTaskScriptPath(spec)) {
+				return serviceCommandResult{Stdout: "111\r\n"}, nil
+			}
+			if strings.Contains(script, spec.Executable) {
+				return serviceCommandResult{Stdout: "222\r\n"}, nil
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	status, err := (scheduledTaskServiceBackend{}).Status(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.PID != 222 {
+		t.Fatalf("status PID = %d, want registered server PID 222", status.PID)
 	}
 }
 
