@@ -53,7 +53,7 @@ func (scheduledTaskServiceBackend) Install(ctx context.Context, spec serviceSpec
 	createArgs = append(createArgs, "/SC", "ONLOGON", "/RL", "LIMITED", "/TN", serviceWindowsTaskName, "/TR", scriptPath)
 	if _, err := runServiceCommand(ctx, "schtasks", createArgs...); err != nil {
 		if fallbackErr := installWindowsStartupItem(ctx, spec, start); fallbackErr != nil {
-			return fmt.Errorf("%w; startup fallback failed: %v", err, fallbackErr)
+			return errors.Join(err, fmt.Errorf("startup fallback failed: %w", fallbackErr))
 		}
 		return nil
 	}
@@ -116,7 +116,7 @@ func (scheduledTaskServiceBackend) Status(ctx context.Context, spec serviceSpec)
 	}
 	taskScriptPIDs := windowsTaskScriptPIDs(ctx, spec)
 	serverPIDs := windowsRegisteredCommandPIDs(ctx, spec)
-	running := strings.Contains(strings.ToLower(taskOutput), "running") || len(taskScriptPIDs) > 0 || len(serverPIDs) > 0
+	running := len(taskScriptPIDs) > 0 || len(serverPIDs) > 0
 	pid := 0
 	if len(serverPIDs) > 0 {
 		pid = serverPIDs[0]
@@ -279,7 +279,7 @@ func windowsProcessPIDsMatchingAll(ctx context.Context, needles []string) []int 
 		}
 		script.WriteString(windowsPowerShellSingleQuote(needle))
 	}
-	script.WriteString("); Get-CimInstance Win32_Process | Where-Object { $cmd = ($_.CommandLine -replace '/', '\\'); $ok = $true; foreach ($needle in $needles) { if ($cmd -notlike \"*$needle*\") { $ok = $false; break } }; $ok } | ForEach-Object { $_.ProcessId }")
+	script.WriteString("); Get-CimInstance Win32_Process | Where-Object { $cmd = ($_.CommandLine -replace '/', '\\'); $ok = $true; foreach ($needle in $needles) { if ($cmd.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $ok = $false; break } }; $ok } | ForEach-Object { $_.ProcessId }")
 	result, err := runServiceCommand(ctx, "powershell", "-NoProfile", "-Command", script.String())
 	if err != nil {
 		return nil

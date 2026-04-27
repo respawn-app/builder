@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"builder/shared/config"
+	"builder/shared/protocol"
 )
 
 type serviceAction string
@@ -271,7 +272,7 @@ func ensureNoUnmanagedServerConflict(ctx context.Context, backend serviceBackend
 		return err
 	}
 	healthStatus, healthPID := probeServiceHealth(ctx, spec)
-	healthRunning := healthStatus == "ok"
+	healthRunning := healthStatus == protocol.HealthStatusOK
 	pidProof := status.PID > 0 && healthPID > 0 && status.PID == healthPID
 	commandProof := len(status.Command) > 0 && commandArgsEqual(status.Command, serviceCommand(spec))
 	backendOwnsHealthyServer := healthRunning && status.Running && status.Loaded && (pidProof || commandProof)
