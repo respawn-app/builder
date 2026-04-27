@@ -115,10 +115,11 @@ func (scheduledTaskServiceBackend) Status(ctx context.Context, spec serviceSpec)
 		return serviceStatus{}, fmt.Errorf("stat Startup folder item: %w", err)
 	}
 	taskScriptPIDs := windowsTaskScriptPIDs(ctx, spec)
-	running := strings.Contains(strings.ToLower(taskOutput), "running") || len(taskScriptPIDs) > 0
+	serverPIDs := windowsRegisteredCommandPIDs(ctx, spec)
+	running := strings.Contains(strings.ToLower(taskOutput), "running") || len(taskScriptPIDs) > 0 || len(serverPIDs) > 0
 	pid := 0
-	if len(taskScriptPIDs) > 0 {
-		pid = taskScriptPIDs[0]
+	if len(serverPIDs) > 0 {
+		pid = serverPIDs[0]
 	}
 	return serviceStatus{
 		Backend:     "schtasks",
@@ -248,8 +249,38 @@ func stopWindowsTaskScriptProcess(ctx context.Context, spec serviceSpec) error {
 
 func windowsTaskScriptPIDs(ctx context.Context, spec serviceSpec) []int {
 	needle := strings.ReplaceAll(windowsTaskScriptPath(spec), "/", "\\")
-	script := "$needle = " + windowsPowerShellSingleQuote(needle) + "; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$needle*\" } | ForEach-Object { $_.ProcessId }"
-	result, err := runServiceCommand(ctx, "powershell", "-NoProfile", "-Command", script)
+	return windowsProcessPIDsMatchingAll(ctx, []string{needle})
+}
+
+func windowsRegisteredCommandPIDs(ctx context.Context, spec serviceSpec) []int {
+	command := readWindowsRegisteredCommand(spec)
+	if len(command) == 0 {
+		return nil
+	}
+	return windowsProcessPIDsMatchingAll(ctx, command)
+}
+
+func windowsProcessPIDsMatchingAll(ctx context.Context, needles []string) []int {
+	filteredNeedles := make([]string, 0, len(needles))
+	for _, needle := range needles {
+		trimmed := strings.TrimSpace(strings.ReplaceAll(needle, "/", "\\"))
+		if trimmed != "" {
+			filteredNeedles = append(filteredNeedles, trimmed)
+		}
+	}
+	if len(filteredNeedles) == 0 {
+		return nil
+	}
+	var script strings.Builder
+	script.WriteString("$needles = @(")
+	for i, needle := range filteredNeedles {
+		if i > 0 {
+			script.WriteString(", ")
+		}
+		script.WriteString(windowsPowerShellSingleQuote(needle))
+	}
+	script.WriteString("); Get-CimInstance Win32_Process | Where-Object { $cmd = ($_.CommandLine -replace '/', '\\'); $ok = $true; foreach ($needle in $needles) { if ($cmd -notlike \"*$needle*\") { $ok = $false; break } }; $ok } | ForEach-Object { $_.ProcessId }")
+	result, err := runServiceCommand(ctx, "powershell", "-NoProfile", "-Command", script.String())
 	if err != nil {
 		return nil
 	}
