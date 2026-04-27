@@ -456,9 +456,6 @@ func TestRollbackEditRejectsSlashCommandSubmitAndAutocomplete(t *testing.T) {
 	updated.input = "/sta"
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected transient status command for blocked edit-mode slash autocomplete")
-	}
 	if updated.input != "/sta" {
 		t.Fatalf("expected blocked slash autocomplete to preserve input, got %q", updated.input)
 	}

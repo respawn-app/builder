@@ -669,6 +669,10 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 	if !strings.Contains(plain, "Fast mode enabled") {
 		t.Fatalf("expected transcript notice for /fast toggle, got %q", plain)
 	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, _ = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
 
 	updated.input = "/fast off"
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -702,6 +706,34 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 	}
 	if updated.transientStatus != "Fast mode disabled" {
 		t.Fatalf("did not expect /fast status to overwrite transient status, got %q", updated.transientStatus)
+	}
+}
+
+func TestSlashFastStatusNoticeReplacesWithoutWaitingForClear(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIFastModeAvailable(true))
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+	m.input = "/fast on"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.fastModeEnabled {
+		t.Fatal("expected fast mode enabled")
+	}
+	if !strings.Contains(updated.transientStatus, "Fast mode enabled") {
+		t.Fatalf("expected enable status, got %q", updated.transientStatus)
+	}
+
+	updated.input = "/fast off"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.fastModeEnabled {
+		t.Fatal("expected fast mode disabled")
+	}
+	if !strings.Contains(updated.transientStatus, "Fast mode disabled") {
+		t.Fatalf("expected immediate replacement disable status, got %q", updated.transientStatus)
 	}
 }
 
@@ -794,6 +826,10 @@ func TestSlashSupervisorTogglesReviewerInvocationAndShowsStatus(t *testing.T) {
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "Supervisor invocation enabled") {
 		t.Fatalf("expected transcript notice for /supervisor toggle, got %q", plain)
+	}
+	for _, msg := range collectCmdMessages(t, cmd) {
+		next, _ = updated.Update(msg)
+		updated = next.(*uiModel)
 	}
 
 	updated.input = "/supervisor off"

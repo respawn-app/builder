@@ -59,8 +59,12 @@ var pendingToolSpinner = bubblespinner.Spinner{
 }
 var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 8 * time.Second
-var scheduleTransientStatusClear = func(token uint64) tea.Cmd {
-	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
+var updateNoticeDuration = 5 * time.Second
+var scheduleTransientStatusClear = func(duration time.Duration, token uint64) tea.Cmd {
+	if duration <= 0 {
+		duration = transientStatusDuration
+	}
+	return tea.Tick(duration, func(time.Time) tea.Msg {
 		return clearTransientStatusMsg{token: token}
 	})
 }

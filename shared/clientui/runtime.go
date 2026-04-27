@@ -36,6 +36,14 @@ type RuntimeStatus struct {
 	CompactionMode                    string
 	ContextUsage                      RuntimeContextUsage
 	CompactionCount                   int
+	Update                            UpdateStatus
+}
+
+type UpdateStatus struct {
+	Checked        bool
+	Available      bool
+	CurrentVersion string
+	LatestVersion  string
 }
 
 type RunStatus string
