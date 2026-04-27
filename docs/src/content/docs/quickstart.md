@@ -22,7 +22,16 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/in
 
 Check the installed version with: `builder --version`
 
-Interactive sessions show a one-time startup notice, `update available: <version>`, in the first interactive session when a newer release is published. `/status` shows the same update state.
+## Optional: Install the Background Service
+
+Run this if you want one shared Builder server to start at login:
+
+```bash
+builder service install
+```
+
+It uses about 70 MB of RAM, lets unlimited frontends stay lightweight by connecting to one local orchestrator, and makes background shells reliable when a terminal frontend exits.
+See [Builder Server](../server/) for details and service management commands.
 
 ## First Authentication
 
@@ -36,8 +45,7 @@ Supported auth options:
 You can switch later with `/login`.
 
 :::note
-Anthropic or Gemini subscriptions will not be supported until that becomes legal.
-Non-OpenAI model support is limited.
+Anthropic or Gemini subscriptions/models will not be supported until they allow third-party harnesses in their ToS.
 :::
 
 ## Main Workflows
@@ -62,7 +70,7 @@ Builder reads settings from `~/.builder/config.toml` and will auto-create it thr
 
 ## Skills and Slash Commands
 
-On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout. Runtime discovery still reads Builder directories only.
+On first launch, the setup wizard can optionally symlink existing skills and slash-command directories from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout.
 
 Builder discovers skills from:
 
@@ -84,11 +92,9 @@ Builder discovers custom slash commands from Markdown files in:
 - `~/.builder/prompts`
 - `~/.builder/commands`
 
-Each top-level `.md` file becomes a `/prompt:<name>` command.
-
 ## Supervisor
 
-- Use `/supervisor` to toggle its invocation for the current session. Initial value is config's `reviewer.frequency`, and default is after code edits. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
+- Use `/supervisor` to toggle its invocation for the current session. Initial value is config's `reviewer.frequency`, and default is after code edits. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~15% (if using the main model) but improves results.
 
 By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](../config/) page contains instructions on how to change supervisor model.
 Running OSS models or smaller models like `gpt-5.4-mini` seems to give almost the same results while keeping costs low.

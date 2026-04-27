@@ -11,27 +11,13 @@ server_port="${BUILDER_SERVER_PORT:-53082}"
 sandbox_home="${SANDBOX_HOME:-/home/builder}"
 builder_bin="${BUILDER_SANDBOX_BUILDER_BIN:-/usr/local/bin/builder}"
 
-require_commands() {
-	local missing=()
-	local cmd
-	for cmd in "$@"; do
-		if ! command -v "$cmd" >/dev/null 2>&1; then
-			missing+=("$cmd")
-		fi
-	done
-	if [ ${#missing[@]} -gt 0 ]; then
-		echo "sandbox image is missing required dev tools: ${missing[*]}" >&2
-		return 1
-	fi
-}
-
-require_project_create_cli() {
-	if HOME="$sandbox_home" "$builder_bin" project create --help >/dev/null 2>&1; then
-		return 0
-	fi
-	echo "sandbox bootstrap requires project registration support. Upgrade Builder so \`builder project create --path <server-path> --name <project-name>\` is available." >&2
-	return 1
-}
+if [ "$(id -u)" -eq 0 ]; then
+	mkdir -p "$(dirname -- "$workspace_root")"
+	mkdir -p "$workspace_root"
+	mkdir -p "$sandbox_home/.builder"
+	chown -R builder:builder "$workspace_root" "$sandbox_home"
+	exec runuser -u builder -- "$0" "$@"
+fi
 
 copy_seed_file_if_missing() {
 	local target_path="${1:-}"
@@ -65,13 +51,9 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-require_commands git jq yq rg fd fzf sqlite3 strace lsof ip dig nc tree rsync zip python3 python pip uv
-
 mkdir -p "$(dirname -- "$workspace_root")"
 mkdir -p "$workspace_root"
 mkdir -p "$sandbox_home/.builder"
-
-require_project_create_cli
 
 copy_seed_file_if_missing "$sandbox_home/.builder/config.toml" "$config_seed_path"
 copy_seed_file_if_missing "$sandbox_home/.builder/auth.json" "$auth_seed_path"
@@ -82,7 +64,7 @@ fi
 
 cd "$workspace_root"
 
-HOME="$sandbox_home" "$builder_bin" serve --workspace "$workspace_root" "$@" &
+HOME="$sandbox_home" "$builder_bin" serve "$@" &
 server_pid=$!
 
 ready_status=0

@@ -145,7 +145,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, r *http.Request) {
 		authReady := serverAuthReady(r.Context(), s.Core)
 		writeStatusJSON(w, http.StatusOK, map[string]any{
-			"status":     "ok",
+			"status":     protocol.HealthStatusOK,
 			"server_id":  identity.ServerID,
 			"pid":        identity.PID,
 			"auth_ready": authReady,

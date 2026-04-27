@@ -6,7 +6,7 @@ Builder is a highly opinionated terminal coding agent for professional Agentic E
 
 ## Get started 
 
-Everything you need is in the [Quicktart Guide](https://opensource.respawn.pro/builder/quickstart) - start there.
+Everything you need is in the [Quickstart Guide](https://opensource.respawn.pro/builder/quickstart) - start there.
 
 ### Features:
 
@@ -38,20 +38,19 @@ Everything you need is in the [Quicktart Guide](https://opensource.respawn.pro/b
 
 ### What will likely never be implemented
 
-These features are controversial or questionable for model performance, and usually have a better replacement.
-Here is where this project has to be highly opinionated:
+These features are controversial or questionable for model performance, and usually have a better replacement. Here is where this project has to be opinionated:
 
 - Native subagent orchestration inside one process; use separate headless Builder instances instead.
   - Supported path: `builder run "..."` for tmux/background subagent workflows. Agent already does this on its own.
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
-- MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
+- MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts. MCPs can be turned into CLIs easily with tools like [MCPorter](https://github.com/steipete/mcporter)
 - Extra UI candy tool calls. Less tools, less burden on the model.
-- On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches.
+- On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches, which can cost up to 10x more per invalidation.
 - Microcompaction - this invalidates caches and drives costs up with marginal benefits
-- Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
+- Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Builder can be easily sandboxed in a true, fully isolated Docker container with remote connection (no ssh hacks).
 - WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai) to fetch urls.
-- Fancy summaries, UI, minimal mode, features for "vibe coding". The philosophy is to build something for professionals (agentic engineers)
-- Anthropic, Gemini, Antigravity subscription usage. Not until that becomes legal.
+- Fancy summaries, UI, minimal mode, features for "vibe coding". The philosophy is to build something for professionals (agentic engineers).
+- Anthropic, Gemini, Antigravity subscription usage. Not until that becomes legal according to those companies' ToS.
 
 ## License
 
