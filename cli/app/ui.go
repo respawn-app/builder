@@ -1095,7 +1095,6 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
-		m.startupUpdateShown = true
 		cmd := m.enqueueTransientStatusWithDuration("update available: "+strings.TrimSpace(msg.version), uiStatusNoticeUpdateAvailable, updateNoticeDuration)
 		m.syncViewport()
 		return m, cmd
@@ -1558,6 +1557,9 @@ func (m *uiModel) showTransientStatusNotice(notice uiStatusNotice) tea.Cmd {
 	token := m.transientStatusToken
 	m.transientStatus = strings.TrimSpace(notice.Text)
 	m.transientStatusKind = notice.Kind
+	if notice.Kind == uiStatusNoticeUpdateAvailable {
+		m.startupUpdateShown = true
+	}
 	return scheduleTransientStatusClear(notice.Duration, token)
 }
 
