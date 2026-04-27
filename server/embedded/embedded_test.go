@@ -21,6 +21,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/testopenai"
@@ -744,23 +745,35 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	}
 	defer func() { _ = sub.Close() }()
 
-	first, err := sub.Next(ctx)
-	if err != nil {
-		t.Fatalf("first Next: %v", err)
+	chunks := make([]clientui.ProcessOutputChunk, 0, 2)
+	for {
+		chunk, err := sub.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if chunk.ProcessID != result.SessionID {
+			t.Fatalf("unexpected chunk process id: %+v", chunk)
+		}
+		if len(chunks) > 0 {
+			previous := chunks[len(chunks)-1]
+			if chunk.OffsetBytes != previous.NextOffsetBytes || chunk.NextOffsetBytes <= chunk.OffsetBytes {
+				t.Fatalf("unexpected chunk offsets previous=%+v current=%+v", previous, chunk)
+			}
+		}
+		chunks = append(chunks, chunk)
 	}
-	if first.ProcessID != result.SessionID || !strings.Contains(first.Text, "first") {
-		t.Fatalf("unexpected first chunk: %+v", first)
+	combined := strings.Builder{}
+	for _, chunk := range chunks {
+		combined.WriteString(chunk.Text)
 	}
-
-	second, err := sub.Next(ctx)
-	if err != nil {
-		t.Fatalf("second Next: %v", err)
-	}
-	if second.OffsetBytes <= first.OffsetBytes || second.NextOffsetBytes <= second.OffsetBytes || !strings.Contains(second.Text, "second") {
-		t.Fatalf("unexpected second chunk: %+v", second)
-	}
-	if _, err := sub.Next(ctx); !errors.Is(err, io.EOF) {
-		t.Fatalf("expected EOF after process exit, got %v", err)
+	combinedText := combined.String()
+	firstIndex := strings.Index(combinedText, "first")
+	secondIndex := strings.Index(combinedText, "second")
+	if len(chunks) == 0 || firstIndex < 0 || secondIndex < firstIndex {
+		t.Fatalf("expected streamed process output to contain first and second, chunks=%+v", chunks)
 	}
 }
 

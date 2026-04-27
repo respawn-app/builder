@@ -27,6 +27,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 	nextSessionInitialInput := ""
 	nextSessionParentID := ""
 	forceNewSession := false
+	showStartupUpdateNotice := true
 	for {
 		plan, err := planner.PlanSession(ctx, sessionLaunchRequest{
 			Mode:              launchModeInteractive,
@@ -74,7 +75,9 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			plan.ModelContractLocked,
 			plan.ConfiguredModelName,
 			plan.StatusConfig,
+			showStartupUpdateNotice,
 		)
+		showStartupUpdateNotice = shouldRetryStartupUpdateNotice(finalModel, showStartupUpdateNotice)
 		nextSessionInitialPrompt = ""
 		nextSessionInitialInput = ""
 		if runErr != nil {
@@ -101,6 +104,14 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		nextSessionParentID = resolved.ParentSessionID
 		forceNewSession = resolved.ForceNewSession
 	}
+}
+
+func shouldRetryStartupUpdateNotice(model any, enabled bool) bool {
+	if !enabled {
+		return false
+	}
+	ui, ok := model.(*uiModel)
+	return !ok || ui == nil || !ui.startupUpdateShown
 }
 
 func shouldCloseReboundServer(original embeddedServer, rebound embeddedServer) bool {

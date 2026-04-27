@@ -213,6 +213,9 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 		if model.sawAssistantDelta {
 			return false
 		}
+		if strings.Count(model.nativeRenderedSnapshot, "TAIL-ONCE") != 1 {
+			return false
+		}
 		for _, entry := range eng.ChatSnapshot().Entries {
 			if strings.Contains(entry.Text, "NO_OP") {
 				return false
@@ -232,9 +235,11 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 		t.Fatal("program did not terminate")
 	}
 
-	plain := xansi.Strip(out.String())
-	if strings.Contains(plain, "TAIL-ONCETAIL-ONCE") {
-		t.Fatalf("expected no duplicated tail token blink pattern, got %q", plain)
+	if count := strings.Count(model.nativeRenderedSnapshot, "TAIL-ONCE"); count != 1 {
+		t.Fatalf("expected native rendered snapshot to contain tail token once, count=%d snapshot=%q", count, model.nativeRenderedSnapshot)
+	}
+	if strings.Contains(xansi.Strip(out.String()), "TAIL-ONCETAIL-ONCE") {
+		t.Fatalf("expected no adjacent duplicate tail token writes, got %q", normalizedOutput(out.String()))
 	}
 }
 

@@ -8,10 +8,10 @@ import (
 )
 
 func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry) (tea.Model, error) {
-	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", "", false, active.Model, uiStatusConfig{})
+	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", "", false, active.Model, uiStatusConfig{}, false)
 }
 
-func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig) (tea.Model, error) {
+func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig, startupUpdateNotice bool) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
 	runtimeClient := wiring.runtimeClient
 	if runtimeClient == nil {
@@ -60,6 +60,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUISessionName(sessionName),
 		WithUISessionID(sessionID),
 		WithUIStatusConfig(statusConfig),
+		WithUIStartupUpdateNotice(startupUpdateNotice),
 	)
 	if closable, ok := model.(interface{ Close() }); ok {
 		defer closable.Close()

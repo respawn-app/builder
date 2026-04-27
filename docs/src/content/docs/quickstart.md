@@ -22,6 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/in
 
 Check the installed version with: `builder --version`
 
+Interactive sessions show a one-time startup notice, `update available: <version>`, in the first interactive session when a newer release is published. `/status` shows the same update state.
+
 ## Optional: Install the Background Service
 
 Run this if you want one shared Builder server to start at login:
