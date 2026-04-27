@@ -27,6 +27,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 	nextSessionInitialInput := ""
 	nextSessionParentID := ""
 	forceNewSession := false
+	showStartupUpdateNotice := true
 	for {
 		plan, err := planner.PlanSession(ctx, sessionLaunchRequest{
 			Mode:              launchModeInteractive,
@@ -63,6 +64,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		initialInput := sessionLaunchInitialInputFromServer(ctx, server, plan.SessionID, nextSessionInitialInput)
 
+		startupUpdateNotice := consumeStartupUpdateNoticeFlag(&showStartupUpdateNotice)
 		finalModel, runErr := runUILoopWithInitialPrompt(
 			runtimePlan.Wiring,
 			plan.ActiveSettings,
@@ -74,6 +76,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			plan.ModelContractLocked,
 			plan.ConfiguredModelName,
 			plan.StatusConfig,
+			startupUpdateNotice,
 		)
 		nextSessionInitialPrompt = ""
 		nextSessionInitialInput = ""
@@ -101,6 +104,14 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		nextSessionParentID = resolved.ParentSessionID
 		forceNewSession = resolved.ForceNewSession
 	}
+}
+
+func consumeStartupUpdateNoticeFlag(enabled *bool) bool {
+	if enabled == nil || !*enabled {
+		return false
+	}
+	*enabled = false
+	return true
 }
 
 func shouldCloseReboundServer(original embeddedServer, rebound embeddedServer) bool {

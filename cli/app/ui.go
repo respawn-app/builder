@@ -77,6 +77,10 @@ type clearTransientStatusMsg struct {
 	token uint64
 }
 
+type startupUpdateNoticeMsg struct {
+	version string
+}
+
 type nativeResizeReplayMsg struct {
 	token uint64
 }
@@ -220,6 +224,20 @@ const (
 	uiStatusNoticeNeutral uiStatusNoticeKind = iota
 	uiStatusNoticeSuccess
 	uiStatusNoticeError
+	uiStatusNoticeUpdateAvailable
+)
+
+type uiStatusNotice struct {
+	Text     string
+	Kind     uiStatusNoticeKind
+	Duration time.Duration
+}
+
+type uiStatusNoticeDelivery uint8
+
+const (
+	uiStatusNoticeReplace uiStatusNoticeDelivery = iota
+	uiStatusNoticeQueue
 )
 
 type uiLogger interface {
@@ -427,6 +445,12 @@ func WithUIPromptHistory(history []string) UIOption {
 	}
 }
 
+func WithUIStartupUpdateNotice(enabled bool) UIOption {
+	return func(m *uiModel) {
+		m.startupUpdateNotice = enabled
+	}
+}
+
 func WithUIClipboardImagePaster(paster uiClipboardImagePaster) UIOption {
 	return func(m *uiModel) {
 		m.clipboardImagePaster = paster
@@ -559,6 +583,9 @@ type uiModel struct {
 	transientStatus       string
 	transientStatusKind   uiStatusNoticeKind
 	transientStatusToken  uint64
+	transientStatusQueue  []uiStatusNotice
+	startupUpdateNotice   bool
+	startupUpdateShown    bool
 	debugKeys             bool
 	debugMode             bool
 	transcriptDiagnostics bool
@@ -731,6 +758,9 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			m.pathReferenceSearch.StartPrewarm(strings.TrimSpace(m.statusConfig.WorkspaceRoot))
 			return nil
 		})
+	}
+	if m.startupUpdateNotice && m.hasRuntimeClient() {
+		m.startupCmds = append(m.startupCmds, m.startupUpdateNoticeCmd(status.Update))
 	}
 	m.syncViewport()
 	return m
@@ -1056,11 +1086,19 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitPathReferenceSearchEvent(m.pathReferenceEvents)
 	case clearTransientStatusMsg:
 		if msg.token == m.transientStatusToken {
-			m.transientStatus = ""
-			m.transientStatusKind = uiStatusNoticeNeutral
+			return m, m.advanceTransientStatusQueue()
 		}
 		m.syncViewport()
 		return m, nil
+	case startupUpdateNoticeMsg:
+		if m.startupUpdateShown {
+			m.syncViewport()
+			return m, nil
+		}
+		m.startupUpdateShown = true
+		cmd := m.enqueueTransientStatusWithDuration("update available: "+strings.TrimSpace(msg.version), uiStatusNoticeUpdateAvailable, updateNoticeDuration)
+		m.syncViewport()
+		return m, cmd
 	case nativeHistoryFlushMsg:
 		return m, m.handleNativeHistoryFlush(msg)
 	case promptHistoryPersistErrMsg:
@@ -1483,14 +1521,67 @@ func (m *uiModel) setTransientStatus(message string) tea.Cmd {
 }
 
 func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNoticeKind) tea.Cmd {
+	return m.sendTransientStatus(message, kind, transientStatusDuration, uiStatusNoticeReplace)
+}
+
+func (m *uiModel) enqueueTransientStatus(message string, kind uiStatusNoticeKind) tea.Cmd {
+	return m.sendTransientStatus(message, kind, transientStatusDuration, uiStatusNoticeQueue)
+}
+
+func (m *uiModel) enqueueTransientStatusWithDuration(message string, kind uiStatusNoticeKind, duration time.Duration) tea.Cmd {
+	return m.sendTransientStatus(message, kind, duration, uiStatusNoticeQueue)
+}
+
+func (m *uiModel) sendTransientStatus(message string, kind uiStatusNoticeKind, duration time.Duration, delivery uiStatusNoticeDelivery) tea.Cmd {
 	if strings.TrimSpace(message) == "" {
 		return nil
 	}
+	notice := uiStatusNotice{Text: strings.TrimSpace(message), Kind: kind, Duration: duration}
+	if delivery == uiStatusNoticeQueue && strings.TrimSpace(m.transientStatus) != "" {
+		if m.transientStatus == notice.Text && m.transientStatusKind == notice.Kind {
+			return nil
+		}
+		if len(m.transientStatusQueue) > 0 {
+			last := m.transientStatusQueue[len(m.transientStatusQueue)-1]
+			if last == notice {
+				return nil
+			}
+		}
+		m.transientStatusQueue = append(m.transientStatusQueue, notice)
+		return nil
+	}
+	return m.showTransientStatusNotice(notice)
+}
+
+func (m *uiModel) showTransientStatusNotice(notice uiStatusNotice) tea.Cmd {
 	m.transientStatusToken++
 	token := m.transientStatusToken
-	m.transientStatus = strings.TrimSpace(message)
-	m.transientStatusKind = kind
-	return scheduleTransientStatusClear(token)
+	m.transientStatus = strings.TrimSpace(notice.Text)
+	m.transientStatusKind = notice.Kind
+	return scheduleTransientStatusClear(notice.Duration, token)
+}
+
+func (m *uiModel) advanceTransientStatusQueue() tea.Cmd {
+	m.transientStatus = ""
+	m.transientStatusKind = uiStatusNoticeNeutral
+	if len(m.transientStatusQueue) == 0 {
+		m.syncViewport()
+		return nil
+	}
+	next := m.transientStatusQueue[0]
+	m.transientStatusQueue = append([]uiStatusNotice(nil), m.transientStatusQueue[1:]...)
+	cmd := m.showTransientStatusNotice(next)
+	m.syncViewport()
+	return cmd
+}
+
+func (m *uiModel) startupUpdateNoticeCmd(status clientui.UpdateStatus) tea.Cmd {
+	if !status.Available || strings.TrimSpace(status.LatestVersion) == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		return startupUpdateNoticeMsg{version: status.LatestVersion}
+	}
 }
 
 func batchCmds(cmds ...tea.Cmd) tea.Cmd {

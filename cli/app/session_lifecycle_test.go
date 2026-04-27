@@ -837,3 +837,16 @@ func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 		t.Fatal("did not expect force-new session")
 	}
 }
+
+func TestConsumeStartupUpdateNoticeFlagOnlyOnce(t *testing.T) {
+	enabled := true
+	if !consumeStartupUpdateNoticeFlag(&enabled) {
+		t.Fatal("expected first session to consume startup update notice")
+	}
+	if enabled {
+		t.Fatal("expected startup update notice flag to be disabled after first consume")
+	}
+	if consumeStartupUpdateNoticeFlag(&enabled) {
+		t.Fatal("did not expect later sessions to show startup update notice")
+	}
+}

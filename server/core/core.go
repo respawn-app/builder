@@ -36,7 +36,9 @@ import (
 	"builder/server/storagemigration"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/server/updatestatus"
 	"builder/server/worktree"
+	"builder/shared/buildinfo"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -78,6 +80,7 @@ type Core struct {
 	sessionActivity  client.SessionActivityClient
 	worktrees        client.WorktreeClient
 	runPrompt        client.RunPromptClient
+	updateStatus     *updatestatus.Service
 }
 
 type unregisteredSessionLaunchClient struct{}
@@ -146,7 +149,9 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	authBootstrapService := authbootstrap.NewService(authSupport.AuthManager, authSupport.OAuthOptions, protocol.AllowedPreAuthMethods())
 	authStatusService := authstatus.NewService(authSupport.AuthManager)
-	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode)
+	updateStatusService := updatestatus.NewService(buildinfo.Version)
+	updateStatusService.Start()
+	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode).WithUpdateStatusProvider(updateStatusService)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
@@ -180,6 +185,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
 		worktrees:        client.NewLoopbackWorktreeClient(worktreeService),
 		runPrompt:        unregisteredRunPromptClient{},
+		updateStatus:     updateStatusService,
 	}
 	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
 		binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)

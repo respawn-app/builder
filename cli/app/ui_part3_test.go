@@ -6,6 +6,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/server/tools/askquestion"
+	"builder/shared/clientui"
 	"bytes"
 	"context"
 	"errors"
@@ -44,6 +45,79 @@ func TestShowErrorStatusSetsErrorNoticeKind(t *testing.T) {
 	}
 	if m.transientStatusKind != uiStatusNoticeError {
 		t.Fatalf("expected error notice kind, got %d", m.transientStatusKind)
+	}
+}
+
+func TestTransientStatusQueuePromotesNextNoticeAfterClear(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	first := m.enqueueTransientStatus("first", uiStatusNoticeSuccess)
+	second := m.enqueueTransientStatus("second", uiStatusNoticeError)
+
+	if first == nil {
+		t.Fatal("expected first notice clear command")
+	}
+	if second != nil {
+		t.Fatalf("expected queued notice to wait for active clear, got %T", second())
+	}
+	if m.transientStatus != "first" {
+		t.Fatalf("active notice = %q, want first", m.transientStatus)
+	}
+
+	next, cmd := m.Update(clearTransientStatusMsg{token: m.transientStatusToken})
+	updated := next.(*uiModel)
+	if updated.transientStatus != "second" {
+		t.Fatalf("promoted notice = %q, want second", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("promoted notice kind = %d, want error", updated.transientStatusKind)
+	}
+	if cmd == nil {
+		t.Fatal("expected promoted notice clear command")
+	}
+}
+
+func TestTransientStatusReplaceUpdatesActiveNoticeImmediately(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	first := m.setTransientStatusWithKind("first", uiStatusNoticeSuccess)
+	second := m.setTransientStatusWithKind("second", uiStatusNoticeError)
+
+	if first == nil || second == nil {
+		t.Fatal("expected replacement notices to schedule clear commands")
+	}
+	if m.transientStatus != "second" {
+		t.Fatalf("active notice = %q, want second", m.transientStatus)
+	}
+	if m.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("active notice kind = %d, want error", m.transientStatusKind)
+	}
+}
+
+func TestStartupUpdateNoticeShowsAvailableVersionOnce(t *testing.T) {
+	client := &runtimeControlFakeClient{
+		status: clientui.RuntimeStatus{
+			Update: clientui.UpdateStatus{Checked: true, Available: true, LatestVersion: "1.2.3"},
+		},
+		sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+	}
+	m := newProjectedTestUIModel(client, nil, nil, WithUIStartupUpdateNotice(true))
+
+	msg := m.startupUpdateNoticeCmd(client.status.Update)()
+	next, cmd := m.Update(msg)
+	updated := next.(*uiModel)
+	if updated.transientStatus != "update available: 1.2.3" {
+		t.Fatalf("startup update notice = %q", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeUpdateAvailable {
+		t.Fatalf("startup update notice kind = %d, want update available", updated.transientStatusKind)
+	}
+	if cmd == nil {
+		t.Fatal("expected update notice clear command")
+	}
+
+	next, _ = updated.Update(startupUpdateNoticeMsg{version: "1.2.4"})
+	updated = next.(*uiModel)
+	if updated.transientStatus != "update available: 1.2.3" {
+		t.Fatalf("expected duplicate startup update notice suppressed, got %q", updated.transientStatus)
 	}
 }
 

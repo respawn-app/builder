@@ -22,6 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/in
 
 Check the installed version with: `builder --version`
 
+Interactive sessions show `update available: <version>` in the status line when a newer release is published. `/status` shows the same update state.
+
 ## First Authentication
 
 Start Builder CLI with: `builder`

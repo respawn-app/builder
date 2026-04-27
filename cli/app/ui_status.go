@@ -103,6 +103,7 @@ type uiStatusSnapshot struct {
 	Auth              uiStatusAuthInfo
 	Context           uiStatusContextInfo
 	Model             uiStatusModelInfo
+	Update            uiStatusUpdateInfo
 	Config            uiStatusConfigInfo
 	Subscription      uiStatusSubscriptionInfo
 	Skills            []runtime.SkillInspection
@@ -137,6 +138,12 @@ type uiStatusContextInfo struct {
 
 type uiStatusModelInfo struct {
 	Summary string
+}
+
+type uiStatusUpdateInfo struct {
+	Checked       bool
+	Available     bool
+	LatestVersion string
 }
 
 type uiStatusConfigInfo struct {
@@ -346,6 +353,7 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 		OwnsServer:      req.OwnsServer,
 		Context:         contextInfo,
 		Model:           uiStatusModelInfo{Summary: statusModelSummary(req)},
+		Update:          statusUpdateInfo(req),
 		Config: uiStatusConfigInfo{
 			SettingsPath:    filepath.ToSlash(strings.TrimSpace(req.Source.SettingsPath)),
 			OverrideSources: statusConfigOverrideSources(req.Source),
@@ -354,6 +362,18 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 			Debug:           req.Settings.Debug,
 		},
 		CompactionCount: compactionCount,
+	}
+}
+
+func statusUpdateInfo(req uiStatusRequest) uiStatusUpdateInfo {
+	if req.Runtime == nil {
+		return uiStatusUpdateInfo{}
+	}
+	status := req.Runtime.Status().Update
+	return uiStatusUpdateInfo{
+		Checked:       status.Checked,
+		Available:     status.Available,
+		LatestVersion: strings.TrimSpace(status.LatestVersion),
 	}
 }
 
