@@ -11,6 +11,8 @@ type LockedContract struct {
 	MaxOutputToken    int                        `json:"max_output_token"`
 	SystemPrompt      string                     `json:"system_prompt"`
 	HasSystemPrompt   bool                       `json:"has_system_prompt,omitempty"`
+	ReviewerPrompt    string                     `json:"reviewer_prompt,omitempty"`
+	HasReviewerPrompt bool                       `json:"has_reviewer_prompt,omitempty"`
 	ContextWindow     int                        `json:"context_window,omitempty"`
 	ContextPercent    int                        `json:"context_percent,omitempty"`
 	EnabledTools      []string                   `json:"enabled_tools,omitempty"`
