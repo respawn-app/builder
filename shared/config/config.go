@@ -151,11 +151,12 @@ type ProviderCapabilitiesOverride struct {
 }
 
 type ReviewerSettings struct {
-	Frequency      string
-	Model          string
-	ThinkingLevel  string
-	TimeoutSeconds int
-	VerboseOutput  bool
+	Frequency        string
+	Model            string
+	ThinkingLevel    string
+	SystemPromptFile string
+	TimeoutSeconds   int
+	VerboseOutput    bool
 }
 
 type SourceReport struct {
