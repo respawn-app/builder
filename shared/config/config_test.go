@@ -297,6 +297,42 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 	}
 }
 
+func TestAppendSystemPromptFileFromConfigResolvesConfigRelativePath(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".builder", "config.toml")
+	state := configRegistry.defaultState()
+
+	if err := appendSystemPromptFileFromConfig(
+		settingsFile{"system_prompt_file": "prompts/SYSTEM.md"},
+		configPath,
+		SystemPromptFileScopeWorkspaceConfig,
+		&state,
+	); err != nil {
+		t.Fatalf("append system prompt file: %v", err)
+	}
+
+	want := filepath.Join(filepath.Dir(configPath), "prompts", "SYSTEM.md")
+	if got := state.Settings.SystemPromptFiles; len(got) != 1 || got[0].Path != want || got[0].Scope != SystemPromptFileScopeWorkspaceConfig {
+		t.Fatalf("system prompt files = %+v, want %q %s", got, want, SystemPromptFileScopeWorkspaceConfig)
+	}
+}
+
+func TestParseSubagentRoleSystemPromptFileResolvesConfigRelativePath(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".builder", "config.toml")
+
+	role, err := parseSubagentRole(settingsFile{"system_prompt_file": "fast-system.md"}, configPath, "fast")
+	if err != nil {
+		t.Fatalf("parse subagent role: %v", err)
+	}
+
+	want := filepath.Join(filepath.Dir(configPath), "fast-system.md")
+	if got := role.Settings.SystemPromptFiles; len(got) != 1 || got[0].Path != want || got[0].Scope != SystemPromptFileScopeSubagent {
+		t.Fatalf("subagent system prompt files = %+v, want %q %s", got, want, SystemPromptFileScopeSubagent)
+	}
+	if role.Sources["system_prompt_file"] != "file" {
+		t.Fatalf("system_prompt_file source = %q, want file", role.Sources["system_prompt_file"])
+	}
+}
+
 func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

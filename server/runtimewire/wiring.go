@@ -128,6 +128,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		}(),
 		EnabledTools:                  enabledTools,
 		DisabledSkills:                config.DisabledSkillToggles(active),
+		SystemPromptFiles:             active.SystemPromptFiles,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
 		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
 		ContextWindowTokens:           active.ModelContextWindow,

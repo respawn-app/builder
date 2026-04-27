@@ -81,6 +81,9 @@ func applySubagentRoleOverrides(settings *config.Settings, role config.SubagentR
 			settings.ThinkingLevel = role.Settings.ThinkingLevel
 		case "model_verbosity":
 			settings.ModelVerbosity = role.Settings.ModelVerbosity
+		case "system_prompt_file":
+			settings.SystemPromptFile = role.Settings.SystemPromptFile
+			settings.SystemPromptFiles = append(settings.SystemPromptFiles, role.Settings.SystemPromptFiles...)
 		case "model_capabilities.supports_reasoning_effort":
 			settings.ModelCapabilities.SupportsReasoningEffort = role.Settings.ModelCapabilities.SupportsReasoningEffort
 		case "model_capabilities.supports_vision_inputs":
@@ -254,6 +257,7 @@ func applyReviewerInheritance(settings *config.Settings, sources map[string]stri
 
 func cloneSettings(in config.Settings) config.Settings {
 	out := in
+	out.SystemPromptFiles = append([]config.SystemPromptFile(nil), in.SystemPromptFiles...)
 	out.EnabledTools = cloneEnabledToolSet(in.EnabledTools)
 	out.SkillToggles = cloneStringBoolMap(in.SkillToggles)
 	out.Subagents = cloneSubagentRoles(in.Subagents)

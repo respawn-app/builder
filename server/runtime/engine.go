@@ -103,6 +103,7 @@ type Config struct {
 	ProviderCapabilitiesOverride  *llm.ProviderCapabilities
 	EnabledTools                  []toolspec.ID
 	DisabledSkills                map[string]bool
+	SystemPromptFiles             []config.SystemPromptFile
 	AutoCompactTokenLimit         int
 	PreSubmitCompactionLeadTokens int
 	ContextWindowTokens           int
