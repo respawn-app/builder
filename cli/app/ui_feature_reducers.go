@@ -30,6 +30,15 @@ func (m *uiModel) reduceFeatureMessage(msg tea.Msg) uiFeatureUpdateResult {
 		m.windowReducer(),
 		m.runtimeReducer(),
 		m.statusReducer(),
+		m.worktreeReducer(),
+		m.diagnosticsReducer(),
+		m.askReducer(),
+		m.pathReferenceReducer(),
+		m.noticeReducer(),
+		m.nativeFlushReducer(),
+		m.inputAsyncReducer(),
+		m.processReducer(),
+		m.clipboardReducer(),
 	}
 	for _, reducer := range reducers {
 		if result := reducer.Update(msg); result.handled {
