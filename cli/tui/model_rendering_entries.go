@@ -500,6 +500,11 @@ func (m Model) selectedUserTranscriptEntry() (int, bool) {
 	return m.selectedTranscriptEntry, true
 }
 
+func (m Model) selectedTranscriptEntryMatches(entryIndex int) bool {
+	selectedEntry, ok := m.selectedUserTranscriptEntry()
+	return ok && selectedEntry == entryIndex
+}
+
 func (m Model) resolveDetailSelection() (int, bool) {
 	if selectedEntry, ok := m.selectedUserTranscriptEntry(); ok {
 		return selectedEntry, true

@@ -383,7 +383,7 @@ func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role st
 		expanded:   m.detailEntryExpanded(absoluteIndex),
 		expandable: m.detailStandardExpandable(entry, role, text),
 		render: func(model Model, symbolOverride string) []string {
-			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) {
+			if model.detailEntryExpanded(absoluteIndex) || model.detailRoleRendersFullWhenCollapsed(role) || model.selectedTranscriptEntryMatches(absoluteIndex) {
 				return model.detailWithTreeGuideWithSymbol(role, model.flattenEntryWithMetaAndSymbol(role, text, false, nil, symbolOverride), true, symbolOverride)
 			}
 			return model.detailCollapsedStandardLinesWithSymbol(entry, role, text, symbolOverride)

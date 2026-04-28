@@ -628,11 +628,13 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
 	}
-	if entryIndex < 0 || entryIndex >= len(m.transcriptEntries) {
+	localIndex := entryIndex - m.transcriptBaseOffset
+	if localIndex < 0 || localIndex >= len(m.transcriptEntries) {
 		return nil
 	}
-	projection := nativeCommittedProjection(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
-	rawSnapshot := renderNativeCommittedSnapshot(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
+	entries := m.transcriptEntries[:localIndex+1]
+	projection := nativeCommittedProjection(entries, m.theme, m.nativeReplayRenderWidth())
+	rawSnapshot := renderNativeCommittedSnapshot(entries, m.theme, m.nativeReplayRenderWidth())
 	m.nativeRenderedProjection = projection
 	m.nativeRenderedSnapshot = rawSnapshot
 	if strings.TrimSpace(rawSnapshot) == "" {
