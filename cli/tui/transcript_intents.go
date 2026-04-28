@@ -72,12 +72,16 @@ const (
 	RenderIntentInterruption              RenderIntent = RenderIntent(TranscriptRoleInterruption)
 )
 
-func NormalizeTranscriptRole(role string) TranscriptRole {
+func TranscriptRoleFromWire(role string) TranscriptRole {
 	normalized := transcript.NormalizeEntryRole(role)
 	if normalized == "" {
 		return TranscriptRoleUnknown
 	}
 	return TranscriptRole(normalized)
+}
+
+func TranscriptRoleToWire(role TranscriptRole) string {
+	return role.WireString()
 }
 
 func (r TranscriptRole) String() string {
@@ -246,7 +250,7 @@ func (i RenderIntent) BaseToolResultIntent(resultRole TranscriptRole) RenderInte
 }
 
 func roleFromEntry(entry TranscriptEntry) TranscriptRole {
-	return NormalizeTranscriptRole(entry.Role.WireString())
+	return TranscriptRoleFromWire(TranscriptRoleToWire(entry.Role))
 }
 
 func intentFromEntry(entry TranscriptEntry) RenderIntent {

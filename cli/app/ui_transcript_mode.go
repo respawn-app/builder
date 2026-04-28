@@ -68,7 +68,7 @@ func (m *uiModel) primeDetailTranscriptFromCurrentTail() {
 	for _, entry := range committedTranscriptEntriesForApp(m.transcriptEntries) {
 		page.Entries = append(page.Entries, clientui.ChatEntry{
 			Visibility:        entry.Visibility,
-			Role:              entry.Role.WireString(),
+			Role:              tui.TranscriptRoleToWire(entry.Role),
 			Text:              entry.Text,
 			OngoingText:       entry.OngoingText,
 			Phase:             string(entry.Phase),

@@ -716,7 +716,7 @@ func shouldPreserveLiveAssistantOngoingForPage(m *uiModel, req clientui.Transcri
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		return strings.TrimSpace(entry.Text) != trimmedLiveOngoing
@@ -743,7 +743,7 @@ func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.Tran
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
@@ -902,7 +902,7 @@ func shouldAppendSyntheticOngoingEntry(m *uiModel, entry *clientui.ChatEntry) bo
 	if m == nil || entry == nil || !m.hasRuntimeClient() || m.view.Mode() != tui.ModeOngoing {
 		return false
 	}
-	role := tui.NormalizeTranscriptRole(entry.Role)
+	role := tui.TranscriptRoleFromWire(entry.Role)
 	text := strings.TrimSpace(entry.Text)
 	if role == tui.TranscriptRoleUnknown || text == "" {
 		return false
@@ -960,7 +960,7 @@ func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient b
 		Visibility:        entry.Visibility,
 		Transient:         transient,
 		Committed:         committed,
-		Role:              tui.NormalizeTranscriptRole(entry.Role),
+		Role:              tui.TranscriptRoleFromWire(entry.Role),
 		Text:              entry.Text,
 		OngoingText:       entry.OngoingText,
 		Phase:             llm.MessagePhase(entry.Phase),
@@ -1271,7 +1271,7 @@ func shouldSkipProjectedToolCallStart(m *uiModel, evt clientui.Event) bool {
 	}
 	matched := false
 	for _, entry := range evt.TranscriptEntries {
-		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleToolCall {
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleToolCall {
 			return false
 		}
 		toolCallID := strings.TrimSpace(entry.ToolCallID)
@@ -1297,7 +1297,7 @@ func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) 
 		return false
 	}
 	for _, entry := range evt.TranscriptEntries {
-		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleUser {
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleUser {
 			return false
 		}
 	}
@@ -1313,7 +1313,7 @@ func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bo
 		return false
 	}
 	for _, entry := range evt.TranscriptEntries {
-		if tui.NormalizeTranscriptRole(entry.Role) == tui.TranscriptRoleAssistant {
+		if tui.TranscriptRoleFromWire(entry.Role) == tui.TranscriptRoleAssistant {
 			return true
 		}
 	}
@@ -1326,7 +1326,7 @@ func skippedAssistantCommitMatchesActiveLiveStream(m *uiModel, evt clientui.Even
 	}
 	assistantText := ""
 	for _, entry := range evt.TranscriptEntries {
-		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		assistantText = strings.TrimSpace(entry.Text)
@@ -1473,7 +1473,7 @@ func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clie
 func transcriptPayloadFromTUIEntry(entry tui.TranscriptEntry) transcript.EntryPayload {
 	return transcript.EntryPayload{
 		Visibility:        entry.Visibility,
-		Role:              entry.Role.WireString(),
+		Role:              tui.TranscriptRoleToWire(entry.Role),
 		Text:              entry.Text,
 		OngoingText:       entry.OngoingText,
 		Phase:             string(entry.Phase),

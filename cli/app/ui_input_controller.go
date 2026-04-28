@@ -208,7 +208,7 @@ func (m *uiModel) appendLocalEntryFallbackWithVisibility(role, text string, visi
 	if m == nil {
 		return nil
 	}
-	transcriptRole := tui.NormalizeTranscriptRole(role)
+	transcriptRole := tui.TranscriptRoleFromWire(role)
 	entry := tui.TranscriptEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: transcriptRole, Text: text}
 	m.transcriptEntries = append(m.transcriptEntries, entry)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(committedTranscriptEntriesForApp(m.transcriptEntries)))
