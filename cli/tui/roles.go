@@ -2,25 +2,20 @@ package tui
 
 import "builder/shared/transcript"
 
-const roleManualCompactionCarryover = string(transcript.EntryRoleManualCompactionCarryover)
-const roleCompactionSummary = string(transcript.EntryRoleCompactionSummary)
-const roleDeveloperContext = string(transcript.EntryRoleDeveloperContext)
-const roleDeveloperFeedback = string(transcript.EntryRoleDeveloperFeedback)
-const roleDeveloperErrorFeedback = string(transcript.EntryRoleDeveloperErrorFeedback)
-const roleInterruption = string(transcript.EntryRoleInterruption)
+const roleManualCompactionCarryover = TranscriptRoleManualCompactionCarryover
+const roleCompactionSummary = TranscriptRoleCompactionSummary
+const roleDeveloperContext = TranscriptRoleDeveloperContext
+const roleDeveloperFeedback = TranscriptRoleDeveloperFeedback
+const roleDeveloperErrorFeedback = TranscriptRoleDeveloperErrorFeedback
+const roleInterruption = TranscriptRoleInterruption
 
 const interruptionUserVisibleText = "You interrupted"
 
-func isCompactionRole(role string) bool {
-	switch transcript.NormalizeEntryRole(role) {
-	case roleCompactionSummary, roleManualCompactionCarryover:
-		return true
-	default:
-		return false
-	}
+func isCompactionRole(role TranscriptRole) bool {
+	return role.IsCompaction()
 }
 
-func isDetailOnlyRole(role string) bool {
+func isDetailOnlyRole(role TranscriptRole) bool {
 	return defaultEntryVisibilityForRole(role) == transcript.EntryVisibilityDetailOnly
 }
 
@@ -37,30 +32,28 @@ func entryVisibility(entry TranscriptEntry) transcript.EntryVisibility {
 	if explicit := transcript.NormalizeEntryVisibility(entry.Visibility); explicit != transcript.EntryVisibilityAuto {
 		return explicit
 	}
-	return defaultEntryVisibilityForRole(entry.Role)
+	return defaultEntryVisibilityForRole(roleFromEntry(entry))
 }
 
-func defaultEntryVisibilityForRole(role string) transcript.EntryVisibility {
-	normalized := transcript.NormalizeEntryRole(role)
-	switch normalized {
-	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, roleInterruption, "error", "warning", "cache_warning":
+func defaultEntryVisibilityForRole(role TranscriptRole) transcript.EntryVisibility {
+	switch role {
+	case TranscriptRoleThinking, TranscriptRoleThinkingTrace, TranscriptRoleReasoning, TranscriptRoleCompactionSummary, TranscriptRoleDeveloperContext, TranscriptRoleManualCompactionCarryover, TranscriptRoleInterruption, TranscriptRoleError, TranscriptRoleWarning, TranscriptRoleCacheWarning:
 		return transcript.EntryVisibilityDetailOnly
 	default:
-		if transcriptMessageStyleForRole(normalized) == transcriptMessageStyleWarning {
+		if transcriptMessageStyleForIntent(role.DisplayIntent("")) == transcriptMessageStyleWarning {
 			return transcript.EntryVisibilityDetailOnly
 		}
 		return transcript.EntryVisibilityAll
 	}
 }
 
-func isStyledMetaRole(role string) bool {
-	trimmed := transcript.NormalizeEntryRole(role)
-	return isCompactionRole(trimmed) || transcriptMessageStyleForRole(trimmed) != transcriptMessageStyleNone || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
+func isStyledMetaRole(role RenderIntent) bool {
+	return role.IsCompaction() || transcriptMessageStyleForIntent(role) != transcriptMessageStyleNone || role == RenderIntentDeveloperContext || role == RenderIntentDeveloperFeedback || role == RenderIntentInterruption
 }
 
-func transcriptDisplayText(role, text string) string {
-	switch transcript.NormalizeEntryRole(role) {
-	case roleInterruption:
+func transcriptDisplayText(role RenderIntent, text string) string {
+	switch role {
+	case RenderIntentInterruption:
 		return interruptionUserVisibleText
 	default:
 		return text

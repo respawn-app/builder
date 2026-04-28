@@ -686,7 +686,7 @@ func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.Transcri
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if entry.Role != tui.TranscriptRoleAssistant {
 			return false
 		}
 		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
@@ -716,7 +716,7 @@ func shouldPreserveLiveAssistantOngoingForPage(m *uiModel, req clientui.Transcri
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		return strings.TrimSpace(entry.Text) != trimmedLiveOngoing
@@ -743,7 +743,7 @@ func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.Tran
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
@@ -772,7 +772,7 @@ func committedTranscriptAlreadyMatchesAssistantOngoing(entries []tui.TranscriptE
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if entry.Role != tui.TranscriptRoleAssistant {
 			return false
 		}
 		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
@@ -902,13 +902,13 @@ func shouldAppendSyntheticOngoingEntry(m *uiModel, entry *clientui.ChatEntry) bo
 	if m == nil || entry == nil || !m.hasRuntimeClient() || m.view.Mode() != tui.ModeOngoing {
 		return false
 	}
-	role := strings.TrimSpace(entry.Role)
+	role := tui.NormalizeTranscriptRole(entry.Role)
 	text := strings.TrimSpace(entry.Text)
-	if role == "" || text == "" {
+	if role == tui.TranscriptRoleUnknown || text == "" {
 		return false
 	}
 	for _, loaded := range m.view.LoadedTranscriptEntries() {
-		if strings.TrimSpace(loaded.Role) == role && strings.TrimSpace(loaded.Text) == text {
+		if loaded.Role == role && strings.TrimSpace(loaded.Text) == text {
 			return false
 		}
 	}
@@ -931,7 +931,7 @@ func shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m *uiModel, entries 
 			if committedEntry.Transient || !committedEntry.Committed {
 				continue
 			}
-			if strings.TrimSpace(loadedEntry.Role) == strings.TrimSpace(committedEntry.Role) && strings.TrimSpace(loadedEntry.Text) == strings.TrimSpace(committedEntry.Text) {
+			if loadedEntry.Role == committedEntry.Role && strings.TrimSpace(loadedEntry.Text) == strings.TrimSpace(committedEntry.Text) {
 				return true
 			}
 		}
@@ -960,7 +960,7 @@ func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient b
 		Visibility:        entry.Visibility,
 		Transient:         transient,
 		Committed:         committed,
-		Role:              entry.Role,
+		Role:              tui.NormalizeTranscriptRole(entry.Role),
 		Text:              entry.Text,
 		OngoingText:       entry.OngoingText,
 		Phase:             llm.MessagePhase(entry.Phase),
@@ -1271,7 +1271,7 @@ func shouldSkipProjectedToolCallStart(m *uiModel, evt clientui.Event) bool {
 	}
 	matched := false
 	for _, entry := range evt.TranscriptEntries {
-		if entry.Role != "tool_call" {
+		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleToolCall {
 			return false
 		}
 		toolCallID := strings.TrimSpace(entry.ToolCallID)
@@ -1297,7 +1297,7 @@ func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) 
 		return false
 	}
 	for _, entry := range evt.TranscriptEntries {
-		if entry.Role != "user" {
+		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleUser {
 			return false
 		}
 	}
@@ -1313,7 +1313,7 @@ func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bo
 		return false
 	}
 	for _, entry := range evt.TranscriptEntries {
-		if strings.TrimSpace(entry.Role) == "assistant" {
+		if tui.NormalizeTranscriptRole(entry.Role) == tui.TranscriptRoleAssistant {
 			return true
 		}
 	}
@@ -1326,7 +1326,7 @@ func skippedAssistantCommitMatchesActiveLiveStream(m *uiModel, evt clientui.Even
 	}
 	assistantText := ""
 	for _, entry := range evt.TranscriptEntries {
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if tui.NormalizeTranscriptRole(entry.Role) != tui.TranscriptRoleAssistant {
 			continue
 		}
 		assistantText = strings.TrimSpace(entry.Text)
@@ -1338,7 +1338,7 @@ func skippedAssistantCommitMatchesActiveLiveStream(m *uiModel, evt clientui.Even
 	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
 	for idx := len(committedEntries) - 1; idx >= 0; idx-- {
 		entry := committedEntries[idx]
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if entry.Role != tui.TranscriptRoleAssistant {
 			continue
 		}
 		return strings.TrimSpace(entry.Text) == assistantText
@@ -1365,7 +1365,7 @@ func shouldIgnoreStaleAssistantDelta(m *uiModel, evt clientui.Event, delta strin
 	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
 	for idx := len(committedEntries) - 1; idx >= 0; idx-- {
 		entry := committedEntries[idx]
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if entry.Role != tui.TranscriptRoleAssistant {
 			continue
 		}
 		return strings.TrimSpace(entry.Text) == strings.TrimSpace(delta)
@@ -1473,7 +1473,7 @@ func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clie
 func transcriptPayloadFromTUIEntry(entry tui.TranscriptEntry) transcript.EntryPayload {
 	return transcript.EntryPayload{
 		Visibility:        entry.Visibility,
-		Role:              entry.Role,
+		Role:              entry.Role.WireString(),
 		Text:              entry.Text,
 		OngoingText:       entry.OngoingText,
 		Phase:             string(entry.Phase),

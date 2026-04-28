@@ -1,8 +1,6 @@
 package app
 
 import (
-	"strings"
-
 	"builder/cli/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +10,7 @@ func (m *uiModel) refreshRollbackCandidates() {
 	entries, baseOffset := m.rollbackCandidateEntries()
 	candidates := make([]rollbackCandidate, 0)
 	for idx, entry := range entries {
-		if strings.TrimSpace(entry.Role) != "user" {
+		if entry.Role != tui.TranscriptRoleUser {
 			continue
 		}
 		candidates = append(candidates, rollbackCandidate{

@@ -620,8 +620,9 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			if strings.TrimSpace(entry.Text) == "" {
 				continue
 			}
-			m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: entry.Role, Text: entry.Text})
-			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
+			role := tui.NormalizeTranscriptRole(entry.Role)
+			m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: role, Text: entry.Text})
+			m.forwardToView(tui.AppendTranscriptMsg{Role: role, Text: entry.Text})
 		}
 		m.transcriptBaseOffset = 0
 		m.transcriptTotalEntries = len(m.transcriptEntries)

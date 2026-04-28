@@ -35,7 +35,7 @@ type TranscriptProjectionLine struct {
 }
 
 type TranscriptProjectionBlock struct {
-	Role         string
+	Role         RenderIntent
 	DividerGroup string
 	EntryIndex   int
 	EntryEnd     int
@@ -363,7 +363,7 @@ func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {
 	consumedResults := make(map[int]struct{})
 	resultIndex := buildToolResultIndex(tail)
 	for idx, entry := range tail {
-		if strings.TrimSpace(entry.Role) != "tool_call" {
+		if roleFromEntry(entry) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -397,7 +397,7 @@ func RenderCommittedOngoingSnapshot(entries []TranscriptEntry, theme string, wid
 func nonEmptyTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	filtered := make([]TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
-		if isToolResultRole(strings.TrimSpace(entry.Role)) &&
+		if roleFromEntry(entry).IsToolResult() &&
 			strings.TrimSpace(entry.Text) == "" &&
 			strings.TrimSpace(entry.OngoingText) == "" {
 			// Successful patch/edit calls intentionally emit an empty tool_result
@@ -421,7 +421,7 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 		if entry.Transient {
 			return committedOngoingPrefixEndBefore(entries, idx, resultIndex)
 		}
-		if strings.TrimSpace(entry.Role) != "tool_call" {
+		if roleFromEntry(entry) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
@@ -440,7 +440,7 @@ func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, re
 	consumedResults := make(map[int]struct{})
 	for idx := boundary - 1; idx >= 0; idx-- {
 		entry := entries[idx]
-		if strings.TrimSpace(entry.Role) != "tool_call" {
+		if roleFromEntry(entry) != TranscriptRoleToolCall {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {

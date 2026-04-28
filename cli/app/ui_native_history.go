@@ -106,7 +106,7 @@ func (m *uiModel) canFinalizeNativeStreamingCommit(committedEntries []tui.Transc
 		return false
 	}
 	newEntries := committedEntries[previousCommittedCount:]
-	return len(newEntries) > 0 && strings.TrimSpace(newEntries[0].Role) == "assistant" && strings.TrimSpace(newEntries[0].Text) == strings.TrimSpace(m.nativeStreamingText)
+	return len(newEntries) > 0 && newEntries[0].Role == tui.TranscriptRoleAssistant && strings.TrimSpace(newEntries[0].Text) == strings.TrimSpace(m.nativeStreamingText)
 }
 
 func (m *uiModel) shouldEmitNativeHistory() bool {
