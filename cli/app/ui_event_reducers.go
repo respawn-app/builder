@@ -1,0 +1,218 @@
+package app
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+type uiDiagnosticsFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) diagnosticsReducer() uiDiagnosticsFeatureReducer {
+	return uiDiagnosticsFeatureReducer{model: m}
+}
+
+func (r uiDiagnosticsFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case renderDiagnosticMsg:
+		cmd := m.applyRenderDiagnostic(msg.diagnostic)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	case runLoggerDiagnosticMsg:
+		cmd := m.applyRunLoggerDiagnostic(msg.diagnostic)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiAskFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) askReducer() uiAskFeatureReducer {
+	return uiAskFeatureReducer{model: m}
+}
+
+func (r uiAskFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case askEventMsg:
+		m.askController().acceptEvent(msg.event)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitAskEvent(m.askEvents))
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiPathReferenceFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) pathReferenceReducer() uiPathReferenceFeatureReducer {
+	return uiPathReferenceFeatureReducer{model: m}
+}
+
+func (r uiPathReferenceFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case uiPathReferenceCorpusReadyMsg:
+		m.handlePathReferenceCorpusReady(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitPathReferenceSearchEvent(m.pathReferenceEvents))
+	case uiPathReferenceCorpusFailedMsg:
+		m.handlePathReferenceCorpusFailed(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitPathReferenceSearchEvent(m.pathReferenceEvents))
+	case uiPathReferenceMatchResultMsg:
+		m.handlePathReferenceMatchResult(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitPathReferenceSearchEvent(m.pathReferenceEvents))
+	case uiPathReferenceLoadingDelayMsg:
+		m.handlePathReferenceLoadingDelay(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitPathReferenceSearchEvent(m.pathReferenceEvents))
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiNoticeFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) noticeReducer() uiNoticeFeatureReducer {
+	return uiNoticeFeatureReducer{model: m}
+}
+
+func (r uiNoticeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case clearTransientStatusMsg:
+		if msg.token == m.transientStatusToken {
+			return handledUIFeatureUpdate(m, m.advanceTransientStatusQueue())
+		}
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, nil)
+	case startupUpdateNoticeMsg:
+		if m.startupUpdateShown {
+			m.syncViewport()
+			return handledUIFeatureUpdate(m, nil)
+		}
+		cmd := m.enqueueTransientStatusWithDuration("update available: "+strings.TrimSpace(msg.version), uiStatusNoticeUpdateAvailable, updateNoticeDuration)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiInputAsyncFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) inputAsyncReducer() uiInputAsyncFeatureReducer {
+	return uiInputAsyncFeatureReducer{model: m}
+}
+
+func (r uiInputAsyncFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case promptHistoryPersistErrMsg:
+		if msg.err == nil {
+			return handledUIFeatureUpdate(m, nil)
+		}
+		return handledUIFeatureUpdate(m, m.setTransientStatusWithKind("prompt history persistence failed: "+msg.err.Error(), uiStatusNoticeError))
+	case submitDoneMsg:
+		next, cmd := m.inputController().handleSubmitDone(msg)
+		nextModel := next.(*uiModel)
+		nextModel.syncViewport()
+		return handledUIFeatureUpdate(nextModel, cmd)
+	case preSubmitCompactionCheckDoneMsg:
+		next, cmd := m.inputController().handlePreSubmitCompactionCheckDone(msg)
+		nextModel := next.(*uiModel)
+		nextModel.syncViewport()
+		return handledUIFeatureUpdate(nextModel, cmd)
+	case compactDoneMsg:
+		next, cmd := m.inputController().handleCompactDone(msg)
+		nextModel := next.(*uiModel)
+		nextModel.syncViewport()
+		return handledUIFeatureUpdate(nextModel, cmd)
+	case spinnerTickMsg:
+		next, cmd := m.inputController().handleSpinnerTick(msg)
+		nextModel := next.(*uiModel)
+		nextModel.syncViewport()
+		return handledUIFeatureUpdate(nextModel, cmd)
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiProcessFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) processReducer() uiProcessFeatureReducer {
+	return uiProcessFeatureReducer{model: m}
+}
+
+func (r uiProcessFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case processListRefreshTickMsg:
+		if !m.processList.isOpen() {
+			m.syncViewport()
+			return handledUIFeatureUpdate(m, nil)
+		}
+		m.refreshProcessEntries()
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, tea.Batch(waitProcessListRefresh(), m.ensureSpinnerTicking()))
+	case openProcessLogsDoneMsg:
+		m.syncViewport()
+		if msg.err != nil {
+			return handledUIFeatureUpdate(m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError))
+		}
+		return handledUIFeatureUpdate(m, nil)
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiClipboardFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) clipboardReducer() uiClipboardFeatureReducer {
+	return uiClipboardFeatureReducer{model: m}
+}
+
+func (r uiClipboardFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case clipboardImagePasteDoneMsg:
+		cmd := m.handleClipboardImagePasteDone(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	case clipboardTextCopyDoneMsg:
+		cmd := m.handleClipboardTextCopyDone(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	}
+	return uiFeatureUpdateResult{}
+}
+
+type uiNativeFlushFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) nativeFlushReducer() uiNativeFlushFeatureReducer {
+	return uiNativeFlushFeatureReducer{model: m}
+}
+
+func (r uiNativeFlushFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case nativeHistoryFlushMsg:
+		return handledUIFeatureUpdate(m, m.handleNativeHistoryFlush(msg))
+	}
+	return uiFeatureUpdateResult{}
+}
