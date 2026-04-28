@@ -486,47 +486,32 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		m.sessionName = strings.TrimSpace(page.SessionName)
 	}
 	m.conversationFreshness = page.ConversationFreshness
-	pageReq := req
-	if pageReq.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && m.view.Mode() == tui.ModeOngoing {
-		pageReq.Window = clientui.TranscriptWindowOngoingTail
-	}
-	entries := transcriptEntriesFromPage(page)
-	if shouldPreserveLiveAssistantOngoingForPage(m, pageReq, page) {
-		page.Ongoing = m.view.OngoingStreamingText()
-		page.OngoingError = m.view.OngoingErrorText()
-	}
-	if authoritativePageDuplicatesCommittedAssistantOngoing(entries, page.Ongoing, m.view.OngoingStreamingText()) {
-		page.Ongoing = ""
-		page.OngoingError = ""
-	}
-	if reason := transcriptPageReplacementRejectReason(m, pageReq, page); reason != "" {
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(m), req, page, recoveryCause)
+	pageReq := reduction.request
+	page = reduction.page
+	entries := reduction.entries
+	if reduction.decision == runtimeTranscriptPageDecisionReject {
 		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{
 			"path":                    "hydrate",
-			"reason":                  reason,
+			"reason":                  reduction.rejectReason,
 			"recovery_cause":          string(recoveryCause),
-			"replacement_branch":      transcriptPageApplyBranch(pageReq, m),
-			"preserve_live_reasoning": strconv.FormatBool(shouldPreserveLiveReasoning(m, page)),
+			"replacement_branch":      reduction.branch,
+			"preserve_live_reasoning": strconv.FormatBool(reduction.preserveLiveReasoning),
 		})
 		if previousWindowTitle != m.windowTitle() {
 			return tea.SetWindowTitle(m.windowTitle())
 		}
 		return nil
 	}
-	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
-	preserveLiveReasoning := shouldPreserveLiveReasoning(m, page)
-	if shouldSyncNativeHistory {
-		permit := nativeHistoryReplayPermitAuthoritativeHydrate
-		if recoveryCause != clientui.TranscriptRecoveryCauseNone {
-			permit = nativeHistoryReplayPermitContinuityRecovery
-		}
-		m.armNativeHistoryReplayPermit(permit)
+	if reduction.shouldSyncNativeHistory {
+		m.armNativeHistoryReplayPermit(reduction.nativeReplayPermit)
 		m.clearDeferredCommittedTail("authoritative_hydrate")
-		a.applyAuthoritativeOngoingTailPage(page, entries, preserveLiveReasoning)
+		a.applyAuthoritativeOngoingTailPage(page, entries, reduction.preserveLiveReasoning)
 	}
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
 		m.detailTranscript.syncTail(page)
 		if m.view.Mode() != tui.ModeDetail {
-			if !preserveLiveReasoning {
+			if !reduction.preserveLiveReasoning {
 				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 			m.forwardToView(tui.SetConversationMsg{
@@ -547,7 +532,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		}
 		m.detailTranscript.apply(page)
 		m.transcriptRevision = max(m.transcriptRevision, page.Revision)
-		if !preserveLiveReasoning {
+		if !reduction.preserveLiveReasoning {
 			m.reasoningLiveDirty = false
 		}
 		detailPage := m.detailTranscript.page()
@@ -556,7 +541,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		detailPage.ConversationFreshness = page.ConversationFreshness
 		detailPage.Revision = page.Revision
 		if m.view.Mode() == tui.ModeDetail {
-			if !preserveLiveReasoning {
+			if !reduction.preserveLiveReasoning {
 				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 			m.forwardToView(tui.SetConversationMsg{
@@ -575,17 +560,17 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		m.sawAssistantDelta = false
 	}
 	cmds := make([]tea.Cmd, 0, 2)
-	if shouldSyncNativeHistory {
+	if reduction.shouldSyncNativeHistory {
 		cmds = append(cmds, m.syncNativeHistoryFromTranscript())
 	}
 	m.logTranscriptPageDiag("transcript.diag.client.apply_page_commit", pageReq, page, map[string]string{
 		"path":                      "hydrate",
 		"recovery_cause":            string(recoveryCause),
-		"branch":                    transcriptPageApplyBranch(pageReq, m),
-		"preserve_live_reasoning":   strconv.FormatBool(preserveLiveReasoning),
+		"branch":                    reduction.branch,
+		"preserve_live_reasoning":   strconv.FormatBool(reduction.preserveLiveReasoning),
 		"transcript_revision_after": strconv.FormatInt(m.transcriptRevision, 10),
 		"transcript_total_after":    strconv.Itoa(m.transcriptTotalEntries),
-		"native_history_sync":       strconv.FormatBool(shouldSyncNativeHistory),
+		"native_history_sync":       strconv.FormatBool(reduction.shouldSyncNativeHistory),
 	})
 	if previousWindowTitle != m.windowTitle() {
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
@@ -672,198 +657,6 @@ func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.Transcri
 		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
 	}
 	return false
-}
-
-func shouldPreserveLiveAssistantOngoingForPage(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
-	if m == nil {
-		return false
-	}
-	replacesOngoingTail := req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail)
-	if replacesOngoingTail {
-		return false
-	}
-	effectiveRevision, _ := committedTranscriptStateIncludingDeferredTail(m)
-	if page.Revision <= 0 || page.Revision != effectiveRevision {
-		return false
-	}
-	trimmedLiveOngoing := strings.TrimSpace(m.view.OngoingStreamingText())
-	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
-		return false
-	}
-	entries := page.Entries
-	for idx := len(entries) - 1; idx >= 0; idx-- {
-		entry := entries[idx]
-		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
-			continue
-		}
-		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
-			continue
-		}
-		return strings.TrimSpace(entry.Text) != trimmedLiveOngoing
-	}
-	return true
-}
-
-func authoritativePageCommitsLiveAssistantOngoing(m *uiModel, page clientui.TranscriptPage) bool {
-	if m == nil {
-		return false
-	}
-	trimmedLiveOngoing := strings.TrimSpace(m.view.OngoingStreamingText())
-	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
-		return false
-	}
-	entries := page.Entries
-	if len(entries) == 0 {
-		return false
-	}
-	currentStart := m.transcriptBaseOffset
-	currentEnd := currentStart + len(m.transcriptEntries)
-	for idx := len(entries) - 1; idx >= 0; idx-- {
-		entry := entries[idx]
-		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
-			continue
-		}
-		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
-			continue
-		}
-		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
-			return false
-		}
-		absolute := page.Offset + idx
-		if absolute < currentStart || absolute >= currentEnd {
-			return true
-		}
-		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[absolute-currentStart], entry) {
-			return true
-		}
-		return false
-	}
-	return false
-}
-
-func committedTranscriptAlreadyMatchesAssistantOngoing(entries []tui.TranscriptEntry, liveOngoing string) bool {
-	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
-	if trimmedLiveOngoing == "" {
-		return false
-	}
-	committed := committedTranscriptEntriesForApp(entries)
-	for idx := len(committed) - 1; idx >= 0; idx-- {
-		entry := committed[idx]
-		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
-			continue
-		}
-		if entry.Role != tui.TranscriptRoleAssistant {
-			return false
-		}
-		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
-	}
-	return false
-}
-
-func shouldRejectTranscriptPageReplacement(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
-	return transcriptPageReplacementRejectReason(m, req, page) != ""
-}
-
-func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) string {
-	if m == nil {
-		return ""
-	}
-	effectiveRevision, effectiveCommittedCount := committedTranscriptStateIncludingDeferredTail(m)
-	if page.Revision <= 0 {
-		if effectiveRevision > 0 {
-			return "stale_revision"
-		}
-		return ""
-	}
-	if page.Revision < effectiveRevision {
-		return "stale_revision"
-	}
-	replacesOngoingTail := req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail)
-	if !replacesOngoingTail {
-		return ""
-	}
-	if page.Revision == effectiveRevision && page.TotalEntries < effectiveCommittedCount {
-		return "stale_total_entries"
-	}
-	if page.Revision == effectiveRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
-		if authoritativePageCommitsLiveAssistantOngoing(m, page) {
-			return ""
-		}
-		if authoritativePageDuplicatesCommittedAssistantOngoing(transcriptEntriesFromPage(page), page.Ongoing, m.view.OngoingStreamingText()) {
-			return ""
-		}
-		if committedTranscriptAlreadyMatchesAssistantOngoing(m.transcriptEntries, m.view.OngoingStreamingText()) {
-			return ""
-		}
-		return "same_revision_would_clear_ongoing"
-	}
-	if m.transcriptLiveDirty && page.Revision == effectiveRevision && shouldAcceptEqualRevisionTailReplacement(m, page) {
-		return ""
-	}
-	if m.transcriptLiveDirty && page.Revision <= effectiveRevision {
-		return "live_dirty_same_or_older_revision"
-	}
-	return ""
-}
-
-func shouldAcceptEqualRevisionTailReplacement(m *uiModel, page clientui.TranscriptPage) bool {
-	if m == nil {
-		return false
-	}
-	currentStart := m.transcriptBaseOffset
-	currentEnd := currentStart + len(m.transcriptEntries)
-	pageStart := page.Offset
-	pageEnd := page.Offset + len(page.Entries)
-	if pageStart > currentStart || pageEnd < currentEnd {
-		return false
-	}
-	overlapStart := max(currentStart, pageStart)
-	overlapEnd := min(currentEnd, pageEnd)
-	if overlapStart >= overlapEnd {
-		return pageEnd > currentEnd || m.view.OngoingStreamingText() != page.Ongoing || m.view.OngoingErrorText() != page.OngoingError
-	}
-	hasOverlapDiff := false
-	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
-		currentIndex := absolute - currentStart
-		pageIndex := absolute - pageStart
-		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[currentIndex], page.Entries[pageIndex]) {
-			hasOverlapDiff = true
-			break
-		}
-	}
-	if hasOverlapDiff {
-		return true
-	}
-	if pageEnd > currentEnd {
-		return true
-	}
-	if m.view.OngoingStreamingText() != page.Ongoing {
-		return true
-	}
-	if m.view.OngoingErrorText() != page.OngoingError {
-		return true
-	}
-	return false
-}
-
-func transcriptPageApplyBranch(req clientui.TranscriptPageRequest, m *uiModel) string {
-	if req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m != nil && m.view.Mode() != tui.ModeDetail) {
-		return "ongoing_tail_replace"
-	}
-	return "detail_merge"
-}
-
-func shouldPreserveLiveReasoning(m *uiModel, page clientui.TranscriptPage) bool {
-	if m == nil {
-		return false
-	}
-	if !m.reasoningLiveDirty {
-		return false
-	}
-	if page.Revision <= 0 {
-		return true
-	}
-	return page.Revision <= m.transcriptRevision
 }
 
 func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEntry {

@@ -1,0 +1,297 @@
+package app
+
+import (
+	"strings"
+
+	"builder/cli/tui"
+	"builder/shared/clientui"
+)
+
+type runtimeTranscriptPageDecisionKind uint8
+
+const (
+	runtimeTranscriptPageDecisionApply runtimeTranscriptPageDecisionKind = iota + 1
+	runtimeTranscriptPageDecisionReject
+)
+
+type runtimeTranscriptPageState struct {
+	entries                 []tui.TranscriptEntry
+	baseOffset              int
+	totalEntries            int
+	revision                int64
+	effectiveRevision       int64
+	effectiveCommittedCount int
+	viewMode                tui.Mode
+	liveOngoing             string
+	liveOngoingError        string
+	transcriptLiveDirty     bool
+	reasoningLiveDirty      bool
+}
+
+type runtimeTranscriptPageReduction struct {
+	decision                       runtimeTranscriptPageDecisionKind
+	request                        clientui.TranscriptPageRequest
+	page                           clientui.TranscriptPage
+	entries                        []tui.TranscriptEntry
+	rejectReason                   string
+	branch                         string
+	preserveLiveAssistantOngoing   bool
+	duplicateCommittedAssistantEnd bool
+	preserveLiveReasoning          bool
+	shouldSyncNativeHistory        bool
+	nativeReplayPermit             nativeHistoryReplayPermit
+}
+
+func newRuntimeTranscriptPageState(m *uiModel) runtimeTranscriptPageState {
+	if m == nil {
+		return runtimeTranscriptPageState{}
+	}
+	effectiveRevision, effectiveCommittedCount := committedTranscriptStateIncludingDeferredTail(m)
+	return runtimeTranscriptPageState{
+		entries:                 m.transcriptEntries,
+		baseOffset:              m.transcriptBaseOffset,
+		totalEntries:            m.transcriptTotalEntries,
+		revision:                m.transcriptRevision,
+		effectiveRevision:       effectiveRevision,
+		effectiveCommittedCount: effectiveCommittedCount,
+		viewMode:                m.view.Mode(),
+		liveOngoing:             m.view.OngoingStreamingText(),
+		liveOngoingError:        m.view.OngoingErrorText(),
+		transcriptLiveDirty:     m.transcriptLiveDirty,
+		reasoningLiveDirty:      m.reasoningLiveDirty,
+	}
+}
+
+func reduceRuntimeTranscriptPage(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest, page clientui.TranscriptPage, recoveryCause clientui.TranscriptRecoveryCause) runtimeTranscriptPageReduction {
+	pageReq := normalizeRuntimeTranscriptPageRequest(state, req, page)
+	if shouldPreserveLiveAssistantOngoingForRuntimeTranscriptPage(state, pageReq, page) {
+		page.Ongoing = state.liveOngoing
+		page.OngoingError = state.liveOngoingError
+	}
+	entries := transcriptEntriesFromPage(page)
+	duplicateCommittedAssistantEnd := authoritativePageDuplicatesCommittedAssistantOngoing(entries, page.Ongoing, state.liveOngoing)
+	if duplicateCommittedAssistantEnd {
+		page.Ongoing = ""
+		page.OngoingError = ""
+	}
+	preserveLiveReasoning := shouldPreserveLiveReasoningForRuntimeTranscriptPage(state, page)
+	shouldSyncNativeHistory := shouldSyncNativeHistoryForRuntimeTranscriptPage(state, pageReq)
+	reduction := runtimeTranscriptPageReduction{
+		decision:                       runtimeTranscriptPageDecisionApply,
+		request:                        pageReq,
+		page:                           page,
+		entries:                        entries,
+		branch:                         runtimeTranscriptPageApplyBranch(state, pageReq),
+		preserveLiveAssistantOngoing:   page.Ongoing == state.liveOngoing && strings.TrimSpace(state.liveOngoing) != "",
+		duplicateCommittedAssistantEnd: duplicateCommittedAssistantEnd,
+		preserveLiveReasoning:          preserveLiveReasoning,
+		shouldSyncNativeHistory:        shouldSyncNativeHistory,
+	}
+	if shouldSyncNativeHistory {
+		reduction.nativeReplayPermit = nativeHistoryReplayPermitAuthoritativeHydrate
+		if recoveryCause != clientui.TranscriptRecoveryCauseNone {
+			reduction.nativeReplayPermit = nativeHistoryReplayPermitContinuityRecovery
+		}
+	}
+	if reason := runtimeTranscriptPageReplacementRejectReason(state, pageReq, page); reason != "" {
+		reduction.decision = runtimeTranscriptPageDecisionReject
+		reduction.rejectReason = reason
+	}
+	return reduction
+}
+
+func normalizeRuntimeTranscriptPageRequest(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) clientui.TranscriptPageRequest {
+	if req.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && state.viewMode == tui.ModeOngoing {
+		req.Window = clientui.TranscriptWindowOngoingTail
+	}
+	return req
+}
+
+func shouldSyncNativeHistoryForRuntimeTranscriptPage(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest) bool {
+	return req.Window == clientui.TranscriptWindowOngoingTail || req == (clientui.TranscriptPageRequest{})
+}
+
+func replacesOngoingTailForRuntimeTranscriptPage(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest) bool {
+	return req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && state.viewMode != tui.ModeDetail)
+}
+
+func runtimeTranscriptPageApplyBranch(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest) string {
+	if replacesOngoingTailForRuntimeTranscriptPage(state, req) {
+		return "ongoing_tail_replace"
+	}
+	return "detail_merge"
+}
+
+func shouldPreserveLiveAssistantOngoingForRuntimeTranscriptPage(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
+	if replacesOngoingTailForRuntimeTranscriptPage(state, req) {
+		return false
+	}
+	effectiveRevision, _ := state.effectiveCommittedState()
+	if page.Revision <= 0 || page.Revision != effectiveRevision {
+		return false
+	}
+	trimmedLiveOngoing := strings.TrimSpace(state.liveOngoing)
+	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
+		return false
+	}
+	for idx := len(page.Entries) - 1; idx >= 0; idx-- {
+		entry := page.Entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
+			continue
+		}
+		return strings.TrimSpace(entry.Text) != trimmedLiveOngoing
+	}
+	return true
+}
+
+func shouldPreserveLiveReasoningForRuntimeTranscriptPage(state runtimeTranscriptPageState, page clientui.TranscriptPage) bool {
+	if !state.reasoningLiveDirty {
+		return false
+	}
+	if page.Revision <= 0 {
+		return true
+	}
+	return page.Revision <= state.revision
+}
+
+func runtimeTranscriptPageReplacementRejectReason(state runtimeTranscriptPageState, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) string {
+	effectiveRevision, effectiveCommittedCount := state.effectiveCommittedState()
+	if page.Revision <= 0 {
+		if effectiveRevision > 0 {
+			return "stale_revision"
+		}
+		return ""
+	}
+	if page.Revision < effectiveRevision {
+		return "stale_revision"
+	}
+	if !replacesOngoingTailForRuntimeTranscriptPage(state, req) {
+		return ""
+	}
+	if page.Revision == effectiveRevision && page.TotalEntries < effectiveCommittedCount {
+		return "stale_total_entries"
+	}
+	if page.Revision == effectiveRevision && strings.TrimSpace(state.liveOngoing) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		if authoritativePageCommitsLiveAssistantOngoing(state, page) {
+			return ""
+		}
+		if authoritativePageDuplicatesCommittedAssistantOngoing(transcriptEntriesFromPage(page), page.Ongoing, state.liveOngoing) {
+			return ""
+		}
+		if committedTranscriptAlreadyMatchesAssistantOngoing(state.entries, state.liveOngoing) {
+			return ""
+		}
+		return "same_revision_would_clear_ongoing"
+	}
+	if state.transcriptLiveDirty && page.Revision == effectiveRevision && shouldAcceptEqualRevisionTailReplacement(state, page) {
+		return ""
+	}
+	if state.transcriptLiveDirty && page.Revision <= effectiveRevision {
+		return "live_dirty_same_or_older_revision"
+	}
+	return ""
+}
+
+func (state runtimeTranscriptPageState) effectiveCommittedState() (int64, int) {
+	revision := state.effectiveRevision
+	if revision == 0 {
+		revision = state.revision
+	}
+	count := state.effectiveCommittedCount
+	if count == 0 {
+		count = state.baseOffset + len(committedTranscriptEntriesForApp(state.entries))
+	}
+	return revision, max(state.totalEntries, count)
+}
+
+func authoritativePageCommitsLiveAssistantOngoing(state runtimeTranscriptPageState, page clientui.TranscriptPage) bool {
+	trimmedLiveOngoing := strings.TrimSpace(state.liveOngoing)
+	if trimmedLiveOngoing == "" || strings.TrimSpace(page.Ongoing) != "" {
+		return false
+	}
+	if len(page.Entries) == 0 {
+		return false
+	}
+	currentStart := state.baseOffset
+	currentEnd := currentStart + len(state.entries)
+	for idx := len(page.Entries) - 1; idx >= 0; idx-- {
+		entry := page.Entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if tui.TranscriptRoleFromWire(entry.Role) != tui.TranscriptRoleAssistant {
+			continue
+		}
+		if strings.TrimSpace(entry.Text) != trimmedLiveOngoing {
+			return false
+		}
+		absolute := page.Offset + idx
+		if absolute < currentStart || absolute >= currentEnd {
+			return true
+		}
+		if !transcriptEntryMatchesChatEntry(state.entries[absolute-currentStart], entry) {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func committedTranscriptAlreadyMatchesAssistantOngoing(entries []tui.TranscriptEntry, liveOngoing string) bool {
+	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
+	if trimmedLiveOngoing == "" {
+		return false
+	}
+	committed := committedTranscriptEntriesForApp(entries)
+	for idx := len(committed) - 1; idx >= 0; idx-- {
+		entry := committed[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if entry.Role != tui.TranscriptRoleAssistant {
+			return false
+		}
+		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
+	}
+	return false
+}
+
+func shouldAcceptEqualRevisionTailReplacement(state runtimeTranscriptPageState, page clientui.TranscriptPage) bool {
+	currentStart := state.baseOffset
+	currentEnd := currentStart + len(state.entries)
+	pageStart := page.Offset
+	pageEnd := page.Offset + len(page.Entries)
+	if pageStart > currentStart || pageEnd < currentEnd {
+		return false
+	}
+	overlapStart := max(currentStart, pageStart)
+	overlapEnd := min(currentEnd, pageEnd)
+	if overlapStart >= overlapEnd {
+		return pageEnd > currentEnd || state.liveOngoing != page.Ongoing || state.liveOngoingError != page.OngoingError
+	}
+	hasOverlapDiff := false
+	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
+		currentIndex := absolute - currentStart
+		pageIndex := absolute - pageStart
+		if !transcriptEntryMatchesChatEntry(state.entries[currentIndex], page.Entries[pageIndex]) {
+			hasOverlapDiff = true
+			break
+		}
+	}
+	if hasOverlapDiff {
+		return true
+	}
+	if pageEnd > currentEnd {
+		return true
+	}
+	if state.liveOngoing != page.Ongoing {
+		return true
+	}
+	if state.liveOngoingError != page.OngoingError {
+		return true
+	}
+	return false
+}
