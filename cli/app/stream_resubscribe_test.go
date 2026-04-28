@@ -75,10 +75,11 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithout
 	defer cancel()
 
 	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{err: io.EOF}}}
-	resubscribeCalled := false
-	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
-		resubscribeCalled = true
-		return nil, context.Canceled
+	resubscribed := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 1, Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}}}}
+	var requestedAfter []uint64
+	events, stop := startSessionActivityEvents(ctx, initial, func(_ context.Context, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
+		requestedAfter = append(requestedAfter, afterSequence)
+		return resubscribed, nil
 	}, func() bool { return false }, nil)
 	defer stop()
 
@@ -89,8 +90,12 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithout
 	if gap.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
 		t.Fatalf("stream-gap recovery cause = %q, want %q", gap.RecoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
 	}
-	if resubscribeCalled {
-		t.Fatal("initial stream drop without a replay cursor must not resubscribe with AfterSequence 0")
+	if len(requestedAfter) != 1 || requestedAfter[0] != 0 {
+		t.Fatalf("resubscribe cursors = %+v, want [0]", requestedAfter)
+	}
+	live := waitSessionActivityEvent(t, events)
+	if live.Kind != clientui.EventRunStateChanged || live.RunState == nil || !live.RunState.Busy {
+		t.Fatalf("expected live event after recovery resubscribe, got %+v", live)
 	}
 }
 
