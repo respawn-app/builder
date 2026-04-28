@@ -7,7 +7,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/runtime"
 	"builder/shared/clientui"
-	"builder/shared/transcriptdiag"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -53,14 +52,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	if merge := reduceDeferredCommittedTailMerge(newDeferredCommittedTailState(deferredCommittedTailSnapshotFromModel(m)), evt); merge.merged {
 		evt = merge.event
 		m.deferredCommittedTail = merge.remaining
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.merge_deferred_tail", map[string]string{
-			"session_id":     strings.TrimSpace(m.sessionID),
-			"mode":           m.transcriptModeLabel(),
-			"kind":           string(evt.Kind),
-			"merged_start":   strconv.Itoa(merge.mergedStart),
-			"merged_count":   strconv.Itoa(merge.mergedCount),
-			"consumed_tails": strconv.Itoa(merge.consumedTails),
-		}))
+		m.logDeferredCommittedTailMergeDiag(evt, merge)
 	}
 	if m.turnQueueHook != nil {
 		m.turnQueueHook.OnProjectedRuntimeEvent(evt)
@@ -387,37 +379,10 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
 	}
 	if !flushNativeHistory {
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-			"session_id":            strings.TrimSpace(m.sessionID),
-			"mode":                  m.transcriptModeLabel(),
-			"path":                  "live_event",
-			"incoming_count":        strconv.Itoa(incomingCount),
-			"applied_count":         strconv.Itoa(len(entries)),
-			"start_offset":          strconv.Itoa(startOffset),
-			"entries_digest":        transcriptdiag.EntriesDigest(entries),
-			"reconcile_mode":        plan.mode.label(),
-			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-			"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
-			"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
-		}))
+		m.logProjectedTranscriptAppliedDiag(evt, plan, incomingCount, len(entries), startOffset, entries, false)
 		return nil, true, false
 	}
-	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-		"session_id":            strings.TrimSpace(m.sessionID),
-		"mode":                  m.transcriptModeLabel(),
-		"path":                  "live_event",
-		"incoming_count":        strconv.Itoa(incomingCount),
-		"applied_count":         strconv.Itoa(len(entries)),
-		"start_offset":          strconv.Itoa(startOffset),
-		"entries_digest":        transcriptdiag.EntriesDigest(entries),
-		"reconcile_mode":        plan.mode.label(),
-		"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-		"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-		"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
-		"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
-		"native_history_sync":   "true",
-	}))
+	m.logProjectedTranscriptAppliedDiag(evt, plan, incomingCount, len(entries), startOffset, entries, true)
 	return m.syncNativeHistoryFromTranscript(), true, false
 }
 
@@ -698,35 +663,14 @@ func (m *uiModel) deferProjectedCommittedTail(evt clientui.Event) {
 	m.deferredCommittedTail = append(m.deferredCommittedTail, reduction.tail)
 	m.transcriptRevision = reduction.revisionAfter
 	m.transcriptTotalEntries = reduction.totalEntriesAfter
-	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.defer_tail", map[string]string{
-		"session_id":     strings.TrimSpace(m.sessionID),
-		"mode":           m.transcriptModeLabel(),
-		"kind":           string(evt.Kind),
-		"range_start":    strconv.Itoa(reduction.tail.rangeStart),
-		"range_end":      strconv.Itoa(reduction.tail.rangeEnd),
-		"revision":       strconv.FormatInt(evt.TranscriptRevision, 10),
-		"entries_digest": transcriptdiag.EntriesDigest(evt.TranscriptEntries),
-		"pending_count":  strconv.Itoa(len(reduction.tail.pending)),
-	}))
+	m.logDeferredCommittedTailDeferDiag(evt, reduction)
 }
 
 func (m *uiModel) clearDeferredCommittedTail(reason string) {
 	if m == nil {
 		return
 	}
-	if len(m.deferredCommittedTail) > 0 {
-		pendingCount := 0
-		for _, deferred := range m.deferredCommittedTail {
-			pendingCount += len(deferred.pending)
-		}
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.clear_deferred_tail", map[string]string{
-			"session_id":    strings.TrimSpace(m.sessionID),
-			"mode":          m.transcriptModeLabel(),
-			"reason":        reason,
-			"tail_count":    strconv.Itoa(len(m.deferredCommittedTail)),
-			"pending_count": strconv.Itoa(pendingCount),
-		}))
-	}
+	m.logDeferredCommittedTailClearDiag(reason)
 	m.deferredCommittedTail = nil
 }
 
@@ -734,13 +678,7 @@ func (m *uiModel) beginCommittedTranscriptContinuityRecovery() {
 	if m == nil {
 		return
 	}
-	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.begin_continuity_recovery", map[string]string{
-		"session_id":    strings.TrimSpace(m.sessionID),
-		"mode":          m.transcriptModeLabel(),
-		"current_base":  strconv.Itoa(m.transcriptBaseOffset),
-		"current_count": strconv.Itoa(len(m.transcriptEntries)),
-		"current_total": strconv.Itoa(m.transcriptTotalEntries),
-	}))
+	m.logCommittedTranscriptContinuityRecoveryStartDiag()
 	m.invalidateTransientTranscriptState()
 }
 
