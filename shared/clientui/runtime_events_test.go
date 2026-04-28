@@ -2,7 +2,7 @@ package clientui
 
 import "testing"
 
-func TestReduceRuntimeEvent_UserMessageFlushedConsumesInjectedInputAndUnlocksSubmit(t *testing.T) {
+func TestReduceRuntimeEvent_UserMessageFlushedProducesPendingInputAndConversationUpdates(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{ConversationFreshness: ConversationFreshnessFresh},
 		PendingInputState{
@@ -15,26 +15,26 @@ func TestReduceRuntimeEvent_UserMessageFlushedConsumesInjectedInputAndUnlocksSub
 		Event{Kind: EventUserMessageFlushed, UserMessage: "steered message"},
 	)
 
-	if update.SyncSessionView {
+	if update.Transcript.Sync != nil {
 		t.Fatal("did not expect flushed user message to request session sync")
 	}
-	if !update.RecordPromptHistory {
+	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputRecordPromptHistory) {
 		t.Fatal("expected consumed injected text to be recorded in prompt history")
 	}
-	if !update.ClearInput {
+	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputClearDraft) {
 		t.Fatal("expected locked injected input to clear the draft input")
 	}
-	if update.Input.InputSubmitLocked {
+	if update.PendingInput.State.InputSubmitLocked {
 		t.Fatal("expected input submit lock cleared")
 	}
-	if update.Input.LockedInjectText != "" {
-		t.Fatalf("expected locked inject text cleared, got %q", update.Input.LockedInjectText)
+	if update.PendingInput.State.LockedInjectText != "" {
+		t.Fatalf("expected locked inject text cleared, got %q", update.PendingInput.State.LockedInjectText)
 	}
-	if len(update.Input.PendingInjected) != 1 || update.Input.PendingInjected[0] != "follow-up" {
-		t.Fatalf("expected first injected item consumed, got %+v", update.Input.PendingInjected)
+	if len(update.PendingInput.State.PendingInjected) != 1 || update.PendingInput.State.PendingInjected[0] != "follow-up" {
+		t.Fatalf("expected first injected item consumed, got %+v", update.PendingInput.State.PendingInjected)
 	}
-	if update.State.ConversationFreshness != ConversationFreshnessEstablished {
-		t.Fatalf("conversation freshness = %v, want established", update.State.ConversationFreshness)
+	if update.Conversation.State.Freshness != ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", update.Conversation.State.Freshness)
 	}
 }
 
@@ -46,16 +46,16 @@ func TestReduceRuntimeEvent_RunStateStoppedClearsReasoningAndReturnsToIdle(t *te
 		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: false}},
 	)
 
-	if update.State.Busy {
+	if update.RunState.State.Busy {
 		t.Fatal("expected busy cleared")
 	}
-	if !update.SetActivityIdle {
+	if update.RunState.Activity != RuntimeActivityIdle {
 		t.Fatal("expected stopped run to return running activity to idle")
 	}
-	if update.State.ReasoningStatusHeader != "" {
-		t.Fatalf("expected reasoning status header cleared, got %q", update.State.ReasoningStatusHeader)
+	if update.Reasoning.State.StatusHeader != "" {
+		t.Fatalf("expected reasoning status header cleared, got %q", update.Reasoning.State.StatusHeader)
 	}
-	if !update.ClearReasoningStream {
+	if !hasReasoningStreamCommand(update.Reasoning.Stream, RuntimeReasoningStreamClear) {
 		t.Fatal("expected reasoning stream cleared when run stops")
 	}
 }
@@ -68,16 +68,16 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}},
 	)
 
-	if !update.State.Busy {
+	if !update.RunState.State.Busy {
 		t.Fatal("expected busy set")
 	}
-	if !update.SetActivityRunning {
+	if update.RunState.Activity != RuntimeActivityRunning {
 		t.Fatal("expected started run to set running activity")
 	}
-	if update.SyncSessionView {
+	if update.Transcript.Sync != nil {
 		t.Fatal("did not expect started run to request transcript sync")
 	}
-	if !update.ClearPendingPreSubmit {
+	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputClearPreSubmit) {
 		t.Fatal("expected started run to clear pending pre-submit text")
 	}
 }
@@ -89,7 +89,7 @@ func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceO
 		false,
 		Event{Kind: EventConversationUpdated},
 	)
-	if plain.SyncSessionView {
+	if plain.Transcript.Sync != nil {
 		t.Fatal("did not expect plain conversation_updated to request transcript sync")
 	}
 	committed := ReduceRuntimeEvent(
@@ -98,7 +98,7 @@ func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceO
 		false,
 		Event{Kind: EventConversationUpdated, CommittedTranscriptChanged: true},
 	)
-	if !committed.SyncSessionView {
+	if committed.Transcript.Sync == nil || committed.Transcript.Sync.Reason != RuntimeTranscriptSyncCommittedAdvance {
 		t.Fatal("expected committed conversation_updated to request transcript sync")
 	}
 	recovery := ReduceRuntimeEvent(
@@ -107,7 +107,7 @@ func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceO
 		false,
 		Event{Kind: EventConversationUpdated, RecoveryCause: TranscriptRecoveryCauseStreamGap},
 	)
-	if !recovery.SyncSessionView {
+	if recovery.Transcript.Sync == nil || recovery.Transcript.Sync.Reason != RuntimeTranscriptSyncRecovery {
 		t.Fatal("expected recovery conversation_updated to request transcript sync")
 	}
 	gap := ReduceRuntimeEvent(
@@ -116,7 +116,7 @@ func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceO
 		false,
 		Event{Kind: EventStreamGap, RecoveryCause: TranscriptRecoveryCauseStreamGap},
 	)
-	if !gap.SyncSessionView {
+	if gap.Transcript.Sync == nil || gap.Transcript.Sync.Reason != RuntimeTranscriptSyncStreamGap {
 		t.Fatal("expected explicit stream gap to request transcript sync")
 	}
 }
@@ -128,7 +128,7 @@ func TestReduceRuntimeEvent_OngoingErrorUpdatedRequestsSessionSync(t *testing.T)
 		false,
 		Event{Kind: EventOngoingErrorUpdated},
 	)
-	if !update.SyncSessionView {
+	if update.Transcript.Sync == nil || update.Transcript.Sync.Reason != RuntimeTranscriptSyncOngoingErrorUpdated {
 		t.Fatal("expected ongoing_error_updated to request transcript sync")
 	}
 }
@@ -141,17 +141,18 @@ func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", CompactText: "Background shell 1000 completed (exit 0)"}},
 	)
 
-	if !update.RefreshProcesses {
+	if !hasBackgroundProcessCommand(update.BackgroundProcesses.Commands, RuntimeBackgroundProcessRefresh) {
 		t.Fatal("expected background update to refresh process snapshots")
 	}
-	if update.BackgroundNotice == nil {
+	notice := firstBackgroundNotice(update.Notices)
+	if notice == nil {
 		t.Fatal("expected completion notice")
 	}
-	if update.BackgroundNotice.Kind != BackgroundNoticeSuccess {
-		t.Fatalf("notice kind = %v, want success", update.BackgroundNotice.Kind)
+	if notice.Kind != BackgroundNoticeSuccess {
+		t.Fatalf("notice kind = %v, want success", notice.Kind)
 	}
-	if update.BackgroundNotice.Message != "Background shell 1000 completed (exit 0)" {
-		t.Fatalf("notice message = %q", update.BackgroundNotice.Message)
+	if notice.Message != "Background shell 1000 completed (exit 0)" {
+		t.Fatalf("notice message = %q", notice.Message)
 	}
 }
 
@@ -163,11 +164,12 @@ func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *t
 		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}},
 	)
 
-	if update.BackgroundNotice == nil {
+	notice := firstBackgroundNotice(update.Notices)
+	if notice == nil {
 		t.Fatal("expected completion notice")
 	}
-	if update.BackgroundNotice.Message != "background shell 1000 completed" {
-		t.Fatalf("notice message = %q", update.BackgroundNotice.Message)
+	if notice.Message != "background shell 1000 completed" {
+		t.Fatalf("notice message = %q", notice.Message)
 	}
 }
 
@@ -179,12 +181,63 @@ func TestReduceRuntimeEvent_CompactionCompletedClearsCompactingWithoutSyntheticN
 		Event{Kind: EventCompactionCompleted, Compaction: &CompactionStatus{Mode: "auto", Count: 2}},
 	)
 
-	if update.State.Compacting {
+	if update.RunState.State.Compacting {
 		t.Fatal("expected compaction completed to clear compacting state")
 	}
-	if update.SyntheticOngoingEntry != nil {
-		t.Fatalf("did not expect synthetic ongoing compaction notice, got %+v", update.SyntheticOngoingEntry)
+	if update.Transcript.SyntheticOngoingEntry != nil {
+		t.Fatalf("did not expect synthetic ongoing compaction notice, got %+v", update.Transcript.SyntheticOngoingEntry)
 	}
+}
+
+func TestDomainReducersIgnoreUnownedEventConcerns(t *testing.T) {
+	evt := Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}}
+
+	if transcript := ReduceRuntimeTranscriptEvent(evt); transcript.Sync != nil || len(transcript.AssistantStream) != 0 {
+		t.Fatalf("transcript reducer handled background event: %+v", transcript)
+	}
+	if reasoning := ReduceRuntimeReasoningEvent(RuntimeReasoningState{StatusHeader: "thinking"}, evt); reasoning.State.StatusHeader != "thinking" || len(reasoning.Stream) != 0 {
+		t.Fatalf("reasoning reducer handled background event: %+v", reasoning)
+	}
+	processes := ReduceRuntimeBackgroundProcessEvent(evt)
+	if !hasBackgroundProcessCommand(processes.Commands, RuntimeBackgroundProcessRefresh) {
+		t.Fatalf("background process reducer did not own background refresh: %+v", processes)
+	}
+}
+
+func hasPendingInputCommand(commands []RuntimePendingInputCommand, kind RuntimePendingInputCommandKind) bool {
+	for _, command := range commands {
+		if command.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasReasoningStreamCommand(commands []RuntimeReasoningStreamCommand, kind RuntimeReasoningStreamCommandKind) bool {
+	for _, command := range commands {
+		if command.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBackgroundProcessCommand(commands []RuntimeBackgroundProcessCommand, kind RuntimeBackgroundProcessCommand) bool {
+	for _, command := range commands {
+		if command == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func firstBackgroundNotice(commands []RuntimeNoticeCommand) *BackgroundNotice {
+	for _, command := range commands {
+		if command.Kind == RuntimeNoticeBackground {
+			return command.BackgroundNotice
+		}
+	}
+	return nil
 }
 
 func TestExtractReasoningStatusHeaderAcceptsWhitespaceWrappedBoldOnly(t *testing.T) {
