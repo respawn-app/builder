@@ -110,6 +110,15 @@ func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceO
 	if !recovery.SyncSessionView {
 		t.Fatal("expected recovery conversation_updated to request transcript sync")
 	}
+	gap := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventStreamGap, RecoveryCause: TranscriptRecoveryCauseStreamGap},
+	)
+	if !gap.SyncSessionView {
+		t.Fatal("expected explicit stream gap to request transcript sync")
+	}
 }
 
 func TestReduceRuntimeEvent_OngoingErrorUpdatedRequestsSessionSync(t *testing.T) {

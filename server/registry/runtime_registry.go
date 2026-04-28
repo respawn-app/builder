@@ -56,6 +56,8 @@ type promptResponseResult struct {
 type sessionActivityHub struct {
 	mu          sync.Mutex
 	nextID      uint64
+	nextSeq     uint64
+	history     []clientui.Event
 	closed      bool
 	subscribers map[uint64]*sessionActivitySubscription
 }
@@ -187,17 +189,21 @@ func (r *RuntimeRegistry) PublishRuntimeEvent(sessionID string, evt runtime.Even
 }
 
 func (r *RuntimeRegistry) SubscribeSessionActivity(_ context.Context, sessionID string) (serverapi.SessionActivitySubscription, error) {
+	return r.SubscribeSessionActivityFrom(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: sessionID})
+}
+
+func (r *RuntimeRegistry) SubscribeSessionActivityFrom(_ context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
 	if r == nil {
 		return nil, fmt.Errorf("runtime registry is required")
 	}
-	id := strings.TrimSpace(sessionID)
+	id := strings.TrimSpace(req.SessionID)
 	r.mu.RLock()
 	entry := r.engines[id]
 	r.mu.RUnlock()
 	if entry == nil || entry.hub == nil {
 		return nil, fmt.Errorf("session activity stream for %q is unavailable: %w", id, serverapi.ErrSessionActivityUnavailable)
 	}
-	return entry.hub.subscribe(), nil
+	return entry.hub.subscribe(req.AfterSequence)
 }
 
 func (r *RuntimeRegistry) SubscribePromptActivity(_ context.Context, sessionID string) (serverapi.PromptActivitySubscription, error) {
@@ -493,27 +499,38 @@ func (e *runtimeEntry) publishPendingPrompt(sessionID string, snapshot PendingPr
 	e.promptHub.publish(pendingPromptEventFromSnapshot(sessionID, snapshot, eventType))
 }
 
-func (h *sessionActivityHub) subscribe() *sessionActivitySubscription {
+func (h *sessionActivityHub) subscribe(afterSequence uint64) (*sessionActivitySubscription, error) {
 	if h == nil {
-		return nil
+		return nil, fmt.Errorf("session activity stream is unavailable: %w", serverapi.ErrSessionActivityUnavailable)
 	}
 	sub := &sessionActivitySubscription{ch: make(chan clientui.Event, sessionActivityBufferSize)}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		sub.closeWithError(io.EOF)
-		return sub
+		return sub, nil
+	}
+	if afterSequence > 0 && !h.canReplayLocked(afterSequence) {
+		h.mu.Unlock()
+		return nil, fmt.Errorf("session activity cursor %d is outside retained range: %w", afterSequence, serverapi.ErrStreamGap)
 	}
 	id := h.nextID
 	h.nextID++
+	replay := h.replayAfterLocked(afterSequence)
 	h.subscribers[id] = sub
 	h.mu.Unlock()
+	for _, evt := range replay {
+		if !sub.publish(evt) {
+			sub.closeWithError(serverapi.ErrStreamGap)
+			return sub, nil
+		}
+	}
 	sub.onClose = func() {
 		h.mu.Lock()
 		delete(h.subscribers, id)
 		h.mu.Unlock()
 	}
-	return sub
+	return sub, nil
 }
 
 func (h *sessionActivityHub) publish(evt clientui.Event) {
@@ -525,6 +542,13 @@ func (h *sessionActivityHub) publish(evt clientui.Event) {
 		h.mu.Unlock()
 		return
 	}
+	h.nextSeq++
+	evt.Sequence = h.nextSeq
+	h.history = append(h.history, evt)
+	if len(h.history) > sessionActivityBufferSize {
+		copy(h.history, h.history[len(h.history)-sessionActivityBufferSize:])
+		h.history = h.history[:sessionActivityBufferSize]
+	}
 	subs := make([]*sessionActivitySubscription, 0, len(h.subscribers))
 	for _, sub := range h.subscribers {
 		subs = append(subs, sub)
@@ -535,6 +559,32 @@ func (h *sessionActivityHub) publish(evt clientui.Event) {
 			sub.closeWithError(serverapi.ErrStreamGap)
 		}
 	}
+}
+
+func (h *sessionActivityHub) canReplayLocked(afterSequence uint64) bool {
+	if afterSequence == 0 || afterSequence == h.nextSeq {
+		return true
+	}
+	if afterSequence > h.nextSeq {
+		return false
+	}
+	if len(h.history) == 0 {
+		return false
+	}
+	return afterSequence >= h.history[0].Sequence-1
+}
+
+func (h *sessionActivityHub) replayAfterLocked(afterSequence uint64) []clientui.Event {
+	if afterSequence == 0 || len(h.history) == 0 {
+		return nil
+	}
+	replay := make([]clientui.Event, 0)
+	for _, evt := range h.history {
+		if evt.Sequence > afterSequence {
+			replay = append(replay, evt)
+		}
+	}
+	return replay
 }
 
 func (h *sessionActivityHub) close(err error) {

@@ -1608,9 +1608,10 @@ func runtimeEventBatchFence(evt clientui.Event) bool {
 		return true
 	}
 	switch evt.Kind {
-	case clientui.EventAssistantDelta,
-		clientui.EventReasoningDelta,
+	case clientui.EventStreamGap,
 		clientui.EventConversationUpdated,
+		clientui.EventAssistantDelta,
+		clientui.EventReasoningDelta,
 		clientui.EventOngoingErrorUpdated,
 		clientui.EventAssistantDeltaReset,
 		clientui.EventReasoningDeltaReset:

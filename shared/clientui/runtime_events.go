@@ -51,6 +51,8 @@ type RuntimeEventUpdate struct {
 func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activityRunning bool, evt Event) RuntimeEventUpdate {
 	update := RuntimeEventUpdate{State: state, Input: clonePendingInputState(input)}
 	switch evt.Kind {
+	case EventStreamGap:
+		update.SyncSessionView = true
 	case EventConversationUpdated:
 		update.SyncSessionView = evt.CommittedTranscriptChanged || evt.RecoveryCause != TranscriptRecoveryCauseNone
 	case EventOngoingErrorUpdated:
