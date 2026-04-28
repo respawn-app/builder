@@ -13,7 +13,6 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -693,21 +692,15 @@ type projectNamePromptModel struct {
 	height   int
 	theme    string
 	headerMD *glamour.TermRenderer
-	input    textinput.Model
+	input    uiSharedTextInput
 	error    string
 	result   string
 	canceled bool
 }
 
 func newProjectNamePromptModel(defaultName string, theme string) *projectNamePromptModel {
-	input := textinput.New()
+	input := newUISharedTextInput(defaultName)
 	input.Focus()
-	input.Prompt = ""
-	input.SetValue(defaultName)
-	palette := uiPalette(theme)
-	input.Cursor.Style = lipgloss.NewStyle().Foreground(palette.primary)
-	input.TextStyle = lipgloss.NewStyle().Foreground(palette.foreground)
-	input.PlaceholderStyle = lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
 	return &projectNamePromptModel{
 		width:    defaultPickerWidth,
 		height:   defaultPickerHeight,
@@ -717,7 +710,7 @@ func newProjectNamePromptModel(defaultName string, theme string) *projectNamePro
 	}
 }
 
-func (m *projectNamePromptModel) Init() tea.Cmd { return textinput.Blink }
+func (m *projectNamePromptModel) Init() tea.Cmd { return nil }
 
 func (m *projectNamePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch typed := msg.(type) {
@@ -744,9 +737,7 @@ func (m *projectNamePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	return m, m.input.Update(msg)
 }
 
 func (m *projectNamePromptModel) View() string {

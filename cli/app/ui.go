@@ -303,6 +303,12 @@ func WithUIDebug(enabled bool) UIOption {
 	}
 }
 
+func WithUITerminalCursorState(state *uiTerminalCursorState) UIOption {
+	return func(m *uiModel) {
+		m.terminalCursor = state
+	}
+}
+
 func WithUIModelName(model string) UIOption {
 	return func(m *uiModel) {
 		m.modelName = strings.TrimSpace(model)

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -523,6 +524,36 @@ func TestAskFreeformUsesMainEditingStack(t *testing.T) {
 	}
 	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskFreeformCtrlUEditingMatchesMainInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Type answer"}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	updated.ask.input = "top\ncurrent\nbottom"
+	updated.ask.inputCursor = len([]rune("top\ncur"))
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updated = next.(*uiModel)
+
+	if goruntime.GOOS == "darwin" {
+		if updated.ask.input != "top\nbottom" {
+			t.Fatalf("expected ctrl+u to delete current ask line on darwin, got %q", updated.ask.input)
+		}
+		if updated.ask.inputCursor != len([]rune("top\n")) {
+			t.Fatalf("expected cursor at joined ask line on darwin, got %d", updated.ask.inputCursor)
+		}
+		return
+	}
+	if updated.ask.input != "rent\nbottom" {
+		t.Fatalf("expected ctrl+u to kill to ask line start, got %q", updated.ask.input)
+	}
+	if updated.ask.inputCursor != len([]rune("top\n")) {
+		t.Fatalf("expected cursor at ask line start, got %d", updated.ask.inputCursor)
 	}
 }
 

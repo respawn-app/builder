@@ -11,7 +11,6 @@ import (
 	"builder/shared/serverapi"
 	"builder/shared/uiglyphs"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
@@ -62,8 +61,8 @@ const (
 )
 
 type uiWorktreeCreateDialogState struct {
-	baseRef       textinput.Model
-	branchTarget  textinput.Model
+	baseRef       uiSharedTextInput
+	branchTarget  uiSharedTextInput
 	focus         uiWorktreeCreateField
 	action        uiWorktreeCreateAction
 	errorText     string
@@ -143,14 +142,8 @@ type worktreeCreateTargetResolveDoneMsg struct {
 	err   error
 }
 
-func newWorktreeDialogTextInput(value string) textinput.Model {
-	input := textinput.New()
-	input.Prompt = ""
-	input.SetValue(strings.TrimSpace(value))
-	input.Cursor.Style = lipgloss.NewStyle()
-	input.TextStyle = lipgloss.NewStyle()
-	input.PlaceholderStyle = lipgloss.NewStyle()
-	return input
+func newWorktreeDialogTextInput(value string) uiSharedTextInput {
+	return newUISharedTextInput(strings.TrimSpace(value))
 }
 
 func newWorktreeCreateDialog(suggestedBranch string) uiWorktreeCreateDialogState {
@@ -941,10 +934,10 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 	var resolveCmd tea.Cmd
 	switch dialog.focus {
 	case uiWorktreeCreateFieldBaseRef:
-		dialog.baseRef, cmd = dialog.baseRef.Update(msg)
+		cmd = dialog.baseRef.Update(msg)
 	case uiWorktreeCreateFieldBranchTarget:
 		before := dialog.branchTarget.Value()
-		dialog.branchTarget, cmd = dialog.branchTarget.Update(msg)
+		cmd = dialog.branchTarget.Update(msg)
 		if dialog.branchTarget.Value() != before {
 			resolveCmd = m.scheduleWorktreeCreateTargetResolution()
 		}

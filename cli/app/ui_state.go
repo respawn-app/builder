@@ -46,6 +46,7 @@ type uiRuntimeFeatureState struct {
 type uiInputFeatureState struct {
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
+	inputKillBuffer          string
 	mainInputDraftToken      uint64
 	promptHistory            []string
 	promptHistorySelection   int
@@ -98,6 +99,7 @@ type uiPresentationFeatureState struct {
 	theme              string
 	tuiAlternateScreen config.TUIAlternateScreenPolicy
 	altScreenActive    bool
+	terminalCursor     *uiTerminalCursorState
 	termWidth          int
 	termHeight         int
 	windowSizeKnown    bool
