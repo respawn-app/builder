@@ -8,13 +8,13 @@ import (
 )
 
 func TestReduceRuntimeTranscriptPageRejectsOlderTailRevision(t *testing.T) {
-	reduction := reduceRuntimeTranscriptPage(runtimeTranscriptPageState{
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(runtimeTranscriptPageSnapshot{
 		entries:                 []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "newer", Committed: true}},
 		revision:                11,
 		effectiveRevision:       11,
 		effectiveCommittedCount: 1,
 		viewMode:                tui.ModeOngoing,
-	}, clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	}), clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		Revision:     10,
 		Offset:       0,
 		TotalEntries: 1,
@@ -30,14 +30,14 @@ func TestReduceRuntimeTranscriptPageRejectsOlderTailRevision(t *testing.T) {
 }
 
 func TestReduceRuntimeTranscriptPageRejectsEqualRevisionTailPageThatClearsLiveOngoing(t *testing.T) {
-	reduction := reduceRuntimeTranscriptPage(runtimeTranscriptPageState{
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(runtimeTranscriptPageSnapshot{
 		entries:                 []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed", Committed: true}},
 		revision:                10,
 		effectiveRevision:       10,
 		effectiveCommittedCount: 1,
 		viewMode:                tui.ModeOngoing,
 		liveOngoing:             "working",
-	}, clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	}), clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		Revision:     10,
 		Offset:       0,
 		TotalEntries: 1,
@@ -53,7 +53,7 @@ func TestReduceRuntimeTranscriptPageRejectsEqualRevisionTailPageThatClearsLiveOn
 }
 
 func TestReduceRuntimeTranscriptPagePreservesLiveOngoingForEqualRevisionDetailPage(t *testing.T) {
-	reduction := reduceRuntimeTranscriptPage(runtimeTranscriptPageState{
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(runtimeTranscriptPageSnapshot{
 		entries:                 []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed", Committed: true}},
 		revision:                10,
 		effectiveRevision:       10,
@@ -61,7 +61,7 @@ func TestReduceRuntimeTranscriptPagePreservesLiveOngoingForEqualRevisionDetailPa
 		viewMode:                tui.ModeDetail,
 		liveOngoing:             "working",
 		liveOngoingError:        "boom",
-	}, clientui.TranscriptPageRequest{Offset: 0, Limit: 1}, clientui.TranscriptPage{
+	}), clientui.TranscriptPageRequest{Offset: 0, Limit: 1}, clientui.TranscriptPage{
 		Revision:     10,
 		Offset:       0,
 		TotalEntries: 1,
@@ -83,13 +83,13 @@ func TestReduceRuntimeTranscriptPagePreservesLiveOngoingForEqualRevisionDetailPa
 }
 
 func TestReduceRuntimeTranscriptPageDefaultDetailHydrationSyncsNativeWithoutTailReplacement(t *testing.T) {
-	reduction := reduceRuntimeTranscriptPage(runtimeTranscriptPageState{
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(runtimeTranscriptPageSnapshot{
 		entries:                 []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed", Committed: true}},
 		revision:                10,
 		effectiveRevision:       10,
 		effectiveCommittedCount: 1,
 		viewMode:                tui.ModeDetail,
-	}, clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	}), clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		Revision:     10,
 		Offset:       0,
 		TotalEntries: 1,
@@ -108,7 +108,7 @@ func TestReduceRuntimeTranscriptPageDefaultDetailHydrationSyncsNativeWithoutTail
 }
 
 func TestReduceRuntimeTranscriptPageAcceptsEqualRevisionTailCorrection(t *testing.T) {
-	reduction := reduceRuntimeTranscriptPage(runtimeTranscriptPageState{
+	reduction := reduceRuntimeTranscriptPage(newRuntimeTranscriptPageState(runtimeTranscriptPageSnapshot{
 		entries: []tui.TranscriptEntry{
 			{Role: tui.TranscriptRoleUser, Text: "prompt", Committed: true},
 			{Role: tui.TranscriptRoleToolCall, Text: "pwd", ToolCallID: "stale-call", Committed: true},
@@ -118,7 +118,7 @@ func TestReduceRuntimeTranscriptPageAcceptsEqualRevisionTailCorrection(t *testin
 		effectiveCommittedCount: 2,
 		viewMode:                tui.ModeOngoing,
 		transcriptLiveDirty:     true,
-	}, clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+	}), clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
 		Revision:     10,
 		Offset:       0,
 		TotalEntries: 3,
