@@ -1382,6 +1382,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if _, ok := msg.(tea.MouseMsg); ok && m.rollback.isActive() {
+		m.syncViewport()
+		return m, nil
+	}
 	m.forwardToView(msg)
 	m.syncViewport()
 	return m, m.maybeRequestDetailTranscriptPage()

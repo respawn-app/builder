@@ -849,11 +849,7 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	}
 	sequenceLog := strings.Join(terminalSequences, "")
 	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
-	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
-	if enableAltScroll != disableAltScroll {
-		t.Fatalf("expected balanced alternate-scroll enable/disable sequences, enable=%d disable=%d", enableAltScroll, disableAltScroll)
-	}
-	if enableAltScroll == 0 {
-		t.Fatal("expected rollback overlay in native mode to enable alternate scroll under auto policy")
+	if enableAltScroll != 0 {
+		t.Fatalf("did not expect rollback picker to enable alternate-scroll, enable=%d log=%q", enableAltScroll, sequenceLog)
 	}
 }

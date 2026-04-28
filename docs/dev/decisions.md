@@ -390,6 +390,7 @@
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
 - Detail does not enable terminal mouse capture because it blocks native text selection in common terminals. Detail may enable terminal alternate-scroll (`?1007`) while active, and must disable it again on leaving detail.
+- Rollback/edit message picker uses detail rendering inside alt-screen but does not enable terminal alternate-scroll (`?1007`) and ignores mouse events; `Up`/`Down` are the only picker navigation path.
 - Rationale: ongoing must preserve long-lived normal-buffer scrollback; detail still needs smooth native selection/copy, so selection wins over app-level pointer capture. Wheel navigation is best-effort through terminal alternate-scroll and any mouse events the terminal can deliver without capture.
 - Compact detail viewport scrolling (`Up`/`Down`, `PgUp`/`PgDn`, wheel, and alternate-scroll key events) auto-focuses the selectable item nearest the viewport center so `Enter` expands what the user is visually centered on.
 - No timestamps are shown in UI.

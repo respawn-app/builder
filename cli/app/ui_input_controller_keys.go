@@ -36,7 +36,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	}
-	if m.view.Mode() == tui.ModeDetail {
+	if m.view.Mode() == tui.ModeDetail && inputState.Mode != uiInputModeRollbackEdit {
 		switch msg.Type {
 		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(tea.KeyMsg{Type: msg.Type})
@@ -44,6 +44,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			m.forwardToView(tea.KeyMsg{Type: msg.Type})
 			return m, nil
+		case tea.KeyEsc:
+			if m.busy || m.isInputLocked() || strings.TrimSpace(m.input) != "" {
+				return m, nil
+			}
+			return c.handleIdleRollbackEsc()
 		case tea.KeyShiftTab, tea.KeyCtrlT:
 			return m, m.toggleTranscriptMode()
 		case tea.KeyCtrlC:
@@ -134,10 +139,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleTranscriptMode()
 	case tea.KeyEsc:
 		if inputState.Mode == uiInputModeRollbackEdit {
-			if strings.TrimSpace(m.input) == "" {
-				return m, c.cancelRollbackEditingToSelectionFlowCmd()
-			}
-			return m, nil
+			return m, c.cancelRollbackEditingToSelectionFlowCmd()
 		}
 		if m.view.Mode() != tui.ModeOngoing {
 			return m, nil
@@ -145,13 +147,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.busy || m.isInputLocked() || strings.TrimSpace(m.input) != "" {
 			return m, nil
 		}
-		now := time.Now()
-		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
-			m.lastEscAt = time.Time{}
-			return m, c.startRollbackSelectionFlowCmd()
-		}
-		m.lastEscAt = now
-		return m, nil
+		return c.handleIdleRollbackEsc()
 	case tea.KeyEnter:
 		c.normalizePendingCSIShiftEnterOnEnter()
 		text := strings.TrimSpace(m.input)
@@ -296,6 +292,17 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (c uiInputController) handleIdleRollbackEsc() (tea.Model, tea.Cmd) {
+	m := c.model
+	now := time.Now()
+	if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
+		m.lastEscAt = time.Time{}
+		return m, c.startRollbackSelectionFlowCmd()
+	}
+	m.lastEscAt = now
+	return m, nil
 }
 
 func (c uiInputController) handlePromptHistoryKey(delta int) (bool, tea.Cmd) {

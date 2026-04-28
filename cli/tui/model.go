@@ -1139,6 +1139,9 @@ func (m Model) detailExpansionSymbolOverride(block detailBlockSpec) string {
 	if !m.compactDetail || m.mode != ModeDetail || !block.selectable || !block.expandable {
 		return ""
 	}
+	if selectedEntry, ok := m.selectedUserTranscriptEntry(); ok && selectedEntry == block.entryIndex {
+		return renderRoleSymbol(">", m.detailExpansionSymbolStyle(block.role)) + " "
+	}
 	selectedEntry, ok := m.resolveDetailSelection()
 	if !ok || selectedEntry != block.entryIndex {
 		return ""

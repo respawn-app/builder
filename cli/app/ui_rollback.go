@@ -9,13 +9,14 @@ import (
 )
 
 func (m *uiModel) refreshRollbackCandidates() {
+	entries, baseOffset := m.rollbackCandidateEntries()
 	candidates := make([]rollbackCandidate, 0)
-	for idx, entry := range m.transcriptEntries {
+	for idx, entry := range entries {
 		if strings.TrimSpace(entry.Role) != "user" {
 			continue
 		}
 		candidates = append(candidates, rollbackCandidate{
-			TranscriptIndex: m.transcriptBaseOffset + idx,
+			TranscriptIndex: baseOffset + idx,
 			Text:            entry.Text,
 		})
 	}
@@ -40,6 +41,16 @@ func (m *uiModel) refreshRollbackCandidates() {
 	if m.rollback.isSelecting() {
 		m.applyRollbackSelectionHighlight()
 	}
+}
+
+func (m *uiModel) rollbackCandidateEntries() ([]tui.TranscriptEntry, int) {
+	if m == nil {
+		return nil, 0
+	}
+	if m.view.Mode() == tui.ModeDetail && m.detailTranscript.loaded {
+		return m.detailTranscript.entries, m.detailTranscript.offset
+	}
+	return m.transcriptEntries, m.transcriptBaseOffset
 }
 
 func (m *uiModel) startRollbackSelectionMode() bool {
@@ -137,13 +148,23 @@ func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
 	if !m.rollback.isEditing() {
 		return false
 	}
-	m.rollback.phase = uiRollbackPhaseInactive
-	return m.startRollbackSelectionMode()
+	m.rollback.phase = uiRollbackPhaseSelection
+	m.setInputMode(uiInputModeRollbackSelection)
+	m.replaceMainInput("", -1)
+	if m.rollback.selection < 0 {
+		m.rollback.selection = 0
+	}
+	if m.rollback.selection >= len(m.rollback.candidates) {
+		m.rollback.selection = len(m.rollback.candidates) - 1
+	}
+	m.applyRollbackSelectionHighlight()
+	return len(m.rollback.candidates) > 0
 }
 
 func (m *uiModel) clearRollbackFlow() {
 	m.rollback.phase = uiRollbackPhaseInactive
 	m.rollback.ownsTranscriptMode = false
+	m.rollback.suppressedAlternateScroll = false
 	m.rollback.selectedTranscriptEntry = -1
 	m.rollback.restoreScrollActive = false
 	m.clearRollbackSelectionHighlight()
@@ -158,10 +179,36 @@ func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
 		return nil
 	}
 	m.rollback.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, false, true); transitionCmd != nil {
+	if transitionCmd := m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+		target:                tui.ModeDetail,
+		emitNativeReplay:      true,
+		enableAlternateScroll: false,
+	}); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
+}
+
+func (m *uiModel) suppressRollbackAlternateScrollIfNeeded() tea.Cmd {
+	if m == nil || m.rollback.suppressedAlternateScroll {
+		return nil
+	}
+	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive || !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
+		return nil
+	}
+	m.rollback.suppressedAlternateScroll = true
+	return disableAlternateScrollCmd()
+}
+
+func (m *uiModel) restoreRollbackAlternateScrollIfNeeded() tea.Cmd {
+	if m == nil || !m.rollback.suppressedAlternateScroll {
+		return nil
+	}
+	m.rollback.suppressedAlternateScroll = false
+	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive || !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
+		return nil
+	}
+	return enableAlternateScrollCmd()
 }
 
 func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
@@ -173,6 +220,7 @@ func (m *uiModel) popRollbackOverlayWithNativeReplay(emitNativeReplay bool) tea.
 		return nil
 	}
 	m.rollback.ownsTranscriptMode = false
+	m.rollback.suppressedAlternateScroll = false
 	if m.view.Mode() != tui.ModeDetail {
 		return nil
 	}

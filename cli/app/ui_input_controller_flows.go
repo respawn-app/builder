@@ -27,17 +27,18 @@ func (c uiInputController) startRollbackSelectionFlowCmd() tea.Cmd {
 		m.focusRollbackSelection()
 		return overlayCmd
 	}
-	return c.rollbackTransitionCmd()
+	return sequenceCmds(m.suppressRollbackAlternateScrollIfNeeded(), c.rollbackTransitionCmd())
 }
 
 func (c uiInputController) stopRollbackSelectionFlowCmd() tea.Cmd {
 	m := c.model
 	overlayCmd := m.popRollbackOverlayIfNeeded()
+	alternateScrollCmd := m.restoreRollbackAlternateScrollIfNeeded()
 	m.stopRollbackSelectionMode()
 	if overlayCmd != nil {
-		return overlayCmd
+		return sequenceCmds(alternateScrollCmd, overlayCmd)
 	}
-	return c.rollbackTransitionCmd()
+	return sequenceCmds(alternateScrollCmd, c.rollbackTransitionCmd())
 }
 
 func (c uiInputController) beginRollbackEditingFlowCmd() tea.Cmd {
@@ -47,12 +48,13 @@ func (c uiInputController) beginRollbackEditingFlowCmd() tea.Cmd {
 		return nil
 	}
 	overlayCmd := m.popRollbackOverlayWithNativeReplay(false)
+	alternateScrollCmd := m.restoreRollbackAlternateScrollIfNeeded()
 	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: targetEntry, Bottom: true})
 	if overlayCmd == nil {
-		return c.rollbackTransitionCmd()
+		return sequenceCmds(alternateScrollCmd, c.rollbackTransitionCmd())
 	}
 	anchorCmd := m.replayNativeTranscriptThroughEntry(targetEntry)
-	return sequenceCmds(overlayCmd, anchorCmd)
+	return sequenceCmds(alternateScrollCmd, overlayCmd, anchorCmd)
 }
 
 func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
@@ -66,7 +68,7 @@ func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
 		m.focusRollbackSelection()
 		return overlayCmd
 	}
-	return c.rollbackTransitionCmd()
+	return sequenceCmds(m.suppressRollbackAlternateScrollIfNeeded(), c.rollbackTransitionCmd())
 }
 
 func (c uiInputController) startRollbackFork(text string) (tea.Model, tea.Cmd) {
