@@ -38,16 +38,15 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				if lastSequence == 0 {
-					emitSessionActivityGap(pollCtx, out)
-					return
-				}
 				current, err = resubscribeSessionActivity(pollCtx, subscribe, lastSequence)
 				if err != nil {
 					if errors.Is(err, serverapi.ErrStreamGap) {
 						emitSessionActivityGap(pollCtx, out)
 					}
 					return
+				}
+				if lastSequence == 0 {
+					emitSessionActivityGap(pollCtx, out)
 				}
 				continue
 			}
