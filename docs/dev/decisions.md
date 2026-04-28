@@ -346,6 +346,7 @@
 - runtime projection decides whether a persisted/runtime message becomes a transcript entry and which transcript role it uses.
 - TUI rendering decides how that transcript role behaves in ongoing vs detail mode.
 - When a concept already has a dedicated transcript role, do not also render its raw developer/request artifact. Example: reviewer feedback is shown through `reviewer_suggestions` / `reviewer_status`, not by duplicating the underlying `reviewer_feedback` developer message.
+- CLI transcript frontend ownership is file-scoped. `ui_runtime_adapter.go` is the runtime event coordinator only. `ui_transcript_event_reducer.go`, `ui_transcript_page_reducer.go`, and `ui_transcript_tail_reducer.go` own transcript planning/policy. `ui_transcript_event_apply.go`, `ui_transcript_page_apply.go`, and `ui_transcript_runtime_state.go` own UI-side transcript mutations. `ui_transcript_entries.go` owns app/TUI transcript conversion and equality helpers. `ui_transcript_diag.go` owns transcript diagnostic field formatting. `ui_runtime_events.go` owns runtime event batching/fence policy.
 - Detail shell commands are full syntax color.
 - Ongoing shell commands are syntax-highlighted but subdued.
 - Formatted text uses the app foreground as its base text color.
