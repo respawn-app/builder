@@ -75,6 +75,52 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 	assertNoColoredShellSymbol(t, rawCommitted, "dark pending", transcriptToolPendingColorHex("dark"))
 }
 
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionReplacementWhenToolMetadataChanges(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	corrected := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls"}},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, corrected); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].ToolCall == nil {
+		t.Fatalf("expected corrected tool metadata, got nil")
+	}
+	if got := m.transcriptEntries[1].ToolCall.Command; got != "ls" {
+		t.Fatalf("tool command = %q, want ls", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected equal-revision metadata correction to clear transcriptLiveDirty")
+	}
+}
+
 func TestProjectedAssistantToolCallEntriesApplyAsCommittedInRuntimeMode(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

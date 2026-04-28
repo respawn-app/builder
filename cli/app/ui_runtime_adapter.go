@@ -1429,16 +1429,39 @@ func eventTranscriptEntriesAreCommitted(evt clientui.Event) bool {
 }
 
 func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clientui.ChatEntry) bool {
-	return existing.Visibility == incoming.Visibility &&
-		existing.Role == incoming.Role &&
-		existing.Text == incoming.Text &&
-		existing.OngoingText == incoming.OngoingText &&
-		existing.Phase == llm.MessagePhase(incoming.Phase) &&
-		existing.MessageType == llm.MessageType(incoming.MessageType) &&
-		strings.TrimSpace(existing.SourcePath) == strings.TrimSpace(incoming.SourcePath) &&
-		strings.TrimSpace(existing.CompactLabel) == strings.TrimSpace(incoming.CompactLabel) &&
-		strings.TrimSpace(existing.ToolResultSummary) == strings.TrimSpace(incoming.ToolResultSummary) &&
-		strings.TrimSpace(existing.ToolCallID) == strings.TrimSpace(incoming.ToolCallID)
+	return transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(existing), transcriptPayloadFromClientEntry(incoming))
+}
+
+func transcriptPayloadFromTUIEntry(entry tui.TranscriptEntry) transcript.EntryPayload {
+	return transcript.EntryPayload{
+		Visibility:        entry.Visibility,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             string(entry.Phase),
+		MessageType:       string(entry.MessageType),
+		SourcePath:        entry.SourcePath,
+		CompactLabel:      entry.CompactLabel,
+		ToolResultSummary: entry.ToolResultSummary,
+		ToolCallID:        entry.ToolCallID,
+		ToolCall:          entry.ToolCall,
+	}
+}
+
+func transcriptPayloadFromClientEntry(entry clientui.ChatEntry) transcript.EntryPayload {
+	return transcript.EntryPayload{
+		Visibility:        entry.Visibility,
+		Role:              entry.Role,
+		Text:              entry.Text,
+		OngoingText:       entry.OngoingText,
+		Phase:             entry.Phase,
+		MessageType:       entry.MessageType,
+		SourcePath:        entry.SourcePath,
+		CompactLabel:      entry.CompactLabel,
+		ToolResultSummary: entry.ToolResultSummary,
+		ToolCallID:        entry.ToolCallID,
+		ToolCall:          transcriptToolCallMeta(entry.ToolCall),
+	}
 }
 
 func projectedTranscriptEventRange(evt clientui.Event, entryCount int) (int, int, bool) {
