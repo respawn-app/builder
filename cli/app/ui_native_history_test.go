@@ -81,6 +81,35 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	}
 }
 
+func TestNativeCommittedProjectionCacheRebuildsAfterRevisionBump(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.windowSizeKnown = true
+	m.transcriptBaseOffset = 12
+	m.transcriptRevision = 20
+	entries := []tui.TranscriptEntry{{Role: "assistant", Text: "before"}}
+
+	initial := m.nativeCommittedProjection(entries)
+	entries[0].Text = "after"
+	sameRevision := m.nativeCommittedProjection(entries)
+	if rendered := sameRevision.Render(tui.TranscriptDivider); !strings.Contains(rendered, "before") || strings.Contains(rendered, "after") {
+		t.Fatalf("expected same revision to reuse cached native projection, got %q", rendered)
+	}
+
+	m.transcriptRevision = 21
+	updated := m.nativeCommittedProjection(entries)
+	rendered := updated.Render(tui.TranscriptDivider)
+	if !strings.Contains(rendered, "after") || strings.Contains(rendered, "before") {
+		t.Fatalf("expected revision bump to rebuild native projection, got %q", rendered)
+	}
+	if len(updated.Blocks) != 1 || updated.Blocks[0].EntryIndex != 12 {
+		t.Fatalf("expected native projection to preserve base offset after rebuild, got %#v", updated.Blocks)
+	}
+	if initial.Render(tui.TranscriptDivider) == rendered {
+		t.Fatalf("expected updated projection to differ after revision bump")
+	}
+}
+
 func TestNativeScrollbackStartupReplayHidesInterruptionInOngoing(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: string(transcript.EntryRoleInterruption), Text: "User interrupted you"}}),

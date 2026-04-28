@@ -274,6 +274,10 @@ func (p *CommittedOngoingProjector) rendererFor(theme string, width int, baseOff
 }
 
 func committedOngoingProjectionRenderer(theme string, width int, baseOffset int) Model {
+	return transcriptProjectionRenderer(theme, width, baseOffset)
+}
+
+func transcriptProjectionRenderer(theme string, width int, baseOffset int) Model {
 	model := NewModel(WithTheme(theme))
 	model.viewportWidth = width
 	model.transcriptBaseOffset = baseOffset

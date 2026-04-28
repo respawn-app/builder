@@ -913,10 +913,6 @@ func committedTranscriptEntriesForApp(entries []tui.TranscriptEntry) []tui.Trans
 	return tui.CommittedOngoingEntries(normalized)
 }
 
-func committedTranscriptProjectionForApp(view tui.Model, entries []tui.TranscriptEntry) tui.TranscriptProjection {
-	return view.CommittedOngoingProjectionForEntries(committedTranscriptEntriesForApp(entries))
-}
-
 func transcriptEntryFromProjectedChatEntry(entry clientui.ChatEntry, transient bool, committed bool) tui.TranscriptEntry {
 	return tui.TranscriptEntry{
 		Visibility:        entry.Visibility,
