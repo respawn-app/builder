@@ -478,170 +478,6 @@ func (b *askBridge) Handle(req askquestion.Request) (askquestion.Response, error
 	return resp.response, resp.err
 }
 
-type uiModel struct {
-	engine clientui.RuntimeClient
-	view   tui.Model
-
-	processClient         clientui.ProcessClient
-	processClientExplicit bool
-	worktreeClient        client.WorktreeClient
-
-	runtimeEvents               <-chan clientui.Event
-	pendingRuntimeEvents        []clientui.Event
-	askEvents                   <-chan askEvent
-	pathReferenceEvents         <-chan uiPathReferenceSearchEvent
-	runtimeConnectionEvents     <-chan runtimeConnectionStateChangedMsg
-	runtimeLeaseRecoveryWarning <-chan runtimeLeaseRecoveryWarningMsg
-
-	input                    string
-	inputCursor              int // rune index; -1 means "track tail"
-	mainInputDraftToken      uint64
-	promptHistory            []string
-	promptHistorySelection   int
-	promptHistoryDraft       string
-	promptHistoryDraftCursor int
-	busy                     bool
-	activity                 uiActivity
-	compacting               bool
-	reviewerRunning          bool
-	reviewerBlocking         bool
-	reviewerEnabled          bool
-	reviewerMode             string
-	autoCompactionEnabled    bool
-	conversationFreshness    clientui.ConversationFreshness
-
-	queued               []string
-	preSubmitCheckToken  uint64
-	pendingPreSubmitText string
-	submitToken          uint64
-	activeSubmit         activeSubmitState
-
-	pendingInjected   []string
-	lockedInjectText  string
-	inputSubmitLocked bool
-
-	modelName             string
-	configuredModelName   string
-	thinkingLevel         string
-	fastModeAvailable     bool
-	fastModeEnabled       bool
-	modelContractLocked   bool
-	spinnerFrame          int
-	spinnerClock          frameAnimationClock
-	spinnerGeneration     uint64
-	spinnerTickToken      uint64
-	commandRegistry       *commands.Registry
-	hasOtherSessions      bool
-	hasOtherSessionsKnown bool
-	authSlashCommandName  string
-	authSlashCommandErr   string
-	authSlashSessionOpen  bool
-	slashCommandFilter    string
-	slashCommandFilterSet bool
-	slashCommandSelection int
-	pathReferenceSearch   uiPathReferenceSearch
-	pathReference         uiPathReferenceState
-	exitAction            UIAction
-	theme                 string
-	tuiAlternateScreen    config.TUIAlternateScreenPolicy
-	altScreenActive       bool
-
-	sawAssistantDelta            bool
-	lastCommittedAssistantStepID string
-	logger                       uiLogger
-
-	interaction uiInteractionState
-	ask         uiAskState
-
-	termWidth       int
-	termHeight      int
-	windowSizeKnown bool
-
-	initialTranscript []UITranscriptEntry
-	startupSubmit     string
-
-	nextSessionInitialPrompt     string
-	nextSessionInitialInput      string
-	nextSessionID                string
-	nextForkUserMessageIndex     int
-	nextForkTranscriptEntryIndex int
-	nextParentSessionID          string
-	sessionName                  string
-	sessionID                    string
-	processList                  uiProcessListState
-	helpVisible                  bool
-	reasoningStatusHeader        string
-	turnQueueHook                turnQueueHook
-	statusConfig                 uiStatusConfig
-	statusCollector              uiStatusCollector
-	statusRepository             uiStatusRepository
-	status                       uiStatusOverlayState
-	statusGitBackgroundInFlight  bool
-	clipboardImagePaster         uiClipboardImagePaster
-	clipboardTextCopier          uiClipboardTextCopier
-
-	transientStatus       string
-	transientStatusKind   uiStatusNoticeKind
-	transientStatusToken  uint64
-	transientStatusQueue  []uiStatusNotice
-	startupUpdateNotice   bool
-	startupUpdateShown    bool
-	debugKeys             bool
-	debugMode             bool
-	transcriptDiagnostics bool
-
-	transcriptEntries                   []tui.TranscriptEntry
-	transcriptBaseOffset                int
-	transcriptTotalEntries              int
-	transcriptRevision                  int64
-	deferredCommittedTail               []deferredProjectedTranscriptTail
-	runtimeDisconnected                 bool
-	transcriptLiveDirty                 bool
-	reasoningLiveDirty                  bool
-	detailTranscript                    uiDetailTranscriptWindow
-	runtimeMainViewToken                uint64
-	runtimeTranscriptToken              uint64
-	runtimeTranscriptRetry              uint64
-	runtimeTranscriptBusy               bool
-	runtimeTranscriptDirty              bool
-	runtimeTranscriptDirtyRecoveryCause clientui.TranscriptRecoveryCause
-	pendingQueuedDrainAfterHydration    bool
-	queuedDrainReadyAfterHydration      bool
-	waitRuntimeEventAfterHydration      bool
-	nativeFlushedEntryCount             int
-	nativeHistoryReplayed               bool
-	nativeReplayWidth                   int
-	nativeFormatterWidth                int
-	nativeCommittedProjector            tui.CommittedOngoingProjector
-	nativeProjection                    tui.TranscriptProjection
-	nativeProjectionBaseOffset          int
-	nativeRenderedProjection            tui.TranscriptProjection
-	nativeRenderedBaseOffset            int
-	nativeRenderedSnapshot              string
-	nativeHistoryReplayPermit           nativeHistoryReplayPermit
-	nativeFlushSequence                 uint64
-	nativeFlushedSequence               uint64
-	nativePendingFlushes                map[uint64]nativeHistoryFlushMsg
-	waitRuntimeEventAfterFlushSequence  uint64
-	startupCmds                         []tea.Cmd
-	nativeLiveRegionLines               int
-	nativeLiveRegionPad                 int
-	nativeStreamingActive               bool
-	nativeStreamingText                 string
-	nativeStreamingWidth                int
-	nativeStreamingFlushedLineCount     int
-	nativeStreamingDividerFlushed       bool
-	nativeResizeReplayToken             uint64
-	nativeResizeReplayAt                time.Time
-
-	lastEscAt              time.Time
-	pendingCSIShiftEnterAt time.Time
-	pendingCSIShiftEnter   bool
-
-	rollback  uiRollbackState
-	worktrees uiWorktreeOverlayState
-}
-
 func (m *uiModel) isInputLocked() bool {
 	return m.inputSubmitLocked
 }
@@ -662,32 +498,46 @@ type rollbackCandidate struct {
 
 func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                       runtimeClient,
-		view:                         tui.NewModel(tui.WithCompactDetail()),
-		activity:                     uiActivityIdle,
-		runtimeEvents:                runtimeEvents,
-		askEvents:                    askEvents,
-		inputCursor:                  -1,
-		mainInputDraftToken:          1,
-		promptHistorySelection:       -1,
-		promptHistoryDraftCursor:     -1,
-		commandRegistry:              commands.NewDefaultRegistry(),
-		exitAction:                   UIActionNone,
-		theme:                        theme.Auto,
-		tuiAlternateScreen:           config.TUIAlternateScreenAuto,
-		debugKeys:                    envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		debugMode:                    envFlagEnabled("BUILDER_DEBUG"),
-		transcriptDiagnostics:        envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
-		nextForkTranscriptEntryIndex: -1,
-		reviewerMode:                 "off",
-		autoCompactionEnabled:        true,
-		conversationFreshness:        clientui.ConversationFreshnessFresh,
-		interaction:                  uiInteractionState{Mode: uiInputModeMain},
-		ask:                          uiAskState{inputCursor: -1},
-		rollback:                     uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
-		statusRepository:             newMemoryUIStatusRepository(),
-		clipboardImagePaster:         newSystemClipboardImagePaster(),
-		clipboardTextCopier:          newSystemClipboardTextCopier(),
+		uiRuntimeFeatureState: uiRuntimeFeatureState{
+			engine:        runtimeClient,
+			view:          tui.NewModel(tui.WithCompactDetail()),
+			runtimeEvents: runtimeEvents,
+			askEvents:     askEvents,
+		},
+		uiInputFeatureState: uiInputFeatureState{
+			activity:                 uiActivityIdle,
+			inputCursor:              -1,
+			mainInputDraftToken:      1,
+			promptHistorySelection:   -1,
+			promptHistoryDraftCursor: -1,
+			commandRegistry:          commands.NewDefaultRegistry(),
+			reviewerMode:             "off",
+			autoCompactionEnabled:    true,
+			conversationFreshness:    clientui.ConversationFreshnessFresh,
+		},
+		uiPresentationFeatureState: uiPresentationFeatureState{
+			theme:              theme.Auto,
+			tuiAlternateScreen: config.TUIAlternateScreenAuto,
+		},
+		uiConversationFeatureState: uiConversationFeatureState{
+			interaction: uiInteractionState{Mode: uiInputModeMain},
+			ask:         uiAskState{inputCursor: -1},
+		},
+		uiSessionTransitionFeatureState: uiSessionTransitionFeatureState{
+			exitAction:                   UIActionNone,
+			nextForkTranscriptEntryIndex: -1,
+		},
+		uiStatusFeatureState: uiStatusFeatureState{
+			statusRepository:      newMemoryUIStatusRepository(),
+			clipboardImagePaster:  newSystemClipboardImagePaster(),
+			clipboardTextCopier:   newSystemClipboardTextCopier(),
+			debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+			debugMode:             envFlagEnabled("BUILDER_DEBUG"),
+			transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+		},
+		uiRollbackFeatureState: uiRollbackFeatureState{
+			rollback: uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
+		},
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -921,142 +771,11 @@ func (m *uiModel) Init() tea.Cmd {
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok, source := normalizeKeyMsgWithSource(msg); ok {
-		if m.debugKeys {
-			m.setDebugKeyTransientStatus(msg, keyMsg, source)
-		}
-		if m.helpVisible {
-			m.helpVisible = false
-			if isHelpKey(keyMsg, m) && m.canShowHelp() {
-				m.lastEscAt = time.Time{}
-				m.syncViewport()
-				return m, nil
-			}
-		}
-		if isHelpKey(keyMsg, m) && m.canShowHelp() {
-			m.lastEscAt = time.Time{}
-			m.toggleHelp()
-			m.syncViewport()
-			return m, nil
-		}
-		switch m.inputModeState().Mode {
-		case uiInputModeAsk:
-			next, cmd := m.askController().handleKey(keyMsg)
-			next.(*uiModel).syncViewport()
-			return next, cmd
-		default:
-			next, cmd := m.inputController().handleKey(keyMsg)
-			next.(*uiModel).syncViewport()
-			return next, cmd
-		}
-	}
-	if _, isKey := msg.(tea.KeyMsg); isKey {
-		if m.helpVisible {
-			m.helpVisible = false
-		}
-		m.lastEscAt = time.Time{}
-		m.syncViewport()
-		return m, nil
+	if result := m.reduceFeatureMessage(msg); result.handled {
+		return result.bubbleTea()
 	}
 
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		previousWidth := m.termWidth
-		previousHeight := m.termHeight
-		m.termWidth = msg.Width
-		m.termHeight = msg.Height
-		m.windowSizeKnown = true
-		m.syncViewport()
-		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
-			committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
-			if len(committedEntries) == 0 {
-				m.resetNativeHistoryState()
-				m.nativeHistoryReplayed = true
-			} else {
-				m.rebaseNativeProjection(m.nativeCommittedProjection(committedEntries), m.transcriptBaseOffset, len(committedEntries))
-			}
-		}
-		if !m.nativeHistoryReplayed {
-			return m, m.syncNativeHistoryFromTranscript()
-		}
-		if previousWidth > 0 && previousHeight > 0 && previousWidth != msg.Width && m.view.Mode() == tui.ModeOngoing {
-			// Only width changes need a native replay: horizontal resize changes the
-			// committed scrollback wrapping, while height-only resize affects only the
-			// live viewport. After the width has been quiet for the debounce window,
-			// clear and replay ongoing history so emitted lines and dividers match.
-			m.nativeResizeReplayToken++
-			m.nativeResizeReplayAt = nativeResizeReplayNow().Add(nativeResizeReplayDebounce)
-			token := m.nativeResizeReplayToken
-			return m, tea.Tick(nativeResizeReplayDebounce, func(time.Time) tea.Msg {
-				return nativeResizeReplayMsg{token: token}
-			})
-		}
-		return m, nil
-	case nativeResizeReplayMsg:
-		if msg.token != m.nativeResizeReplayToken || m.view.Mode() != tui.ModeOngoing {
-			return m, nil
-		}
-		if !m.nativeResizeReplayAt.IsZero() {
-			remaining := time.Until(m.nativeResizeReplayAt)
-			if now := nativeResizeReplayNow(); !now.IsZero() {
-				remaining = m.nativeResizeReplayAt.Sub(now)
-			}
-			if remaining > 0 {
-				token := m.nativeResizeReplayToken
-				return m, tea.Tick(remaining, func(time.Time) tea.Msg {
-					return nativeResizeReplayMsg{token: token}
-				})
-			}
-		}
-		m.nativeResizeReplayAt = time.Time{}
-		if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
-			return m, replay
-		}
-		if !m.nativeRenderedProjection.Empty() {
-			return m, nil
-		}
-		return m, tea.ClearScreen
-	case runtimeEventMsg:
-		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
-	case runtimeEventBatchMsg:
-		if msg.carry != nil {
-			m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_carry", map[string]string{
-				"session_id":             strings.TrimSpace(m.sessionID),
-				"mode":                   string(m.view.Mode()),
-				"kind":                   string(msg.carry.Kind),
-				"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents) + 1),
-			}))
-			m.pendingRuntimeEvents = append([]clientui.Event{*msg.carry}, m.pendingRuntimeEvents...)
-		}
-		return m.handleRuntimeEventBatch(msg.events)
-	case runtimeConnectionStateChangedMsg:
-		m.observeRuntimeRequestResult(msg.err)
-		m.syncViewport()
-		return m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents)
-	case runtimeLeaseRecoveryWarningMsg:
-		cmd := m.appendLocalEntryFallbackWithVisibility("warning", msg.text, msg.visibility)
-		m.syncViewport()
-		return m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning))
-	case runtimeMainViewRefreshedMsg:
-		cmd := m.handleRuntimeMainViewRefreshed(msg)
-		m.syncViewport()
-		return m, cmd
-	case runtimeTranscriptRefreshedMsg:
-		cmd := m.handleRuntimeTranscriptRefreshed(msg)
-		m.syncViewport()
-		return m, cmd
-	case runtimeTranscriptRetryMsg:
-		if msg.token != m.runtimeTranscriptRetry {
-			m.syncViewport()
-			return m, nil
-		}
-		cmd := m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, msg.syncCause, msg.recoveryCause)
-		m.syncViewport()
-		return m, cmd
-	case detailTranscriptLoadMsg:
-		cmd := m.requestRuntimeTranscriptPage(m.transcriptRequestForCurrentMode())
-		m.syncViewport()
-		return m, cmd
 	case renderDiagnosticMsg:
 		cmd := m.applyRenderDiagnostic(msg.diagnostic)
 		m.syncViewport()
@@ -1277,96 +996,6 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshProcessEntries()
 		m.syncViewport()
 		return m, tea.Batch(waitProcessListRefresh(), m.ensureSpinnerTicking())
-	case statusRefreshDoneMsg:
-		if msg.token != m.status.refreshToken {
-			m.syncViewport()
-			return m, nil
-		}
-		m.status.pendingSections = nil
-		m.status.sectionWarnings = nil
-		m.status.loading = false
-		if msg.err != nil {
-			m.status.error = msg.err.Error()
-			m.syncViewport()
-			return m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
-		}
-		m.status.error = ""
-		m.status.snapshot = msg.snapshot
-		m.syncViewport()
-		return m, nil
-	case statusBaseRefreshDoneMsg:
-		if msg.token != m.status.refreshToken {
-			m.syncViewport()
-			return m, nil
-		}
-		m.status.error = ""
-		snapshot := msg.snapshot
-		if statusHasAuthData(m.status.snapshot) {
-			snapshot.Auth = m.status.snapshot.Auth
-			snapshot.Subscription = m.status.snapshot.Subscription
-		}
-		if m.status.snapshot.Git.Visible {
-			snapshot.Git = m.status.snapshot.Git
-		}
-		if m.status.snapshot.Skills != nil {
-			snapshot.Skills = m.status.snapshot.Skills
-		}
-		if m.status.snapshot.SkillTokenCounts != nil {
-			snapshot.SkillTokenCounts = m.status.snapshot.SkillTokenCounts
-		}
-		if m.status.snapshot.AgentsPaths != nil {
-			snapshot.AgentsPaths = m.status.snapshot.AgentsPaths
-		}
-		if m.status.snapshot.AgentTokenCounts != nil {
-			snapshot.AgentTokenCounts = m.status.snapshot.AgentTokenCounts
-		}
-		m.status.snapshot = snapshot
-		m.finishStatusSectionRefresh(uiStatusSectionBase, msg.snapshot.CollectorWarning)
-		m.syncViewport()
-		return m, nil
-	case statusAuthRefreshDoneMsg:
-		if msg.token != m.status.refreshToken {
-			m.syncViewport()
-			return m, nil
-		}
-		m.status.snapshot.Auth = msg.result.Auth
-		m.status.snapshot.Subscription = msg.result.Subscription
-		if m.statusRepository != nil {
-			m.statusRepository.StoreAuth(msg.cacheKey, msg.result, time.Now())
-		}
-		m.finishStatusSectionRefresh(uiStatusSectionAuth, msg.result.Warning)
-		m.syncViewport()
-		return m, nil
-	case statusGitRefreshDoneMsg:
-		if msg.background {
-			m.statusGitBackgroundInFlight = false
-		}
-		if msg.token != m.status.refreshToken {
-			m.syncViewport()
-			return m, nil
-		}
-		m.status.snapshot.Git = msg.result.Git
-		if m.statusRepository != nil {
-			m.statusRepository.StoreGit(msg.cacheKey, msg.result, time.Now())
-		}
-		m.finishStatusSectionRefresh(uiStatusSectionGit, "")
-		m.syncViewport()
-		return m, nil
-	case statusEnvironmentRefreshDoneMsg:
-		if msg.token != m.status.refreshToken {
-			m.syncViewport()
-			return m, nil
-		}
-		m.status.snapshot.Skills = msg.result.Skills
-		m.status.snapshot.SkillTokenCounts = msg.result.SkillTokenCounts
-		m.status.snapshot.AgentsPaths = msg.result.AgentsPaths
-		m.status.snapshot.AgentTokenCounts = msg.result.AgentTokenCounts
-		if m.statusRepository != nil {
-			m.statusRepository.StoreEnvironment(msg.cacheKey, msg.result, time.Now())
-		}
-		m.finishStatusSectionRefresh(uiStatusSectionEnvironment, msg.result.CollectorWarning)
-		m.syncViewport()
-		return m, nil
 	case openProcessLogsDoneMsg:
 		m.syncViewport()
 		if msg.err != nil {

@@ -842,7 +842,7 @@ func TestShouldRetryStartupUpdateNoticeUntilShown(t *testing.T) {
 	if shouldRetryStartupUpdateNotice(&uiModel{}, true) != true {
 		t.Fatal("expected retry when startup update notice was not shown")
 	}
-	if shouldRetryStartupUpdateNotice(&uiModel{startupUpdateShown: true}, true) {
+	if shouldRetryStartupUpdateNotice(&uiModel{uiStatusFeatureState: uiStatusFeatureState{startupUpdateShown: true}}, true) {
 		t.Fatal("did not expect retry after startup update notice was shown")
 	}
 	if shouldRetryStartupUpdateNotice(&uiModel{}, false) {

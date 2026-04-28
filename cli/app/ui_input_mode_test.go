@@ -19,13 +19,13 @@ func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
 	}{
 		{
 			name:  "status mode",
-			model: uiModel{interaction: uiInteractionState{Mode: uiInputModeStatus}},
+			model: uiModel{uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeStatus}}},
 			want:  uiInputModeStatus,
 		},
-		{name: "process list mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeProcessList}}, want: uiInputModeProcessList},
-		{name: "rollback selection mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeRollbackSelection}}, want: uiInputModeRollbackSelection},
-		{name: "rollback edit mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}}, want: uiInputModeRollbackEdit},
-		{name: "ask mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeAsk}, ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}, view: detailView}, want: uiInputModeAsk},
+		{name: "process list mode", model: uiModel{uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeProcessList}}}, want: uiInputModeProcessList},
+		{name: "rollback selection mode", model: uiModel{uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeRollbackSelection}}}, want: uiInputModeRollbackSelection},
+		{name: "rollback edit mode", model: uiModel{uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}}}, want: uiInputModeRollbackEdit},
+		{name: "ask mode", model: uiModel{uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeAsk}, ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}}, uiRuntimeFeatureState: uiRuntimeFeatureState{view: detailView}}, want: uiInputModeAsk},
 		{name: "main", model: uiModel{}, want: uiInputModeMain},
 	}
 
@@ -50,12 +50,12 @@ func TestRestorePrimaryInputModeFollowsAskAndTranscriptMode(t *testing.T) {
 	}{
 		{
 			name:  "active ask in ongoing mode restores ask input",
-			model: &uiModel{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}},
+			model: &uiModel{uiConversationFeatureState: uiConversationFeatureState{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}}},
 			want:  uiInputModeAsk,
 		},
 		{
 			name:  "active ask in detail mode restores main input",
-			model: &uiModel{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}, view: detailView},
+			model: &uiModel{uiConversationFeatureState: uiConversationFeatureState{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}}, uiRuntimeFeatureState: uiRuntimeFeatureState{view: detailView}},
 			want:  uiInputModeMain,
 		},
 		{
@@ -76,7 +76,10 @@ func TestRestorePrimaryInputModeFollowsAskAndTranscriptMode(t *testing.T) {
 }
 
 func TestInputModeStateExposesRenderingAndInteractionFlags(t *testing.T) {
-	m := &uiModel{busy: true, inputSubmitLocked: true, interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}}
+	m := &uiModel{
+		uiInputFeatureState:        uiInputFeatureState{busy: true, inputSubmitLocked: true},
+		uiConversationFeatureState: uiConversationFeatureState{interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}},
+	}
 	state := m.inputModeState()
 
 	if state.Mode != uiInputModeRollbackEdit {
