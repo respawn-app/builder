@@ -344,11 +344,23 @@ func TestConversationUpdateHydrationFencesLaterRuntimeEvents(t *testing.T) {
 	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "later"}
 	m := newProjectedTestUIModel(client, runtimeEvents, nil)
 	m.startupCmds = nil
+	m.sawAssistantDelta = true
+	m.reasoningLiveDirty = true
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "stale stream"})
 
 	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventConversationUpdated, CommittedTranscriptChanged: true}})
 	updated := next.(*uiModel)
 	if !updated.waitRuntimeEventAfterHydration {
 		t.Fatal("expected conversation update to arm hydration fence")
+	}
+	if updated.sawAssistantDelta {
+		t.Fatal("expected conversation update committed-advance sync to clear assistant delta state before hydration")
+	}
+	if updated.reasoningLiveDirty {
+		t.Fatal("expected conversation update committed-advance sync to clear reasoning live state before hydration")
+	}
+	if got := updated.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected conversation update committed-advance sync to clear stale ongoing text before hydration, got %q", got)
 	}
 	if len(runtimeEvents) != 1 {
 		t.Fatalf("expected later runtime event to remain unread until hydration completes, remaining=%d", len(runtimeEvents))

@@ -152,7 +152,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 
 func shouldInvalidateTransientTranscriptStateForSync(sync clientui.RuntimeTranscriptSyncCommand) bool {
 	switch sync.Reason {
-	case clientui.RuntimeTranscriptSyncRecovery, clientui.RuntimeTranscriptSyncStreamGap:
+	case clientui.RuntimeTranscriptSyncRecovery, clientui.RuntimeTranscriptSyncStreamGap, clientui.RuntimeTranscriptSyncCommittedAdvance:
 		return true
 	default:
 		return false
