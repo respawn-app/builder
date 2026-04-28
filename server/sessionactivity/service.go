@@ -33,6 +33,9 @@ func (s *Service) SubscribeSessionActivity(ctx context.Context, req serverapi.Se
 	if subscriber, ok := s.subscriber.(CursorSubscriber); ok {
 		return subscriber.SubscribeSessionActivityFrom(ctx, req)
 	}
+	if req.AfterSequence > 0 {
+		return nil, serverapi.ErrStreamGap
+	}
 	return s.subscriber.SubscribeSessionActivity(ctx, req.SessionID)
 }
 

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +67,30 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenCursorReplayUnavailable(t
 	}
 	if gap.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
 		t.Fatalf("stream-gap recovery cause = %q, want %q", gap.RecoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
+	}
+}
+
+func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithoutCursor(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{err: io.EOF}}}
+	resubscribeCalled := false
+	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
+		resubscribeCalled = true
+		return nil, context.Canceled
+	}, func() bool { return false }, nil)
+	defer stop()
+
+	gap := waitSessionActivityEvent(t, events)
+	if gap.Kind != clientui.EventStreamGap {
+		t.Fatalf("expected explicit stream-gap event after initial stream drop, got %+v", gap)
+	}
+	if gap.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("stream-gap recovery cause = %q, want %q", gap.RecoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
+	}
+	if resubscribeCalled {
+		t.Fatal("initial stream drop without a replay cursor must not resubscribe with AfterSequence 0")
 	}
 }
 

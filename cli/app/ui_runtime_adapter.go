@@ -82,7 +82,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		entry := transcriptEntryFromProjectedChatEntry(*reduction.Transcript.SyntheticOngoingEntry, true, false)
 		m.forwardToView(appendTranscriptMsgFromEntry(entry))
 	}
-	if evt.Kind == clientui.EventConversationUpdated && transcriptSync.IsSet() {
+	if shouldInvalidateTransientTranscriptStateForSync(transcriptSync) {
 		m.invalidateTransientTranscriptState()
 	}
 	if len(evt.TranscriptEntries) > 0 {
@@ -148,6 +148,15 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		cmds = append(cmds, m.requestRuntimeCommittedConversationSync())
 	}
 	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated, awaitsHydration: awaitsHydration}
+}
+
+func shouldInvalidateTransientTranscriptStateForSync(sync clientui.RuntimeTranscriptSyncCommand) bool {
+	switch sync.Reason {
+	case clientui.RuntimeTranscriptSyncRecovery, clientui.RuntimeTranscriptSyncStreamGap:
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeTranscriptSyncReasonLabel(sync clientui.RuntimeTranscriptSyncCommand) string {
