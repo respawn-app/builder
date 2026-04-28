@@ -2,15 +2,6 @@ package clientui
 
 import "strings"
 
-type RuntimeEventState struct {
-	Busy                  bool
-	Compacting            bool
-	ReviewerRunning       bool
-	ReviewerBlocking      bool
-	ConversationFreshness ConversationFreshness
-	ReasoningStatusHeader string
-}
-
 type RuntimeRunState struct {
 	Busy             bool
 	Compacting       bool
@@ -48,6 +39,7 @@ type BackgroundNotice struct {
 type RuntimeTranscriptSyncReason string
 
 const (
+	RuntimeTranscriptSyncNone                RuntimeTranscriptSyncReason = ""
 	RuntimeTranscriptSyncStreamGap           RuntimeTranscriptSyncReason = "stream_gap"
 	RuntimeTranscriptSyncCommittedAdvance    RuntimeTranscriptSyncReason = "committed_advance"
 	RuntimeTranscriptSyncRecovery            RuntimeTranscriptSyncReason = "recovery"
@@ -57,6 +49,10 @@ const (
 type RuntimeTranscriptSyncCommand struct {
 	Reason        RuntimeTranscriptSyncReason
 	RecoveryCause TranscriptRecoveryCause
+}
+
+func (c RuntimeTranscriptSyncCommand) IsSet() bool {
+	return c.Reason != RuntimeTranscriptSyncNone
 }
 
 type RuntimeAssistantStreamCommandKind uint8
@@ -73,7 +69,7 @@ type RuntimeAssistantStreamCommand struct {
 }
 
 type RuntimeTranscriptReduction struct {
-	Sync                  *RuntimeTranscriptSyncCommand
+	Sync                  RuntimeTranscriptSyncCommand
 	AssistantStream       []RuntimeAssistantStreamCommand
 	SyntheticOngoingEntry *ChatEntry
 }
@@ -91,22 +87,29 @@ type RuntimeRunStateReduction struct {
 	Activity RuntimeActivityCommand
 }
 
-type RuntimePendingInputCommandKind uint8
+type RuntimeDraftInputCommandKind uint8
 
 const (
-	RuntimePendingInputClearDraft RuntimePendingInputCommandKind = iota + 1
-	RuntimePendingInputClearPreSubmit
-	RuntimePendingInputRecordPromptHistory
+	RuntimePendingInputKeepDraft RuntimeDraftInputCommandKind = iota
+	RuntimePendingInputClearDraft
 )
 
-type RuntimePendingInputCommand struct {
-	Kind RuntimePendingInputCommandKind
+type RuntimePreSubmitInputCommandKind uint8
+
+const (
+	RuntimePendingInputKeepPreSubmit RuntimePreSubmitInputCommandKind = iota
+	RuntimePendingInputClearPreSubmit
+)
+
+type RuntimePromptHistoryCommand struct {
 	Text string
 }
 
 type RuntimePendingInputReduction struct {
-	State    PendingInputState
-	Commands []RuntimePendingInputCommand
+	State                PendingInputState
+	DraftCommand         RuntimeDraftInputCommandKind
+	PreSubmitCommand     RuntimePreSubmitInputCommandKind
+	PromptHistoryCommand *RuntimePromptHistoryCommand
 }
 
 type RuntimeReasoningStreamCommandKind uint8
@@ -129,22 +132,16 @@ type RuntimeReasoningReduction struct {
 type RuntimeBackgroundProcessCommand uint8
 
 const (
-	RuntimeBackgroundProcessRefresh RuntimeBackgroundProcessCommand = iota + 1
+	RuntimeBackgroundProcessUnchanged RuntimeBackgroundProcessCommand = iota
+	RuntimeBackgroundProcessRefresh
 )
 
-type RuntimeNoticeCommandKind uint8
-
-const (
-	RuntimeNoticeBackground RuntimeNoticeCommandKind = iota + 1
-)
-
-type RuntimeNoticeCommand struct {
-	Kind             RuntimeNoticeCommandKind
+type RuntimeNoticeReduction struct {
 	BackgroundNotice *BackgroundNotice
 }
 
 type RuntimeBackgroundProcessReduction struct {
-	Commands []RuntimeBackgroundProcessCommand
+	Command RuntimeBackgroundProcessCommand
 }
 
 type RuntimeConversationReduction struct {
@@ -158,43 +155,41 @@ type RuntimeEventReduction struct {
 	PendingInput        RuntimePendingInputReduction
 	Reasoning           RuntimeReasoningReduction
 	BackgroundProcesses RuntimeBackgroundProcessReduction
-	Notices             []RuntimeNoticeCommand
+	Notices             RuntimeNoticeReduction
 }
 
-func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activityRunning bool, evt Event) RuntimeEventReduction {
+func ReduceRuntimeEvent(
+	runState RuntimeRunState,
+	conversationState RuntimeConversationState,
+	input PendingInputState,
+	reasoningState RuntimeReasoningState,
+	activityRunning bool,
+	evt Event,
+) RuntimeEventReduction {
 	return RuntimeEventReduction{
 		Transcript:          ReduceRuntimeTranscriptEvent(evt),
-		RunState:            ReduceRuntimeRunStateEvent(runtimeRunStateFromEventState(state), activityRunning, evt),
-		Conversation:        ReduceRuntimeConversationEvent(RuntimeConversationState{Freshness: state.ConversationFreshness}, evt),
+		RunState:            ReduceRuntimeRunStateEvent(runState, activityRunning, evt),
+		Conversation:        ReduceRuntimeConversationEvent(conversationState, evt),
 		PendingInput:        ReduceRuntimePendingInputEvent(input, evt),
-		Reasoning:           ReduceRuntimeReasoningEvent(RuntimeReasoningState{StatusHeader: state.ReasoningStatusHeader}, evt),
+		Reasoning:           ReduceRuntimeReasoningEvent(reasoningState, evt),
 		BackgroundProcesses: ReduceRuntimeBackgroundProcessEvent(evt),
 		Notices:             ReduceRuntimeNoticeEvent(evt),
-	}
-}
-
-func runtimeRunStateFromEventState(state RuntimeEventState) RuntimeRunState {
-	return RuntimeRunState{
-		Busy:             state.Busy,
-		Compacting:       state.Compacting,
-		ReviewerRunning:  state.ReviewerRunning,
-		ReviewerBlocking: state.ReviewerBlocking,
 	}
 }
 
 func ReduceRuntimeTranscriptEvent(evt Event) RuntimeTranscriptReduction {
 	switch evt.Kind {
 	case EventStreamGap:
-		return RuntimeTranscriptReduction{Sync: &RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncStreamGap, RecoveryCause: evt.RecoveryCause}}
+		return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncStreamGap, RecoveryCause: evt.RecoveryCause}}
 	case EventConversationUpdated:
 		if evt.RecoveryCause != TranscriptRecoveryCauseNone {
-			return RuntimeTranscriptReduction{Sync: &RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncRecovery, RecoveryCause: evt.RecoveryCause}}
+			return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncRecovery, RecoveryCause: evt.RecoveryCause}}
 		}
 		if evt.CommittedTranscriptChanged {
-			return RuntimeTranscriptReduction{Sync: &RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncCommittedAdvance}}
+			return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncCommittedAdvance}}
 		}
 	case EventOngoingErrorUpdated:
-		return RuntimeTranscriptReduction{Sync: &RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncOngoingErrorUpdated}}
+		return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncOngoingErrorUpdated}}
 	case EventAssistantDelta:
 		return RuntimeTranscriptReduction{AssistantStream: []RuntimeAssistantStreamCommand{{Kind: RuntimeAssistantStreamAppend, Delta: evt.AssistantDelta, StepID: evt.StepID}}}
 	case EventAssistantDeltaReset:
@@ -242,11 +237,15 @@ func ReduceRuntimeConversationEvent(state RuntimeConversationState, evt Event) R
 
 func ReduceRuntimePendingInputEvent(input PendingInputState, evt Event) RuntimePendingInputReduction {
 	next := clonePendingInputState(input)
-	reduction := RuntimePendingInputReduction{State: next}
+	reduction := RuntimePendingInputReduction{
+		State:            next,
+		DraftCommand:     RuntimePendingInputKeepDraft,
+		PreSubmitCommand: RuntimePendingInputKeepPreSubmit,
+	}
 	switch evt.Kind {
 	case EventRunStateChanged:
 		if evt.RunState != nil && evt.RunState.Busy {
-			reduction.Commands = append(reduction.Commands, RuntimePendingInputCommand{Kind: RuntimePendingInputClearPreSubmit})
+			reduction.PreSubmitCommand = RuntimePendingInputClearPreSubmit
 		}
 	case EventUserMessageFlushed:
 		batch := append([]string(nil), evt.UserMessageBatch...)
@@ -262,11 +261,11 @@ func ReduceRuntimePendingInputEvent(input PendingInputState, evt Event) RuntimeP
 		}
 		if consumed > 0 {
 			reduction.State.PendingInjected = append([]string(nil), reduction.State.PendingInjected[consumed:]...)
-			reduction.Commands = append(reduction.Commands, RuntimePendingInputCommand{Kind: RuntimePendingInputRecordPromptHistory, Text: evt.UserMessage})
+			reduction.PromptHistoryCommand = &RuntimePromptHistoryCommand{Text: evt.UserMessage}
 		}
 		if reduction.State.InputSubmitLocked && strings.TrimSpace(reduction.State.LockedInjectText) == strings.TrimSpace(evt.UserMessage) {
 			if strings.TrimSpace(reduction.State.Input) == strings.TrimSpace(reduction.State.LockedInjectText) {
-				reduction.Commands = append(reduction.Commands, RuntimePendingInputCommand{Kind: RuntimePendingInputClearDraft})
+				reduction.DraftCommand = RuntimePendingInputClearDraft
 			}
 			reduction.State.LockedInjectText = ""
 			reduction.State.InputSubmitLocked = false
@@ -301,18 +300,18 @@ func ReduceRuntimeBackgroundProcessEvent(evt Event) RuntimeBackgroundProcessRedu
 	if evt.Kind != EventBackgroundUpdated {
 		return RuntimeBackgroundProcessReduction{}
 	}
-	return RuntimeBackgroundProcessReduction{Commands: []RuntimeBackgroundProcessCommand{RuntimeBackgroundProcessRefresh}}
+	return RuntimeBackgroundProcessReduction{Command: RuntimeBackgroundProcessRefresh}
 }
 
-func ReduceRuntimeNoticeEvent(evt Event) []RuntimeNoticeCommand {
+func ReduceRuntimeNoticeEvent(evt Event) RuntimeNoticeReduction {
 	if evt.Kind != EventBackgroundUpdated {
-		return nil
+		return RuntimeNoticeReduction{}
 	}
 	notice := backgroundNoticeFromEvent(evt.Background)
 	if notice == nil {
-		return nil
+		return RuntimeNoticeReduction{}
 	}
-	return []RuntimeNoticeCommand{{Kind: RuntimeNoticeBackground, BackgroundNotice: notice}}
+	return RuntimeNoticeReduction{BackgroundNotice: notice}
 }
 
 func ExtractReasoningStatusHeader(text string) string {

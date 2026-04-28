@@ -4,24 +4,26 @@ import "testing"
 
 func TestReduceRuntimeEvent_UserMessageFlushedProducesPendingInputAndConversationUpdates(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{ConversationFreshness: ConversationFreshnessFresh},
+		RuntimeRunState{},
+		RuntimeConversationState{Freshness: ConversationFreshnessFresh},
 		PendingInputState{
 			Input:             "steered message",
 			PendingInjected:   []string{"steered message", "follow-up"},
 			LockedInjectText:  "steered message",
 			InputSubmitLocked: true,
 		},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventUserMessageFlushed, UserMessage: "steered message"},
 	)
 
-	if update.Transcript.Sync != nil {
+	if update.Transcript.Sync.IsSet() {
 		t.Fatal("did not expect flushed user message to request session sync")
 	}
-	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputRecordPromptHistory) {
+	if update.PendingInput.PromptHistoryCommand == nil {
 		t.Fatal("expected consumed injected text to be recorded in prompt history")
 	}
-	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputClearDraft) {
+	if update.PendingInput.DraftCommand != RuntimePendingInputClearDraft {
 		t.Fatal("expected locked injected input to clear the draft input")
 	}
 	if update.PendingInput.State.InputSubmitLocked {
@@ -40,8 +42,10 @@ func TestReduceRuntimeEvent_UserMessageFlushedProducesPendingInputAndConversatio
 
 func TestReduceRuntimeEvent_RunStateStoppedClearsReasoningAndReturnsToIdle(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{Busy: true, ReasoningStatusHeader: "Running checks"},
+		RuntimeRunState{Busy: true},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{StatusHeader: "Running checks"},
 		true,
 		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: false}},
 	)
@@ -62,8 +66,10 @@ func TestReduceRuntimeEvent_RunStateStoppedClearsReasoningAndReturnsToIdle(t *te
 
 func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{Busy: false},
+		RuntimeRunState{Busy: false},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}},
 	)
@@ -74,77 +80,89 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 	if update.RunState.Activity != RuntimeActivityRunning {
 		t.Fatal("expected started run to set running activity")
 	}
-	if update.Transcript.Sync != nil {
+	if update.Transcript.Sync.IsSet() {
 		t.Fatal("did not expect started run to request transcript sync")
 	}
-	if !hasPendingInputCommand(update.PendingInput.Commands, RuntimePendingInputClearPreSubmit) {
+	if update.PendingInput.PreSubmitCommand != RuntimePendingInputClearPreSubmit {
 		t.Fatal("expected started run to clear pending pre-submit text")
 	}
 }
 
 func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceOrRecovery(t *testing.T) {
 	plain := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventConversationUpdated},
 	)
-	if plain.Transcript.Sync != nil {
+	if plain.Transcript.Sync.IsSet() {
 		t.Fatal("did not expect plain conversation_updated to request transcript sync")
 	}
 	committed := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventConversationUpdated, CommittedTranscriptChanged: true},
 	)
-	if committed.Transcript.Sync == nil || committed.Transcript.Sync.Reason != RuntimeTranscriptSyncCommittedAdvance {
+	if committed.Transcript.Sync.Reason != RuntimeTranscriptSyncCommittedAdvance {
 		t.Fatal("expected committed conversation_updated to request transcript sync")
 	}
 	recovery := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventConversationUpdated, RecoveryCause: TranscriptRecoveryCauseStreamGap},
 	)
-	if recovery.Transcript.Sync == nil || recovery.Transcript.Sync.Reason != RuntimeTranscriptSyncRecovery {
+	if recovery.Transcript.Sync.Reason != RuntimeTranscriptSyncRecovery {
 		t.Fatal("expected recovery conversation_updated to request transcript sync")
 	}
 	gap := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventStreamGap, RecoveryCause: TranscriptRecoveryCauseStreamGap},
 	)
-	if gap.Transcript.Sync == nil || gap.Transcript.Sync.Reason != RuntimeTranscriptSyncStreamGap {
+	if gap.Transcript.Sync.Reason != RuntimeTranscriptSyncStreamGap {
 		t.Fatal("expected explicit stream gap to request transcript sync")
 	}
 }
 
 func TestReduceRuntimeEvent_OngoingErrorUpdatedRequestsSessionSync(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventOngoingErrorUpdated},
 	)
-	if update.Transcript.Sync == nil || update.Transcript.Sync.Reason != RuntimeTranscriptSyncOngoingErrorUpdated {
+	if update.Transcript.Sync.Reason != RuntimeTranscriptSyncOngoingErrorUpdated {
 		t.Fatal("expected ongoing_error_updated to request transcript sync")
 	}
 }
 
 func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", CompactText: "Background shell 1000 completed (exit 0)"}},
 	)
 
-	if !hasBackgroundProcessCommand(update.BackgroundProcesses.Commands, RuntimeBackgroundProcessRefresh) {
+	if update.BackgroundProcesses.Command != RuntimeBackgroundProcessRefresh {
 		t.Fatal("expected background update to refresh process snapshots")
 	}
-	notice := firstBackgroundNotice(update.Notices)
+	notice := update.Notices.BackgroundNotice
 	if notice == nil {
 		t.Fatal("expected completion notice")
 	}
@@ -158,13 +176,15 @@ func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 
 func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{},
+		RuntimeRunState{},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}},
 	)
 
-	notice := firstBackgroundNotice(update.Notices)
+	notice := update.Notices.BackgroundNotice
 	if notice == nil {
 		t.Fatal("expected completion notice")
 	}
@@ -175,8 +195,10 @@ func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *t
 
 func TestReduceRuntimeEvent_CompactionCompletedClearsCompactingWithoutSyntheticNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
-		RuntimeEventState{Compacting: true},
+		RuntimeRunState{Compacting: true},
+		RuntimeConversationState{},
 		PendingInputState{},
+		RuntimeReasoningState{},
 		false,
 		Event{Kind: EventCompactionCompleted, Compaction: &CompactionStatus{Mode: "auto", Count: 2}},
 	)
@@ -192,25 +214,16 @@ func TestReduceRuntimeEvent_CompactionCompletedClearsCompactingWithoutSyntheticN
 func TestDomainReducersIgnoreUnownedEventConcerns(t *testing.T) {
 	evt := Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}}
 
-	if transcript := ReduceRuntimeTranscriptEvent(evt); transcript.Sync != nil || len(transcript.AssistantStream) != 0 {
+	if transcript := ReduceRuntimeTranscriptEvent(evt); transcript.Sync.IsSet() || len(transcript.AssistantStream) != 0 {
 		t.Fatalf("transcript reducer handled background event: %+v", transcript)
 	}
 	if reasoning := ReduceRuntimeReasoningEvent(RuntimeReasoningState{StatusHeader: "thinking"}, evt); reasoning.State.StatusHeader != "thinking" || len(reasoning.Stream) != 0 {
 		t.Fatalf("reasoning reducer handled background event: %+v", reasoning)
 	}
 	processes := ReduceRuntimeBackgroundProcessEvent(evt)
-	if !hasBackgroundProcessCommand(processes.Commands, RuntimeBackgroundProcessRefresh) {
+	if processes.Command != RuntimeBackgroundProcessRefresh {
 		t.Fatalf("background process reducer did not own background refresh: %+v", processes)
 	}
-}
-
-func hasPendingInputCommand(commands []RuntimePendingInputCommand, kind RuntimePendingInputCommandKind) bool {
-	for _, command := range commands {
-		if command.Kind == kind {
-			return true
-		}
-	}
-	return false
 }
 
 func hasReasoningStreamCommand(commands []RuntimeReasoningStreamCommand, kind RuntimeReasoningStreamCommandKind) bool {
@@ -220,24 +233,6 @@ func hasReasoningStreamCommand(commands []RuntimeReasoningStreamCommand, kind Ru
 		}
 	}
 	return false
-}
-
-func hasBackgroundProcessCommand(commands []RuntimeBackgroundProcessCommand, kind RuntimeBackgroundProcessCommand) bool {
-	for _, command := range commands {
-		if command == kind {
-			return true
-		}
-	}
-	return false
-}
-
-func firstBackgroundNotice(commands []RuntimeNoticeCommand) *BackgroundNotice {
-	for _, command := range commands {
-		if command.Kind == RuntimeNoticeBackground {
-			return command.BackgroundNotice
-		}
-	}
-	return nil
 }
 
 func TestExtractReasoningStatusHeaderAcceptsWhitespaceWrappedBoldOnly(t *testing.T) {
