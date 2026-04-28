@@ -612,6 +612,7 @@ type uiModel struct {
 	nativeHistoryReplayed               bool
 	nativeReplayWidth                   int
 	nativeFormatterWidth                int
+	nativeCommittedProjector            tui.CommittedOngoingProjector
 	nativeProjection                    tui.TranscriptProjection
 	nativeProjectionBaseOffset          int
 	nativeRenderedProjection            tui.TranscriptProjection
@@ -972,7 +973,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetNativeHistoryState()
 				m.nativeHistoryReplayed = true
 			} else {
-				m.rebaseNativeProjection(committedTranscriptProjectionForApp(m.view, m.transcriptEntries), m.transcriptBaseOffset, len(committedEntries))
+				m.rebaseNativeProjection(m.nativeCommittedProjection(committedEntries), m.transcriptBaseOffset, len(committedEntries))
 			}
 		}
 		if !m.nativeHistoryReplayed {

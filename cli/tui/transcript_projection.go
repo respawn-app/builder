@@ -6,6 +6,29 @@ type TranscriptProjection struct {
 	Blocks []TranscriptProjectionBlock
 }
 
+// CommittedOngoingProjectionKey identifies the render-affecting inputs for the
+// committed ongoing transcript projection. Revision must advance when transcript
+// content changes; revisionless keys intentionally skip projection caching.
+type CommittedOngoingProjectionKey struct {
+	Revision   int64
+	Width      int
+	Theme      string
+	BaseOffset int
+	EntryCount int
+}
+
+// CommittedOngoingProjector reuses the ongoing transcript renderer and caches
+// committed projections by transcript revision and terminal width.
+type CommittedOngoingProjector struct {
+	key           CommittedOngoingProjectionKey
+	projection    TranscriptProjection
+	projectionSet bool
+	renderer      Model
+	rendererSet   bool
+	rendererTheme string
+	rendererWidth int
+}
+
 type TranscriptProjectionLine struct {
 	Kind VisibleLineKind
 	Text string
@@ -21,6 +44,23 @@ type TranscriptProjectionBlock struct {
 
 func (p TranscriptProjection) Empty() bool {
 	return len(p.Blocks) == 0
+}
+
+func (p TranscriptProjection) Clone() TranscriptProjection {
+	if len(p.Blocks) == 0 {
+		return TranscriptProjection{}
+	}
+	blocks := make([]TranscriptProjectionBlock, 0, len(p.Blocks))
+	for _, block := range p.Blocks {
+		blocks = append(blocks, TranscriptProjectionBlock{
+			Role:         block.Role,
+			DividerGroup: block.DividerGroup,
+			EntryIndex:   block.EntryIndex,
+			EntryEnd:     block.EntryEnd,
+			Lines:        append([]string(nil), block.Lines...),
+		})
+	}
+	return TranscriptProjection{Blocks: blocks}
 }
 
 func (p TranscriptProjection) Lines(dividerText string) []TranscriptProjectionLine {
@@ -168,18 +208,87 @@ func (m Model) CommittedOngoingProjection() TranscriptProjection {
 }
 
 func (m Model) CommittedOngoingProjectionForEntries(entries []TranscriptEntry) TranscriptProjection {
-	committed := CommittedOngoingEntries(m.transcript)
+	target := m.transcript
 	if len(entries) > 0 {
-		committed = CommittedOngoingEntries(entries)
+		target = entries
 	}
+	return projectCommittedOngoingTranscriptWithRenderer(m, target)
+}
+
+// ProjectCommittedOngoingTranscript renders committed ongoing transcript entries
+// without requiring callers to construct a throwaway tui.Model.
+func ProjectCommittedOngoingTranscript(entries []TranscriptEntry, theme string, width int) TranscriptProjection {
+	var projector CommittedOngoingProjector
+	return projector.Project(entries, CommittedOngoingProjectionKey{
+		Theme:      theme,
+		Width:      width,
+		EntryCount: len(entries),
+	})
+}
+
+// Project returns the committed ongoing projection for entries, reusing a cached
+// projection when the key still matches.
+func (p *CommittedOngoingProjector) Project(entries []TranscriptEntry, key CommittedOngoingProjectionKey) TranscriptProjection {
+	key = normalizeCommittedOngoingProjectionKey(key, len(entries))
+	cacheable := key.Revision > 0
+	if cacheable && p != nil && p.projectionSet && p.key == key {
+		return p.projection.Clone()
+	}
+	renderer := committedOngoingProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
+	if p != nil {
+		renderer = p.rendererFor(key.Theme, key.Width, key.BaseOffset)
+	}
+	projection := projectCommittedOngoingTranscriptWithRenderer(renderer, entries)
+	if cacheable && p != nil {
+		p.key = key
+		p.projection = projection.Clone()
+		p.projectionSet = true
+	}
+	return projection
+}
+
+func normalizeCommittedOngoingProjectionKey(key CommittedOngoingProjectionKey, entryCount int) CommittedOngoingProjectionKey {
+	key.Theme = normalizeTheme(key.Theme)
+	if key.Width <= 0 {
+		key.Width = 120
+	}
+	if key.EntryCount != entryCount {
+		key.EntryCount = entryCount
+	}
+	return key
+}
+
+func (p *CommittedOngoingProjector) rendererFor(theme string, width int, baseOffset int) Model {
+	theme = normalizeTheme(theme)
+	if width <= 0 {
+		width = 120
+	}
+	if !p.rendererSet || p.rendererTheme != theme || p.rendererWidth != width {
+		p.renderer = committedOngoingProjectionRenderer(theme, width, baseOffset)
+		p.rendererSet = true
+		p.rendererTheme = theme
+		p.rendererWidth = width
+	}
+	p.renderer.transcriptBaseOffset = baseOffset
+	return p.renderer
+}
+
+func committedOngoingProjectionRenderer(theme string, width int, baseOffset int) Model {
+	model := NewModel(WithTheme(theme))
+	model.viewportWidth = width
+	model.transcriptBaseOffset = baseOffset
+	return model
+}
+
+func projectCommittedOngoingTranscriptWithRenderer(renderer Model, entries []TranscriptEntry) TranscriptProjection {
+	committed := CommittedOngoingEntries(entries)
 	if len(committed) == 0 {
 		return TranscriptProjection{}
 	}
-	clone := m
-	clone.transcript = append([]TranscriptEntry(nil), committed...)
-	clone.ongoing = ""
-	clone.streamingReasoning = nil
-	return projectionFromOngoingBlocks(clone.buildOngoingBlocks(false))
+	renderer.transcript = append([]TranscriptEntry(nil), committed...)
+	renderer.ongoing = ""
+	renderer.streamingReasoning = nil
+	return projectionFromOngoingBlocks(renderer.buildOngoingBlocks(false))
 }
 
 func (m Model) DetailProjection(includeStreaming bool, applySelection bool) TranscriptProjection {
@@ -278,19 +387,7 @@ func RenderCommittedOngoingSnapshot(entries []TranscriptEntry, theme string, wid
 	if len(entries) == 0 {
 		return ""
 	}
-	if width <= 0 {
-		width = 120
-	}
-	model := NewModel(WithTheme(theme), WithPreviewLines(200000))
-	next, _ := model.Update(SetViewportSizeMsg{Lines: 200000, Width: width})
-	if casted, ok := next.(Model); ok {
-		model = casted
-	}
-	next, _ = model.Update(SetConversationMsg{Entries: entries})
-	if casted, ok := next.(Model); ok {
-		model = casted
-	}
-	return model.CommittedOngoingProjection().Render(TranscriptDivider)
+	return ProjectCommittedOngoingTranscript(entries, theme, width).Render(TranscriptDivider)
 }
 
 func nonEmptyTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {

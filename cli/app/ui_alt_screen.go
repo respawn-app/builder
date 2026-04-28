@@ -130,7 +130,7 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 		return m.syncNativeHistoryFromTranscript()
 	}
 	if len(committedEntries) > 0 && !m.nativeProjection.Empty() {
-		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		projection := m.nativeCommittedProjection(committedEntries)
 		if _, ok := projection.RenderAppendDeltaFrom(m.nativeProjection, tui.TranscriptDivider); !ok {
 			m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
 			m.acceptNativeProjectionWithoutReplay(projection)
@@ -138,7 +138,7 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 		}
 	}
 	if m.nativeProjection.Empty() && len(committedEntries) > 0 {
-		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		projection := m.nativeCommittedProjection(committedEntries)
 		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
 		m.acceptNativeProjectionWithoutReplay(projection)
 		return nil
