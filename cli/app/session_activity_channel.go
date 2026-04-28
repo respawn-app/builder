@@ -12,7 +12,7 @@ import (
 
 const sessionActivityResubscribeDelay = 250 * time.Millisecond
 
-type sessionActivitySubscriber func(context.Context) (serverapi.SessionActivitySubscription, error)
+type sessionActivitySubscriber func(context.Context, uint64) (serverapi.SessionActivitySubscription, error)
 
 func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivitySubscription, subscribe sessionActivitySubscriber, diagnosticsEnabled func() bool, logDiag func(string)) (<-chan clientui.Event, func()) {
 	out := make(chan clientui.Event, 64)
@@ -24,6 +24,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 	go func() {
 		defer close(out)
 		current := sub
+		var lastSequence uint64
 		for {
 			evt, err := current.Next(pollCtx)
 			if err != nil {
@@ -37,24 +38,21 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				current, err = resubscribeSessionActivity(pollCtx, subscribe)
-				if err != nil {
+				if errors.Is(err, serverapi.ErrStreamGap) && lastSequence == 0 {
+					emitSessionActivityGap(pollCtx, out)
 					return
 				}
-				select {
-				case <-pollCtx.Done():
-					_ = current.Close()
-					return
-				case out <- clientui.Event{Kind: clientui.EventConversationUpdated, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap, CommittedTranscriptChanged: true}:
-					if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
-						logDiag(transcriptdiag.FormatLine("transcript.diag.client.synthetic_conversation_updated", map[string]string{
-							"path":  "recovery",
-							"kind":  string(clientui.EventConversationUpdated),
-							"cause": string(clientui.TranscriptRecoveryCauseStreamGap),
-						}))
+				current, err = resubscribeSessionActivity(pollCtx, subscribe, lastSequence)
+				if err != nil {
+					if errors.Is(err, serverapi.ErrStreamGap) {
+						emitSessionActivityGap(pollCtx, out)
 					}
+					return
 				}
 				continue
+			}
+			if evt.Sequence > lastSequence {
+				lastSequence = evt.Sequence
 			}
 			if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
 				fields := map[string]string{
@@ -77,18 +75,28 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 	return out, cancel
 }
 
+func emitSessionActivityGap(ctx context.Context, out chan<- clientui.Event) {
+	select {
+	case <-ctx.Done():
+	case out <- clientui.Event{Kind: clientui.EventStreamGap, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap}:
+	}
+}
+
 func sessionActivityDiagnosticsEnabled(enabled func() bool) bool {
 	return enabled != nil && enabled()
 }
 
-func resubscribeSessionActivity(ctx context.Context, subscribe sessionActivitySubscriber) (serverapi.SessionActivitySubscription, error) {
+func resubscribeSessionActivity(ctx context.Context, subscribe sessionActivitySubscriber, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
 	for {
 		if !waitSessionActivityRetry(ctx) {
 			return nil, ctx.Err()
 		}
-		sub, err := subscribe(ctx)
+		sub, err := subscribe(ctx, afterSequence)
 		if err == nil {
 			return sub, nil
+		}
+		if errors.Is(err, serverapi.ErrStreamGap) {
+			return nil, err
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
