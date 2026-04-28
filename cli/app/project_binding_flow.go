@@ -936,16 +936,6 @@ func trimRenderedHeaderInset(rendered string) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderStartupEditableInput(width int, height int, theme string, spec uiEditableInputRenderSpec) string {
-	contentWidth := width
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-	lineStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
-	borderStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).primary)
-	return strings.Join(renderFramedEditableInputLines(contentWidth, inputContentLineLimit(height), spec, lineStyle, borderStyle), "\n")
-}
-
 func renderStartupSharedTextInput(width int, height int, theme string, input uiSharedTextInput, prefix string, renderCursor bool) string {
 	contentWidth := width
 	if contentWidth < 1 {
