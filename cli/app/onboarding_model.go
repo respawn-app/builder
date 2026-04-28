@@ -690,11 +690,7 @@ func (m *onboardingModel) buildContent(width int) onboardingRenderedContent {
 	case onboardingScreenInput:
 		appendBlank()
 		cursorRow = len(lines)
-		spec := m.input.renderSpec("> ", true)
-		rendered := renderEditableInputField(width, 0, spec)
-		for _, line := range rendered.Lines {
-			lines = append(lines, m.styles.inputText.Render(line))
-		}
+		lines = append(lines, m.input.renderSoftCursorLines(width, 0, "> ", true, m.styles.inputText)...)
 	}
 	if helper := strings.TrimSpace(m.currentScreen.Helper); helper != "" {
 		appendBlank()

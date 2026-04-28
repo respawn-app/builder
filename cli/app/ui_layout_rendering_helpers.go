@@ -64,15 +64,7 @@ func renderFramedEditableInputLines(width, maxContentLines int, spec uiEditableI
 		return []string{padRight("", width)}
 	}
 	renderedField := renderEditableInputField(width, maxContentLines, spec)
-	rendered := make([]string, 0, len(renderedField.Lines))
-	for index, line := range renderedField.Lines {
-		if renderedField.Cursor.Visible && index == renderedField.Cursor.Row {
-			rendered = append(rendered, renderEditableInputLineWithCursor(line, width, renderedField.Cursor.Col, lineStyle))
-			continue
-		}
-		rendered = append(rendered, lineStyle.Render(padANSIRight(line, width)))
-	}
-	return renderFramedLines(width, rendered, borderStyle)
+	return renderFramedLines(width, renderEditableInputSoftCursorLines(width, renderedField, lineStyle), borderStyle)
 }
 
 func renderFramedLines(width int, lines []string, borderStyle lipgloss.Style) []string {
@@ -109,6 +101,22 @@ func visibleEditableInputRender(width, maxContentLines int, spec uiEditableInput
 func renderEditableInputField(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.RenderResult {
 	field := editableInputField(width, maxContentLines, spec)
 	return field.Render(width)
+}
+
+func renderEditableInputSoftCursorFieldLines(width, maxContentLines int, spec uiEditableInputRenderSpec, lineStyle lipgloss.Style) []string {
+	return renderEditableInputSoftCursorLines(width, renderEditableInputField(width, maxContentLines, spec), lineStyle)
+}
+
+func renderEditableInputSoftCursorLines(width int, rendered tuiinput.RenderResult, lineStyle lipgloss.Style) []string {
+	lines := make([]string, 0, len(rendered.Lines))
+	for index, line := range rendered.Lines {
+		if rendered.Cursor.Visible && index == rendered.Cursor.Row {
+			lines = append(lines, renderEditableInputLineWithCursor(line, width, rendered.Cursor.Col, lineStyle))
+			continue
+		}
+		lines = append(lines, lineStyle.Render(padANSIRight(line, width)))
+	}
+	return lines
 }
 
 func editableInputField(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.Field {
