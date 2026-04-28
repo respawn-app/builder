@@ -66,6 +66,15 @@ func (m *uiModel) runtimeTranscript() clientui.TranscriptPage {
 	return m.localRuntimeTranscript()
 }
 
+func (m *uiModel) startupRuntimeTranscript() clientui.TranscriptPage {
+	if client := m.runtimeClient(); client != nil {
+		if _, ok := client.(*sessionRuntimeClient); ok {
+			return m.refreshRuntimeTranscript()
+		}
+	}
+	return m.runtimeTranscript()
+}
+
 func (m *uiModel) refreshRuntimeTranscript() clientui.TranscriptPage {
 	if client := m.runtimeClient(); client != nil {
 		page, err := client.RefreshTranscript()
@@ -74,7 +83,7 @@ func (m *uiModel) refreshRuntimeTranscript() clientui.TranscriptPage {
 			return page
 		}
 		m.observeRuntimeRequestResult(err)
-		return client.Transcript()
+		return m.localRuntimeTranscript()
 	}
 	return m.localRuntimeTranscript()
 }

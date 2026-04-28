@@ -56,6 +56,14 @@ func (c *startupTranscriptRuntimeClient) Transcript() clientui.TranscriptPage {
 	return c.page
 }
 
+func (c *startupTranscriptRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	page := c.page
+	if page.SessionID == "" {
+		page.SessionID = "session-1"
+	}
+	return page, nil
+}
+
 func (c *startupTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	c.loadRequests = append(c.loadRequests, req)
 	page := c.page
