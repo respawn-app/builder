@@ -6,7 +6,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/shared/clientui"
-	"builder/shared/transcript"
 )
 
 func (m *uiModel) runtimeMainView() clientui.RuntimeMainView {
@@ -110,7 +109,7 @@ func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) strin
 		if !transcriptEntryAffectsCommittedAssistantFinalAnswer(entry) {
 			continue
 		}
-		if strings.TrimSpace(entry.Role) == "assistant" && entry.Phase == llm.MessagePhaseFinal && strings.TrimSpace(entry.Text) != "" {
+		if entry.Role == tui.TranscriptRoleAssistant && entry.Phase == llm.MessagePhaseFinal && strings.TrimSpace(entry.Text) != "" {
 			answer = entry.Text
 			continue
 		}
@@ -120,10 +119,10 @@ func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) strin
 }
 
 func transcriptEntryAffectsCommittedAssistantFinalAnswer(entry tui.TranscriptEntry) bool {
-	switch transcript.NormalizeEntryRole(entry.Role) {
-	case "", "system", "error", "warning", "cache_warning", "reviewer_status", "reviewer_suggestions", "tool_question_error", string(transcript.EntryRoleDeveloperFeedback):
+	switch entry.Role {
+	case "", tui.TranscriptRoleSystem, tui.TranscriptRoleError, tui.TranscriptRoleWarning, tui.TranscriptRoleCacheWarning, tui.TranscriptRoleReviewerStatus, tui.TranscriptRoleReviewerSuggestions, tui.TranscriptRoleDeveloperFeedback:
 		return false
-	case string(transcript.EntryRoleDeveloperErrorFeedback):
+	case tui.TranscriptRoleDeveloperErrorFeedback:
 		return false
 	default:
 		return true
@@ -136,7 +135,7 @@ func (m *uiModel) localRuntimeTranscript() clientui.TranscriptPage {
 	for _, entry := range committedEntries {
 		entries = append(entries, clientui.ChatEntry{
 			Visibility:        entry.Visibility,
-			Role:              entry.Role,
+			Role:              entry.Role.WireString(),
 			Text:              entry.Text,
 			OngoingText:       entry.OngoingText,
 			Phase:             string(entry.Phase),

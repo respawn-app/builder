@@ -24,11 +24,11 @@ func (m Model) detailEntryExpanded(entryIndex int) bool {
 	return ok
 }
 
-func (m Model) detailWithTreeGuide(role string, lines []string, expanded bool) []string {
+func (m Model) detailWithTreeGuide(role RenderIntent, lines []string, expanded bool) []string {
 	return m.detailWithTreeGuideWithSymbol(role, lines, expanded, "")
 }
 
-func (m Model) detailWithTreeGuideWithSymbol(role string, lines []string, expanded bool, symbolOverride string) []string {
+func (m Model) detailWithTreeGuideWithSymbol(role RenderIntent, lines []string, expanded bool, symbolOverride string) []string {
 	if !m.compactDetail {
 		return lines
 	}
@@ -45,7 +45,7 @@ func (m Model) detailWithTreeGuideWithSymbol(role string, lines []string, expand
 	return out
 }
 
-func (m Model) detailTreeGuideLine(role string, line string, last bool, expanded bool, symbolOverride string) string {
+func (m Model) detailTreeGuideLine(role RenderIntent, line string, last bool, expanded bool, symbolOverride string) string {
 	connector := detailTreeMiddle
 	if last {
 		connector = detailTreeLast
@@ -118,15 +118,15 @@ func removeExtraSpacesFromLongestRunLongerThan(line string, count int, minLen in
 	return line[:bestStart] + line[bestStart+remove:]
 }
 
-func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role string, text string) []string {
+func (m Model) detailCollapsedStandardLines(entry TranscriptEntry, role RenderIntent, text string) []string {
 	return m.detailCollapsedStandardLinesWithSymbol(entry, role, text, "")
 }
 
-func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, role string, text string, symbolOverride string) []string {
+func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, role RenderIntent, text string, symbolOverride string) []string {
 	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
 		return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 	}
-	if strings.TrimSpace(role) == "reviewer_suggestions" {
+	if role == RenderIntentReviewerSuggestions {
 		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, label, false, nil, symbolOverride), false, symbolOverride)
 		}
@@ -147,7 +147,7 @@ func (m Model) detailCollapsedStandardLinesWithSymbol(entry TranscriptEntry, rol
 	return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, m.firstDetailPreviewLine(text, defaultDetailLabelForRole(role)), false, nil, symbolOverride), false, symbolOverride)
 }
 
-func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text string) bool {
+func (m Model) detailStandardExpandable(entry TranscriptEntry, role RenderIntent, text string) bool {
 	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
 		return false
 	}
@@ -158,7 +158,7 @@ func (m Model) detailStandardExpandable(entry TranscriptEntry, role string, text
 	if label := strings.TrimSpace(entry.CompactLabel); label != "" {
 		return label != trimmedText
 	}
-	if strings.TrimSpace(role) == "reviewer_suggestions" {
+	if role == RenderIntentReviewerSuggestions {
 		if label := reviewerSuggestionsCollapsedLabel(entry); label != "" {
 			return label != trimmedText
 		}
@@ -187,11 +187,11 @@ func reviewerSuggestionsCollapsedLabel(entry TranscriptEntry) string {
 	return ""
 }
 
-func (m Model) detailCollapsedToolLines(role string, entry TranscriptEntry, resultSummary string) []string {
+func (m Model) detailCollapsedToolLines(role RenderIntent, entry TranscriptEntry, resultSummary string) []string {
 	return m.detailCollapsedToolLinesWithSymbol(role, entry, resultSummary, "")
 }
 
-func (m Model) detailCollapsedToolLinesWithSymbol(role string, entry TranscriptEntry, resultSummary string, symbolOverride string) []string {
+func (m Model) detailCollapsedToolLinesWithSymbol(role RenderIntent, entry TranscriptEntry, resultSummary string, symbolOverride string) []string {
 	compact := m.toolCallDisplayText(entry, role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
 	if strings.TrimSpace(compact) == "" {
 		compact = "Tool call"
@@ -214,14 +214,14 @@ func (m Model) detailCollapsedToolLinesWithSymbol(role string, entry TranscriptE
 	return m.detailWithTreeGuideWithSymbol(role, m.flattenEntryWithMetaAndSymbol(role, compact, true, entry.ToolCall, symbolOverride), false, symbolOverride)
 }
 
-func (m Model) detailToolResultExpandable(role string, text string) bool {
+func (m Model) detailToolResultExpandable(role RenderIntent, text string) bool {
 	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
 		return false
 	}
 	return m.detailRenderedContentLineCount(role, text) > 1
 }
 
-func (m Model) detailToolCallExpandable(role string, entry TranscriptEntry, resultSummary string, combined string, meta *transcript.ToolCallMeta, resultText string) bool {
+func (m Model) detailToolCallExpandable(role RenderIntent, entry TranscriptEntry, resultSummary string, combined string, meta *transcript.ToolCallMeta, resultText string) bool {
 	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
 		return false
 	}
@@ -235,7 +235,7 @@ func (m Model) detailToolCallExpandable(role string, entry TranscriptEntry, resu
 	return strings.TrimSpace(compact) != strings.TrimSpace(combined)
 }
 
-func (m Model) detailAskQuestionExpandable(role string, question string, suggestions []string, recommendedOptionIndex int, answer string, resultSummary string) bool {
+func (m Model) detailAskQuestionExpandable(role RenderIntent, question string, suggestions []string, recommendedOptionIndex int, answer string, resultSummary string) bool {
 	if !m.compactDetail || m.detailRoleRendersFullWhenCollapsed(role) {
 		return false
 	}
@@ -245,7 +245,7 @@ func (m Model) detailAskQuestionExpandable(role string, question string, suggest
 		m.detailRenderedContentLineCount(role, question) > 1
 }
 
-func (m Model) detailRenderedContentLineCount(role string, text string) int {
+func (m Model) detailRenderedContentLineCount(role RenderIntent, text string) int {
 	renderWidth := m.entryRenderWidth(role, "")
 	lines := splitLines(wrapTextForViewport(transcriptDisplayText(role, text), renderWidth))
 	if len(lines) == 0 {
@@ -274,17 +274,17 @@ func attachShellSummaryToFirstLine(text string, summary string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) knownDetailLabel(entry TranscriptEntry, role string) string {
+func (m Model) knownDetailLabel(entry TranscriptEntry, role RenderIntent) string {
 	messageType := strings.TrimSpace(string(entry.MessageType))
-	if messageType != "" && role == roleDeveloperContext {
+	if messageType != "" && role == RenderIntentDeveloperContext {
 		return "Developer context: " + messageType
 	}
 	return ""
 }
 
-func (m Model) detailRoleRendersFullWhenCollapsed(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "error", roleDeveloperErrorFeedback:
+func (m Model) detailRoleRendersFullWhenCollapsed(role RenderIntent) bool {
+	switch role {
+	case RenderIntentError, RenderIntentDeveloperErrorFeedback:
 		return true
 	default:
 		return false
@@ -300,9 +300,9 @@ func (m Model) firstDetailPreviewLine(text string, fallback string) string {
 	return fallback
 }
 
-func isThreeLinePreviewRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "user", "assistant", "assistant_commentary":
+func isThreeLinePreviewRole(role RenderIntent) bool {
+	switch role {
+	case RenderIntentUser, RenderIntentAssistant, RenderIntentAssistantCommentary:
 		return true
 	default:
 		return false
@@ -319,38 +319,38 @@ func firstNRenderedLines(lines []string, limit int) []string {
 	return append([]string(nil), lines[:limit]...)
 }
 
-func defaultDetailLabelForRole(role string) string {
-	switch strings.TrimSpace(role) {
-	case "system":
+func defaultDetailLabelForRole(role RenderIntent) string {
+	switch role {
+	case RenderIntentSystem:
 		return "System notice"
-	case "warning":
+	case RenderIntentWarning:
 		return "Warning"
-	case "cache_warning":
+	case RenderIntentCacheWarning:
 		return "Cache warning"
-	case "reviewer_status":
+	case RenderIntentReviewerStatus:
 		return "Reviewer status"
-	case "reviewer_suggestions":
+	case RenderIntentReviewerSuggestions:
 		return "Reviewer suggestions"
-	case "thinking", "reasoning":
+	case RenderIntentThinking, RenderIntentReasoning:
 		return "Reasoning summary"
-	case "thinking_trace":
+	case RenderIntentThinkingTrace:
 		return "Reasoning trace"
-	case roleDeveloperContext:
+	case RenderIntentDeveloperContext:
 		return "Developer context"
-	case roleDeveloperFeedback:
+	case RenderIntentDeveloperFeedback:
 		return "Developer feedback"
-	case roleManualCompactionCarryover:
+	case RenderIntentManualCompactionCarryover:
 		return "Last user message preserved for compaction"
-	case roleCompactionSummary:
+	case RenderIntentCompactionSummary:
 		return "Context compacted"
-	case roleInterruption:
+	case RenderIntentInterruption:
 		return "You interrupted"
-	case "tool_result", "tool_result_ok", "tool_result_error":
+	case RenderIntentTool, RenderIntentToolSuccess, RenderIntentToolError:
 		return "Tool output"
 	default:
 		if role == "" {
 			return "Unknown entry"
 		}
-		return "Unknown entry: " + role
+		return "Unknown entry: " + role.String()
 	}
 }

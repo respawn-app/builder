@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"builder/server/llm"
 	"builder/shared/theme"
 	"builder/shared/transcript"
 	"fmt"
@@ -9,15 +8,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 )
-
-func isToolResultRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "tool_result", "tool_result_ok", "tool_result_error":
-		return true
-	default:
-		return false
-	}
-}
 
 type toolResultIndex struct {
 	results map[string][]int
@@ -30,7 +20,7 @@ func buildToolResultIndex(entries []TranscriptEntry) toolResultIndex {
 		cursors: make(map[string]int),
 	}
 	for idx, entry := range entries {
-		if !isToolResultRole(entry.Role) {
+		if !roleFromEntry(entry).IsToolResult() {
 			continue
 		}
 		callID := strings.TrimSpace(entry.ToolCallID)
@@ -49,7 +39,7 @@ func (index toolResultIndex) findMatchingToolResultIndex(entries []TranscriptEnt
 	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
 	nextIdx := callIdx + 1
 	if nextIdx < len(entries) {
-		if _, used := consumed[nextIdx]; !used && isToolResultRole(entries[nextIdx].Role) {
+		if _, used := consumed[nextIdx]; !used && roleFromEntry(entries[nextIdx]).IsToolResult() {
 			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
 			if callID == nextCallID {
 				return nextIdx
@@ -77,65 +67,26 @@ func (index toolResultIndex) findMatchingToolResultIndex(entries []TranscriptEnt
 	return -1
 }
 
-func toolBlockRoleFromResult(role, baseRole string) string {
-	if strings.TrimSpace(role) == "tool_result_error" {
-		if baseRole == "tool_question" {
-			return "tool_question_error"
-		}
-		if baseRole == "tool_web_search" {
-			return "tool_web_search_error"
-		}
-		if baseRole == "tool_patch" {
-			return "tool_patch_error"
-		}
-		if baseRole == "tool_shell" {
-			return "tool_shell_error"
-		}
-		return "tool_error"
-	}
-	if isToolResultRole(role) {
-		if baseRole == "tool_question" {
-			return "tool_question"
-		}
-		if baseRole == "tool_web_search" {
-			return "tool_web_search_success"
-		}
-		if baseRole == "tool_patch" {
-			return "tool_patch_success"
-		}
-		if baseRole == "tool_shell" {
-			return "tool_shell_success"
-		}
-		return "tool_success"
-	}
-	if baseRole == "tool_shell" {
-		return "tool_shell"
-	}
-	if baseRole == "tool_web_search" {
-		return "tool_web_search"
-	}
-	if baseRole == "tool_patch" {
-		return "tool_patch"
-	}
-	return "tool"
+func toolBlockRoleFromResult(role TranscriptRole, baseRole RenderIntent) RenderIntent {
+	return baseRole.BaseToolResultIntent(role)
 }
 
-func (m Model) roleSymbol(role string) string {
+func (m Model) roleSymbol(role RenderIntent) string {
 	prefix := rolePrefix(role)
 	if prefix == "" {
 		return ""
 	}
 	p := m.palette()
-	if style := transcriptMessageStyleForRole(role); style != transcriptMessageStyleNone {
+	if style := transcriptMessageStyleForIntent(role); style != transcriptMessageStyleNone {
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	}
 	switch role {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_patch", "tool_patch_success", "tool_patch_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+	case RenderIntentTool, RenderIntentToolSuccess, RenderIntentToolError, RenderIntentToolShell, RenderIntentToolShellSuccess, RenderIntentToolShellError, RenderIntentToolPatch, RenderIntentToolPatchSuccess, RenderIntentToolPatchError, RenderIntentToolQuestion, RenderIntentToolQuestionError, RenderIntentToolWebSearch, RenderIntentToolWebSearchSuccess, RenderIntentToolWebSearchError:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case roleDeveloperContext, roleDeveloperFeedback, roleInterruption:
+	case RenderIntentDeveloperContext, RenderIntentDeveloperFeedback, RenderIntentInterruption:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
-		if isCompactionRole(role) {
+		if role.IsCompaction() {
 			return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 		}
 		return prefix
@@ -147,11 +98,11 @@ type roleSymbolColorStyle struct {
 	faint bool
 }
 
-func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
-	if isCompactionRole(role) {
+func roleSymbolStyle(role RenderIntent, p palette) roleSymbolColorStyle {
+	if role.IsCompaction() {
 		return roleSymbolColorStyle{color: p.compactionColor}
 	}
-	switch transcriptMessageStyleForRole(role) {
+	switch transcriptMessageStyleForIntent(role) {
 	case transcriptMessageStyleSuccess:
 		return roleSymbolColorStyle{color: p.successColor}
 	case transcriptMessageStyleWarning:
@@ -160,17 +111,17 @@ func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
 		return roleSymbolColorStyle{color: p.errorColor}
 	}
 	switch role {
-	case "tool_success", "tool_shell_success", "tool_patch_success", "tool_web_search_success":
+	case RenderIntentToolSuccess, RenderIntentToolShellSuccess, RenderIntentToolPatchSuccess, RenderIntentToolWebSearchSuccess:
 		return roleSymbolColorStyle{color: p.toolSuccessColor}
-	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_web_search_error":
+	case RenderIntentToolError, RenderIntentToolShellError, RenderIntentToolPatchError, RenderIntentToolWebSearchError:
 		return roleSymbolColorStyle{color: p.toolErrorColor}
-	case "tool_question":
+	case RenderIntentToolQuestion:
 		return roleSymbolColorStyle{color: p.userColor}
-	case "tool_question_error", roleDeveloperFeedback, roleInterruption:
+	case RenderIntentToolQuestionError, RenderIntentDeveloperFeedback, RenderIntentInterruption:
 		return roleSymbolColorStyle{color: p.errorColor}
-	case roleDeveloperContext:
+	case RenderIntentDeveloperContext:
 		return roleSymbolColorStyle{color: p.foregroundColor}
-	case "tool", "tool_shell", "tool_patch", "tool_web_search":
+	case RenderIntentTool, RenderIntentToolShell, RenderIntentToolPatch, RenderIntentToolWebSearch:
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
 		return roleSymbolColorStyle{color: p.foregroundColor}
@@ -182,53 +133,44 @@ func renderRoleSymbol(prefix string, style roleSymbolColorStyle) string {
 	return styleEscape(transform, false) + prefix + "\x1b[0m"
 }
 
-func rolePrefix(role string) string {
-	if isCompactionRole(role) {
+func rolePrefix(role RenderIntent) string {
+	if role.IsCompaction() {
 		return "@"
 	}
-	if symbol := transcriptMessageStyleSymbol(transcriptMessageStyleForRole(role)); symbol != "" {
+	if symbol := transcriptMessageStyleSymbol(transcriptMessageStyleForIntent(role)); symbol != "" {
 		return symbol
 	}
 	switch role {
-	case "user":
+	case RenderIntentUser:
 		return "❯"
-	case "assistant", "assistant_commentary":
+	case RenderIntentAssistant, RenderIntentAssistantCommentary:
 		return "❮"
-	case "tool", "tool_success", "tool_error":
+	case RenderIntentTool, RenderIntentToolSuccess, RenderIntentToolError:
 		return "•"
-	case "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+	case RenderIntentToolWebSearch, RenderIntentToolWebSearchSuccess, RenderIntentToolWebSearchError:
 		return "@"
-	case "tool_shell", "tool_shell_success", "tool_shell_error":
+	case RenderIntentToolShell, RenderIntentToolShellSuccess, RenderIntentToolShellError:
 		return "$"
-	case "tool_patch", "tool_patch_success", "tool_patch_error":
+	case RenderIntentToolPatch, RenderIntentToolPatchSuccess, RenderIntentToolPatchError:
 		return "⇄"
-	case "tool_question", "tool_question_error":
+	case RenderIntentToolQuestion, RenderIntentToolQuestionError:
 		return "?"
-	case roleDeveloperContext:
+	case RenderIntentDeveloperContext:
 		return "ℹ"
-	case roleDeveloperFeedback:
+	case RenderIntentDeveloperFeedback:
 		return "!"
-	case roleInterruption:
+	case RenderIntentInterruption:
 		return "!"
 	default:
 		return ""
 	}
 }
 
-func isThinkingRole(role string) bool {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning":
-		return true
-	default:
-		return false
-	}
-}
-
-func styleForRole(role string, p palette) lipgloss.Style {
-	if isCompactionRole(role) {
+func styleForRole(role RenderIntent, p palette) lipgloss.Style {
+	if role.IsCompaction() {
 		return p.compaction
 	}
-	switch transcriptMessageStyleForRole(role) {
+	switch transcriptMessageStyleForIntent(role) {
 	case transcriptMessageStyleSuccess:
 		return p.success
 	case transcriptMessageStyleWarning:
@@ -237,61 +179,61 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.error
 	}
 	switch role {
-	case "user":
+	case RenderIntentUser:
 		return p.user
-	case "assistant":
+	case RenderIntentAssistant:
 		return p.model
-	case "assistant_commentary":
+	case RenderIntentAssistantCommentary:
 		return p.model.Faint(true)
-	case "tool_call", "tool_result":
+	case RenderIntentTool:
 		return p.tool
-	case "tool_success", "tool_result_ok":
+	case RenderIntentToolSuccess:
 		return p.toolSuccess
-	case "tool_error", "tool_result_error":
+	case RenderIntentToolError:
 		return p.toolError
-	case "tool_web_search":
+	case RenderIntentToolWebSearch:
 		return p.tool
-	case "tool_web_search_success":
+	case RenderIntentToolWebSearchSuccess:
 		return p.toolSuccess
-	case "tool_web_search_error":
+	case RenderIntentToolWebSearchError:
 		return p.toolError
-	case "tool_shell":
+	case RenderIntentToolShell:
 		return p.tool
-	case "tool_shell_success":
+	case RenderIntentToolShellSuccess:
 		return p.toolSuccess
-	case "tool_shell_error":
+	case RenderIntentToolShellError:
 		return p.toolError
-	case "tool_patch":
+	case RenderIntentToolPatch:
 		return p.tool
-	case "tool_patch_success":
+	case RenderIntentToolPatchSuccess:
 		return p.toolSuccess
-	case "tool_patch_error":
+	case RenderIntentToolPatchError:
 		return p.toolError
-	case "tool_question":
+	case RenderIntentToolQuestion:
 		return p.user
-	case "tool_question_error":
+	case RenderIntentToolQuestionError:
 		return p.toolError
-	case "system":
+	case RenderIntentSystem:
 		return p.system
-	case roleDeveloperContext:
+	case RenderIntentDeveloperContext:
 		return p.preview
-	case roleDeveloperFeedback:
+	case RenderIntentDeveloperFeedback:
 		return p.warning
-	case roleInterruption:
+	case RenderIntentInterruption:
 		return p.error
-	case "reasoning", "thinking_trace":
+	case RenderIntentReasoning, RenderIntentThinkingTrace:
 		return p.system
 	default:
 		return p.preview
 	}
 }
 
-func (m Model) entryRole(entry TranscriptEntry) string {
-	role := strings.TrimSpace(entry.Role)
-	if role == "assistant" && entry.Phase == llm.MessagePhaseCommentary {
-		return "assistant_commentary"
-	}
-	return role
+func (m Model) entryRole(entry TranscriptEntry) TranscriptRole {
+	return roleFromEntry(entry)
+}
+
+func (m Model) entryIntent(entry TranscriptEntry) RenderIntent {
+	return intentFromEntry(entry)
 }
 
 type palette struct {

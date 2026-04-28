@@ -208,10 +208,11 @@ func (m *uiModel) appendLocalEntryFallbackWithVisibility(role, text string, visi
 	if m == nil {
 		return nil
 	}
-	entry := tui.TranscriptEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text}
+	transcriptRole := tui.NormalizeTranscriptRole(role)
+	entry := tui.TranscriptEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: transcriptRole, Text: text}
 	m.transcriptEntries = append(m.transcriptEntries, entry)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(committedTranscriptEntriesForApp(m.transcriptEntries)))
 	m.refreshRollbackCandidates()
-	m.forwardToView(tui.AppendTranscriptMsg{Visibility: entry.Visibility, Role: role, Text: text})
+	m.forwardToView(tui.AppendTranscriptMsg{Visibility: entry.Visibility, Role: transcriptRole, Text: text})
 	return m.syncNativeHistoryFromTranscript()
 }

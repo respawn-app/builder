@@ -36,11 +36,12 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 		}
 		entry := m.transcript[idx]
 		role := m.entryRole(entry)
+		intent := m.entryIntent(entry)
 		switch role {
-		case "tool_call":
+		case TranscriptRoleToolCall:
 			blocks = append(blocks, m.detailToolCallSpec(idx, entry, consumedResults, resultIndex))
-		case "tool_result", "tool_result_ok", "tool_result_error":
-			blockRole := toolBlockRoleFromResult(role, "tool")
+		case TranscriptRoleToolResult, TranscriptRoleToolResultOK, TranscriptRoleToolResultError:
+			blockRole := toolBlockRoleFromResult(role, RenderIntentTool)
 			text := entry.Text
 			absoluteIndex := m.absoluteTranscriptIndex(idx)
 			blocks = append(blocks, detailBlockSpec{
@@ -51,17 +52,17 @@ func (m Model) buildDetailBlockSpecs(includeStreaming bool) []detailBlockSpec {
 				expanded:   m.detailEntryExpanded(absoluteIndex),
 				expandable: m.detailToolResultExpandable(blockRole, text),
 				render: func(model Model, symbolOverride string) []string {
-					if model.detailEntryExpanded(absoluteIndex) || blockRole == "tool_error" {
+					if model.detailEntryExpanded(absoluteIndex) || blockRole == RenderIntentToolError {
 						return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, text, false, nil, symbolOverride), true, symbolOverride)
 					}
 					return model.detailWithTreeGuideWithSymbol(blockRole, model.flattenEntryWithMetaAndSymbol(blockRole, model.firstDetailPreviewLine(text, "Tool output"), false, nil, symbolOverride), false, symbolOverride)
 				},
 			})
 		default:
-			if role == "" {
+			if role == TranscriptRoleUnknown {
 				continue
 			}
-			blocks = append(blocks, m.detailStandardSpec(idx, entry, role, consumedResults))
+			blocks = append(blocks, m.detailStandardSpec(idx, entry, intent, consumedResults))
 		}
 	}
 	if includeStreaming {
@@ -120,10 +121,11 @@ func (m Model) buildTranscriptBlocks(opts transcriptBlockOptions) []ongoingBlock
 		}
 		entry := m.transcript[idx]
 		role := m.entryRole(entry)
+		intent := m.entryIntent(entry)
 		if opts.mode == transcriptBlockModeOngoing && skipInOngoing(entry) {
 			continue
 		}
-		block, ok := m.entryBlock(idx, entry, role, consumedResults, resultIndex, opts)
+		block, ok := m.entryBlock(idx, entry, role, intent, consumedResults, resultIndex, opts)
 		if !ok {
 			continue
 		}
@@ -140,7 +142,7 @@ func (m Model) prefixedReasoningBlock(entryIndex int, consumed map[int]struct{},
 	if !ok {
 		return ongoingBlock{}, false
 	}
-	return ongoingBlock{role: "reasoning", lines: thinkingBlock, entryIndex: -1, entryEnd: -1}, true
+	return ongoingBlock{role: RenderIntentReasoning, lines: thinkingBlock, entryIndex: -1, entryEnd: -1}, true
 }
 
 func (m Model) prefixedReasoningBlockSpec(entryIndex int, consumed map[int]struct{}) (detailBlockSpec, bool) {
@@ -149,24 +151,24 @@ func (m Model) prefixedReasoningBlockSpec(entryIndex int, consumed map[int]struc
 		return detailBlockSpec{}, false
 	}
 	return detailBlockSpec{
-		role:       "reasoning",
+		role:       RenderIntentReasoning,
 		entryIndex: -1,
 		entryEnd:   -1,
 		render: func(model Model, symbolOverride string) []string {
-			return model.flattenEntry("reasoning", thinkingText)
+			return model.flattenEntry(RenderIntentReasoning, thinkingText)
 		},
 	}, true
 }
 
-func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (ongoingBlock, bool) {
+func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role TranscriptRole, intent RenderIntent, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (ongoingBlock, bool) {
 	switch role {
-	case "tool_call":
+	case TranscriptRoleToolCall:
 		return m.toolCallBlock(entryIndex, entry, consumed, resultIndex, opts), true
-	case "tool_result", "tool_result_ok", "tool_result_error":
+	case TranscriptRoleToolResult, TranscriptRoleToolResultOK, TranscriptRoleToolResultError:
 		if opts.mode == transcriptBlockModeOngoing {
 			return ongoingBlock{}, false
 		}
-		blockRole := toolBlockRoleFromResult(role, "tool")
+		blockRole := toolBlockRoleFromResult(role, RenderIntentTool)
 		return ongoingBlock{
 			role:       blockRole,
 			lines:      m.flattenEntry(blockRole, entry.Text),
@@ -174,21 +176,21 @@ func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, co
 			entryEnd:   m.absoluteTranscriptIndex(entryIndex),
 		}, true
 	default:
-		return m.standardEntryBlock(entryIndex, entry, role, consumed, opts), true
+		return m.standardEntryBlock(entryIndex, entry, intent, consumed, opts), true
 	}
 }
 
 func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) ongoingBlock {
-	blockRole := "tool"
+	blockRole := RenderIntentTool
 	if isAskQuestionToolCall(entry.ToolCall) {
 		return m.askQuestionBlock(entryIndex, entry, consumed, resultIndex, opts, blockRole)
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
-		blockRole = "tool_web_search"
+		blockRole = RenderIntentToolWebSearch
 	} else if isPatchToolCall(entry.ToolCall) {
-		blockRole = "tool_patch"
+		blockRole = RenderIntentToolPatch
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
-		blockRole = "tool_shell"
+		blockRole = RenderIntentToolShell
 	}
 	combined := m.toolCallDisplayText(entry, blockRole, opts)
 	entryEnd := entryIndex
@@ -205,16 +207,16 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 }
 
 func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex) detailBlockSpec {
-	blockRole := "tool"
+	blockRole := RenderIntentTool
 	if isAskQuestionToolCall(entry.ToolCall) {
 		return m.detailAskQuestionSpec(entryIndex, entry, consumed, resultIndex)
 	}
 	if isWebSearchToolCall(entry.ToolCall) {
-		blockRole = "tool_web_search"
+		blockRole = RenderIntentToolWebSearch
 	} else if isPatchToolCall(entry.ToolCall) {
-		blockRole = "tool_patch"
+		blockRole = RenderIntentToolPatch
 	} else if isShellToolCall(entry.ToolCall, entry.Text) {
-		blockRole = "tool_shell"
+		blockRole = RenderIntentToolShell
 	}
 	combined := toolCallDisplayText(entry.ToolCall, entry.Text)
 	entryEnd := entryIndex
@@ -222,14 +224,14 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcript[resultIdx]
-		resultRole := strings.TrimSpace(resultEntry.Role)
+		resultRole := roleFromEntry(resultEntry)
 		resultSummary = strings.TrimSpace(resultEntry.ToolResultSummary)
-		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != "tool_result_error"
+		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != TranscriptRoleToolResultError
 		if trimmedResultText := strings.TrimSpace(resultEntry.Text); trimmedResultText != "" && !omitSuccessfulResult {
 			combined += "\n" + resultEntry.Text
 			resultText = resultEntry.Text
 		}
-		if isToolResultRole(resultRole) {
+		if resultRole.IsToolResult() {
 			blockRole = toolBlockRoleFromResult(resultRole, blockRole)
 			consumed[resultIdx] = struct{}{}
 			entryEnd = resultIdx
@@ -257,13 +259,13 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	}
 }
 
-func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions, defaultRole string) ongoingBlock {
-	blockRole := "tool_question"
+func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions, defaultRole RenderIntent) ongoingBlock {
+	blockRole := RenderIntentToolQuestion
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
-		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
-		if isToolResultRole(nextRole) {
+		nextRole := roleFromEntry(m.transcript[resultIdx])
+		if nextRole.IsToolResult() {
 			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 			consumed[resultIdx] = struct{}{}
@@ -278,13 +280,13 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 }
 
 func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex) detailBlockSpec {
-	blockRole := "tool_question"
+	blockRole := RenderIntentToolQuestion
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
 	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
-		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
-		if isToolResultRole(nextRole) {
+		nextRole := roleFromEntry(m.transcript[resultIdx])
+		if nextRole.IsToolResult() {
 			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
 			resultSummary = strings.TrimSpace(m.transcript[resultIdx].ToolResultSummary)
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
@@ -312,7 +314,7 @@ func (m Model) detailAskQuestionSpec(entryIndex int, entry TranscriptEntry, cons
 	}
 }
 
-func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts transcriptBlockOptions) string {
+func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole RenderIntent, opts transcriptBlockOptions) string {
 	if opts.mode == transcriptBlockModeDetail {
 		return toolCallDisplayText(entry.ToolCall, entry.Text)
 	}
@@ -323,28 +325,28 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts
 	return combined
 }
 
-func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, blockRole string, combined string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string, int) {
+func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, blockRole RenderIntent, combined string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (RenderIntent, string, int) {
 	resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed)
 	if resultIdx < 0 {
 		return blockRole, combined, -1
 	}
-	nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
+	nextRole := roleFromEntry(m.transcript[resultIdx])
 	if opts.mode == transcriptBlockModeDetail {
 		resultText := m.transcript[resultIdx].Text
-		omitSuccessfulResult := meta != nil && meta.OmitSuccessfulResult && nextRole != "tool_result_error"
+		omitSuccessfulResult := meta != nil && meta.OmitSuccessfulResult && nextRole != TranscriptRoleToolResultError
 		if strings.TrimSpace(resultText) != "" && !omitSuccessfulResult {
 			combined += "\n" + resultText
 		}
 	}
-	if isToolResultRole(nextRole) {
+	if nextRole.IsToolResult() {
 		blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 		consumed[resultIdx] = struct{}{}
 	}
 	return blockRole, combined, resultIdx
 }
 
-func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, opts transcriptBlockOptions) ongoingBlock {
-	if opts.mode == transcriptBlockModeDetail && isThinkingRole(role) {
+func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role RenderIntent, consumed map[int]struct{}, opts transcriptBlockOptions) ongoingBlock {
+	if opts.mode == transcriptBlockModeDetail && TranscriptRole(role).IsThinking() {
 		return ongoingBlock{
 			role:       role,
 			lines:      m.flattenEntry(role, m.combinedThinkingText(entryIndex, consumed)),
@@ -355,9 +357,9 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 	text := entry.Text
 	if opts.mode == transcriptBlockModeOngoing {
 		text = m.ongoingEntryText(entry)
-		if role == "reviewer_status" {
+		if role == RenderIntentReviewerStatus {
 			text = compactReviewerStatusForOngoing(text)
-		} else if role == "reviewer_suggestions" {
+		} else if role == RenderIntentReviewerSuggestions {
 			text = compactReviewerSuggestionsForOngoing(text)
 		}
 	}
@@ -369,9 +371,9 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 	return ongoingBlock{role: role, lines: lines, entryIndex: absoluteIndex, entryEnd: absoluteIndex}
 }
 
-func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}) detailBlockSpec {
+func (m Model) detailStandardSpec(entryIndex int, entry TranscriptEntry, role RenderIntent, consumed map[int]struct{}) detailBlockSpec {
 	text := entry.Text
-	if isThinkingRole(role) {
+	if TranscriptRole(role).IsThinking() {
 		text = m.combinedThinkingText(entryIndex, consumed)
 	}
 	absoluteIndex := m.absoluteTranscriptIndex(entryIndex)
@@ -397,7 +399,7 @@ func (m Model) combinedThinkingText(entryIndex int, consumed map[int]struct{}) s
 		if _, used := consumed[idx]; used {
 			break
 		}
-		if !isThinkingRole(strings.TrimSpace(m.transcript[idx].Role)) {
+		if !roleFromEntry(m.transcript[idx]).IsThinking() {
 			break
 		}
 		nextText := strings.TrimSpace(m.transcript[idx].Text)
@@ -416,17 +418,17 @@ func (m Model) combinedThinkingText(entryIndex int, consumed map[int]struct{}) s
 func (m Model) appendStreamingBlocks(blocks []ongoingBlock, opts transcriptBlockOptions) []ongoingBlock {
 	if opts.includeStreaming && opts.mode == transcriptBlockModeDetail {
 		if lines := m.streamingReasoningLines(); len(lines) > 0 {
-			blocks = append(blocks, ongoingBlock{role: "reasoning", lines: lines, entryIndex: -1, entryEnd: -1})
+			blocks = append(blocks, ongoingBlock{role: RenderIntentReasoning, lines: lines, entryIndex: -1, entryEnd: -1})
 		}
 	}
 	if !opts.includeStreaming || m.ongoing == "" {
 		return blocks
 	}
-	lines := m.flattenEntry("assistant", m.ongoing)
+	lines := m.flattenEntry(RenderIntentAssistant, m.ongoing)
 	if opts.mode == transcriptBlockModeOngoing {
-		lines = m.flattenEntryPlain("assistant", m.ongoing)
+		lines = m.flattenEntryPlain(RenderIntentAssistant, m.ongoing)
 	}
-	return append(blocks, ongoingBlock{role: "assistant", lines: lines, entryIndex: -1, entryEnd: -1})
+	return append(blocks, ongoingBlock{role: RenderIntentAssistant, lines: lines, entryIndex: -1, entryEnd: -1})
 }
 
 func (m Model) streamingReasoningLines() []string {
@@ -444,7 +446,7 @@ func (m Model) streamingReasoningLines() []string {
 	if len(parts) == 0 {
 		return nil
 	}
-	return m.flattenEntry("reasoning", strings.Join(parts, "\n"))
+	return m.flattenEntry(RenderIntentReasoning, strings.Join(parts, "\n"))
 }
 
 func (m Model) detailStreamingReasoningSpec() (detailBlockSpec, bool) {
@@ -464,11 +466,11 @@ func (m Model) detailStreamingReasoningSpec() (detailBlockSpec, bool) {
 	}
 	combined := strings.Join(parts, "\n")
 	return detailBlockSpec{
-		role:       "reasoning",
+		role:       RenderIntentReasoning,
 		entryIndex: -1,
 		entryEnd:   -1,
 		render: func(model Model, symbolOverride string) []string {
-			return model.flattenEntry("reasoning", combined)
+			return model.flattenEntry(RenderIntentReasoning, combined)
 		},
 	}, true
 }
@@ -479,11 +481,11 @@ func (m Model) detailStreamingAssistantSpec() (detailBlockSpec, bool) {
 	}
 	text := m.ongoing
 	return detailBlockSpec{
-		role:       "assistant",
+		role:       RenderIntentAssistant,
 		entryIndex: -1,
 		entryEnd:   -1,
 		render: func(model Model, symbolOverride string) []string {
-			return model.flattenEntry("assistant", text)
+			return model.flattenEntry(RenderIntentAssistant, text)
 		},
 	}, true
 }
@@ -493,7 +495,7 @@ func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx i
 	if !ok {
 		return nil, false
 	}
-	return m.flattenEntry("reasoning", combined), true
+	return m.flattenEntry(RenderIntentReasoning, combined), true
 }
 
 func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx int, consumed map[int]struct{}) (string, bool) {
@@ -501,7 +503,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		return "", false
 	}
 	role := m.entryRole(entries[idx])
-	if role != "assistant" && role != "assistant_commentary" && role != "tool_call" {
+	if role != TranscriptRoleAssistant && role != TranscriptRoleToolCall {
 		return "", false
 	}
 	actionEnd := idx
@@ -510,7 +512,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		if _, used := consumed[next]; used {
 			break
 		}
-		if strings.TrimSpace(entries[next].Role) != "tool_call" {
+		if roleFromEntry(entries[next]) != TranscriptRoleToolCall {
 			break
 		}
 		actionEnd = next
@@ -522,7 +524,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 	if _, used := consumed[thinkingStart]; used {
 		return "", false
 	}
-	if !isThinkingRole(strings.TrimSpace(entries[thinkingStart].Role)) {
+	if !roleFromEntry(entries[thinkingStart]).IsThinking() {
 		return "", false
 	}
 
@@ -532,7 +534,7 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 		if _, used := consumed[j]; used {
 			break
 		}
-		if !isThinkingRole(strings.TrimSpace(entries[j].Role)) {
+		if !roleFromEntry(entries[j]).IsThinking() {
 			break
 		}
 		nextText := strings.TrimSpace(entries[j].Text)

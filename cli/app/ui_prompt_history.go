@@ -21,7 +21,7 @@ func (m *uiModel) seedPromptHistoryFromTranscriptEntries(entries []tui.Transcrip
 		return
 	}
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.Role) != "user" {
+		if entry.Role != tui.TranscriptRoleUser {
 			continue
 		}
 		if text := preservePromptHistoryText(entry.Text); text != "" {
