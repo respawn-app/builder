@@ -76,13 +76,13 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	if m.turnQueueHook != nil {
 		m.turnQueueHook.OnProjectedRuntimeEvent(evt)
 	}
-	update := clientui.ReduceRuntimeEvent(
+	reduction := clientui.ReduceRuntimeEvent(
 		a.runtimeEventState(),
 		a.pendingInputState(),
 		m.activity == uiActivityRunning,
 		evt,
 	)
-	effectiveSyncSessionView := update.SyncSessionView
+	effectiveSyncSessionView := reduction.Transcript.Sync != nil
 	if evt.Kind == clientui.EventConversationUpdated {
 		effectiveSyncSessionView = shouldRecoverCommittedTranscriptFromConversationUpdate(m, evt)
 	}
@@ -90,15 +90,15 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		"path":                  "live_event",
 		"recovery_cause":        string(evt.RecoveryCause),
 		"sync_session_view":     strconv.FormatBool(effectiveSyncSessionView),
-		"record_prompt_history": strconv.FormatBool(update.RecordPromptHistory),
+		"record_prompt_history": strconv.FormatBool(runtimeReductionRecordsPromptHistory(reduction)),
 	})
 	m.markActiveSubmitFlushed(evt)
-	a.applyRuntimeEventUpdate(update)
+	a.applyRuntimeEventReduction(reduction)
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
 	awaitsHydration := false
-	if shouldAppendSyntheticOngoingEntry(m, update.SyntheticOngoingEntry) {
-		entry := transcriptEntryFromProjectedChatEntry(*update.SyntheticOngoingEntry, true, false)
+	if shouldAppendSyntheticOngoingEntry(m, reduction.Transcript.SyntheticOngoingEntry) {
+		entry := transcriptEntryFromProjectedChatEntry(*reduction.Transcript.SyntheticOngoingEntry, true, false)
 		m.forwardToView(appendTranscriptMsgFromEntry(entry))
 	}
 	if evt.Kind == clientui.EventConversationUpdated && effectiveSyncSessionView {
@@ -117,42 +117,59 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 			m.forwardToView(tui.ClearOngoingAssistantMsg{})
 		}
 	}
-	if update.AssistantDelta != "" {
-		if shouldIgnoreStaleAssistantDelta(m, evt, update.AssistantDelta) {
-			update.AssistantDelta = ""
-		} else if isNoopFinalText(update.AssistantDelta) {
-			update.AssistantDelta = ""
-		} else {
+	for _, streamCommand := range reduction.Transcript.AssistantStream {
+		switch streamCommand.Kind {
+		case clientui.RuntimeAssistantStreamAppend:
+			delta := streamCommand.Delta
+			if shouldIgnoreStaleAssistantDelta(m, evt, delta) {
+				continue
+			}
+			if isNoopFinalText(delta) {
+				continue
+			}
 			m.sawAssistantDelta = true
-			m.forwardToView(tui.StreamAssistantMsg{Delta: update.AssistantDelta})
-		}
-	}
-	if update.ClearAssistantStream {
-		if evt.Kind == clientui.EventAssistantDeltaReset {
-			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
+		case clientui.RuntimeAssistantStreamClear:
+			if stepID := strings.TrimSpace(streamCommand.StepID); stepID != "" {
 				m.lastCommittedAssistantStepID = stepID
 			}
+			m.sawAssistantDelta = false
+			m.forwardToView(tui.ClearOngoingAssistantMsg{})
 		}
-		m.sawAssistantDelta = false
-		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	}
-	if update.ReasoningDelta != nil {
-		m.reasoningLiveDirty = true
-		m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: update.ReasoningDelta.Key, Role: update.ReasoningDelta.Role, Text: update.ReasoningDelta.Text})
-	}
-	if update.ClearReasoningStream {
-		m.reasoningLiveDirty = false
-		m.forwardToView(tui.ClearStreamingReasoningMsg{})
-	}
-	if update.BackgroundNotice != nil {
-		kind := uiStatusNoticeSuccess
-		if update.BackgroundNotice.Kind == clientui.BackgroundNoticeError {
-			kind = uiStatusNoticeError
+	for _, streamCommand := range reduction.Reasoning.Stream {
+		switch streamCommand.Kind {
+		case clientui.RuntimeReasoningStreamUpsert:
+			if streamCommand.Delta == nil {
+				continue
+			}
+			m.reasoningLiveDirty = true
+			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: streamCommand.Delta.Key, Role: streamCommand.Delta.Role, Text: streamCommand.Delta.Text})
+		case clientui.RuntimeReasoningStreamClear:
+			m.reasoningLiveDirty = false
+			m.forwardToView(tui.ClearStreamingReasoningMsg{})
 		}
-		cmds = append(cmds, m.setTransientStatusWithKind(update.BackgroundNotice.Message, kind))
 	}
-	if update.RecordPromptHistory && strings.TrimSpace(evt.UserMessage) != "" {
-		cmds = append(cmds, m.recordPromptHistory(evt.UserMessage))
+	for _, noticeCommand := range reduction.Notices {
+		switch noticeCommand.Kind {
+		case clientui.RuntimeNoticeBackground:
+			if noticeCommand.BackgroundNotice == nil {
+				continue
+			}
+			kind := uiStatusNoticeSuccess
+			if noticeCommand.BackgroundNotice.Kind == clientui.BackgroundNoticeError {
+				kind = uiStatusNoticeError
+			}
+			cmds = append(cmds, m.setTransientStatusWithKind(noticeCommand.BackgroundNotice.Message, kind))
+		}
+	}
+	for _, inputCommand := range reduction.PendingInput.Commands {
+		switch inputCommand.Kind {
+		case clientui.RuntimePendingInputRecordPromptHistory:
+			if strings.TrimSpace(inputCommand.Text) != "" {
+				cmds = append(cmds, m.recordPromptHistory(inputCommand.Text))
+			}
+		}
 	}
 	if effectiveSyncSessionView {
 		if evt.RecoveryCause != clientui.TranscriptRecoveryCauseNone {
@@ -199,32 +216,46 @@ func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
 	}
 }
 
-func (a uiRuntimeAdapter) applyRuntimeEventUpdate(update clientui.RuntimeEventUpdate) {
+func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) {
 	m := a.model
-	m.busy = update.State.Busy
-	m.compacting = update.State.Compacting
-	m.reviewerRunning = update.State.ReviewerRunning
-	m.reviewerBlocking = update.State.ReviewerBlocking
-	m.conversationFreshness = update.State.ConversationFreshness
-	m.reasoningStatusHeader = update.State.ReasoningStatusHeader
-	m.pendingInjected = update.Input.PendingInjected
-	m.lockedInjectText = update.Input.LockedInjectText
-	m.inputSubmitLocked = update.Input.InputSubmitLocked
-	if update.ClearInput {
-		m.clearInput()
-	}
-	if update.ClearPendingPreSubmit {
-		m.pendingPreSubmitText = ""
-	}
-	if update.SetActivityRunning {
+	m.busy = reduction.RunState.State.Busy
+	m.compacting = reduction.RunState.State.Compacting
+	m.reviewerRunning = reduction.RunState.State.ReviewerRunning
+	m.reviewerBlocking = reduction.RunState.State.ReviewerBlocking
+	m.conversationFreshness = reduction.Conversation.State.Freshness
+	m.reasoningStatusHeader = reduction.Reasoning.State.StatusHeader
+	m.pendingInjected = reduction.PendingInput.State.PendingInjected
+	m.lockedInjectText = reduction.PendingInput.State.LockedInjectText
+	m.inputSubmitLocked = reduction.PendingInput.State.InputSubmitLocked
+	switch reduction.RunState.Activity {
+	case clientui.RuntimeActivityRunning:
 		m.activity = uiActivityRunning
-	}
-	if update.SetActivityIdle {
+	case clientui.RuntimeActivityIdle:
 		m.activity = uiActivityIdle
 	}
-	if update.RefreshProcesses {
-		m.refreshProcessEntriesIfOpen()
+	for _, inputCommand := range reduction.PendingInput.Commands {
+		switch inputCommand.Kind {
+		case clientui.RuntimePendingInputClearDraft:
+			m.clearInput()
+		case clientui.RuntimePendingInputClearPreSubmit:
+			m.pendingPreSubmitText = ""
+		}
 	}
+	for _, processCommand := range reduction.BackgroundProcesses.Commands {
+		switch processCommand {
+		case clientui.RuntimeBackgroundProcessRefresh:
+			m.refreshProcessEntriesIfOpen()
+		}
+	}
+}
+
+func runtimeReductionRecordsPromptHistory(reduction clientui.RuntimeEventReduction) bool {
+	for _, command := range reduction.PendingInput.Commands {
+		if command.Kind == clientui.RuntimePendingInputRecordPromptHistory {
+			return true
+		}
+	}
+	return false
 }
 
 func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
