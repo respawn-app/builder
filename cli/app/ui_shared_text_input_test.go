@@ -1,11 +1,14 @@
 package app
 
 import (
+	"io"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 func TestUISharedTextInputUsesSharedGraphemeEditing(t *testing.T) {
@@ -82,14 +85,26 @@ func TestUISharedTextInputDeleteCurrentLineUsesSharedPolicy(t *testing.T) {
 	}
 }
 
-func TestStartupEditableInputMasksAndRendersPlaceholder(t *testing.T) {
-	masked := xansi.Strip(renderStartupEditableInput(16, 8, "dark", uiEditableInputRenderSpec{
-		Prefix:       "› ",
-		Text:         "secret",
-		CursorIndex:  -1,
-		RenderCursor: true,
-		Mask:         '*',
-	}))
+func TestUISharedTextInputRenderFramedSoftCursorLinesHonorsCursorVisibility(t *testing.T) {
+	input := newUISharedTextInput("abc")
+	input.SetPosition(1)
+	style := testANSIInputStyle()
+
+	focused := strings.Join(input.renderFramedSoftCursorLines(8, 1, "› ", true, style, style), "\n")
+	if !strings.Contains(focused, "\x1b[7") {
+		t.Fatalf("focused shared input missing soft cursor: %q", focused)
+	}
+
+	unfocused := strings.Join(input.renderFramedSoftCursorLines(8, 1, "› ", false, style, style), "\n")
+	if strings.Contains(unfocused, "\x1b[7") {
+		t.Fatalf("unfocused shared input unexpectedly rendered soft cursor: %q", unfocused)
+	}
+}
+
+func TestStartupSharedTextInputMasksAndRendersPlaceholder(t *testing.T) {
+	maskedInput := newUISharedTextInput("secret")
+	maskedInput.SetPasswordMode(true)
+	masked := xansi.Strip(renderStartupSharedTextInput(16, 8, "dark", maskedInput, "› ", true))
 	if strings.Contains(masked, "secret") {
 		t.Fatalf("masked startup input exposed sensitive text: %q", masked)
 	}
@@ -97,12 +112,16 @@ func TestStartupEditableInputMasksAndRendersPlaceholder(t *testing.T) {
 		t.Fatalf("masked startup input missing mask runes: %q", masked)
 	}
 
-	placeholder := xansi.Strip(renderStartupEditableInput(16, 8, "dark", uiEditableInputRenderSpec{
-		Prefix:       "› ",
-		Placeholder:  "project name",
-		RenderCursor: true,
-	}))
+	placeholderInput := newUISharedTextInput("")
+	placeholderInput.placeholder = "project name"
+	placeholder := xansi.Strip(renderStartupSharedTextInput(16, 8, "dark", placeholderInput, "› ", true))
 	if !strings.Contains(placeholder, "› project name") {
 		t.Fatalf("startup input missing placeholder: %q", placeholder)
 	}
+}
+
+func testANSIInputStyle() lipgloss.Style {
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.ANSI)
+	return lipgloss.NewStyle().Renderer(renderer).Foreground(lipgloss.Color("7"))
 }

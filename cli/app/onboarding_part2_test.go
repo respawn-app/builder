@@ -4,8 +4,6 @@ import (
 	"builder/server/auth"
 	"builder/shared/config"
 	"builder/shared/theme"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,10 +58,6 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 }
 
 func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
-	originalProfile := lipgloss.ColorProfile()
-	defer lipgloss.SetColorProfile(originalProfile)
-	lipgloss.SetColorProfile(termenv.ANSI)
-
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
 	model.input = newUISharedTextInput("abc")
@@ -71,9 +65,13 @@ func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
 	model.input.SetPosition(1)
 
 	content := model.buildContent(24)
-	rendered := strings.Join(content.lines, "\n")
-	if !strings.Contains(rendered, "\x1b[7") {
-		t.Fatalf("expected onboarding input to render soft cursor, got %q", rendered)
+	expected := model.input.renderSoftCursorLines(24, 0, "> ", true, model.styles.inputText)
+	if content.cursorRow < 0 || content.cursorRow+len(expected) > len(content.lines) {
+		t.Fatalf("input cursor row %d outside content lines %#v", content.cursorRow, content.lines)
+	}
+	got := content.lines[content.cursorRow : content.cursorRow+len(expected)]
+	if strings.Join(got, "\n") != strings.Join(expected, "\n") {
+		t.Fatalf("onboarding input did not render through shared text input, got %#v want %#v", got, expected)
 	}
 }
 
