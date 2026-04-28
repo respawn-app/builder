@@ -346,7 +346,7 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 			Revision:            page.Revision,
 			CommittedEntryCount: page.TotalEntries,
 		}
-		if isOngoingTailTranscriptRequest(req) && page.Offset == 0 && !page.HasMore {
+		if isOngoingTailTranscriptRequest(req) {
 			view.Session.Chat = clientui.ChatSnapshot{
 				Entries:      cloneTranscriptEntries(page.Entries),
 				Ongoing:      page.Ongoing,

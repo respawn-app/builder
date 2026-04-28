@@ -144,6 +144,39 @@ func TestRuntimeRegistryReplaysSessionActivityFromCursor(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistryDeliversReplayBeforePostSubscribeLiveEvents(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventRunStateChanged, StepID: "step-2"})
+
+	sub, err := registry.SubscribeSessionActivityFrom(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 1})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivityFrom: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-3"})
+
+	replay, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next replay: %v", err)
+	}
+	live, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next live: %v", err)
+	}
+	if replay.Sequence != 2 || replay.StepID != "step-2" {
+		t.Fatalf("replay event = %+v, want sequence 2 step-2", replay)
+	}
+	if live.Sequence != 3 || live.StepID != "step-3" {
+		t.Fatalf("live event = %+v, want sequence 3 step-3", live)
+	}
+}
+
 func TestRuntimeRegistryRejectsExpiredSessionActivityCursor(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	engine := &runtime.Engine{}

@@ -679,6 +679,39 @@ func TestRuntimeClientRefreshMainViewDoesNotDowngradeCachedTranscriptTail(t *tes
 	}
 }
 
+func TestRuntimeClientRefreshTranscriptUpdatesMainViewChatForWindowedOngoingTail(t *testing.T) {
+	reads := &countingSessionViewClient{
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     3,
+			Offset:       490,
+			TotalEntries: 500,
+			HasMore:      true,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "windowed tail"}},
+			Ongoing:      "streaming",
+		},
+	}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("RefreshTranscript: %v", err)
+	}
+	view := runtimeClient.MainView()
+	if got := len(view.Session.Chat.Entries); got != 1 {
+		t.Fatalf("main view chat entry count = %d, want 1", got)
+	}
+	if got := view.Session.Chat.Entries[0].Text; got != "windowed tail" {
+		t.Fatalf("main view chat text = %q, want windowed tail", got)
+	}
+	if got := view.Session.Chat.Ongoing; got != "streaming" {
+		t.Fatalf("main view ongoing = %q, want streaming", got)
+	}
+}
+
 func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",

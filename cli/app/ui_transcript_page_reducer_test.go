@@ -142,3 +142,15 @@ func TestReduceRuntimeTranscriptPageAcceptsEqualRevisionTailCorrection(t *testin
 		t.Fatalf("branch = %q", reduction.branch)
 	}
 }
+
+func TestRuntimeTranscriptPageSnapshotCopiesTranscriptEntries(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed"}}
+
+	snapshot := runtimeTranscriptPageSnapshotFromModel(m)
+	m.transcriptEntries[0].Text = "mutated"
+
+	if got := snapshot.entries[0].Text; got != "seed" {
+		t.Fatalf("snapshot entry text = %q, want seed", got)
+	}
+}

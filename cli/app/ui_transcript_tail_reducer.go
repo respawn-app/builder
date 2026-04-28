@@ -56,6 +56,12 @@ func reduceDeferredCommittedTailDefer(state deferredCommittedTailState, evt clie
 	start, end, ok := projectedTranscriptEventRange(evt, len(evt.TranscriptEntries))
 	if !ok {
 		start = state.baseOffset + len(state.committedEntries)
+		for _, tail := range state.tails {
+			if tail.rangeStart != start {
+				break
+			}
+			start = tail.rangeEnd
+		}
 		end = start + len(evt.TranscriptEntries)
 	}
 	pendingBatch := deferredPendingInjectedBatchFromEvent(evt)

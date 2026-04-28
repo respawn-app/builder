@@ -34,6 +34,32 @@ func TestReduceDeferredCommittedTailDeferDerivesRangeAndPendingBatch(t *testing.
 	}
 }
 
+func TestReduceDeferredCommittedTailDeferChainsFallbackRangeAfterPendingTails(t *testing.T) {
+	reduction := reduceDeferredCommittedTailDefer(deferredCommittedTailState{
+		committedEntries: []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed", Committed: true}},
+		baseOffset:       0,
+		revision:         6,
+		totalEntries:     2,
+		tails: []deferredProjectedTranscriptTail{
+			{rangeStart: 1, rangeEnd: 2, revision: 7, entries: []clientui.ChatEntry{{Role: "user", Text: "queued one"}}},
+		},
+	}, clientui.Event{
+		Kind:               clientui.EventUserMessageFlushed,
+		TranscriptRevision: 8,
+		TranscriptEntries:  []clientui.ChatEntry{{Role: "user", Text: "queued two"}},
+	})
+
+	if !reduction.shouldDefer {
+		t.Fatal("expected defer reduction")
+	}
+	if reduction.tail.rangeStart != 2 || reduction.tail.rangeEnd != 3 {
+		t.Fatalf("range = [%d,%d], want [2,3]", reduction.tail.rangeStart, reduction.tail.rangeEnd)
+	}
+	if reduction.totalEntriesAfter != 3 {
+		t.Fatalf("totalEntriesAfter = %d, want 3", reduction.totalEntriesAfter)
+	}
+}
+
 func TestReduceDeferredCommittedTailMergeConsumesContiguousChain(t *testing.T) {
 	state := deferredCommittedTailState{
 		committedEntries: []tui.TranscriptEntry{{Role: tui.TranscriptRoleAssistant, Text: "seed", Committed: true}},

@@ -113,6 +113,15 @@ func (r TranscriptRole) IsThinking() bool {
 	}
 }
 
+func (r RenderIntent) IsThinking() bool {
+	switch r {
+	case RenderIntentThinking, RenderIntentThinkingTrace, RenderIntentReasoning:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r TranscriptRole) IsCompaction() bool {
 	switch r {
 	case TranscriptRoleCompactionSummary, TranscriptRoleManualCompactionCarryover:

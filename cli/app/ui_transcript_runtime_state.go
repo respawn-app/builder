@@ -5,6 +5,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 func (m *uiModel) invalidateTransientTranscriptState() {
@@ -62,7 +63,7 @@ func shouldAppendSyntheticOngoingEntry(m *uiModel, entry *clientui.ChatEntry) bo
 		return false
 	}
 	for _, loaded := range m.view.LoadedTranscriptEntries() {
-		if loaded.Role == role && strings.TrimSpace(loaded.Text) == text {
+		if transcriptEntryMatchesChatEntry(loaded, *entry) {
 			return false
 		}
 	}
@@ -85,12 +86,16 @@ func shouldReplaceLoadedSyntheticEntriesWithCommittedAppend(m *uiModel, entries 
 			if committedEntry.Transient || !committedEntry.Committed {
 				continue
 			}
-			if loadedEntry.Role == committedEntry.Role && strings.TrimSpace(loadedEntry.Text) == strings.TrimSpace(committedEntry.Text) {
+			if transcriptEntryPayloadsEqual(loadedEntry, committedEntry) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func transcriptEntryPayloadsEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool {
+	return transcript.EntryPayloadEqual(transcriptPayloadFromTUIEntry(left), transcriptPayloadFromTUIEntry(right))
 }
 
 func (m *uiModel) deferProjectedCommittedTail(evt clientui.Event) {

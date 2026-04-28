@@ -4,9 +4,10 @@ func runtimeTranscriptPageSnapshotFromModel(m *uiModel) runtimeTranscriptPageSna
 	if m == nil {
 		return runtimeTranscriptPageSnapshot{}
 	}
+	entries := cloneTUITranscriptEntries(m.transcriptEntries)
 	effectiveRevision, effectiveCommittedCount := committedTranscriptStateIncludingDeferredTail(m)
 	return runtimeTranscriptPageSnapshot{
-		entries:                 m.transcriptEntries,
+		entries:                 entries,
 		baseOffset:              m.transcriptBaseOffset,
 		totalEntries:            m.transcriptTotalEntries,
 		revision:                m.transcriptRevision,

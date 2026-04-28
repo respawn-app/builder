@@ -33,6 +33,29 @@ func TestReduceProjectedTranscriptEventSkipsDuplicateToolStart(t *testing.T) {
 	}
 }
 
+func TestReduceProjectedTranscriptEventSkipsDuplicateTransientToolStart(t *testing.T) {
+	state := projectedTranscriptEventState{
+		entries: []tui.TranscriptEntry{{
+			Role:       tui.TranscriptRoleToolCall,
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			Transient:  true,
+		}},
+	}
+	reduction := reduceProjectedTranscriptEvent(state, clientui.Event{
+		Kind: clientui.EventToolCallStarted,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+		}},
+	})
+
+	if reduction.decision != projectedTranscriptDecisionSkip || !reduction.duplicateToolStarts {
+		t.Fatalf("decision = %+v, want duplicate transient tool start skip", reduction)
+	}
+}
+
 func TestReduceProjectedTranscriptEventHydratesCommittedGap(t *testing.T) {
 	state := projectedTranscriptEventState{
 		baseOffset: 0,

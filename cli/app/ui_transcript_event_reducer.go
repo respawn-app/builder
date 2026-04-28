@@ -230,7 +230,14 @@ func shouldSkipProjectedToolCallStart(state projectedTranscriptEventState, evt c
 		if toolCallID == "" {
 			return false
 		}
-		if !transcriptContainsCommittedToolCallID(state.entries, toolCallID) {
+		if evt.CommittedTranscriptChanged {
+			if !transcriptContainsCommittedToolCallID(state.entries, toolCallID) {
+				return false
+			}
+			matched = true
+			continue
+		}
+		if !transcriptContainsToolCallID(state.entries, toolCallID) {
 			return false
 		}
 		matched = true
