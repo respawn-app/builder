@@ -14,7 +14,6 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -204,7 +203,7 @@ func TestRuntimeClientRefreshTranscriptRequestsOngoingTail(t *testing.T) {
 	}
 }
 
-func TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail(t *testing.T) {
+func TestRuntimeClientLoadTranscriptPageLetsServerApplyDefaultWindow(t *testing.T) {
 	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1"}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
 	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
@@ -212,12 +211,12 @@ func TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail(t *testing.T) {
 	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{}); err != nil {
 		t.Fatalf("load transcript page: %v", err)
 	}
-	if reads.lastTranscriptReq.Window != clientui.TranscriptWindowOngoingTail {
-		t.Fatalf("window = %q, want ongoing tail", reads.lastTranscriptReq.Window)
+	if reads.lastTranscriptReq.Window != "" {
+		t.Fatalf("window = %q, want empty server-default request", reads.lastTranscriptReq.Window)
 	}
 }
 
-func TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest(t *testing.T) {
+func TestRuntimeClientLoadTranscriptPageAlwaysReadsFromServerAuthority(t *testing.T) {
 	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
 	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
@@ -229,8 +228,8 @@ func TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest(t *t
 	if _, err := runtimeClient.LoadTranscriptPage(req); err != nil {
 		t.Fatalf("second load transcript page: %v", err)
 	}
-	if got := reads.count.Load(); got != 1 {
-		t.Fatalf("session view call count = %d, want 1", got)
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("session view call count = %d, want 2", got)
 	}
 }
 
@@ -266,7 +265,7 @@ func TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage(t *testing.T) {
 	}
 }
 
-func TestRuntimeClientLoadTranscriptPageDoesNotReplaceCachedTailTranscript(t *testing.T) {
+func TestRuntimeClientLoadTranscriptPageDoesNotPopulateTranscriptAccessor(t *testing.T) {
 	reads := &countingSessionViewClient{
 		pageForRequest: func(req serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage {
 			if req.Window == clientui.TranscriptWindowOngoingTail {
@@ -295,36 +294,15 @@ func TestRuntimeClientLoadTranscriptPageDoesNotReplaceCachedTailTranscript(t *te
 		t.Fatalf("load transcript page: %v", err)
 	}
 	page := runtimeClient.Transcript()
-	if page.Offset != 0 {
-		t.Fatalf("tail transcript offset = %d, want 0", page.Offset)
-	}
-	if len(page.Entries) != 1 || page.Entries[0].Text != "tail" {
-		t.Fatalf("tail transcript entries = %+v", page.Entries)
+	if page.SessionID != "session-1" || len(page.Entries) != 0 {
+		t.Fatalf("transcript accessor page = %+v, want empty session page", page)
 	}
 	if got := reads.count.Load(); got != 2 {
 		t.Fatalf("session view call count = %d, want 2", got)
 	}
 }
 
-func TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests(t *testing.T) {
-	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", TotalEntries: 5000}}
-	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
-	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
-
-	for i := 0; i <= uiRuntimeTranscriptPageCacheMaxEntries; i++ {
-		if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: i * 10, Limit: 10}); err != nil {
-			t.Fatalf("load transcript page %d: %v", i, err)
-		}
-	}
-	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 10}); err != nil {
-		t.Fatalf("reload evicted transcript page: %v", err)
-	}
-	if got, want := reads.count.Load(), int32(uiRuntimeTranscriptPageCacheMaxEntries+2); got != want {
-		t.Fatalf("session view call count = %d, want %d", got, want)
-	}
-}
-
-func TestRuntimeClientLoadTranscriptPageRetainsCachedTailEntryUnderEvictionPressure(t *testing.T) {
+func TestRuntimeClientTranscriptDoesNotReadFromServer(t *testing.T) {
 	reads := &countingSessionViewClient{
 		pageForRequest: func(req serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage {
 			if req.Window == clientui.TranscriptWindowOngoingTail {
@@ -349,41 +327,20 @@ func TestRuntimeClientLoadTranscriptPageRetainsCachedTailEntryUnderEvictionPress
 	if _, err := runtimeClient.RefreshTranscript(); err != nil {
 		t.Fatalf("refresh transcript: %v", err)
 	}
-	for i := 0; i <= uiRuntimeTranscriptPageCacheMaxEntries; i++ {
-		if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: i * 10, Limit: 10}); err != nil {
-			t.Fatalf("load transcript page %d: %v", i, err)
-		}
-	}
-
-	concrete, ok := runtimeClient.(*sessionRuntimeClient)
-	if !ok {
-		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
-	}
-	tailKey := ongoingTailTranscriptCacheKey()
-	concrete.mu.RLock()
-	_, hasTailKey := concrete.transcriptPages[tailKey]
-	cacheSize := len(concrete.transcriptPages)
-	concrete.mu.RUnlock()
-	if !hasTailKey {
-		t.Fatal("expected ongoing-tail cache entry to survive eviction pressure")
-	}
-	if cacheSize > uiRuntimeTranscriptPageCacheMaxEntries {
-		t.Fatalf("cache size = %d, want <= %d", cacheSize, uiRuntimeTranscriptPageCacheMaxEntries)
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 10}); err != nil {
+		t.Fatalf("load transcript page: %v", err)
 	}
 
 	page := runtimeClient.Transcript()
-	if page.Offset != 490 {
-		t.Fatalf("tail transcript offset = %d, want 490", page.Offset)
+	if page.SessionID != "session-1" || len(page.Entries) != 0 {
+		t.Fatalf("transcript accessor page = %+v, want empty session page", page)
 	}
-	if len(page.Entries) != 1 || page.Entries[0].Text != "tail" {
-		t.Fatalf("tail transcript entries = %+v", page.Entries)
-	}
-	if got, want := reads.count.Load(), int32(uiRuntimeTranscriptPageCacheMaxEntries+2); got != want {
+	if got, want := reads.count.Load(), int32(2); got != want {
 		t.Fatalf("session view call count = %d, want %d", got, want)
 	}
 }
 
-func TestRuntimeClientFromEngineSeedsCachedTranscriptTail(t *testing.T) {
+func TestRuntimeClientFromEngineDoesNotSeedTranscriptAccessor(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -403,17 +360,21 @@ func TestRuntimeClientFromEngineSeedsCachedTranscriptTail(t *testing.T) {
 	runtimeClient := newUIRuntimeClientFromEngine(eng)
 	page := runtimeClient.Transcript()
 
-	if got, want := page.TotalEntries, 2; got != want {
+	if page.SessionID != store.Meta().SessionID || len(page.Entries) != 0 {
+		t.Fatalf("transcript accessor page = %+v, want empty session page", page)
+	}
+	authoritative, err := runtimeClient.RefreshTranscript()
+	if err != nil {
+		t.Fatalf("refresh transcript: %v", err)
+	}
+	if got, want := authoritative.TotalEntries, 2; got != want {
 		t.Fatalf("total entries = %d, want %d", got, want)
 	}
-	if got, want := page.Offset, 0; got != want {
-		t.Fatalf("offset = %d, want %d", got, want)
-	}
-	if got, want := len(page.Entries), 2; got != want {
+	if got, want := len(authoritative.Entries), 2; got != want {
 		t.Fatalf("entry count = %d, want %d", got, want)
 	}
-	if page.Entries[1].Text != "a1" {
-		t.Fatalf("expected cached transcript tail entry, got %+v", page.Entries)
+	if authoritative.Entries[1].Text != "a1" {
+		t.Fatalf("expected authoritative transcript tail entry, got %+v", authoritative.Entries)
 	}
 }
 
@@ -519,7 +480,7 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 	}
 }
 
-func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *testing.T) {
+func TestRuntimeClientMainViewSnapshotDoesNotPopulateTranscriptEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -545,13 +506,13 @@ func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *t
 		t.Fatalf("main view chat entry count = %d, want 0", got)
 	}
 	if page := runtimeClient.Transcript(); len(page.Entries) != 0 {
-		t.Fatalf("expected transcript() to return uncached page before async hydration, got %+v", page)
+		t.Fatalf("expected transcript accessor to stay empty before explicit hydration, got %+v", page)
 	}
 
-	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+	page, err := runtimeClient.RefreshTranscript()
+	if err != nil {
 		t.Fatalf("refresh transcript: %v", err)
 	}
-	page := runtimeClient.Transcript()
 	if got := len(page.Entries); got != 1 {
 		t.Fatalf("transcript entry count = %d, want 1", got)
 	}
@@ -612,7 +573,7 @@ func TestRuntimeClientRefreshMainViewBypassesCache(t *testing.T) {
 	}
 }
 
-func TestRuntimeClientMainViewSeedsTranscriptCacheBeforeTranscriptFetch(t *testing.T) {
+func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *testing.T) {
 	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
 		SessionID: "session-1",
 		Transcript: clientui.TranscriptMetadata{
@@ -634,11 +595,8 @@ func TestRuntimeClientMainViewSeedsTranscriptCacheBeforeTranscriptFetch(t *testi
 		t.Fatalf("session id = %q, want session-1", view.Session.SessionID)
 	}
 	page := runtimeClient.Transcript()
-	if got := len(page.Entries); got != 1 {
-		t.Fatalf("transcript entry count = %d, want 1", got)
-	}
-	if got := page.Entries[0].Text; got != "seed" {
-		t.Fatalf("transcript entry text = %q, want seed", got)
+	if got := len(page.Entries); got != 0 {
+		t.Fatalf("transcript entry count = %d, want 0", got)
 	}
 	if got := reads.count.Load(); got != 1 {
 		t.Fatalf("session view call count = %d, want 1", got)
@@ -697,38 +655,16 @@ func TestRuntimeClientRefreshMainViewDoesNotDowngradeCachedTranscriptTail(t *tes
 		reads,
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
 	)
-	concrete, ok := runtimeClient.(*sessionRuntimeClient)
-	if !ok {
-		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
-	}
-
 	if _, err := runtimeClient.RefreshTranscript(); err != nil {
 		t.Fatalf("RefreshTranscript: %v", err)
-	}
-	tailKey := ongoingTailTranscriptCacheKey()
-	concrete.mu.RLock()
-	seededTail, hasSeededTail := concrete.transcriptPages[tailKey]
-	concrete.mu.RUnlock()
-	if !hasSeededTail {
-		t.Fatal("expected ongoing-tail cache entry after transcript refresh")
 	}
 	if _, err := runtimeClient.RefreshMainView(); err != nil {
 		t.Fatalf("RefreshMainView: %v", err)
 	}
-	concrete.mu.RLock()
-	refreshedTail, hasRefreshedTail := concrete.transcriptPages[tailKey]
-	concrete.mu.RUnlock()
-	if !hasRefreshedTail {
-		t.Fatal("expected ongoing-tail cache entry retained after main-view refresh")
+	page, err := runtimeClient.RefreshTranscript()
+	if err != nil {
+		t.Fatalf("refresh transcript after main view refresh: %v", err)
 	}
-	if len(refreshedTail.page.Entries) != len(seededTail.page.Entries) {
-		t.Fatalf("cached ongoing-tail entry count = %d, want %d", len(refreshedTail.page.Entries), len(seededTail.page.Entries))
-	}
-	if refreshedTail.page.Entries[1].Role != seededTail.page.Entries[1].Role || refreshedTail.page.Entries[1].Text != seededTail.page.Entries[1].Text {
-		t.Fatalf("cached ongoing-tail page downgraded after main-view refresh: before=%+v after=%+v", seededTail.page.Entries, refreshedTail.page.Entries)
-	}
-
-	page := runtimeClient.Transcript()
 	if got := len(page.Entries); got != 2 {
 		t.Fatalf("transcript entry count = %d, want 2", got)
 	}
@@ -738,8 +674,8 @@ func TestRuntimeClientRefreshMainViewDoesNotDowngradeCachedTranscriptTail(t *tes
 	if got := page.Entries[1].Text; got != "Supervisor ran and applied 2 suggestions." {
 		t.Fatalf("second transcript text = %q", got)
 	}
-	if got := reads.count.Load(); got != 2 {
-		t.Fatalf("session view call count = %d, want 2", got)
+	if got := reads.count.Load(); got != 3 {
+		t.Fatalf("session view call count = %d, want 3", got)
 	}
 }
 
@@ -781,26 +717,15 @@ func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
 	}
 }
 
-func TestRuntimeClientRefreshTranscriptPagePreservesLastKnownPageOnReadError(t *testing.T) {
+func TestRuntimeClientRefreshTranscriptPageDoesNotUseHiddenPageCacheOnReadError(t *testing.T) {
 	reads := &countingSessionViewClient{}
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",
 		reads,
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
 	)
-	concrete, ok := runtimeClient.(*sessionRuntimeClient)
-	if !ok {
-		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
-	}
 	seedReq := clientui.TranscriptPageRequest{Page: 2, PageSize: 25}
-	seedPage := clientui.TranscriptPage{
-		SessionID:    "session-1",
-		Revision:     7,
-		Offset:       25,
-		TotalEntries: 40,
-		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "cached page"}},
-	}
-	concrete.storeTranscriptForRequest(seedReq, seedPage)
+	concrete := runtimeClient.(*sessionRuntimeClient)
 
 	var observedErr error
 	concrete.SetConnectionStateObserver(func(err error) { observedErr = err })
@@ -813,8 +738,8 @@ func TestRuntimeClientRefreshTranscriptPagePreservesLastKnownPageOnReadError(t *
 	if observedErr != context.DeadlineExceeded {
 		t.Fatalf("observed connection state error = %v, want %v", observedErr, context.DeadlineExceeded)
 	}
-	if !reflect.DeepEqual(page, seedPage) {
-		t.Fatalf("refresh transcript page fallback = %+v, want %+v", page, seedPage)
+	if page.SessionID != "session-1" || len(page.Entries) != 0 {
+		t.Fatalf("refresh transcript page fallback = %+v, want empty session page", page)
 	}
 }
 
@@ -838,7 +763,7 @@ func TestRuntimeClientQueueUserMessageNotifiesConnectionObserverOnFailure(t *tes
 	}
 }
 
-func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *testing.T) {
+func TestRuntimeClientRefreshTranscriptPageRecoveryReturnsAuthoritativePage(t *testing.T) {
 	reads := &countingSessionViewClient{}
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",
@@ -850,13 +775,6 @@ func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *te
 		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
 	}
 	seedReq := clientui.TranscriptPageRequest{Page: 2, PageSize: 25}
-	seedPage := clientui.TranscriptPage{
-		SessionID:    "session-1",
-		Revision:     7,
-		Offset:       25,
-		TotalEntries: 40,
-		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "cached page"}},
-	}
 	authoritativePage := clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     8,
@@ -864,7 +782,6 @@ func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *te
 		TotalEntries: 41,
 		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "authoritative page"}},
 	}
-	concrete.storeTranscriptForRequest(seedReq, seedPage)
 
 	var observed []error
 	concrete.SetConnectionStateObserver(func(err error) {
@@ -879,23 +796,16 @@ func TestRuntimeClientRefreshTranscriptPageRecoveryOverridesCachedFallback(t *te
 	if err != context.DeadlineExceeded {
 		t.Fatalf("refresh transcript page error = %v, want %v", err, context.DeadlineExceeded)
 	}
-	if !reflect.DeepEqual(page, seedPage) {
-		t.Fatalf("refresh transcript page fallback = %+v, want %+v", page, seedPage)
+	if page.SessionID != "session-1" || len(page.Entries) != 0 {
+		t.Fatalf("refresh transcript page fallback = %+v, want empty session page", page)
 	}
 
 	page, err = concrete.refreshTranscriptPageSync(seedReq, time.Millisecond)
 	if err != nil {
 		t.Fatalf("refresh transcript page recovery error = %v", err)
 	}
-	if !reflect.DeepEqual(page, authoritativePage) {
+	if page.SessionID != authoritativePage.SessionID || page.Revision != authoritativePage.Revision || len(page.Entries) != 1 || page.Entries[0].Text != "authoritative page" {
 		t.Fatalf("refresh transcript page recovery = %+v, want %+v", page, authoritativePage)
-	}
-	cached, hasCached, _ := concrete.cachedTranscriptPage(seedReq)
-	if !hasCached {
-		t.Fatal("expected transcript cache entry after successful recovery")
-	}
-	if !reflect.DeepEqual(cached, authoritativePage) {
-		t.Fatalf("cached transcript page after recovery = %+v, want %+v", cached, authoritativePage)
 	}
 	if len(observed) != 2 || observed[0] != context.DeadlineExceeded || observed[1] != nil {
 		t.Fatalf("connection observer sequence = %+v, want [%v <nil>]", observed, context.DeadlineExceeded)
