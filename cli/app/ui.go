@@ -496,49 +496,81 @@ type rollbackCandidate struct {
 	Text            string
 }
 
-func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
-	m := &uiModel{
-		uiRuntimeFeatureState: uiRuntimeFeatureState{
-			engine:        runtimeClient,
-			view:          tui.NewModel(tui.WithCompactDetail()),
-			runtimeEvents: runtimeEvents,
-			askEvents:     askEvents,
-		},
-		uiInputFeatureState: uiInputFeatureState{
-			activity:                 uiActivityIdle,
-			inputCursor:              -1,
-			mainInputDraftToken:      1,
-			promptHistorySelection:   -1,
-			promptHistoryDraftCursor: -1,
-			commandRegistry:          commands.NewDefaultRegistry(),
-			reviewerMode:             "off",
-			autoCompactionEnabled:    true,
-			conversationFreshness:    clientui.ConversationFreshnessFresh,
-		},
-		uiPresentationFeatureState: uiPresentationFeatureState{
-			theme:              theme.Auto,
-			tuiAlternateScreen: config.TUIAlternateScreenAuto,
-		},
-		uiConversationFeatureState: uiConversationFeatureState{
-			interaction: uiInteractionState{Mode: uiInputModeMain},
-			ask:         uiAskState{inputCursor: -1},
-		},
-		uiSessionTransitionFeatureState: uiSessionTransitionFeatureState{
-			exitAction:                   UIActionNone,
-			nextForkTranscriptEntryIndex: -1,
-		},
-		uiStatusFeatureState: uiStatusFeatureState{
-			statusRepository:      newMemoryUIStatusRepository(),
-			clipboardImagePaster:  newSystemClipboardImagePaster(),
-			clipboardTextCopier:   newSystemClipboardTextCopier(),
-			debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
-			debugMode:             envFlagEnabled("BUILDER_DEBUG"),
-			transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
-		},
-		uiRollbackFeatureState: uiRollbackFeatureState{
-			rollback: uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
-		},
+func newUIModelDefaults(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent) *uiModel {
+	return &uiModel{
+		uiRuntimeFeatureState:           newUIRuntimeFeatureState(runtimeClient, runtimeEvents, askEvents),
+		uiInputFeatureState:             newUIInputFeatureState(),
+		uiPresentationFeatureState:      newUIPresentationFeatureState(),
+		uiConversationFeatureState:      newUIConversationFeatureState(),
+		uiSessionTransitionFeatureState: newUISessionTransitionFeatureState(),
+		uiStatusFeatureState:            newUIStatusFeatureState(),
+		uiRollbackFeatureState:          newUIRollbackFeatureState(),
 	}
+}
+
+func newUIRuntimeFeatureState(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent) uiRuntimeFeatureState {
+	return uiRuntimeFeatureState{
+		engine:        runtimeClient,
+		view:          tui.NewModel(tui.WithCompactDetail()),
+		runtimeEvents: runtimeEvents,
+		askEvents:     askEvents,
+	}
+}
+
+func newUIInputFeatureState() uiInputFeatureState {
+	return uiInputFeatureState{
+		activity:                 uiActivityIdle,
+		inputCursor:              -1,
+		mainInputDraftToken:      1,
+		promptHistorySelection:   -1,
+		promptHistoryDraftCursor: -1,
+		commandRegistry:          commands.NewDefaultRegistry(),
+		reviewerMode:             "off",
+		autoCompactionEnabled:    true,
+		conversationFreshness:    clientui.ConversationFreshnessFresh,
+	}
+}
+
+func newUIPresentationFeatureState() uiPresentationFeatureState {
+	return uiPresentationFeatureState{
+		theme:              theme.Auto,
+		tuiAlternateScreen: config.TUIAlternateScreenAuto,
+	}
+}
+
+func newUIConversationFeatureState() uiConversationFeatureState {
+	return uiConversationFeatureState{
+		interaction: uiInteractionState{Mode: uiInputModeMain},
+		ask:         uiAskState{inputCursor: -1},
+	}
+}
+
+func newUISessionTransitionFeatureState() uiSessionTransitionFeatureState {
+	return uiSessionTransitionFeatureState{
+		exitAction:                   UIActionNone,
+		nextForkTranscriptEntryIndex: -1,
+	}
+}
+
+func newUIStatusFeatureState() uiStatusFeatureState {
+	return uiStatusFeatureState{
+		statusRepository:      newMemoryUIStatusRepository(),
+		clipboardImagePaster:  newSystemClipboardImagePaster(),
+		clipboardTextCopier:   newSystemClipboardTextCopier(),
+		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugMode:             envFlagEnabled("BUILDER_DEBUG"),
+		transcriptDiagnostics: envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+	}
+}
+
+func newUIRollbackFeatureState() uiRollbackFeatureState {
+	return uiRollbackFeatureState{
+		rollback: uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
+	}
+}
+
+func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
+	m := newUIModelDefaults(runtimeClient, runtimeEvents, askEvents)
 	for _, opt := range opts {
 		opt(m)
 	}
