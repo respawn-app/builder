@@ -119,7 +119,7 @@ func TestNativeAlwaysPolicyDisablesAltScreenAndShowsReplayAfterWindowSize(t *tes
 	model := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "startup replay marker"}}),
 	)
-	program := tea.NewProgram(model, append(mainUIProgramOptions(settings), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())...)
+	program := tea.NewProgram(model, append(mainUIProgramOptions(settings, nil), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())...)
 	done := make(chan error, 1)
 	go func() {
 		_, err := program.Run()

@@ -77,6 +77,7 @@ func (m *uiModel) helpSections() []uiHelpSection {
 				{Bindings: []string{"Ctrl + V", "Ctrl + D"}, Description: "paste a clipboard screenshot as a file path", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Delete", "Ctrl + K", "Ctrl + U", "Ctrl + W", "Ctrl + Y"}, Description: "edit/delete/yank text with shell-style shortcuts", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Alt + ←, →", "Ctrl + ←, →"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Home", "End", "Ctrl + A", "Ctrl + E", "Ctrl + End"}, Description: "jump to the line start or end", Active: uiHelpInTextEditing},
 			},

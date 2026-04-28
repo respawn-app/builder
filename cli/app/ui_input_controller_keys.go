@@ -57,11 +57,18 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if isDeleteCurrentLineKey(msg) {
-		if m.isInputLocked() {
-			return m, nil
-		}
-		m.deleteCurrentInputLine()
+	if m.isInputLocked() && isSharedInputEditKey(msg) {
+		return m, nil
+	}
+	if handleSharedInputEditKey(msg, uiSharedInputEditActions{
+		Backspace:          m.backspaceInput,
+		DeleteForward:      m.deleteForwardInput,
+		DeleteBackwardWord: m.deleteBackwardWordInput,
+		KillToLineStart:    m.killInputToLineStart,
+		KillToLineEnd:      m.killInputToLineEnd,
+		Yank:               m.yankInput,
+		DeleteCurrentLine:  m.deleteCurrentInputLine,
+	}) {
 		return m, nil
 	}
 	if !m.isInputLocked() {
@@ -199,12 +206,6 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == keyTypeShiftEnterCSI {
 			c.markPendingCSIShiftEnter()
 		}
-		return m, nil
-	case tea.KeyBackspace:
-		if m.isInputLocked() {
-			return m, nil
-		}
-		m.backspaceInput()
 		return m, nil
 	case tea.KeySpace:
 		if m.isInputLocked() {
