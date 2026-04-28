@@ -746,12 +746,7 @@ func (m *projectNamePromptModel) View() string {
 	out.WriteString("\n\n")
 	out.WriteString(tui.ApplyThemeDefaultForeground("Enter a project name. Press Enter to create the project.", m.theme))
 	out.WriteString("\n\n")
-	out.WriteString(renderStartupEditableInput(m.width, m.height, m.theme, uiEditableInputRenderSpec{
-		Prefix:       "› ",
-		Text:         m.input.Value(),
-		CursorIndex:  m.input.Position(),
-		RenderCursor: true,
-	}))
+	out.WriteString(renderStartupSharedTextInput(m.width, m.height, m.theme, m.input, "› ", true))
 	if trimmed := strings.TrimSpace(m.error); trimmed != "" {
 		out.WriteString("\n\n")
 		out.WriteString(lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(truncateQueuedMessageLine(trimmed, m.width)))
@@ -949,4 +944,14 @@ func renderStartupEditableInput(width int, height int, theme string, spec uiEdit
 	lineStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
 	borderStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).primary)
 	return strings.Join(renderFramedEditableInputLines(contentWidth, inputContentLineLimit(height), spec, lineStyle, borderStyle), "\n")
+}
+
+func renderStartupSharedTextInput(width int, height int, theme string, input uiSharedTextInput, prefix string, renderCursor bool) string {
+	contentWidth := width
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	lineStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
+	borderStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).primary)
+	return strings.Join(input.renderFramedSoftCursorLines(contentWidth, inputContentLineLimit(height), prefix, renderCursor, lineStyle, borderStyle), "\n")
 }

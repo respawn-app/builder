@@ -4,6 +4,8 @@ import (
 	"builder/server/auth"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +56,24 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	}
 	if got := updated.input.Value(); got != "draft-model-alias" {
 		t.Fatalf("expected import discovery refresh to preserve typed input, got %q", got)
+	}
+}
+
+func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
+	originalProfile := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(originalProfile)
+	lipgloss.SetColorProfile(termenv.ANSI)
+
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+	model.input = newUISharedTextInput("abc")
+	model.input.Focus()
+	model.input.SetPosition(1)
+
+	content := model.buildContent(24)
+	rendered := strings.Join(content.lines, "\n")
+	if !strings.Contains(rendered, "\x1b[7") {
+		t.Fatalf("expected onboarding input to render soft cursor, got %q", rendered)
 	}
 }
 

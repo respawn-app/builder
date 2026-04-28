@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type uiSharedTextInput struct {
@@ -190,6 +191,14 @@ func (i *uiSharedTextInput) deleteCurrentLine() bool {
 	i.text = singleLineText(updated)
 	i.cursor = clampCursor(cursor, len([]rune(i.text)))
 	return true
+}
+
+func (i uiSharedTextInput) renderSoftCursorLines(width int, maxContentLines int, prefix string, renderCursor bool, lineStyle lipgloss.Style) []string {
+	return renderEditableInputSoftCursorFieldLines(width, maxContentLines, i.renderSpec(prefix, renderCursor), lineStyle)
+}
+
+func (i uiSharedTextInput) renderFramedSoftCursorLines(width int, maxContentLines int, prefix string, renderCursor bool, lineStyle lipgloss.Style, borderStyle lipgloss.Style) []string {
+	return renderFramedLines(width, i.renderSoftCursorLines(width, maxContentLines, prefix, renderCursor, lineStyle), borderStyle)
 }
 
 func (i uiSharedTextInput) renderSpec(prefix string, renderCursor bool) uiEditableInputRenderSpec {
