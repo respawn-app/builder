@@ -729,7 +729,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	if m.hasRuntimeClient() {
 		seedView := m.runtimeMainView().Session
 		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
-		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.runtimeTranscript())
+		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.startupRuntimeTranscript())
 		startupNativeHistoryCmd = m.requestRuntimeBootstrapTranscriptSync()
 		m.runtimeTranscriptBusy = false
 	} else {

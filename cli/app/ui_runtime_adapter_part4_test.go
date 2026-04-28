@@ -534,7 +534,7 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	}
 }
 
-func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
+func TestStartupSeedsFromRuntimeClientTranscriptAccessorBeforeBoundedSync(t *testing.T) {
 	client := &startupTranscriptRuntimeClient{
 		view:     clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
 		page:     clientui.TranscriptPage{SessionID: "session-1", Offset: 10, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "cached tail"}}},
@@ -548,7 +548,7 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 		t.Fatal("expected startup transcript hydration command")
 	}
 	if client.transcriptCalls != 1 {
-		t.Fatalf("expected startup to seed from cached RuntimeClient.Transcript(), got %d calls", client.transcriptCalls)
+		t.Fatalf("expected startup to seed from RuntimeClient.Transcript(), got %d calls", client.transcriptCalls)
 	}
 	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "cached tail") {
 		t.Fatalf("expected cached transcript tail visible before bounded sync, got %q", got)
@@ -589,7 +589,7 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 	}
 	afterHydrate := next.(*uiModel)
 	if got := stripANSIAndTrimRight(afterHydrate.view.OngoingSnapshot()); !strings.Contains(got, "authoritative tail") || strings.Contains(got, "cached tail") {
-		t.Fatalf("expected authoritative startup hydrate to replace cached seed, got %q", got)
+		t.Fatalf("expected authoritative startup hydrate without cached seed, got %q", got)
 	}
 }
 
