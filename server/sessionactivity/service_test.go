@@ -54,10 +54,22 @@ func TestServiceFallsBackToLegacySessionSubscriber(t *testing.T) {
 	subscriber := &recordingLegacySubscriber{}
 	service := NewService(subscriber)
 
-	if _, err := service.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 42}); err != nil {
+	if _, err := service.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"}); err != nil {
 		t.Fatalf("SubscribeSessionActivity: %v", err)
 	}
 	if subscriber.sessionID != "session-1" {
 		t.Fatalf("legacy session id = %q, want session-1", subscriber.sessionID)
+	}
+}
+
+func TestServiceRejectsLegacySubscriberCursorReplay(t *testing.T) {
+	subscriber := &recordingLegacySubscriber{}
+	service := NewService(subscriber)
+
+	if _, err := service.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 42}); err != serverapi.ErrStreamGap {
+		t.Fatalf("SubscribeSessionActivity error = %v, want %v", err, serverapi.ErrStreamGap)
+	}
+	if subscriber.sessionID != "" {
+		t.Fatalf("legacy subscriber was called with session id %q despite unsupported cursor replay", subscriber.sessionID)
 	}
 }

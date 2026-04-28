@@ -38,7 +38,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				if errors.Is(err, serverapi.ErrStreamGap) && lastSequence == 0 {
+				if lastSequence == 0 {
 					emitSessionActivityGap(pollCtx, out)
 					return
 				}
