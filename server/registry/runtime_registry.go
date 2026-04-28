@@ -517,10 +517,9 @@ func (h *sessionActivityHub) subscribe(afterSequence uint64) (*sessionActivitySu
 	id := h.nextID
 	h.nextID++
 	replay := h.replayAfterLocked(afterSequence)
-	h.subscribers[id] = sub
-	h.mu.Unlock()
 	for _, evt := range replay {
 		if !sub.publish(evt) {
+			h.mu.Unlock()
 			sub.closeWithError(serverapi.ErrStreamGap)
 			return sub, nil
 		}
@@ -530,6 +529,8 @@ func (h *sessionActivityHub) subscribe(afterSequence uint64) (*sessionActivitySu
 		delete(h.subscribers, id)
 		h.mu.Unlock()
 	}
+	h.subscribers[id] = sub
+	h.mu.Unlock()
 	return sub, nil
 }
 

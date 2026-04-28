@@ -79,7 +79,7 @@ func (m Model) entryRenderWidth(role RenderIntent, symbolOverride string) int {
 func (m Model) flattenEntryWithMetaAndSymbol(role RenderIntent, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
 	text = transcriptDisplayText(role, text)
 	renderWidth := m.entryRenderWidth(role, symbolOverride)
-	if TranscriptRole(role).IsThinking() {
+	if role.IsThinking() {
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
 	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
@@ -604,7 +604,7 @@ func (m Model) renderEntryTextStage(role RenderIntent, text string, width int, t
 	if strings.TrimSpace(text) == "" {
 		return text, 0, transcriptRenderWrapModeViewport
 	}
-	if TranscriptRole(role).IsThinking() {
+	if role.IsThinking() {
 		return text, 0, transcriptRenderWrapModeViewport
 	}
 	if rendered, intents, ok := m.renderToolTextWithHighlight(role, text, toolMeta, muteText); ok {

@@ -305,9 +305,10 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 	if page, ok := entry.transcriptPageCoveredByTail(meta, freshness, clientui.TranscriptPageRequest{Offset: offset, Limit: limit}); ok {
 		return page, nil
 	}
-	cacheKey := dormantTranscriptPageCacheKeyForStore(store, meta, freshness, offset, limit)
+	cacheWarningMode := s.cacheWarningModeValue()
+	cacheKey := dormantTranscriptPageCacheKeyForStore(store, meta, freshness, cacheWarningMode, offset, limit)
 	return s.dormantPages.getOrBuild(cacheKey, func() (clientui.TranscriptPage, error) {
-		scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: s.cacheWarningModeValue()})
+		scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: cacheWarningMode})
 		if err != nil {
 			return clientui.TranscriptPage{}, err
 		}

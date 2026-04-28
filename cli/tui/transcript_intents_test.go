@@ -77,3 +77,22 @@ func TestRenderIntentToolResultMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderIntentThinkingPredicate(t *testing.T) {
+	tests := []struct {
+		intent RenderIntent
+		want   bool
+	}{
+		{intent: RenderIntentThinking, want: true},
+		{intent: RenderIntentThinkingTrace, want: true},
+		{intent: RenderIntentReasoning, want: true},
+		{intent: RenderIntentAssistant, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.intent), func(t *testing.T) {
+			if got := tt.intent.IsThinking(); got != tt.want {
+				t.Fatalf("IsThinking() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

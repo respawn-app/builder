@@ -119,6 +119,37 @@ func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
 	return cloned
 }
 
+func cloneTUITranscriptEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]tui.TranscriptEntry, 0, len(entries))
+	for _, entry := range entries {
+		copyEntry := entry
+		copyEntry.ToolCall = cloneTranscriptToolCallMeta(entry.ToolCall)
+		cloned = append(cloned, copyEntry)
+	}
+	return cloned
+}
+
+func cloneTranscriptToolCallMeta(meta *transcript.ToolCallMeta) *transcript.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	copyMeta := *meta
+	if len(meta.Suggestions) > 0 {
+		copyMeta.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		renderHint := *meta.RenderHint
+		copyMeta.RenderHint = &renderHint
+	}
+	if meta.PatchRender != nil {
+		copyMeta.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
+	return &copyMeta
+}
+
 func eventTranscriptEntriesReconcileWithCommittedTail(evt clientui.Event) bool {
 	if !evt.CommittedTranscriptChanged || len(evt.TranscriptEntries) == 0 {
 		return false

@@ -10,6 +10,7 @@ import (
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/transcript/patchformat"
 )
 
 const dormantTranscriptCacheMaxEntries = 16
@@ -226,13 +227,14 @@ type dormantTranscriptPageCache struct {
 }
 
 type dormantTranscriptPageCacheKey struct {
-	sessionDir  string
-	sessionID   string
-	sessionName string
-	revision    int64
-	freshness   clientui.ConversationFreshness
-	offset      int
-	limit       int
+	sessionDir       string
+	sessionID        string
+	sessionName      string
+	revision         int64
+	freshness        clientui.ConversationFreshness
+	cacheWarningMode config.CacheWarningMode
+	offset           int
+	limit            int
 }
 
 type dormantTranscriptPageCacheEntry struct {
@@ -264,7 +266,7 @@ func (c *dormantTranscriptPageCache) getOrBuild(key dormantTranscriptPageCacheKe
 		entry.lastUsed = c.nextStampLocked()
 		c.entries[key] = entry
 		c.mu.Unlock()
-		return entry.page, nil
+		return cloneDormantTranscriptPage(entry.page), nil
 	}
 	c.mu.Unlock()
 	page, err := build()
@@ -276,12 +278,13 @@ func (c *dormantTranscriptPageCache) getOrBuild(key dormantTranscriptPageCacheKe
 		existing.lastUsed = c.nextStampLocked()
 		c.entries[key] = existing
 		c.mu.Unlock()
-		return existing.page, nil
+		return cloneDormantTranscriptPage(existing.page), nil
 	}
-	c.entries[key] = dormantTranscriptPageCacheEntry{page: page, lastUsed: c.nextStampLocked()}
+	storedPage := cloneDormantTranscriptPage(page)
+	c.entries[key] = dormantTranscriptPageCacheEntry{page: storedPage, lastUsed: c.nextStampLocked()}
 	c.evictIfNeededLocked()
 	c.mu.Unlock()
-	return page, nil
+	return cloneDormantTranscriptPage(storedPage), nil
 }
 
 func (c *dormantTranscriptPageCache) clear() {
@@ -316,14 +319,75 @@ func (c *dormantTranscriptPageCache) evictIfNeededLocked() {
 	}
 }
 
-func dormantTranscriptPageCacheKeyForStore(store *session.Store, meta session.Meta, freshness clientui.ConversationFreshness, offset, limit int) dormantTranscriptPageCacheKey {
+func dormantTranscriptPageCacheKeyForStore(store *session.Store, meta session.Meta, freshness clientui.ConversationFreshness, cacheWarningMode config.CacheWarningMode, offset, limit int) dormantTranscriptPageCacheKey {
 	return dormantTranscriptPageCacheKey{
-		sessionDir:  strings.TrimSpace(store.Dir()),
-		sessionID:   strings.TrimSpace(meta.SessionID),
-		sessionName: strings.TrimSpace(meta.Name),
-		revision:    meta.LastSequence,
-		freshness:   freshness,
-		offset:      offset,
-		limit:       limit,
+		sessionDir:       strings.TrimSpace(store.Dir()),
+		sessionID:        strings.TrimSpace(meta.SessionID),
+		sessionName:      strings.TrimSpace(meta.Name),
+		revision:         meta.LastSequence,
+		freshness:        freshness,
+		cacheWarningMode: normalizeServiceCacheWarningMode(cacheWarningMode),
+		offset:           offset,
+		limit:            limit,
 	}
+}
+
+func cloneDormantTranscriptPage(page clientui.TranscriptPage) clientui.TranscriptPage {
+	page.Entries = cloneDormantClientChatEntries(page.Entries)
+	return page
+}
+
+func cloneDormantClientChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		copyEntry := entry
+		copyEntry.ToolCall = cloneDormantClientToolCallMeta(entry.ToolCall)
+		cloned = append(cloned, copyEntry)
+	}
+	return cloned
+}
+
+func cloneDormantClientToolCallMeta(meta *clientui.ToolCallMeta) *clientui.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	copyMeta := *meta
+	if len(meta.Suggestions) > 0 {
+		copyMeta.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		renderHint := *meta.RenderHint
+		copyMeta.RenderHint = &renderHint
+	}
+	if meta.PatchRender != nil {
+		copyMeta.PatchRender = cloneDormantRenderedPatch(meta.PatchRender)
+	}
+	return &copyMeta
+}
+
+func cloneDormantRenderedPatch(in *patchformat.RenderedPatch) *patchformat.RenderedPatch {
+	if in == nil {
+		return nil
+	}
+	out := &patchformat.RenderedPatch{}
+	if len(in.Files) > 0 {
+		out.Files = make([]patchformat.RenderedFile, 0, len(in.Files))
+		for _, file := range in.Files {
+			copyFile := file
+			if len(file.Diff) > 0 {
+				copyFile.Diff = append([]string(nil), file.Diff...)
+			}
+			out.Files = append(out.Files, copyFile)
+		}
+	}
+	if len(in.SummaryLines) > 0 {
+		out.SummaryLines = append([]patchformat.RenderedLine(nil), in.SummaryLines...)
+	}
+	if len(in.DetailLines) > 0 {
+		out.DetailLines = append([]patchformat.RenderedLine(nil), in.DetailLines...)
+	}
+	return out
 }

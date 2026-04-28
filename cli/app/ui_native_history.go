@@ -638,6 +638,7 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 	projection := m.nativeCommittedProjectionForEntries(entries)
 	rawSnapshot := projection.Render(tui.TranscriptDivider)
 	m.nativeRenderedProjection = projection
+	m.nativeRenderedBaseOffset = m.transcriptBaseOffset
 	m.nativeRenderedSnapshot = rawSnapshot
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return tea.ClearScreen
