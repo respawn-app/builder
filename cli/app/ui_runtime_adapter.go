@@ -53,8 +53,17 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEventsBatch(events []clientui.Eve
 
 func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNativeHistory bool) runtimeEventApplyResult {
 	m := a.model
-	if merged, ok := mergeDeferredCommittedTailIntoEvent(m, evt); ok {
-		evt = merged
+	if merge := reduceDeferredCommittedTailMerge(newDeferredCommittedTailState(deferredCommittedTailSnapshotFromModel(m)), evt); merge.merged {
+		evt = merge.event
+		m.deferredCommittedTail = merge.remaining
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.merge_deferred_tail", map[string]string{
+			"session_id":     strings.TrimSpace(m.sessionID),
+			"mode":           m.transcriptModeLabel(),
+			"kind":           string(evt.Kind),
+			"merged_start":   strconv.Itoa(merge.mergedStart),
+			"merged_count":   strconv.Itoa(merge.mergedCount),
+			"consumed_tails": strconv.Itoa(merge.consumedTails),
+		}))
 	}
 	if m.turnQueueHook != nil {
 		m.turnQueueHook.OnProjectedRuntimeEvent(evt)
@@ -263,7 +272,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, flushNativeHistory bool) (tea.Cmd, bool, bool) {
 	m := a.model
 	incomingCount := len(evt.TranscriptEntries)
-	reduction := reduceProjectedTranscriptEvent(newProjectedTranscriptEventState(m), evt)
+	reduction := reduceProjectedTranscriptEvent(newProjectedTranscriptEventState(projectedTranscriptEventSnapshotFromModel(m)), evt)
 	if reduction.decision == projectedTranscriptDecisionSkip && reduction.duplicateToolStarts {
 		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
 			"path":           "live_event",
@@ -305,7 +314,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		}
 		return nil, false, false
 	case projectedTranscriptDecisionDefer:
-		deferProjectedCommittedTail(m, evt)
+		m.deferProjectedCommittedTail(evt)
 		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
 			"path":           "live_event",
 			"incoming_count": strconv.Itoa(incomingCount),
@@ -790,57 +799,27 @@ func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
 	return cloned
 }
 
-func deferProjectedCommittedTail(m *uiModel, evt clientui.Event) {
-	if m == nil || len(evt.TranscriptEntries) == 0 {
+func (m *uiModel) deferProjectedCommittedTail(evt clientui.Event) {
+	if m == nil {
 		return
 	}
-	pendingBatch := deferredPendingInjectedBatchFromEvent(evt)
-	start, end, ok := projectedTranscriptEventRange(evt, len(evt.TranscriptEntries))
-	if !ok {
-		start = m.transcriptBaseOffset + len(committedTranscriptEntriesForApp(m.transcriptEntries))
-		end = start + len(evt.TranscriptEntries)
+	reduction := reduceDeferredCommittedTailDefer(newDeferredCommittedTailState(deferredCommittedTailSnapshotFromModel(m)), evt)
+	if !reduction.shouldDefer {
+		return
 	}
-	m.deferredCommittedTail = append(m.deferredCommittedTail, deferredProjectedTranscriptTail{
-		rangeStart: start,
-		rangeEnd:   end,
-		revision:   evt.TranscriptRevision,
-		entries:    cloneChatEntries(evt.TranscriptEntries),
-		pending:    pendingBatch,
-	})
-	if evt.TranscriptRevision > m.transcriptRevision {
-		m.transcriptRevision = evt.TranscriptRevision
-	}
-	if end > m.transcriptTotalEntries {
-		m.transcriptTotalEntries = end
-	}
+	m.deferredCommittedTail = append(m.deferredCommittedTail, reduction.tail)
+	m.transcriptRevision = reduction.revisionAfter
+	m.transcriptTotalEntries = reduction.totalEntriesAfter
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.defer_tail", map[string]string{
 		"session_id":     strings.TrimSpace(m.sessionID),
 		"mode":           m.transcriptModeLabel(),
 		"kind":           string(evt.Kind),
-		"range_start":    strconv.Itoa(start),
-		"range_end":      strconv.Itoa(end),
+		"range_start":    strconv.Itoa(reduction.tail.rangeStart),
+		"range_end":      strconv.Itoa(reduction.tail.rangeEnd),
 		"revision":       strconv.FormatInt(evt.TranscriptRevision, 10),
 		"entries_digest": transcriptdiag.EntriesDigest(evt.TranscriptEntries),
-		"pending_count":  strconv.Itoa(len(pendingBatch)),
+		"pending_count":  strconv.Itoa(len(reduction.tail.pending)),
 	}))
-}
-
-func deferredPendingInjectedBatchFromEvent(evt clientui.Event) []string {
-	if evt.Kind != clientui.EventUserMessageFlushed {
-		return nil
-	}
-	batch := append([]string(nil), evt.UserMessageBatch...)
-	if len(batch) == 0 {
-		trimmed := strings.TrimSpace(evt.UserMessage)
-		if trimmed == "" {
-			return nil
-		}
-		batch = []string{trimmed}
-	}
-	for idx := range batch {
-		batch[idx] = strings.TrimSpace(batch[idx])
-	}
-	return batch
 }
 
 func (m *uiModel) clearDeferredCommittedTail(reason string) {
@@ -875,46 +854,6 @@ func (m *uiModel) beginCommittedTranscriptContinuityRecovery() {
 		"current_total": strconv.Itoa(m.transcriptTotalEntries),
 	}))
 	m.invalidateTransientTranscriptState()
-}
-
-func mergeDeferredCommittedTailIntoEvent(m *uiModel, evt clientui.Event) (clientui.Event, bool) {
-	if m == nil || len(m.deferredCommittedTail) == 0 || len(evt.TranscriptEntries) == 0 || !evt.CommittedTranscriptChanged {
-		return evt, false
-	}
-	eventStart, _, ok := projectedTranscriptEventRange(evt, len(evt.TranscriptEntries))
-	if !ok {
-		return evt, false
-	}
-	currentEnd := m.transcriptBaseOffset + len(committedTranscriptEntriesForApp(m.transcriptEntries))
-	mergedEntries := make([]clientui.ChatEntry, 0, len(evt.TranscriptEntries)+len(m.deferredCommittedTail))
-	mergedStart := currentEnd
-	used := 0
-	chainEnd := currentEnd
-	for _, deferred := range m.deferredCommittedTail {
-		if deferred.rangeStart != chainEnd {
-			break
-		}
-		mergedEntries = append(mergedEntries, cloneChatEntries(deferred.entries)...)
-		chainEnd = deferred.rangeEnd
-		used++
-	}
-	if used == 0 || eventStart != chainEnd {
-		return evt, false
-	}
-	mergedEntries = append(mergedEntries, cloneChatEntries(evt.TranscriptEntries)...)
-	evt.TranscriptEntries = mergedEntries
-	evt.CommittedEntryStart = mergedStart
-	evt.CommittedEntryStartSet = true
-	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.merge_deferred_tail", map[string]string{
-		"session_id":     strings.TrimSpace(m.sessionID),
-		"mode":           m.transcriptModeLabel(),
-		"kind":           string(evt.Kind),
-		"merged_start":   strconv.Itoa(mergedStart),
-		"merged_count":   strconv.Itoa(len(mergedEntries)),
-		"consumed_tails": strconv.Itoa(used),
-	}))
-	m.deferredCommittedTail = append([]deferredProjectedTranscriptTail(nil), m.deferredCommittedTail[used:]...)
-	return evt, true
 }
 
 func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bool {

@@ -42,6 +42,15 @@ type projectedTranscriptEventState struct {
 	liveAssistantPending bool
 }
 
+type projectedTranscriptEventSnapshot struct {
+	entries              []tui.TranscriptEntry
+	baseOffset           int
+	revision             int64
+	hasRuntimeClient     bool
+	busy                 bool
+	liveAssistantPending bool
+}
+
 type projectedTranscriptReduction struct {
 	decision            projectedTranscriptDecisionKind
 	plan                projectedTranscriptEntryPlan
@@ -53,17 +62,14 @@ type projectedTranscriptReduction struct {
 	duplicateToolStarts bool
 }
 
-func newProjectedTranscriptEventState(m *uiModel) projectedTranscriptEventState {
-	if m == nil {
-		return projectedTranscriptEventState{}
-	}
+func newProjectedTranscriptEventState(snapshot projectedTranscriptEventSnapshot) projectedTranscriptEventState {
 	return projectedTranscriptEventState{
-		entries:              m.transcriptEntries,
-		baseOffset:           m.transcriptBaseOffset,
-		revision:             m.transcriptRevision,
-		hasRuntimeClient:     m.hasRuntimeClient(),
-		busy:                 m.busy,
-		liveAssistantPending: strings.TrimSpace(m.view.OngoingStreamingText()) != "" || m.sawAssistantDelta,
+		entries:              append([]tui.TranscriptEntry(nil), snapshot.entries...),
+		baseOffset:           snapshot.baseOffset,
+		revision:             snapshot.revision,
+		hasRuntimeClient:     snapshot.hasRuntimeClient,
+		busy:                 snapshot.busy,
+		liveAssistantPending: snapshot.liveAssistantPending,
 	}
 }
 
