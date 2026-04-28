@@ -10,7 +10,7 @@ const (
 )
 
 func transcriptMessageStyleForRole(role string) transcriptMessageStyle {
-	return transcriptMessageStyleForIntent(NormalizeTranscriptRole(role).DisplayIntent(""))
+	return transcriptMessageStyleForIntent(TranscriptRoleFromWire(role).DisplayIntent(""))
 }
 
 func transcriptMessageStyleForIntent(intent RenderIntent) transcriptMessageStyle {

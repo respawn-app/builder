@@ -135,7 +135,7 @@ func (m *uiModel) localRuntimeTranscript() clientui.TranscriptPage {
 	for _, entry := range committedEntries {
 		entries = append(entries, clientui.ChatEntry{
 			Visibility:        entry.Visibility,
-			Role:              entry.Role.WireString(),
+			Role:              tui.TranscriptRoleToWire(entry.Role),
 			Text:              entry.Text,
 			OngoingText:       entry.OngoingText,
 			Phase:             string(entry.Phase),

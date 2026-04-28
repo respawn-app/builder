@@ -454,7 +454,7 @@ func TestFocusTranscriptEntryCentersOngoingViewport(t *testing.T) {
 		if i%2 == 0 {
 			role = "user"
 		}
-		m = updateModel(t, m, AppendTranscriptMsg{Role: NormalizeTranscriptRole(role), Text: fmt.Sprintf("line %d", i)})
+		m = updateModel(t, m, AppendTranscriptMsg{Role: TranscriptRoleFromWire(role), Text: fmt.Sprintf("line %d", i)})
 	}
 
 	entryIndex := 10
@@ -478,7 +478,7 @@ func TestFocusTranscriptEntryClampsNearTopAndBottom(t *testing.T) {
 		if i%2 == 0 {
 			role = "user"
 		}
-		m = updateModel(t, m, AppendTranscriptMsg{Role: NormalizeTranscriptRole(role), Text: fmt.Sprintf("line %d", i)})
+		m = updateModel(t, m, AppendTranscriptMsg{Role: TranscriptRoleFromWire(role), Text: fmt.Sprintf("line %d", i)})
 	}
 
 	topEntry := 0
