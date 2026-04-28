@@ -28,6 +28,20 @@ type runtimeTranscriptPageState struct {
 	reasoningLiveDirty      bool
 }
 
+type runtimeTranscriptPageSnapshot struct {
+	entries                 []tui.TranscriptEntry
+	baseOffset              int
+	totalEntries            int
+	revision                int64
+	effectiveRevision       int64
+	effectiveCommittedCount int
+	viewMode                tui.Mode
+	liveOngoing             string
+	liveOngoingError        string
+	transcriptLiveDirty     bool
+	reasoningLiveDirty      bool
+}
+
 type runtimeTranscriptPageReduction struct {
 	decision                       runtimeTranscriptPageDecisionKind
 	request                        clientui.TranscriptPageRequest
@@ -42,23 +56,19 @@ type runtimeTranscriptPageReduction struct {
 	nativeReplayPermit             nativeHistoryReplayPermit
 }
 
-func newRuntimeTranscriptPageState(m *uiModel) runtimeTranscriptPageState {
-	if m == nil {
-		return runtimeTranscriptPageState{}
-	}
-	effectiveRevision, effectiveCommittedCount := committedTranscriptStateIncludingDeferredTail(m)
+func newRuntimeTranscriptPageState(snapshot runtimeTranscriptPageSnapshot) runtimeTranscriptPageState {
 	return runtimeTranscriptPageState{
-		entries:                 m.transcriptEntries,
-		baseOffset:              m.transcriptBaseOffset,
-		totalEntries:            m.transcriptTotalEntries,
-		revision:                m.transcriptRevision,
-		effectiveRevision:       effectiveRevision,
-		effectiveCommittedCount: effectiveCommittedCount,
-		viewMode:                m.view.Mode(),
-		liveOngoing:             m.view.OngoingStreamingText(),
-		liveOngoingError:        m.view.OngoingErrorText(),
-		transcriptLiveDirty:     m.transcriptLiveDirty,
-		reasoningLiveDirty:      m.reasoningLiveDirty,
+		entries:                 append([]tui.TranscriptEntry(nil), snapshot.entries...),
+		baseOffset:              snapshot.baseOffset,
+		totalEntries:            snapshot.totalEntries,
+		revision:                snapshot.revision,
+		effectiveRevision:       snapshot.effectiveRevision,
+		effectiveCommittedCount: snapshot.effectiveCommittedCount,
+		viewMode:                snapshot.viewMode,
+		liveOngoing:             snapshot.liveOngoing,
+		liveOngoingError:        snapshot.liveOngoingError,
+		transcriptLiveDirty:     snapshot.transcriptLiveDirty,
+		reasoningLiveDirty:      snapshot.reasoningLiveDirty,
 	}
 }
 
