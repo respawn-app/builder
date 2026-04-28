@@ -13,6 +13,7 @@ import (
 )
 
 const dormantTranscriptCacheMaxEntries = 16
+const dormantTranscriptPageCacheMaxEntries = 64
 
 type dormantTranscriptCache struct {
 	mu      sync.RWMutex
@@ -215,4 +216,114 @@ func cloneDormantChatEntries(entries []runtime.ChatEntry) []runtime.ChatEntry {
 		cloned = append(cloned, entry)
 	}
 	return cloned
+}
+
+type dormantTranscriptPageCache struct {
+	mu      sync.RWMutex
+	entries map[dormantTranscriptPageCacheKey]dormantTranscriptPageCacheEntry
+	maxSize int
+	clock   uint64
+}
+
+type dormantTranscriptPageCacheKey struct {
+	sessionDir  string
+	sessionID   string
+	sessionName string
+	revision    int64
+	freshness   clientui.ConversationFreshness
+	offset      int
+	limit       int
+}
+
+type dormantTranscriptPageCacheEntry struct {
+	page     clientui.TranscriptPage
+	lastUsed uint64
+}
+
+func newDormantTranscriptPageCache() *dormantTranscriptPageCache {
+	return newDormantTranscriptPageCacheWithLimit(dormantTranscriptPageCacheMaxEntries)
+}
+
+func newDormantTranscriptPageCacheWithLimit(limit int) *dormantTranscriptPageCache {
+	if limit <= 0 {
+		limit = dormantTranscriptPageCacheMaxEntries
+	}
+	return &dormantTranscriptPageCache{
+		entries: make(map[dormantTranscriptPageCacheKey]dormantTranscriptPageCacheEntry),
+		maxSize: limit,
+	}
+}
+
+func (c *dormantTranscriptPageCache) getOrBuild(key dormantTranscriptPageCacheKey, build func() (clientui.TranscriptPage, error)) (clientui.TranscriptPage, error) {
+	if c == nil || build == nil || key.limit <= 0 {
+		return build()
+	}
+	c.mu.Lock()
+	entry, ok := c.entries[key]
+	if ok {
+		entry.lastUsed = c.nextStampLocked()
+		c.entries[key] = entry
+		c.mu.Unlock()
+		return entry.page, nil
+	}
+	c.mu.Unlock()
+	page, err := build()
+	if err != nil {
+		return clientui.TranscriptPage{}, err
+	}
+	c.mu.Lock()
+	if existing, ok := c.entries[key]; ok {
+		existing.lastUsed = c.nextStampLocked()
+		c.entries[key] = existing
+		c.mu.Unlock()
+		return existing.page, nil
+	}
+	c.entries[key] = dormantTranscriptPageCacheEntry{page: page, lastUsed: c.nextStampLocked()}
+	c.evictIfNeededLocked()
+	c.mu.Unlock()
+	return page, nil
+}
+
+func (c *dormantTranscriptPageCache) clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.entries)
+	c.clock = 0
+}
+
+func (c *dormantTranscriptPageCache) nextStampLocked() uint64 {
+	c.clock++
+	return c.clock
+}
+
+func (c *dormantTranscriptPageCache) evictIfNeededLocked() {
+	if c == nil || c.maxSize <= 0 || len(c.entries) <= c.maxSize {
+		return
+	}
+	oldestKey := dormantTranscriptPageCacheKey{}
+	oldestStamp := uint64(0)
+	for key, entry := range c.entries {
+		if oldestStamp == 0 || entry.lastUsed < oldestStamp {
+			oldestKey = key
+			oldestStamp = entry.lastUsed
+		}
+	}
+	if oldestStamp != 0 {
+		delete(c.entries, oldestKey)
+	}
+}
+
+func dormantTranscriptPageCacheKeyForStore(store *session.Store, meta session.Meta, freshness clientui.ConversationFreshness, offset, limit int) dormantTranscriptPageCacheKey {
+	return dormantTranscriptPageCacheKey{
+		sessionDir:  strings.TrimSpace(store.Dir()),
+		sessionID:   strings.TrimSpace(meta.SessionID),
+		sessionName: strings.TrimSpace(meta.Name),
+		revision:    meta.LastSequence,
+		freshness:   freshness,
+		offset:      offset,
+		limit:       limit,
+	}
 }
