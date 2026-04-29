@@ -59,7 +59,7 @@ func TestProjectRuntimeEventChannelStopsWhenRequested(t *testing.T) {
 	}
 }
 
-func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBridgeGap(t *testing.T) {
+func TestProjectRuntimeEventChannelPublishesExplicitStreamGapAfterBridgeGap(t *testing.T) {
 	bridge := newRuntimeEventBridge(1, nil)
 	bridge.Publish(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "first"})
 	bridge.Publish(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
@@ -88,9 +88,9 @@ func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBrid
 		if evt.AssistantDelta == "first" {
 			sawAssistantDelta = true
 		}
-		if evt.Kind == clientui.EventConversationUpdated {
+		if evt.Kind == clientui.EventStreamGap {
 			if evt.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
-				t.Fatalf("expected synthetic bridge-gap recovery cause, got %+v", evt)
+				t.Fatalf("expected bridge-gap recovery cause, got %+v", evt)
 			}
 			sawRecovery = true
 		}
@@ -100,12 +100,39 @@ func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBrid
 	}
 }
 
+func TestWaitRuntimeEventTreatsStreamGapAsBatchFence(t *testing.T) {
+	ch := make(chan clientui.Event, 2)
+	ch <- clientui.Event{Kind: clientui.EventStreamGap, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap}
+	ch <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "after"}
+
+	raw := waitRuntimeEvent(ch)()
+	msg, ok := raw.(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected runtimeEventBatchMsg, got %T", raw)
+	}
+	if len(msg.events) != 1 || msg.events[0].Kind != clientui.EventStreamGap {
+		t.Fatalf("first batch = %+v, want stream gap only", msg.events)
+	}
+	if msg.carry != nil {
+		t.Fatalf("did not expect stream gap to carry later event, got %+v", *msg.carry)
+	}
+
+	raw = waitRuntimeEvent(ch)()
+	next, ok := raw.(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected second runtimeEventBatchMsg, got %T", raw)
+	}
+	if len(next.events) != 1 || next.events[0].AssistantDelta != "after" {
+		t.Fatalf("second batch = %+v, want assistant delta", next.events)
+	}
+}
+
 func TestSessionActivityEventsDoNotLogDiagnosticsWhenDisabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sub := &sessionActivityTestSubscription{events: make(chan clientui.Event, 1)}
 	lines := make([]string, 0, 1)
-	out, stop := startSessionActivityEvents(ctx, sub, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+	out, stop := startSessionActivityEvents(ctx, sub, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
 		return sub, nil
 	}, func() bool { return false }, func(line string) {
 		lines = append(lines, line)

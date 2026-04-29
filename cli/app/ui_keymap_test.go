@@ -84,7 +84,7 @@ func TestNormalizeKeyMsgRecognizesHelpCSIUVariants(t *testing.T) {
 
 func TestIsHelpKeyRecognizesPrimaryAndFallbackBindings(t *testing.T) {
 	emptyPromptModel := &uiModel{}
-	draftModel := &uiModel{input: "draft"}
+	draftModel := &uiModel{uiInputFeatureState: uiInputFeatureState{input: "draft"}}
 
 	if !isHelpKey(tea.KeyMsg{Type: tea.KeyF1}, draftModel) {
 		t.Fatal("expected f1 to toggle help")

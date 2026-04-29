@@ -37,6 +37,7 @@ type Service struct {
 	targets          ExecutionTargetResolver
 	updates          UpdateStatusProvider
 	dormant          *dormantTranscriptCache
+	dormantPages     *dormantTranscriptPageCache
 	cacheWarningMu   sync.RWMutex
 	cacheWarningMode config.CacheWarningMode
 }
@@ -51,6 +52,7 @@ func NewService(sessions SessionStoreResolver, runtimes RuntimeResolver, targets
 	svc.dormant = newDormantTranscriptCache(func(ctx context.Context, store *session.Store) (dormantTranscriptCacheEntry, error) {
 		return svc.buildDormantTranscriptCacheEntry(ctx, store)
 	})
+	svc.dormantPages = newDormantTranscriptPageCache()
 	return svc
 }
 
@@ -63,6 +65,9 @@ func (s *Service) WithCacheWarningMode(mode config.CacheWarningMode) *Service {
 	s.setCacheWarningMode(normalized)
 	if changed && s.dormant != nil {
 		s.dormant.clear()
+	}
+	if changed && s.dormantPages != nil {
+		s.dormantPages.clear()
 	}
 	return s
 }
@@ -300,23 +305,28 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 	if page, ok := entry.transcriptPageCoveredByTail(meta, freshness, clientui.TranscriptPageRequest{Offset: offset, Limit: limit}); ok {
 		return page, nil
 	}
-	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: s.cacheWarningModeValue()})
-	if err != nil {
-		return clientui.TranscriptPage{}, err
-	}
-	if offset > scan.TotalEntries() {
-		offset = scan.TotalEntries()
-	}
-	return runtimeview.TranscriptPageFromCollectedChat(
-		meta.SessionID,
-		meta.Name,
-		freshness,
-		meta.LastSequence,
-		runtimeview.ChatSnapshotFromRuntime(scan.CollectedPageSnapshot()),
-		scan.TotalEntries(),
-		offset,
-		clientui.TranscriptPageRequest{Offset: offset, Limit: limit},
-	), nil
+	cacheWarningMode := s.cacheWarningModeValue()
+	cacheKey := dormantTranscriptPageCacheKeyForStore(store, meta, freshness, cacheWarningMode, offset, limit)
+	return s.dormantPages.getOrBuild(cacheKey, func() (clientui.TranscriptPage, error) {
+		scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit, CacheWarningMode: cacheWarningMode})
+		if err != nil {
+			return clientui.TranscriptPage{}, err
+		}
+		pageOffset := offset
+		if pageOffset > scan.TotalEntries() {
+			pageOffset = scan.TotalEntries()
+		}
+		return runtimeview.TranscriptPageFromCollectedChat(
+			meta.SessionID,
+			meta.Name,
+			freshness,
+			meta.LastSequence,
+			runtimeview.ChatSnapshotFromRuntime(scan.CollectedPageSnapshot()),
+			scan.TotalEntries(),
+			pageOffset,
+			clientui.TranscriptPageRequest{Offset: pageOffset, Limit: limit},
+		), nil
+	})
 }
 
 func scanDormantTranscript(ctx context.Context, store *session.Store, req runtime.PersistedTranscriptScanRequest) (*runtime.PersistedTranscriptScan, error) {

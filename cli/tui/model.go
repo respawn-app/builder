@@ -27,7 +27,7 @@ type TranscriptEntry struct {
 	Visibility        transcript.EntryVisibility
 	Transient         bool
 	Committed         bool
-	Role              string
+	Role              TranscriptRole
 	Text              string
 	OngoingText       string
 	Phase             llm.MessagePhase
@@ -48,7 +48,7 @@ const (
 
 type StreamingReasoningEntry struct {
 	Key  string
-	Role string
+	Role TranscriptRole
 	Text string
 }
 
@@ -78,7 +78,7 @@ type AppendTranscriptMsg struct {
 	Visibility        transcript.EntryVisibility
 	Transient         bool
 	Committed         bool
-	Role              string
+	Role              TranscriptRole
 	Text              string
 	OngoingText       string
 	Phase             llm.MessagePhase
@@ -337,7 +337,7 @@ func (m Model) localTranscriptIndex(absoluteIndex int) (int, bool) {
 }
 
 type ongoingBlock struct {
-	role       string
+	role       RenderIntent
 	lines      []string
 	entryIndex int
 	entryEnd   int
@@ -349,7 +349,7 @@ type lineRange struct {
 }
 
 type detailBlockSpec struct {
-	role       string
+	role       RenderIntent
 	entryIndex int
 	entryEnd   int
 	selectable bool
@@ -1112,7 +1112,7 @@ func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int) bool {
 }
 
 type detailExpansionSymbolState struct {
-	role     string
+	role     RenderIntent
 	expanded bool
 }
 
@@ -1138,6 +1138,9 @@ func (m Model) detailSelectedExpansionState() (detailExpansionSymbolState, bool)
 func (m Model) detailExpansionSymbolOverride(block detailBlockSpec) string {
 	if !m.compactDetail || m.mode != ModeDetail || !block.selectable || !block.expandable {
 		return ""
+	}
+	if selectedEntry, ok := m.selectedUserTranscriptEntry(); ok && selectedEntry == block.entryIndex {
+		return renderRoleSymbol(">", m.detailExpansionSymbolStyle(block.role)) + " "
 	}
 	selectedEntry, ok := m.resolveDetailSelection()
 	if !ok || selectedEntry != block.entryIndex {

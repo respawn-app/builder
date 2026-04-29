@@ -6,9 +6,11 @@ import (
 
 func TestExtractUITransitionIncludesInitialPrompt(t *testing.T) {
 	model := &uiModel{
-		exitAction:               UIActionNewSession,
-		nextSessionInitialPrompt: "review prompt payload",
-		nextSessionInitialInput:  "draft payload",
+		uiSessionTransitionFeatureState: uiSessionTransitionFeatureState{
+			exitAction:               UIActionNewSession,
+			nextSessionInitialPrompt: "review prompt payload",
+			nextSessionInitialInput:  "draft payload",
+		},
 	}
 	transition := extractUITransition(model)
 	if transition.Action != UIActionNewSession {

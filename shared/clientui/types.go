@@ -12,6 +12,7 @@ type TranscriptRecoveryCause string
 
 const (
 	EventConversationUpdated EventKind = "conversation_updated"
+	EventStreamGap           EventKind = "stream_gap"
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
 	EventOngoingErrorUpdated EventKind = "ongoing_error_updated"
@@ -39,6 +40,7 @@ const (
 )
 
 type Event struct {
+	Sequence                   uint64
 	Kind                       EventKind
 	StepID                     string
 	RecoveryCause              TranscriptRecoveryCause

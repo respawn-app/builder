@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/primaryrun"
 	"builder/shared/clientui"
@@ -360,14 +361,14 @@ func TestSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testin
 		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
 	}
 	entry := updated.transcriptEntries[0]
-	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != primaryrun.ErrActivePrimaryRun.Error() {
+	if entry.Role != tui.TranscriptRoleDeveloperErrorFeedback || entry.Text != primaryrun.ErrActivePrimaryRun.Error() {
 		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
 	}
 	loaded := updated.view.LoadedTranscriptEntries()
 	if len(loaded) != 1 {
 		t.Fatalf("expected one loaded transcript entry, got %+v", loaded)
 	}
-	if loaded[0].Role != string(transcript.EntryRoleDeveloperErrorFeedback) || loaded[0].Text != primaryrun.ErrActivePrimaryRun.Error() {
+	if loaded[0].Role != tui.TranscriptRoleDeveloperErrorFeedback || loaded[0].Text != primaryrun.ErrActivePrimaryRun.Error() {
 		t.Fatalf("unexpected loaded transcript entry: %+v", loaded[0])
 	}
 }
@@ -389,7 +390,7 @@ func TestPreSubmitCheckErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t
 		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
 	}
 	entry := updated.transcriptEntries[0]
-	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != "pre-submit failed" {
+	if entry.Role != tui.TranscriptRoleDeveloperErrorFeedback || entry.Text != "pre-submit failed" {
 		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
 	}
 }

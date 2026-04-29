@@ -73,7 +73,6 @@ func (m *uiModel) requestRuntimeDirtyFollowUpTranscriptSync(cause clientui.Trans
 }
 
 func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool, syncCause runtimeTranscriptSyncCause, recoveryCause clientui.TranscriptRecoveryCause) tea.Cmd {
-	request = normalizeRuntimeTranscriptRequest(request)
 	fetchRequest := m.transcriptHydrationRequest(request, allowDuplicateSkip)
 	if m.runtimeTranscriptBusy {
 		m.runtimeTranscriptDirty = true
@@ -128,7 +127,6 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 }
 
 func (m *uiModel) transcriptHydrationRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool) clientui.TranscriptPageRequest {
-	request = normalizeRuntimeTranscriptRequest(request)
 	if m == nil || allowDuplicateSkip || request.Window != clientui.TranscriptWindowOngoingTail {
 		return request
 	}

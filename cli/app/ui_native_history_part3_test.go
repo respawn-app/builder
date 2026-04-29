@@ -611,6 +611,50 @@ func TestNativeDetailExitRebasesCommittedTranscriptWhenDetailChangedState(t *tes
 	}
 }
 
+func TestDefaultDetailTranscriptHydrationSyncsNativeProjectionWithoutTailReplacement(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	_ = collectCmdMessages(t, startupCmd)
+
+	enterCmd := m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+	_ = collectCmdMessages(t, enterCmd)
+
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		Offset:       0,
+		TotalEntries: 2,
+		NextOffset:   2,
+		HasMore:      false,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "fresh root"}, {Role: "assistant", Text: "rewritten tail"}},
+		Ongoing:      "",
+		OngoingError: "",
+	}, clientui.TranscriptRecoveryCauseNone)
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			t.Fatalf("did not expect detail hydration to emit native flush before mode exit, got %+v", flush)
+		}
+	}
+
+	nativePlain := stripANSIText(m.nativeProjection.Render(tui.TranscriptDivider))
+	if !strings.Contains(nativePlain, "fresh root") || !strings.Contains(nativePlain, "rewritten tail") || strings.Contains(nativePlain, "seed") {
+		t.Fatalf("expected default detail hydration to sync native projection, got %q", nativePlain)
+	}
+	detailPlain := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(detailPlain, "fresh root") || !strings.Contains(detailPlain, "rewritten tail") {
+		t.Fatalf("expected default detail hydration to merge detail page, got %q", detailPlain)
+	}
+}
+
 func TestNativeDetailRepeatedTogglesDoNotPoisonNextAppend(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),

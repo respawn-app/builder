@@ -24,9 +24,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{err: serverapi.ErrStreamGap}}}
 	resubscribed := &stubSessionActivitySubscription{}
 	remaining := []serverapi.SessionActivitySubscription{resubscribed}
-	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
 		if len(remaining) == 0 {
-			return nil, context.Canceled
+			return nil, serverapi.ErrStreamGap
 		}
 		next := remaining[0]
 		remaining = remaining[1:]
@@ -50,8 +50,8 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	m.syncViewport()
 
 	evt := waitSessionActivityEvent(t, events)
-	if evt.Kind != clientui.EventConversationUpdated {
-		t.Fatalf("expected synthetic conversation_updated after gap, got %+v", evt)
+	if evt.Kind != clientui.EventStreamGap {
+		t.Fatalf("expected explicit stream-gap event after replay failure, got %+v", evt)
 	}
 	if evt.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
 		t.Fatalf("expected stream-gap recovery cause, got %+v", evt)

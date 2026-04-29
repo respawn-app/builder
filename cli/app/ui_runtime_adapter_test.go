@@ -56,6 +56,14 @@ func (c *startupTranscriptRuntimeClient) Transcript() clientui.TranscriptPage {
 	return c.page
 }
 
+func (c *startupTranscriptRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	page := c.page
+	if page.SessionID == "" {
+		page.SessionID = "session-1"
+	}
+	return page, nil
+}
+
 func (c *startupTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	c.loadRequests = append(c.loadRequests, req)
 	page := c.page
@@ -203,6 +211,90 @@ func TestProjectRuntimeEventIncludesBackgroundSystemTranscriptEntry(t *testing.T
 	}
 	if entry.OngoingText != "Background shell 1000 completed" {
 		t.Fatalf("background transcript ongoing = %q", entry.OngoingText)
+	}
+}
+
+func TestRuntimeAdapterRunStartAppliesPendingInputBeforeActivityEffect(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.pendingPreSubmitText = "queued prompt"
+	m.activity = uiActivityIdle
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: true},
+	})
+
+	if m.pendingPreSubmitText != "" {
+		t.Fatalf("pending pre-submit text = %q, want cleared", m.pendingPreSubmitText)
+	}
+	if m.activity != uiActivityRunning {
+		t.Fatalf("activity = %v, want running", m.activity)
+	}
+	if !m.busy {
+		t.Fatal("expected busy state set")
+	}
+}
+
+func TestRuntimeAdapterUserMessageFlushRecordsHistoryAndClearsDraft(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.conversationFreshness = clientui.ConversationFreshnessFresh
+	m.input = "steered message"
+	m.pendingInjected = []string{"steered message", "follow-up"}
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		UserMessage: "steered message",
+	})
+
+	if m.input != "" {
+		t.Fatalf("input = %q, want cleared", m.input)
+	}
+	if m.inputSubmitLocked {
+		t.Fatal("expected input submit lock cleared")
+	}
+	if m.lockedInjectText != "" {
+		t.Fatalf("locked inject text = %q, want cleared", m.lockedInjectText)
+	}
+	if len(m.pendingInjected) != 1 || m.pendingInjected[0] != "follow-up" {
+		t.Fatalf("pending injected = %+v, want follow-up only", m.pendingInjected)
+	}
+	if len(m.promptHistory) != 1 || m.promptHistory[0] != "steered message" {
+		t.Fatalf("prompt history = %+v, want flushed message recorded", m.promptHistory)
+	}
+	if m.conversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", m.conversationFreshness)
+	}
+}
+
+func TestRuntimeAdapterBackgroundUpdateRefreshesOpenProcessListAndShowsNotice(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIProcessClient(fixedUIProcessClient{
+		entries: []clientui.BackgroundProcess{{ID: "proc-1", State: "completed"}},
+	}))
+	m.processList.open = true
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind: clientui.EventBackgroundUpdated,
+		Background: &clientui.BackgroundShellEvent{
+			Type:        "completed",
+			ID:          "proc-1",
+			State:       "completed",
+			CompactText: "Background shell proc-1 completed",
+		},
+	})
+
+	if len(m.processList.entries) != 1 || m.processList.entries[0].ID != "proc-1" {
+		t.Fatalf("process entries = %+v, want refreshed proc-1", m.processList.entries)
+	}
+	if m.transientStatus != "Background shell proc-1 completed" {
+		t.Fatalf("transient status = %q, want background notice", m.transientStatus)
+	}
+	if m.transientStatusKind != uiStatusNoticeSuccess {
+		t.Fatalf("transient status kind = %d, want success", m.transientStatusKind)
+	}
+	if cmd == nil {
+		t.Fatal("expected notice clear command")
 	}
 }
 

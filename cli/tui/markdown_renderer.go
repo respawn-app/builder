@@ -34,7 +34,7 @@ func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) 
 	}
 }
 
-func (r *markdownRenderer) render(role, text string, width int) (string, error) {
+func (r *markdownRenderer) render(role RenderIntent, text string, width int) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", nil
 	}
@@ -95,9 +95,9 @@ func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
 	return r.styles.markdownConfig()
 }
 
-func isMarkdownRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "user", "assistant", "assistant_commentary":
+func isMarkdownRole(role RenderIntent) bool {
+	switch role {
+	case RenderIntentUser, RenderIntentAssistant, RenderIntentAssistantCommentary:
 		return true
 	default:
 		return false

@@ -35,15 +35,8 @@ func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme str
 	if width <= 0 {
 		width = 120
 	}
-	model := NewModel(WithTheme(theme), WithPreviewLines(200000))
-	next, _ := model.Update(SetViewportSizeMsg{Lines: 200000, Width: width})
-	if casted, ok := next.(Model); ok {
-		model = casted
-	}
-	next, _ = model.Update(SetConversationMsg{Entries: entries})
-	if casted, ok := next.(Model); ok {
-		model = casted
-	}
+	model := transcriptProjectionRenderer(theme, width, 0)
+	model.transcript = append([]TranscriptEntry(nil), entries...)
 	blocks := model.buildOngoingBlocks(false)
 	blocks = model.applyPendingSpinner(blocks, entries, spinner)
 	if len(blocks) == 0 {
@@ -80,7 +73,7 @@ func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []Transcrip
 		return ongoingBlock{}, false
 	}
 	entry := entries[block.entryIndex]
-	if strings.TrimSpace(entry.Role) != "tool_call" {
+	if roleFromEntry(entry) != TranscriptRoleToolCall {
 		return ongoingBlock{}, false
 	}
 	lines := block.lines
@@ -102,7 +95,7 @@ func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []Transcri
 		return false
 	}
 	entry := entries[block.entryIndex]
-	if strings.TrimSpace(entry.Role) != "tool_call" {
+	if roleFromEntry(entry) != TranscriptRoleToolCall {
 		return false
 	}
 	resultIdx := resultIndex.findMatchingToolResultIndex(entries, block.entryIndex, consumedResults)

@@ -1,0 +1,69 @@
+package app
+
+import (
+	"strconv"
+	"strings"
+
+	"builder/shared/clientui"
+	"builder/shared/transcriptdiag"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+type uiRuntimeFeatureReducer struct {
+	model *uiModel
+}
+
+func (m *uiModel) runtimeReducer() uiRuntimeFeatureReducer {
+	return uiRuntimeFeatureReducer{model: m}
+}
+
+func (r uiRuntimeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
+	m := r.model
+	switch msg := msg.(type) {
+	case runtimeEventMsg:
+		next, cmd := m.handleRuntimeEventBatch([]clientui.Event{msg.event})
+		return handledUIFeatureUpdate(next, cmd)
+	case runtimeEventBatchMsg:
+		if msg.carry != nil {
+			m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_carry", map[string]string{
+				"session_id":             strings.TrimSpace(m.sessionID),
+				"mode":                   string(m.view.Mode()),
+				"kind":                   string(msg.carry.Kind),
+				"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents) + 1),
+			}))
+			m.pendingRuntimeEvents = append([]clientui.Event{*msg.carry}, m.pendingRuntimeEvents...)
+		}
+		next, cmd := m.handleRuntimeEventBatch(msg.events)
+		return handledUIFeatureUpdate(next, cmd)
+	case runtimeConnectionStateChangedMsg:
+		m.observeRuntimeRequestResult(msg.err)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents))
+	case runtimeLeaseRecoveryWarningMsg:
+		cmd := m.appendLocalEntryFallbackWithVisibility("warning", msg.text, msg.visibility)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, sequenceCmds(cmd, waitRuntimeLeaseRecoveryWarning(m.runtimeLeaseRecoveryWarning)))
+	case runtimeMainViewRefreshedMsg:
+		cmd := m.handleRuntimeMainViewRefreshed(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	case runtimeTranscriptRefreshedMsg:
+		cmd := m.handleRuntimeTranscriptRefreshed(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	case runtimeTranscriptRetryMsg:
+		if msg.token != m.runtimeTranscriptRetry {
+			m.syncViewport()
+			return handledUIFeatureUpdate(m, nil)
+		}
+		cmd := m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, msg.syncCause, msg.recoveryCause)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	case detailTranscriptLoadMsg:
+		cmd := m.requestRuntimeTranscriptPage(m.transcriptRequestForCurrentMode())
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
+	}
+	return uiFeatureUpdateResult{}
+}

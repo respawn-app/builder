@@ -75,6 +75,52 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 	assertNoColoredShellSymbol(t, rawCommitted, "dark pending", transcriptToolPendingColorHex("dark"))
 }
 
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionReplacementWhenToolMetadataChanges(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	corrected := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "run", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls"}},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, corrected); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].ToolCall == nil {
+		t.Fatalf("expected corrected tool metadata, got nil")
+	}
+	if got := m.transcriptEntries[1].ToolCall.Command; got != "ls" {
+		t.Fatalf("tool command = %q, want ls", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected equal-revision metadata correction to clear transcriptLiveDirty")
+	}
+}
+
 func TestProjectedAssistantToolCallEntriesApplyAsCommittedInRuntimeMode(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -488,7 +534,7 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	}
 }
 
-func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
+func TestStartupSeedsFromRuntimeClientTranscriptAccessorBeforeBoundedSync(t *testing.T) {
 	client := &startupTranscriptRuntimeClient{
 		view:     clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
 		page:     clientui.TranscriptPage{SessionID: "session-1", Offset: 10, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "cached tail"}}},
@@ -502,7 +548,7 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 		t.Fatal("expected startup transcript hydration command")
 	}
 	if client.transcriptCalls != 1 {
-		t.Fatalf("expected startup to seed from cached RuntimeClient.Transcript(), got %d calls", client.transcriptCalls)
+		t.Fatalf("expected startup to seed from RuntimeClient.Transcript(), got %d calls", client.transcriptCalls)
 	}
 	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "cached tail") {
 		t.Fatalf("expected cached transcript tail visible before bounded sync, got %q", got)
@@ -543,7 +589,7 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 	}
 	afterHydrate := next.(*uiModel)
 	if got := stripANSIAndTrimRight(afterHydrate.view.OngoingSnapshot()); !strings.Contains(got, "authoritative tail") || strings.Contains(got, "cached tail") {
-		t.Fatalf("expected authoritative startup hydrate to replace cached seed, got %q", got)
+		t.Fatalf("expected authoritative startup hydrate without cached seed, got %q", got)
 	}
 }
 

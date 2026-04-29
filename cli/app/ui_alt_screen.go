@@ -49,9 +49,25 @@ func (m *uiModel) toggleTranscriptModeWithOptions(emitNativeReplay bool, skipDet
 	return m.transitionTranscriptMode(target, skipDetailWarmup, emitNativeReplay)
 }
 
+type transcriptModeTransitionOptions struct {
+	target                tui.Mode
+	skipDetailWarmup      bool
+	emitNativeReplay      bool
+	enableAlternateScroll bool
+}
+
 func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup bool, emitNativeReplay bool) tea.Cmd {
+	return m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+		target:                target,
+		skipDetailWarmup:      skipDetailWarmup,
+		emitNativeReplay:      emitNativeReplay,
+		enableAlternateScroll: true,
+	})
+}
+
+func (m *uiModel) transitionTranscriptModeWithOptions(options transcriptModeTransitionOptions) tea.Cmd {
 	prevMode := m.view.Mode()
-	m.forwardToView(tui.SetModeMsg{Mode: target, SkipDetailWarmup: skipDetailWarmup})
+	m.forwardToView(tui.SetModeMsg{Mode: options.target, SkipDetailWarmup: options.skipDetailWarmup})
 	nextMode := m.view.Mode()
 	if prevMode != nextMode && nextMode == tui.ModeDetail {
 		m.primeDetailTranscriptFromCurrentTail()
@@ -65,8 +81,8 @@ func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup boo
 		m.invalidateNativeResizeReplay()
 	}
 	clearCmd := m.clearCmdForModeTransition(prevMode, nextMode)
-	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
-	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay)
+	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode, options.enableAlternateScroll)
+	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, options.emitNativeReplay)
 	detailLoadCmd := m.detailLoadCmdForModeTransition(prevMode, nextMode)
 	if clearCmd == nil && transitionCmd == nil && nativeReplayCmd == nil && detailLoadCmd == nil {
 		return nil
@@ -114,7 +130,7 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 		return m.syncNativeHistoryFromTranscript()
 	}
 	if len(committedEntries) > 0 && !m.nativeProjection.Empty() {
-		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		projection := m.nativeCommittedProjection(committedEntries)
 		if _, ok := projection.RenderAppendDeltaFrom(m.nativeProjection, tui.TranscriptDivider); !ok {
 			m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
 			m.acceptNativeProjectionWithoutReplay(projection)
@@ -122,7 +138,7 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 		}
 	}
 	if m.nativeProjection.Empty() && len(committedEntries) > 0 {
-		projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
+		projection := m.nativeCommittedProjection(committedEntries)
 		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, len(committedEntries))
 		m.acceptNativeProjectionWithoutReplay(projection)
 		return nil
@@ -146,7 +162,7 @@ func sequenceCmds(cmds ...tea.Cmd) tea.Cmd {
 	return tea.Sequence(filtered...)
 }
 
-func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
+func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode, enableAlternateScroll bool) tea.Cmd {
 	if prev == next {
 		return nil
 	}
@@ -155,9 +171,15 @@ func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
 	}
 	if next == tui.ModeDetail && !m.altScreenActive {
 		m.altScreenActive = true
+		if !enableAlternateScroll {
+			return tea.EnterAltScreen
+		}
 		return tea.Sequence(tea.EnterAltScreen, enableAlternateScrollCmd())
 	}
 	if next == tui.ModeDetail && m.altScreenActive {
+		if !enableAlternateScroll {
+			return nil
+		}
 		return enableAlternateScrollCmd()
 	}
 	if prev == tui.ModeDetail && m.altScreenActive && m.tuiAlternateScreen != config.TUIAlternateScreenAlways {

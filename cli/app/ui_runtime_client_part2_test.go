@@ -18,17 +18,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
-func TestRuntimeClientAsyncMainViewRefreshNotifiesConnectionObserverOnRecovery(t *testing.T) {
+func TestRuntimeClientMainViewDoesNotRefreshCachedSnapshotBehindUIBack(t *testing.T) {
 	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil))
 	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls).(*sessionRuntimeClient)
 	runtimeClient.storeMainView(clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}})
-	runtimeClient.mu.Lock()
-	runtimeClient.lastMainViewAt = time.Now().Add(-2 * uiRuntimeMainViewRefreshInterval)
-	runtimeClient.mu.Unlock()
 	notified := make(chan error, 1)
 	runtimeClient.SetConnectionStateObserver(func(err error) {
 		notified <- err
@@ -36,13 +32,13 @@ func TestRuntimeClientAsyncMainViewRefreshNotifiesConnectionObserverOnRecovery(t
 
 	_ = runtimeClient.MainView()
 
+	if got := reads.count.Load(); got != 0 {
+		t.Fatalf("main view read count = %d, want 0", got)
+	}
 	select {
 	case err := <-notified:
-		if err != nil {
-			t.Fatalf("expected recovery observer notification without error, got %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for async refresh observer notification")
+		t.Fatalf("did not expect synchronous main-view refresh notification, got %v", err)
+	default:
 	}
 }
 
