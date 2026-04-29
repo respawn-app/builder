@@ -7,6 +7,7 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -552,8 +553,14 @@ func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 }
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
+	const requestedYield = 20
+	const commandDelay = 100 * time.Millisecond
+	// Keep the clamped foreground window far above commandDelay. This test verifies
+	// clamping behavior, not scheduler precision under full-suite/pre-push load.
+	const clampedForegroundWindow = 2 * time.Second
+
 	workspace := t.TempDir()
-	manager, err := NewManager(WithMinimumExecToBgTime(2 * time.Second))
+	manager, err := NewManager(WithMinimumExecToBgTime(clampedForegroundWindow))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -561,10 +568,10 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
 	execInput, _ := json.Marshal(map[string]any{
-		"cmd":           "sleep 0.1; echo done",
+		"cmd":           fmt.Sprintf("sleep %.1f; echo done", commandDelay.Seconds()),
 		"shell":         "/bin/sh",
 		"login":         false,
-		"yield_time_ms": 20,
+		"yield_time_ms": requestedYield,
 	})
 	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: toolspec.ToolExecCommand, Input: execInput})
 	if err != nil {
