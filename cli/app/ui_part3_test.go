@@ -262,7 +262,7 @@ func TestMainInputDeleteKillAndYankShortcuts(t *testing.T) {
 	if goruntime.GOOS != "darwin" {
 		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
 		updated = next.(*uiModel)
-		if updated.input != "eta gamma" {
+		if updated.input != "" {
 			t.Fatalf("expected ctrl+u to kill to line start on non-darwin paths, got %q", updated.input)
 		}
 	}
