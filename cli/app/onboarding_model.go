@@ -387,7 +387,7 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 		} else {
 			m.input.SetValue(screen.InputValue)
 		}
-		m.input.placeholder = screen.Placeholder
+		m.input.SetPlaceholder(screen.Placeholder)
 		m.input.SetPasswordMode(screen.SensitiveInput)
 		m.input.Focus()
 	}

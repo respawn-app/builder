@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,5 +38,20 @@ func TestDeleteCurrentLineKeyCtrlUPlatformCheck(t *testing.T) {
 	}
 	if isDeleteCurrentLineKeyForGOOS(msg, "linux") {
 		t.Fatal("did not expect ctrl+u to delete current line on linux")
+	}
+}
+
+func TestSharedInputEditKeyAltDeleteUsesForwardWord(t *testing.T) {
+	var actions []string
+	handled := handleSharedInputEditKeyForGOOS(tea.KeyMsg{Type: tea.KeyDelete, Alt: true}, uiSharedInputEditActions{
+		DeleteForward:      func() bool { actions = append(actions, "delete-forward"); return true },
+		DeleteBackwardWord: func() bool { actions = append(actions, "delete-backward-word"); return true },
+		DeleteForwardWord:  func() bool { actions = append(actions, "delete-forward-word"); return true },
+	}, "linux")
+	if !handled {
+		t.Fatal("expected alt+delete to be handled")
+	}
+	if got, want := actions, []string{"delete-forward-word"}; !slices.Equal(got, want) {
+		t.Fatalf("actions = %v, want %v", got, want)
 	}
 }

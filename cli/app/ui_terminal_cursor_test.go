@@ -19,7 +19,7 @@ func TestTerminalCursorSequencesUseExplicitPlacement(t *testing.T) {
 	if got, want := terminalCursorRestoreSequence(normal), xansi.CursorDown(6)+"\r"; got != want {
 		t.Fatalf("normal restore sequence = %q, want %q", got, want)
 	}
-	if got, want := terminalCursorPlaceSequence(normal), xansi.ShowCursor+xansi.CursorUp(6)+xansi.CursorRight(5); got != want {
+	if got, want := terminalCursorPlaceSequence(normal), xansi.ShowCursor+xansi.CursorUp(6)+xansi.CursorForward(5); got != want {
 		t.Fatalf("normal place sequence = %q, want %q", got, want)
 	}
 
@@ -45,7 +45,7 @@ func TestTerminalCursorWriterRestoresAnchorAroundWrites(t *testing.T) {
 	if !strings.HasPrefix(first, "frame") {
 		t.Fatalf("first write should not need anchor restore, got %q", first)
 	}
-	if !strings.HasSuffix(first, xansi.ShowCursor+xansi.CursorUp(3)+xansi.CursorRight(4)) {
+	if !strings.HasSuffix(first, xansi.ShowCursor+xansi.CursorUp(3)+xansi.CursorForward(4)) {
 		t.Fatalf("first write did not place cursor, got %q", first)
 	}
 
@@ -57,7 +57,7 @@ func TestTerminalCursorWriterRestoresAnchorAroundWrites(t *testing.T) {
 	if !strings.HasPrefix(next, xansi.CursorDown(3)+"\rnext") {
 		t.Fatalf("next write should restore anchor before payload, got %q", next)
 	}
-	if !strings.HasSuffix(next, xansi.ShowCursor+xansi.CursorUp(3)+xansi.CursorRight(4)) {
+	if !strings.HasSuffix(next, xansi.ShowCursor+xansi.CursorUp(3)+xansi.CursorForward(4)) {
 		t.Fatalf("next write did not replace cursor, got %q", next)
 	}
 }
@@ -79,7 +79,7 @@ func TestTerminalCursorWriterPreservesCursorAroundControlWrites(t *testing.T) {
 	if !strings.HasPrefix(got, xansi.CursorDown(5)+"\r\x1b[?1049h") {
 		t.Fatalf("control write should restore renderer anchor before payload, got %q", got)
 	}
-	if !strings.HasSuffix(got, xansi.ShowCursor+xansi.CursorUp(5)+xansi.CursorRight(6)) {
+	if !strings.HasSuffix(got, xansi.ShowCursor+xansi.CursorUp(5)+xansi.CursorForward(6)) {
 		t.Fatalf("control write should restore terminal cursor after payload, got %q", got)
 	}
 }

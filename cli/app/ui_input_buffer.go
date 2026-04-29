@@ -83,6 +83,19 @@ func (m *uiModel) deleteBackwardWordInput() bool {
 	return true
 }
 
+func (m *uiModel) deleteForwardWordInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteForwardWordBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.inputKillBuffer = killBuffer
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
 func (m *uiModel) killInputToLineStart() bool {
 	updated, nextCursor, killBuffer, ok := killToLineStartBuffer(m.input, m.inputCursor, m.inputKillBuffer)
 	if !ok {
@@ -217,6 +230,17 @@ func (m *uiModel) deleteForwardAskInput() bool {
 
 func (m *uiModel) deleteBackwardWordAskInput() bool {
 	updated, nextCursor, killBuffer, ok := deleteBackwardWordBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	m.ask.inputKill = killBuffer
+	return true
+}
+
+func (m *uiModel) deleteForwardWordAskInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteForwardWordBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
 	if !ok {
 		return false
 	}
@@ -435,6 +459,14 @@ func deleteCurrentBufferLine(text string, cursor int) (string, int, bool) {
 func deleteBackwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
 	editor := bufferEditorWithKill(text, cursor, killBuffer)
 	if !editor.DeleteBackwardWord() {
+		return text, bufferCursorIndex(text, cursor), killBuffer, false
+	}
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
+}
+
+func deleteForwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.DeleteForwardWord() {
 		return text, bufferCursorIndex(text, cursor), killBuffer, false
 	}
 	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true

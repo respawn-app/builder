@@ -31,6 +31,10 @@ func (i *uiSharedTextInput) SetValue(value string) {
 	i.cursor = -1
 }
 
+func (i *uiSharedTextInput) SetPlaceholder(placeholder string) {
+	i.placeholder = placeholder
+}
+
 func (i uiSharedTextInput) Position() int {
 	return bufferCursorIndex(i.text, i.cursor)
 }
@@ -75,6 +79,7 @@ func (i *uiSharedTextInput) Update(msg tea.Msg) tea.Cmd {
 		Backspace:          func() bool { return i.applyEdit(backspaceBuffer) },
 		DeleteForward:      i.deleteForward,
 		DeleteBackwardWord: i.deleteBackwardWord,
+		DeleteForwardWord:  i.deleteForwardWord,
 		KillToLineStart:    i.killToLineStart,
 		KillToLineEnd:      i.killToLineEnd,
 		Yank:               i.yank,
@@ -151,6 +156,17 @@ func (i *uiSharedTextInput) deleteBackwardWord() bool {
 	return true
 }
 
+func (i *uiSharedTextInput) deleteForwardWord() bool {
+	updated, cursor, killBuffer, ok := deleteForwardWordBuffer(i.text, i.cursor, i.killBuffer)
+	if !ok {
+		return false
+	}
+	i.text = singleLineText(updated)
+	i.cursor = clampCursor(cursor, len([]rune(i.text)))
+	i.killBuffer = killBuffer
+	return true
+}
+
 func (i *uiSharedTextInput) killToLineStart() bool {
 	updated, cursor, killBuffer, ok := killToLineStartBuffer(i.text, i.cursor, i.killBuffer)
 	if !ok {
@@ -213,11 +229,7 @@ func (i uiSharedTextInput) renderSpec(prefix string, renderCursor bool) uiEditab
 }
 
 func singleLineText(text string) string {
-	text = strings.ReplaceAll(text, "\r", "")
-	if index := strings.IndexRune(text, '\n'); index >= 0 {
-		return text[:index] + strings.ReplaceAll(text[index+1:], "\n", "")
-	}
-	return text
+	return strings.NewReplacer("\r", "", "\n", "").Replace(text)
 }
 
 func singleLineRunes(runes []rune) []rune {
