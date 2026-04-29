@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"builder/cli/tui"
 	"builder/server/tools/askquestion"
+	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -62,7 +64,52 @@ func TestTerminalCursorWriterRestoresAnchorAroundWrites(t *testing.T) {
 	}
 }
 
-func TestTerminalCursorWriterPreservesCursorAroundControlWrites(t *testing.T) {
+func TestTerminalCursorWriterPreservesTerminalFileDescriptor(t *testing.T) {
+	state := newUITerminalCursorState()
+	file := &fakeTerminalCursorFile{fd: 42}
+
+	writer := newUITerminalCursorWriter(file, state)
+	terminalFile, ok := writer.(interface{ Fd() uintptr })
+	if !ok {
+		t.Fatalf("expected cursor writer to preserve Fd for Bubble Tea TTY detection, got %T", writer)
+	}
+	if got := terminalFile.Fd(); got != 42 {
+		t.Fatalf("fd = %d, want 42", got)
+	}
+}
+
+type fakeTerminalCursorFile struct {
+	bytes.Buffer
+	fd uintptr
+}
+
+func (f *fakeTerminalCursorFile) Fd() uintptr {
+	return f.fd
+}
+
+func (f *fakeTerminalCursorFile) Close() error {
+	return nil
+}
+
+func TestMainUIProgramOptionsPreservesTerminalFileOutput(t *testing.T) {
+	state := newUITerminalCursorState()
+	file := &fakeTerminalCursorFile{fd: 42}
+	options := mainUIProgramOptionsWithOutput(config.Settings{}, state, file)
+	if len(options) != 2 {
+		t.Fatalf("main options length = %d, want filter and output options", len(options))
+	}
+
+	output := mainUIProgramOutputWriter(state, file)
+	terminalFile, ok := output.(terminalCursorFile)
+	if !ok {
+		t.Fatalf("expected main options output to preserve terminal file interface, got %T", output)
+	}
+	if got := terminalFile.Fd(); got != 42 {
+		t.Fatalf("fd = %d, want 42", got)
+	}
+}
+
+func TestTerminalCursorWriterPassesThroughRendererControlWrites(t *testing.T) {
 	state := newUITerminalCursorState()
 	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
 
@@ -71,16 +118,48 @@ func TestTerminalCursorWriterPreservesCursorAroundControlWrites(t *testing.T) {
 	if _, err := writer.Write([]byte("frame")); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
+	for _, sequence := range []string{xansi.SetAltScreenSaveCursorMode, xansi.EraseEntireScreen, xansi.CursorHomePosition} {
+		out.Reset()
+		if _, err := writer.Write([]byte(sequence)); err != nil {
+			t.Fatalf("write control sequence: %v", err)
+		}
+		if got := out.String(); got != sequence {
+			t.Fatalf("control write should pass through unchanged, got %q want %q", got, sequence)
+		}
+	}
+}
+
+func TestTerminalCursorWriterDoesNotRestoreFromStalePlacementAfterClearScreen(t *testing.T) {
+	state := newUITerminalCursorState()
+	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
+
+	var out bytes.Buffer
+	writer := newUITerminalCursorWriter(&out, state)
+	if _, err := writer.Write([]byte("frame")); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+
 	out.Reset()
-	if _, err := writer.Write([]byte("\x1b[?1049h")); err != nil {
-		t.Fatalf("write control sequence: %v", err)
+	if _, err := writer.Write([]byte(xansi.EraseEntireScreen)); err != nil {
+		t.Fatalf("write clear screen: %v", err)
+	}
+	if _, err := writer.Write([]byte(xansi.CursorHomePosition)); err != nil {
+		t.Fatalf("write cursor home: %v", err)
+	}
+	if got, want := out.String(), xansi.EraseEntireScreen+xansi.CursorHomePosition; got != want {
+		t.Fatalf("clear screen should not append terminal cursor placement, got %q want %q", got, want)
+	}
+
+	out.Reset()
+	if _, err := writer.Write([]byte("next")); err != nil {
+		t.Fatalf("write next: %v", err)
 	}
 	got := out.String()
-	if !strings.HasPrefix(got, xansi.CursorDown(5)+"\r\x1b[?1049h") {
-		t.Fatalf("control write should restore renderer anchor before payload, got %q", got)
+	if strings.HasPrefix(got, xansi.CursorDown(5)+"\r") {
+		t.Fatalf("next frame should not restore from stale pre-clear cursor placement, got %q", got)
 	}
-	if !strings.HasSuffix(got, xansi.ShowCursor+xansi.CursorUp(5)+xansi.CursorForward(6)) {
-		t.Fatalf("control write should restore terminal cursor after payload, got %q", got)
+	if got != "next"+xansi.ShowCursor+xansi.CursorUp(5)+xansi.CursorForward(6) {
+		t.Fatalf("next frame = %q", got)
 	}
 }
 
@@ -272,6 +351,99 @@ func TestViewDoesNotAppendHideCursorWhenRealTerminalCursorVisible(t *testing.T) 
 	}
 }
 
+func TestRealCursorFrameChangesWhenOnlyInputSpacesMoveCursor(t *testing.T) {
+	state := newUITerminalCursorState()
+	m := newProjectedStaticUIModel(WithUITerminalCursorState(state))
+	m.termWidth = 24
+	m.termHeight = 10
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	emptyView := m.View()
+	m.input = " "
+	m.inputCursor = -1
+	m.syncViewport()
+	spaceView := m.View()
+	if emptyView == spaceView {
+		t.Fatal("expected real-cursor frame to change when only trailing spaces move cursor")
+	}
+	placement, ok := state.Snapshot()
+	if !ok {
+		t.Fatal("expected real cursor placement")
+	}
+	if got, want := placement.CursorCol, lipgloss.Width("›  "); got != want {
+		t.Fatalf("cursor col after typed space = %d, want %d", got, want)
+	}
+}
+
+func TestRealCursorFrameChangesAfterTypingEachSpace(t *testing.T) {
+	state := newUITerminalCursorState()
+	model := tea.Model(newProjectedStaticUIModel(WithUITerminalCursorState(state)))
+	m := model.(*uiModel)
+	m.termWidth = 24
+	m.termHeight = 10
+	m.windowSizeKnown = true
+	m.syncViewport()
+	previous := m.View()
+
+	for i := range 3 {
+		next, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+		model = next
+		updated := model.(*uiModel)
+		updated.syncViewport()
+		current := updated.View()
+		if current == previous {
+			t.Fatalf("view did not change after typing space %d", i+1)
+		}
+		placement, ok := state.Snapshot()
+		if !ok {
+			t.Fatalf("expected real cursor placement after typing space %d", i+1)
+		}
+		if got, want := placement.CursorCol, lipgloss.Width("› ")+i+1; got != want {
+			t.Fatalf("cursor col after typing space %d = %d, want %d", i+1, got, want)
+		}
+		previous = current
+	}
+	if got, want := model.(*uiModel).input, "   "; got != want {
+		t.Fatalf("input = %q, want %q", got, want)
+	}
+}
+
+func TestRealCursorFrameMarkerNotRenderedWithoutRealCursor(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 24
+	m.termHeight = 10
+	m.windowSizeKnown = true
+	m.input = " "
+	m.syncViewport()
+
+	view := m.View()
+	if strings.Contains(view, realCursorFrameMarker(1)) {
+		t.Fatalf("did not expect real cursor frame marker without terminal cursor: %q", view)
+	}
+	if !strings.Contains(view, ansiHideCursor) {
+		t.Fatalf("expected soft-cursor fallback frame to hide terminal cursor: %q", view)
+	}
+}
+
+func TestRealCursorFrameMarkerNotRenderedInDetailMode(t *testing.T) {
+	state := newUITerminalCursorState()
+	m := newProjectedStaticUIModel(
+		WithUITerminalCursorState(state),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "history"}}),
+	)
+	m.termWidth = 24
+	m.termHeight = 10
+	m.windowSizeKnown = true
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail})
+	m.syncViewport()
+
+	view := m.View()
+	if strings.Contains(view, realCursorFrameMarker(1)) {
+		t.Fatalf("did not expect real cursor frame marker in detail mode: %q", view)
+	}
+}
+
 func TestTerminalCursorPlacementAccountsForTailTrimmedStatusLine(t *testing.T) {
 	state := newUITerminalCursorState()
 	m := newProjectedStaticUIModel(WithUITerminalCursorState(state))
@@ -308,7 +480,11 @@ func TestTerminalCursorPlacementAccountsForTailTrimmedStatusLine(t *testing.T) {
 		t.Fatalf("cursor col = %d, want 4", placement.CursorCol)
 	}
 	lines := strings.Split(view, "\n")
-	if got, want := lines, []string{"input 1", "input 2", "status"}; !slices.Equal(got, want) {
+	strippedLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		strippedLines = append(strippedLines, xansi.Strip(line))
+	}
+	if got, want := strippedLines, []string{"input 1", "input 2", "status"}; !slices.Equal(got, want) {
 		t.Fatalf("rendered lines = %#v, want %#v", got, want)
 	}
 }
@@ -380,6 +556,56 @@ func TestTerminalCursorProgramTracksWrappedInputAndResize(t *testing.T) {
 	if !strings.Contains(out.String(), xansi.ShowCursor) {
 		t.Fatalf("expected program output to show native cursor, got %q", out.String())
 	}
+}
+
+func TestTerminalCursorProgramStartupReplayAfterClearScreenKeepsOngoingOutputVisible(t *testing.T) {
+	state := newUITerminalCursorState()
+	model := newProjectedStaticUIModel(
+		WithUITerminalCursorState(state),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "startup replay marker"}}),
+	)
+
+	var out bytes.Buffer
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(newUITerminalCursorWriter(&out, state)),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	defer program.Quit()
+
+	program.Send(tea.WindowSizeMsg{Width: 80, Height: 20})
+	waitForTestCondition(t, 2*time.Second, "visible ongoing output after startup clear-screen replay", func() bool {
+		tail := terminalOutputAfterLastClearScreen(out.String())
+		plain := normalizedOutput(tail)
+		return strings.Contains(plain, "startup replay marker")
+	})
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if plain := normalizedOutput(terminalOutputAfterLastClearScreen(out.String())); strings.TrimSpace(plain) == "" {
+		t.Fatalf("expected nonblank ongoing output after final clear screen, got raw %q", out.String())
+	}
+}
+
+func terminalOutputAfterLastClearScreen(output string) string {
+	index := strings.LastIndex(output, xansi.EraseEntireScreen)
+	if index < 0 {
+		return output
+	}
+	return output[index:]
 }
 
 func TestTerminalCursorProgramSurvivesAltScreenTransitionAfterPlacement(t *testing.T) {

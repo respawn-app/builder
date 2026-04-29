@@ -18,17 +18,18 @@ type uiViewLayout struct {
 }
 
 type uiRenderFrame struct {
-	width       int
-	height      int
-	chatPanel   []string
-	pickerPane  []string
-	queuePane   []string
-	inputPane   []string
-	helpPane    []string
-	statusLine  string
-	padToHeight bool
-	tailOnly    bool
-	inputCursor uiInputFieldCursor
+	width            int
+	height           int
+	chatPanel        []string
+	pickerPane       []string
+	queuePane        []string
+	inputPane        []string
+	helpPane         []string
+	statusLine       string
+	padToHeight      bool
+	tailOnly         bool
+	inputCursor      uiInputFieldCursor
+	cursorFrameCount int
 }
 
 type nativeLiveRegionState struct {
@@ -95,6 +96,7 @@ func (l uiViewLayout) renderNativeOngoingSized() string {
 
 func (l uiViewLayout) renderFrame(frame uiRenderFrame) string {
 	l.updateTerminalCursor(frame)
+	frame.cursorFrameCount = l.realCursorFrameCount(frame)
 	return frame.renderWithCursorVisibility(!l.shouldShowRealTerminalCursor(frame))
 }
 
@@ -132,7 +134,24 @@ func (f uiRenderFrame) renderWithCursorVisibility(hideCursor bool) string {
 	if hideCursor {
 		return rendered + ansiHideCursor
 	}
+	if f.cursorFrameCount > 0 {
+		return rendered + realCursorFrameMarker(f.cursorFrameCount)
+	}
 	return rendered
+}
+
+func realCursorFrameMarker(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.Repeat("\x1b[m", count)
+}
+
+func (l uiViewLayout) realCursorFrameCount(frame uiRenderFrame) int {
+	if !l.shouldShowRealTerminalCursor(frame) {
+		return 0
+	}
+	return max(0, frame.inputCursor.Row)*max(1, frame.width) + max(0, frame.inputCursor.Col) + 1
 }
 
 func (l uiViewLayout) shouldShowRealTerminalCursor(frame uiRenderFrame) bool {
