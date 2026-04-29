@@ -275,7 +275,7 @@ func terminalCursorControlSequenceInvalidatesPlacement(sequence string, parser *
 	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'f':
 		return true
 	case 'h', 'l':
-		return sequence == xansi.SetAltScreenSaveCursorMode || sequence == xansi.ResetAltScreenSaveCursorMode
+		return sequence == xansi.SetModeAltScreenSaveCursor || sequence == xansi.ResetModeAltScreenSaveCursor
 	default:
 		return false
 	}
