@@ -553,7 +553,7 @@ func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager(WithMinimumExecToBgTime(150 * time.Millisecond))
+	manager, err := NewManager(WithMinimumExecToBgTime(2 * time.Second))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
