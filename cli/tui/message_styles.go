@@ -1,7 +1,5 @@
 package tui
 
-import "builder/shared/transcript"
-
 type transcriptMessageStyle uint8
 
 const (
@@ -12,12 +10,16 @@ const (
 )
 
 func transcriptMessageStyleForRole(role string) transcriptMessageStyle {
-	switch transcript.NormalizeEntryRole(role) {
-	case "reviewer_status", "reviewer_suggestions":
+	return transcriptMessageStyleForIntent(TranscriptRoleFromWire(role).DisplayIntent(""))
+}
+
+func transcriptMessageStyleForIntent(intent RenderIntent) transcriptMessageStyle {
+	switch intent {
+	case RenderIntentReviewerStatus, RenderIntentReviewerSuggestions:
 		return transcriptMessageStyleSuccess
-	case "warning", "cache_warning":
+	case RenderIntentWarning, RenderIntentCacheWarning:
 		return transcriptMessageStyleWarning
-	case "error", roleDeveloperErrorFeedback:
+	case RenderIntentError, RenderIntentDeveloperErrorFeedback:
 		return transcriptMessageStyleError
 	default:
 		return transcriptMessageStyleNone

@@ -728,7 +728,7 @@ func TestRollbackSelectionHighlightsSelectedMessageFullWidth(t *testing.T) {
 	}
 }
 
-func TestRollbackEditingEscRequiresEmptyInput(t *testing.T) {
+func TestRollbackEditingEscReturnsToSelection(t *testing.T) {
 	m := newProjectedStaticUIModel(WithUIInitialTranscript([]UITranscriptEntry{
 		{Role: "user", Text: "u1"},
 		{Role: "assistant", Text: "a1"},
@@ -739,18 +739,8 @@ func TestRollbackEditingEscRequiresEmptyInput(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated := next.(*uiModel)
-	if !testRollbackEditing(updated) {
-		t.Fatal("expected rollback editing to stay active while input non-empty")
-	}
-	if testRollbackSelecting(updated) {
-		t.Fatal("did not expect rollback selection mode while input non-empty")
-	}
-
-	updated.input = ""
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	updated = next.(*uiModel)
 	if !testRollbackSelecting(updated) {
-		t.Fatal("expected rollback selection mode after esc on empty input")
+		t.Fatal("expected rollback selection mode after esc")
 	}
 	if testRollbackSelection(updated) != 1 {
 		t.Fatalf("expected rollback selection preserved, got %d", testRollbackSelection(updated))

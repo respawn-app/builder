@@ -28,7 +28,7 @@ func (w uiDetailTranscriptWindow) page() clientui.TranscriptPage {
 	for _, entry := range w.entries {
 		entries = append(entries, clientui.ChatEntry{
 			Visibility:        entry.Visibility,
-			Role:              entry.Role,
+			Role:              tui.TranscriptRoleToWire(entry.Role),
 			Text:              entry.Text,
 			OngoingText:       entry.OngoingText,
 			Phase:             string(entry.Phase),
@@ -275,5 +275,5 @@ func transcriptPageSessionChanged(currentSessionID, nextSessionID string) bool {
 }
 
 func isUserTranscriptEntry(entry tui.TranscriptEntry) bool {
-	return strings.TrimSpace(entry.Role) == "user"
+	return entry.Role == tui.TranscriptRoleUser
 }

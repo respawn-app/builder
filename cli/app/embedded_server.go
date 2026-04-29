@@ -350,8 +350,8 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()).(*sessionRuntimeClient)
 	runtimeClient.SetControllerLeaseManager(leaseManager)
 	runtimeClient.SetTranscriptDiagnosticsEnabled(transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug))
-	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
-		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
+	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
+		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID, AfterSequence: afterSequence})
 	}, runtimeClient.transcriptDiagnosticsEnabled, func(line string) {
 		logger.Logf("%s", line)
 	})

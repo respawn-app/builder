@@ -7,7 +7,8 @@ import (
 )
 
 type SessionActivitySubscribeRequest struct {
-	SessionID string
+	SessionID     string
+	AfterSequence uint64
 }
 
 type SessionActivitySubscription interface {

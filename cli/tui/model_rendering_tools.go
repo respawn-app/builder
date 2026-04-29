@@ -14,24 +14,23 @@ func detailDivider() string {
 	return TranscriptDivider
 }
 
-func ongoingDividerGroup(role string) string {
+func ongoingDividerGroup(role RenderIntent) string {
 	normalized := normalizeOngoingDividerRole(role)
-	if isToolHeadlineRole(normalized) {
+	if normalized.IsToolHeadline() {
 		return "tool"
 	}
-	return normalized
+	return normalized.String()
 }
 
-func transcriptRoleGroupsNeedSeparator(previousRole string, currentRole string) bool {
+func transcriptRoleGroupsNeedSeparator(previousRole RenderIntent, currentRole RenderIntent) bool {
 	return ongoingDividerGroup(previousRole) != ongoingDividerGroup(currentRole)
 }
 
-func normalizeOngoingDividerRole(role string) string {
-	normalized := strings.ToLower(strings.TrimSpace(role))
-	if normalized == "assistant_commentary" {
-		return "assistant"
+func normalizeOngoingDividerRole(role RenderIntent) RenderIntent {
+	if role == RenderIntentAssistantCommentary {
+		return RenderIntentAssistant
 	}
-	return normalized
+	return role
 }
 
 func skipInOngoing(entry TranscriptEntry) bool {
@@ -119,11 +118,11 @@ func normalizeAskQuestionSuggestion(suggestion string) string {
 	return strings.TrimSpace(suggestion)
 }
 
-func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool) []string {
+func (m Model) flattenAskQuestionEntry(role RenderIntent, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool) []string {
 	return m.flattenAskQuestionEntryWithSymbol(role, question, suggestions, recommendedOptionIndex, answer, includeSuggestions, "")
 }
 
-func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool, symbolOverride string) []string {
+func (m Model) flattenAskQuestionEntryWithSymbol(role RenderIntent, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool, symbolOverride string) []string {
 	renderWidth := m.entryRenderWidth(role, symbolOverride)
 	continuationPrefix := m.entryContinuationPrefix(role, symbolOverride)
 
@@ -185,7 +184,7 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggesti
 		case "recommended_suggestion":
 			display = m.palette().model.Render(display)
 		case "answer":
-			if role == "tool_question_error" {
+			if role == RenderIntentToolQuestionError {
 				display = applyANSIStyleIntents(display, m.ansiIntentPalette(), ErrorForeground)
 			} else {
 				display = m.palette().user.Render(display)
@@ -244,12 +243,12 @@ func isPatchToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && (meta.HasPatchDetail() || strings.TrimSpace(meta.ToolName) == "patch")
 }
 
-func isPatchToolBlock(role string, meta *transcript.ToolCallMeta) bool {
+func isPatchToolBlock(role RenderIntent, meta *transcript.ToolCallMeta) bool {
 	if meta != nil && (isPatchToolCall(meta) || meta.PatchRender != nil) {
 		return true
 	}
-	switch strings.TrimSpace(role) {
-	case "tool_patch", "tool_patch_success", "tool_patch_error":
+	switch role {
+	case RenderIntentToolPatch, RenderIntentToolPatchSuccess, RenderIntentToolPatchError:
 		return true
 	default:
 		return false
@@ -264,31 +263,16 @@ func isWebSearchToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && strings.TrimSpace(meta.ToolName) == string(toolspec.ToolWebSearch)
 }
 
-func isToolHeadlineRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_patch", "tool_patch_success", "tool_patch_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
-		return true
-	default:
-		return false
-	}
+func isToolHeadlineRole(role RenderIntent) bool {
+	return role.IsToolHeadline()
 }
 
-func isToolErrorHeadlineRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_question_error", "tool_web_search_error":
-		return true
-	default:
-		return false
-	}
+func isToolErrorHeadlineRole(role RenderIntent) bool {
+	return role.IsToolErrorHeadline()
 }
 
-func isShellPreviewRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "tool_shell", "tool_shell_success", "tool_shell_error":
-		return true
-	default:
-		return false
-	}
+func isShellPreviewRole(role RenderIntent) bool {
+	return role.IsShellPreview()
 }
 
 func splitToolInlineMeta(line string) (string, string) {

@@ -192,10 +192,7 @@ func (m *Model) reduceViewportSizeMsg(msg SetViewportSizeMsg, result *modelUpdat
 }
 
 func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *modelUpdateResult) {
-	role := strings.TrimSpace(msg.Role)
-	if role == "" {
-		role = "unknown"
-	}
+	role := TranscriptRoleFromWire(TranscriptRoleToWire(msg.Role))
 	m.transcript = append(m.transcript, TranscriptEntry{
 		Visibility:        transcript.NormalizeEntryVisibility(msg.Visibility),
 		Transient:         msg.Transient,
@@ -230,6 +227,7 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	copy(entries, msg.Entries)
 	for i := range entries {
 		entries[i].Visibility = transcript.NormalizeEntryVisibility(entries[i].Visibility)
+		entries[i].Role = TranscriptRoleFromWire(TranscriptRoleToWire(entries[i].Role))
 		entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
 		entries[i].SourcePath = strings.TrimSpace(entries[i].SourcePath)
 		entries[i].CompactLabel = strings.TrimSpace(entries[i].CompactLabel)
@@ -501,9 +499,9 @@ func (m *Model) reduceUpsertStreamingReasoningMsg(msg UpsertStreamingReasoningMs
 	if key == "" {
 		return
 	}
-	role := strings.TrimSpace(msg.Role)
-	if role == "" {
-		role = "reasoning"
+	role := TranscriptRoleFromWire(msg.Role)
+	if role == TranscriptRoleUnknown {
+		role = TranscriptRoleReasoning
 	}
 	text := strings.TrimSpace(msg.Text)
 	updated := false
@@ -544,7 +542,7 @@ func (m *Model) reduceCommitAssistantMsg(result *modelUpdateResult) {
 	if m.ongoing == "" {
 		return
 	}
-	m.transcript = append(m.transcript, TranscriptEntry{Role: "assistant", Text: m.ongoing})
+	m.transcript = append(m.transcript, TranscriptEntry{Role: TranscriptRoleAssistant, Text: m.ongoing})
 	m.ongoing = ""
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true

@@ -9,19 +9,19 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
-func (m Model) flattenEntry(role, text string) []string {
+func (m Model) flattenEntry(role RenderIntent, text string) []string {
 	return m.flattenEntryWithMeta(role, text, false, nil)
 }
 
-func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []string {
+func (m Model) flattenEntryWithMutedText(role RenderIntent, text string, muteText bool) []string {
 	return m.flattenEntryWithMeta(role, text, muteText, nil)
 }
 
-func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta) []string {
+func (m Model) flattenEntryWithMeta(role RenderIntent, text string, muteText bool, toolMeta *transcript.ToolCallMeta) []string {
 	return m.flattenEntryWithMetaAndSymbol(role, text, muteText, toolMeta, "")
 }
 
-func (m Model) entryPrefix(role, symbolOverride string) string {
+func (m Model) entryPrefix(role RenderIntent, symbolOverride string) string {
 	if symbolOverride != "" {
 		return symbolOverride
 	}
@@ -32,7 +32,7 @@ func (m Model) entryPrefix(role, symbolOverride string) string {
 	return symbol + " "
 }
 
-func (m Model) detailExpansionSymbolPrefix(role string, expanded bool) string {
+func (m Model) detailExpansionSymbolPrefix(role RenderIntent, expanded bool) string {
 	symbol := "▶"
 	if expanded {
 		symbol = "▼"
@@ -40,9 +40,9 @@ func (m Model) detailExpansionSymbolPrefix(role string, expanded bool) string {
 	return renderRoleSymbol(symbol, m.detailExpansionSymbolStyle(role)) + " "
 }
 
-func (m Model) detailExpansionSymbolStyle(role string) roleSymbolColorStyle {
+func (m Model) detailExpansionSymbolStyle(role RenderIntent) roleSymbolColorStyle {
 	p := m.palette()
-	switch transcriptMessageStyleForRole(role) {
+	switch transcriptMessageStyleForIntent(role) {
 	case transcriptMessageStyleSuccess:
 		return roleSymbolColorStyle{color: p.successColor}
 	case transcriptMessageStyleWarning:
@@ -51,24 +51,24 @@ func (m Model) detailExpansionSymbolStyle(role string) roleSymbolColorStyle {
 		return roleSymbolColorStyle{color: p.errorColor}
 	}
 	switch role {
-	case "tool_success", "tool_shell_success", "tool_patch_success", "tool_web_search_success":
+	case RenderIntentToolSuccess, RenderIntentToolShellSuccess, RenderIntentToolPatchSuccess, RenderIntentToolWebSearchSuccess:
 		return roleSymbolColorStyle{color: p.toolSuccessColor}
-	case "tool_error", "tool_shell_error", "tool_patch_error", "tool_web_search_error", "tool_question_error", roleDeveloperFeedback, roleInterruption:
+	case RenderIntentToolError, RenderIntentToolShellError, RenderIntentToolPatchError, RenderIntentToolWebSearchError, RenderIntentToolQuestionError, RenderIntentDeveloperFeedback, RenderIntentInterruption:
 		return roleSymbolColorStyle{color: p.toolErrorColor}
 	default:
 		return roleSymbolColorStyle{color: p.primaryColor}
 	}
 }
 
-func (m Model) entryPrefixWidth(role, symbolOverride string) int {
+func (m Model) entryPrefixWidth(role RenderIntent, symbolOverride string) int {
 	return lipgloss.Width(m.entryPrefix(role, symbolOverride))
 }
 
-func (m Model) entryContinuationPrefix(role, symbolOverride string) string {
+func (m Model) entryContinuationPrefix(role RenderIntent, symbolOverride string) string {
 	return strings.Repeat(" ", max(0, m.entryPrefixWidth(role, symbolOverride)))
 }
 
-func (m Model) entryRenderWidth(role, symbolOverride string) int {
+func (m Model) entryRenderWidth(role RenderIntent, symbolOverride string) int {
 	renderWidth := m.viewportWidth - m.entryPrefixWidth(role, symbolOverride)
 	if renderWidth < 1 {
 		return 1
@@ -76,17 +76,17 @@ func (m Model) entryRenderWidth(role, symbolOverride string) int {
 	return renderWidth
 }
 
-func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
+func (m Model) flattenEntryWithMetaAndSymbol(role RenderIntent, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
 	text = transcriptDisplayText(role, text)
 	renderWidth := m.entryRenderWidth(role, symbolOverride)
-	if isThinkingRole(role) {
+	if role.IsThinking() {
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
 	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
 	return m.flattenEntryContent(role, content, renderWidth, muteText, isPatchToolBlock(role, toolMeta), symbolOverride)
 }
 
-func (m Model) flattenEntryContent(role string, content transcriptRenderContent, renderWidth int, muteText bool, isPatchBlock bool, symbolOverride string) []string {
+func (m Model) flattenEntryContent(role RenderIntent, content transcriptRenderContent, renderWidth int, muteText bool, isPatchBlock bool, symbolOverride string) []string {
 	content = m.applyEntrySemanticTransformStage(content)
 	if muteText && isShellPreviewRole(role) {
 		return m.flattenSingleLineShellPreview(role, content, renderWidth, symbolOverride)
@@ -98,7 +98,7 @@ func (m Model) flattenEntryContent(role string, content transcriptRenderContent,
 	return m.attachRoleSymbolStage(role, decorated, symbolOverride)
 }
 
-func (m Model) flattenSingleLineShellPreview(role string, content transcriptRenderContent, renderWidth int, symbolOverride string) []string {
+func (m Model) flattenSingleLineShellPreview(role RenderIntent, content transcriptRenderContent, renderWidth int, symbolOverride string) []string {
 	first, forceEllipsis := firstShellPreviewRenderLine(content)
 	laidOut := m.layoutEntryContentStage(role, transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: []transcriptRenderLine{first}}, symbolOverride)
 	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, true, false)
@@ -114,7 +114,7 @@ func (m Model) flattenSingleLineShellPreview(role string, content transcriptRend
 	return []string{truncateRenderedLineToWidthWithEllipsis(out[0], targetWidth, forceEllipsis)}
 }
 
-func (m Model) flattenToolErrorText(role string, text string, symbolOverride string) []string {
+func (m Model) flattenToolErrorText(role RenderIntent, text string, symbolOverride string) []string {
 	renderWidth := m.entryRenderWidth(role, symbolOverride)
 	content := transcriptRenderContent{
 		Lines:    []transcriptRenderLine{{Text: text, Intents: ErrorForeground}},
@@ -197,7 +197,7 @@ func truncateRenderedLineToWidthWithEllipsis(line string, width int, forceEllips
 	return out.String()
 }
 
-func (m Model) renderEntryContentStage(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) transcriptRenderContent {
+func (m Model) renderEntryContentStage(role RenderIntent, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) transcriptRenderContent {
 	if !muteText {
 		if diffLines, ok := m.renderDiffToolLines(text, width, toolMeta); ok {
 			return transcriptRenderContent{Lines: diffLines, WrapMode: transcriptRenderWrapModePreserved}
@@ -252,7 +252,7 @@ func (m Model) wrapEntryContentStage(content transcriptRenderContent, width int)
 	return out
 }
 
-func (m Model) layoutEntryContentStage(role string, content transcriptRenderContent, symbolOverride string) []transcriptLayoutLine {
+func (m Model) layoutEntryContentStage(role RenderIntent, content transcriptRenderContent, symbolOverride string) []transcriptLayoutLine {
 	hasRoleSymbol := rolePrefix(role) != ""
 	continuationPrefix := m.entryContinuationPrefix(role, symbolOverride)
 	out := make([]transcriptLayoutLine, 0, len(content.Lines))
@@ -305,7 +305,7 @@ func (m Model) applyDeferredDecoratedLayoutTransformStage(lines []transcriptLayo
 	return out
 }
 
-func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isPatchBlock bool) []transcriptLayoutLine {
+func (m Model) decorateEntryLayoutBodyStage(role RenderIntent, lines []transcriptLayoutLine, renderWidth int, muteText bool, isPatchBlock bool) []transcriptLayoutLine {
 	out := make([]transcriptLayoutLine, 0, len(lines))
 	for idx, line := range lines {
 		display := line.Text
@@ -345,7 +345,7 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 	return out
 }
 
-func (m Model) attachRoleSymbolStage(role string, lines []transcriptLayoutLine, symbolOverride string) []string {
+func (m Model) attachRoleSymbolStage(role RenderIntent, lines []transcriptLayoutLine, symbolOverride string) []string {
 	out := make([]string, 0, len(lines))
 	prefix := m.entryPrefix(role, symbolOverride)
 	for idx, line := range lines {
@@ -358,7 +358,7 @@ func (m Model) attachRoleSymbolStage(role string, lines []transcriptLayoutLine, 
 	return out
 }
 
-func (m Model) flattenThinkingEntry(role, text string, renderWidth int) []string {
+func (m Model) flattenThinkingEntry(role RenderIntent, text string, renderWidth int) []string {
 	if renderWidth < 1 {
 		renderWidth = 1
 	}
@@ -415,11 +415,11 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 	return out, true
 }
 
-func (m Model) flattenPatchToolBlock(role string, toolMeta *transcript.ToolCallMeta, resultText string) []string {
+func (m Model) flattenPatchToolBlock(role RenderIntent, toolMeta *transcript.ToolCallMeta, resultText string) []string {
 	return m.flattenPatchToolBlockWithSymbol(role, toolMeta, resultText, "")
 }
 
-func (m Model) flattenPatchToolBlockWithSymbol(role string, toolMeta *transcript.ToolCallMeta, resultText string, symbolOverride string) []string {
+func (m Model) flattenPatchToolBlockWithSymbol(role RenderIntent, toolMeta *transcript.ToolCallMeta, resultText string, symbolOverride string) []string {
 	if toolMeta == nil || toolMeta.PatchRender == nil {
 		return m.flattenEntryWithMetaAndSymbol(role, resultText, false, toolMeta, symbolOverride)
 	}
@@ -434,7 +434,7 @@ func (m Model) flattenPatchToolBlockWithSymbol(role string, toolMeta *transcript
 			content.Lines = append(content.Lines, transcriptRenderLine{})
 		}
 		intents := ThemeForeground
-		if strings.TrimSpace(role) == "tool_error" || strings.TrimSpace(role) == "tool_patch_error" {
+		if role == RenderIntentToolError || role == RenderIntentToolPatchError {
 			intents = ErrorForeground
 		}
 		for _, chunk := range splitLines(wrapTextForViewport(trimmedResult, max(1, renderWidth))) {
@@ -447,7 +447,7 @@ func (m Model) flattenPatchToolBlockWithSymbol(role string, toolMeta *transcript
 	return m.flattenEntryContent(role, content, renderWidth, false, true, symbolOverride)
 }
 
-func (m Model) flattenEntryPlain(role, text string) []string {
+func (m Model) flattenEntryPlain(role RenderIntent, text string) []string {
 	text = transcriptDisplayText(role, text)
 	renderWidth := m.entryRenderWidth(role, "")
 	chunks := splitLines(wrapTextForViewport(text, renderWidth))
@@ -475,8 +475,8 @@ func (m Model) flattenEntryPlain(role, text string) []string {
 	return out
 }
 
-func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []string) []string {
-	if strings.TrimSpace(role) != "user" {
+func (m Model) maybeSelectedUserBlock(entryIndex int, role RenderIntent, lines []string) []string {
+	if role != RenderIntentUser {
 		return lines
 	}
 	out := make([]string, 0, len(lines))
@@ -494,10 +494,15 @@ func (m Model) selectedUserTranscriptEntry() (int, bool) {
 	if !ok {
 		return -1, false
 	}
-	if strings.TrimSpace(m.transcript[localIndex].Role) != "user" {
+	if roleFromEntry(m.transcript[localIndex]) != TranscriptRoleUser {
 		return -1, false
 	}
 	return m.selectedTranscriptEntry, true
+}
+
+func (m Model) selectedTranscriptEntryMatches(entryIndex int) bool {
+	selectedEntry, ok := m.selectedUserTranscriptEntry()
+	return ok && selectedEntry == entryIndex
 }
 
 func (m Model) resolveDetailSelection() (int, bool) {
@@ -579,7 +584,7 @@ func padRenderedLineToWidth(line string, width int) string {
 	return line + strings.Repeat(" ", width-current)
 }
 
-func (m Model) renderEntryText(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
+func (m Model) renderEntryText(role RenderIntent, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
 	rendered, intents, wrapMode := m.renderEntryTextStage(role, text, width, toolMeta, muteText)
 	content := transcriptRenderContent{Lines: []transcriptRenderLine{{Text: rendered, Intents: intents}}, WrapMode: wrapMode}
 	content = m.applyEntrySemanticTransformStage(content)
@@ -595,11 +600,11 @@ func (m Model) renderEntryText(role, text string, width int, toolMeta *transcrip
 	return strings.Join(parts, "\n")
 }
 
-func (m Model) renderEntryTextStage(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, transcriptRenderWrapMode) {
+func (m Model) renderEntryTextStage(role RenderIntent, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, transcriptRenderWrapMode) {
 	if strings.TrimSpace(text) == "" {
 		return text, 0, transcriptRenderWrapModeViewport
 	}
-	if isThinkingRole(role) {
+	if role.IsThinking() {
 		return text, 0, transcriptRenderWrapModeViewport
 	}
 	if rendered, intents, ok := m.renderToolTextWithHighlight(role, text, toolMeta, muteText); ok {
@@ -629,7 +634,7 @@ func (m Model) wrapRenderedEntryContent(text string, width int) string {
 	return wrapTextForViewport(text, width)
 }
 
-func shouldUseMutedToolForeground(role string, toolMeta *transcript.ToolCallMeta, muteText bool) bool {
+func shouldUseMutedToolForeground(role RenderIntent, toolMeta *transcript.ToolCallMeta, muteText bool) bool {
 	return muteText &&
 		isShellPreviewRole(role) &&
 		toolMeta != nil &&
@@ -637,11 +642,11 @@ func shouldUseMutedToolForeground(role string, toolMeta *transcript.ToolCallMeta
 		toolMeta.RenderHint.Kind == transcript.ToolRenderKindPlain
 }
 
-func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent {
+func (m Model) defaultEntryStyleIntents(role RenderIntent, muteText bool) StyleIntent {
 	if muteText {
 		return Subdued
 	}
-	switch transcriptMessageStyleForRole(role) {
+	switch transcriptMessageStyleForIntent(role) {
 	case transcriptMessageStyleSuccess:
 		return SuccessForeground
 	case transcriptMessageStyleWarning:
@@ -650,12 +655,12 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 		return ErrorForeground
 	}
 	switch role {
-	case roleDeveloperFeedback:
+	case RenderIntentDeveloperFeedback:
 		return WarningForeground
-	case roleInterruption:
+	case RenderIntentInterruption:
 		return ErrorForeground
 	default:
-		if isCompactionRole(role) {
+		if role.IsCompaction() {
 			return 0
 		}
 		return ThemeForeground
@@ -666,7 +671,7 @@ func shouldDeferEntrySemanticTransform(intents StyleIntent) bool {
 	return intents.Has(Subdued) && intents.Has(SyntaxHighlighted)
 }
 
-func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.ToolCallMeta) bool {
+func shouldUseLowLevelMutedShellStyle(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta) bool {
 	if !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
 		return false
 	}
@@ -680,7 +685,7 @@ func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.To
 	return shouldFallbackToShellPreviewHint(role, text, toolMeta, hint)
 }
 
-func (m Model) renderToolTextWithHighlight(role, text string, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, bool) {
+func (m Model) renderToolTextWithHighlight(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, bool) {
 	hint, ok := resolveToolRenderHint(role, text, toolMeta)
 	if !ok || m.code == nil {
 		return "", 0, false
@@ -718,7 +723,7 @@ func (m Model) renderToolTextWithHighlight(role, text string, toolMeta *transcri
 	return rendered, intents, true
 }
 
-func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta) (*transcript.ToolRenderHint, bool) {
+func resolveToolRenderHint(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta) (*transcript.ToolRenderHint, bool) {
 	if !isToolHeadlineRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
 		return nil, false
 	}
@@ -735,7 +740,7 @@ func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta)
 	return hint, true
 }
 
-func shouldFallbackToShellPreviewHint(role, text string, toolMeta *transcript.ToolCallMeta, hint *transcript.ToolRenderHint) bool {
+func shouldFallbackToShellPreviewHint(role RenderIntent, text string, toolMeta *transcript.ToolCallMeta, hint *transcript.ToolRenderHint) bool {
 	if hint == nil || !hint.ResultOnly || !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.UsesShellRendering() {
 		return false
 	}

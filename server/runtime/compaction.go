@@ -31,7 +31,7 @@ const (
 	preciseTokenCountFailureDiagnostic = "precise_token_count_failure"
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
-	manualCompactionCarryoverHeader        = "# Last user message before compaction (work may have been done after it was sent):"
+	manualCompactionCarryoverHeader        = "# Last user message before handoff (work may have been done after it was sent):"
 	handoffDisabledByUserMessage           = "User disabled the handoff manually for now. They do not want you to hand off at this time, so please keep working or retry this tool later"
 	handoffTooEarlyMessage                 = "trigger_handoff is not enabled yet. Keep working until you receive the reminder that this tool is now enabled, then retry it."
 )

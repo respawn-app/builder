@@ -49,13 +49,14 @@ const (
 )
 
 type uiRollbackState struct {
-	phase                   uiRollbackPhase
-	ownsTranscriptMode      bool
-	candidates              []rollbackCandidate
-	selection               int
-	selectedTranscriptEntry int
-	restoreOngoingScroll    int
-	restoreScrollActive     bool
+	phase                     uiRollbackPhase
+	ownsTranscriptMode        bool
+	suppressedAlternateScroll bool
+	candidates                []rollbackCandidate
+	selection                 int
+	selectedTranscriptEntry   int
+	restoreOngoingScroll      int
+	restoreScrollActive       bool
 }
 
 type uiStatusOverlayState struct {

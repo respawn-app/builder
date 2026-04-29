@@ -27,6 +27,59 @@ func TestCommittedOngoingProjectionRenderAppendDeltaFromAppendedEntry(t *testing
 	}
 }
 
+func TestCommittedOngoingProjectorCachesByRevisionAndWidth(t *testing.T) {
+	var projector CommittedOngoingProjector
+	entries := []TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	key := CommittedOngoingProjectionKey{Revision: 7, Width: 80, Theme: "dark", EntryCount: len(entries)}
+
+	initial := projector.Project(entries, key)
+	entries[0].Text = "changed"
+	sameKey := projector.Project(entries, key)
+	if rendered := sameKey.Render(TranscriptDivider); !strings.Contains(rendered, "seed") || strings.Contains(rendered, "changed") {
+		t.Fatalf("expected unchanged revision/width to reuse cached projection, got %q", rendered)
+	}
+
+	key.Revision = 8
+	updated := projector.Project(entries, key)
+	if rendered := updated.Render(TranscriptDivider); !strings.Contains(rendered, "changed") || strings.Contains(rendered, "seed") {
+		t.Fatalf("expected advanced revision to rebuild projection, got %q", rendered)
+	}
+	if initial.Render(TranscriptDivider) == updated.Render(TranscriptDivider) {
+		t.Fatalf("expected projection to change after revision advance")
+	}
+}
+
+func TestCommittedOngoingProjectorDoesNotCacheWithoutRevision(t *testing.T) {
+	var projector CommittedOngoingProjector
+	entries := []TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	key := CommittedOngoingProjectionKey{Width: 80, Theme: "dark", EntryCount: len(entries)}
+
+	_ = projector.Project(entries, key)
+	entries[0].Text = "changed"
+	updated := projector.Project(entries, key)
+	if rendered := updated.Render(TranscriptDivider); !strings.Contains(rendered, "changed") || strings.Contains(rendered, "seed") {
+		t.Fatalf("expected revisionless projection to rebuild, got %q", rendered)
+	}
+}
+
+func TestCommittedOngoingProjectorPreservesBaseOffset(t *testing.T) {
+	var projector CommittedOngoingProjector
+	entries := []TranscriptEntry{{Role: "user", Text: "prompt"}, {Role: "assistant", Text: "answer"}}
+	projection := projector.Project(entries, CommittedOngoingProjectionKey{
+		Revision:   3,
+		Width:      80,
+		BaseOffset: 42,
+		EntryCount: len(entries),
+	})
+
+	if len(projection.Blocks) != 2 {
+		t.Fatalf("expected two projection blocks, got %#v", projection.Blocks)
+	}
+	if projection.Blocks[0].EntryIndex != 42 || projection.Blocks[1].EntryIndex != 43 {
+		t.Fatalf("expected absolute entry indices from base offset, got %#v", projection.Blocks)
+	}
+}
+
 func TestCommittedOngoingProjectionRenderAppendDeltaFromAssistantCommentaryContinuation(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "Decision: keep", Phase: llm.MessagePhaseCommentary})

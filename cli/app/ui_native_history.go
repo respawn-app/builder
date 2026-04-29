@@ -27,8 +27,8 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.sequenceNativeStreamingScrollback(m.emitCurrentNativeScrollbackState(false))
 	}
 
-	projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
 	committedCount := len(committedEntries)
+	projection := m.nativeCommittedProjection(committedEntries)
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
 		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
 		return m.sequenceNativeStreamingScrollback(nil)
@@ -106,7 +106,7 @@ func (m *uiModel) canFinalizeNativeStreamingCommit(committedEntries []tui.Transc
 		return false
 	}
 	newEntries := committedEntries[previousCommittedCount:]
-	return len(newEntries) > 0 && strings.TrimSpace(newEntries[0].Role) == "assistant" && strings.TrimSpace(newEntries[0].Text) == strings.TrimSpace(m.nativeStreamingText)
+	return len(newEntries) > 0 && newEntries[0].Role == tui.TranscriptRoleAssistant && strings.TrimSpace(newEntries[0].Text) == strings.TrimSpace(m.nativeStreamingText)
 }
 
 func (m *uiModel) shouldEmitNativeHistory() bool {
@@ -126,6 +126,7 @@ func (m *uiModel) nativeReplayRenderWidth() int {
 func (m *uiModel) resetNativeHistoryState() {
 	m.nativeFlushedEntryCount = 0
 	m.nativeHistoryReplayed = false
+	m.nativeCommittedProjector = tui.CommittedOngoingProjector{}
 	m.nativeProjection = tui.TranscriptProjection{}
 	m.nativeProjectionBaseOffset = 0
 	m.nativeRenderedProjection = tui.TranscriptProjection{}
@@ -306,9 +307,10 @@ func (m *uiModel) emitNativeProjectionLinesAfterEntry(projection tui.TranscriptP
 	if entryIndex < 0 {
 		entryIndex = 0
 	}
+	startAfter := m.transcriptBaseOffset + entryIndex
 	startBlock := -1
 	for idx, block := range projection.Blocks {
-		if block.EntryIndex >= entryIndex+1 {
+		if block.EntryIndex > startAfter {
 			startBlock = idx
 			break
 		}
@@ -628,12 +630,15 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
 	}
-	if entryIndex < 0 || entryIndex >= len(m.transcriptEntries) {
+	localIndex := entryIndex - m.transcriptBaseOffset
+	if localIndex < 0 || localIndex >= len(m.transcriptEntries) {
 		return nil
 	}
-	projection := nativeCommittedProjection(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
-	rawSnapshot := renderNativeCommittedSnapshot(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
+	entries := m.transcriptEntries[:localIndex+1]
+	projection := m.nativeCommittedProjectionForEntries(entries)
+	rawSnapshot := projection.Render(tui.TranscriptDivider)
 	m.nativeRenderedProjection = projection
+	m.nativeRenderedBaseOffset = m.transcriptBaseOffset
 	m.nativeRenderedSnapshot = rawSnapshot
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return tea.ClearScreen
@@ -779,39 +784,28 @@ func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {
 }
 
 func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
-	if width <= 0 {
-		width = 120
-	}
-	model := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
-	next, _ := model.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
-	if casted, ok := next.(tui.Model); ok {
-		model = casted
-	}
-	next, _ = model.Update(tui.SetConversationMsg{Entries: entries})
-	if casted, ok := next.(tui.Model); ok {
-		model = casted
-	}
-	return renderStyledNativeProjection(model.CommittedOngoingProjection(), theme, width)
+	return renderStyledNativeProjection(tui.ProjectCommittedOngoingTranscript(entries, theme, width), theme, width)
 }
 
 func renderNativeCommittedSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
 	return tui.RenderCommittedOngoingSnapshot(entries, theme, width)
 }
 
-func nativeCommittedProjection(entries []tui.TranscriptEntry, theme string, width int) tui.TranscriptProjection {
-	if width <= 0 {
-		width = 120
+func (m *uiModel) nativeCommittedProjection(entries []tui.TranscriptEntry) tui.TranscriptProjection {
+	if m == nil {
+		return tui.ProjectCommittedOngoingTranscript(entries, "", 0)
 	}
-	model := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
-	next, _ := model.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
-	if casted, ok := next.(tui.Model); ok {
-		model = casted
-	}
-	next, _ = model.Update(tui.SetConversationMsg{Entries: entries})
-	if casted, ok := next.(tui.Model); ok {
-		model = casted
-	}
-	return model.CommittedOngoingProjection()
+	return m.nativeCommittedProjector.Project(entries, tui.CommittedOngoingProjectionKey{
+		Revision:   m.transcriptRevision,
+		Width:      m.nativeReplayRenderWidth(),
+		Theme:      m.theme,
+		BaseOffset: m.transcriptBaseOffset,
+		EntryCount: len(entries),
+	})
+}
+
+func (m *uiModel) nativeCommittedProjectionForEntries(entries []tui.TranscriptEntry) tui.TranscriptProjection {
+	return m.nativeCommittedProjection(committedTranscriptEntriesForApp(entries))
 }
 
 func renderStyledNativeProjection(projection tui.TranscriptProjection, theme string, width int) string {

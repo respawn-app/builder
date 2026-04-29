@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -12,15 +13,17 @@ import (
 	"builder/shared/serverapi"
 )
 
-func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
+func TestStartSessionActivityEventsResubscribesFromLastSequenceAfterStreamGap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "first"}}, {err: serverapi.ErrStreamGap}}}
-	resubscribed := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}}}}
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 41, Kind: clientui.EventAssistantDelta, AssistantDelta: "first"}}, {err: serverapi.ErrStreamGap}}}
+	resubscribed := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 42, Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}}}}
 	remaining := []serverapi.SessionActivitySubscription{resubscribed}
+	var requestedAfter uint64
 
-	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+	events, stop := startSessionActivityEvents(ctx, initial, func(_ context.Context, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
+		requestedAfter = afterSequence
 		if len(remaining) == 0 {
 			return nil, context.Canceled
 		}
@@ -35,17 +38,64 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 		t.Fatalf("unexpected initial event: %+v", first)
 	}
 
-	rehydrate := waitSessionActivityEvent(t, events)
-	if rehydrate.Kind != clientui.EventConversationUpdated {
-		t.Fatalf("expected synthetic conversation update after resubscribe, got %+v", rehydrate)
-	}
-	if rehydrate.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
-		t.Fatalf("expected stream-gap recovery cause on synthetic refresh, got %+v", rehydrate)
-	}
-
 	second := waitSessionActivityEvent(t, events)
 	if second.Kind != clientui.EventRunStateChanged || second.RunState == nil || !second.RunState.Busy {
 		t.Fatalf("unexpected resubscribed event: %+v", second)
+	}
+	if requestedAfter != 41 {
+		t.Fatalf("resubscribe cursor = %d, want 41", requestedAfter)
+	}
+}
+
+func TestStartSessionActivityEventsEmitsExplicitGapWhenCursorReplayUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 41, Kind: clientui.EventAssistantDelta, AssistantDelta: "first"}}, {err: serverapi.ErrStreamGap}}}
+	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
+		return nil, serverapi.ErrStreamGap
+	}, func() bool { return false }, nil)
+	defer stop()
+
+	first := waitSessionActivityEvent(t, events)
+	if first.Kind != clientui.EventAssistantDelta || first.AssistantDelta != "first" {
+		t.Fatalf("unexpected initial event: %+v", first)
+	}
+	gap := waitSessionActivityEvent(t, events)
+	if gap.Kind != clientui.EventStreamGap {
+		t.Fatalf("expected explicit stream-gap event, got %+v", gap)
+	}
+	if gap.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("stream-gap recovery cause = %q, want %q", gap.RecoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
+	}
+}
+
+func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithoutCursor(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{err: io.EOF}}}
+	resubscribed := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 1, Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}}}}
+	var requestedAfter []uint64
+	events, stop := startSessionActivityEvents(ctx, initial, func(_ context.Context, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
+		requestedAfter = append(requestedAfter, afterSequence)
+		return resubscribed, nil
+	}, func() bool { return false }, nil)
+	defer stop()
+
+	gap := waitSessionActivityEvent(t, events)
+	if gap.Kind != clientui.EventStreamGap {
+		t.Fatalf("expected explicit stream-gap event after initial stream drop, got %+v", gap)
+	}
+	if gap.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("stream-gap recovery cause = %q, want %q", gap.RecoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
+	}
+	if len(requestedAfter) != 1 || requestedAfter[0] != 0 {
+		t.Fatalf("resubscribe cursors = %+v, want [0]", requestedAfter)
+	}
+	live := waitSessionActivityEvent(t, events)
+	if live.Kind != clientui.EventRunStateChanged || live.RunState == nil || !live.RunState.Busy {
+		t.Fatalf("expected live event after recovery resubscribe, got %+v", live)
 	}
 }
 
@@ -53,13 +103,13 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	initialA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "a-first"}}, {err: serverapi.ErrStreamGap}}}
-	resubA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventRunStateChanged, StepID: "step-a", RunState: &clientui.RunState{Busy: true}}}}}
+	initialA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 1, Kind: clientui.EventAssistantDelta, AssistantDelta: "a-first"}}, {err: serverapi.ErrStreamGap}}}
+	resubA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 2, Kind: clientui.EventRunStateChanged, StepID: "step-a", RunState: &clientui.RunState{Busy: true}}}}}
 	remainingA := []serverapi.SessionActivitySubscription{resubA}
 
 	initialB := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "b-first"}}}}
 
-	eventsA, stopA := startSessionActivityEvents(ctx, initialA, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+	eventsA, stopA := startSessionActivityEvents(ctx, initialA, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
 		if len(remainingA) == 0 {
 			return nil, context.Canceled
 		}
@@ -68,7 +118,7 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 		return next, nil
 	}, func() bool { return false }, nil)
 	defer stopA()
-	eventsB, stopB := startSessionActivityEvents(ctx, initialB, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+	eventsB, stopB := startSessionActivityEvents(ctx, initialB, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
 		return nil, context.Canceled
 	}, func() bool { return false }, nil)
 	defer stopB()
@@ -82,13 +132,6 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 		t.Fatalf("unexpected initial event for stream B: %+v", firstB)
 	}
 
-	rehydrateA := waitSessionActivityEvent(t, eventsA)
-	if rehydrateA.Kind != clientui.EventConversationUpdated {
-		t.Fatalf("expected synthetic refresh only on stream A, got %+v", rehydrateA)
-	}
-	if rehydrateA.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
-		t.Fatalf("expected stream-gap recovery cause only on stream A, got %+v", rehydrateA)
-	}
 	secondA := waitSessionActivityEvent(t, eventsA)
 	if secondA.Kind != clientui.EventRunStateChanged || secondA.StepID != "step-a" {
 		t.Fatalf("unexpected post-resubscribe event for stream A: %+v", secondA)

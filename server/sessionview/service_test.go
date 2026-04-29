@@ -406,6 +406,83 @@ func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestServiceGetSessionTranscriptPageDormantPageCacheInvalidatesOnRename(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := appendDormantTranscriptMessages(store, 510); err != nil {
+		t.Fatalf("append transcript messages: %v", err)
+	}
+	if err := store.SetName("before rename"); err != nil {
+		t.Fatalf("set initial name: %v", err)
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
+
+	first, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 1})
+	if err != nil {
+		t.Fatalf("get first transcript page: %v", err)
+	}
+	if got := first.Transcript.SessionName; got != "before rename" {
+		t.Fatalf("first session name = %q, want before rename", got)
+	}
+
+	if err := store.SetName("after rename"); err != nil {
+		t.Fatalf("rename session: %v", err)
+	}
+	second, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 1})
+	if err != nil {
+		t.Fatalf("get second transcript page: %v", err)
+	}
+	if got := second.Transcript.SessionName; got != "after rename" {
+		t.Fatalf("cached session name = %q, want after rename", got)
+	}
+}
+
+func TestServiceGetSessionTranscriptPageDormantPageCacheInvalidatesOnRevisionBoundary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := appendDormantTranscriptMessages(store, 510); err != nil {
+		t.Fatalf("append transcript messages: %v", err)
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
+
+	first, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 1})
+	if err != nil {
+		t.Fatalf("get first transcript page: %v", err)
+	}
+	if got := first.Transcript.TotalEntries; got != 510 {
+		t.Fatalf("first total entries = %d, want 510", got)
+	}
+
+	if _, err := store.AppendEvent("step-extra", "message", llm.Message{Role: llm.RoleAssistant, Content: "line 510", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append revision boundary message: %v", err)
+	}
+	second, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 0, Limit: 1})
+	if err != nil {
+		t.Fatalf("get second transcript page: %v", err)
+	}
+	if got := second.Transcript.TotalEntries; got != 511 {
+		t.Fatalf("cached total entries = %d, want 511", got)
+	}
+	if second.Transcript.Revision <= first.Transcript.Revision {
+		t.Fatalf("revision did not advance: first=%d second=%d", first.Transcript.Revision, second.Transcript.Revision)
+	}
+}
+
+func appendDormantTranscriptMessages(store *session.Store, count int) error {
+	for i := 0; i < count; i++ {
+		if _, err := store.AppendEvent("step-seed", "message", llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("line %d", i), Phase: llm.MessagePhaseFinal}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

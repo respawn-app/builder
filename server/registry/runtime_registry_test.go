@@ -102,7 +102,7 @@ func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 	}
 	defer func() { _ = sub.Close() }()
 
-	for i := 0; i <= sessionActivityBufferSize; i++ {
+	for i := 0; i <= sessionActivityBufferSize+1; i++ {
 		registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated})
 	}
 
@@ -120,6 +120,78 @@ func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistryReplaysSessionActivityFromCursor(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventRunStateChanged, StepID: "step-2"})
+
+	sub, err := registry.SubscribeSessionActivityFrom(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 1})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivityFrom: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	evt, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next replay: %v", err)
+	}
+	if evt.Sequence != 2 || evt.StepID != "step-2" {
+		t.Fatalf("replay event = %+v, want sequence 2 step-2", evt)
+	}
+}
+
+func TestRuntimeRegistryDeliversReplayBeforePostSubscribeLiveEvents(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventRunStateChanged, StepID: "step-2"})
+
+	sub, err := registry.SubscribeSessionActivityFrom(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 1})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivityFrom: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-3"})
+
+	replay, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next replay: %v", err)
+	}
+	live, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next live: %v", err)
+	}
+	if replay.Sequence != 2 || replay.StepID != "step-2" {
+		t.Fatalf("replay event = %+v, want sequence 2 step-2", replay)
+	}
+	if live.Sequence != 3 || live.StepID != "step-3" {
+		t.Fatalf("live event = %+v, want sequence 3 step-3", live)
+	}
+}
+
+func TestRuntimeRegistryRejectsExpiredSessionActivityCursor(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	for i := 0; i <= sessionActivityBufferSize+1; i++ {
+		registry.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated})
+	}
+
+	if _, err := registry.SubscribeSessionActivityFrom(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1", AfterSequence: 1}); !errors.Is(err, serverapi.ErrStreamGap) {
+		t.Fatalf("expected stream gap for expired cursor, got %v", err)
+	}
+}
+
 func TestRuntimeRegistryRejectsInactiveSessionActivityStreamWithUnavailableError(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	if _, err := registry.SubscribeSessionActivity(context.Background(), "missing-session"); !errors.Is(err, serverapi.ErrStreamUnavailable) {
@@ -128,7 +200,10 @@ func TestRuntimeRegistryRejectsInactiveSessionActivityStreamWithUnavailableError
 }
 
 func TestRuntimeRegistryNormalizesSessionActivitySubscriptionFailures(t *testing.T) {
-	sub := newSessionActivityHub().subscribe()
+	sub, err := newSessionActivityHub().subscribe(0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	sub.closeWithError(errors.New("writer failed"))
 	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrStreamFailed) {
 		t.Fatalf("expected stream failed error, got %v", err)
@@ -136,7 +211,10 @@ func TestRuntimeRegistryNormalizesSessionActivitySubscriptionFailures(t *testing
 }
 
 func TestRuntimeRegistryPassesThroughSessionActivityEOF(t *testing.T) {
-	sub := newSessionActivityHub().subscribe()
+	sub, err := newSessionActivityHub().subscribe(0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	sub.closeWithError(io.EOF)
 	if _, err := sub.Next(context.Background()); !errors.Is(err, io.EOF) {
 		t.Fatalf("expected EOF, got %v", err)
@@ -144,7 +222,10 @@ func TestRuntimeRegistryPassesThroughSessionActivityEOF(t *testing.T) {
 }
 
 func TestRuntimeRegistryPassesThroughSessionActivityContextCanceled(t *testing.T) {
-	sub := newSessionActivityHub().subscribe()
+	sub, err := newSessionActivityHub().subscribe(0)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := sub.Next(ctx); !errors.Is(err, context.Canceled) {

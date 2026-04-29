@@ -2,6 +2,7 @@ package app
 
 import (
 	"builder/cli/app/commands"
+	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -578,7 +579,7 @@ func TestDisconnectedEnterAppendsOperatorFeedbackWhenRuntimeAppendFails(t *testi
 		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
 	}
 	entry := updated.transcriptEntries[0]
-	if entry.Role != string(transcript.EntryRoleDeveloperErrorFeedback) || entry.Text != runtimeDisconnectedStatusMessage {
+	if entry.Role != tui.TranscriptRoleDeveloperErrorFeedback || entry.Text != runtimeDisconnectedStatusMessage {
 		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
 	}
 	if client.submitText != "" {
