@@ -154,7 +154,7 @@ func terminalCursorPlaceSequence(placement uiTerminalCursorPlacement) string {
 		sequence += xansi.CursorUp(rowsUp)
 	}
 	if placement.CursorCol > 0 {
-		sequence += xansi.CursorRight(placement.CursorCol)
+		sequence += xansi.CursorForward(placement.CursorCol)
 	}
 	return sequence
 }

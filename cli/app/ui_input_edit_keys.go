@@ -10,6 +10,7 @@ type uiSharedInputEditActions struct {
 	Backspace          func() bool
 	DeleteForward      func() bool
 	DeleteBackwardWord func() bool
+	DeleteForwardWord  func() bool
 	KillToLineStart    func() bool
 	KillToLineEnd      func() bool
 	Yank               func() bool
@@ -51,7 +52,7 @@ func handleSharedInputEditKeyForGOOS(msg tea.KeyMsg, actions uiSharedInputEditAc
 		return true
 	case tea.KeyDelete:
 		if msg.Alt {
-			runInputEditAction(actions.DeleteBackwardWord)
+			runInputEditAction(actions.DeleteForwardWord)
 		} else {
 			runInputEditAction(actions.DeleteForward)
 		}

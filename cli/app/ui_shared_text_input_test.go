@@ -71,6 +71,20 @@ func TestUISharedTextInputForwardDeleteUsesSharedEditor(t *testing.T) {
 	}
 }
 
+func TestUISharedTextInputAltDeleteDeletesForwardWord(t *testing.T) {
+	input := newUISharedTextInput("alpha beta gamma")
+	input.Focus()
+	input.SetPosition(len([]rune("alpha ")))
+
+	input.Update(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+	if got := input.Value(); got != "alpha  gamma" {
+		t.Fatalf("value after alt+delete = %q", got)
+	}
+	if got, want := input.Position(), len([]rune("alpha ")); got != want {
+		t.Fatalf("cursor after alt+delete = %d, want %d", got, want)
+	}
+}
+
 func TestUISharedTextInputDeleteCurrentLineUsesSharedPolicy(t *testing.T) {
 	input := newUISharedTextInput("project name")
 	input.Focus()
@@ -113,7 +127,7 @@ func TestStartupSharedTextInputMasksAndRendersPlaceholder(t *testing.T) {
 	}
 
 	placeholderInput := newUISharedTextInput("")
-	placeholderInput.placeholder = "project name"
+	placeholderInput.SetPlaceholder("project name")
 	placeholder := xansi.Strip(renderStartupSharedTextInput(16, 8, "dark", placeholderInput, "› ", true))
 	if !strings.Contains(placeholder, "› project name") {
 		t.Fatalf("startup input missing placeholder: %q", placeholder)

@@ -64,6 +64,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		Backspace:          m.backspaceInput,
 		DeleteForward:      m.deleteForwardInput,
 		DeleteBackwardWord: m.deleteBackwardWordInput,
+		DeleteForwardWord:  m.deleteForwardWordInput,
 		KillToLineStart:    m.killInputToLineStart,
 		KillToLineEnd:      m.killInputToLineEnd,
 		Yank:               m.yankInput,

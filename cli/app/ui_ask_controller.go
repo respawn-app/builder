@@ -121,6 +121,7 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		Backspace:          m.backspaceAskInput,
 		DeleteForward:      m.deleteForwardAskInput,
 		DeleteBackwardWord: m.deleteBackwardWordAskInput,
+		DeleteForwardWord:  m.deleteForwardWordAskInput,
 		KillToLineStart:    m.killAskInputToLineStart,
 		KillToLineEnd:      m.killAskInputToLineEnd,
 		Yank:               m.yankAskInput,
