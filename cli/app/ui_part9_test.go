@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	tea "github.com/charmbracelet/bubbletea"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -368,9 +369,8 @@ func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *tes
 			t.Fatal("did not expect standalone transcript help section")
 		}
 		for _, entry := range section.Entries {
-			joined := strings.Join(entry.Bindings, " | ")
-			if strings.Contains(joined, "PgUp | PgDn") {
-				t.Fatalf("did not expect repeated transcript page binding in %q", joined)
+			if slices.Equal(entry.Bindings, []string{"PgUp", "PgDn"}) {
+				t.Fatalf("did not expect split transcript page binding: %#v", entry.Bindings)
 			}
 		}
 	}
@@ -388,7 +388,7 @@ func assertHelpEntryBindings(t *testing.T, sections []uiHelpSection, description
 			if entry.Description != description {
 				continue
 			}
-			if strings.Join(entry.Bindings, "\x00") != strings.Join(want, "\x00") {
+			if !slices.Equal(entry.Bindings, want) {
 				t.Fatalf("bindings for %q = %#v, want %#v", description, entry.Bindings, want)
 			}
 			return
