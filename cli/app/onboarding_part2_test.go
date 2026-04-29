@@ -75,6 +75,22 @@ func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
 	}
 }
 
+func TestOnboardingInputCursorRowTracksWrappedSharedTextInput(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+	model.input = newUISharedTextInput("alpha beta gamma")
+	model.input.Focus()
+
+	content := model.buildContent(8)
+	rendered := renderEditableInputField(8, 0, model.input.renderSpec("> ", true))
+	if !rendered.Cursor.Visible || rendered.Cursor.Row < 1 {
+		t.Fatalf("expected wrapped input cursor below first row, cursor=%+v lines=%#v", rendered.Cursor, rendered.Lines)
+	}
+	if got, want := content.cursorRow, rendered.Cursor.Row; got != want {
+		t.Fatalf("content cursor row = %d, want %d", got, want)
+	}
+}
+
 func TestOnboardingSpinnerTickDoesNotRescheduleOutsideLoadingOrFinalize(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.state.imports.pending = false
