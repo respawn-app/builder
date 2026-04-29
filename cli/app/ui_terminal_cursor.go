@@ -2,7 +2,6 @@ package app
 
 import (
 	"io"
-	"strings"
 	"sync"
 
 	xansi "github.com/charmbracelet/x/ansi"
@@ -276,7 +275,7 @@ func terminalCursorControlSequenceInvalidatesPlacement(sequence string, parser *
 	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'f':
 		return true
 	case 'h', 'l':
-		return strings.Contains(sequence, "?1049")
+		return sequence == xansi.SetAltScreenSaveCursorMode || sequence == xansi.ResetAltScreenSaveCursorMode
 	default:
 		return false
 	}
