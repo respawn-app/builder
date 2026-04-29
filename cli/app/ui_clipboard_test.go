@@ -451,7 +451,7 @@ func TestHelpSectionsIncludeClipboardImagePasteEntry(t *testing.T) {
 			if entry.Description != "paste a clipboard screenshot as a file path" {
 				continue
 			}
-			if len(entry.Bindings) != 2 || entry.Bindings[0] != "Ctrl + V" || entry.Bindings[1] != "Ctrl + D" {
+			if len(entry.Bindings) != 1 || entry.Bindings[0] != "Ctrl + V/D" {
 				t.Fatalf("unexpected clipboard paste bindings: %#v", entry.Bindings)
 			}
 			return

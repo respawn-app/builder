@@ -359,6 +359,34 @@ func TestF1TogglesHelp(t *testing.T) {
 	}
 }
 
+func TestHelpMenuOmitsStandaloneTranscriptSectionAndCompactsBindings(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 30
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	updated := next.(*uiModel)
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "\nTranscript\n") {
+		t.Fatalf("did not expect standalone transcript help section, got %q", plain)
+	}
+	if strings.Contains(plain, "PgUp | PgDn") {
+		t.Fatalf("did not expect repeated transcript page binding, got %q", plain)
+	}
+	if !strings.Contains(plain, "F1 / ? (empty) / Alt/Cmd + /") {
+		t.Fatalf("expected compact help-toggle binding, got %q", plain)
+	}
+	if !strings.Contains(plain, "Alt/Ctrl + ←/→") {
+		t.Fatalf("expected compact word-movement binding, got %q", plain)
+	}
+	if !strings.Contains(plain, "Ctrl/Cmd + Backspace") {
+		t.Fatalf("expected compact delete-line binding, got %q", plain)
+	}
+}
+
 func TestAltSlashTogglesHelp(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
