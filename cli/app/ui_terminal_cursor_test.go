@@ -118,7 +118,7 @@ func TestTerminalCursorWriterPassesThroughRendererControlWrites(t *testing.T) {
 	if _, err := writer.Write([]byte("frame")); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
-	for _, sequence := range []string{xansi.SetAltScreenSaveCursorMode, xansi.EraseEntireScreen, xansi.CursorHomePosition} {
+	for _, sequence := range []string{xansi.SetModeAltScreenSaveCursor, xansi.EraseEntireScreen, xansi.CursorHomePosition} {
 		out.Reset()
 		if _, err := writer.Write([]byte(sequence)); err != nil {
 			t.Fatalf("write control sequence: %v", err)
