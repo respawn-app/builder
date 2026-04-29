@@ -549,7 +549,7 @@ func TestAskFreeformCtrlUEditingMatchesMainInput(t *testing.T) {
 		}
 		return
 	}
-	if updated.ask.input != "rent\nbottom" {
+	if updated.ask.input != "top\nrent\nbottom" {
 		t.Fatalf("expected ctrl+u to kill to ask line start, got %q", updated.ask.input)
 	}
 	if updated.ask.inputCursor != len([]rune("top\n")) {
