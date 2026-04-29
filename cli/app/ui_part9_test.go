@@ -359,6 +359,44 @@ func TestF1TogglesHelp(t *testing.T) {
 	}
 }
 
+func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	sections := m.helpSections()
+
+	for _, section := range sections {
+		if section.Title == "Transcript" {
+			t.Fatal("did not expect standalone transcript help section")
+		}
+		for _, entry := range section.Entries {
+			joined := strings.Join(entry.Bindings, " | ")
+			if strings.Contains(joined, "PgUp | PgDn") {
+				t.Fatalf("did not expect repeated transcript page binding in %q", joined)
+			}
+		}
+	}
+
+	assertHelpEntryBindings(t, sections, "toggle keyboard help", []string{"F1 / ? (empty) / Alt/Cmd + /"})
+	assertHelpEntryBindings(t, sections, "paste a clipboard screenshot as a file path", []string{"Ctrl + V/D"})
+	assertHelpEntryBindings(t, sections, "delete the current input line", deleteCurrentLineBindings())
+	assertHelpEntryBindings(t, sections, "move the cursor by word", []string{"Alt/Ctrl + ←/→"})
+}
+
+func assertHelpEntryBindings(t *testing.T, sections []uiHelpSection, description string, want []string) {
+	t.Helper()
+	for _, section := range sections {
+		for _, entry := range section.Entries {
+			if entry.Description != description {
+				continue
+			}
+			if strings.Join(entry.Bindings, "\x00") != strings.Join(want, "\x00") {
+				t.Fatalf("bindings for %q = %#v, want %#v", description, entry.Bindings, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing help entry %q", description)
+}
+
 func TestAltSlashTogglesHelp(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
