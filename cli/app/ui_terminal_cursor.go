@@ -2,6 +2,7 @@ package app
 
 import (
 	"io"
+	"strings"
 	"sync"
 
 	xansi "github.com/charmbracelet/x/ansi"
@@ -164,14 +165,34 @@ type uiTerminalCursorWriter struct {
 	state *uiTerminalCursorState
 }
 
+type uiTerminalCursorFileWriter struct {
+	uiTerminalCursorWriter
+	file terminalCursorFile
+}
+
+type terminalCursorFile interface {
+	io.ReadWriteCloser
+	Fd() uintptr
+}
+
 func newUITerminalCursorWriter(out io.Writer, state *uiTerminalCursorState) io.Writer {
 	if out == nil || state == nil {
 		return out
 	}
-	return uiTerminalCursorWriter{out: out, state: state}
+	writer := uiTerminalCursorWriter{out: out, state: state}
+	if file, ok := out.(terminalCursorFile); ok {
+		return uiTerminalCursorFileWriter{uiTerminalCursorWriter: writer, file: file}
+	}
+	return writer
 }
 
 func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
+	if passthrough, invalidatesPlacement := terminalCursorWriterControlWrite(p); passthrough {
+		if invalidatesPlacement {
+			w.state.discardPlacedCursor()
+		}
+		return w.out.Write(p)
+	}
 	shouldPreserveCursor := w.state.hasPlacement()
 	if shouldPreserveCursor {
 		if prefix := w.state.restoreRendererAnchor(); prefix != "" {
@@ -192,4 +213,71 @@ func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func (w uiTerminalCursorFileWriter) Read(p []byte) (int, error) {
+	return w.file.Read(p)
+}
+
+func (w uiTerminalCursorFileWriter) Close() error {
+	// Bubble Tea only needs Fd() for output TTY detection. Closing stdout/stderr
+	// through this adapter would be surprising, so keep ownership with caller.
+	return nil
+}
+
+func (w uiTerminalCursorFileWriter) Fd() uintptr {
+	return w.file.Fd()
+}
+
+func (s *uiTerminalCursorState) discardPlacedCursor() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.previous = uiTerminalCursorPlacement{}
+	s.placed = false
+}
+
+func terminalCursorWriterControlWrite(p []byte) (bool, bool) {
+	if len(p) == 0 {
+		return false, false
+	}
+	parser := xansi.GetParser()
+	defer xansi.PutParser(parser)
+
+	input := string(p)
+	state := byte(0)
+	invalidatesPlacement := false
+	for len(input) > 0 {
+		_, width, n, newState := xansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
+		if n <= 0 {
+			return false, false
+		}
+		sequence := input[:n]
+		state = newState
+		input = input[n:]
+		if width > 0 {
+			return false, false
+		}
+		if terminalCursorControlSequenceInvalidatesPlacement(sequence, parser) {
+			invalidatesPlacement = true
+		}
+	}
+	return true, invalidatesPlacement
+}
+
+func terminalCursorControlSequenceInvalidatesPlacement(sequence string, parser *xansi.Parser) bool {
+	if sequence == "\r" || sequence == "\n" {
+		return true
+	}
+	command := xansi.Cmd(parser.Command())
+	switch command.Final() {
+	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'f':
+		return true
+	case 'h', 'l':
+		return strings.Contains(sequence, "?1049")
+	default:
+		return false
+	}
 }

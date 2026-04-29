@@ -3,6 +3,7 @@ package app
 import (
 	"builder/cli/app/commands"
 	"builder/shared/config"
+	"io"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -85,11 +86,19 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 }
 
 func mainUIProgramOptions(active config.Settings, terminalCursor *uiTerminalCursorState) []tea.ProgramOption {
+	return mainUIProgramOptionsWithOutput(active, terminalCursor, os.Stdout)
+}
+
+func mainUIProgramOptionsWithOutput(active config.Settings, terminalCursor *uiTerminalCursorState, output io.Writer) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithFilter(terminalCursorProgramFilter(terminalCursor))}
 	if terminalCursor != nil {
-		options = append(options, tea.WithOutput(newUITerminalCursorWriter(os.Stdout, terminalCursor)))
+		options = append(options, tea.WithOutput(mainUIProgramOutputWriter(terminalCursor, output)))
 	}
 	return options
+}
+
+func mainUIProgramOutputWriter(terminalCursor *uiTerminalCursorState, output io.Writer) io.Writer {
+	return newUITerminalCursorWriter(output, terminalCursor)
 }
 
 func extractUITransition(model tea.Model) UITransition {
