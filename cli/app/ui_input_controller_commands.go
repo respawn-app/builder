@@ -118,7 +118,10 @@ func (m *uiModel) backTeleportInput() string {
 }
 
 func (m *uiModel) latestAssistantFinalAnswer() string {
-	return m.runtimeStatus().LastCommittedAssistantFinalAnswer
+	if answer := strings.TrimSpace(m.runtimeStatus().LastCommittedAssistantFinalAnswer); answer != "" {
+		return m.runtimeStatus().LastCommittedAssistantFinalAnswer
+	}
+	return localLastCommittedAssistantFinalAnswer(m.transcriptEntries)
 }
 
 func (m *uiModel) hasAssistantFinalAnswerToCopy() bool {

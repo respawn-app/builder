@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/tools/askquestion"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -91,6 +93,68 @@ func TestCopySlashCommandCopiesLatestAssistantFinalAnswer(t *testing.T) {
 	}
 	if followCmd == nil {
 		t.Fatal("expected transient-status clear command after successful copy")
+	}
+}
+
+func TestCopySlashCommandCopiesLatestAssistantFinalAnswerAfterReviewerFeedback(t *testing.T) {
+	copier := &stubClipboardTextCopier{}
+	m := newProjectedStaticUIModel(WithUIClipboardTextCopier(copier))
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "copy after review", Phase: llm.MessagePhaseFinal},
+		{Role: "developer_feedback", Text: "reviewer suggestions", MessageType: llm.MessageTypeReviewerFeedback},
+	}
+	m.input = "/copy"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard copy command")
+	}
+	next, _ = updated.Update(cmd())
+	if copier.calls != 1 {
+		t.Fatalf("expected one clipboard copy, got %d", copier.calls)
+	}
+	if copier.text != "copy after review" {
+		t.Fatalf("copied text = %q, want %q", copier.text, "copy after review")
+	}
+}
+
+func TestCopySlashCommandFallsBackToVisibleCommittedFinalWhenRuntimeStatusIsStale(t *testing.T) {
+	copier := &stubClipboardTextCopier{}
+	client := &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIClipboardTextCopier(copier))
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		CommittedEntryCount:        1,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "visible final",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}})
+	updated := next.(*uiModel)
+	if got := localLastCommittedAssistantFinalAnswer(updated.transcriptEntries); got != "visible final" {
+		t.Fatalf("test setup expected visible final answer fallback, got %q entries=%+v", got, updated.transcriptEntries)
+	}
+	if strings.TrimSpace(updated.runtimeStatus().LastCommittedAssistantFinalAnswer) != "" {
+		t.Fatalf("test setup expected stale empty runtime status, got %q", updated.runtimeStatus().LastCommittedAssistantFinalAnswer)
+	}
+	updated.input = "/copy"
+
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard copy command")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	if copier.calls != 1 {
+		t.Fatalf("expected one clipboard copy, got %d msgs=%+v", copier.calls, msgs)
+	}
+	if copier.text != "visible final" {
+		t.Fatalf("copied text = %q, want %q", copier.text, "visible final")
 	}
 }
 
