@@ -118,7 +118,7 @@ func TestTerminalCursorWriterPassesThroughRendererControlWrites(t *testing.T) {
 	if _, err := writer.Write([]byte("frame")); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
-	for _, sequence := range []string{xansi.SetModeAltScreenSaveCursor, xansi.EraseEntireScreen, xansi.CursorHomePosition} {
+	for _, sequence := range []string{xansi.EraseEntireScreen, xansi.CursorHomePosition} {
 		out.Reset()
 		if _, err := writer.Write([]byte(sequence)); err != nil {
 			t.Fatalf("write control sequence: %v", err)
@@ -126,6 +126,33 @@ func TestTerminalCursorWriterPassesThroughRendererControlWrites(t *testing.T) {
 		if got := out.String(); got != sequence {
 			t.Fatalf("control write should pass through unchanged, got %q want %q", got, sequence)
 		}
+	}
+}
+
+func TestTerminalCursorWriterRestoresAnchorBeforeAltScreenEnter(t *testing.T) {
+	state := newUITerminalCursorState()
+	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
+
+	var out bytes.Buffer
+	writer := newUITerminalCursorWriter(&out, state)
+	if _, err := writer.Write([]byte("frame")); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+
+	out.Reset()
+	if _, err := writer.Write([]byte(xansi.SetModeAltScreenSaveCursor)); err != nil {
+		t.Fatalf("write alt-screen enter: %v", err)
+	}
+	if got, want := out.String(), xansi.CursorDown(5)+"\r"+xansi.SetModeAltScreenSaveCursor; got != want {
+		t.Fatalf("alt-screen enter should save renderer anchor, got %q want %q", got, want)
+	}
+
+	out.Reset()
+	if _, err := writer.Write([]byte("next")); err != nil {
+		t.Fatalf("write next: %v", err)
+	}
+	if strings.HasPrefix(out.String(), xansi.CursorDown(5)+"\r") {
+		t.Fatalf("next frame should not restore from pre-alt-screen placement, got %q", out.String())
 	}
 }
 
