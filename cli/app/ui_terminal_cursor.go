@@ -98,15 +98,33 @@ func (s *uiTerminalCursorState) placeCursor() string {
 	if s == nil {
 		return ""
 	}
+	placement, suffix := s.placeCursorPlan()
+	s.commitPlacedCursor(placement)
+	return suffix
+}
+
+func (s *uiTerminalCursorState) placeCursorPlan() (uiTerminalCursorPlacement, string) {
+	if s == nil {
+		return uiTerminalCursorPlacement{}, ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	placement := sanitizeTerminalCursorPlacement(s.latest)
+	if !placement.Visible {
+		return placement, ""
+	}
+	return placement, terminalCursorPlaceSequence(placement)
+}
+
+func (s *uiTerminalCursorState) commitPlacedCursor(placement uiTerminalCursorPlacement) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	placement = sanitizeTerminalCursorPlacement(placement)
 	s.previous = placement
 	s.placed = placement.Visible
-	if !placement.Visible {
-		return ""
-	}
-	return terminalCursorPlaceSequence(placement)
 }
 
 func sanitizeTerminalCursorPlacement(placement uiTerminalCursorPlacement) uiTerminalCursorPlacement {
@@ -118,6 +136,9 @@ func sanitizeTerminalCursorPlacement(placement uiTerminalCursorPlacement) uiTerm
 	}
 	if placement.AnchorRow < 0 {
 		placement.AnchorRow = 0
+	}
+	if !placement.AltScreen && placement.AnchorRow < placement.CursorRow {
+		placement.AnchorRow = placement.CursorRow
 	}
 	return placement
 }
@@ -204,7 +225,12 @@ func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
 			}
 		}
 		if control.invalidatesPlacement {
+			n, err := w.out.Write(p)
+			if err != nil {
+				return n, err
+			}
 			w.state.discardPlacedCursor()
+			return n, nil
 		}
 		return w.out.Write(p)
 	}
@@ -221,11 +247,13 @@ func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
 		return n, err
 	}
 	if shouldPreserveCursor || len(p) > 0 {
-		if suffix := w.state.placeCursor(); suffix != "" {
+		placement, suffix := w.state.placeCursorPlan()
+		if suffix != "" {
 			if _, err := io.WriteString(w.out, suffix); err != nil {
 				return n, err
 			}
 		}
+		w.state.commitPlacedCursor(placement)
 	}
 	return n, nil
 }
