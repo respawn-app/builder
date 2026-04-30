@@ -368,6 +368,7 @@ func (s *Store) UpdateSessionExecutionTargetByID(ctx context.Context, sessionID 
 	return nil
 }
 
+// DeleteSessionRecordByID removes a session metadata row and dependent records.
 func (s *Store) DeleteSessionRecordByID(ctx context.Context, sessionID string) error {
 	if s == nil || s.db == nil {
 		return errors.New("metadata store is required")

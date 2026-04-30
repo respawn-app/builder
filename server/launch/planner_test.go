@@ -11,12 +11,36 @@ import (
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type failingUpdateMetadataExecutionTargetStore struct {
+	base             *metadata.Store
+	updateErr        error
+	updatedSessionID string
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
+	return s.base.ResolveSessionExecutionTarget(ctx, sessionID)
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) UpdateSessionExecutionTargetByID(_ context.Context, sessionID string, _ string, _ string, _ string) error {
+	s.updatedSessionID = sessionID
+	return s.updateErr
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) DeleteSessionRecordByID(ctx context.Context, sessionID string) error {
+	return s.base.DeleteSessionRecordByID(ctx, sessionID)
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) Close() error {
+	return nil
+}
 
 func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
@@ -416,16 +440,12 @@ func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails
 	if err != nil {
 		t.Fatalf("read container before plan: %v", err)
 	}
-	updateChildExecutionTargetBeforeUpdateHook = func(childSessionID string) {
-		if err := metadataStore.DeleteSessionRecordByID(ctx, childSessionID); err != nil {
-			t.Fatalf("DeleteSessionRecordByID child before update: %v", err)
-		}
-	}
-	defer func() { updateChildExecutionTargetBeforeUpdateHook = nil }()
+	failingStore := &failingUpdateMetadataExecutionTargetStore{base: metadataStore, updateErr: session.ErrSessionNotFound}
 	planner := Planner{
-		Config:       cfg,
-		ContainerDir: containerDir,
-		StoreOptions: metadataStore.SessionStoreOptions(),
+		Config:              cfg,
+		ContainerDir:        containerDir,
+		StoreOptions:        metadataStore.SessionStoreOptions(),
+		MetadataStoreOpener: func(string) (MetadataExecutionTargetStore, error) { return failingStore, nil },
 	}
 
 	_, err = planner.PlanSession(context.Background(), SessionRequest{
@@ -435,6 +455,15 @@ func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails
 	})
 	if !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("PlanSession error = %v, want session not found from metadata target update", err)
+	}
+	if strings.TrimSpace(failingStore.updatedSessionID) == "" {
+		t.Fatal("expected child execution target update to be attempted")
+	}
+	if _, err := metadataStore.ResolveSessionExecutionTarget(ctx, failingStore.updatedSessionID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ResolveSessionExecutionTarget child after rollback error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := os.Stat(filepath.Join(containerDir, failingStore.updatedSessionID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("child session dir stat after rollback error = %v, want not exist", err)
 	}
 	afterEntries, err := os.ReadDir(containerDir)
 	if err != nil {

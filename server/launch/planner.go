@@ -21,6 +21,8 @@ import (
 	"builder/shared/toolspec"
 )
 
+type Mode string
+
 const (
 	ModeInteractive Mode = "interactive"
 	ModeHeadless    Mode = "headless"
@@ -28,18 +30,27 @@ const (
 	SubagentSessionSuffix = "subagent"
 )
 
-var updateChildExecutionTargetBeforeUpdateHook func(childSessionID string)
+// MetadataExecutionTargetStore is the metadata subset needed to copy a parent
+// session execution target into a newly created child session.
+type MetadataExecutionTargetStore interface {
+	ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error)
+	UpdateSessionExecutionTargetByID(ctx context.Context, sessionID string, workspaceID string, worktreeID string, cwdRelpath string) error
+	DeleteSessionRecordByID(ctx context.Context, sessionID string) error
+	Close() error
+}
 
-type Mode string
+// MetadataExecutionTargetStoreOpener opens metadata storage for launch planning.
+type MetadataExecutionTargetStoreOpener func(persistenceRoot string) (MetadataExecutionTargetStore, error)
 
 type Planner struct {
-	Config       config.App
-	ContainerDir string
-	ProjectID    string
-	ProjectViews client.ProjectViewClient
-	PickSession  SessionPicker
-	StoreOptions []session.StoreOption
-	ReloadConfig func() (config.App, error)
+	Config              config.App
+	ContainerDir        string
+	ProjectID           string
+	ProjectViews        client.ProjectViewClient
+	PickSession         SessionPicker
+	StoreOptions        []session.StoreOption
+	ReloadConfig        func() (config.App, error)
+	MetadataStoreOpener MetadataExecutionTargetStoreOpener
 }
 
 type SessionPicker func([]session.Summary) (SessionSelection, error)
@@ -378,11 +389,18 @@ func (p Planner) openParentSession(parentSessionID string) (*session.Store, erro
 	return parent, nil
 }
 
+func (p Planner) openMetadataStore() (MetadataExecutionTargetStore, error) {
+	if p.MetadataStoreOpener != nil {
+		return p.MetadataStoreOpener(p.Config.PersistenceRoot)
+	}
+	return metadata.Open(p.Config.PersistenceRoot)
+}
+
 func (p Planner) resolveParentExecutionTarget(ctx context.Context, parentSessionID string) (clientui.SessionExecutionTarget, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return clientui.SessionExecutionTarget{}, false, err
 	}
-	store, err := metadata.Open(p.Config.PersistenceRoot)
+	store, err := p.openMetadataStore()
 	if err != nil {
 		return clientui.SessionExecutionTarget{}, false, err
 	}
@@ -401,14 +419,11 @@ func (p Planner) updateChildExecutionTarget(ctx context.Context, childSessionID 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	store, err := metadata.Open(p.Config.PersistenceRoot)
+	store, err := p.openMetadataStore()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = store.Close() }()
-	if updateChildExecutionTargetBeforeUpdateHook != nil {
-		updateChildExecutionTargetBeforeUpdateHook(childSessionID)
-	}
 	return store.UpdateSessionExecutionTargetByID(ctx, childSessionID, target.WorkspaceID, target.WorktreeID, target.CwdRelpath)
 }
 
@@ -420,7 +435,7 @@ func (p Planner) rollbackChildSession(child *session.Store) error {
 	rollbackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var rollbackErrs []error
-	if store, err := metadata.Open(p.Config.PersistenceRoot); err == nil {
+	if store, err := p.openMetadataStore(); err == nil {
 		if err := store.DeleteSessionRecordByID(rollbackCtx, childMeta.SessionID); err != nil {
 			rollbackErrs = append(rollbackErrs, err)
 		}

@@ -236,6 +236,8 @@ func (s *Store) Dir() string {
 	return s.sessionDir
 }
 
+// RemoveDurable deletes this session's on-disk artifacts after a failed
+// creation flow and returns the store to a non-durable state.
 func (s *Store) RemoveDurable() error {
 	if s == nil {
 		return errors.New("session store is required")
