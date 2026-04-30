@@ -5,6 +5,7 @@ import (
 	"builder/shared/transcript"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -209,6 +210,7 @@ type Model struct {
 	detailLineKinds         []VisibleLineKind
 	detailLineEntryIndices  []int
 	detailEntryLineRanges   []lineRange
+	detailBlockLineRanges   []lineRange
 	detailEntryRangeOffset  int
 	detailBlocks            []detailBlockSpec
 	detailBlockLines        [][]string
@@ -527,7 +529,7 @@ func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
 		}
 		m.refreshDetailViewport()
 		if m.compactDetail {
-			m.focusCenterVisibleDetailEntry()
+			m.focusBottomVisibleDetailEntry()
 		}
 	case ModeOngoing:
 		m.mode = ModeOngoing
@@ -599,6 +601,14 @@ func (m *Model) ensureDetailSelection() {
 }
 
 func (m *Model) focusCenterVisibleDetailEntry() {
+	m.focusVisibleDetailEntry(m.viewportLines / 2)
+}
+
+func (m *Model) focusBottomVisibleDetailEntry() {
+	m.focusVisibleDetailEntry(len(m.detailLineEntryIndices) - 1)
+}
+
+func (m *Model) focusVisibleDetailEntry(anchor int) {
 	if m == nil || !m.compactDetail {
 		return
 	}
@@ -609,7 +619,6 @@ func (m *Model) focusCenterVisibleDetailEntry() {
 		m.ensureDetailSelection()
 		return
 	}
-	anchor := m.viewportLines / 2
 	if anchor >= len(m.detailLineEntryIndices) {
 		anchor = len(m.detailLineEntryIndices) - 1
 	}
@@ -1092,7 +1101,7 @@ func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelecte
 
 func (m Model) detailAtTopEdgeForSelectionSpacer() bool {
 	if m.detailBottomAnchor && !m.detailMetricsResolved {
-		return m.detailBottomOffset == 0
+		return false
 	}
 	return m.detailScroll == 0
 }
@@ -1158,6 +1167,7 @@ func (m *Model) rebuildDetailSnapshot() {
 	m.detailBlocks = m.buildDetailBlockSpecs(true)
 	m.detailBlockLines = make([][]string, len(m.detailBlocks))
 	m.detailEntryLineRanges = nil
+	m.detailBlockLineRanges = nil
 	m.detailEntryRangeOffset = m.transcriptBaseOffset
 	m.detailTotalLineCount = 0
 	m.detailMetricsResolved = false
@@ -1225,6 +1235,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 	for i := range ranges {
 		ranges[i] = lineRange{Start: -1, End: -1}
 	}
+	blockRanges := make([]lineRange, len(m.detailBlocks))
 	lineOffset := 0
 	for idx, block := range m.detailBlocks {
 		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
@@ -1233,6 +1244,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 		blockLines := m.detailBlockLinesAt(idx)
 		start := lineOffset
 		end := start + len(blockLines) - 1
+		blockRanges[idx] = lineRange{Start: start, End: end}
 		localIndex := block.entryIndex - m.transcriptBaseOffset
 		if localIndex >= 0 && localIndex < len(ranges) {
 			if ranges[localIndex].Start < 0 {
@@ -1247,6 +1259,7 @@ func (m *Model) ensureDetailMetricsResolved() {
 		lineOffset = 1
 	}
 	m.detailEntryLineRanges = ranges
+	m.detailBlockLineRanges = blockRanges
 	m.detailEntryRangeOffset = m.transcriptBaseOffset
 	m.detailTotalLineCount = lineOffset
 	m.detailMetricsResolved = true
@@ -1327,23 +1340,33 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 	if m.viewportLines <= 0 {
 		return nil, nil, nil
 	}
+	m.ensureDetailMetricsResolved()
 	end := start + m.viewportLines
 	lines := make([]string, 0, m.viewportLines)
 	kinds := make([]VisibleLineKind, 0, m.viewportLines)
 	owners := make([]int, 0, m.viewportLines)
-	lineOffset := 0
-	for idx, block := range m.detailBlocks {
+	blockRanges := m.detailBlockLineRanges
+	idx := firstDetailBlockAtOrAfterLine(blockRanges, start)
+	if idx < 0 {
+		return lines, kinds, owners
+	}
+	for ; idx < len(m.detailBlocks); idx++ {
+		blockRange := blockRanges[idx]
+		if blockRange.Start > end {
+			break
+		}
+		block := m.detailBlocks[idx]
 		if idx > 0 && transcriptRoleGroupsNeedSeparator(m.detailBlocks[idx-1].role, block.role) {
-			if lineOffset >= start && lineOffset < end {
+			separatorLine := blockRange.Start - 1
+			if separatorLine >= start && separatorLine < end {
 				lines = append(lines, detailItemSeparator)
 				kinds = append(kinds, VisibleLineContent)
 				owners = append(owners, -1)
 			}
-			lineOffset++
 		}
 		blockLines := m.detailBlockLinesAt(idx)
-		blockStart := lineOffset
-		blockEnd := blockStart + len(blockLines)
+		blockStart := blockRange.Start
+		blockEnd := blockRange.End + 1
 		if blockEnd > start && blockStart < end {
 			from := max(0, start-blockStart)
 			to := min(len(blockLines), end-blockStart)
@@ -1353,12 +1376,21 @@ func (m *Model) detailViewportFromScroll(start int) ([]string, []VisibleLineKind
 				owners = append(owners, block.entryIndex)
 			}
 		}
-		lineOffset = blockEnd
-		if lineOffset >= end {
+		if blockEnd >= end {
 			break
 		}
 	}
 	return lines, kinds, owners
+}
+
+func firstDetailBlockAtOrAfterLine(ranges []lineRange, line int) int {
+	idx := sort.Search(len(ranges), func(i int) bool {
+		return ranges[i].End >= line
+	})
+	if idx >= len(ranges) {
+		return -1
+	}
+	return idx
 }
 
 func reverseStrings(values []string) {

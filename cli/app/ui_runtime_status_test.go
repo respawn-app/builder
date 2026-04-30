@@ -140,3 +140,69 @@ func TestRuntimeStatusUsesLoopbackRuntimeSnapshot(t *testing.T) {
 		t.Fatalf("compaction count = %d, want 0", status.CompactionCount)
 	}
 }
+
+func TestRuntimeStatusUsesLiveContextUsageFromRuntimeEvents(t *testing.T) {
+	client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{
+		ContextUsage: clientui.RuntimeContextUsage{UsedTokens: 100, WindowTokens: 1_000},
+	}, sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUISessionID("session-1"))
+	if got := m.runtimeStatus().ContextUsage.UsedTokens; got != 100 {
+		t.Fatalf("initial context used tokens = %d, want 100", got)
+	}
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind: clientui.EventModelResponse,
+		ContextUsage: &clientui.RuntimeContextUsage{
+			UsedTokens:      420,
+			WindowTokens:    1_000,
+			CacheHitPercent: 25,
+		},
+	}})
+	updated := next.(*uiModel)
+	usage := updated.runtimeStatus().ContextUsage
+	if usage.UsedTokens != 420 || usage.WindowTokens != 1_000 || usage.CacheHitPercent != 25 {
+		t.Fatalf("live context usage not applied: %+v", usage)
+	}
+}
+
+func TestRuntimeStatusUsesLiveContextUsageFromNonModelResponseEvents(t *testing.T) {
+	client := &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUISessionID("session-1"))
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind: clientui.EventToolCallCompleted,
+		ContextUsage: &clientui.RuntimeContextUsage{
+			UsedTokens:   520,
+			WindowTokens: 1_000,
+		},
+	}})
+	updated := next.(*uiModel)
+	usage := updated.runtimeStatus().ContextUsage
+	if usage.UsedTokens != 520 || usage.WindowTokens != 1_000 {
+		t.Fatalf("tool event context usage not applied: %+v", usage)
+	}
+}
+
+func TestRuntimeStatusDoesNotLeakLiveContextUsageAcrossSessions(t *testing.T) {
+	client := &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUISessionID("session-1"))
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind: clientui.EventModelResponse,
+		ContextUsage: &clientui.RuntimeContextUsage{
+			UsedTokens:   420,
+			WindowTokens: 1_000,
+		},
+	}})
+	updated := next.(*uiModel)
+	if got := updated.runtimeStatus().ContextUsage.UsedTokens; got != 420 {
+		t.Fatalf("session-1 context used tokens = %d, want 420", got)
+	}
+
+	updated.sessionID = "session-2"
+	client.sessionView.SessionID = "session-2"
+	client.status.ContextUsage = clientui.RuntimeContextUsage{}
+	usage := updated.runtimeStatus().ContextUsage
+	if usage.WindowTokens != 0 || usage.UsedTokens != 0 {
+		t.Fatalf("expected zero context usage for fresh session, got %+v", usage)
+	}
+}

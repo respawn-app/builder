@@ -3,17 +3,44 @@ package launch
 import (
 	"builder/server/auth"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
+	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type failingUpdateMetadataExecutionTargetStore struct {
+	base             *metadata.Store
+	updateErr        error
+	updatedSessionID string
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
+	return s.base.ResolveSessionExecutionTarget(ctx, sessionID)
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) UpdateSessionExecutionTargetByID(_ context.Context, sessionID string, _ string, _ string, _ string) error {
+	s.updatedSessionID = sessionID
+	return s.updateErr
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) DeleteSessionRecordByID(ctx context.Context, sessionID string) error {
+	return s.base.DeleteSessionRecordByID(ctx, sessionID)
+}
+
+func (s *failingUpdateMetadataExecutionTargetStore) Close() error {
+	return nil
+}
 
 func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
@@ -29,7 +56,7 @@ func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testin
 		ContainerDir: containerDir,
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeHeadless})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeHeadless})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -65,7 +92,7 @@ func TestPlannerHeadlessUsesDefaultGPT55ModelAndOpenAIProviderInference(t *testi
 		ContainerDir: filepath.Join(cfg.PersistenceRoot, "sessions", "workspace-a"),
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeHeadless})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeHeadless})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -123,7 +150,7 @@ func TestPlannerInteractiveUsesPickerSelection(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -177,7 +204,7 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 		},
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -186,6 +213,364 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 	}
 	if projectViews.overviewCalls != 1 {
 		t.Fatalf("expected project overview to be used once, got %d", projectViews.overviewCalls)
+	}
+}
+
+func TestPlannerNewChildSessionPreservesParentWorktreeContext(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	parent, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := parent.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable parent: %v", err)
+	}
+	if err := parent.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://parent.local/v1"}); err != nil {
+		t.Fatalf("SetContinuationContext parent: %v", err)
+	}
+	if err := parent.MarkAgentsInjected(); err != nil {
+		t.Fatalf("MarkAgentsInjected parent: %v", err)
+	}
+	if err := parent.MarkModelDispatchLocked(session.LockedContract{
+		Model:        "locked-parent-model",
+		EnabledTools: []string{"shell"},
+	}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-review")
+	if err := os.MkdirAll(filepath.Join(worktreeRoot, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(ctx, metadata.WorktreeRecord{
+		ID:              "worktree-review",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(ctx, parent.Meta().SessionID, binding.WorkspaceID, "worktree-review", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID parent: %v", err)
+	}
+	if err := parent.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:                  session.WorktreeReminderModeEnter,
+		Branch:                "feature/review",
+		WorktreePath:          canonicalWorktreeRoot,
+		WorkspaceRoot:         cfg.WorkspaceRoot,
+		EffectiveCwd:          filepath.Join(canonicalWorktreeRoot, "pkg"),
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 3,
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState parent: %v", err)
+	}
+	planner := Planner{
+		Config:       cfg,
+		ContainerDir: containerDir,
+		StoreOptions: metadataStore.AuthoritativeSessionStoreOptions(),
+	}
+
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("PlanSession child: %v", err)
+	}
+	childMeta := plan.Store.Meta()
+	if childMeta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("child parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if !childMeta.AgentsInjected {
+		t.Fatal("expected child to inherit agents-injected state")
+	}
+	if childMeta.Locked == nil || childMeta.Locked.Model != "locked-parent-model" {
+		t.Fatalf("child locked contract = %+v, want parent model lock", childMeta.Locked)
+	}
+	if childMeta.Continuation == nil || childMeta.Continuation.OpenAIBaseURL != "http://parent.local/v1" {
+		t.Fatalf("child continuation = %+v, want parent continuation", childMeta.Continuation)
+	}
+	if plan.ActiveSettings.OpenAIBaseURL != "http://parent.local/v1" {
+		t.Fatalf("plan openai base url = %q, want parent continuation", plan.ActiveSettings.OpenAIBaseURL)
+	}
+	if plan.ActiveSettings.Model != "locked-parent-model" {
+		t.Fatalf("plan model = %q, want locked-parent-model", plan.ActiveSettings.Model)
+	}
+	if childMeta.WorktreeReminder == nil {
+		t.Fatal("expected child worktree reminder")
+	}
+	if childMeta.WorktreeReminder.Branch != "feature/review" || childMeta.WorktreeReminder.WorktreePath != canonicalWorktreeRoot {
+		t.Fatalf("child worktree reminder = %+v", childMeta.WorktreeReminder)
+	}
+	if childMeta.WorktreeReminder.HasIssuedInGeneration || childMeta.WorktreeReminder.IssuedCompactionCount != 0 {
+		t.Fatalf("child worktree reminder generation flags = %+v, want reset", childMeta.WorktreeReminder)
+	}
+	target, err := metadataStore.ResolveSessionExecutionTarget(ctx, childMeta.SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget child: %v", err)
+	}
+	if target.WorktreeID != "worktree-review" {
+		t.Fatalf("child worktree id = %q, want worktree-review", target.WorktreeID)
+	}
+	if target.CwdRelpath != "pkg" {
+		t.Fatalf("child cwd relpath = %q, want pkg", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != filepath.Join(canonicalWorktreeRoot, "pkg") {
+		t.Fatalf("child effective workdir = %q, want %q", target.EffectiveWorkdir, filepath.Join(canonicalWorktreeRoot, "pkg"))
+	}
+}
+
+func TestPlannerNewChildSessionFallsBackWhenParentExecutionTargetIsNotMetadataBacked(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	parent, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := parent.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:                  session.WorktreeReminderModeEnter,
+		Branch:                "feature/file-backed",
+		WorktreePath:          "/tmp/worktree-a",
+		WorkspaceRoot:         "/tmp/workspace-a",
+		EffectiveCwd:          "/tmp/worktree-a/pkg",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 4,
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState parent: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerDir,
+	}
+
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("PlanSession child: %v", err)
+	}
+	childMeta := plan.Store.Meta()
+	if childMeta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if childMeta.WorktreeReminder == nil || childMeta.WorktreeReminder.Branch != "feature/file-backed" {
+		t.Fatalf("worktree reminder = %+v, want parent reminder copied", childMeta.WorktreeReminder)
+	}
+	if childMeta.WorktreeReminder.HasIssuedInGeneration || childMeta.WorktreeReminder.IssuedCompactionCount != 0 {
+		t.Fatalf("worktree reminder generation flags = %+v, want reset", childMeta.WorktreeReminder)
+	}
+}
+
+func TestPlannerNewChildSessionIgnoresParentOutsideActiveContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	parent, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create foreign parent session: %v", err)
+	}
+	if err := parent.MarkModelDispatchLocked(session.LockedContract{Model: "foreign-parent-model"}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
+	}
+	if err := parent.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://foreign.local/v1"}); err != nil {
+		t.Fatalf("SetContinuationContext parent: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerA,
+	}
+
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("PlanSession child: %v", err)
+	}
+	childMeta := plan.Store.Meta()
+	if childMeta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if childMeta.WorkspaceRoot != "/tmp/workspace-a" || childMeta.WorkspaceContainer != "workspace-a" {
+		t.Fatalf("child workspace context = root %q container %q, want active workspace", childMeta.WorkspaceRoot, childMeta.WorkspaceContainer)
+	}
+	if childMeta.Locked != nil {
+		t.Fatalf("locked contract = %+v, want no foreign parent lock copied", childMeta.Locked)
+	}
+	if childMeta.Continuation != nil {
+		t.Fatalf("continuation = %+v, want no foreign parent continuation copied", childMeta.Continuation)
+	}
+}
+
+func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	parent, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.SessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := parent.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable parent: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-review")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(ctx, metadata.WorktreeRecord{
+		ID:              "worktree-review",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(ctx, parent.Meta().SessionID, binding.WorkspaceID, "worktree-review", "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID parent: %v", err)
+	}
+	beforeEntries, err := os.ReadDir(containerDir)
+	if err != nil {
+		t.Fatalf("read container before plan: %v", err)
+	}
+	failingStore := &failingUpdateMetadataExecutionTargetStore{base: metadataStore, updateErr: session.ErrSessionNotFound}
+	planner := Planner{
+		Config:              cfg,
+		ContainerDir:        containerDir,
+		StoreOptions:        metadataStore.SessionStoreOptions(),
+		MetadataStoreOpener: func(string) (MetadataExecutionTargetStore, error) { return failingStore, nil },
+	}
+
+	_, err = planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("PlanSession error = %v, want session not found from metadata target update", err)
+	}
+	if strings.TrimSpace(failingStore.updatedSessionID) == "" {
+		t.Fatal("expected child execution target update to be attempted")
+	}
+	if _, err := metadataStore.ResolveSessionExecutionTarget(ctx, failingStore.updatedSessionID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ResolveSessionExecutionTarget child after rollback error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := os.Stat(filepath.Join(containerDir, failingStore.updatedSessionID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("child session dir stat after rollback error = %v, want not exist", err)
+	}
+	afterEntries, err := os.ReadDir(containerDir)
+	if err != nil {
+		t.Fatalf("read container after plan: %v", err)
+	}
+	if len(afterEntries) != len(beforeEntries) {
+		t.Fatalf("session dirs after failed plan = %d, want %d", len(afterEntries), len(beforeEntries))
+	}
+	if len(afterEntries) != 1 || afterEntries[0].Name() != parent.Meta().SessionID {
+		t.Fatalf("unexpected remaining session dirs after rollback: %+v", afterEntries)
+	}
+}
+
+func TestPlannerNewSessionHonorsCanceledContextBeforeDurableCreation(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerDir,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := planner.PlanSession(ctx, SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PlanSession error = %v, want context canceled", err)
+	}
+	if _, err := os.Stat(containerDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("container stat error = %v, want not exist", err)
+	}
+}
+
+func TestPlannerNewChildSessionHonorsCanceledContextBeforeParentCopy(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	parent, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerDir,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = planner.PlanSession(ctx, SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PlanSession error = %v, want context canceled", err)
 	}
 }
 

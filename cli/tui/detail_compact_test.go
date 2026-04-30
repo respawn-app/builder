@@ -56,6 +56,77 @@ func TestCompactDetailKeepsMultipleExpanded(t *testing.T) {
 	}
 }
 
+func TestCompactDetailToggleStartsWithBottomVisibleEntrySelected(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(4))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 4, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "third"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "fourth"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "fifth"})
+
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) == 0 {
+		t.Fatal("expected visible selectable detail entries")
+	}
+	want := visible[len(visible)-1]
+	if !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected bottom visible entry selected on detail open, got active=%v entry=%d want=%d visible=%+v", m.detailSelectedActive, m.detailSelectedEntry, want, visible)
+	}
+	if !m.detailBottomAnchor || m.DetailScroll() != 0 {
+		t.Fatalf("expected detail to remain anchored at bottom, anchored=%v scroll=%d", m.detailBottomAnchor, m.DetailScroll())
+	}
+}
+
+func TestCompactDetailToggleStartsWithMultilineTailBlockSelected(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(5))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 5, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "tail 1\ntail 2\ntail 3\ntail 4"})
+
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) == 0 {
+		t.Fatal("expected visible selectable detail entries")
+	}
+	want := visible[len(visible)-1]
+	if !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected multiline tail block selected on detail open, got active=%v entry=%d want=%d visible=%+v owners=%+v", m.detailSelectedActive, m.detailSelectedEntry, want, visible, m.detailLineEntryIndices)
+	}
+	selectedLines := 0
+	for _, owner := range m.detailLineEntryIndices {
+		if owner == want {
+			selectedLines++
+		}
+	}
+	if selectedLines < 2 {
+		t.Fatalf("expected bottom-selected tail block to own multiple visible lines, got %d owners=%+v", selectedLines, m.detailLineEntryIndices)
+	}
+}
+
+func TestCompactDetailViewportShrinkKeepsBottomSelectionVisible(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	for idx := 0; idx < 24; idx++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %02d", idx)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})
+
+	visible := m.visibleSelectableDetailEntries()
+	if len(visible) == 0 {
+		t.Fatal("expected visible selectable detail entries")
+	}
+	want := visible[len(visible)-1]
+	if !m.detailSelectedActive || m.detailSelectedEntry != want {
+		t.Fatalf("expected bottom visible entry selected after viewport shrink, got active=%v entry=%d want=%d visible=%+v owners=%+v", m.detailSelectedActive, m.detailSelectedEntry, want, visible, m.detailLineEntryIndices)
+	}
+}
+
 func TestCompactDetailArrowScrollsExpandedItemByLineAndTracksCenterSelection(t *testing.T) {
 	m := NewModel(WithCompactDetail(), WithPreviewLines(6))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 80})

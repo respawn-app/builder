@@ -23,6 +23,23 @@ func BenchmarkToggleModeFirstDetailSnapshot(b *testing.B) {
 	}
 }
 
+func BenchmarkCompactToggleModeLargeTranscript(b *testing.B) {
+	entries := benchmarkDetailEntries(1200)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		model := NewModel(WithTheme("dark"), WithCompactDetail())
+		next, _ := model.Update(SetViewportSizeMsg{Lines: 40, Width: 120})
+		model = next.(Model)
+		next, _ = model.Update(SetConversationMsg{Entries: entries})
+		model = next.(Model)
+		b.StartTimer()
+		next, _ = model.Update(ToggleModeMsg{})
+		model = next.(Model)
+		_ = model.View()
+	}
+}
+
 func BenchmarkToggleModeReopenDetailSnapshot(b *testing.B) {
 	entries := benchmarkDetailEntries(600)
 	b.ReportAllocs()

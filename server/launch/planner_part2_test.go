@@ -103,7 +103,7 @@ func TestPlannerInteractivePickerReopensSelectedSessionWithinActiveContainer(t *
 		},
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestPlannerSelectedSessionIDUsesActiveContainerScope(t *testing.T) {
 		ContainerDir: containerA,
 	}
 
-	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive, SelectedSessionID: selected.Meta().SessionID})
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive, SelectedSessionID: selected.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestPlannerSelectedSessionIDRejectsSymlinkOutsideActiveContainer(t *testing
 		ContainerDir: containerA,
 	}
 
-	if _, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive, SelectedSessionID: "escaped-link"}); err == nil {
+	if _, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive, SelectedSessionID: "escaped-link"}); err == nil {
 		t.Fatal("expected planner to reject symlinked selected session outside active container")
 	}
 }

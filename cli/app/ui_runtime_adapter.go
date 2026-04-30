@@ -74,6 +74,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		"record_prompt_history": strconv.FormatBool(reduction.PendingInput.PromptHistoryCommand != nil),
 	})
 	m.markActiveSubmitFlushed(evt)
+	m.applyRuntimeEventStatus(evt)
 	a.applyRuntimeEventReduction(reduction)
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false

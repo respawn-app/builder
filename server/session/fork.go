@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var errForkReplayBoundary = errors.New("fork replay boundary reached")
@@ -76,6 +77,10 @@ func cloneLockedContract(in *LockedContract) *LockedContract {
 	if len(in.EnabledTools) > 0 {
 		copyLocked.EnabledTools = append([]string(nil), in.EnabledTools...)
 	}
+	if in.ToolPreambles != nil {
+		toolPreambles := *in.ToolPreambles
+		copyLocked.ToolPreambles = &toolPreambles
+	}
 	copyLocked.SystemPrompt = strings.TrimSpace(in.SystemPrompt)
 	copyLocked.ReviewerPrompt = strings.TrimSpace(in.ReviewerPrompt)
 	return &copyLocked
@@ -87,6 +92,31 @@ func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
 	}
 	copyContext := *in
 	return &copyContext
+}
+
+// InitializeChildFromParent initializes a fresh child session with parent-owned
+// execution context while leaving conversational state empty. The caller owns
+// durability so launch planning can finish cross-store setup atomically.
+func InitializeChildFromParent(child *Store, parent *Store) error {
+	if child == nil {
+		return fmt.Errorf("child store is required")
+	}
+	if parent == nil {
+		return fmt.Errorf("parent store is required")
+	}
+	parentMeta := parent.Meta()
+	child.mu.Lock()
+	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
+	child.meta.AgentsInjected = parentMeta.AgentsInjected
+	child.meta.WorkspaceRoot = parentMeta.WorkspaceRoot
+	child.meta.WorkspaceContainer = parentMeta.WorkspaceContainer
+	child.meta.WorktreeReminder = forkedWorktreeReminderState(parentMeta.WorktreeReminder)
+	child.meta.UsageState = nil
+	child.meta.ParentSessionID = parentMeta.SessionID
+	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
+	child.meta.UpdatedAt = time.Now().UTC()
+	child.mu.Unlock()
+	return nil
 }
 
 func cloneWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderState {

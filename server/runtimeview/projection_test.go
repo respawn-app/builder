@@ -307,6 +307,27 @@ func TestStatusFromRuntimeUsesFreshPreciseCurrentTokens(t *testing.T) {
 	}
 }
 
+func TestEventFromRuntimeCopiesContextUsage(t *testing.T) {
+	projected := EventFromRuntime(runtime.Event{
+		Kind: runtime.EventModelResponse,
+		ContextUsage: &runtime.ContextUsage{
+			UsedTokens:            420,
+			WindowTokens:          1_000,
+			CacheHitPercent:       25,
+			HasCacheHitPercentage: true,
+		},
+	})
+	if projected.ContextUsage == nil {
+		t.Fatal("expected projected event to carry context usage")
+	}
+	if projected.ContextUsage.UsedTokens != 420 || projected.ContextUsage.WindowTokens != 1_000 {
+		t.Fatalf("projected context usage = %+v", projected.ContextUsage)
+	}
+	if projected.ContextUsage.CacheHitPercent != 25 || !projected.ContextUsage.HasCacheHitPercentage {
+		t.Fatalf("projected cache hit usage = %+v", projected.ContextUsage)
+	}
+}
+
 func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	event := EventFromRuntime(runtime.Event{
 		Kind:                   runtime.EventCacheWarning,

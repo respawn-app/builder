@@ -716,6 +716,115 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 	}
 }
 
+func TestReviewTeleportLifecyclePreservesParentWorktreeContext(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	parent, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(filepath.Clean(cfg.WorkspaceRoot)),
+		cfg.WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := parent.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable parent: %v", err)
+	}
+	if err := parent.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://review-parent.local/v1"}); err != nil {
+		t.Fatalf("SetContinuationContext parent: %v", err)
+	}
+	if err := parent.MarkModelDispatchLocked(session.LockedContract{Model: "locked-review-model", EnabledTools: []string{"shell"}}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-review-lifecycle")
+	if err := os.MkdirAll(filepath.Join(worktreeRoot, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(ctx, metadata.WorktreeRecord{
+		ID:              "worktree-review-lifecycle",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(ctx, parent.Meta().SessionID, binding.WorkspaceID, "worktree-review-lifecycle", "pkg"); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID parent: %v", err)
+	}
+
+	model := newProjectedStaticUIModel(
+		WithUISessionID(parent.Meta().SessionID),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	)
+	model.input = "/review pkg"
+	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected /review to quit into a new session transition")
+	}
+	updated := next.(*uiModel)
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("action = %q, want %q", updated.Action(), UIActionNewSession)
+	}
+
+	server := &testEmbeddedServer{cfg: cfg}
+	resolved, err := resolveSessionAction(ctx, server, nil, parent.Meta().SessionID, "lease-test-controller", updated.Transition())
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(ctx, sessionLaunchRequest{
+		Mode:            launchModeInteractive,
+		ForceNewSession: resolved.ForceNewSession,
+		ParentSessionID: resolved.ParentSessionID,
+	})
+	if err != nil {
+		t.Fatalf("PlanSession child: %v", err)
+	}
+	child := openAuthoritativeAppSession(t, cfg.PersistenceRoot, plan.SessionID)
+	childMeta := child.Meta()
+	if childMeta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("child parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if childMeta.Continuation == nil || childMeta.Continuation.OpenAIBaseURL != "http://review-parent.local/v1" {
+		t.Fatalf("child continuation = %+v, want parent continuation", childMeta.Continuation)
+	}
+	if childMeta.Locked == nil || childMeta.Locked.Model != "locked-review-model" {
+		t.Fatalf("child locked contract = %+v, want parent lock", childMeta.Locked)
+	}
+	target, err := metadataStore.ResolveSessionExecutionTarget(ctx, childMeta.SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget child: %v", err)
+	}
+	if target.WorktreeID != "worktree-review-lifecycle" || target.CwdRelpath != "pkg" {
+		t.Fatalf("child target = %+v, want parent worktree target", target)
+	}
+	if target.EffectiveWorkdir != filepath.Join(canonicalWorktreeRoot, "pkg") {
+		t.Fatalf("child effective workdir = %q, want %q", target.EffectiveWorkdir, filepath.Join(canonicalWorktreeRoot, "pkg"))
+	}
+}
+
 func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T) {
 	root := t.TempDir()
 	store, err := session.Create(root, "workspace-x", "/tmp/work")

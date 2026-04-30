@@ -60,6 +60,7 @@ var pendingToolSpinner = bubblespinner.Spinner{
 var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 8 * time.Second
 var updateNoticeDuration = 5 * time.Second
+var spinnerTickRearmGrace = 3 * time.Second
 var scheduleTransientStatusClear = func(duration time.Duration, token uint64) tea.Cmd {
 	if duration <= 0 {
 		duration = transientStatusDuration
@@ -96,6 +97,14 @@ func (m *uiModel) shouldAnimateSpinner() bool {
 }
 
 func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
+	return m.reconcileSpinnerTicking(false)
+}
+
+func (m *uiModel) rearmSpinnerTicking() tea.Cmd {
+	return m.reconcileSpinnerTicking(true)
+}
+
+func (m *uiModel) reconcileSpinnerTicking(force bool) tea.Cmd {
 	if m == nil {
 		return nil
 	}
@@ -103,19 +112,33 @@ func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
 		m.stopSpinnerTicking()
 		return nil
 	}
-	if m.spinnerTickToken != 0 {
-		return nil
-	}
 	now := uiAnimationNow()
-	m.spinnerClock.Start(now)
-	m.spinnerFrame = 0
+	if m.spinnerTickToken != 0 && m.spinnerClock.Running() && !m.spinnerTickDue.IsZero() {
+		rearmAfter := m.spinnerTickDue.Add(spinnerTickRearmGrace)
+		if force {
+			rearmAfter = m.spinnerTickDue
+		}
+		if !now.After(rearmAfter) {
+			return nil
+		}
+	}
+	if !m.spinnerClock.Running() {
+		m.spinnerClock.Start(now)
+		m.spinnerFrame = 0
+	} else {
+		frameCount := len(pendingToolSpinner.Frames)
+		if frameCount <= 0 {
+			frameCount = 1
+		}
+		m.spinnerFrame = m.spinnerClock.Frame(now, frameCount, spinnerTickInterval)
+	}
 	m.spinnerGeneration++
 	m.spinnerTickToken = m.spinnerGeneration
 	if m.spinnerTickToken == 0 {
 		m.spinnerGeneration++
 		m.spinnerTickToken = m.spinnerGeneration
 	}
-	return tickSpinner(m.spinnerTickToken, m.spinnerClock.NextDelay(now, spinnerTickInterval))
+	return m.scheduleSpinnerTick(m.spinnerTickToken, now)
 }
 
 func (m *uiModel) stopSpinnerTicking() {
@@ -123,7 +146,20 @@ func (m *uiModel) stopSpinnerTicking() {
 		return
 	}
 	m.spinnerTickToken = 0
+	m.spinnerTickDue = time.Time{}
 	m.spinnerClock.Stop()
+}
+
+func (m *uiModel) scheduleSpinnerTick(token uint64, now time.Time) tea.Cmd {
+	if m == nil || token == 0 {
+		return nil
+	}
+	if now.IsZero() {
+		now = uiAnimationNow()
+	}
+	delay := m.spinnerClock.NextDelay(now, spinnerTickInterval)
+	m.spinnerTickDue = now.Add(delay)
+	return tickSpinner(token, delay)
 }
 
 func formatSubmissionError(err error) string {

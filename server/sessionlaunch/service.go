@@ -41,8 +41,8 @@ func (s *Service) PlanSession(ctx context.Context, req serverapi.SessionPlanRequ
 		ForceNewSession:   req.ForceNewSession,
 		ParentSessionID:   strings.TrimSpace(req.ParentSessionID),
 	}
-	return s.plans.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionPlanMemoRequest, func(context.Context) (serverapi.SessionPlanResponse, error) {
-		plan, err := s.planner.PlanSession(launch.SessionRequest{
+	return s.plans.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameSessionPlanMemoRequest, func(ctx context.Context) (serverapi.SessionPlanResponse, error) {
+		plan, err := s.planner.PlanSession(ctx, launch.SessionRequest{
 			Mode:              launch.Mode(req.Mode),
 			SelectedSessionID: req.SelectedSessionID,
 			ForceNewSession:   req.ForceNewSession,

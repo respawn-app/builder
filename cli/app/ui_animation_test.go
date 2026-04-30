@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"builder/server/runtime"
+	"builder/shared/clientui"
 )
 
 func TestFrameAnimationClockUsesElapsedFrameBoundaries(t *testing.T) {
@@ -50,8 +51,123 @@ func TestHandleSpinnerTickJumpsFromElapsedTimeAndKeepsBoundaryAlignedDelay(t *te
 	if got, want := updated.spinnerClock.NextDelay(tickAt, spinnerTickInterval), 5*time.Millisecond; got != want {
 		t.Fatalf("expected next delay %s after late tick, got %s", want, got)
 	}
+	if got, want := updated.spinnerTickDue, tickAt.Add(5*time.Millisecond); !got.Equal(want) {
+		t.Fatalf("expected next tick due at %s after late tick, got %s", want, got)
+	}
 	if cmd == nil {
 		t.Fatal("expected spinner tick to schedule next boundary-aligned tick")
+	}
+}
+
+func TestRuntimeBusyEventStartsSpinnerTicking(t *testing.T) {
+	oldNow := uiAnimationNow
+	anchor := time.Unix(1_700_000_150, 0)
+	uiAnimationNow = func() time.Time { return anchor }
+	t.Cleanup(func() { uiAnimationNow = oldNow })
+
+	m := newProjectedStaticUIModel()
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: true},
+	}})
+	updated := next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected runtime busy event to set busy")
+	}
+	if updated.spinnerTickToken == 0 {
+		t.Fatal("expected runtime busy event to start spinner ticking")
+	}
+	if updated.spinnerTickDue.IsZero() {
+		t.Fatal("expected runtime busy event to record next spinner tick deadline")
+	}
+	if cmd == nil {
+		t.Fatal("expected runtime busy event to schedule spinner tick")
+	}
+}
+
+func TestRuntimeEventRearmsExpiredSpinnerTick(t *testing.T) {
+	oldInterval := spinnerTickInterval
+	oldGrace := spinnerTickRearmGrace
+	oldNow := uiAnimationNow
+	spinnerTickInterval = 10 * time.Millisecond
+	spinnerTickRearmGrace = 30 * time.Millisecond
+	anchor := time.Unix(1_700_000_175, 0)
+	now := anchor
+	uiAnimationNow = func() time.Time { return now }
+	t.Cleanup(func() {
+		spinnerTickInterval = oldInterval
+		spinnerTickRearmGrace = oldGrace
+		uiAnimationNow = oldNow
+	})
+
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.spinnerGeneration = 1
+	m.spinnerTickToken = 1
+	m.spinnerClock.Start(anchor)
+	m.spinnerTickDue = anchor.Add(spinnerTickInterval)
+	now = anchor.Add(spinnerTickInterval + spinnerTickRearmGrace + time.Millisecond)
+
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:           clientui.EventAssistantDelta,
+		StepID:         "step-1",
+		AssistantDelta: "working",
+	}})
+	updated := next.(*uiModel)
+	if updated.spinnerTickToken == 1 {
+		t.Fatal("expected expired spinner tick to be replaced with a fresh token")
+	}
+	if updated.spinnerTickToken == 0 {
+		t.Fatal("expected spinner to remain active")
+	}
+	if !updated.spinnerTickDue.After(now) {
+		t.Fatalf("expected rearmed spinner due after current time, got due=%s now=%s", updated.spinnerTickDue, now)
+	}
+	if cmd == nil {
+		t.Fatal("expected runtime event to rearm expired spinner tick")
+	}
+}
+
+func TestRuntimeEventRearmsActiveSpinnerTickBeforeGrace(t *testing.T) {
+	oldInterval := spinnerTickInterval
+	oldGrace := spinnerTickRearmGrace
+	oldNow := uiAnimationNow
+	spinnerTickInterval = 10 * time.Millisecond
+	spinnerTickRearmGrace = 30 * time.Second
+	anchor := time.Unix(1_700_000_185, 0)
+	now := anchor
+	uiAnimationNow = func() time.Time { return now }
+	t.Cleanup(func() {
+		spinnerTickInterval = oldInterval
+		spinnerTickRearmGrace = oldGrace
+		uiAnimationNow = oldNow
+	})
+
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.spinnerGeneration = 1
+	m.spinnerTickToken = 1
+	m.spinnerClock.Start(anchor)
+	m.spinnerTickDue = anchor.Add(spinnerTickInterval)
+	now = anchor.Add(25 * time.Millisecond)
+
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:           clientui.EventAssistantDelta,
+		StepID:         "step-1",
+		AssistantDelta: "working",
+	}})
+	updated := next.(*uiModel)
+	if updated.spinnerTickToken == 1 {
+		t.Fatal("expected runtime progress event to replace active spinner token")
+	}
+	if got, want := updated.spinnerFrame, 2; got != want {
+		t.Fatalf("expected runtime progress event to advance spinner frame to %d, got %d", want, got)
+	}
+	if !updated.spinnerTickDue.After(now) {
+		t.Fatalf("expected rearmed spinner due after current time, got due=%s now=%s", updated.spinnerTickDue, now)
+	}
+	if cmd == nil {
+		t.Fatal("expected runtime progress event to schedule fresh spinner tick")
 	}
 }
 

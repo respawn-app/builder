@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -375,10 +377,64 @@ func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *tes
 		}
 	}
 
-	assertHelpEntryBindings(t, sections, "toggle keyboard help", []string{"F1 / ? (empty) / Alt/Cmd + /"})
+	assertHelpEntryBindings(t, sections, "toggle keyboard help", []string{shortcutLabelsForGOOS(goruntime.GOOS).helpToggleBinding()})
 	assertHelpEntryBindings(t, sections, "paste a clipboard screenshot as a file path", []string{"Ctrl + V/D"})
 	assertHelpEntryBindings(t, sections, "delete the current input line", deleteCurrentLineBindings())
 	assertHelpEntryBindings(t, sections, "move the cursor by word", []string{"Alt/Ctrl + ←/→"})
+}
+
+func TestHelpSectionsUsePlatformSpecificSuperKeyLabels(t *testing.T) {
+	tests := []struct {
+		goos       string
+		helpToggle []string
+		deleteLine []string
+	}{
+		{
+			goos:       "darwin",
+			helpToggle: []string{"F1 / ? (empty) / Alt/⌘ + /"},
+			deleteLine: []string{"Ctrl/⌘ + Backspace", "Ctrl + U"},
+		},
+		{
+			goos:       "linux",
+			helpToggle: []string{"F1 / ? (empty) / Alt/Super + /"},
+			deleteLine: []string{"Ctrl/Super + Backspace"},
+		},
+		{
+			goos:       "windows",
+			helpToggle: []string{"F1 / ? (empty) / Alt/Win + /"},
+			deleteLine: []string{"Ctrl/Win + Backspace"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.goos, func(t *testing.T) {
+			sections := helpSectionsForGOOS(tc.goos)
+			assertHelpEntryBindings(t, sections, "toggle keyboard help", tc.helpToggle)
+			assertHelpEntryBindings(t, sections, "delete the current input line", tc.deleteLine)
+		})
+	}
+}
+
+func TestHelpPaneRendersDarwinCommandGlyphAtNarrowWidth(t *testing.T) {
+	originalGOOS := uiHelpGOOS
+	uiHelpGOOS = func() string { return "darwin" }
+	t.Cleanup(func() { uiHelpGOOS = originalGOOS })
+
+	m := newProjectedStaticUIModel()
+	m.helpVisible = true
+	width := 24
+	lines := m.layout().renderHelpPane(width, 18, uiThemeStyles("dark"))
+	plain := stripANSIText(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Alt/⌘") {
+		t.Fatalf("expected rendered help pane to contain command glyph binding, got %q", plain)
+	}
+	if strings.Contains(plain, "Cmd") || strings.Contains(plain, "CMD") {
+		t.Fatalf("did not expect macOS command text in rendered help pane, got %q", plain)
+	}
+	for _, line := range strings.Split(stripANSIPreserve(strings.Join(lines, "\n")), "\n") {
+		if got := runewidth.StringWidth(line); got > width {
+			t.Fatalf("help pane line width = %d, want <= %d for %q", got, width, line)
+		}
+	}
 }
 
 func assertHelpEntryBindings(t *testing.T, sections []uiHelpSection, description string, want []string) {

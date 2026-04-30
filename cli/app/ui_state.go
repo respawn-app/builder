@@ -40,6 +40,8 @@ type uiRuntimeFeatureState struct {
 	pathReferenceEvents         <-chan uiPathReferenceSearchEvent
 	runtimeConnectionEvents     <-chan runtimeConnectionStateChangedMsg
 	runtimeLeaseRecoveryWarning <-chan runtimeLeaseRecoveryWarningMsg
+	runtimeContextUsage         clientui.RuntimeContextUsage
+	runtimeContextUsageSession  string
 	logger                      uiLogger
 }
 
@@ -80,6 +82,7 @@ type uiInputFeatureState struct {
 	modelContractLocked   bool
 	spinnerFrame          int
 	spinnerClock          frameAnimationClock
+	spinnerTickDue        time.Time
 	spinnerGeneration     uint64
 	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry

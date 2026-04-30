@@ -368,6 +368,17 @@ func (s *Store) UpdateSessionExecutionTargetByID(ctx context.Context, sessionID 
 	return nil
 }
 
+// DeleteSessionRecordByID removes a session metadata row and dependent records.
+func (s *Store) DeleteSessionRecordByID(ctx context.Context, sessionID string) error {
+	if s == nil || s.db == nil {
+		return errors.New("metadata store is required")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, strings.TrimSpace(sessionID)); err != nil {
+		return fmt.Errorf("delete session record: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ListSessionsTargetingWorktree(ctx context.Context, worktreeID string) ([]WorktreeSessionBlocker, error) {
 	if s == nil || s.queries == nil {
 		return nil, errors.New("metadata store is required")
