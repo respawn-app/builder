@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"builder/server/auth"
+	"builder/server/metadata"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/client"
@@ -63,7 +65,7 @@ type SessionPlan struct {
 	Source              config.SourceReport
 }
 
-func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
+func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPlan, error) {
 	if p.ReloadConfig != nil {
 		cfg, err := p.ReloadConfig()
 		if err != nil {
@@ -71,7 +73,7 @@ func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
 		}
 		p.Config = cfg
 	}
-	store, err := p.openStore(req)
+	store, err := p.openStore(ctx, req)
 	if err != nil {
 		return SessionPlan{}, err
 	}
@@ -223,7 +225,7 @@ func mergeOverrideSources(base config.SourceReport, override config.SourceReport
 	return merged
 }
 
-func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
+func (p Planner) openStore(ctx context.Context, req SessionRequest) (*session.Store, error) {
 	if strings.TrimSpace(p.Config.PersistenceRoot) == "" {
 		return nil, errors.New("launch planner persistence root is required")
 	}
@@ -234,26 +236,26 @@ func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 		return p.openScopedSession(req.SelectedSessionID)
 	}
 	if req.ForceNewSession || req.Mode == ModeHeadless {
-		return p.createSession(req.ParentSessionID)
+		return p.createSession(ctx, req.ParentSessionID)
 	}
 	if p.ProjectViews != nil && strings.TrimSpace(p.ProjectID) != "" {
-		overview, err := p.ProjectViews.GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: p.ProjectID})
+		overview, err := p.ProjectViews.GetProjectOverview(ctx, serverapi.ProjectGetOverviewRequest{ProjectID: p.ProjectID})
 		if err != nil {
 			return nil, err
 		}
 		summaries := sessionSummariesFromProjectView(overview.Overview.Sessions)
-		return p.pickOrCreateSession(req, summaries)
+		return p.pickOrCreateSession(ctx, req, summaries)
 	}
 	summaries, err := session.ListSessions(p.ContainerDir)
 	if err != nil {
 		return nil, err
 	}
-	return p.pickOrCreateSession(req, summaries)
+	return p.pickOrCreateSession(ctx, req, summaries)
 }
 
-func (p Planner) pickOrCreateSession(req SessionRequest, summaries []session.Summary) (*session.Store, error) {
+func (p Planner) pickOrCreateSession(ctx context.Context, req SessionRequest, summaries []session.Summary) (*session.Store, error) {
 	if len(summaries) == 0 {
-		return p.createSession(req.ParentSessionID)
+		return p.createSession(ctx, req.ParentSessionID)
 	}
 	if p.PickSession == nil {
 		return nil, errors.New("session picker is required")
@@ -266,7 +268,7 @@ func (p Planner) pickOrCreateSession(req SessionRequest, summaries []session.Sum
 		return nil, errors.New("startup canceled by user")
 	}
 	if picked.CreateNew {
-		return p.createSession(req.ParentSessionID)
+		return p.createSession(ctx, req.ParentSessionID)
 	}
 	if picked.Session == nil {
 		return nil, errors.New("no session selected")
@@ -295,14 +297,15 @@ func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.
 	return out
 }
 
-func (p Planner) createSession(parentSessionID string) (*session.Store, error) {
+func (p Planner) createSession(ctx context.Context, parentSessionID string) (*session.Store, error) {
 	containerName := filepath.Base(p.ContainerDir)
 	created, err := session.NewLazy(p.ContainerDir, containerName, p.Config.WorkspaceRoot, p.StoreOptions...)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(parentSessionID) != "" {
-		if err := created.SetParentSessionID(parentSessionID); err != nil {
+	parentID := strings.TrimSpace(parentSessionID)
+	if parentID != "" {
+		if err := p.initializeChildSessionContext(ctx, created, parentID); err != nil {
 			return nil, err
 		}
 	} else {
@@ -311,6 +314,61 @@ func (p Planner) createSession(parentSessionID string) (*session.Store, error) {
 		}
 	}
 	return created, nil
+}
+
+func (p Planner) initializeChildSessionContext(ctx context.Context, child *session.Store, parentSessionID string) error {
+	if child == nil {
+		return errors.New("child session store is required")
+	}
+	parentID := strings.TrimSpace(parentSessionID)
+	if parentID == "" {
+		return child.EnsureDurable()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	parent, err := p.openParentSession(parentID)
+	if err != nil {
+		return err
+	}
+	if parent != nil {
+		if err := session.InitializeChildFromParent(child, parent); err != nil {
+			return err
+		}
+	} else if err := child.SetParentSessionID(parentID); err != nil {
+		return err
+	}
+	return p.copyParentExecutionTarget(ctx, child.Meta().SessionID, parentID)
+}
+
+func (p Planner) openParentSession(parentSessionID string) (*session.Store, error) {
+	parent, err := session.OpenByID(p.Config.PersistenceRoot, parentSessionID, p.StoreOptions...)
+	if err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parent, nil
+}
+
+func (p Planner) copyParentExecutionTarget(ctx context.Context, childSessionID string, parentSessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	store, err := metadata.Open(p.Config.PersistenceRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	target, err := store.ResolveSessionExecutionTarget(ctx, parentSessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, session.ErrSessionNotFound) {
+			return nil
+		}
+		return err
+	}
+	return store.UpdateSessionExecutionTargetByID(ctx, childSessionID, target.WorkspaceID, target.WorktreeID, target.CwdRelpath)
 }
 
 func EnsureSubagentSessionName(store *session.Store) error {

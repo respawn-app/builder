@@ -51,7 +51,7 @@ type headlessPromptLauncher struct {
 
 func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
 	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir, StoreOptions: l.boot.StoreOptions, ReloadConfig: l.boot.ReloadConfig}
-	plan, err := planner.PlanSession(launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
+	plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
 	if err != nil {
 		return nil, err
 	}

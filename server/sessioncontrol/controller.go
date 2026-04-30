@@ -24,7 +24,7 @@ type Controller struct {
 	Reauth       func(context.Context) error
 }
 
-func (c Controller) PlanSession(req launch.SessionRequest) (launch.SessionPlan, error) {
+func (c Controller) PlanSession(ctx context.Context, req launch.SessionRequest) (launch.SessionPlan, error) {
 	planner := launch.Planner{
 		Config:       c.Config,
 		ContainerDir: c.ContainerDir,
@@ -36,7 +36,7 @@ func (c Controller) PlanSession(req launch.SessionRequest) (launch.SessionPlan, 
 			return c.PickSession(summaries, c.Config.Settings.Theme, c.Config.Settings.TUIAlternateScreen)
 		}
 	}
-	return planner.PlanSession(req)
+	return planner.PlanSession(ctx, req)
 }
 
 func (c Controller) ResolveTransition(ctx context.Context, store *session.Store, transition lifecycle.Transition) (lifecycle.Resolved, error) {

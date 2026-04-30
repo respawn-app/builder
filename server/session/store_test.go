@@ -731,6 +731,76 @@ func TestForkAtUserMessageResetsWorktreeReminderGenerationFlags(t *testing.T) {
 	}
 }
 
+func TestInitializeChildFromParentCopiesContextWithoutConversationState(t *testing.T) {
+	root := t.TempDir()
+	parent, err := Create(root, "workspace-parent", "/tmp/work-parent")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := parent.MarkModelDispatchLocked(LockedContract{Model: "locked-parent", EnabledTools: []string{"shell", "patch"}}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
+	}
+	if err := parent.MarkAgentsInjected(); err != nil {
+		t.Fatalf("MarkAgentsInjected parent: %v", err)
+	}
+	if err := parent.SetContinuationContext(ContinuationContext{OpenAIBaseURL: "http://parent.local/v1"}); err != nil {
+		t.Fatalf("SetContinuationContext parent: %v", err)
+	}
+	if err := parent.SetUsageState(&UsageState{InputTokens: 123}); err != nil {
+		t.Fatalf("SetUsageState parent: %v", err)
+	}
+	if err := parent.SetWorktreeReminderState(&WorktreeReminderState{
+		Mode:                  WorktreeReminderModeEnter,
+		Branch:                "feature/child-context",
+		WorktreePath:          "/tmp/work-parent-wt",
+		WorkspaceRoot:         "/tmp/work-parent",
+		EffectiveCwd:          "/tmp/work-parent-wt/pkg",
+		HasIssuedInGeneration: true,
+		IssuedCompactionCount: 2,
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState parent: %v", err)
+	}
+	child, err := NewLazy(root, "workspace-child", "/tmp/work-child")
+	if err != nil {
+		t.Fatalf("new child: %v", err)
+	}
+
+	if err := InitializeChildFromParent(child, parent); err != nil {
+		t.Fatalf("InitializeChildFromParent: %v", err)
+	}
+	meta := child.Meta()
+	if meta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("parent session id = %q, want %q", meta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if meta.WorkspaceRoot != "/tmp/work-parent" || meta.WorkspaceContainer != "workspace-parent" {
+		t.Fatalf("workspace context = root %q container %q, want parent", meta.WorkspaceRoot, meta.WorkspaceContainer)
+	}
+	if !meta.AgentsInjected {
+		t.Fatal("expected agents-injected state to be copied")
+	}
+	if meta.Locked == nil || meta.Locked.Model != "locked-parent" || len(meta.Locked.EnabledTools) != 2 {
+		t.Fatalf("locked contract = %+v, want parent lock", meta.Locked)
+	}
+	if meta.Continuation == nil || meta.Continuation.OpenAIBaseURL != "http://parent.local/v1" {
+		t.Fatalf("continuation = %+v, want parent continuation", meta.Continuation)
+	}
+	if meta.UsageState != nil {
+		t.Fatalf("usage state = %+v, want nil for fresh child", meta.UsageState)
+	}
+	if meta.FirstPromptPreview != "" || meta.ModelRequestCount != 0 {
+		t.Fatalf("conversation state leaked into child: %+v", meta)
+	}
+	if meta.WorktreeReminder == nil {
+		t.Fatal("expected worktree reminder")
+	}
+	if meta.WorktreeReminder.Branch != "feature/child-context" {
+		t.Fatalf("worktree reminder = %+v, want parent branch", meta.WorktreeReminder)
+	}
+	if meta.WorktreeReminder.HasIssuedInGeneration || meta.WorktreeReminder.IssuedCompactionCount != 0 {
+		t.Fatalf("worktree reminder generation flags = %+v, want reset", meta.WorktreeReminder)
+	}
+}
+
 func TestSetContinuationContextStaysLazyUntilFirstWrite(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewLazy(root, "workspace-x", "/tmp/work")

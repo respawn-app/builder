@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var errForkReplayBoundary = errors.New("fork replay boundary reached")
@@ -87,6 +88,34 @@ func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
 	}
 	copyContext := *in
 	return &copyContext
+}
+
+// InitializeChildFromParent persists a fresh child session with parent-owned
+// execution context while leaving conversational state empty.
+func InitializeChildFromParent(child *Store, parent *Store) error {
+	if child == nil {
+		return fmt.Errorf("child store is required")
+	}
+	if parent == nil {
+		return fmt.Errorf("parent store is required")
+	}
+	parentMeta := parent.Meta()
+	child.mu.Lock()
+	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
+	child.meta.AgentsInjected = parentMeta.AgentsInjected
+	child.meta.WorkspaceRoot = parentMeta.WorkspaceRoot
+	child.meta.WorkspaceContainer = parentMeta.WorkspaceContainer
+	child.meta.WorktreeReminder = forkedWorktreeReminderState(parentMeta.WorktreeReminder)
+	child.meta.UsageState = nil
+	child.meta.ParentSessionID = parentMeta.SessionID
+	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
+	child.meta.UpdatedAt = time.Now().UTC()
+	snapshot, err := child.persistMetaLocked()
+	child.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return child.observePersistence(snapshot)
 }
 
 func cloneWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderState {

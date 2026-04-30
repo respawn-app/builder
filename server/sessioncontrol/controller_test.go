@@ -74,7 +74,7 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 		},
 	}
 
-	plan, err := controller.PlanSession(launch.SessionRequest{Mode: launch.ModeInteractive})
+	plan, err := controller.PlanSession(context.Background(), launch.SessionRequest{Mode: launch.ModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
