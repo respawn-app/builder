@@ -169,6 +169,12 @@ type uiTerminalCursorFileWriter struct {
 	file terminalCursorFile
 }
 
+type terminalCursorControlWritePlan struct {
+	passthrough          bool
+	invalidatesPlacement bool
+	restoreAnchorBefore  bool
+}
+
 type terminalCursorFile interface {
 	io.ReadWriteCloser
 	Fd() uintptr
@@ -186,8 +192,18 @@ func newUITerminalCursorWriter(out io.Writer, state *uiTerminalCursorState) io.W
 }
 
 func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
-	if passthrough, invalidatesPlacement := terminalCursorWriterControlWrite(p); passthrough {
-		if invalidatesPlacement {
+	if control := terminalCursorWriterControlWrite(p); control.passthrough {
+		if control.restoreAnchorBefore {
+			// Alt-screen enter saves the terminal cursor position. Our real cursor
+			// usually sits in the input field, so restore Bubble's frame anchor first
+			// or exiting detail mode appends the ongoing chrome from the input row.
+			if prefix := w.state.restoreRendererAnchor(); prefix != "" {
+				if _, err := io.WriteString(w.out, prefix); err != nil {
+					return 0, err
+				}
+			}
+		}
+		if control.invalidatesPlacement {
 			w.state.discardPlacedCursor()
 		}
 		return w.out.Write(p)
@@ -238,9 +254,9 @@ func (s *uiTerminalCursorState) discardPlacedCursor() {
 	s.placed = false
 }
 
-func terminalCursorWriterControlWrite(p []byte) (bool, bool) {
+func terminalCursorWriterControlWrite(p []byte) terminalCursorControlWritePlan {
 	if len(p) == 0 {
-		return false, false
+		return terminalCursorControlWritePlan{}
 	}
 	parser := xansi.GetParser()
 	defer xansi.PutParser(parser)
@@ -248,22 +264,30 @@ func terminalCursorWriterControlWrite(p []byte) (bool, bool) {
 	input := string(p)
 	state := byte(0)
 	invalidatesPlacement := false
+	restoreAnchorBefore := false
 	for len(input) > 0 {
 		_, width, n, newState := xansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
 		if n <= 0 {
-			return false, false
+			return terminalCursorControlWritePlan{}
 		}
 		sequence := input[:n]
 		state = newState
 		input = input[n:]
 		if width > 0 {
-			return false, false
+			return terminalCursorControlWritePlan{}
 		}
 		if terminalCursorControlSequenceInvalidatesPlacement(sequence, parser) {
 			invalidatesPlacement = true
 		}
+		if terminalCursorControlSequenceNeedsAnchorBeforeWrite(sequence, parser) {
+			restoreAnchorBefore = true
+		}
 	}
-	return true, invalidatesPlacement
+	return terminalCursorControlWritePlan{
+		passthrough:          true,
+		invalidatesPlacement: invalidatesPlacement,
+		restoreAnchorBefore:  restoreAnchorBefore,
+	}
 }
 
 func terminalCursorControlSequenceInvalidatesPlacement(sequence string, parser *xansi.Parser) bool {
@@ -279,4 +303,12 @@ func terminalCursorControlSequenceInvalidatesPlacement(sequence string, parser *
 	default:
 		return false
 	}
+}
+
+func terminalCursorControlSequenceNeedsAnchorBeforeWrite(sequence string, parser *xansi.Parser) bool {
+	command := xansi.Cmd(parser.Command())
+	if command.Final() != 'h' {
+		return false
+	}
+	return sequence == xansi.SetModeAltScreenSaveCursor
 }
