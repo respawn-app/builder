@@ -365,6 +365,89 @@ func TestPlannerNewChildSessionFallsBackWhenParentExecutionTargetIsNotMetadataBa
 	}
 }
 
+func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	binding, err := metadataStore.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	parent, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.SessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := parent.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable parent: %v", err)
+	}
+	worktreeRoot := filepath.Join(cfg.WorkspaceRoot, "wt-review")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	canonicalWorktreeRoot, err := config.CanonicalWorkspaceRoot(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if err := metadataStore.UpsertWorktreeRecord(ctx, metadata.WorktreeRecord{
+		ID:              "worktree-review",
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   canonicalWorktreeRoot,
+		DisplayName:     filepath.Base(canonicalWorktreeRoot),
+		Availability:    "available",
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertWorktreeRecord: %v", err)
+	}
+	if err := metadataStore.UpdateSessionExecutionTargetByID(ctx, parent.Meta().SessionID, binding.WorkspaceID, "worktree-review", "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID parent: %v", err)
+	}
+	beforeEntries, err := os.ReadDir(containerDir)
+	if err != nil {
+		t.Fatalf("read container before plan: %v", err)
+	}
+	updateChildExecutionTargetBeforeUpdateHook = func(childSessionID string) {
+		if err := metadataStore.DeleteSessionRecordByID(ctx, childSessionID); err != nil {
+			t.Fatalf("DeleteSessionRecordByID child before update: %v", err)
+		}
+	}
+	defer func() { updateChildExecutionTargetBeforeUpdateHook = nil }()
+	planner := Planner{
+		Config:       cfg,
+		ContainerDir: containerDir,
+		StoreOptions: metadataStore.SessionStoreOptions(),
+	}
+
+	_, err = planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("PlanSession error = %v, want session not found from metadata target update", err)
+	}
+	afterEntries, err := os.ReadDir(containerDir)
+	if err != nil {
+		t.Fatalf("read container after plan: %v", err)
+	}
+	if len(afterEntries) != len(beforeEntries) {
+		t.Fatalf("session dirs after failed plan = %d, want %d", len(afterEntries), len(beforeEntries))
+	}
+	if len(afterEntries) != 1 || afterEntries[0].Name() != parent.Meta().SessionID {
+		t.Fatalf("unexpected remaining session dirs after rollback: %+v", afterEntries)
+	}
+}
+
 func TestPlannerNewChildSessionHonorsCanceledContextBeforeParentCopy(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")

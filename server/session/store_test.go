@@ -737,7 +737,8 @@ func TestInitializeChildFromParentCopiesContextWithoutConversationState(t *testi
 	if err != nil {
 		t.Fatalf("create parent: %v", err)
 	}
-	if err := parent.MarkModelDispatchLocked(LockedContract{Model: "locked-parent", EnabledTools: []string{"shell", "patch"}}); err != nil {
+	toolPreambles := true
+	if err := parent.MarkModelDispatchLocked(LockedContract{Model: "locked-parent", EnabledTools: []string{"shell", "patch"}, ToolPreambles: &toolPreambles}); err != nil {
 		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
 	}
 	if err := parent.MarkAgentsInjected(); err != nil {
@@ -780,6 +781,12 @@ func TestInitializeChildFromParentCopiesContextWithoutConversationState(t *testi
 	}
 	if meta.Locked == nil || meta.Locked.Model != "locked-parent" || len(meta.Locked.EnabledTools) != 2 {
 		t.Fatalf("locked contract = %+v, want parent lock", meta.Locked)
+	}
+	if meta.Locked.ToolPreambles == nil || !*meta.Locked.ToolPreambles {
+		t.Fatalf("locked tool preambles = %+v, want copied true", meta.Locked.ToolPreambles)
+	}
+	if meta.Locked.ToolPreambles == parent.Meta().Locked.ToolPreambles {
+		t.Fatal("expected locked tool preambles pointer to be deep-copied")
 	}
 	if meta.Continuation == nil || meta.Continuation.OpenAIBaseURL != "http://parent.local/v1" {
 		t.Fatalf("continuation = %+v, want parent continuation", meta.Continuation)

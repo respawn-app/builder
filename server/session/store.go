@@ -236,6 +236,29 @@ func (s *Store) Dir() string {
 	return s.sessionDir
 }
 
+func (s *Store) RemoveDurable() error {
+	if s == nil {
+		return errors.New("session store is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(s.sessionDir) == "" {
+		return errors.New("session dir is required")
+	}
+	if filepath.Base(s.sessionDir) != strings.TrimSpace(s.meta.SessionID) {
+		return fmt.Errorf("session dir %q does not match session id %q", s.sessionDir, s.meta.SessionID)
+	}
+	if err := os.RemoveAll(s.sessionDir); err != nil {
+		return fmt.Errorf("remove session dir: %w", err)
+	}
+	s.persisted = false
+	s.eventsFileSizeBytes = 0
+	s.pendingFsyncWrites = 0
+	s.writesSinceCompaction = 0
+	s.persistedMetaVersion = 0
+	return nil
+}
+
 func (s *Store) Meta() Meta {
 	s.mu.Lock()
 	defer s.mu.Unlock()

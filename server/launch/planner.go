@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"builder/server/auth"
 	"builder/server/metadata"
@@ -26,6 +27,8 @@ const (
 
 	SubagentSessionSuffix = "subagent"
 )
+
+var updateChildExecutionTargetBeforeUpdateHook func(childSessionID string)
 
 type Mode string
 
@@ -335,10 +338,33 @@ func (p Planner) initializeChildSessionContext(ctx context.Context, child *sessi
 		if err := session.InitializeChildFromParent(child, parent); err != nil {
 			return err
 		}
-	} else if err := child.SetParentSessionID(parentID); err != nil {
+	}
+	target, hasTarget, err := p.resolveParentExecutionTarget(ctx, parentID)
+	if err != nil {
 		return err
 	}
-	return p.copyParentExecutionTarget(ctx, child.Meta().SessionID, parentID)
+	if parent == nil {
+		if err := child.SetParentSessionID(parentID); err != nil {
+			return err
+		}
+		if !hasTarget {
+			return nil
+		}
+		if err := p.updateChildExecutionTarget(ctx, child.Meta().SessionID, target); err != nil {
+			return errors.Join(err, p.rollbackChildSession(child))
+		}
+		return nil
+	}
+	if err := child.EnsureDurable(); err != nil {
+		return err
+	}
+	if !hasTarget {
+		return nil
+	}
+	if err := p.updateChildExecutionTarget(ctx, child.Meta().SessionID, target); err != nil {
+		return errors.Join(err, p.rollbackChildSession(child))
+	}
+	return nil
 }
 
 func (p Planner) openParentSession(parentSessionID string) (*session.Store, error) {
@@ -352,7 +378,26 @@ func (p Planner) openParentSession(parentSessionID string) (*session.Store, erro
 	return parent, nil
 }
 
-func (p Planner) copyParentExecutionTarget(ctx context.Context, childSessionID string, parentSessionID string) error {
+func (p Planner) resolveParentExecutionTarget(ctx context.Context, parentSessionID string) (clientui.SessionExecutionTarget, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return clientui.SessionExecutionTarget{}, false, err
+	}
+	store, err := metadata.Open(p.Config.PersistenceRoot)
+	if err != nil {
+		return clientui.SessionExecutionTarget{}, false, err
+	}
+	defer func() { _ = store.Close() }()
+	target, err := store.ResolveSessionExecutionTarget(ctx, parentSessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, session.ErrSessionNotFound) {
+			return clientui.SessionExecutionTarget{}, false, nil
+		}
+		return clientui.SessionExecutionTarget{}, false, err
+	}
+	return target, true, nil
+}
+
+func (p Planner) updateChildExecutionTarget(ctx context.Context, childSessionID string, target clientui.SessionExecutionTarget) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -361,14 +406,34 @@ func (p Planner) copyParentExecutionTarget(ctx context.Context, childSessionID s
 		return err
 	}
 	defer func() { _ = store.Close() }()
-	target, err := store.ResolveSessionExecutionTarget(ctx, parentSessionID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, session.ErrSessionNotFound) {
-			return nil
-		}
-		return err
+	if updateChildExecutionTargetBeforeUpdateHook != nil {
+		updateChildExecutionTargetBeforeUpdateHook(childSessionID)
 	}
 	return store.UpdateSessionExecutionTargetByID(ctx, childSessionID, target.WorkspaceID, target.WorktreeID, target.CwdRelpath)
+}
+
+func (p Planner) rollbackChildSession(child *session.Store) error {
+	if child == nil {
+		return nil
+	}
+	childMeta := child.Meta()
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var rollbackErrs []error
+	if store, err := metadata.Open(p.Config.PersistenceRoot); err == nil {
+		if err := store.DeleteSessionRecordByID(rollbackCtx, childMeta.SessionID); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+		if err := store.Close(); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+	} else {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	if err := child.RemoveDurable(); err != nil {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	return errors.Join(rollbackErrs...)
 }
 
 func EnsureSubagentSessionName(store *session.Store) error {

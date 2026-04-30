@@ -77,6 +77,10 @@ func cloneLockedContract(in *LockedContract) *LockedContract {
 	if len(in.EnabledTools) > 0 {
 		copyLocked.EnabledTools = append([]string(nil), in.EnabledTools...)
 	}
+	if in.ToolPreambles != nil {
+		toolPreambles := *in.ToolPreambles
+		copyLocked.ToolPreambles = &toolPreambles
+	}
 	copyLocked.SystemPrompt = strings.TrimSpace(in.SystemPrompt)
 	copyLocked.ReviewerPrompt = strings.TrimSpace(in.ReviewerPrompt)
 	return &copyLocked
@@ -90,8 +94,9 @@ func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
 	return &copyContext
 }
 
-// InitializeChildFromParent persists a fresh child session with parent-owned
-// execution context while leaving conversational state empty.
+// InitializeChildFromParent initializes a fresh child session with parent-owned
+// execution context while leaving conversational state empty. The caller owns
+// durability so launch planning can finish cross-store setup atomically.
 func InitializeChildFromParent(child *Store, parent *Store) error {
 	if child == nil {
 		return fmt.Errorf("child store is required")
@@ -110,12 +115,8 @@ func InitializeChildFromParent(child *Store, parent *Store) error {
 	child.meta.ParentSessionID = parentMeta.SessionID
 	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
 	child.meta.UpdatedAt = time.Now().UTC()
-	snapshot, err := child.persistMetaLocked()
 	child.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return child.observePersistence(snapshot)
+	return nil
 }
 
 func cloneWorktreeReminderState(in *WorktreeReminderState) *WorktreeReminderState {
