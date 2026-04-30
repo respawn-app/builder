@@ -206,6 +206,28 @@ func TestTerminalCursorWriterKeepsStateWhenPlacementSuffixWriteFails(t *testing.
 	}
 }
 
+func TestTerminalCursorWriterTreatsEmptyWriteAsNoop(t *testing.T) {
+	state := newUITerminalCursorState()
+	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
+
+	var out bytes.Buffer
+	writer := newUITerminalCursorWriter(&out, state)
+	if _, err := writer.Write([]byte("frame")); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+
+	out.Reset()
+	if n, err := writer.Write(nil); n != 0 || err != nil {
+		t.Fatalf("empty write = (%d, %v), want (0, nil)", n, err)
+	}
+	if got := out.String(); got != "" {
+		t.Fatalf("empty write should not emit cursor sequences, got %q", got)
+	}
+	if !state.hasPlacement() {
+		t.Fatal("empty write should not mutate placement state")
+	}
+}
+
 var errTerminalCursorTestWrite = errors.New("terminal cursor test write failed")
 
 type failingTerminalCursorWriter struct {

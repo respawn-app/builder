@@ -213,6 +213,9 @@ func newUITerminalCursorWriter(out io.Writer, state *uiTerminalCursorState) io.W
 }
 
 func (w uiTerminalCursorWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	if control := terminalCursorWriterControlWrite(p); control.passthrough {
 		if control.restoreAnchorBefore {
 			// Alt-screen enter saves the terminal cursor position. Our real cursor
