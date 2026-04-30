@@ -11,7 +11,6 @@ import (
 	"builder/shared/theme"
 	"builder/shared/toolspec"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	ansi "github.com/charmbracelet/x/ansi"
@@ -43,7 +42,6 @@ type onboardingStyles struct {
 	checkbox       lipgloss.Style
 	checkboxOn     lipgloss.Style
 	spinner        lipgloss.Style
-	inputPrompt    lipgloss.Style
 	inputText      lipgloss.Style
 	group          lipgloss.Style
 	valueNeutral   lipgloss.Style
@@ -61,7 +59,7 @@ type onboardingModel struct {
 	styles          onboardingStyles
 	spinnerClock    frameAnimationClock
 	spinnerFrame    int
-	input           textinput.Model
+	input           uiSharedTextInput
 	currentScreen   onboardingScreen
 	stepIndex       int
 	cursor          int
@@ -90,7 +88,6 @@ func newOnboardingStyles(theme string) onboardingStyles {
 		checkbox:       lipgloss.NewStyle().Foreground(palette.muted),
 		checkboxOn:     lipgloss.NewStyle().Foreground(palette.secondary).Bold(true),
 		spinner:        lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
-		inputPrompt:    lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		inputText:      lipgloss.NewStyle().Foreground(palette.foreground),
 		group:          lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		valueNeutral:   lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
@@ -100,8 +97,7 @@ func newOnboardingStyles(theme string) onboardingStyles {
 }
 
 func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardingModel {
-	input := textinput.New()
-	input.Prompt = ""
+	input := newUISharedTextInput("")
 	input.Focus()
 	m := &onboardingModel{
 		workflow:   newOnboardingWorkflow(&state),
@@ -113,7 +109,6 @@ func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardin
 		input:      input,
 	}
 	m.spinnerClock.Start(uiAnimationNow())
-	m.applyInputTheme(m.activeTheme())
 	m.syncScreen(true)
 	return m
 }
@@ -140,17 +135,9 @@ func (m *onboardingModel) activeTheme() string {
 	return theme.Resolve(m.state.settings.Theme)
 }
 
-func (m *onboardingModel) applyInputTheme(theme string) {
-	palette := uiPalette(theme)
-	m.input.Cursor.Style = lipgloss.NewStyle().Foreground(palette.primary)
-	m.input.TextStyle = lipgloss.NewStyle().Foreground(palette.foreground)
-	m.input.PlaceholderStyle = lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
-}
-
 func (m *onboardingModel) applyActiveThemeStyles() {
 	activeTheme := m.activeTheme()
 	m.styles = newOnboardingStyles(activeTheme)
-	m.applyInputTheme(activeTheme)
 }
 
 func (m *onboardingModel) Init() tea.Cmd {
@@ -277,9 +264,7 @@ func (m *onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.currentScreen.Kind == onboardingScreenInput {
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
+		return m, m.input.Update(msg)
 	}
 	return m, nil
 }
@@ -402,11 +387,8 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 		} else {
 			m.input.SetValue(screen.InputValue)
 		}
-		m.input.Placeholder = screen.Placeholder
-		m.input.EchoMode = textinput.EchoNormal
-		if screen.SensitiveInput {
-			m.input.EchoMode = textinput.EchoPassword
-		}
+		m.input.SetPlaceholder(screen.Placeholder)
+		m.input.SetPasswordMode(screen.SensitiveInput)
 		m.input.Focus()
 	}
 	if screen.Kind == onboardingScreenMulti {
@@ -707,10 +689,13 @@ func (m *onboardingModel) buildContent(width int) onboardingRenderedContent {
 		}
 	case onboardingScreenInput:
 		appendBlank()
-		cursorRow = len(lines)
-		for _, line := range wrapANSIText(m.styles.inputPrompt.Render("> ")+m.styles.inputText.Render(m.input.View()), width) {
-			lines = append(lines, line)
+		renderedInput := renderEditableInputField(width, 0, m.input.renderSpec("> ", true))
+		if renderedInput.Cursor.Visible {
+			cursorRow = len(lines) + renderedInput.Cursor.Row
+		} else {
+			cursorRow = len(lines)
 		}
+		lines = append(lines, renderEditableInputSoftCursorLines(width, renderedInput, m.styles.inputText)...)
 	}
 	if helper := strings.TrimSpace(m.currentScreen.Helper); helper != "" {
 		appendBlank()

@@ -57,6 +57,40 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	}
 }
 
+func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+	model.input = newUISharedTextInput("abc")
+	model.input.Focus()
+	model.input.SetPosition(1)
+
+	content := model.buildContent(24)
+	expected := model.input.renderSoftCursorLines(24, 0, "> ", true, model.styles.inputText)
+	if content.cursorRow < 0 || content.cursorRow+len(expected) > len(content.lines) {
+		t.Fatalf("input cursor row %d outside content lines %#v", content.cursorRow, content.lines)
+	}
+	got := content.lines[content.cursorRow : content.cursorRow+len(expected)]
+	if strings.Join(got, "\n") != strings.Join(expected, "\n") {
+		t.Fatalf("onboarding input did not render through shared text input, got %#v want %#v", got, expected)
+	}
+}
+
+func TestOnboardingInputCursorRowTracksWrappedSharedTextInput(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+	model.input = newUISharedTextInput("alpha beta gamma")
+	model.input.Focus()
+
+	content := model.buildContent(8)
+	rendered := renderEditableInputField(8, 0, model.input.renderSpec("> ", true))
+	if !rendered.Cursor.Visible || rendered.Cursor.Row < 1 {
+		t.Fatalf("expected wrapped input cursor below first row, cursor=%+v lines=%#v", rendered.Cursor, rendered.Lines)
+	}
+	if got, want := content.cursorRow, rendered.Cursor.Row; got != want {
+		t.Fatalf("content cursor row = %d, want %d", got, want)
+	}
+}
+
 func TestOnboardingSpinnerTickDoesNotRescheduleOutsideLoadingOrFinalize(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.state.imports.pending = false

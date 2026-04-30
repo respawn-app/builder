@@ -101,11 +101,15 @@ func isShiftEnterKey(msg tea.KeyMsg) bool {
 }
 
 func isDeleteCurrentLineKey(msg tea.KeyMsg) bool {
+	return isDeleteCurrentLineKeyForGOOS(msg, runtime.GOOS)
+}
+
+func isDeleteCurrentLineKeyForGOOS(msg tea.KeyMsg, goos string) bool {
 	keyString := strings.ToLower(msg.String())
 	if msg.Type == keyTypeCtrlBackspaceCSI || msg.Type == keyTypeSuperBackspaceCSI {
 		return true
 	}
-	if runtime.GOOS == "darwin" && (msg.Type == tea.KeyCtrlU || keyString == "ctrl+u") {
+	if goos == "darwin" && (msg.Type == tea.KeyCtrlU || keyString == "ctrl+u") {
 		return true
 	}
 	return keyString == "ctrl+backspace" || keyString == "cmd+backspace" || keyString == "super+backspace"

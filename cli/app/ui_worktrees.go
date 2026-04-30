@@ -11,7 +11,6 @@ import (
 	"builder/shared/serverapi"
 	"builder/shared/uiglyphs"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
@@ -62,8 +61,8 @@ const (
 )
 
 type uiWorktreeCreateDialogState struct {
-	baseRef       textinput.Model
-	branchTarget  textinput.Model
+	baseRef       uiSharedTextInput
+	branchTarget  uiSharedTextInput
 	focus         uiWorktreeCreateField
 	action        uiWorktreeCreateAction
 	errorText     string
@@ -143,14 +142,8 @@ type worktreeCreateTargetResolveDoneMsg struct {
 	err   error
 }
 
-func newWorktreeDialogTextInput(value string) textinput.Model {
-	input := textinput.New()
-	input.Prompt = ""
-	input.SetValue(strings.TrimSpace(value))
-	input.Cursor.Style = lipgloss.NewStyle()
-	input.TextStyle = lipgloss.NewStyle()
-	input.PlaceholderStyle = lipgloss.NewStyle()
-	return input
+func newWorktreeDialogTextInput(value string) uiSharedTextInput {
+	return newUISharedTextInput(strings.TrimSpace(value))
 }
 
 func newWorktreeCreateDialog(suggestedBranch string) uiWorktreeCreateDialogState {
@@ -941,10 +934,10 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 	var resolveCmd tea.Cmd
 	switch dialog.focus {
 	case uiWorktreeCreateFieldBaseRef:
-		dialog.baseRef, cmd = dialog.baseRef.Update(msg)
+		cmd = dialog.baseRef.Update(msg)
 	case uiWorktreeCreateFieldBranchTarget:
 		before := dialog.branchTarget.Value()
-		dialog.branchTarget, cmd = dialog.branchTarget.Update(msg)
+		cmd = dialog.branchTarget.Update(msg)
 		if dialog.branchTarget.Value() != before {
 			resolveCmd = m.scheduleWorktreeCreateTargetResolution()
 		}
@@ -1224,7 +1217,7 @@ func (l uiViewLayout) renderWorktreeCreateDialog(width, height int, style uiStyl
 		style.brand.Render(truncateQueuedMessageLine("New worktree", width)),
 	})
 	addSection(uiWorktreeCreateFieldBranchTarget, true, l.renderWorktreeCreateTargetField(width, dialog))
-	addSection(uiWorktreeCreateFieldBaseRef, false, l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef.Value(), dialog.baseRef.Position(), dialog.focus == uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef()))
+	addSection(uiWorktreeCreateFieldBaseRef, false, l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef, dialog.focus == uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef()))
 	addSection(uiWorktreeCreateFieldActions, true, renderWorktreeCreateActionGroup(width, m.theme, dialog, dialog.focus == uiWorktreeCreateFieldActions))
 	footer := make([]string, 0, 3)
 	if dialog.submitting {
@@ -1291,14 +1284,13 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	}
 	lineStyle := rowStyle.Foreground(p.foreground)
 	borderStyle := rowStyle.Foreground(p.muted).Faint(true)
-	spec := uiEditableInputRenderSpec{Prefix: "› ", Text: dialog.branchTarget.Value(), CursorIndex: dialog.branchTarget.Position(), RenderCursor: dialog.focus == uiWorktreeCreateFieldBranchTarget}
 	lines := []string{labelStyle.Render(padANSIRight("Branch or ref", width))}
 	lines = append(lines, badgeStyle.Render(padANSIRight(truncateQueuedMessageLine(badgeText, width), width)))
-	lines = append(lines, renderFramedEditableInputLines(max(1, width), 1, spec, lineStyle, borderStyle)...)
+	lines = append(lines, dialog.branchTarget.renderFramedSoftCursorLines(max(1, width), 1, "› ", dialog.focus == uiWorktreeCreateFieldBranchTarget, lineStyle, borderStyle)...)
 	return lines
 }
 
-func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label string, helper string, value string, cursor int, focused bool, enabled bool) []string {
+func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label string, helper string, input uiSharedTextInput, focused bool, enabled bool) []string {
 	p := uiPalette(l.model.theme)
 	rowStyle := lipgloss.NewStyle()
 	if focused {
@@ -1316,14 +1308,13 @@ func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label
 	if !enabled {
 		lineStyle = rowStyle.Foreground(p.muted).Faint(true)
 	}
-	spec := uiEditableInputRenderSpec{Prefix: "› ", Text: value, CursorIndex: cursor, RenderCursor: focused && enabled}
 	contentWidth := max(1, width)
 	lines := []string{labelStyle.Render(padANSIRight(truncateQueuedMessageLine(label, contentWidth), contentWidth))}
 	if strings.TrimSpace(helper) != "" {
 		helperStyle := rowStyle.Foreground(p.muted).Faint(true)
 		lines = append(lines, helperStyle.Render(padANSIRight(truncateQueuedMessageLine(helper, contentWidth), contentWidth)))
 	}
-	lines = append(lines, renderFramedEditableInputLines(contentWidth, 1, spec, lineStyle, borderStyle)...)
+	lines = append(lines, input.renderFramedSoftCursorLines(contentWidth, 1, "› ", focused && enabled, lineStyle, borderStyle)...)
 	return lines
 }
 

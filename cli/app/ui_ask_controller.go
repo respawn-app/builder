@@ -117,6 +117,18 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ask.freeform && isClipboardImagePasteKey(msg) {
 		return m, m.pasteClipboardImageCmd(uiClipboardPasteTargetAsk)
 	}
+	if m.ask.freeform && handleSharedInputEditKey(msg, uiSharedInputEditActions{
+		Backspace:          m.backspaceAskInput,
+		DeleteForward:      m.deleteForwardAskInput,
+		DeleteBackwardWord: m.deleteBackwardWordAskInput,
+		DeleteForwardWord:  m.deleteForwardWordAskInput,
+		KillToLineStart:    m.killAskInputToLineStart,
+		KillToLineEnd:      m.killAskInputToLineEnd,
+		Yank:               m.yankAskInput,
+		DeleteCurrentLine:  m.deleteCurrentAskInputLine,
+	}) {
+		return m, nil
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -251,11 +263,6 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputController().markPendingCSIShiftEnter()
 		}
 		return m, nil
-	case tea.KeyBackspace:
-		if m.ask.freeform {
-			m.backspaceAskInput()
-		}
-		return m, nil
 	case tea.KeySpace:
 		if m.ask.freeform {
 			m.insertAskInputRunes([]rune{' '})
@@ -302,12 +309,6 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if isDeleteCurrentLineKey(msg) {
-			if m.ask.freeform {
-				m.deleteCurrentAskInputLine()
-			}
-			return m, nil
-		}
 		if isShiftEnterKey(msg) {
 			if !m.ask.freeform {
 				return m, nil

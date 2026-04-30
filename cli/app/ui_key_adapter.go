@@ -67,3 +67,12 @@ func decodeUnknownCSISequenceBytes(bytes []byte) (string, bool) {
 func customKeyProgramFilter(_ tea.Model, msg tea.Msg) tea.Msg {
 	return adaptCustomKeyMsg(msg)
 }
+
+func terminalCursorProgramFilter(state *uiTerminalCursorState) func(tea.Model, tea.Msg) tea.Msg {
+	return func(model tea.Model, msg tea.Msg) tea.Msg {
+		if _, ok := msg.(tea.QuitMsg); ok && state != nil {
+			state.Stop()
+		}
+		return customKeyProgramFilter(model, msg)
+	}
+}

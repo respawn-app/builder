@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	tea "github.com/charmbracelet/bubbletea"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -201,6 +202,72 @@ func TestMainInputSupportsWordNavigation(t *testing.T) {
 	}
 }
 
+func TestMainInputEditingUsesGraphemeBoundaries(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "a👍e\u0301b"
+	m.inputCursor = len([]rune("a👍e\u0301"))
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated := next.(*uiModel)
+	if updated.inputCursor != len([]rune("a👍")) {
+		t.Fatalf("expected left to cross combining grapheme, got cursor %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated = next.(*uiModel)
+	if updated.input != "ae\u0301b" {
+		t.Fatalf("expected backspace to delete emoji grapheme, got %q", updated.input)
+	}
+	if updated.inputCursor != len([]rune("a")) {
+		t.Fatalf("expected cursor after emoji delete at rune 1, got %d", updated.inputCursor)
+	}
+}
+
+func TestMainInputDeleteKillAndYankShortcuts(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "alpha beta gamma"
+	m.inputCursor = len([]rune("alpha beta"))
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	updated := next.(*uiModel)
+	if updated.input != "alpha  gamma" {
+		t.Fatalf("expected ctrl+w to delete previous word, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated = next.(*uiModel)
+	if updated.input != "alpha beta gamma" {
+		t.Fatalf("expected ctrl+y to yank killed word, got %q", updated.input)
+	}
+
+	updated.inputCursor = len([]rune("alpha "))
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	updated = next.(*uiModel)
+	if updated.input != "alpha eta gamma" {
+		t.Fatalf("expected delete to remove next grapheme, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	updated = next.(*uiModel)
+	if updated.input != "alpha " {
+		t.Fatalf("expected ctrl+k to kill to line end, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated = next.(*uiModel)
+	if updated.input != "alpha eta gamma" {
+		t.Fatalf("expected ctrl+y to yank killed suffix, got %q", updated.input)
+	}
+
+	if goruntime.GOOS != "darwin" {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		updated = next.(*uiModel)
+		if updated.input != "" {
+			t.Fatalf("expected ctrl+u to kill to line start on non-darwin paths, got %q", updated.input)
+		}
+	}
+}
+
 func TestMainInputUpDownSingleLineMoveToStartAndEnd(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.input = "abcd"
@@ -246,6 +313,25 @@ func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
 	updated = next.(*uiModel)
 	if updated.inputCursor != 10 {
 		t.Fatalf("expected second down to land on third line at same column, got %d", updated.inputCursor)
+	}
+}
+
+func TestMainInputUpDownMovesAcrossWrappedVisualLines(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 5
+	m.input = "abcd efgh ijkl"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.inputCursor != len([]rune("abcd efgh")) {
+		t.Fatalf("expected up to land on previous wrapped row, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.inputCursor != len([]rune("abcd")) {
+		t.Fatalf("expected second up to land on first wrapped row, got %d", updated.inputCursor)
 	}
 }
 
@@ -987,13 +1073,6 @@ func TestViewCursorMovementDoesNotDropCharacters(t *testing.T) {
 	plain := stripANSIAndTrimRight(m.View())
 	if !strings.Contains(plain, "› hello") {
 		t.Fatalf("expected all characters preserved while moving cursor, got %q", plain)
-	}
-}
-
-func TestInputCursorDisplayPositionMovesToNextLineAfterNewline(t *testing.T) {
-	line, col := inputCursorDisplayPosition("› ", "abc\n", -1, 40)
-	if line != 1 || col != 0 {
-		t.Fatalf("expected cursor to move to start of next line after trailing newline, got line=%d col=%d", line, col)
 	}
 }
 
