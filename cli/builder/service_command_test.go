@@ -269,6 +269,66 @@ func TestServiceInstallAllowsHealthyServerOwnedByLoadedService(t *testing.T) {
 	}
 }
 
+func TestServiceRestartAllowsHealthyServerOwnedByLoadedServiceBeforePIDIsVisible(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{
+		Installed: true,
+		Loaded:    true,
+		Running:   true,
+		Command:   []string{"/usr/local/bin/builder", "serve"},
+	}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	want := []serviceAction{serviceActionStatus, serviceActionRestart}
+	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
+		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
+	}
+}
+
+func TestServiceRestartRejectsHealthyServerWhenLoadedServiceIsNotRunning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
+	}))
+	t.Cleanup(server.Close)
+	backend := &stubServiceBackend{status: serviceStatus{
+		Installed: true,
+		Loaded:    true,
+		Running:   false,
+		Command:   []string{"/usr/local/bin/builder", "serve"},
+	}}
+	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != serviceActionStatus {
+		t.Fatalf("calls = %+v, want status only", backend.calls)
+	}
+	if !strings.Contains(stderr.String(), "outside the background service") {
+		t.Fatalf("stderr = %q, want unmanaged conflict", stderr.String())
+	}
+}
+
 func TestServiceStartRejectsUnmanagedRunningServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {

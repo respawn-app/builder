@@ -43,13 +43,7 @@ func (launchdServiceBackend) Install(ctx context.Context, spec serviceSpec, forc
 		return fmt.Errorf("write launchd plist: %w", err)
 	}
 	if start {
-		if loaded, _ := launchdLoaded(ctx); loaded {
-			_, _ = runServiceCommand(ctx, "launchctl", "bootout", launchdDomain()+"/"+serviceLaunchdLabel)
-		}
-		if _, err := runServiceCommand(ctx, "launchctl", "bootstrap", launchdDomain(), path); err != nil {
-			return err
-		}
-		if _, err := runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
+		if err := reloadLaunchdService(ctx, spec, path); err != nil {
 			return err
 		}
 	}
@@ -82,9 +76,7 @@ func (launchdServiceBackend) Start(ctx context.Context, spec serviceSpec) error 
 		return fmt.Errorf("stat launchd plist: %w", err)
 	}
 	if loaded, _ := launchdLoaded(ctx); !loaded {
-		if _, err := runServiceCommand(ctx, "launchctl", "bootstrap", launchdDomain(), path); err != nil {
-			return err
-		}
+		return bootstrapLaunchdService(ctx, spec, path)
 	}
 	_, err = runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel)
 	return err
@@ -119,17 +111,59 @@ func (launchdServiceBackend) Status(ctx context.Context, spec serviceSpec) (serv
 	}
 	loaded, output := launchdLoaded(ctx)
 	pid := launchdPID(output)
+	command := readLaunchdRegisteredCommand(path)
+	if loadedCommand := parseLaunchdPrintProgramArguments(output); len(loadedCommand) > 0 {
+		command = loadedCommand
+	}
 	return serviceStatus{
 		Backend:     "launchd",
 		Installed:   installed,
 		Loaded:      loaded,
-		Running:     pid > 0,
+		Running:     pid > 0 || launchdState(output) == "running",
 		PID:         pid,
-		Command:     readLaunchdRegisteredCommand(path),
+		Command:     command,
 		Endpoint:    spec.Endpoint,
 		Logs:        []string{spec.StdoutLogPath, spec.StderrLogPath},
 		InstallPath: path,
 	}, nil
+}
+
+func reloadLaunchdService(ctx context.Context, spec serviceSpec, path string) error {
+	if loaded, _ := launchdLoaded(ctx); loaded {
+		if _, err := runServiceCommand(ctx, "launchctl", "bootout", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
+			return err
+		}
+	}
+	return bootstrapLaunchdService(ctx, spec, path)
+}
+
+func bootstrapLaunchdService(ctx context.Context, spec serviceSpec, path string) error {
+	if _, err := runServiceCommand(ctx, "launchctl", "bootstrap", launchdDomain(), path); err != nil {
+		if !isTransientLaunchdBootstrapError(err) {
+			return err
+		}
+		return kickstartMatchingLoadedLaunchdService(ctx, spec, err)
+	}
+	return nil
+}
+
+func isTransientLaunchdBootstrapError(err error) bool {
+	var commandErr serviceCommandError
+	if !errors.As(err, &commandErr) {
+		return false
+	}
+	return commandErr.Name == "launchctl" && commandErr.Result.Code == 5
+}
+
+func kickstartMatchingLoadedLaunchdService(ctx context.Context, spec serviceSpec, cause error) error {
+	loaded, output := launchdLoaded(ctx)
+	if !loaded || !commandArgsEqual(parseLaunchdPrintProgramArguments(output), serviceCommand(spec)) {
+		return cause
+	}
+	if _, err := runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
+		return errors.Join(cause, err)
+	}
+	return nil
 }
 
 func readLaunchdRegisteredCommand(path string) []string {
@@ -222,6 +256,36 @@ func launchdPID(output string) int {
 		}
 	}
 	return 0
+}
+
+func launchdState(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.TrimSpace(parts[0]) == "state" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
+}
+
+func parseLaunchdPrintProgramArguments(output string) []string {
+	args := []string{}
+	inArguments := false
+	for _, rawLine := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(rawLine)
+		switch {
+		case line == "arguments = {":
+			inArguments = true
+		case inArguments && line == "}":
+			return args
+		case inArguments && line != "":
+			args = append(args, line)
+		}
+	}
+	return nil
 }
 
 func renderLaunchdPlist(spec serviceSpec) string {

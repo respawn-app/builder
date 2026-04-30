@@ -57,6 +57,7 @@ type Event struct {
 	CacheWarningVisibility     transcript.EntryVisibility
 	LocalEntry                 *ChatEntry
 	RunState                   *RunState
+	ContextUsage               *ContextUsage
 	Background                 *BackgroundShellEvent
 }
 

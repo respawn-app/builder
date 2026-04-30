@@ -59,6 +59,7 @@ type Event struct {
 	CacheWarning               *cachewarn.Warning
 	CacheWarningVisibility     EntryVisibility
 	RunState                   *RunState
+	ContextUsage               *RuntimeContextUsage
 	Background                 *BackgroundShellEvent
 }
 

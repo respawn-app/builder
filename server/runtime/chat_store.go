@@ -463,7 +463,7 @@ func (s *chatStore) applyHeadlessStateLocked(msg llm.Message) {
 }
 
 func (s *chatStore) applyLastCommittedAssistantFinalAnswerLocked(msg llm.Message) {
-	if shouldSkipTrailingAssistantHandoffMessage(msg) {
+	if messagePreservesLastCommittedAssistantFinalAnswer(msg) {
 		return
 	}
 	if isNoopFinalAnswer(msg) {

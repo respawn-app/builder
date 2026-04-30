@@ -285,6 +285,15 @@ func (c *sessionRuntimeClient) patchMainView(apply func(view *clientui.RuntimeMa
 	c.mu.Unlock()
 }
 
+func (c *sessionRuntimeClient) observeRuntimeEventStatus(evt clientui.Event) {
+	if c == nil || evt.ContextUsage == nil {
+		return
+	}
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Status.ContextUsage = *evt.ContextUsage
+	})
+}
+
 func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clientui.RuntimeMainView, error) {
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()

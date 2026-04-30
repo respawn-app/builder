@@ -377,7 +377,7 @@ func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea
 	}
 	m.spinnerFrame = m.spinnerClock.Frame(tickAt, frameCount, spinnerTickInterval)
 	m.syncViewport()
-	return m, tickSpinner(msg.token, m.spinnerClock.NextDelay(tickAt, spinnerTickInterval))
+	return m, m.scheduleSpinnerTick(msg.token, tickAt)
 }
 
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {

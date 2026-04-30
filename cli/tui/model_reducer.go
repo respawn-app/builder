@@ -595,6 +595,9 @@ func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom b
 		}
 		if !m.detailDirty {
 			m.refreshDetailViewport()
+			if result.viewportChanged && m.compactDetail && m.detailBottomAnchor {
+				m.focusBottomVisibleDetailEntry()
+			}
 		}
 	}
 }

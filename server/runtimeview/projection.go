@@ -116,6 +116,14 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 			FinishedAt: evt.RunState.FinishedAt,
 		}
 	}
+	if evt.ContextUsage != nil {
+		view.ContextUsage = &clientui.RuntimeContextUsage{
+			UsedTokens:            evt.ContextUsage.UsedTokens,
+			WindowTokens:          evt.ContextUsage.WindowTokens,
+			CacheHitPercent:       evt.ContextUsage.CacheHitPercent,
+			HasCacheHitPercentage: evt.ContextUsage.HasCacheHitPercentage,
+		}
+	}
 	if evt.Background != nil {
 		view.Background = &clientui.BackgroundShellEvent{
 			Type:              evt.Background.Type,

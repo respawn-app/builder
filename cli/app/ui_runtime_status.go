@@ -35,11 +35,69 @@ func (m *uiModel) refreshRuntimeMainView() clientui.RuntimeMainView {
 }
 
 func (m *uiModel) runtimeStatus() clientui.RuntimeStatus {
-	return m.runtimeMainView().Status
+	view := m.runtimeMainView()
+	status := view.Status
+	if m.runtimeContextUsageAppliesTo(view.Session.SessionID) {
+		status.ContextUsage = m.runtimeContextUsage
+	}
+	return status
 }
 
 func (m *uiModel) refreshRuntimeStatus() clientui.RuntimeStatus {
-	return m.refreshRuntimeMainView().Status
+	view := m.refreshRuntimeMainView()
+	status := view.Status
+	if m.runtimeContextUsageAppliesTo(view.Session.SessionID) {
+		status.ContextUsage = m.runtimeContextUsage
+	}
+	return status
+}
+
+func (m *uiModel) applyRuntimeEventStatus(evt clientui.Event) {
+	if m == nil || evt.ContextUsage == nil {
+		return
+	}
+	m.setRuntimeContextUsage(m.currentRuntimeSessionID(), *evt.ContextUsage)
+	if observer, ok := m.runtimeClient().(interface{ observeRuntimeEventStatus(clientui.Event) }); ok {
+		observer.observeRuntimeEventStatus(evt)
+	}
+}
+
+func (m *uiModel) setRuntimeContextUsage(sessionID string, usage clientui.RuntimeContextUsage) {
+	if m == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		m.runtimeContextUsage = clientui.RuntimeContextUsage{}
+		m.runtimeContextUsageSession = ""
+		return
+	}
+	m.runtimeContextUsage = usage
+	m.runtimeContextUsageSession = sessionID
+}
+
+func (m *uiModel) runtimeContextUsageAppliesTo(sessionID string) bool {
+	if m == nil || m.runtimeContextUsage.WindowTokens <= 0 {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(m.sessionID)
+	}
+	return sessionID != "" && strings.TrimSpace(m.runtimeContextUsageSession) == sessionID
+}
+
+func (m *uiModel) currentRuntimeSessionID() string {
+	if m == nil {
+		return ""
+	}
+	if sessionID := strings.TrimSpace(m.sessionID); sessionID != "" {
+		return sessionID
+	}
+	if client := m.runtimeClient(); client != nil {
+		return strings.TrimSpace(client.MainView().Session.SessionID)
+	}
+	return ""
 }
 
 func (m *uiModel) refreshRuntimeSessionView() clientui.RuntimeSessionView {

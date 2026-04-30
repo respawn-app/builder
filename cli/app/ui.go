@@ -705,7 +705,6 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
 	flushSequenceBefore := m.nativeFlushSequence
-	wasReviewerRunning := m.reviewerRunning
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch", map[string]string{
 		"session_id":             strings.TrimSpace(m.sessionID),
 		"mode":                   string(m.view.Mode()),
@@ -716,12 +715,7 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	}))
 	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
 	cmd := result.cmd
-	if !wasReviewerRunning && m.reviewerRunning {
-		cmd = tea.Batch(cmd, m.ensureSpinnerTicking())
-	}
-	if wasReviewerRunning && !m.reviewerRunning && !m.shouldAnimateSpinner() {
-		m.stopSpinnerTicking()
-	}
+	cmd = tea.Batch(cmd, m.rearmSpinnerTicking())
 	if !result.awaitsHydration {
 		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
 	}

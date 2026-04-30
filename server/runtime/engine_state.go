@@ -68,12 +68,12 @@ func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 	return e.chat.cachedLastCommittedAssistantFinalAnswer()
 }
 
-func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {
+func messagePreservesLastCommittedAssistantFinalAnswer(message llm.Message) bool {
 	if message.Role != llm.RoleDeveloper {
 		return false
 	}
 	switch message.MessageType {
-	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeHandoffFutureMessage:
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeHandoffFutureMessage, llm.MessageTypeReviewerFeedback:
 		return true
 	default:
 		return false
@@ -623,6 +623,10 @@ func (e *Engine) cacheHitSnapshot() (int, bool) {
 func (e *Engine) emit(evt Event) {
 	evt.TranscriptRevision = e.TranscriptRevision()
 	evt.CommittedEntryCount = e.CommittedTranscriptEntryCount()
+	if evt.ContextUsage == nil && eventShouldCarryContextUsage(evt) {
+		usage := e.ContextUsage()
+		evt.ContextUsage = &usage
+	}
 	if !evt.CommittedEntryStartSet && eventMayInferCommittedEntryStart(evt.Kind) {
 		entries := TranscriptEntriesFromEvent(evt)
 		if len(entries) > 0 {
@@ -636,6 +640,17 @@ func (e *Engine) emit(evt Event) {
 	}
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(evt)
+	}
+}
+
+func eventShouldCarryContextUsage(evt Event) bool {
+	switch evt.Kind {
+	case EventModelResponse, EventUserMessageFlushed, EventCompactionCompleted, EventCompactionFailed:
+		return true
+	case EventAssistantMessage, EventToolCallStarted, EventToolCallCompleted, EventLocalEntryAdded, EventCacheWarning, EventConversationUpdated:
+		return evt.CommittedTranscriptChanged
+	default:
+		return false
 	}
 }
 

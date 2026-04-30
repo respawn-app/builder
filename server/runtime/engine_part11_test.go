@@ -69,6 +69,42 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}
 }
 
+func TestModelResponseEventCarriesContextUsage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 420, WindowTokens: 1_000},
+	}}}
+	var usage *ContextUsage
+	autoCompactionEnabled := false
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   1_000,
+		AutoCompactionEnabled: &autoCompactionEnabled,
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventModelResponse {
+				usage = evt.ContextUsage
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "prompt"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if usage == nil {
+		t.Fatal("expected model response event to carry context usage")
+	}
+	if usage.UsedTokens != 420 || usage.WindowTokens != 1_000 {
+		t.Fatalf("context usage = %+v, want used=420 window=1000", usage)
+	}
+}
+
 func TestQueuedUserMessageFlushDoesNotEmitConversationUpdatedForInjectedMessage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
