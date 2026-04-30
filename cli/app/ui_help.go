@@ -21,6 +21,10 @@ type uiHelpSection struct {
 	Entries []uiHelpEntry
 }
 
+var uiHelpGOOS = func() string {
+	return runtime.GOOS
+}
+
 func (m *uiModel) toggleHelp() {
 	m.helpVisible = !m.helpVisible
 }
@@ -52,11 +56,16 @@ func (m *uiModel) canShowHelp() bool {
 }
 
 func (m *uiModel) helpSections() []uiHelpSection {
+	return helpSectionsForGOOS(uiHelpGOOS())
+}
+
+func helpSectionsForGOOS(goos string) []uiHelpSection {
+	shortcutLabels := shortcutLabelsForGOOS(goos)
 	return []uiHelpSection{
 		{
 			Title: "Global",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"F1 / ? (empty) / Alt/Cmd + /"}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
+				{Bindings: []string{shortcutLabels.helpToggleBinding()}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Ctrl + C"}, Description: "interrupt current run or exit", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Shift + Tab / Ctrl + T"}, Description: "toggle transcript mode", Active: uiHelpCanToggleTranscript},
 			},
@@ -70,7 +79,7 @@ func (m *uiModel) helpSections() []uiHelpSection {
 				{Bindings: []string{"↑ / ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Ctrl + V/D"}, Description: "paste a clipboard screenshot as a file path", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter / Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
-				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
+				{Bindings: deleteCurrentLineBindingsForGOOS(goos), Description: "delete the current input line", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Delete / Ctrl + K/U/W/Y"}, Description: "edit/delete/yank text with shell-style shortcuts", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Alt/Ctrl + ←/→"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Home/End / Ctrl + A/E/End"}, Description: "jump to the line start or end", Active: uiHelpInTextEditing},
@@ -89,11 +98,35 @@ func (m *uiModel) helpSections() []uiHelpSection {
 }
 
 func deleteCurrentLineBindings() []string {
-	bindings := []string{"Ctrl/Cmd + Backspace"}
-	if runtime.GOOS == "darwin" {
+	return deleteCurrentLineBindingsForGOOS(uiHelpGOOS())
+}
+
+func deleteCurrentLineBindingsForGOOS(goos string) []string {
+	shortcutLabels := shortcutLabelsForGOOS(goos)
+	bindings := []string{"Ctrl/" + shortcutLabels.super + " + Backspace"}
+	if goos == "darwin" {
 		bindings = append(bindings, "Ctrl + U")
 	}
 	return bindings
+}
+
+type uiShortcutLabels struct {
+	super string
+}
+
+func shortcutLabelsForGOOS(goos string) uiShortcutLabels {
+	switch goos {
+	case "darwin":
+		return uiShortcutLabels{super: "⌘"}
+	case "windows":
+		return uiShortcutLabels{super: "Win"}
+	default:
+		return uiShortcutLabels{super: "Super"}
+	}
+}
+
+func (l uiShortcutLabels) helpToggleBinding() string {
+	return "F1 / ? (empty) / Alt/" + l.super + " + /"
 }
 
 func uiHelpAlwaysActive(*uiModel) bool {

@@ -256,6 +256,10 @@ func writeServiceUsage(fs *flag.FlagSet) {
 		"  Linux/WSL2: systemd --user unit.",
 		"  Windows: Scheduled Task, with Startup folder fallback when needed.",
 	)
+	writeHelpSection(out, "macOS Notes:",
+		"  `restart --if-installed` rewrites the LaunchAgent, unloads the loaded job, and bootstraps it again.",
+		"  `start` bootstraps an unloaded LaunchAgent; launchd starts it through RunAtLoad.",
+	)
 	writeHelpSection(out, "Examples:",
 		"  builder service status",
 		"  builder service install",
