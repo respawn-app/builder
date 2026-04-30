@@ -17,6 +17,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.32.0
 	github.com/pressly/goose/v3 v3.27.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/sahilm/fuzzy v0.1.1
 	golang.org/x/net v0.53.0
 	golang.org/x/oauth2 v0.36.0
@@ -54,7 +55,6 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect

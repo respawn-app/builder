@@ -201,6 +201,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	}
 	snapshot, backgrounded := entry.transitionToBackground()
 	if !backgrounded {
+		if pending := entry.drainPending(); len(pending) > 0 {
+			output = append(output, pending...)
+			sanitized = sanitizeOutput(string(output))
+		}
 		processed, err := m.applyPostprocessing(ctx, entry, sanitized, snapshot.ExitCode, false, maxOutputChars)
 		if err != nil {
 			return ExecResult{}, err

@@ -3,6 +3,8 @@ package app
 import (
 	"builder/cli/app/commands"
 	"builder/shared/config"
+	"io"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -12,7 +14,8 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 }
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig, startupUpdateNotice bool) (tea.Model, error) {
-	options := mainUIProgramOptions(active)
+	terminalCursor := newUITerminalCursorState()
+	options := mainUIProgramOptions(active, terminalCursor)
 	runtimeClient := wiring.runtimeClient
 	if runtimeClient == nil {
 		sessionID := ""
@@ -61,6 +64,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUISessionID(sessionID),
 		WithUIStatusConfig(statusConfig),
 		WithUIStartupUpdateNotice(startupUpdateNotice),
+		WithUITerminalCursorState(terminalCursor),
 	)
 	if closable, ok := model.(interface{ Close() }); ok {
 		defer closable.Close()
@@ -81,9 +85,20 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	return finalModel, nil
 }
 
-func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
-	options := []tea.ProgramOption{tea.WithFilter(customKeyProgramFilter)}
+func mainUIProgramOptions(active config.Settings, terminalCursor *uiTerminalCursorState) []tea.ProgramOption {
+	return mainUIProgramOptionsWithOutput(active, terminalCursor, os.Stdout)
+}
+
+func mainUIProgramOptionsWithOutput(active config.Settings, terminalCursor *uiTerminalCursorState, output io.Writer) []tea.ProgramOption {
+	options := []tea.ProgramOption{tea.WithFilter(terminalCursorProgramFilter(terminalCursor))}
+	if terminalCursor != nil {
+		options = append(options, tea.WithOutput(mainUIProgramOutputWriter(terminalCursor, output)))
+	}
 	return options
+}
+
+func mainUIProgramOutputWriter(terminalCursor *uiTerminalCursorState, output io.Writer) io.Writer {
+	return newUITerminalCursorWriter(output, terminalCursor)
 }
 
 func extractUITransition(model tea.Model) UITransition {

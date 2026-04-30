@@ -7,8 +7,10 @@ import (
 )
 
 type wrappedAskPromptLine struct {
-	Text string
-	Line askPromptLine
+	Text      string
+	Line      askPromptLine
+	HasCursor bool
+	CursorCol int
 }
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
@@ -97,6 +99,30 @@ func (l uiViewLayout) mainInputRenderSpec() uiEditableInputRenderSpec {
 	}
 }
 
+func (l uiViewLayout) inputPaneCursor(width int) uiInputFieldCursor {
+	if l.model.terminalCursor == nil || width < 1 {
+		return uiInputFieldCursor{}
+	}
+	inputState := l.model.inputModeState()
+	if inputState.InputLocked || inputState.Mode == uiInputModeProcessList || inputState.Mode == uiInputModeWorktree || inputState.Mode == uiInputModeRollbackSelection {
+		return uiInputFieldCursor{}
+	}
+	if inputState.ShowsAskInput {
+		return l.askInputPaneCursor(width)
+	}
+	if !inputState.ShowsMainInput {
+		return uiInputFieldCursor{}
+	}
+	spec := l.mainInputRenderSpec()
+	spec.RenderCursor = true
+	visible, cursorLine, cursorCol := visibleEditableInputViewport(width, inputContentLineLimit(l.effectiveHeight()), spec)
+	if cursorLine < 0 {
+		return uiInputFieldCursor{}
+	}
+	cursorLine, cursorCol = normalizeInputFieldCursorCell(cursorLine, cursorCol, width, len(visible))
+	return uiInputFieldCursor{Visible: true, Row: cursorLine + 1, Col: cursorCol}
+}
+
 func (l uiViewLayout) wrappedMainInputLines(width int) []string {
 	return wrappedEditableInputLines(width, l.mainInputRenderSpec())
 }
@@ -114,13 +140,20 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 	cursorLineIndex := -1
 	for _, line := range promptLines {
 		parts := wrapLine(line.Text, width)
+		lineCursor := -1
+		lineCursorCol := 0
 		if line.Kind == askPromptLineKindInput {
 			spec := uiEditableInputRenderSpec{Prefix: line.InputPrefix, Text: line.InputText, CursorIndex: line.InputCursor, RenderCursor: line.ShowsCursor}
-			parts = wrappedEditableInputLines(width, spec)
-			if line.ShowsCursor {
-				cursorLine, cursorCol := inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
+			renderedInput := renderEditableInputField(width, 0, spec)
+			parts = renderedInput.Lines
+			if renderedInput.Cursor.Visible {
+				cursorLine, cursorCol := renderedInput.Cursor.Row, renderedInput.Cursor.Col
 				if cursorLine >= 0 && cursorLine < len(parts) {
-					parts[cursorLine] = overlayCursorOnLine(parts[cursorLine], cursorCol, width, lipgloss.NewStyle().Reverse(true))
+					if !l.shouldUseRealTerminalCursor() {
+						parts[cursorLine] = overlayCursorOnLine(parts[cursorLine], cursorCol, width, lipgloss.NewStyle().Reverse(true))
+					}
+					lineCursor = cursorLine
+					lineCursorCol = cursorCol
 					cursorLineIndex = len(out) + cursorLine
 				}
 			}
@@ -128,12 +161,12 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 		if len(parts) == 0 {
 			parts = []string{""}
 		}
-		for _, part := range parts {
+		for partIndex, part := range parts {
 			wrappedLine := line
 			if wrappedLine.MutedSuffix != "" && !strings.HasSuffix(part, wrappedLine.MutedSuffix) {
 				wrappedLine.MutedSuffix = ""
 			}
-			out = append(out, wrappedAskPromptLine{Text: part, Line: wrappedLine})
+			out = append(out, wrappedAskPromptLine{Text: part, Line: wrappedLine, HasCursor: partIndex == lineCursor, CursorCol: lineCursorCol})
 		}
 	}
 	if len(out) == 0 {
@@ -143,24 +176,49 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 }
 
 func (l uiViewLayout) visibleAskPromptLines(width int) []wrappedAskPromptLine {
-	wrapped, cursorLine := l.wrappedAskPromptLines(width)
-	maxContentLines := inputContentLineLimit(l.effectiveHeight())
-	if len(wrapped) > maxContentLines {
-		visibleStart := visibleWrappedLineStart(len(wrapped), maxContentLines, cursorLine, cursorLine >= 0)
-		wrapped = wrapped[visibleStart : visibleStart+maxContentLines]
-	}
+	wrapped, _ := l.visibleAskPromptLinesWithCursor(width)
 	return wrapped
 }
 
-func wrapPlainLines(lines []string, width int) []string {
-	wrapped := make([]string, 0, len(lines))
-	for _, line := range lines {
-		wrapped = append(wrapped, wrapLine(line, width)...)
+func (l uiViewLayout) visibleAskPromptLinesWithCursor(width int) ([]wrappedAskPromptLine, int) {
+	wrapped, cursorLine := l.wrappedAskPromptLines(width)
+	maxContentLines := inputContentLineLimit(l.effectiveHeight())
+	visibleStart := 0
+	if len(wrapped) > maxContentLines {
+		visibleStart = visibleWrappedLineStart(len(wrapped), maxContentLines, cursorLine, cursorLine >= 0)
+		wrapped = wrapped[visibleStart : visibleStart+maxContentLines]
 	}
-	if len(wrapped) == 0 {
-		return []string{""}
+	visibleCursorLine := cursorLine - visibleStart
+	if visibleCursorLine < 0 || visibleCursorLine >= len(wrapped) {
+		visibleCursorLine = -1
 	}
-	return wrapped
+	return wrapped, visibleCursorLine
+}
+
+func (l uiViewLayout) askInputPaneCursor(width int) uiInputFieldCursor {
+	lines, cursorLine := l.visibleAskPromptLinesWithCursor(width)
+	if cursorLine < 0 {
+		return uiInputFieldCursor{}
+	}
+	cursorCol := 0
+	if cursorLine < len(lines) && lines[cursorLine].HasCursor {
+		cursorCol = lines[cursorLine].CursorCol
+	}
+	cursorLine, cursorCol = normalizeInputFieldCursorCell(cursorLine, cursorCol, width, len(lines))
+	return uiInputFieldCursor{Visible: true, Row: cursorLine + 1, Col: cursorCol}
+}
+
+func normalizeInputFieldCursorCell(row int, col int, width int, lineCount int) (int, int) {
+	if width < 1 {
+		return row, 0
+	}
+	if col < width {
+		return row, max(0, col)
+	}
+	if row+1 < lineCount {
+		return row + 1, 0
+	}
+	return row, width - 1
 }
 
 func inputContentLineLimit(height int) int {

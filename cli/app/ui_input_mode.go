@@ -31,6 +31,7 @@ type uiAskState struct {
 	freeformMode askFreeformMode
 	input        string
 	inputCursor  int
+	inputKill    string
 }
 
 type uiProcessListState struct {

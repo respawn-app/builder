@@ -1,6 +1,6 @@
 package app
 
-import "unicode"
+import tuiinput "builder/cli/tui/input"
 
 func (m *uiModel) inputRunes() []rune {
 	return []rune(m.input)
@@ -58,6 +58,82 @@ func (m *uiModel) backspaceInput() bool {
 	return true
 }
 
+func (m *uiModel) deleteForwardInput() bool {
+	updated, nextCursor, ok := deleteForwardBuffer(m.input, m.inputCursor)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
+func (m *uiModel) deleteBackwardWordInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteBackwardWordBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.inputKillBuffer = killBuffer
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
+func (m *uiModel) deleteForwardWordInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteForwardWordBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.inputKillBuffer = killBuffer
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
+func (m *uiModel) killInputToLineStart() bool {
+	updated, nextCursor, killBuffer, ok := killToLineStartBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.inputKillBuffer = killBuffer
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
+func (m *uiModel) killInputToLineEnd() bool {
+	updated, nextCursor, killBuffer, ok := killToLineEndBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.inputKillBuffer = killBuffer
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
+func (m *uiModel) yankInput() bool {
+	updated, nextCursor, ok := yankBuffer(m.input, m.inputCursor, m.inputKillBuffer)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.syncPromptHistorySelectionToInput()
+	m.refreshAutocompleteFromInput()
+	return true
+}
+
 func (m *uiModel) moveCursorLeft() {
 	m.inputCursor = moveBufferCursorLeft(m.input, m.inputCursor)
 	m.refreshAutocompleteFromInput()
@@ -89,14 +165,14 @@ func (m *uiModel) moveCursorWordRight() {
 }
 
 func (m *uiModel) moveCursorUpLine() bool {
-	nextCursor, moved := moveBufferCursorUpLine(m.input, m.inputCursor)
+	nextCursor, moved := moveBufferCursorUpLine(m.input, m.inputCursor, m.effectiveWidth(), m.layout().mainInputPrefix())
 	m.inputCursor = nextCursor
 	m.refreshAutocompleteFromInput()
 	return moved
 }
 
 func (m *uiModel) moveCursorDownLine() bool {
-	nextCursor, moved := moveBufferCursorDownLine(m.input, m.inputCursor)
+	nextCursor, moved := moveBufferCursorDownLine(m.input, m.inputCursor, m.effectiveWidth(), m.layout().mainInputPrefix())
 	m.inputCursor = nextCursor
 	m.refreshAutocompleteFromInput()
 	return moved
@@ -142,6 +218,70 @@ func (m *uiModel) backspaceAskInput() bool {
 	return true
 }
 
+func (m *uiModel) deleteForwardAskInput() bool {
+	updated, nextCursor, ok := deleteForwardBuffer(m.ask.input, m.ask.inputCursor)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	return true
+}
+
+func (m *uiModel) deleteBackwardWordAskInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteBackwardWordBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	m.ask.inputKill = killBuffer
+	return true
+}
+
+func (m *uiModel) deleteForwardWordAskInput() bool {
+	updated, nextCursor, killBuffer, ok := deleteForwardWordBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	m.ask.inputKill = killBuffer
+	return true
+}
+
+func (m *uiModel) killAskInputToLineStart() bool {
+	updated, nextCursor, killBuffer, ok := killToLineStartBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	m.ask.inputKill = killBuffer
+	return true
+}
+
+func (m *uiModel) killAskInputToLineEnd() bool {
+	updated, nextCursor, killBuffer, ok := killToLineEndBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	m.ask.inputKill = killBuffer
+	return true
+}
+
+func (m *uiModel) yankAskInput() bool {
+	updated, nextCursor, ok := yankBuffer(m.ask.input, m.ask.inputCursor, m.ask.inputKill)
+	if !ok {
+		return false
+	}
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
+	return true
+}
+
 func (m *uiModel) moveAskCursorLeft() {
 	m.ask.inputCursor = moveBufferCursorLeft(m.ask.input, m.ask.inputCursor)
 }
@@ -167,13 +307,13 @@ func (m *uiModel) moveAskCursorWordRight() {
 }
 
 func (m *uiModel) moveAskCursorUpLine() bool {
-	nextCursor, moved := moveBufferCursorUpLine(m.ask.input, m.ask.inputCursor)
+	nextCursor, moved := moveBufferCursorUpLine(m.ask.input, m.ask.inputCursor, m.effectiveWidth(), m.askInputPrefix())
 	m.ask.inputCursor = nextCursor
 	return moved
 }
 
 func (m *uiModel) moveAskCursorDownLine() bool {
-	nextCursor, moved := moveBufferCursorDownLine(m.ask.input, m.ask.inputCursor)
+	nextCursor, moved := moveBufferCursorDownLine(m.ask.input, m.ask.inputCursor, m.effectiveWidth(), m.askInputPrefix())
 	m.ask.inputCursor = nextCursor
 	return moved
 }
@@ -200,44 +340,39 @@ func insertBufferRunes(text string, cursor int, chars []rune) (string, int, bool
 	if len(filtered) == 0 {
 		return text, cursor, false
 	}
-	runes := []rune(text)
-	cursor = clampCursor(cursor, len(runes))
-	updated := make([]rune, 0, len(runes)+len(filtered))
-	updated = append(updated, runes[:cursor]...)
-	updated = append(updated, filtered...)
-	updated = append(updated, runes[cursor:]...)
-	nextCursor := cursor + len(filtered)
-	cleaned, cleanedCursor, _ := stripMouseSGRRunesWithCursor(updated, nextCursor)
+	editor := bufferEditor(text, cursor)
+	editor.InsertString(string(filtered))
+	nextCursor := runeOffsetForByteCursor(editor.Text(), editor.Cursor())
+	cleaned, cleanedCursor, _ := stripMouseSGRRunesWithCursor([]rune(editor.Text()), nextCursor)
 	return string(cleaned), cleanedCursor, true
 }
 
 func backspaceBuffer(text string, cursor int) (string, int, bool) {
-	runes := []rune(text)
-	cursor = clampCursor(cursor, len(runes))
-	if cursor == 0 {
+	editor := bufferEditor(text, cursor)
+	if !editor.DeleteBackward() {
 		return text, cursor, false
 	}
-	updated := make([]rune, 0, len(runes)-1)
-	updated = append(updated, runes[:cursor-1]...)
-	updated = append(updated, runes[cursor:]...)
-	return string(updated), cursor - 1, true
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
+}
+
+func deleteForwardBuffer(text string, cursor int) (string, int, bool) {
+	editor := bufferEditor(text, cursor)
+	if !editor.DeleteForward() {
+		return text, bufferCursorIndex(text, cursor), false
+	}
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }
 
 func moveBufferCursorLeft(text string, cursor int) int {
-	cursor = bufferCursorIndex(text, cursor)
-	if cursor > 0 {
-		return cursor - 1
-	}
-	return cursor
+	editor := bufferEditor(text, cursor)
+	editor.MoveLeft()
+	return runeOffsetForByteCursor(text, editor.Cursor())
 }
 
 func moveBufferCursorRight(text string, cursor int) int {
-	runes := []rune(text)
-	cursor = clampCursor(cursor, len(runes))
-	if cursor < len(runes) {
-		return cursor + 1
-	}
-	return cursor
+	editor := bufferEditor(text, cursor)
+	editor.MoveRight()
+	return runeOffsetForByteCursor(text, editor.Cursor())
 }
 
 func moveBufferCursorStart() int {
@@ -249,101 +384,116 @@ func moveBufferCursorEnd() int {
 }
 
 func moveBufferCursorWordLeft(text string, cursor int) int {
-	runes := []rune(text)
-	return prevWordBoundary(runes, clampCursor(cursor, len(runes)))
+	editor := bufferEditor(text, cursor)
+	editor.MoveWordLeft()
+	return runeOffsetForByteCursor(text, editor.Cursor())
 }
 
 func moveBufferCursorWordRight(text string, cursor int) int {
-	runes := []rune(text)
-	return nextWordBoundary(runes, clampCursor(cursor, len(runes)))
+	editor := bufferEditor(text, cursor)
+	editor.MoveWordRight()
+	return runeOffsetForByteCursor(text, editor.Cursor())
 }
 
-func moveBufferCursorUpLine(text string, cursor int) (int, bool) {
-	runes := []rune(text)
-	cursor = clampCursor(cursor, len(runes))
-	currentStart := lineStart(runes, cursor)
-	currentCol := cursor - currentStart
-	if currentStart == 0 {
-		return 0, cursor != 0
-	}
-	prevEnd := currentStart - 1
-	prevStart := lineStart(runes, prevEnd)
-	prevLen := prevEnd - prevStart
-	newCursor := prevStart + min(currentCol, prevLen)
-	return newCursor, newCursor != cursor
+func moveBufferCursorUpLine(text string, cursor int, width int, prefix string) (int, bool) {
+	return moveBufferCursorVertical(text, cursor, width, prefix, -1)
 }
 
-func moveBufferCursorDownLine(text string, cursor int) (int, bool) {
-	runes := []rune(text)
-	cursor = clampCursor(cursor, len(runes))
-	currentStart := lineStart(runes, cursor)
-	currentCol := cursor - currentStart
-	currentEnd := lineEnd(runes, cursor)
-	if currentEnd >= len(runes) {
-		return len(runes), cursor != len(runes)
+func moveBufferCursorDownLine(text string, cursor int, width int, prefix string) (int, bool) {
+	return moveBufferCursorVertical(text, cursor, width, prefix, 1)
+}
+
+func moveBufferCursorVertical(text string, cursor int, width int, prefix string, delta int) (int, bool) {
+	if width < 1 {
+		width = 1
 	}
-	nextStart := currentEnd + 1
-	nextEnd := lineEnd(runes, nextStart)
-	nextLen := nextEnd - nextStart
-	newCursor := nextStart + min(currentCol, nextLen)
-	return newCursor, newCursor != cursor
+	renderText := prefix + text
+	editor := tuiinput.NewEditor()
+	editor.Replace(renderText)
+	editor.SetCursor(len(prefix) + byteOffsetForRuneCursor(text, cursor))
+	lines := editor.WrappedLines(width)
+	lineIndex := bufferWrappedLineIndex(lines, editor.Cursor())
+	if lineIndex < 0 {
+		return bufferCursorIndex(text, cursor), false
+	}
+	if delta < 0 && lineIndex == 0 {
+		nextCursor := 0
+		return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
+	}
+	if delta > 0 && lineIndex+1 >= len(lines) {
+		nextCursor := len([]rune(text))
+		return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
+	}
+	targetIndex := lineIndex + delta
+	currentLine := lines[lineIndex]
+	targetLine := lines[targetIndex]
+	targetCol := tuiinput.DisplayWidth(renderText[currentLine.Start:editor.Cursor()])
+	prefixWidth := tuiinput.DisplayWidth(prefix)
+	currentHasPrefix := currentLine.Start < len(prefix)
+	targetHasPrefix := targetLine.Start < len(prefix)
+	switch {
+	case currentHasPrefix && !targetHasPrefix:
+		targetCol -= prefixWidth
+	case !currentHasPrefix && targetHasPrefix:
+		targetCol += prefixWidth
+	}
+	if targetCol < 0 {
+		targetCol = 0
+	}
+	nextByteCursor := editor.CursorAtDisplayColumn(targetLine, targetCol) - len(prefix)
+	if nextByteCursor < 0 {
+		nextByteCursor = 0
+	}
+	nextCursor := runeOffsetForByteCursor(text, nextByteCursor)
+	return nextCursor, nextCursor != bufferCursorIndex(text, cursor)
 }
 
 func deleteCurrentBufferLine(text string, cursor int) (string, int, bool) {
-	runes := []rune(text)
-	if len(runes) == 0 {
-		return "", 0, false
+	editor := bufferEditor(text, cursor)
+	if !editor.DeleteCurrentLine() {
+		return text, bufferCursorIndex(text, cursor), false
 	}
-	cursorIndex := clampCursor(cursor, len(runes))
-	start := lineStart(runes, cursorIndex)
-	end := lineEnd(runes, cursorIndex)
-
-	deleteStart := start
-	deleteEnd := end
-	if end < len(runes) && runes[end] == '\n' {
-		deleteEnd = end + 1
-	} else if start > 0 && runes[start-1] == '\n' {
-		deleteStart = start - 1
-	}
-
-	if deleteStart >= deleteEnd {
-		return text, cursorIndex, false
-	}
-
-	updated := make([]rune, 0, len(runes)-(deleteEnd-deleteStart))
-	updated = append(updated, runes[:deleteStart]...)
-	updated = append(updated, runes[deleteEnd:]...)
-	return string(updated), deleteStart, true
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }
 
-func prevWordBoundary(runes []rune, cursor int) int {
-	i := clampCursor(cursor, len(runes))
-	for i > 0 && unicode.IsSpace(runes[i-1]) {
-		i--
+func deleteBackwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.DeleteBackwardWord() {
+		return text, bufferCursorIndex(text, cursor), killBuffer, false
 	}
-	if i == 0 {
-		return 0
-	}
-	class := runeClass(runes[i-1])
-	for i > 0 && runeClass(runes[i-1]) == class {
-		i--
-	}
-	return i
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
 }
 
-func nextWordBoundary(runes []rune, cursor int) int {
-	i := clampCursor(cursor, len(runes))
-	for i < len(runes) && unicode.IsSpace(runes[i]) {
-		i++
+func deleteForwardWordBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.DeleteForwardWord() {
+		return text, bufferCursorIndex(text, cursor), killBuffer, false
 	}
-	if i >= len(runes) {
-		return len(runes)
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
+}
+
+func killToLineStartBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.KillToLineStart() {
+		return text, bufferCursorIndex(text, cursor), killBuffer, false
 	}
-	class := runeClass(runes[i])
-	for i < len(runes) && runeClass(runes[i]) == class {
-		i++
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
+}
+
+func killToLineEndBuffer(text string, cursor int, killBuffer string) (string, int, string, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.KillToLineEnd() {
+		return text, bufferCursorIndex(text, cursor), killBuffer, false
 	}
-	return i
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), editor.KillBuffer(), true
+}
+
+func yankBuffer(text string, cursor int, killBuffer string) (string, int, bool) {
+	editor := bufferEditorWithKill(text, cursor, killBuffer)
+	if !editor.Yank() {
+		return text, bufferCursorIndex(text, cursor), false
+	}
+	return editor.Text(), runeOffsetForByteCursor(editor.Text(), editor.Cursor()), true
 }
 
 func clampCursor(cursor, size int) int {
@@ -356,34 +506,53 @@ func clampCursor(cursor, size int) int {
 	return cursor
 }
 
-func lineStart(runes []rune, cursor int) int {
-	i := clampCursor(cursor, len(runes))
-	for i > 0 && runes[i-1] != '\n' {
-		i--
-	}
-	return i
+func bufferEditor(text string, cursor int) tuiinput.Editor {
+	editor := tuiinput.NewEditor()
+	editor.Replace(text)
+	editor.SetCursor(byteOffsetForRuneCursor(text, cursor))
+	return editor
 }
 
-func lineEnd(runes []rune, cursor int) int {
-	i := clampCursor(cursor, len(runes))
-	for i < len(runes) && runes[i] != '\n' {
-		i++
-	}
-	return i
+func bufferEditorWithKill(text string, cursor int, killBuffer string) tuiinput.Editor {
+	editor := bufferEditor(text, cursor)
+	editor.SetKillBuffer(killBuffer)
+	return editor
 }
 
-const (
-	runeClassSpace = iota
-	runeClassWord
-	runeClassOther
-)
+func bufferWrappedLineIndex(lines []tuiinput.LineRange, cursor int) int {
+	if len(lines) == 0 {
+		return -1
+	}
+	for index, line := range lines {
+		if cursor < line.Start {
+			continue
+		}
+		if cursor < line.End {
+			return index
+		}
+		if cursor == line.End {
+			if index+1 < len(lines) && lines[index+1].Start == cursor {
+				continue
+			}
+			return index
+		}
+	}
+	return len(lines) - 1
+}
 
-func runeClass(r rune) int {
-	if unicode.IsSpace(r) {
-		return runeClassSpace
+func runeOffsetForByteCursor(text string, cursor int) int {
+	if cursor <= 0 {
+		return 0
 	}
-	if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-		return runeClassWord
+	if cursor >= len(text) {
+		return len([]rune(text))
 	}
-	return runeClassOther
+	offset := 0
+	for byteIndex := range text {
+		if byteIndex >= cursor {
+			return offset
+		}
+		offset++
+	}
+	return len([]rune(text))
 }

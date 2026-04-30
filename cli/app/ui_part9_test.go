@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	tea "github.com/charmbracelet/bubbletea"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -357,6 +358,43 @@ func TestF1TogglesHelp(t *testing.T) {
 	if !updated.helpVisible {
 		t.Fatal("expected f1 to open help")
 	}
+}
+
+func TestHelpSectionsUseCompactBindingsWithoutStandaloneTranscriptSection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	sections := m.helpSections()
+
+	for _, section := range sections {
+		if section.Title == "Transcript" {
+			t.Fatal("did not expect standalone transcript help section")
+		}
+		for _, entry := range section.Entries {
+			if slices.Equal(entry.Bindings, []string{"PgUp", "PgDn"}) {
+				t.Fatalf("did not expect split transcript page binding: %#v", entry.Bindings)
+			}
+		}
+	}
+
+	assertHelpEntryBindings(t, sections, "toggle keyboard help", []string{"F1 / ? (empty) / Alt/Cmd + /"})
+	assertHelpEntryBindings(t, sections, "paste a clipboard screenshot as a file path", []string{"Ctrl + V/D"})
+	assertHelpEntryBindings(t, sections, "delete the current input line", deleteCurrentLineBindings())
+	assertHelpEntryBindings(t, sections, "move the cursor by word", []string{"Alt/Ctrl + ←/→"})
+}
+
+func assertHelpEntryBindings(t *testing.T, sections []uiHelpSection, description string, want []string) {
+	t.Helper()
+	for _, section := range sections {
+		for _, entry := range section.Entries {
+			if entry.Description != description {
+				continue
+			}
+			if !slices.Equal(entry.Bindings, want) {
+				t.Fatalf("bindings for %q = %#v, want %#v", description, entry.Bindings, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing help entry %q", description)
 }
 
 func TestAltSlashTogglesHelp(t *testing.T) {

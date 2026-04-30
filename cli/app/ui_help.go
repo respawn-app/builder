@@ -56,15 +56,9 @@ func (m *uiModel) helpSections() []uiHelpSection {
 		{
 			Title: "Global",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"F1", "? (empty prompt)", "Alt + /", "Cmd + /"}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"F1 / ? (empty) / Alt/Cmd + /"}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Ctrl + C"}, Description: "interrupt current run or exit", Active: uiHelpAlwaysActive},
-				{Bindings: []string{"Shift + Tab", "Ctrl + T"}, Description: "toggle transcript mode", Active: uiHelpCanToggleTranscript},
-			},
-		},
-		{
-			Title: "Transcript",
-			Entries: []uiHelpEntry{
-				{Bindings: []string{"PgUp", "PgDn"}, Description: "Scroll transcript", Active: uiHelpCanPageTranscript},
+				{Bindings: []string{"Shift + Tab / Ctrl + T"}, Description: "toggle transcript mode", Active: uiHelpCanToggleTranscript},
 			},
 		},
 		{
@@ -72,21 +66,22 @@ func (m *uiModel) helpSections() []uiHelpSection {
 			Entries: []uiHelpEntry{
 				{Bindings: []string{"$ <command>"}, Description: "execute a shell command and show output to the model", Active: uiHelpInMainInput},
 				{Bindings: []string{"Enter"}, Description: "submit the current input, selected answer, or flush the next queued item", Active: uiHelpInPromptInput},
-				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
-				{Bindings: []string{"↑, ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
-				{Bindings: []string{"Ctrl + V", "Ctrl + D"}, Description: "paste a clipboard screenshot as a file path", Active: uiHelpInTextEditing},
-				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Tab / Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
+				{Bindings: []string{"↑ / ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Ctrl + V/D"}, Description: "paste a clipboard screenshot as a file path", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Shift + Enter / Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
-				{Bindings: []string{"Alt + ←, →", "Ctrl + ←, →"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},
-				{Bindings: []string{"Home", "End", "Ctrl + A", "Ctrl + E", "Ctrl + End"}, Description: "jump to the line start or end", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Delete / Ctrl + K/U/W/Y"}, Description: "edit/delete/yank text with shell-style shortcuts", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Alt/Ctrl + ←/→"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},
+				{Bindings: []string{"Home/End / Ctrl + A/E/End"}, Description: "jump to the line start or end", Active: uiHelpInTextEditing},
 			},
 		},
 		{
 			Title: "Rollback Mode",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"Esc", "Esc"}, Description: "open rollback selection from an idle empty prompt", Active: uiHelpCanArmRollback},
-				{Bindings: []string{"↑, ↓"}, Description: "move the rollback selection", Active: uiHelpAlwaysActive},
-				{Bindings: []string{"PgUp", "PgDn"}, Description: "scroll the transcript while selecting a rollback point", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"Esc Esc"}, Description: "open rollback selection from an idle empty prompt", Active: uiHelpCanArmRollback},
+				{Bindings: []string{"↑ / ↓"}, Description: "move the rollback selection", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"PgUp / PgDn"}, Description: "scroll the transcript while selecting a rollback point", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Esc"}, Description: "cancel or go back", Active: uiHelpAlwaysActive},
 			},
 		},
@@ -94,7 +89,7 @@ func (m *uiModel) helpSections() []uiHelpSection {
 }
 
 func deleteCurrentLineBindings() []string {
-	bindings := []string{"Ctrl + Backspace", "Cmd + Backspace"}
+	bindings := []string{"Ctrl/Cmd + Backspace"}
 	if runtime.GOOS == "darwin" {
 		bindings = append(bindings, "Ctrl + U")
 	}
