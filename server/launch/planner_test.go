@@ -389,6 +389,51 @@ func TestPlannerNewChildSessionFallsBackWhenParentExecutionTargetIsNotMetadataBa
 	}
 }
 
+func TestPlannerNewChildSessionIgnoresParentOutsideActiveContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	parent, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create foreign parent session: %v", err)
+	}
+	if err := parent.MarkModelDispatchLocked(session.LockedContract{Model: "foreign-parent-model"}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
+	}
+	if err := parent.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://foreign.local/v1"}); err != nil {
+		t.Fatalf("SetContinuationContext parent: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerA,
+	}
+
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+		ParentSessionID: parent.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("PlanSession child: %v", err)
+	}
+	childMeta := plan.Store.Meta()
+	if childMeta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
+	}
+	if childMeta.WorkspaceRoot != "/tmp/workspace-a" || childMeta.WorkspaceContainer != "workspace-a" {
+		t.Fatalf("child workspace context = root %q container %q, want active workspace", childMeta.WorkspaceRoot, childMeta.WorkspaceContainer)
+	}
+	if childMeta.Locked != nil {
+		t.Fatalf("locked contract = %+v, want no foreign parent lock copied", childMeta.Locked)
+	}
+	if childMeta.Continuation != nil {
+		t.Fatalf("continuation = %+v, want no foreign parent continuation copied", childMeta.Continuation)
+	}
+}
+
 func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
@@ -474,6 +519,31 @@ func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails
 	}
 	if len(afterEntries) != 1 || afterEntries[0].Name() != parent.Meta().SessionID {
 		t.Fatalf("unexpected remaining session dirs after rollback: %+v", afterEntries)
+	}
+}
+
+func TestPlannerNewSessionHonorsCanceledContextBeforeDurableCreation(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+		},
+		ContainerDir: containerDir,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := planner.PlanSession(ctx, SessionRequest{
+		Mode:            ModeInteractive,
+		ForceNewSession: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PlanSession error = %v, want context canceled", err)
+	}
+	if _, err := os.Stat(containerDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("container stat error = %v, want not exist", err)
 	}
 }
 

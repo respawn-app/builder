@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -323,6 +324,9 @@ func (p Planner) createSession(ctx context.Context, parentSessionID string) (*se
 			return nil, err
 		}
 	} else {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := created.EnsureDurable(); err != nil {
 			return nil, err
 		}
@@ -350,21 +354,12 @@ func (p Planner) initializeChildSessionContext(ctx context.Context, child *sessi
 			return err
 		}
 	}
+	if parent == nil {
+		return child.SetParentSessionID(parentID)
+	}
 	target, hasTarget, err := p.resolveParentExecutionTarget(ctx, parentID)
 	if err != nil {
 		return err
-	}
-	if parent == nil {
-		if err := child.SetParentSessionID(parentID); err != nil {
-			return err
-		}
-		if !hasTarget {
-			return nil
-		}
-		if err := p.updateChildExecutionTarget(ctx, child.Meta().SessionID, target); err != nil {
-			return errors.Join(err, p.rollbackChildSession(child))
-		}
-		return nil
 	}
 	if err := child.EnsureDurable(); err != nil {
 		return err
@@ -379,9 +374,9 @@ func (p Planner) initializeChildSessionContext(ctx context.Context, child *sessi
 }
 
 func (p Planner) openParentSession(parentSessionID string) (*session.Store, error) {
-	parent, err := session.OpenByID(p.Config.PersistenceRoot, parentSessionID, p.StoreOptions...)
+	parent, err := p.openScopedSession(parentSessionID)
 	if err != nil {
-		if errors.Is(err, session.ErrSessionNotFound) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
