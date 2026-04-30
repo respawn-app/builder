@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -31,6 +32,21 @@ func TestTerminalCursorSequencesUseExplicitPlacement(t *testing.T) {
 	}
 	if got, want := terminalCursorPlaceSequence(alt), xansi.ShowCursor+xansi.CursorPosition(8, 5); got != want {
 		t.Fatalf("alt place sequence = %q, want %q", got, want)
+	}
+}
+
+func TestTerminalCursorPlacementSanitizesNormalBufferRows(t *testing.T) {
+	placement := sanitizeTerminalCursorPlacement(uiTerminalCursorPlacement{Visible: true, CursorRow: 8, CursorCol: 2, AnchorRow: 3})
+	if placement.AnchorRow != placement.CursorRow {
+		t.Fatalf("normal-buffer anchor row = %d, want cursor row %d", placement.AnchorRow, placement.CursorRow)
+	}
+	if got, want := terminalCursorPlaceSequence(placement), xansi.ShowCursor+xansi.CursorForward(2); got != want {
+		t.Fatalf("normal place sequence = %q, want %q", got, want)
+	}
+
+	alt := sanitizeTerminalCursorPlacement(uiTerminalCursorPlacement{Visible: true, CursorRow: 8, CursorCol: 2, AnchorRow: 3, AltScreen: true})
+	if alt.AnchorRow != 3 {
+		t.Fatalf("alt-screen anchor row = %d, want 3", alt.AnchorRow)
 	}
 }
 
@@ -154,6 +170,60 @@ func TestTerminalCursorWriterRestoresAnchorBeforeAltScreenEnter(t *testing.T) {
 	if strings.HasPrefix(out.String(), xansi.CursorDown(5)+"\r") {
 		t.Fatalf("next frame should not restore from pre-alt-screen placement, got %q", out.String())
 	}
+}
+
+func TestTerminalCursorWriterKeepsStateWhenInvalidatingControlWriteFails(t *testing.T) {
+	state := newUITerminalCursorState()
+	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
+
+	var out bytes.Buffer
+	writer := newUITerminalCursorWriter(&out, state)
+	if _, err := writer.Write([]byte("frame")); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+
+	failing := &failingTerminalCursorWriter{failAfter: 0}
+	writer = newUITerminalCursorWriter(failing, state)
+	if _, err := writer.Write([]byte(xansi.EraseEntireScreen)); !errors.Is(err, errTerminalCursorTestWrite) {
+		t.Fatalf("write clear-screen error = %v, want %v", err, errTerminalCursorTestWrite)
+	}
+	if !state.hasPlacement() {
+		t.Fatal("expected placement state to remain after failed invalidating control write")
+	}
+}
+
+func TestTerminalCursorWriterKeepsStateWhenPlacementSuffixWriteFails(t *testing.T) {
+	state := newUITerminalCursorState()
+	state.Set(uiTerminalCursorPlacement{Visible: true, CursorRow: 4, CursorCol: 6, AnchorRow: 9})
+
+	failing := &failingTerminalCursorWriter{failAfter: len("frame")}
+	writer := newUITerminalCursorWriter(failing, state)
+	if _, err := writer.Write([]byte("frame")); !errors.Is(err, errTerminalCursorTestWrite) {
+		t.Fatalf("write frame error = %v, want %v", err, errTerminalCursorTestWrite)
+	}
+	if state.hasPlacement() {
+		t.Fatal("did not expect placement state to commit after failed suffix write")
+	}
+}
+
+var errTerminalCursorTestWrite = errors.New("terminal cursor test write failed")
+
+type failingTerminalCursorWriter struct {
+	written   int
+	failAfter int
+}
+
+func (w *failingTerminalCursorWriter) Write(p []byte) (int, error) {
+	if w.written >= w.failAfter {
+		return 0, errTerminalCursorTestWrite
+	}
+	remaining := w.failAfter - w.written
+	if len(p) > remaining {
+		w.written += remaining
+		return remaining, errTerminalCursorTestWrite
+	}
+	w.written += len(p)
+	return len(p), nil
 }
 
 func TestTerminalCursorWriterDoesNotRestoreFromStalePlacementAfterClearScreen(t *testing.T) {
