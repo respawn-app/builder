@@ -30,11 +30,12 @@ func VisibleChatEntriesFromPersistedEvent(evt session.Event, cacheWarningMode co
 			return nil, false, fmt.Errorf("decode tool_completed event: %w", err)
 		}
 		entry := toolResultChatEntry(tools.Result{
-			CallID:  completion.CallID,
-			Name:    toolspec.ID(completion.Name),
-			IsError: completion.IsError,
-			Output:  completion.Output,
-			Summary: completion.Summary,
+			CallID:      completion.CallID,
+			Name:        toolspec.ID(completion.Name),
+			IsError:     completion.IsError,
+			Output:      completion.Output,
+			Summary:     completion.Summary,
+			OngoingText: completion.OngoingText,
 		})
 		return []ChatEntry{entry}, false, nil
 	case "local_entry":

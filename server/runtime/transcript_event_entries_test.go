@@ -5,6 +5,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/toolspec"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -62,9 +63,10 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 		{
 			name: "ordinary shell result",
 			result: tools.Result{
-				CallID: "call-shell-1",
-				Name:   toolspec.ToolExecCommand,
-				Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+				CallID:      "call-shell-1",
+				Name:        toolspec.ToolExecCommand,
+				Output:      json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+				OngoingText: "compact shell result",
 			},
 		},
 		{
@@ -92,6 +94,9 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			}
 			if entry.ToolCallID != tc.result.CallID {
 				t.Fatalf("entry tool call id = %q, want %q", entry.ToolCallID, tc.result.CallID)
+			}
+			if entry.OngoingText != strings.TrimSpace(tc.result.OngoingText) {
+				t.Fatalf("entry ongoing text = %q, want %q", entry.OngoingText, tc.result.OngoingText)
 			}
 		})
 	}

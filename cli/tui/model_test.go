@@ -682,3 +682,60 @@ func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
 		t.Fatalf("expected answer to use user color in detail view, got %q", colored)
 	}
 }
+
+func TestOngoingAskQuestionRendersSelectedOptionText(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Choose scope?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "User chose option #2. They also said: include tests",
+		OngoingText: "Recursive scan\nUser also said:\ninclude tests",
+	})
+
+	plain := plainTranscript(m.View())
+	if !containsInOrder(plain, "?", "Choose scope?", "Recursive scan", "User also said:", "include tests") {
+		t.Fatalf("expected ongoing answer to show selected option text and commentary, got %q", plain)
+	}
+	if strings.Contains(plain, "option #2") || strings.Contains(plain, "flat scan") {
+		t.Fatalf("expected ongoing answer to omit numeric summary and unchosen suggestions, got %q", plain)
+	}
+}
+
+func TestDetailAskQuestionKeepsToolResultTextWhenOngoingTextDiffers(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Choose scope?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "User chose option #2. They also said: include tests",
+		OngoingText: "Recursive scan\nUser also said:\ninclude tests",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	plain := plainTranscript(m.View())
+	if !strings.Contains(plain, "User chose option #2. They also said: include tests") {
+		t.Fatalf("expected detail answer to keep raw tool result text, got %q", plain)
+	}
+	if strings.Contains(plain, "User also said:") {
+		t.Fatalf("expected detail answer to ignore ongoing-only text, got %q", plain)
+	}
+}

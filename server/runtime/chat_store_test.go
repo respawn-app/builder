@@ -148,6 +148,42 @@ func TestChatStoreSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *tes
 	}
 }
 
+func TestChatStoreRestoreToolCompletionPreservesOngoingText(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role: llm.RoleAssistant,
+		ToolCalls: []llm.ToolCall{{
+			ID:    "call_ask",
+			Name:  string(toolspec.ToolAskQuestion),
+			Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["full","fast"]}`),
+		}},
+	})
+	payload, err := json.Marshal(storedToolCompletion{
+		CallID:      "call_ask",
+		Name:        string(toolspec.ToolAskQuestion),
+		Output:      json.RawMessage(`"User chose option #2. They also said: include tests"`),
+		OngoingText: "fast\nUser also said:\ninclude tests",
+	})
+	if err != nil {
+		t.Fatalf("marshal completion: %v", err)
+	}
+	if err := s.restoreToolCompletionPayload(payload); err != nil {
+		t.Fatalf("restore completion: %v", err)
+	}
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected ask call and synthesized result, got %+v", snap.Entries)
+	}
+	result := snap.Entries[1]
+	if result.Role != "tool_result_ok" || result.ToolCallID != "call_ask" {
+		t.Fatalf("unexpected restored result entry: %+v", result)
+	}
+	if !strings.Contains(result.Text, "User chose option #2. They also said: include tests") || result.OngoingText != "fast\nUser also said:\ninclude tests" {
+		t.Fatalf("unexpected restored result text: %+v", result)
+	}
+}
+
 func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 	s := newChatStore()
 	content := strings.Repeat("reasoning detail ", 20)
