@@ -390,14 +390,14 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	}
 }
 
-func TestReleaseSessionRuntimeClosesHandleWhenLeaseAlreadyReleasedAndWaitCanceled(t *testing.T) {
+func TestReleaseSessionRuntimeClosesHandleWhenLeaseValidatedAndWaitCanceled(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
-	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
-		t.Fatalf("ReleaseRuntimeLease setup: %v", err)
+	if _, err := fixture.metadata.ValidateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ValidateRuntimeLease setup: %v", err)
 	}
 	closed := atomic.Int32{}
 	handle := &runtimeHandle{
@@ -423,11 +423,11 @@ func TestReleaseSessionRuntimeClosesHandleWhenLeaseAlreadyReleasedAndWaitCancele
 		t.Fatalf("expected closeFn to run exactly once, got %d", closed.Load())
 	}
 	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
-		t.Fatal("expected runtime handle removed after canceled wait with released lease")
+		t.Fatal("expected runtime handle removed after canceled wait with validated lease")
 	}
 }
 
-func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.T) {
+func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseValidationFails(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	closed := atomic.Int32{}
 	handle := &runtimeHandle{
@@ -446,24 +446,24 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.
 		LeaseID:         "lease-missing",
 	})
 	if err == nil {
-		t.Fatal("expected releaseRuntimeLease error for missing lease record")
+		t.Fatal("expected lease validation error for missing lease record")
 	}
 	if closed.Load() != 1 {
 		t.Fatalf("expected closeFn to run exactly once, got %d", closed.Load())
 	}
 	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
-		t.Fatal("expected runtime handle to be removed even when lease release fails")
+		t.Fatal("expected runtime handle to be removed even when lease validation fails")
 	}
 }
 
-func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseReleased(t *testing.T) {
+func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseValidated(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
-	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
-		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	if _, err := fixture.metadata.ValidateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ValidateRuntimeLease: %v", err)
 	}
 
 	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
@@ -475,7 +475,7 @@ func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseReleased
 	}
 }
 
-func TestReleaseSessionRuntimeReleasesPersistedLeaseWhenHandleAlreadyMissing(t *testing.T) {
+func TestReleaseSessionRuntimeValidatesPersistedLeaseWhenHandleAlreadyMissing(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
 	if err != nil {
@@ -490,12 +490,12 @@ func TestReleaseSessionRuntimeReleasesPersistedLeaseWhenHandleAlreadyMissing(t *
 		t.Fatalf("ReleaseSessionRuntime: %v", err)
 	}
 
-	released, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
+	validated, err := fixture.metadata.ValidateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
 	if err != nil {
-		t.Fatalf("ReleaseRuntimeLease verification: %v", err)
+		t.Fatalf("ValidateRuntimeLease verification: %v", err)
 	}
-	if released.Active() {
-		t.Fatalf("expected lease to stay released after missing-handle cleanup, got %+v", released)
+	if validated.LeaseID != lease.LeaseID || validated.SessionID != lease.SessionID {
+		t.Fatalf("validated lease = %+v, want %+v", validated, lease)
 	}
 }
 
@@ -531,7 +531,7 @@ func TestReleaseSessionRuntimeRejectsMismatchedControllerLeaseWithoutClosingHand
 	if got := fixture.service.handles[fixture.store.Meta().SessionID]; got != handle {
 		t.Fatalf("expected runtime handle preserved for mismatched lease, got %+v", got)
 	}
-	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+	if _, err := fixture.metadata.ValidateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
 		t.Fatalf("expected original runtime lease to remain releasable after mismatched release, got %v", err)
 	}
 }

@@ -3,6 +3,8 @@ package worktree
 import (
 	"builder/server/metadata"
 	"builder/server/primaryrun"
+	"builder/server/registry"
+	runtimepkg "builder/server/runtime"
 	"builder/server/session"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
@@ -902,5 +904,42 @@ func TestDeleteWorktreeBlocksOnlyActiveSessionsTargetingIt(t *testing.T) {
 	}
 	if strings.Contains(message, "dormant blocker") {
 		t.Fatalf("did not expect dormant blocker in error, got %q", message)
+	}
+}
+
+func TestDeleteWorktreeAllowsSessionAfterRuntimeRegistryCleanup(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-after-runtime-cleanup")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+	runtimes := registry.NewRuntimeRegistry()
+	engine := &runtimepkg.Engine{}
+	runtimes.Register(otherSession.Meta().SessionID, engine)
+	env.service.active = runtimes
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-before-runtime-cleanup",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
+		t.Fatalf("DeleteWorktree before runtime cleanup error = %v, want ErrWorktreeBlocked", err)
+	}
+
+	runtimes.Unregister(otherSession.Meta().SessionID, engine)
+	_, err = env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-after-runtime-cleanup",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree after runtime cleanup: %v", err)
+	}
+	if _, err := os.Stat(created.CanonicalRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree root removed after runtime cleanup, stat err=%v", err)
 	}
 }
