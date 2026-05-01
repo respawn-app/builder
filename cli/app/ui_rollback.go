@@ -41,7 +41,12 @@ func (m *uiModel) refreshRollbackCandidates() {
 	if m.rollback.selection >= len(m.rollback.candidates) {
 		m.rollback.selection = len(m.rollback.candidates) - 1
 	}
-	if m.rollback.isSelecting() && previousAnchor >= 0 && previousDelta != 0 {
+	hasPendingPageSelection := previousAnchor >= 0 && previousDelta != 0
+	if hasPendingPageSelection {
+		m.rollback.pendingSelectionAnchor = -1
+		m.rollback.pendingSelectionDelta = 0
+	}
+	if m.rollback.isSelecting() && hasPendingPageSelection {
 		for idx, candidate := range m.rollback.candidates {
 			if candidate.TranscriptIndex == previousAnchor {
 				m.rollback.selection = idx + previousDelta
@@ -54,8 +59,6 @@ func (m *uiModel) refreshRollbackCandidates() {
 				break
 			}
 		}
-		m.rollback.pendingSelectionAnchor = -1
-		m.rollback.pendingSelectionDelta = 0
 	}
 	if m.rollback.isSelecting() {
 		m.applyRollbackSelectionHighlight()

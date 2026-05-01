@@ -63,6 +63,28 @@ func TestRollbackSelectionUsesAbsoluteTranscriptEntryIndexWhenPaged(t *testing.T
 	}
 }
 
+func TestRollbackRefreshClearsPendingPageSelectionOutsideSelectionMode(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: tui.TranscriptRoleUser, Text: "older"},
+		{Role: tui.TranscriptRoleAssistant, Text: "answer"},
+		{Role: tui.TranscriptRoleUser, Text: "newer"},
+	}
+	m.rollback.phase = uiRollbackPhaseEditing
+	m.rollback.selection = 1
+	m.rollback.pendingSelectionAnchor = 2
+	m.rollback.pendingSelectionDelta = -1
+
+	m.refreshRollbackCandidates()
+
+	if m.rollback.pendingSelectionAnchor != -1 || m.rollback.pendingSelectionDelta != 0 {
+		t.Fatalf("pending page selection not cleared: anchor=%d delta=%d", m.rollback.pendingSelectionAnchor, m.rollback.pendingSelectionDelta)
+	}
+	if m.rollback.selection != 1 {
+		t.Fatalf("selection changed outside selection mode: got %d want 1", m.rollback.selection)
+	}
+}
+
 func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 80)
 	for i := 0; i < 40; i++ {

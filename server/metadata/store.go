@@ -936,12 +936,20 @@ func (s *Store) ValidateRuntimeLease(ctx context.Context, sessionID string, leas
 	if s == nil || s.queries == nil {
 		return RuntimeLeaseRecord{}, errors.New("metadata store is required")
 	}
-	record, err := s.getRuntimeLeaseByID(ctx, leaseID)
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return RuntimeLeaseRecord{}, errors.New("session id is required")
+	}
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if trimmedLeaseID == "" {
+		return RuntimeLeaseRecord{}, errors.New("lease id is required")
+	}
+	record, err := s.getRuntimeLeaseByID(ctx, trimmedLeaseID)
 	if err != nil {
 		return RuntimeLeaseRecord{}, err
 	}
-	if strings.TrimSpace(record.SessionID) != strings.TrimSpace(sessionID) {
-		return RuntimeLeaseRecord{}, fmt.Errorf("runtime lease %q does not belong to session %q", strings.TrimSpace(leaseID), strings.TrimSpace(sessionID))
+	if strings.TrimSpace(record.SessionID) != trimmedSessionID {
+		return RuntimeLeaseRecord{}, fmt.Errorf("runtime lease %q does not belong to session %q", trimmedLeaseID, trimmedSessionID)
 	}
 	return record, nil
 }

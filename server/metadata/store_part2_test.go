@@ -327,6 +327,18 @@ func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeLeaseRejectsBlankIDsBeforeLookup(t *testing.T) {
+	ctx := context.Background()
+	store, _, _ := newMetadataTestStore(t)
+
+	if _, err := store.ValidateRuntimeLease(ctx, " ", "lease-1"); err == nil || !strings.Contains(err.Error(), "session id is required") {
+		t.Fatalf("ValidateRuntimeLease blank session err = %v, want session id required", err)
+	}
+	if _, err := store.ValidateRuntimeLease(ctx, "session-1", " "); err == nil || !strings.Contains(err.Error(), "lease id is required") {
+		t.Fatalf("ValidateRuntimeLease blank lease err = %v, want lease id required", err)
+	}
+}
+
 func TestHiddenDurableSessionStaysOutOfProjectListingsUntilVisible(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)

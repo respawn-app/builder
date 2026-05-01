@@ -2,7 +2,9 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,7 +89,7 @@ func TestOpenAllowsDatabaseAtRemovedMigrationVersion(t *testing.T) {
 func TestOpenMigratesRuntimeLeaseLivenessColumnsAway(t *testing.T) {
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "db", "main.sqlite3")
-	db, err := openDatabaseAtVersionForTest(root, dbPath, 3)
+	db, err := openDatabaseAtVersionForTest(t, root, dbPath, 3)
 	if err != nil {
 		t.Fatalf("open test database at version 3: %v", err)
 	}
@@ -123,18 +125,23 @@ VALUES ('lease-1', 'session-1', '', 'request-1', 'active', 1, 1, 0, 0, '{}');
 	}
 }
 
-func openDatabaseAtVersionForTest(root string, dbPath string, version int64) (*sql.DB, error) {
+func openDatabaseAtVersionForTest(t *testing.T, root string, dbPath string, version int64) (*sql.DB, error) {
+	t.Helper()
 	db, err := openDatabaseAtPathWithoutMigrationsForTest(root, dbPath)
 	if err != nil {
 		return nil, err
 	}
-	goose.SetBaseFS(migrationsFS)
-	goose.SetLogger(goose.NopLogger())
-	if err := goose.SetDialect("sqlite3"); err != nil {
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := goose.UpTo(db, "migrations", version); err != nil {
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrations, goose.WithLogger(goose.NopLogger()), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := provider.UpTo(context.Background(), version); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
