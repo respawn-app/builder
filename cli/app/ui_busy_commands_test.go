@@ -7,6 +7,9 @@ import (
 	"builder/cli/app/commands"
 	"builder/cli/tui"
 	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -22,7 +25,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 		"compact":        false,
 		"name":           true,
 		"thinking":       true,
-		"fast":           false,
+		"fast":           true,
 		"supervisor":     true,
 		"autocompaction": true,
 		"status":         true,
@@ -52,15 +55,16 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 
 func TestBusyEnterCommandBehavior(t *testing.T) {
 	tests := []struct {
-		name               string
-		input              string
-		setup              func(*uiModel)
-		wantInput          string
-		wantSessionName    string
-		wantThinkingLevel  string
-		wantStatusMode     bool
-		wantProcessMode    bool
-		wantStatusContains string
+		name                string
+		input               string
+		setup               func(*uiModel)
+		wantInput           string
+		wantSessionName     string
+		wantThinkingLevel   string
+		wantFastModeEnabled bool
+		wantStatusMode      bool
+		wantProcessMode     bool
+		wantStatusContains  string
 	}{
 		{
 			name:            "name executes immediately while busy",
@@ -83,9 +87,12 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			wantProcessMode: true,
 		},
 		{
-			name:               "fast is blocked on enter while busy",
-			input:              "/fast on",
-			wantStatusContains: "cannot run /fast while model is working",
+			name:  "fast executes immediately while busy",
+			input: "/fast on",
+			setup: func(m *uiModel) {
+				m.fastModeAvailable = true
+			},
+			wantFastModeEnabled: true,
 		},
 		{
 			name:               "compact is blocked on enter while busy",
@@ -138,6 +145,9 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			}
 			if updated.thinkingLevel != tt.wantThinkingLevel {
 				t.Fatalf("thinking level = %q, want %q", updated.thinkingLevel, tt.wantThinkingLevel)
+			}
+			if updated.fastModeEnabled != tt.wantFastModeEnabled {
+				t.Fatalf("fast mode enabled = %t, want %t", updated.fastModeEnabled, tt.wantFastModeEnabled)
 			}
 			if got := updated.inputMode() == uiInputModeStatus; got != tt.wantStatusMode {
 				t.Fatalf("status overlay open=%t, want %t", got, tt.wantStatusMode)
@@ -332,5 +342,83 @@ func TestBusyQueuedCopyCopiesFinalAnswerAfterTurnDrains(t *testing.T) {
 	}
 	if followCmd == nil {
 		t.Fatal("expected transient-status clear command after queued /copy success")
+	}
+}
+
+func TestBusyQueuedFastAppliesToNextRuntimeRequestAfterTurnDrains(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "next done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/fast on"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/fast on" {
+		t.Fatalf("expected queued /fast command, got %+v", updated.queued)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{message: "prior turn done"})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued /fast feedback command")
+	}
+	if !eng.FastModeEnabled() {
+		t.Fatal("expected queued /fast to enable runtime fast mode")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued /fast to drain, got %+v", updated.queued)
+	}
+	if updated.busy {
+		t.Fatal("did not expect queued /fast alone to start a new turn")
+	}
+
+	updated.input = "next prompt"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected pre-submit command for next prompt")
+	}
+
+	var submitCmd tea.Cmd
+	for _, msg := range collectCmdMessages(t, cmd) {
+		preSubmit, ok := msg.(preSubmitCompactionCheckDoneMsg)
+		if !ok {
+			continue
+		}
+		next, submitCmd = updated.Update(preSubmit)
+		updated = next.(*uiModel)
+	}
+	if submitCmd == nil {
+		t.Fatal("expected submit command after pre-submit check")
+	}
+	for _, msg := range collectCmdMessages(t, submitCmd) {
+		done, ok := msg.(submitDoneMsg)
+		if !ok {
+			continue
+		}
+		next, _ = updated.Update(done)
+		updated = next.(*uiModel)
+	}
+
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("captured requests = %d, want 1", len(requests))
+	}
+	if !requests[0].FastMode {
+		t.Fatal("expected next runtime request after queued /fast to use fast mode")
 	}
 }
