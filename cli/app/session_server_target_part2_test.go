@@ -48,13 +48,13 @@ func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *t
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		if len(projects) != 0 {
 			t.Fatalf("expected no existing projects, got %+v", projects)
 		}
 		return projectBindingPickerResult{CreateNew: true}, nil
 	}
-	runProjectNamePromptFlow = func(defaultName string, theme string, policy config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(defaultName string, theme string) (string, error) {
 		if want := filepath.Base(workspace); defaultName != want {
 			t.Fatalf("default project name = %q, want %q", defaultName, want)
 		}

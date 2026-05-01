@@ -7,7 +7,6 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/auth"
-	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -315,12 +314,8 @@ func newStartupPickerStyles(theme string) startupPickerStyles {
 	}
 }
 
-func runStartupPicker(model *startupPickerModel, alternateScreen config.TUIAlternateScreenPolicy) (startupPickerResult, error) {
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+func runStartupPicker(model *startupPickerModel) (startupPickerResult, error) {
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return startupPickerResult{}, err
@@ -412,7 +407,7 @@ func authMethodDisplayTitle(choice authMethodChoice) string {
 
 func runAuthMethodPicker(req authInteraction) (authMethodPickerResult, error) {
 	model := newAuthMethodPickerModel(req.Theme, authMethodPickerNoticeForRequest(req), req.HasEnvAPIKey, !req.AuthRequired)
-	picked, err := runStartupPicker(model, req.AlternateScreen)
+	picked, err := runStartupPicker(model)
 	if err != nil {
 		return authMethodPickerResult{}, err
 	}
@@ -452,7 +447,7 @@ func runAuthConflictPicker(req authInteraction) (authConflictPickerResult, error
 		startupPickerNotice{Text: "Builder found both saved subscription auth and OPENAI_API_KEY. Choose which auth source should win from now on.", Kind: startupPickerNoticeNeutral},
 		authConflictOptions(),
 	)
-	picked, err := runStartupPicker(model, req.AlternateScreen)
+	picked, err := runStartupPicker(model)
 	if err != nil {
 		return authConflictPickerResult{}, err
 	}

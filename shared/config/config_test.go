@@ -61,9 +61,6 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Debug {
 		t.Fatalf("expected default debug=false")
 	}
-	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
-		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
-	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}

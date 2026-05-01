@@ -17,7 +17,7 @@ import (
 	"builder/shared/serverapi"
 )
 
-func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
+func TestControllerPlanSessionForwardsPickerTheme(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	first, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
@@ -36,15 +36,13 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 	}
 
 	var gotTheme string
-	var gotPolicy config.TUIAlternateScreenPolicy
 	pickedCalled := false
 	controller := Controller{
 		Config: config.App{
 			WorkspaceRoot:   "/tmp/workspace-a",
 			PersistenceRoot: root,
 			Settings: config.Settings{
-				Theme:              "dark",
-				TUIAlternateScreen: config.TUIAlternateScreenAlways,
+				Theme: "dark",
 			},
 		},
 		ContainerDir: containerDir,
@@ -56,10 +54,9 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 				{SessionID: store.Meta().SessionID, Name: "second", UpdatedAt: store.Meta().UpdatedAt},
 			},
 		}}}),
-		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
+		PickSession: func(summaries []session.Summary, theme string) (launch.SessionSelection, error) {
 			pickedCalled = true
 			gotTheme = theme
-			gotPolicy = alternateScreenPolicy
 			if len(summaries) != 2 {
 				t.Fatalf("expected two summaries, got %d", len(summaries))
 			}
@@ -83,9 +80,6 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 	}
 	if gotTheme != "dark" {
 		t.Fatalf("theme = %q, want dark", gotTheme)
-	}
-	if gotPolicy != config.TUIAlternateScreenAlways {
-		t.Fatalf("alternate screen policy = %q, want always", gotPolicy)
 	}
 	if plan.Store.Meta().SessionID != store.Meta().SessionID {
 		t.Fatalf("planned session = %q, want %q", plan.Store.Meta().SessionID, store.Meta().SessionID)

@@ -50,7 +50,6 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIModelContractLocked(modelContractLocked),
 		WithUITheme(active.Theme),
 		WithUIDebug(active.Debug),
-		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
 		WithUICommandRegistry(commandRegistry),
 		WithUIHasOtherSessions(wiring.hasOtherSessionsKnown, wiring.hasOtherSessions),
 		WithUIBackgroundManager(wiring.background),

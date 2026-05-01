@@ -33,9 +33,10 @@ type sessionRuntimeClient struct {
 	connectionStateObserver func(error)
 	leaseRecoveryWarning    func(string, clientui.EntryVisibility)
 
-	mu          sync.RWMutex
-	mainView    clientui.RuntimeMainView
-	hasMainView bool
+	mu                   sync.RWMutex
+	mainView             clientui.RuntimeMainView
+	hasMainView          bool
+	suffixRPCUnsupported bool
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
@@ -235,6 +236,10 @@ func (c *sessionRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageReq
 	return c.refreshTranscriptPageSync(req, uiRuntimeHydrationReadTimeout)
 }
 
+func (c *sessionRuntimeClient) RefreshCommittedTranscriptSuffix(req clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error) {
+	return c.refreshCommittedTranscriptSuffixSync(req, uiRuntimeHydrationReadTimeout)
+}
+
 func (c *sessionRuntimeClient) Status() clientui.RuntimeStatus {
 	return c.MainView().Status
 }
@@ -262,6 +267,13 @@ func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool)
 		return view, false
 	}
 	return view, true
+}
+
+func (c *sessionRuntimeClient) CachedMainView() (clientui.RuntimeMainView, bool) {
+	if c == nil {
+		return clientui.RuntimeMainView{}, false
+	}
+	return c.cachedMainView()
 }
 
 func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clientui.RuntimeMainView {
@@ -366,6 +378,62 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 	return page, nil
 }
 
+func (c *sessionRuntimeClient) refreshCommittedTranscriptSuffixSync(req clientui.CommittedTranscriptSuffixRequest, timeout time.Duration) (clientui.CommittedTranscriptSuffix, error) {
+	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
+	fallbackToPage := func() (clientui.CommittedTranscriptSuffix, error) {
+		page, err := c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Offset: req.AfterEntryCount, Limit: req.Limit}, timeout)
+		if err != nil {
+			return clientui.CommittedTranscriptSuffix{SessionID: c.sessionID}, err
+		}
+		return committedTranscriptSuffixFromPage(page), nil
+	}
+	suffixClient, ok := c.reads.(client.SessionCommittedTranscriptSuffixClient)
+	if !ok {
+		return fallbackToPage()
+	}
+	if c.committedSuffixRPCUnsupported() {
+		return fallbackToPage()
+	}
+	ctx, cancel := c.readContext(timeout)
+	defer cancel()
+	resp, err := suffixClient.GetSessionCommittedTranscriptSuffix(ctx, serverapi.SessionCommittedTranscriptSuffixRequest{
+		SessionID:       c.sessionID,
+		AfterEntryCount: req.AfterEntryCount,
+		Limit:           req.Limit,
+	})
+	c.notifyConnectionState(err)
+	if err != nil {
+		if errors.Is(err, serverapi.ErrMethodNotFound) {
+			c.setCommittedSuffixRPCUnsupported()
+			return fallbackToPage()
+		}
+		return clientui.CommittedTranscriptSuffix{SessionID: c.sessionID}, err
+	}
+	suffix := resp.Suffix
+	if suffix.SessionID == "" {
+		suffix.SessionID = c.sessionID
+	}
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Session.Transcript = clientui.TranscriptMetadata{
+			Revision:            suffix.Revision,
+			CommittedEntryCount: suffix.CommittedEntryCount,
+		}
+	})
+	return suffix, nil
+}
+
+func (c *sessionRuntimeClient) committedSuffixRPCUnsupported() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.suffixRPCUnsupported
+}
+
+func (c *sessionRuntimeClient) setCommittedSuffixRPCUnsupported() {
+	c.mu.Lock()
+	c.suffixRPCUnsupported = true
+	c.mu.Unlock()
+}
+
 func (c *sessionRuntimeClient) transcriptDiagnosticsEnabled() bool {
 	if c == nil {
 		return false
@@ -438,6 +506,38 @@ func transcriptPageFromSessionView(view clientui.RuntimeSessionView) clientui.Tr
 		NextOffset:            nextOffset,
 		HasMore:               hasMore,
 		Entries:               cloneTranscriptEntries(view.Chat.Entries),
+	}
+}
+
+func transcriptPageFromCommittedTranscriptSuffix(suffix clientui.CommittedTranscriptSuffix) clientui.TranscriptPage {
+	nextOffset := 0
+	if suffix.HasMore {
+		nextOffset = suffix.NextEntryCount
+	}
+	return clientui.TranscriptPage{
+		SessionID:             suffix.SessionID,
+		SessionName:           suffix.SessionName,
+		ConversationFreshness: suffix.ConversationFreshness,
+		Revision:              suffix.Revision,
+		TotalEntries:          suffix.CommittedEntryCount,
+		Offset:                suffix.StartEntryCount,
+		NextOffset:            nextOffset,
+		HasMore:               suffix.HasMore,
+		Entries:               cloneTranscriptEntries(suffix.Entries),
+	}
+}
+
+func committedTranscriptSuffixFromPage(page clientui.TranscriptPage) clientui.CommittedTranscriptSuffix {
+	return clientui.CommittedTranscriptSuffix{
+		SessionID:             page.SessionID,
+		SessionName:           page.SessionName,
+		ConversationFreshness: page.ConversationFreshness,
+		Revision:              page.Revision,
+		CommittedEntryCount:   page.TotalEntries,
+		StartEntryCount:       page.Offset,
+		NextEntryCount:        page.Offset + len(page.Entries),
+		HasMore:               page.HasMore,
+		Entries:               cloneTranscriptEntries(page.Entries),
 	}
 }
 

@@ -122,13 +122,6 @@ func newSettingsRegistry() settingsRegistry {
 			func(opts LoadOptions) (string, bool, error) { return trimmedCLIString(opts.Theme) },
 			theme.Normalize,
 			settingDocOptions{}),
-		newStringSetting("tui_alternate_screen", TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
-			func(state *settingsState, value TUIAlternateScreenPolicy) { state.Settings.TUIAlternateScreen = value },
-			func(state settingsState) TUIAlternateScreenPolicy { return state.Settings.TUIAlternateScreen },
-			"BUILDER_TUI_ALTERNATE_SCREEN",
-			nil,
-			normalizeTUIAlternateScreenPolicy,
-			settingDocOptions{}),
 		newStringSetting("notification_method", "auto",
 			func(state *settingsState, value string) { state.Settings.NotificationMethod = value },
 			func(state settingsState) string { return state.Settings.NotificationMethod },
@@ -425,7 +418,6 @@ func newSettingsRegistry() settingsRegistry {
 			validateThinkingLevel,
 			validateModelVerbosity,
 			validateTheme,
-			validateTUIAlternateScreen,
 			validateNotificationMethod,
 			validateServerHost,
 			validateServerPort,
@@ -1247,8 +1239,6 @@ func renderTOMLValue(value any) string {
 		return strconv.Itoa(v)
 	case fmt.Stringer:
 		return strconv.Quote(v.String())
-	case TUIAlternateScreenPolicy:
-		return strconv.Quote(string(v))
 	case ModelVerbosity:
 		return strconv.Quote(string(v))
 	case CompactionMode:

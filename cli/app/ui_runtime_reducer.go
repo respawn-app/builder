@@ -52,6 +52,10 @@ func (r uiRuntimeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 		cmd := m.handleRuntimeTranscriptRefreshed(msg)
 		m.syncViewport()
 		return handledUIFeatureUpdate(m, cmd)
+	case runtimeCommittedTranscriptSuffixRefreshedMsg:
+		cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(msg)
+		m.syncViewport()
+		return handledUIFeatureUpdate(m, cmd)
 	case runtimeTranscriptRetryMsg:
 		if msg.token != m.runtimeTranscriptRetry {
 			m.syncViewport()

@@ -2,24 +2,11 @@ package app
 
 import (
 	"builder/cli/tui"
-	"builder/shared/config"
 	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-func shouldStartMainUIInAltScreen(policy config.TUIAlternateScreenPolicy) bool {
-	return policy == config.TUIAlternateScreenAlways
-}
-
-func shouldUseDetailAltScreen(policy config.TUIAlternateScreenPolicy) bool {
-	return policy != config.TUIAlternateScreenNever
-}
-
-func shouldUseStartupPickerAltScreen(policy config.TUIAlternateScreenPolicy) bool {
-	return policy != config.TUIAlternateScreenNever
-}
 
 var writeTerminalSequence = func(sequence string) {
 	_, _ = os.Stdout.WriteString(sequence)
@@ -97,10 +84,7 @@ func (m *uiModel) clearCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
 	if next != tui.ModeDetail {
 		return nil
 	}
-	if shouldUseDetailAltScreen(m.tuiAlternateScreen) {
-		return nil
-	}
-	return tea.ClearScreen
+	return nil
 }
 
 func (m *uiModel) detailLoadCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
@@ -166,9 +150,6 @@ func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode, enableAlter
 	if prev == next {
 		return nil
 	}
-	if !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
-		return nil
-	}
 	if next == tui.ModeDetail && !m.altScreenActive {
 		m.altScreenActive = true
 		if !enableAlternateScroll {
@@ -182,12 +163,9 @@ func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode, enableAlter
 		}
 		return enableAlternateScrollCmd()
 	}
-	if prev == tui.ModeDetail && m.altScreenActive && m.tuiAlternateScreen != config.TUIAlternateScreenAlways {
+	if prev == tui.ModeDetail && m.altScreenActive {
 		m.altScreenActive = false
 		return tea.Sequence(disableAlternateScrollCmd(), tea.ExitAltScreen)
-	}
-	if prev == tui.ModeDetail && m.altScreenActive {
-		return disableAlternateScrollCmd()
 	}
 	return nil
 }

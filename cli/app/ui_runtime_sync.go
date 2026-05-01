@@ -44,6 +44,25 @@ func (m *uiModel) requestRuntimeCommittedConversationSync() tea.Cmd {
 	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, runtimeTranscriptSyncCauseCommittedConversation, clientui.TranscriptRecoveryCauseNone)
 }
 
+func (m *uiModel) requestRuntimeCommittedTranscriptSuffix(req clientui.CommittedTranscriptSuffixRequest) tea.Cmd {
+	if !m.hasRuntimeClient() {
+		return nil
+	}
+	client, ok := m.runtimeClient().(interface {
+		RefreshCommittedTranscriptSuffix(clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error)
+	})
+	if !ok {
+		return nil
+	}
+	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
+	m.runtimeCommittedSuffixToken++
+	token := m.runtimeCommittedSuffixToken
+	return func() tea.Msg {
+		suffix, err := client.RefreshCommittedTranscriptSuffix(req)
+		return runtimeCommittedTranscriptSuffixRefreshedMsg{token: token, req: req, suffix: suffix, err: err}
+	}
+}
+
 func (m *uiModel) requestRuntimeCommittedGapSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
@@ -228,6 +247,27 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	m.logf("ui.runtime.transcript.repeat_after_dirty token=%d sync_cause=%s", msg.token, runtimeTranscriptSyncCauseDirtyFollowUp)
 	followUpRecoveryCause := m.runtimeTranscriptDirtyRecoveryCause
 	return sequenceCmds(applyCmd, m.requestRuntimeDirtyFollowUpTranscriptSync(followUpRecoveryCause))
+}
+
+func (m *uiModel) handleRuntimeCommittedTranscriptSuffixRefreshed(msg runtimeCommittedTranscriptSuffixRefreshedMsg) tea.Cmd {
+	if msg.token != m.runtimeCommittedSuffixToken {
+		return nil
+	}
+	if msg.err != nil {
+		m.observeRuntimeRequestResult(msg.err)
+		m.logf("ui.runtime.committed_suffix err=%q after_entry_count=%d limit=%d", msg.err.Error(), msg.req.AfterEntryCount, msg.req.Limit)
+		return m.requestRuntimeCommittedConversationSync()
+	}
+	m.observeRuntimeRequestResult(nil)
+	applyCmd := m.applyCommittedTranscriptSuffixAppend(msg.suffix)
+	if !msg.suffix.HasMore {
+		return applyCmd
+	}
+	nextReq := clientui.NormalizeCommittedTranscriptSuffixRequest(clientui.CommittedTranscriptSuffixRequest{
+		AfterEntryCount: msg.suffix.NextEntryCount,
+		Limit:           msg.req.Limit,
+	})
+	return sequenceCmds(applyCmd, m.requestRuntimeCommittedTranscriptSuffix(nextReq))
 }
 
 func (m *uiModel) flushQueuedInputsAfterHydration() tea.Cmd {

@@ -111,7 +111,6 @@ verbose_output = false # show in ongoing transcript
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
 | `system_prompt_file` | string | `""` |  |  | Main system prompt file. Relative paths resolve from the containing `config.toml` directory. Empty files are skipped. |
 | `theme` | string | `auto` | `BUILDER_THEME` | `builder run --theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
-| `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
 | `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification backend. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
 | `priority_request_mode` | bool | `false` |  |  | Enables fast-mode requests where the provider supports them. |

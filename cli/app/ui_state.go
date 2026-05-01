@@ -7,7 +7,6 @@ import (
 	"builder/cli/tui"
 	"builder/shared/client"
 	"builder/shared/clientui"
-	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -99,15 +98,14 @@ type uiInputFeatureState struct {
 }
 
 type uiPresentationFeatureState struct {
-	theme              string
-	tuiAlternateScreen config.TUIAlternateScreenPolicy
-	altScreenActive    bool
-	terminalCursor     *uiTerminalCursorState
-	termWidth          int
-	termHeight         int
-	windowSizeKnown    bool
-	helpVisible        bool
-	startupCmds        []tea.Cmd
+	theme           string
+	altScreenActive bool
+	terminalCursor  *uiTerminalCursorState
+	termWidth       int
+	termHeight      int
+	windowSizeKnown bool
+	helpVisible     bool
+	startupCmds     []tea.Cmd
 }
 
 type uiConversationFeatureState struct {
@@ -159,6 +157,7 @@ type uiTranscriptFeatureState struct {
 	transcriptBaseOffset                int
 	transcriptTotalEntries              int
 	transcriptRevision                  int64
+	ongoingCommittedDelivery            ongoingCommittedDeliveryCursor
 	deferredCommittedTail               []deferredProjectedTranscriptTail
 	runtimeDisconnected                 bool
 	transcriptLiveDirty                 bool
@@ -166,6 +165,7 @@ type uiTranscriptFeatureState struct {
 	detailTranscript                    uiDetailTranscriptWindow
 	runtimeMainViewToken                uint64
 	runtimeTranscriptToken              uint64
+	runtimeCommittedSuffixToken         uint64
 	runtimeTranscriptRetry              uint64
 	runtimeTranscriptBusy               bool
 	runtimeTranscriptDirty              bool

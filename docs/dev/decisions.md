@@ -247,7 +247,6 @@
 - Responses API `store` is configurable via `store` / `BUILDER_STORE`, default `false`.
 - Compaction routing is configurable by `compaction_mode` (`native|local|none`, default `local`).
 - Terminal notification backend is configurable by `notification_method` (`auto|osc9|bel`, default `auto`).
-- TUI alternate-screen policy is configurable by `tui_alternate_screen` (`auto|always|never`, default `auto`).
 - `tools.web_search` is enabled by default; `web_search` controls whether provider-native web search is activated (`native`) or disabled (`off`).
 - `tools.view_image` is enabled by default; runtime only advertises it to models that support multimodal inputs.
 
@@ -359,12 +358,12 @@
 - Snapshot scope is full session transcript up to latest completed step.
 - Detail transcript rendering is flat continuous stream (no grouped sections).
 - Step-end markers appear in detail only.
-- Switching detail -> ongoing restores prior ongoing scroll position.
+- Ongoing does not own a transcript viewport or restore app-managed ongoing scroll. Native terminal scrollback owns committed ongoing history navigation.
 - Mode-toggle events are UI-ephemeral and not persisted.
 - App interaction/overlay control is modeled as explicit typed states with allowed transitions. `ask`, `rollback`, `process list`, and `status` own isolated controller state; overlapping boolean precedence is forbidden.
 - Detail is a fullscreen pager-style transcript overlay (input/queued/picker hidden).
-- Ongoing mode uses native terminal scrollback by replaying committed transcript history into the normal buffer and appending only new committed transcript deltas.
-- Main UI startup stays in the normal buffer even when `tui_alternate_screen=always`, because ongoing-mode replay must remain visible in terminal scrollback.
+- Ongoing mode uses native terminal scrollback backed by backend/runtime committed transcript SSOT. Runtime events are delivery triggers and live-overlay updates; permanent ongoing rows come from committed suffix/range reads.
+- Main UI startup stays in the normal buffer because ongoing-mode replay must remain visible in terminal scrollback. The former `tui_alternate_screen` config is removed; legacy config keys are rejected.
 - Main UI startup clears the visible terminal viewport once before rendering (including `native` mode), so each session (including `/new`) starts from a clean visible slate.
 - During continuous attachment, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to paper over same-session logical divergence.
 - For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite.
@@ -377,22 +376,22 @@
 - If connectivity or subscription continuity is lost, the transient ongoing live viewport is discarded immediately. Recovery happens by hydrating authoritative committed transcript state and resubscribing.
 - Transcript-affecting transport failures must not be swallowed or converted into fake empty/idle UI state. Correctness wins over continuity: the affected live view may stop, but it must not continue from stale transcript data.
 - For external continuity-loss recovery only, re-issuing the TUI ongoing buffer from authoritative committed state is acceptable.
-- Client-side transcript divergence caused by deduplication, ordering, overlap, or pagination bugs is not an acceptable redraw case; it must be fixed at the root cause. Global debug mode may hard-fail instead.
+- Client-side transcript divergence caused by deduplication, ordering, overlap, or pagination bugs is not an acceptable redraw case; it must be fixed at the root cause. Production reconciles/rebases silently without user-visible same-session divergence warnings; global debug mode may hard-fail instead.
 - Pending tool-call activity in ongoing mode lives only in the volatile live region, not in committed normal-buffer scrollback.
 - Ongoing-mode glyphs reserve `@` for web search tool calls; reviewer status/suggestion entries use `§`.
 - Pending tool-call previews in the live region use the same rendering/layout as normal committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
 - Tool completion in ongoing mode appends exactly one final committed line for that tool, already rendered in its terminal state. Ongoing mode must never recolor or otherwise mutate an earlier emitted tool line.
 - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls remain in the live region until all earlier pending calls are ready, but they render in their final tool state immediately; only still-running calls show the spinner. Newly committable final lines append once in transcript order.
-- In ongoing main-input mode, `Up`/`Down` are reserved for prompt-history recall at whole-buffer boundaries and for normal multiline cursor movement otherwise; they do not scroll the ongoing transcript.
+- In ongoing main-input mode, `Up`/`Down` are reserved for prompt-history recall at whole-buffer boundaries and for normal multiline cursor movement otherwise; they do not scroll the ongoing transcript. `PgUp`/`PgDn` also do not scroll ongoing transcript state; terminal/native scrollback owns that behavior.
 - Builder input fields use one shared editor implementation with a real terminal cursor by default across ongoing and alt-screen surfaces. The editor owns text semantics and rendering computes exact physical cursor coordinates; the terminal owns cursor shape, color, and blink so emulator configuration is respected. Soft/reverse-video cursor rendering is fallback-only for inactive/locked inputs or verified integration failures, not a parallel primary implementation.
 - Real-cursor input rendering must be width-safe inside a closed input component. `InputField.Render(width)` owns both rendered input lines and cursor coordinates; callers must not splice arbitrary unwrapped content into those lines. Any line that can physically hard-wrap in the terminal must be pre-wrapped/truncated and counted by `InputField` before cursor placement; untracked hard wraps are correctness bugs because they shift the terminal cursor and can corrupt Bubble Tea diff rendering. Fallback to soft cursor is allowed only for verified cursor drift, wrap mismatch, or alt-screen corruption that cannot be solved in the renderer adapter.
 - Startup/onboarding/project/worktree input fields use Builder's shared input path rather than Bubble `textinput.Model`; future input surfaces must use the same shared editor/field implementation instead of adding separate cursor/rendering behavior.
-- Ongoing transcript scrolling remains on `PgUp`/`PgDn`; failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
+- Failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
 - Main-input `@` path autocomplete uses a cached repo-relative path corpus built asynchronously from `rg --no-config --files -0 --hidden -g '!.git'`; corpus prewarming starts eagerly in the background when the UI model is created for a workspace, but it must be scheduled through Bubble Tea startup commands (`startupCmds` / `Init`) rather than unmanaged constructor goroutines. Live matching never shells out per keystroke and runs only against the in-memory cache. Query tracking is cursor-local and accepts path-safe runes inside the tracked token: Unicode letters/digits plus `/`, `.`, `_`, and `-`, so nested and hidden path references can be continued after accepting a directory completion. Hidden paths are included, `.git` is explicitly excluded, and normal ignore-file handling remains enabled so `.gitignore` junk such as `node_modules`, `.gradle`, and `build` stays out by default. Non-empty directory candidates are derived from file paths, so empty directories are intentionally excluded in v1. Corpus-build failures are retryable on later queries in the same workspace; they do not permanently disable path autocomplete for the session.
 - Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
 - Ongoing mode keeps mouse capture disabled to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
-- Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
+- Detail transcript overlay always uses terminal alt-screen (`?1049`).
 - Detail does not enable terminal mouse capture because it blocks native text selection in common terminals. Detail may enable terminal alternate-scroll (`?1007`) while active, and must disable it again on leaving detail.
 - Rollback/edit message picker uses detail rendering inside alt-screen but does not enable terminal alternate-scroll (`?1007`) and ignores mouse events; `Up`/`Down` are the only picker navigation path.
 - Rationale: ongoing must preserve long-lived normal-buffer scrollback; detail still needs smooth native selection/copy, so selection wins over app-level pointer capture. Wheel navigation is best-effort through terminal alternate-scroll and any mouse events the terminal can deliver without capture.

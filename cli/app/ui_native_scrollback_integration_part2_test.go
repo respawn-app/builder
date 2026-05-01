@@ -7,7 +7,6 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	sharedclient "builder/shared/client"
-	"builder/shared/config"
 	"bytes"
 	"context"
 	"errors"
@@ -33,7 +32,6 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 		nil,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 	)
 	model.input = "/ps"
 
@@ -96,7 +94,7 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	}
 }
 
-func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
+func TestNativePSOverlayUsesFixedAltScreen(t *testing.T) {
 	var terminalSequences []string
 	originalWriteTerminalSequence := writeTerminalSequence
 	writeTerminalSequence = func(sequence string) {
@@ -111,7 +109,6 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 		nil,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	)
 	model.input = "/ps"
 
@@ -147,15 +144,16 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	}
 
 	raw := out.String()
-	if strings.Contains(raw, "\x1b[?1049h") || strings.Contains(raw, "\x1b[?1049l") {
-		t.Fatalf("did not expect /ps overlay to use alt-screen when detail alt-screen is disabled, got %q", raw)
+	enterAlt := strings.Count(raw, "\x1b[?1049h")
+	exitAlt := strings.Count(raw, "\x1b[?1049l")
+	if enterAlt == 0 || enterAlt != exitAlt {
+		t.Fatalf("expected balanced /ps alt-screen enter/exit sequences, enter=%d exit=%d raw=%q", enterAlt, exitAlt, raw)
 	}
 	sequenceLog := strings.Join(terminalSequences, "")
-	if strings.Contains(sequenceLog, "\x1b[?1007h") || strings.Contains(sequenceLog, "\x1b[?1007l") {
-		t.Fatalf("did not expect /ps overlay to toggle alternate scroll when detail alt-screen is disabled, got %q", sequenceLog)
-	}
-	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 2 {
-		t.Fatalf("expected startup + /ps open clear-screen sequences, got %d in %q", clearCount, raw)
+	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
+	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
+	if enableAltScroll == 0 || enableAltScroll != disableAltScroll {
+		t.Fatalf("expected balanced /ps alternate-scroll enable/disable sequences, enable=%d disable=%d log=%q", enableAltScroll, disableAltScroll, sequenceLog)
 	}
 	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
 		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))

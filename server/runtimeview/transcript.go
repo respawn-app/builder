@@ -37,6 +37,24 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 	)
 }
 
+func CommittedTranscriptSuffixFromRuntime(engine *runtime.Engine, req clientui.CommittedTranscriptSuffixRequest) clientui.CommittedTranscriptSuffix {
+	if engine == nil {
+		return clientui.CommittedTranscriptSuffix{}
+	}
+	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
+	page := engine.TranscriptPageSnapshot(req.AfterEntryCount, req.Limit)
+	return CommittedTranscriptSuffixFromCollectedChat(
+		engine.SessionID(),
+		engine.SessionName(),
+		ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		engine.TranscriptRevision(),
+		ChatSnapshotFromRuntime(page.Snapshot),
+		page.TotalEntries,
+		page.Offset,
+		req,
+	)
+}
+
 func TranscriptPageFromOngoingTailWindow(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, window runtime.TranscriptWindowSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
 	req = NormalizeDefaultTranscriptRequest(req)
 	pageReq := ongoingTailTranscriptRequest(req, revision, window)
@@ -134,6 +152,56 @@ func TranscriptPageFromCollectedChat(sessionID, sessionName string, freshness cl
 	page.Ongoing = snapshot.Ongoing
 	page.OngoingError = snapshot.OngoingError
 	return page
+}
+
+func CommittedTranscriptSuffixFromCollectedChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.CommittedTranscriptSuffixRequest) clientui.CommittedTranscriptSuffix {
+	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
+	if totalEntries < 0 {
+		totalEntries = 0
+	}
+	startEntryCount := req.AfterEntryCount
+	if startEntryCount > totalEntries {
+		startEntryCount = totalEntries
+	}
+	if startEntryCount < baseOffset {
+		startEntryCount = baseOffset
+	}
+	if startEntryCount > totalEntries {
+		startEntryCount = totalEntries
+	}
+	total := len(snapshot.Entries)
+	start := startEntryCount - baseOffset
+	if startEntryCount >= totalEntries {
+		start = total
+	} else if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	end := start
+	if req.Limit > 0 {
+		end = start + req.Limit
+		if end > total {
+			end = total
+		}
+	}
+	entries := cloneChatEntries(snapshot.Entries[start:end])
+	nextEntryCount := startEntryCount + len(entries)
+	if nextEntryCount > totalEntries {
+		nextEntryCount = totalEntries
+	}
+	return clientui.CommittedTranscriptSuffix{
+		SessionID:             sessionID,
+		SessionName:           sessionName,
+		ConversationFreshness: freshness,
+		Revision:              revision,
+		CommittedEntryCount:   totalEntries,
+		StartEntryCount:       startEntryCount,
+		NextEntryCount:        nextEntryCount,
+		HasMore:               nextEntryCount < totalEntries,
+		Entries:               entries,
+	}
 }
 
 func TranscriptPageFromChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {

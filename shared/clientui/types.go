@@ -150,6 +150,41 @@ type TranscriptPage struct {
 	OngoingError          string
 }
 
+const (
+	DefaultCommittedTranscriptSuffixLimit = 250
+	MaxCommittedTranscriptSuffixLimit     = 500
+)
+
+type CommittedTranscriptSuffixRequest struct {
+	AfterEntryCount int
+	Limit           int
+}
+
+type CommittedTranscriptSuffix struct {
+	SessionID             string
+	SessionName           string
+	ConversationFreshness ConversationFreshness
+	Revision              int64
+	CommittedEntryCount   int
+	StartEntryCount       int
+	NextEntryCount        int
+	HasMore               bool
+	Entries               []ChatEntry
+}
+
+func NormalizeCommittedTranscriptSuffixRequest(req CommittedTranscriptSuffixRequest) CommittedTranscriptSuffixRequest {
+	if req.AfterEntryCount < 0 {
+		req.AfterEntryCount = 0
+	}
+	if req.Limit <= 0 {
+		req.Limit = DefaultCommittedTranscriptSuffixLimit
+	}
+	if req.Limit > MaxCommittedTranscriptSuffixLimit {
+		req.Limit = MaxCommittedTranscriptSuffixLimit
+	}
+	return req
+}
+
 type ToolPresentationKind string
 type ToolCallRenderBehavior string
 type ToolRenderKind string

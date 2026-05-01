@@ -27,7 +27,7 @@ func pendingSpinnerFrameText(frame int) string {
 }
 
 func pendingSpinnerLine(frame int, text string) string {
-	return pendingSpinnerFrameText(frame) + text
+	return pendingSpinnerFrameText(frame) + " " + text
 }
 
 func collectNativeHistoryFlushText(msgs []tea.Msg) string {
@@ -378,16 +378,10 @@ func TestNativeScrollbackDoesNotReplaySameSessionNonAppendMutation(t *testing.T)
 	m.transcriptEntries[1].Text = "mutated line"
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 	cmd := m.syncNativeHistoryFromTranscript()
-	if cmd == nil {
-		t.Fatal("expected same-session divergence to surface a transient error notice")
-	}
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(nativeHistoryFlushMsg); ok {
 			t.Fatalf("did not expect same-session divergence to replay normal-buffer history, got %+v", msg)
 		}
-	}
-	if m.transientStatus != nativeHistoryDivergenceStatusMessage || m.transientStatusKind != uiStatusNoticeError {
-		t.Fatalf("expected divergence status surfaced to user, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
 	}
 	if got := stripANSIText(m.nativeRenderedSnapshot); !strings.Contains(got, "mutated line") || strings.Contains(got, "old line") {
 		t.Fatalf("expected rendered baseline rebased without replay, got %q", got)
@@ -406,9 +400,6 @@ func TestNativeScrollbackRebasesWhenNoSharedPrefixExists(t *testing.T) {
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "fresh root"}, {Role: "assistant", Text: "rewritten tail"}}
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 	cmd := m.syncNativeHistoryFromTranscript()
-	if cmd == nil {
-		t.Fatal("expected same-session zero-prefix divergence to surface a transient error notice")
-	}
 	for _, msg := range collectCmdMessages(t, cmd) {
 		if _, ok := msg.(nativeHistoryFlushMsg); ok {
 			t.Fatalf("did not expect same-session zero-prefix divergence to replay scrollback, got %+v", msg)
@@ -786,8 +777,8 @@ func TestNativeScrollbackFlowIntegration(t *testing.T) {
 
 	start := m.view.OngoingScroll()
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if got := m.view.OngoingScroll(); got >= start {
-		t.Fatalf("expected pgup to scroll ongoing transcript state, got %d from %d", got, start)
+	if got := m.view.OngoingScroll(); got != start {
+		t.Fatalf("expected pgup not to mutate ongoing transcript state, got %d from %d", got, start)
 	}
 
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "message 121"})

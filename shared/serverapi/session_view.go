@@ -31,6 +31,16 @@ type SessionTranscriptPageResponse struct {
 	Transcript clientui.TranscriptPage `json:"transcript"`
 }
 
+type SessionCommittedTranscriptSuffixRequest struct {
+	SessionID       string `json:"session_id"`
+	AfterEntryCount int    `json:"after_entry_count,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+}
+
+type SessionCommittedTranscriptSuffixResponse struct {
+	Suffix clientui.CommittedTranscriptSuffix `json:"suffix"`
+}
+
 type RunGetRequest struct {
 	SessionID string
 	RunID     string
@@ -43,6 +53,7 @@ type RunGetResponse struct {
 type SessionViewService interface {
 	GetSessionMainView(ctx context.Context, req SessionMainViewRequest) (SessionMainViewResponse, error)
 	GetSessionTranscriptPage(ctx context.Context, req SessionTranscriptPageRequest) (SessionTranscriptPageResponse, error)
+	GetSessionCommittedTranscriptSuffix(ctx context.Context, req SessionCommittedTranscriptSuffixRequest) (SessionCommittedTranscriptSuffixResponse, error)
 	GetRun(ctx context.Context, req RunGetRequest) (RunGetResponse, error)
 }
 
@@ -78,6 +89,22 @@ func (r SessionTranscriptPageRequest) Validate() error {
 	}
 	if r.KnownCommittedEntryCount < 0 {
 		return errors.New("known_committed_entry_count must be >= 0")
+	}
+	return nil
+}
+
+func (r SessionCommittedTranscriptSuffixRequest) Validate() error {
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
+	}
+	if r.AfterEntryCount < 0 {
+		return errors.New("after_entry_count must be >= 0")
+	}
+	if r.Limit < 0 {
+		return errors.New("limit must be >= 0")
+	}
+	if r.Limit > clientui.MaxCommittedTranscriptSuffixLimit {
+		return errors.New("limit exceeds maximum committed transcript suffix limit")
 	}
 	return nil
 }

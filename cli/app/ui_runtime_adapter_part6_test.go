@@ -5,7 +5,6 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	"builder/shared/transcript"
 	tea "github.com/charmbracelet/bubbletea"
 	"strings"
@@ -293,14 +292,10 @@ func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssi
 }
 
 func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
-	policies := []config.TUIAlternateScreenPolicy{
-		config.TUIAlternateScreenNever,
-		config.TUIAlternateScreenAuto,
-	}
+	policies := []string{"fixed-detail-alt-screen"}
 	for _, policy := range policies {
-		t.Run(string(policy), func(t *testing.T) {
+		t.Run(policy, func(t *testing.T) {
 			m := newProjectedStaticUIModel(
-				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 			)
 
@@ -428,14 +423,10 @@ func TestBackgroundUpdatedWithSuppressedNoticeSkipsTransientStatus(t *testing.T)
 }
 
 func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
-	policies := []config.TUIAlternateScreenPolicy{
-		config.TUIAlternateScreenNever,
-		config.TUIAlternateScreenAuto,
-	}
+	policies := []string{"fixed-detail-alt-screen"}
 	for _, policy := range policies {
-		t.Run(string(policy), func(t *testing.T) {
+		t.Run(policy, func(t *testing.T) {
 			m := newProjectedStaticUIModel(
-				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 			)
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/registry"
 	"builder/server/runtime"
@@ -14,18 +15,26 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type countingSessionViewClient struct {
 	view              clientui.RuntimeMainView
 	page              clientui.TranscriptPage
+	suffix            clientui.CommittedTranscriptSuffix
+	suffixErr         error
 	pageForRequest    func(serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage
 	count             atomic.Int32
+	pageCount         atomic.Int32
+	suffixCount       atomic.Int32
 	lastTranscriptReq serverapi.SessionTranscriptPageRequest
+	lastSuffixReq     serverapi.SessionCommittedTranscriptSuffixRequest
 }
 
 func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
@@ -37,10 +46,22 @@ func (c *countingSessionViewClient) GetSessionTranscriptPage(ctx context.Context
 	_ = ctx
 	c.lastTranscriptReq = req
 	c.count.Add(1)
+	c.pageCount.Add(1)
 	if c.pageForRequest != nil {
 		return serverapi.SessionTranscriptPageResponse{Transcript: c.pageForRequest(req)}, nil
 	}
 	return serverapi.SessionTranscriptPageResponse{Transcript: c.page}, nil
+}
+
+func (c *countingSessionViewClient) GetSessionCommittedTranscriptSuffix(ctx context.Context, req serverapi.SessionCommittedTranscriptSuffixRequest) (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
+	_ = ctx
+	c.lastSuffixReq = req
+	c.count.Add(1)
+	c.suffixCount.Add(1)
+	if c.suffixErr != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, c.suffixErr
+	}
+	return serverapi.SessionCommittedTranscriptSuffixResponse{Suffix: c.suffix}, nil
 }
 
 func (*countingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
@@ -213,6 +234,621 @@ func TestRuntimeClientLoadTranscriptPageLetsServerApplyDefaultWindow(t *testing.
 	}
 	if reads.lastTranscriptReq.Window != "" {
 		t.Fatalf("window = %q, want empty server-default request", reads.lastTranscriptReq.Window)
+	}
+}
+
+func TestRuntimeClientRefreshCommittedTranscriptSuffixUsesSessionViewSuffixAPI(t *testing.T) {
+	reads := &countingSessionViewClient{
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:             "session-1",
+			Revision:              12,
+			CommittedEntryCount:   5,
+			StartEntryCount:       2,
+			NextEntryCount:        4,
+			HasMore:               true,
+			Entries:               []clientui.ChatEntry{{Role: "assistant", Text: "reply-002"}, {Role: "assistant", Text: "reply-003"}},
+			ConversationFreshness: clientui.ConversationFreshnessEstablished,
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls).(*sessionRuntimeClient)
+
+	suffix, err := runtimeClient.RefreshCommittedTranscriptSuffix(clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 2, Limit: 2})
+	if err != nil {
+		t.Fatalf("refresh committed transcript suffix: %v", err)
+	}
+	if reads.lastSuffixReq.SessionID != "session-1" || reads.lastSuffixReq.AfterEntryCount != 2 || reads.lastSuffixReq.Limit != 2 {
+		t.Fatalf("unexpected suffix request: %+v", reads.lastSuffixReq)
+	}
+	if reads.lastTranscriptReq != (serverapi.SessionTranscriptPageRequest{}) {
+		t.Fatalf("did not expect transcript page request, got %+v", reads.lastTranscriptReq)
+	}
+	if suffix.StartEntryCount != 2 || suffix.NextEntryCount != 4 || len(suffix.Entries) != 2 {
+		t.Fatalf("unexpected suffix response: %+v", suffix)
+	}
+	cached := runtimeClient.SessionView()
+	if cached.Transcript.Revision != 12 || cached.Transcript.CommittedEntryCount != 5 {
+		t.Fatalf("cached transcript metadata = %+v, want revision 12 count 5", cached.Transcript)
+	}
+}
+
+func TestRuntimeClientCommittedSuffixDisablesUnsupportedRPC(t *testing.T) {
+	reads := &countingSessionViewClient{
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     7,
+			TotalEntries: 4,
+			Offset:       2,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "page fallback"}},
+		},
+		suffixErr: serverapi.ErrMethodNotFound,
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls).(*sessionRuntimeClient)
+	req := clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 2, Limit: 1}
+
+	suffix, err := runtimeClient.RefreshCommittedTranscriptSuffix(req)
+	if err != nil {
+		t.Fatalf("refresh committed transcript suffix fallback: %v", err)
+	}
+	if suffix.StartEntryCount != 2 || suffix.NextEntryCount != 3 || suffix.Entries[0].Text != "page fallback" {
+		t.Fatalf("unexpected fallback suffix: %+v", suffix)
+	}
+	if reads.suffixCount.Load() != 1 || reads.pageCount.Load() != 1 {
+		t.Fatalf("first refresh counts suffix=%d page=%d, want 1/1", reads.suffixCount.Load(), reads.pageCount.Load())
+	}
+
+	reads.suffixErr = nil
+	reads.suffix = clientui.CommittedTranscriptSuffix{
+		SessionID:           "session-1",
+		CommittedEntryCount: 4,
+		StartEntryCount:     2,
+		NextEntryCount:      3,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "rpc should stay disabled"}},
+	}
+	suffix, err = runtimeClient.RefreshCommittedTranscriptSuffix(req)
+	if err != nil {
+		t.Fatalf("second refresh committed transcript suffix fallback: %v", err)
+	}
+	if suffix.Entries[0].Text != "page fallback" {
+		t.Fatalf("expected cached unsupported capability to keep page fallback, got %+v", suffix)
+	}
+	if reads.suffixCount.Load() != 1 || reads.pageCount.Load() != 2 {
+		t.Fatalf("second refresh counts suffix=%d page=%d, want 1/2", reads.suffixCount.Load(), reads.pageCount.Load())
+	}
+}
+
+func TestStartupRuntimeTranscriptUsesCommittedSuffixBounding(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            10,
+				CommittedEntryCount: 600,
+			},
+		}},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            10,
+			CommittedEntryCount: 600,
+			StartEntryCount:     100,
+			NextEntryCount:      101,
+			HasMore:             true,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "reply-100"}},
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	model := NewProjectedUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents()).(*uiModel)
+
+	if reads.lastSuffixReq.AfterEntryCount != 100 {
+		t.Fatalf("startup suffix after_entry_count = %d, want 100", reads.lastSuffixReq.AfterEntryCount)
+	}
+	if reads.lastSuffixReq.Limit != clientui.MaxCommittedTranscriptSuffixLimit {
+		t.Fatalf("startup suffix limit = %d, want %d", reads.lastSuffixReq.Limit, clientui.MaxCommittedTranscriptSuffixLimit)
+	}
+	if reads.lastTranscriptReq != (serverapi.SessionTranscriptPageRequest{}) {
+		t.Fatalf("did not expect startup seed to use transcript page request, got %+v", reads.lastTranscriptReq)
+	}
+	if model.transcriptBaseOffset != 100 || model.transcriptTotalEntries != 600 {
+		t.Fatalf("startup transcript metadata base=%d total=%d, want base 100 total 600", model.transcriptBaseOffset, model.transcriptTotalEntries)
+	}
+	if got := len(model.transcriptEntries); got != 1 {
+		t.Fatalf("startup transcript entries = %d, want 1", got)
+	}
+	if model.transcriptEntries[0].Text != "reply-100" {
+		t.Fatalf("startup transcript entry = %+v, want reply-100", model.transcriptEntries[0])
+	}
+}
+
+func TestWidthResizeReplayFetchesCommittedSuffixBeforeFullReplay(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            10,
+				CommittedEntryCount: 3,
+			},
+		}},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            10,
+			CommittedEntryCount: 3,
+			StartEntryCount:     0,
+			NextEntryCount:      1,
+			HasMore:             true,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "startup"}},
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+	model := NewProjectedUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents()).(*uiModel)
+
+	next, startupCmd := model.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	model = next.(*uiModel)
+	if startupCmd != nil {
+		if flush, ok := startupCmd().(nativeHistoryFlushMsg); ok {
+			next, _ = model.Update(flush)
+			model = next.(*uiModel)
+		}
+	}
+	reads.suffix = clientui.CommittedTranscriptSuffix{
+		SessionID:           "session-1",
+		Revision:            11,
+		CommittedEntryCount: 3,
+		StartEntryCount:     0,
+		NextEntryCount:      3,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "fresh-0"}, {Role: "assistant", Text: "fresh-1"}, {Role: "assistant", Text: "fresh-2"}},
+	}
+
+	next, resizeCmd := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	model = next.(*uiModel)
+	if resizeCmd == nil {
+		t.Fatal("expected resize debounce command")
+	}
+	model.nativeResizeReplayAt = time.Time{}
+	next, fetchCmd := model.Update(nativeResizeReplayMsg{token: model.nativeResizeReplayToken})
+	model = next.(*uiModel)
+	if fetchCmd == nil {
+		t.Fatal("expected resize replay to fetch committed suffix")
+	}
+	refresh, ok := fetchCmd().(nativeResizeTranscriptSuffixRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected nativeResizeTranscriptSuffixRefreshedMsg, got %T", fetchCmd())
+	}
+	if reads.lastSuffixReq.AfterEntryCount != 0 || reads.lastSuffixReq.Limit != clientui.MaxCommittedTranscriptSuffixLimit {
+		t.Fatalf("unexpected resize suffix request: %+v", reads.lastSuffixReq)
+	}
+	next, replayCmd := model.Update(refresh)
+	model = next.(*uiModel)
+	msgs := collectCmdMessages(t, replayCmd)
+	foundFreshReplay := false
+	for _, msg := range msgs {
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if ok && strings.Contains(flush.Text, "fresh-0") && strings.Contains(flush.Text, "fresh-2") {
+			foundFreshReplay = true
+		}
+	}
+	if !foundFreshReplay {
+		t.Fatalf("expected full replay from refreshed suffix, got msgs=%+v", msgs)
+	}
+	if model.transcriptRevision != 11 || model.transcriptTotalEntries != 3 {
+		t.Fatalf("model transcript metadata revision=%d total=%d, want revision 11 total 3", model.transcriptRevision, model.transcriptTotalEntries)
+	}
+}
+
+func TestCommittedRuntimeEventPermanentOutputUsesCommittedSuffix(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            1,
+				CommittedEntryCount: 1,
+			},
+		}},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            1,
+			CommittedEntryCount: 1,
+			StartEntryCount:     0,
+			NextEntryCount:      1,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+	model := NewProjectedUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents()).(*uiModel)
+	model.termWidth = 100
+	model.termHeight = 20
+	model.windowSizeKnown = true
+	reads.suffix = clientui.CommittedTranscriptSuffix{
+		SessionID:           "session-1",
+		Revision:            2,
+		CommittedEntryCount: 2,
+		StartEntryCount:     1,
+		NextEntryCount:      2,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "authoritative suffix"}},
+	}
+
+	cmd := model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "stale event payload", Phase: string(llm.MessagePhaseFinal)}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeCommittedTranscriptSuffixRefreshedMsg
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeCommittedTranscriptSuffixRefreshedMsg); ok {
+			refresh = typed
+		}
+	}
+	if refresh.token == 0 {
+		t.Fatalf("expected committed suffix refresh, got %+v", msgs)
+	}
+	if reads.lastSuffixReq.AfterEntryCount != 1 || reads.lastSuffixReq.Limit != 1 {
+		t.Fatalf("unexpected committed suffix request: %+v", reads.lastSuffixReq)
+	}
+	if strings.Contains(stripANSIAndTrimRight(model.view.OngoingSnapshot()), "stale event payload") {
+		t.Fatalf("event payload rendered before suffix response: %q", stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+	}
+
+	next, applyCmd := model.Update(refresh)
+	model = next.(*uiModel)
+	_ = collectCmdMessages(t, applyCmd)
+	ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+	if !strings.Contains(ongoing, "authoritative suffix") {
+		t.Fatalf("expected authoritative suffix rendered, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "stale event payload") {
+		t.Fatalf("event payload leaked into permanent output: %q", ongoing)
+	}
+}
+
+func TestCommittedSuffixRequestUsesDeliveryCursorNotLocalProjection(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(2, 10)
+	for i := 0; i < 8; i++ {
+		m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: tui.TranscriptRoleAssistant, Text: "stale"})
+	}
+
+	req := committedTranscriptSuffixRequestForEvent(m, clientui.Event{
+		CommittedTranscriptChanged: true,
+		CommittedEntryCount:        5,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "committed"}},
+	})
+
+	if req.AfterEntryCount != 2 {
+		t.Fatalf("suffix request after_entry_count = %d, want delivery cursor 2", req.AfterEntryCount)
+	}
+	if req.Limit != 3 {
+		t.Fatalf("suffix request limit = %d, want committed gap 3", req.Limit)
+	}
+}
+
+func TestUserMessageFlushedAdvancesDeliveryCursorBeforeFollowingSuffix(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(0, 1)
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		CommittedEntryCount:        1,
+		TranscriptRevision:         2,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
+	})
+	_ = collectCmdMessages(t, cmd)
+
+	if m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount != 1 {
+		t.Fatalf("user echo did not advance delivery cursor: %+v", m.ongoingCommittedDelivery)
+	}
+	req := committedTranscriptSuffixRequestForEvent(m, clientui.Event{
+		CommittedTranscriptChanged: true,
+		CommittedEntryCount:        2,
+		TranscriptRevision:         3,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "answer"}},
+	})
+	if req.AfterEntryCount != 1 {
+		t.Fatalf("following suffix after_entry_count = %d, want user echo cursor 1", req.AfterEntryCount)
+	}
+	if req.Limit != 1 {
+		t.Fatalf("following suffix limit = %d, want 1", req.Limit)
+	}
+}
+
+func TestCommittedSuffixAppendCursorAdvancesAfterNativeFlushAck(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(0, 1)
+
+	cmd := m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            2,
+		CommittedEntryCount: 1,
+		StartEntryCount:     0,
+		NextEntryCount:      1,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "answer"}},
+	})
+	if cmd == nil {
+		t.Fatal("expected native flush command")
+	}
+	if m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount != 0 {
+		t.Fatalf("cursor advanced before native flush ack: %+v", m.ongoingCommittedDelivery)
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	_ = m.handleNativeHistoryFlush(msg)
+	if m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount != 1 {
+		t.Fatalf("cursor did not advance after native flush ack: %+v", m.ongoingCommittedDelivery)
+	}
+}
+
+func TestCommittedSuffixDeliveryDoesNotAdvancePastUnresolvedToolTail(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleUser, Text: "prompt"}}
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, TotalEntries: 1})
+	m.rebaseNativeProjection(m.nativeCommittedProjection(m.transcriptEntries), 0, 1)
+	m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(1, 1)
+
+	cmd := m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            2,
+		CommittedEntryCount: 3,
+		StartEntryCount:     1,
+		NextEntryCount:      3,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		},
+	})
+	if cmd != nil {
+		for _, msg := range collectCmdMessages(t, cmd) {
+			if _, ok := msg.(nativeHistoryFlushMsg); ok {
+				t.Fatalf("did not expect unresolved tool calls to flush committed history, got %+v", msg)
+			}
+		}
+	}
+	if got := m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount; got != 1 {
+		t.Fatalf("cursor advanced past unresolved tools: got %d want 1", got)
+	}
+	if got := len(m.transcriptEntries); got != 3 {
+		t.Fatalf("transcript entries after unresolved suffix = %d, want 3", got)
+	}
+
+	cmd = m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            3,
+		CommittedEntryCount: 4,
+		StartEntryCount:     1,
+		NextEntryCount:      4,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+			{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"},
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		},
+	})
+	if cmd == nil {
+		t.Fatal("expected completed tool prefix to flush")
+	}
+	flushes := collectCmdMessages(t, cmd)
+	foundFlush := false
+	for _, msg := range flushes {
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if !ok {
+			continue
+		}
+		foundFlush = true
+		if strings.Contains(stripANSIText(flush.Text), "echo b") {
+			t.Fatalf("unresolved sibling flushed as committed history: %q", stripANSIText(flush.Text))
+		}
+		_ = m.handleNativeHistoryFlush(flush)
+	}
+	if !foundFlush {
+		t.Fatalf("expected native flush for resolved tool prefix, got %+v", flushes)
+	}
+	if got := m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount; got != 3 {
+		t.Fatalf("cursor after resolved prefix flush = %d, want 3", got)
+	}
+	if got := len(m.transcriptEntries); got != 4 {
+		t.Fatalf("transcript entries after replacing pending tail = %d, want 4 (%+v)", got, m.transcriptEntries)
+	}
+	if m.transcriptEntries[1].ToolCallID != "call_a" || m.transcriptEntries[2].ToolCallID != "call_a" || m.transcriptEntries[3].ToolCallID != "call_b" {
+		t.Fatalf("pending tail replacement duplicated or reordered entries: %+v", m.transcriptEntries)
+	}
+
+	cmd = m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            4,
+		CommittedEntryCount: 5,
+		StartEntryCount:     3,
+		NextEntryCount:      5,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+			{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+		},
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			_ = m.handleNativeHistoryFlush(flush)
+		}
+	}
+	if got := m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount; got != 5 {
+		t.Fatalf("cursor after final tool flush = %d, want 5", got)
+	}
+	if pending := tui.PendingOngoingEntries(m.transcriptEntries); len(pending) != 0 {
+		t.Fatalf("expected no pending live tool entries after all results, got %+v", pending)
+	}
+}
+
+func TestCommittedSuffixMultiToolDetailRoundTripLeavesNoLiveSpinnerAfterFinalResults(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleUser, Text: "prompt"}}
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, TotalEntries: 1})
+	m.rebaseNativeProjection(m.nativeCommittedProjection(m.transcriptEntries), 0, 1)
+	m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(1, 1)
+
+	_ = collectCmdMessages(t, m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            2,
+		CommittedEntryCount: 3,
+		StartEntryCount:     1,
+		NextEntryCount:      3,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		},
+	}))
+	if pending := tui.PendingOngoingEntries(m.transcriptEntries); len(pending) != 2 {
+		t.Fatalf("expected two pending tool calls after starts, got %+v", pending)
+	}
+
+	_ = collectCmdMessages(t, m.toggleTranscriptModeWithNativeReplay(false))
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode = %q, want detail", m.view.Mode())
+	}
+
+	_ = collectCmdMessages(t, m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            3,
+		CommittedEntryCount: 4,
+		StartEntryCount:     1,
+		NextEntryCount:      4,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+			{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"},
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		},
+	}))
+
+	for _, msg := range collectCmdMessages(t, m.toggleTranscriptModeWithNativeReplay(true)) {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			_ = m.handleNativeHistoryFlush(flush)
+		}
+	}
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("mode = %q, want ongoing", m.view.Mode())
+	}
+
+	for _, msg := range collectCmdMessages(t, m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            4,
+		CommittedEntryCount: 5,
+		StartEntryCount:     committedTranscriptTailEnd(m),
+		NextEntryCount:      5,
+		Entries: []clientui.ChatEntry{
+			{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+			{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"},
+			{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+			{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+		},
+	})) {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			_ = m.handleNativeHistoryFlush(flush)
+		}
+	}
+
+	if pending := tui.PendingOngoingEntries(m.transcriptEntries); len(pending) != 0 {
+		t.Fatalf("expected no pending live tool entries after all results, got %+v", pending)
+	}
+	if view := stripANSIPreserve(m.View()); strings.Contains(view, pendingSpinnerFrameText(0)+" echo") || strings.Contains(view, pendingSpinnerFrameText(1)+" echo") {
+		t.Fatalf("did not expect live spinner after final tool results, got %q", view)
+	}
+	counts := map[string]int{}
+	for _, entry := range committedTranscriptEntriesForApp(m.transcriptEntries) {
+		if strings.TrimSpace(entry.ToolCallID) != "" {
+			counts[string(entry.Role)+":"+entry.ToolCallID]++
+		}
+	}
+	for _, key := range []string{"tool_call:call_a", "tool_result_ok:call_a", "tool_call:call_b", "tool_result_ok:call_b"} {
+		if counts[key] != 1 {
+			t.Fatalf("committed transcript row count %s = %d, want 1; entries=%+v", key, counts[key], m.transcriptEntries)
+		}
+	}
+}
+
+func TestCommittedSuffixRefreshedRequestsNextPageWhenCapped(t *testing.T) {
+	reads := &countingSessionViewClient{
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            3,
+			CommittedEntryCount: 900,
+			StartEntryCount:     500,
+			NextEntryCount:      750,
+			HasMore:             false,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "next capped page"}},
+		},
+	}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil)),
+	)
+	m := newProjectedTestUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.runtimeCommittedSuffixToken = 7
+
+	cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 7,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 0, Limit: clientui.MaxCommittedTranscriptSuffixLimit},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            2,
+			CommittedEntryCount: 900,
+			StartEntryCount:     0,
+			NextEntryCount:      500,
+			HasMore:             true,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "first capped page"}},
+		},
+	})
+	if cmd == nil {
+		t.Fatal("expected follow-up suffix request command")
+	}
+
+	var followUp runtimeCommittedTranscriptSuffixRefreshedMsg
+	found := false
+	for _, msg := range collectCmdMessages(t, cmd) {
+		typed, ok := msg.(runtimeCommittedTranscriptSuffixRefreshedMsg)
+		if !ok {
+			continue
+		}
+		followUp = typed
+		found = true
+	}
+	if !found {
+		t.Fatal("expected capped suffix to schedule a follow-up committed suffix request")
+	}
+	if followUp.req.AfterEntryCount != 500 {
+		t.Fatalf("follow-up after_entry_count = %d, want 500", followUp.req.AfterEntryCount)
+	}
+	if followUp.req.Limit != clientui.MaxCommittedTranscriptSuffixLimit {
+		t.Fatalf("follow-up limit = %d, want max %d", followUp.req.Limit, clientui.MaxCommittedTranscriptSuffixLimit)
+	}
+	if reads.lastSuffixReq.AfterEntryCount != 500 {
+		t.Fatalf("server follow-up after_entry_count = %d, want 500", reads.lastSuffixReq.AfterEntryCount)
+	}
+
+	nextCount := reads.count.Load()
+	stopCmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(followUp)
+	for _, msg := range collectCmdMessages(t, stopCmd) {
+		if _, ok := msg.(runtimeCommittedTranscriptSuffixRefreshedMsg); ok {
+			t.Fatalf("did not expect another suffix request after HasMore=false follow-up, got %+v", msg)
+		}
+	}
+	if got := reads.count.Load(); got != nextCount {
+		t.Fatalf("unexpected extra suffix request after HasMore=false follow-up: count=%d want %d", got, nextCount)
 	}
 }
 

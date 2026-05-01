@@ -73,7 +73,6 @@ type onboardingFlowState struct {
 	settings                    config.Settings
 	baselineSettings            config.Settings
 	theme                       string
-	alternateScreen             config.TUIAlternateScreenPolicy
 	authState                   auth.State
 	providerCapabilities        llm.ProviderCapabilities
 	pendingAction               onboardingPendingAction

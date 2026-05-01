@@ -41,18 +41,13 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 		settings:             cfg.Settings,
 		baselineSettings:     cfg.Settings,
 		theme:                cfg.Settings.Theme,
-		alternateScreen:      cfg.Settings.TUIAlternateScreen,
 		authState:            authState,
 		providerCapabilities: providerCaps,
 		skillImport:          onboardingImportSelection{Mode: onboardingImportModeNone},
 		commandImport:        onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
 	model := newOnboardingModel(cfg.PersistenceRoot, state)
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(cfg.Settings.TUIAlternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return onboardingResult{}, err

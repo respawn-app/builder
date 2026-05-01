@@ -119,7 +119,7 @@ func TestCopySlashCommandCopiesLatestAssistantFinalAnswerAfterReviewerFeedback(t
 	}
 }
 
-func TestCopySlashCommandFallsBackToVisibleCommittedFinalWhenRuntimeStatusIsStale(t *testing.T) {
+func TestCopySlashCommandDoesNotUseVisibleProjectionWhenRuntimeStatusIsStale(t *testing.T) {
 	copier := &stubClipboardTextCopier{}
 	client := &runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIClipboardTextCopier(copier))
@@ -147,14 +147,13 @@ func TestCopySlashCommandFallsBackToVisibleCommittedFinalWhenRuntimeStatusIsStal
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected clipboard copy command")
+		t.Fatal("expected transient-status command")
 	}
-	msgs := collectCmdMessages(t, cmd)
-	if copier.calls != 1 {
-		t.Fatalf("expected one clipboard copy, got %d msgs=%+v", copier.calls, msgs)
+	if copier.calls != 0 {
+		t.Fatalf("did not expect clipboard copy from visible projection, got %d", copier.calls)
 	}
-	if copier.text != "visible final" {
-		t.Fatalf("copied text = %q, want %q", copier.text, "visible final")
+	if updated.transientStatus != "No final answer available to copy" {
+		t.Fatalf("expected no-answer status, got %q", updated.transientStatus)
 	}
 }
 

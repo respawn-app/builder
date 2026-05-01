@@ -30,7 +30,7 @@ func TestRunSessionLifecycleMissingWorkspacePrepareRuntimeSuggestsRebind(t *test
 		cfg: config.App{
 			WorkspaceRoot:   missingWorkspace,
 			PersistenceRoot: t.TempDir(),
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		containerDir: containerDir,
 		projectID:    "project-1",
@@ -82,12 +82,12 @@ func TestMaybeHandlePickedSessionWorkspaceChangeSkipsPromptWhenWorkspaceUnchange
 	originalPrompt := runWorkspaceChangePromptFlow
 	defer func() { runWorkspaceChangePromptFlow = originalPrompt }()
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{Rebind: true}, nil
 	}
 
-	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: "/tmp/workspace", Settings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever}}}, sessionLaunchPlan{
+	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: "/tmp/workspace", Settings: config.Settings{Theme: "dark"}}}, sessionLaunchPlan{
 		SessionID:                    "session-1",
 		SelectedViaPicker:            true,
 		SelectedSessionWorkspaceRoot: "/tmp/workspace",
@@ -112,12 +112,12 @@ func TestMaybeHandlePickedSessionWorkspaceChangeCanonicalizesAliases(t *testing.
 	originalPrompt := runWorkspaceChangePromptFlow
 	defer func() { runWorkspaceChangePromptFlow = originalPrompt }()
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{Rebind: true}, nil
 	}
 
-	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: aliasRoot, Settings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever}}}, sessionLaunchPlan{
+	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: aliasRoot, Settings: config.Settings{Theme: "dark"}}}, sessionLaunchPlan{
 		SessionID:                    "session-1",
 		SelectedViaPicker:            true,
 		SelectedSessionWorkspaceRoot: realRoot,
@@ -137,12 +137,12 @@ func TestMaybeHandlePickedSessionWorkspaceChangeLookupFailureReturnsPicker(t *te
 	originalPrompt := runWorkspaceChangePromptFlow
 	defer func() { runWorkspaceChangePromptFlow = originalPrompt }()
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{Rebind: true}, nil
 	}
 
-	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: "/tmp/workspace", Settings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever}}}, sessionLaunchPlan{
+	action, err := maybeHandlePickedSessionWorkspaceChange(context.Background(), &testEmbeddedServer{cfg: config.App{WorkspaceRoot: "/tmp/workspace", Settings: config.Settings{Theme: "dark"}}}, sessionLaunchPlan{
 		SessionID:                            "session-1",
 		SelectedViaPicker:                    true,
 		SelectedSessionWorkspaceLookupFailed: true,
@@ -180,7 +180,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeYesRetargetsSessionAndReplans(t
 	}()
 
 	pickerCalls := 0
-	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string, policy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 		pickerCalls++
 		for _, summary := range summaries {
 			if summary.SessionID == store.Meta().SessionID {
@@ -192,7 +192,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeYesRetargetsSessionAndReplans(t
 		return sessionPickerResult{}, nil
 	}
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(selectedRoot string, currentRoot string, theme string, policy config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(selectedRoot string, currentRoot string, theme string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		if comparableWorkspaceChangeRoot(selectedRoot) != mustCanonicalPath(t, previousWorkspace) {
 			t.Fatalf("selected root = %q, want %q", selectedRoot, mustCanonicalPath(t, previousWorkspace))
@@ -210,7 +210,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeYesRetargetsSessionAndReplans(t
 		cfg: config.App{
 			WorkspaceRoot:   cfg.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		projectID:         binding.ProjectID,
 		projectViewClient: projectViews,
@@ -228,7 +228,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeYesRetargetsSessionAndReplans(t
 			return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{
 				SessionID:      store.Meta().SessionID,
 				WorkspaceRoot:  cfg.WorkspaceRoot,
-				ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+				ActiveSettings: config.Settings{Theme: "dark"},
 			}}, nil
 		}},
 		prepareRuntime: func(_ context.Context, plan sessionLaunchPlan, _ io.Writer, _ string) (*runtimeLaunchPlan, error) {
@@ -290,7 +290,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeNoReturnsToPicker(t *testing.T)
 	}()
 
 	pickerCalls := 0
-	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string, policy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 		pickerCalls++
 		if pickerCalls == 1 {
 			for _, summary := range summaries {
@@ -304,7 +304,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeNoReturnsToPicker(t *testing.T)
 		return sessionPickerResult{Canceled: true}, nil
 	}
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{}, nil
 	}
@@ -314,7 +314,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeNoReturnsToPicker(t *testing.T)
 		cfg: config.App{
 			WorkspaceRoot:   cfg.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		projectID:         binding.ProjectID,
 		projectViewClient: projectViews,
@@ -332,7 +332,7 @@ func TestRunSessionLifecyclePickerWorkspaceChangeNoReturnsToPicker(t *testing.T)
 			return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{
 				SessionID:      store.Meta().SessionID,
 				WorkspaceRoot:  cfg.WorkspaceRoot,
-				ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+				ActiveSettings: config.Settings{Theme: "dark"},
 			}}, nil
 		}},
 	}
@@ -374,7 +374,7 @@ func TestRunSessionLifecycleStalePickedSessionReturnsToPickerAndOpensAnother(t *
 	}()
 
 	pickerCalls := 0
-	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string, policy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+	runSessionPickerFlow = func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 		pickerCalls++
 		for _, summary := range summaries {
 			if pickerCalls == 1 && summary.SessionID == staleSessionID {
@@ -390,7 +390,7 @@ func TestRunSessionLifecycleStalePickedSessionReturnsToPickerAndOpensAnother(t *
 		return sessionPickerResult{}, nil
 	}
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{Rebind: true}, nil
 	}
@@ -402,7 +402,7 @@ func TestRunSessionLifecycleStalePickedSessionReturnsToPickerAndOpensAnother(t *
 		cfg: config.App{
 			WorkspaceRoot:   cfg.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		projectID:         binding.ProjectID,
 		projectViewClient: projectViews,
@@ -421,7 +421,7 @@ func TestRunSessionLifecycleStalePickedSessionReturnsToPickerAndOpensAnother(t *
 			return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{
 				SessionID:      req.SelectedSessionID,
 				WorkspaceRoot:  cfg.WorkspaceRoot,
-				ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+				ActiveSettings: config.Settings{Theme: "dark"},
 			}}, nil
 		}},
 		prepareRuntime: func(_ context.Context, plan sessionLaunchPlan, _ io.Writer, _ string) (*runtimeLaunchPlan, error) {
@@ -468,7 +468,7 @@ func TestRunSessionLifecycleExplicitSessionIDBypassesWorkspaceChangePrompt(t *te
 	originalPrompt := runWorkspaceChangePromptFlow
 	defer func() { runWorkspaceChangePromptFlow = originalPrompt }()
 	promptCalls := 0
-	runWorkspaceChangePromptFlow = func(string, string, string, config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+	runWorkspaceChangePromptFlow = func(string, string, string) (workspaceChangePromptResult, error) {
 		promptCalls++
 		return workspaceChangePromptResult{Rebind: true}, nil
 	}
@@ -479,7 +479,7 @@ func TestRunSessionLifecycleExplicitSessionIDBypassesWorkspaceChangePrompt(t *te
 		cfg: config.App{
 			WorkspaceRoot:   cfg.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		projectID:         binding.ProjectID,
 		projectViewClient: projectViews,
@@ -491,7 +491,7 @@ func TestRunSessionLifecycleExplicitSessionIDBypassesWorkspaceChangePrompt(t *te
 			return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{
 				SessionID:      store.Meta().SessionID,
 				WorkspaceRoot:  cfg.WorkspaceRoot,
-				ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenNever},
+				ActiveSettings: config.Settings{Theme: "dark"},
 			}}, nil
 		}},
 		prepareRuntime: func(_ context.Context, plan sessionLaunchPlan, _ io.Writer, _ string) (*runtimeLaunchPlan, error) {
@@ -683,7 +683,7 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		cfg: config.App{
 			WorkspaceRoot:   workdir,
 			PersistenceRoot: root,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		containerDir: root,
 	}

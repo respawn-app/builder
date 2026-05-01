@@ -7,7 +7,6 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/server/tools/askquestion"
-	"builder/shared/config"
 	"errors"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
@@ -210,7 +209,6 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 
 func TestNativeRollbackOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	m := newProjectedStaticUIModel(
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	)
 
@@ -497,7 +495,6 @@ func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.
 		)
 	}
 	m := newProjectedStaticUIModel(
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript(entries),
 	)
 	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
@@ -565,7 +562,6 @@ func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.
 
 func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	m := newProjectedStaticUIModel(
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	)
 

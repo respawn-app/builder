@@ -36,6 +36,7 @@ func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme str
 		width = 120
 	}
 	model := transcriptProjectionRenderer(theme, width, 0)
+	model.toolSymbolGap = 2
 	model.transcript = append([]TranscriptEntry(nil), entries...)
 	blocks := model.buildOngoingBlocks(false)
 	blocks = model.applyPendingSpinner(blocks, entries, spinner)
@@ -57,7 +58,7 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 			out = append(out, block)
 			continue
 		}
-		spinnerSymbol := styleForRole(block.role, m.palette()).Render(spinner)
+		spinnerSymbol := styleForRole(block.role, m.palette()).Render(spinner) + " "
 		rebuilt, ok := m.renderPendingSpinnerBlock(block, entries, spinnerSymbol)
 		if !ok {
 			out = append(out, block)

@@ -10,6 +10,7 @@ import (
 	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/llm"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -415,6 +416,23 @@ func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T)
 	}
 	if !slashPickerContainsCommand(state, "copy") {
 		t.Fatalf("expected /copy in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+}
+
+func TestSlashCommandPickerUsesCachedRuntimeStatusForCopy(t *testing.T) {
+	client := &runtimeControlFakeClient{
+		status: clientui.RuntimeStatus{LastCommittedAssistantFinalAnswer: "done"},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.input = "/co"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if !slashPickerContainsCommand(state, "copy") {
+		t.Fatalf("expected /copy from cached runtime status, got %+v", slashPickerCommandNames(state))
+	}
+	if client.refreshMainViewCalls != 0 {
+		t.Fatalf("slash picker refreshed runtime status %d times, want 0", client.refreshMainViewCalls)
 	}
 }
 
