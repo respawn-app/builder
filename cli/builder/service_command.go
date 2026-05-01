@@ -250,7 +250,7 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 				return 1
 			}
 			fmt.Fprintln(stdout, "Builder background service is installed. Restarting it after update; sessions may fail briefly.")
-			if err := backend.Install(ctx, spec, true, true); err != nil {
+			if err := backend.Restart(ctx, spec); err != nil {
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
