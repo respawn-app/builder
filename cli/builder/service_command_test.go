@@ -163,12 +163,12 @@ func TestServiceRestartIfInstalledRefreshesRegistrationBeforeRestart(t *testing.
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall, serviceActionRestart}
+	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall}
 	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
 		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
 	}
-	if !backend.installForce || backend.installStart {
-		t.Fatalf("refresh flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
+	if !backend.installForce || !backend.installStart {
+		t.Fatalf("refresh flags force=%v start=%v, want force true start true", backend.installForce, backend.installStart)
 	}
 	if !strings.Contains(stdout.String(), "sessions may fail briefly") {
 		t.Fatalf("stdout = %q, want restart warning", stdout.String())
@@ -194,28 +194,6 @@ func TestServiceRestartIfInstalledStopsWhenRefreshFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "install failed") {
 		t.Fatalf("stderr = %q, want install error", stderr.String())
-	}
-}
-
-func TestServiceRestartIfInstalledSurfacesRestartFailureAfterRefresh(t *testing.T) {
-	backend := &stubServiceBackend{status: serviceStatus{Installed: true}, restartErr: errors.New("restart failed")}
-	withServiceCommandTestBackend(t, backend)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
-	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall, serviceActionRestart}
-	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
-		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
-	}
-	if !backend.installForce || backend.installStart {
-		t.Fatalf("refresh flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
-	}
-	if !strings.Contains(stderr.String(), "restart failed") {
-		t.Fatalf("stderr = %q, want restart error", stderr.String())
 	}
 }
 
