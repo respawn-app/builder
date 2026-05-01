@@ -166,9 +166,14 @@ func CommittedTranscriptSuffixFromCollectedChat(sessionID, sessionName string, f
 	if startEntryCount < baseOffset {
 		startEntryCount = baseOffset
 	}
+	if startEntryCount > totalEntries {
+		startEntryCount = totalEntries
+	}
 	total := len(snapshot.Entries)
 	start := startEntryCount - baseOffset
-	if start < 0 {
+	if startEntryCount >= totalEntries {
+		start = total
+	} else if start < 0 {
 		start = 0
 	}
 	if start > total {
@@ -183,6 +188,9 @@ func CommittedTranscriptSuffixFromCollectedChat(sessionID, sessionName string, f
 	}
 	entries := cloneChatEntries(snapshot.Entries[start:end])
 	nextEntryCount := startEntryCount + len(entries)
+	if nextEntryCount > totalEntries {
+		nextEntryCount = totalEntries
+	}
 	return clientui.CommittedTranscriptSuffix{
 		SessionID:             sessionID,
 		SessionName:           sessionName,

@@ -75,6 +75,29 @@ func TestCommittedTranscriptSuffixHonorsLimit(t *testing.T) {
 	}
 }
 
+func TestCommittedTranscriptSuffixClampsInconsistentBaseOffset(t *testing.T) {
+	suffix := CommittedTranscriptSuffixFromCollectedChat(
+		"session-1",
+		"session",
+		clientui.ConversationFreshnessEstablished,
+		12,
+		clientui.ChatSnapshot{Entries: []clientui.ChatEntry{{Role: "assistant", Text: "stale row"}}},
+		1,
+		3,
+		clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 0, Limit: 10},
+	)
+
+	if suffix.StartEntryCount != 1 || suffix.NextEntryCount != 1 {
+		t.Fatalf("expected clamped cursor at committed total, got %+v", suffix)
+	}
+	if suffix.HasMore {
+		t.Fatalf("did not expect has_more after clamping inconsistent cursor: %+v", suffix)
+	}
+	if len(suffix.Entries) != 0 {
+		t.Fatalf("expected no entries beyond committed total, got %+v", suffix.Entries)
+	}
+}
+
 func TestCommittedTranscriptSuffixPreservesEntryMetadata(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

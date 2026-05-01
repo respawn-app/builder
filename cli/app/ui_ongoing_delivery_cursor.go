@@ -78,7 +78,7 @@ func (c *ongoingCommittedDeliveryCursor) beginNativeFlush(suffix clientui.Commit
 }
 
 func (c *ongoingCommittedDeliveryCursor) ackNativeFlush(sequence uint64) bool {
-	if c == nil || !c.nativeFlushInFlight || sequence < c.flushSequence {
+	if c == nil || !c.nativeFlushInFlight || sequence != c.flushSequence {
 		return false
 	}
 	c.lastEmittedCommittedEntryCount = c.flushNextEntryCount
@@ -92,7 +92,7 @@ func (c *ongoingCommittedDeliveryCursor) ackNativeFlush(sequence uint64) bool {
 }
 
 func (c *ongoingCommittedDeliveryCursor) failNativeFlush(sequence uint64) {
-	if c == nil || !c.nativeFlushInFlight || sequence < c.flushSequence {
+	if c == nil || !c.nativeFlushInFlight || sequence != c.flushSequence {
 		return
 	}
 	failedNextEntryCount := c.flushNextEntryCount

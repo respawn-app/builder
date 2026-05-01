@@ -134,28 +134,44 @@ func (m *uiModel) applyCommittedTranscriptSuffixAppend(suffix clientui.Committed
 	}
 	beforeSequence := m.nativeFlushSequence
 	cmd := m.syncNativeHistoryFromTranscript()
-	m.trackOngoingCommittedSuffixFlush(suffix, beforeSequence)
-	return cmd
+	return sequenceCmds(cmd, m.trackOngoingCommittedSuffixFlush(suffix, beforeSequence))
 }
 
-func (m *uiModel) trackOngoingCommittedSuffixFlush(suffix clientui.CommittedTranscriptSuffix, beforeSequence uint64) {
+func (m *uiModel) trackOngoingCommittedSuffixFlush(suffix clientui.CommittedTranscriptSuffix, beforeSequence uint64) tea.Cmd {
 	if m == nil || !m.ongoingCommittedDelivery.initialized || suffix.NextEntryCount <= suffix.StartEntryCount {
-		return
+		return nil
 	}
 	emittedEnd := committedOngoingLocalFrontierEnd(m)
 	if emittedEnd <= m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount {
-		return
+		return nil
 	}
 	if !m.shouldEmitNativeHistory() {
 		m.ongoingCommittedDelivery.recordCommittedAdvance(emittedEnd, suffix.Revision)
-		return
+		return nil
 	}
 	if m.nativeFlushSequence <= beforeSequence {
 		m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount = emittedEnd
 		m.ongoingCommittedDelivery.lastEmittedTranscriptRevision = suffix.Revision
-		return
+		return nil
 	}
 	emittedSuffix := suffix
 	emittedSuffix.NextEntryCount = emittedEnd
-	_ = m.ongoingCommittedDelivery.beginNativeFlush(emittedSuffix, m.nativeFlushSequence)
+	if err := m.ongoingCommittedDelivery.beginNativeFlush(emittedSuffix, m.nativeFlushSequence); err != nil {
+		m.logf(
+			"ui.runtime.committed_suffix.begin_flush_failed err=%q sequence=%d start=%d next=%d revision=%d cursor=%d",
+			err.Error(),
+			m.nativeFlushSequence,
+			emittedSuffix.StartEntryCount,
+			emittedSuffix.NextEntryCount,
+			emittedSuffix.Revision,
+			m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount,
+		)
+		m.ongoingCommittedDelivery.recordPendingRange(
+			m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount,
+			emittedEnd,
+			suffix.Revision,
+		)
+		return m.requestRuntimeCommittedGapSync()
+	}
+	return nil
 }

@@ -27,6 +27,12 @@ func TestOngoingDeliveryCursorAdvancesOnlyAfterNativeFlushAck(t *testing.T) {
 	if cursor.lastEmittedCommittedEntryCount != 2 {
 		t.Fatalf("cursor advanced after stale ack: %+v", cursor)
 	}
+	if advanced := cursor.ackNativeFlush(8); advanced {
+		t.Fatalf("ack for a different newer flush advanced cursor: %+v", cursor)
+	}
+	if cursor.lastEmittedCommittedEntryCount != 2 {
+		t.Fatalf("cursor advanced after mismatched ack: %+v", cursor)
+	}
 	if advanced := cursor.ackNativeFlush(7); !advanced {
 		t.Fatalf("expected target ack to advance cursor: %+v", cursor)
 	}
@@ -81,6 +87,10 @@ func TestOngoingDeliveryCursorRetryKeepsCursorWhenFlushFails(t *testing.T) {
 
 	if err := cursor.beginNativeFlush(suffix, 9); err != nil {
 		t.Fatalf("begin native flush: %v", err)
+	}
+	cursor.failNativeFlush(10)
+	if !cursor.nativeFlushInFlight {
+		t.Fatalf("mismatched failure cleared flush: %+v", cursor)
 	}
 	cursor.failNativeFlush(9)
 
