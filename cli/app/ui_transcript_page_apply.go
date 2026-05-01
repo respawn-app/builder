@@ -146,6 +146,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 				Ongoing:      detailPage.Ongoing,
 				OngoingError: detailPage.OngoingError,
 			})
+			m.refreshRollbackCandidates()
 		}
 	}
 	if m.view.Mode() == tui.ModeOngoing {

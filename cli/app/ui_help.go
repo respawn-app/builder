@@ -89,7 +89,7 @@ func helpSectionsForGOOS(goos string) []uiHelpSection {
 			Title: "Rollback Mode",
 			Entries: []uiHelpEntry{
 				{Bindings: []string{"Esc Esc"}, Description: "open rollback selection from an idle empty prompt", Active: uiHelpCanArmRollback},
-				{Bindings: []string{"↑ / ↓"}, Description: "move the rollback selection", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"↑ / ↓"}, Description: "move the rollback selection and load older/newer pages at the edges", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"PgUp / PgDn"}, Description: "scroll the transcript while selecting a rollback point", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Esc"}, Description: "cancel or go back", Active: uiHelpAlwaysActive},
 			},
