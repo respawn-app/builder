@@ -105,6 +105,53 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	}
 }
 
+func TestRollbackSelectionEdgeArrowRecentersWhenNoPageAvailable(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 80)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := newProjectedStaticUIModel(WithUIInitialTranscript(entries))
+	m.termWidth = 100
+	m.termHeight = 8
+	m.syncViewport()
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !testRollbackSelecting(m) {
+		t.Fatal("expected rollback selection mode")
+	}
+	for testRollbackSelection(m) > 0 {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	selected := testRollbackCandidates(m)[testRollbackSelection(m)].Text
+	for i := 0; i < 6; i++ {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+	if got := m.view.DetailScroll(); got == 0 {
+		t.Fatalf("expected page down to move detail scroll away from focused edge, got %d", got)
+	}
+	if strings.Contains(stripANSIAndTrimRight(m.view.View()), selected) {
+		t.Fatalf("expected page down to move selected rollback point out of view, got %q", stripANSIAndTrimRight(m.view.View()))
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.view.DetailScroll(); got != 0 {
+		t.Fatalf("expected edge up fallback to restore focused clamped detail scroll, got %d", got)
+	}
+	lines := strings.Split(stripANSIAndTrimRight(m.view.View()), "\n")
+	selectedLine := -1
+	for idx, line := range lines {
+		if strings.Contains(line, selected) {
+			selectedLine = idx
+			break
+		}
+	}
+	if selectedLine < 0 {
+		t.Fatalf("expected edge up to refocus selected rollback point %q, got %q", selected, stripANSIAndTrimRight(m.view.View()))
+	}
+}
+
 func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 120)
 	for i := 0; i < 60; i++ {

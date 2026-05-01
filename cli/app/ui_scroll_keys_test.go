@@ -615,6 +615,187 @@ func TestRollbackForkSubmissionUsesPagedDetailAbsoluteIndex(t *testing.T) {
 	}
 }
 
+func TestRollbackSelectionPagesBeforeCompactionTail(t *testing.T) {
+	olderEntries := make([]clientui.ChatEntry, 100)
+	for idx := range olderEntries {
+		olderEntries[idx] = clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("older answer %03d", idx)}
+	}
+	olderEntries[0] = clientui.ChatEntry{Role: "user", Text: "first ever user"}
+	olderEntries[98] = clientui.ChatEntry{Role: "user", Text: "pre-compaction user"}
+	client := &recordingTranscriptRuntimeClient{
+		loadPage: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Offset:       0,
+			TotalEntries: 104,
+			Entries:      olderEntries,
+		},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 80
+	m.termHeight = 10
+	m.syncViewport()
+	tailEntries := make([]clientui.ChatEntry, 60)
+	for idx := range tailEntries {
+		tailEntries[idx] = clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("post-compaction answer %03d", idx)}
+	}
+	tailEntries[0] = clientui.ChatEntry{Role: "user", Text: "post-compaction user"}
+	tailEntries[58] = clientui.ChatEntry{Role: "user", Text: "tail user"}
+	detailPage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Offset:       100,
+		TotalEntries: 160,
+		Entries:      tailEntries,
+	}
+	m.detailTranscript.replace(detailPage)
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail})
+	m.forwardToView(tui.SetConversationMsg{
+		BaseOffset:   detailPage.Offset,
+		TotalEntries: detailPage.TotalEntries,
+		Entries:      transcriptEntriesFromPage(detailPage),
+	})
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !testRollbackSelecting(m) {
+		t.Fatal("expected rollback selection mode")
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if testRollbackSelection(m) != 0 {
+		t.Fatalf("expected selection at oldest loaded candidate before paging, got %d", testRollbackSelection(m))
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected rollback up at page edge to request previous transcript page")
+	}
+	for i := 0; i < 3; i++ {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+	if got := m.view.DetailScroll(); got == 0 {
+		t.Fatalf("expected page down during in-flight rollback page load to move detail scroll, got %d", got)
+	}
+	if strings.Contains(stripANSIAndTrimRight(m.view.View()), "post-compaction user") {
+		t.Fatalf("expected page down to move current rollback point out of view, got %q", stripANSIAndTrimRight(m.view.View()))
+	}
+	next, duplicateCmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(*uiModel)
+	if duplicateCmd != nil {
+		t.Fatalf("expected in-flight rollback page request to suppress duplicate command, got %T", duplicateCmd())
+	}
+	if got := m.view.DetailScroll(); got != 0 {
+		t.Fatalf("expected busy edge up fallback to refocus current rollback point, got detail scroll %d", got)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(m.view.View()), "post-compaction user") {
+		t.Fatalf("expected busy edge up fallback to show current rollback point, got %q", stripANSIAndTrimRight(m.view.View()))
+	}
+	msgs := collectCmdMessages(t, cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("expected one transcript refresh message, got %#v", msgs)
+	}
+	refresh, ok := msgs[0].(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", msgs[0])
+	}
+	if want := (clientui.TranscriptPageRequest{Offset: 0, Limit: 100}); refresh.req != want {
+		t.Fatalf("previous page request = %+v, want %+v", refresh.req, want)
+	}
+
+	m = updateUIModel(t, m, refresh)
+	candidates := testRollbackCandidates(m)
+	if len(candidates) != 4 {
+		t.Fatalf("expected merged rollback candidates across page boundary, got %+v", candidates)
+	}
+	if got := candidates[testRollbackSelection(m)].Text; got != "pre-compaction user" {
+		t.Fatalf("expected selection to move before compaction tail, got %q candidates=%+v", got, candidates)
+	}
+}
+
+type pagedRollbackRuntimeClient struct {
+	runtimeControlFakeClient
+	requests []clientui.TranscriptPageRequest
+}
+
+func (c *pagedRollbackRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.requests = append(c.requests, req)
+	entries := make([]clientui.ChatEntry, req.Limit)
+	for idx := range entries {
+		absolute := req.Offset + idx
+		entries[idx] = clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("answer %04d", absolute)}
+	}
+	if len(entries) > 0 {
+		entries[0] = clientui.ChatEntry{Role: "user", Text: fmt.Sprintf("user %04d", req.Offset)}
+	}
+	return clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Offset:       req.Offset,
+		TotalEntries: 1502,
+		Entries:      entries,
+	}, nil
+}
+
+func TestRollbackSelectionPagesToFirstUserAcrossTrimmedDetailWindow(t *testing.T) {
+	client := &pagedRollbackRuntimeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 80
+	m.termHeight = 10
+	m.syncViewport()
+	tailEntries := make([]clientui.ChatEntry, 252)
+	for idx := range tailEntries {
+		absolute := 1250 + idx
+		tailEntries[idx] = clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("tail answer %04d", absolute)}
+	}
+	tailEntries[0] = clientui.ChatEntry{Role: "user", Text: "user 1250"}
+	tailEntries[250] = clientui.ChatEntry{Role: "user", Text: "user 1500"}
+	detailPage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Offset:       1250,
+		TotalEntries: 1502,
+		Entries:      tailEntries,
+	}
+	m.detailTranscript.replace(detailPage)
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail})
+	m.forwardToView(tui.SetConversationMsg{
+		BaseOffset:   detailPage.Offset,
+		TotalEntries: detailPage.TotalEntries,
+		Entries:      transcriptEntriesFromPage(detailPage),
+	})
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !testRollbackSelecting(m) {
+		t.Fatal("expected rollback selection mode")
+	}
+	for steps := 0; testRollbackCandidates(m)[testRollbackSelection(m)].TranscriptIndex != 0; steps++ {
+		if steps > 20 {
+			t.Fatalf("rollback selection did not reach first user, selection=%d candidates=%+v requests=%+v", testRollbackSelection(m), testRollbackCandidates(m), client.requests)
+		}
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m = next.(*uiModel)
+		if cmd == nil {
+			continue
+		}
+		msgs := collectCmdMessages(t, cmd)
+		if len(msgs) != 1 {
+			t.Fatalf("expected one transcript page response, got %#v", msgs)
+		}
+		refresh, ok := msgs[0].(runtimeTranscriptRefreshedMsg)
+		if !ok {
+			t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", msgs[0])
+		}
+		m = updateUIModel(t, m, refresh)
+	}
+	if len(client.requests) < 5 {
+		t.Fatalf("expected multiple page requests across trimmed detail window, got %+v", client.requests)
+	}
+	if got := m.detailTranscript.offset; got != 0 {
+		t.Fatalf("expected detail cache to include first page after paging to start, offset=%d", got)
+	}
+	if got := testRollbackCandidates(m)[testRollbackSelection(m)].Text; got != "user 0000" {
+		t.Fatalf("expected selection at first user message, got %q", got)
+	}
+}
+
 func TestRollbackTransitionsUseFixedDetailAltScreen(t *testing.T) {
 	altOnEntry := true
 

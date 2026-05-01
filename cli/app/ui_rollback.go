@@ -2,12 +2,15 @@ package app
 
 import (
 	"builder/cli/tui"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m *uiModel) refreshRollbackCandidates() {
 	entries, baseOffset := m.rollbackCandidateEntries()
+	previousAnchor := m.rollback.pendingSelectionAnchor
+	previousDelta := m.rollback.pendingSelectionDelta
 	candidates := make([]rollbackCandidate, 0)
 	for idx, entry := range entries {
 		if entry.Role != tui.TranscriptRoleUser {
@@ -24,6 +27,8 @@ func (m *uiModel) refreshRollbackCandidates() {
 		m.rollback.phase = uiRollbackPhaseInactive
 		m.rollback.ownsTranscriptMode = false
 		m.rollback.selectedTranscriptEntry = -1
+		m.rollback.pendingSelectionAnchor = -1
+		m.rollback.pendingSelectionDelta = 0
 		m.clearRollbackSelectionHighlight()
 		if m.inputMode() == uiInputModeRollbackSelection || m.inputMode() == uiInputModeRollbackEdit {
 			m.restorePrimaryInputMode()
@@ -35,6 +40,22 @@ func (m *uiModel) refreshRollbackCandidates() {
 	}
 	if m.rollback.selection >= len(m.rollback.candidates) {
 		m.rollback.selection = len(m.rollback.candidates) - 1
+	}
+	if m.rollback.isSelecting() && previousAnchor >= 0 && previousDelta != 0 {
+		for idx, candidate := range m.rollback.candidates {
+			if candidate.TranscriptIndex == previousAnchor {
+				m.rollback.selection = idx + previousDelta
+				if m.rollback.selection < 0 {
+					m.rollback.selection = 0
+				}
+				if m.rollback.selection >= len(m.rollback.candidates) {
+					m.rollback.selection = len(m.rollback.candidates) - 1
+				}
+				break
+			}
+		}
+		m.rollback.pendingSelectionAnchor = -1
+		m.rollback.pendingSelectionDelta = 0
 	}
 	if m.rollback.isSelecting() {
 		m.applyRollbackSelectionHighlight()
@@ -76,6 +97,8 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 	}
 	m.rollback.phase = uiRollbackPhaseSelection
 	m.rollback.selectedTranscriptEntry = -1
+	m.rollback.pendingSelectionAnchor = -1
+	m.rollback.pendingSelectionDelta = 0
 	m.setInputMode(uiInputModeRollbackSelection)
 	m.clearInput()
 	m.applyRollbackSelectionHighlight()
@@ -129,6 +152,28 @@ func (m *uiModel) moveRollbackSelection(delta int) {
 	m.applyRollbackSelectionHighlight()
 }
 
+func (m *uiModel) requestRollbackSelectionPage(delta int) tea.Cmd {
+	if m == nil || !m.hasRuntimeClient() || m.runtimeTranscriptBusy || !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
+		return nil
+	}
+	var (
+		req clientui.TranscriptPageRequest
+		ok  bool
+	)
+	if delta < 0 {
+		req, ok = m.detailTranscript.pageBefore()
+	} else if delta > 0 {
+		req, ok = m.detailTranscript.pageAfter()
+	}
+	if !ok {
+		return nil
+	}
+	current := m.rollback.candidates[m.rollback.selection]
+	m.rollback.pendingSelectionAnchor = current.TranscriptIndex
+	m.rollback.pendingSelectionDelta = delta
+	return m.requestRuntimeTranscriptPage(req)
+}
+
 func (m *uiModel) beginRollbackEditing() (int, bool) {
 	if !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
 		return -1, false
@@ -164,6 +209,8 @@ func (m *uiModel) clearRollbackFlow() {
 	m.rollback.ownsTranscriptMode = false
 	m.rollback.suppressedAlternateScroll = false
 	m.rollback.selectedTranscriptEntry = -1
+	m.rollback.pendingSelectionAnchor = -1
+	m.rollback.pendingSelectionDelta = 0
 	m.rollback.restoreScrollActive = false
 	m.clearRollbackSelectionHighlight()
 	m.restorePrimaryInputMode()

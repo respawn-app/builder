@@ -54,7 +54,7 @@ Anthropic or Gemini subscriptions/models will not be supported until they allow 
 - Use `Enter` to steer the model, `Tab` to queue messages.
 - Use `Shift+Tab` to toggle between detailed transcript mode and lean ongoing mode.
 - Type `$ <command>` to execute a shell command and show its output to the model.
-- Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits are not rolled back.
+- Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. Use `Up`/`Down` to walk through user messages; the picker loads older transcript pages at the edges, including messages before compaction boundaries. File edits are not rolled back.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
 - Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
