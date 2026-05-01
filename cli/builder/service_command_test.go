@@ -141,7 +141,7 @@ func TestServiceRestartIfInstalledSkipsMissingService(t *testing.T) {
 	}
 }
 
-func TestServiceRestartIfInstalledRestartsInstalledService(t *testing.T) {
+func TestServiceRestartIfInstalledRefreshesRegistrationBeforeRestart(t *testing.T) {
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
 	withServiceCommandTestBackend(t, backend)
 
@@ -151,12 +151,12 @@ func TestServiceRestartIfInstalledRestartsInstalledService(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionRestart}
+	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall, serviceActionRestart}
 	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
 		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
 	}
-	if backend.installForce || backend.installStart {
-		t.Fatalf("unexpected install flags force=%v start=%v, want no install", backend.installForce, backend.installStart)
+	if !backend.installForce || backend.installStart {
+		t.Fatalf("refresh flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
 	}
 	if !strings.Contains(stdout.String(), "sessions may fail briefly") {
 		t.Fatalf("stdout = %q, want restart warning", stdout.String())
