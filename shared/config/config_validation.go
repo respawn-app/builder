@@ -30,7 +30,6 @@ func validateSubagentRoleState(state settingsState, sources map[string]string) e
 		{enabled: hasExplicitPrefix(sources, "provider_capabilities."), check: validateProviderCapabilitiesProviderID},
 		{enabled: hasExplicitSource(sources, "model_verbosity"), check: validateModelVerbosity},
 		{enabled: hasExplicitSource(sources, "theme"), check: validateTheme},
-		{enabled: hasExplicitSource(sources, "tui_alternate_screen"), check: validateTUIAlternateScreen},
 		{enabled: hasExplicitSource(sources, "notification_method"), check: validateNotificationMethod},
 		{enabled: hasExplicitSource(sources, "server_host"), check: validateServerHost},
 		{enabled: hasExplicitSource(sources, "server_port"), check: validateServerPort},
@@ -194,15 +193,6 @@ func validateTheme(state settingsState, _ map[string]string) error {
 	}
 }
 
-func validateTUIAlternateScreen(state settingsState, _ map[string]string) error {
-	switch strings.ToLower(strings.TrimSpace(string(state.Settings.TUIAlternateScreen))) {
-	case "auto", "always", "never":
-		return nil
-	default:
-		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", state.Settings.TUIAlternateScreen)
-	}
-}
-
 func validateNotificationMethod(state settingsState, _ map[string]string) error {
 	switch strings.ToLower(strings.TrimSpace(state.Settings.NotificationMethod)) {
 	case "auto", "osc9", "bel":
@@ -346,19 +336,6 @@ func validateReviewer(state settingsState, _ map[string]string) error {
 		return fmt.Errorf("reviewer.timeout_seconds must be > 0")
 	}
 	return nil
-}
-
-func normalizeTUIAlternateScreenPolicy(raw string) TUIAlternateScreenPolicy {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "auto":
-		return TUIAlternateScreenAuto
-	case "always":
-		return TUIAlternateScreenAlways
-	case "never":
-		return TUIAlternateScreenNever
-	default:
-		return TUIAlternateScreenPolicy(strings.TrimSpace(raw))
-	}
 }
 
 func normalizeCompactionMode(raw string) CompactionMode {

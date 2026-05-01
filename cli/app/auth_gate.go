@@ -273,9 +273,8 @@ func (i *interactiveAuthInteractor) showAuthSuccess(ctx context.Context, req aut
 		return fmt.Errorf("load auth state for success screen: %w", err)
 	}
 	return run(authSuccessScreenData{
-		Theme:           req.Theme,
-		AlternateScreen: req.AlternateScreen,
-		Method:          state.Method,
+		Theme:  req.Theme,
+		Method: state.Method,
 	})
 }
 

@@ -192,6 +192,7 @@ type Model struct {
 	ongoingScroll               int
 	detailScroll                int
 	snapOngoingOnViewportResize bool
+	toolSymbolGap               int
 
 	transcript             []TranscriptEntry
 	transcriptBaseOffset   int
@@ -365,6 +366,7 @@ func NewModel(opts ...Option) Model {
 		mode:             ModeOngoing,
 		viewportLines:    DefaultPreviewLines,
 		viewportWidth:    120,
+		toolSymbolGap:    1,
 		theme:            normalizeTheme(""),
 		ongoingBaseDirty: true,
 		ongoingDirty:     true,

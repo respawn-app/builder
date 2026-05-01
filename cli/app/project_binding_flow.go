@@ -11,7 +11,6 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	"builder/shared/serverapi"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -390,8 +389,8 @@ func projectBindingPreviewPath(rootPath string) string {
 	return trimmedRoot
 }
 
-func runProjectBindingPicker(projects []clientui.ProjectSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
-	return runConfiguredProjectPicker(projects, theme, alternateScreen, projectPickerOptions{
+func runProjectBindingPicker(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
+	return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
 		AllowCreate:    true,
 		HeaderMarkdown: projectBindingPickerHeaderMarkdown,
 		HeaderFallback: projectBindingPickerHeaderFallback,
@@ -400,8 +399,8 @@ func runProjectBindingPicker(projects []clientui.ProjectSummary, theme string, a
 	})
 }
 
-func runServerProjectPicker(projects []clientui.ProjectSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
-	return runConfiguredProjectPicker(projects, theme, alternateScreen, projectPickerOptions{
+func runServerProjectPicker(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
+	return runConfiguredProjectPicker(projects, theme, projectPickerOptions{
 		AllowCreate:    false,
 		HeaderMarkdown: serverProjectPickerHeaderMarkdown,
 		HeaderFallback: serverProjectPickerHeaderFallback,
@@ -410,13 +409,9 @@ func runServerProjectPicker(projects []clientui.ProjectSummary, theme string, al
 	})
 }
 
-func runConfiguredProjectPicker(projects []clientui.ProjectSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy, options projectPickerOptions) (projectBindingPickerResult, error) {
+func runConfiguredProjectPicker(projects []clientui.ProjectSummary, theme string, options projectPickerOptions) (projectBindingPickerResult, error) {
 	model := newProjectBindingPickerModel(projects, theme, options)
-	programOptions := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		programOptions = append(programOptions, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, programOptions...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectBindingPickerResult{}, err
@@ -669,13 +664,9 @@ func (m *projectWorkspacePickerModel) hasPreview(index int) bool {
 	return strings.TrimSpace(m.workspaces[index].RootPath) != ""
 }
 
-func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, theme string) (projectWorkspacePickerResult, error) {
 	model := newProjectWorkspacePickerModel(workspaces, theme)
-	programOptions := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		programOptions = append(programOptions, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, programOptions...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectWorkspacePickerResult{}, err
@@ -764,13 +755,9 @@ func (m *projectNamePromptModel) renderHeader() string {
 	return lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true).Render(projectNamePromptHeaderFallback)
 }
 
-func runProjectNamePrompt(defaultName string, theme string, alternateScreen config.TUIAlternateScreenPolicy) (string, error) {
+func runProjectNamePrompt(defaultName string, theme string) (string, error) {
 	model := newProjectNamePromptModel(defaultName, theme)
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return "", err
@@ -820,7 +807,7 @@ func ensureInteractiveLocalPathBinding(ctx context.Context, server embeddedServe
 		return nil, err
 	}
 	cfg := server.Config()
-	picked, err := runProjectBindingPickerFlow(projects.Projects, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
+	picked, err := runProjectBindingPickerFlow(projects.Projects, cfg.Settings.Theme)
 	if err != nil {
 		return nil, err
 	}
@@ -828,7 +815,7 @@ func ensureInteractiveLocalPathBinding(ctx context.Context, server embeddedServe
 		return nil, errors.New("startup canceled by user")
 	}
 	if picked.CreateNew {
-		projectName, err := runProjectNamePromptFlow(filepath.Base(filepath.Clean(workspaceRoot)), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
+		projectName, err := runProjectNamePromptFlow(filepath.Base(filepath.Clean(workspaceRoot)), cfg.Settings.Theme)
 		if err != nil {
 			return nil, err
 		}
@@ -865,7 +852,7 @@ func ensureInteractiveServerBrowsingBinding(ctx context.Context, server embedded
 		return nil, errors.New("server has no registered projects. Create one with `builder project create --path <server-path> --name <project-name>` or attach an existing workspace with `builder attach --project <project-id> <server-path>`")
 	}
 	cfg := server.Config()
-	picked, err := runServerProjectPickerFlow(projects.Projects, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
+	picked, err := runServerProjectPickerFlow(projects.Projects, cfg.Settings.Theme)
 	if err != nil {
 		return nil, err
 	}
@@ -897,7 +884,7 @@ func selectProjectWorkspaceForStartup(ctx context.Context, server embeddedServer
 	if len(overview.Overview.Workspaces) == 1 {
 		return overview.Overview.Workspaces[0], nil
 	}
-	picked, err := runProjectWorkspacePickerFlow(overview.Overview.Workspaces, server.Config().Settings.Theme, server.Config().Settings.TUIAlternateScreen)
+	picked, err := runProjectWorkspacePickerFlow(overview.Overview.Workspaces, server.Config().Settings.Theme)
 	if err != nil {
 		return clientui.ProjectWorkspaceSummary{}, err
 	}

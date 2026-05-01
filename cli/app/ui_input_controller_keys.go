@@ -272,11 +272,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.moveCursorDownLine()
 		return m, nil
-	case tea.KeyPgUp:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgUp})
-		return m, nil
-	case tea.KeyPgDown:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgDown})
+	case tea.KeyPgUp, tea.KeyPgDown:
 		return m, nil
 	default:
 		if isShiftEnterKey(msg) {

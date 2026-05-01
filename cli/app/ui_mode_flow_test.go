@@ -13,7 +13,6 @@ import (
 	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
-	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -189,7 +188,6 @@ func TestCtrlTDeferredDetailLoadSkipsDuplicateSeededPageRequest(t *testing.T) {
 		client,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	)
 	m.termWidth = 100
 	m.termHeight = 12
@@ -240,7 +238,6 @@ func TestCtrlTDeferredDetailLoadSkippedDoesNotRebuildDetailEndToEnd(t *testing.T
 		client,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	)
 	m.termWidth = 100
 	m.termHeight = 12
@@ -279,7 +276,6 @@ func TestDeferredDetailLoadRefreshesWhenTranscriptDirty(t *testing.T) {
 		client,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	)
 	m.termWidth = 100
 	m.termHeight = 12
@@ -332,7 +328,6 @@ func TestCtrlTDeferredDetailLoadDoesNotMutateNativeHistoryState(t *testing.T) {
 		client,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	)
 	m.termWidth = 100
 	m.termHeight = 12
@@ -558,8 +553,8 @@ func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
 	}
 
 	updated := updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if got := updated.view.OngoingScroll(); got >= start {
-		t.Fatalf("expected pgup to scroll ongoing up, got %d from %d", got, start)
+	if got := updated.view.OngoingScroll(); got != start {
+		t.Fatalf("expected pgup not to mutate ongoing scroll, got %d from %d", got, start)
 	}
 
 	detail := updateUIModel(t, updated, tea.KeyMsg{Type: tea.KeyShiftTab})
@@ -578,20 +573,17 @@ func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
 		t.Fatalf("expected latest line visible after returning from detail, got %q", plain)
 	}
 
-	ongoing = updateUIModel(t, ongoing, tea.KeyMsg{Type: tea.KeyUp})
 	afterUp := ongoing.view.OngoingScroll()
 	ongoing = updateUIModel(t, ongoing, tea.KeyMsg{Type: tea.KeyPgDown})
-	if ongoing.view.OngoingScroll() < afterUp {
-		t.Fatalf("expected pgdown to move toward latest tail, got %d from %d", ongoing.view.OngoingScroll(), afterUp)
+	if ongoing.view.OngoingScroll() != afterUp {
+		t.Fatalf("expected pgdown not to mutate ongoing scroll, got %d from %d", ongoing.view.OngoingScroll(), afterUp)
 	}
 }
 
-func TestAlwaysAltScreenPolicyStartsInAltScreen(t *testing.T) {
-	m := newProjectedStaticUIModel(
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAlways),
-	)
-	if !m.altScreenActive {
-		t.Fatal("expected alt-screen active in always policy")
+func TestMainUIStartsInNormalBuffer(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	if m.altScreenActive {
+		t.Fatal("expected main UI to start in normal buffer")
 	}
 }
 

@@ -59,7 +59,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, req.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, hooks.Auth); err != nil {
+	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, req.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, hooks.Auth); err != nil {
 		return nil, err
 	}
 	if hooks.Onboarding != nil {

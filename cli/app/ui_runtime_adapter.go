@@ -87,16 +87,27 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		m.invalidateTransientTranscriptState()
 	}
 	if len(evt.TranscriptEntries) > 0 {
-		cmd, mutated, needsHydration := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
-		cmds = append(cmds, cmd)
-		transcriptMutated = transcriptMutated || mutated
-		awaitsHydration = awaitsHydration || needsHydration
-		if shouldClearAssistantStreamForCommittedAssistantEvent(evt) && (mutated || skippedAssistantCommitMatchesActiveLiveStream(m, evt)) {
-			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
-				m.lastCommittedAssistantStepID = stepID
+		if shouldDeliverCommittedRuntimeEventFromSuffix(m, evt) {
+			cmds = append(cmds, m.requestRuntimeCommittedTranscriptSuffix(committedTranscriptSuffixRequestForEvent(m, evt)))
+			if shouldClearAssistantStreamForCommittedAssistantEvent(evt) || skippedAssistantCommitMatchesActiveLiveStream(m, evt) {
+				if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+					m.lastCommittedAssistantStepID = stepID
+				}
+				m.sawAssistantDelta = false
+				m.forwardToView(tui.ClearOngoingAssistantMsg{})
 			}
-			m.sawAssistantDelta = false
-			m.forwardToView(tui.ClearOngoingAssistantMsg{})
+		} else {
+			cmd, mutated, needsHydration := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
+			cmds = append(cmds, cmd)
+			transcriptMutated = transcriptMutated || mutated
+			awaitsHydration = awaitsHydration || needsHydration
+			if shouldClearAssistantStreamForCommittedAssistantEvent(evt) && (mutated || skippedAssistantCommitMatchesActiveLiveStream(m, evt)) {
+				if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+					m.lastCommittedAssistantStepID = stepID
+				}
+				m.sawAssistantDelta = false
+				m.forwardToView(tui.ClearOngoingAssistantMsg{})
+			}
 		}
 	}
 	for _, streamCommand := range reduction.Transcript.AssistantStream {

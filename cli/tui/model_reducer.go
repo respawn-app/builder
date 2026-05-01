@@ -116,10 +116,6 @@ func (m *Model) reduceOngoingKeyMsg(msg tea.KeyMsg) {
 		*m = m.scrollOngoing(-1)
 	case tea.KeyDown:
 		*m = m.scrollOngoing(1)
-	case tea.KeyPgUp:
-		*m = m.scrollOngoing(-max(1, m.viewportLines-1))
-	case tea.KeyPgDown:
-		*m = m.scrollOngoing(max(1, m.viewportLines-1))
 	}
 }
 

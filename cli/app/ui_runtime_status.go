@@ -43,6 +43,30 @@ func (m *uiModel) runtimeStatus() clientui.RuntimeStatus {
 	return status
 }
 
+func (m *uiModel) cachedRuntimeStatus() clientui.RuntimeStatus {
+	client := m.runtimeClient()
+	view := clientui.RuntimeMainView{}
+	if cached, ok := client.(interface {
+		CachedMainView() (clientui.RuntimeMainView, bool)
+	}); ok {
+		if cachedView, hasCached := cached.CachedMainView(); hasCached {
+			view = cachedView
+		}
+	} else if client != nil {
+		view = client.MainView()
+	} else {
+		view = clientui.RuntimeMainView{
+			Status:  m.localRuntimeStatus(),
+			Session: m.localRuntimeSessionView(),
+		}
+	}
+	status := view.Status
+	if m.runtimeContextUsageAppliesTo(view.Session.SessionID) {
+		status.ContextUsage = m.runtimeContextUsage
+	}
+	return status
+}
+
 func (m *uiModel) refreshRuntimeStatus() clientui.RuntimeStatus {
 	view := m.refreshRuntimeMainView()
 	status := view.Status
@@ -125,11 +149,35 @@ func (m *uiModel) runtimeTranscript() clientui.TranscriptPage {
 
 func (m *uiModel) startupRuntimeTranscript() clientui.TranscriptPage {
 	if client := m.runtimeClient(); client != nil {
+		if suffixClient, ok := client.(interface {
+			RefreshCommittedTranscriptSuffix(clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error)
+		}); ok {
+			suffix, err := suffixClient.RefreshCommittedTranscriptSuffix(m.startupCommittedTranscriptSuffixRequest())
+			if err == nil {
+				m.observeRuntimeRequestResult(nil)
+				return transcriptPageFromCommittedTranscriptSuffix(suffix)
+			}
+			m.observeRuntimeRequestResult(err)
+			return m.localRuntimeTranscript()
+		}
 		if _, ok := client.(*sessionRuntimeClient); ok {
 			return m.refreshRuntimeTranscript()
 		}
 	}
 	return m.runtimeTranscript()
+}
+
+func (m *uiModel) startupCommittedTranscriptSuffixRequest() clientui.CommittedTranscriptSuffixRequest {
+	committedCount := 0
+	if m != nil {
+		committedCount = m.runtimeMainView().Session.Transcript.CommittedEntryCount
+	}
+	limit := clientui.MaxCommittedTranscriptSuffixLimit
+	after := committedCount - limit
+	if after < 0 {
+		after = 0
+	}
+	return clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: after, Limit: limit}
 }
 
 func (m *uiModel) refreshRuntimeTranscript() clientui.TranscriptPage {

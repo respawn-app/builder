@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"builder/server/auth"
-	"builder/shared/config"
 )
 
 type stubHandler struct {
@@ -31,7 +30,7 @@ func (h stubHandler) Interact(ctx context.Context, req InteractionRequest) (Inte
 
 func TestEnsureReadyReturnsStartupErrorWithoutInteractiveHandler(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
-	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, true, false, stubHandler{
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", func(string) string { return "" }, true, false, stubHandler{
 		needs: func(InteractionRequest) bool { return false },
 	})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
@@ -42,7 +41,7 @@ func TestEnsureReadyReturnsStartupErrorWithoutInteractiveHandler(t *testing.T) {
 func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 	callCount := 0
-	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(key string) string {
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", func(key string) string {
 		if key == "OPENAI_API_KEY" {
 			return "sk-env"
 		}
@@ -79,7 +78,7 @@ func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
 func TestEnsureReadyAllowsOptionalStartupWithoutConfiguredAuth(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 	interacted := false
-	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, false, false, stubHandler{
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", func(string) string { return "" }, false, false, stubHandler{
 		needs: func(InteractionRequest) bool { return false },
 		interact: func(context.Context, InteractionRequest) (InteractionOutcome, error) {
 			interacted = true

@@ -818,7 +818,7 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadTUIAlternateScreenPrecedenceAndValidation(t *testing.T) {
+func TestLoadRejectsRemovedTUIAlternateScreenSetting(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -831,52 +831,8 @@ func TestLoadTUIAlternateScreenPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAlways {
-		t.Fatalf("expected file tui_alternate_screen=always, got %q", cfg.Settings.TUIAlternateScreen)
-	}
-	if got := cfg.Source.Sources["tui_alternate_screen"]; got != "file" {
-		t.Fatalf("expected tui_alternate_screen source file, got %q", got)
-	}
-
-	if err := os.WriteFile(configPath, []byte("tui_alternate_screen = \"Always\"\n"), 0o644); err != nil {
-		t.Fatalf("write config mixed case: %v", err)
-	}
-	cfg, err = Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load mixed-case file value: %v", err)
-	}
-	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAlways {
-		t.Fatalf("expected mixed-case file value normalized to always, got %q", cfg.Settings.TUIAlternateScreen)
-	}
-
-	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "never")
-	cfg, err = Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load with env: %v", err)
-	}
-	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenNever {
-		t.Fatalf("expected env tui_alternate_screen=never, got %q", cfg.Settings.TUIAlternateScreen)
-	}
-	if got := cfg.Source.Sources["tui_alternate_screen"]; got != "env" {
-		t.Fatalf("expected tui_alternate_screen source env, got %q", got)
-	}
-
-	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "NEVER")
-	cfg, err = Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load mixed-case env value: %v", err)
-	}
-	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenNever {
-		t.Fatalf("expected mixed-case env value normalized to never, got %q", cfg.Settings.TUIAlternateScreen)
-	}
-
-	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "broken")
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid tui_alternate_screen validation error")
+	if _, err := Load(workspace, LoadOptions{}); err == nil || !strings.Contains(err.Error(), "tui_alternate_screen") {
+		t.Fatalf("expected removed tui_alternate_screen setting error, got %v", err)
 	}
 }
 

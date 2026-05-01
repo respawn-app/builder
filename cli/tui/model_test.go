@@ -427,7 +427,7 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 }
 
-func TestPageKeysScrollActiveView(t *testing.T) {
+func TestPageKeysDoNotScrollOngoingView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
@@ -437,13 +437,20 @@ func TestPageKeysScrollActiveView(t *testing.T) {
 
 	start := m.OngoingScroll()
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if got := m.OngoingScroll(); got >= start {
-		t.Fatalf("expected pgup to scroll up ongoing view, got %d from %d", got, start)
+	if got := m.OngoingScroll(); got != start {
+		t.Fatalf("expected pgup not to mutate ongoing scroll, got %d from %d", got, start)
 	}
 
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
-	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
-		t.Fatalf("expected pgdown to return to bottom, got %d want %d", got, want)
+	if got := m.OngoingScroll(); got != start {
+		t.Fatalf("expected pgdown not to mutate ongoing scroll, got %d from %d", got, start)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailStart := m.DetailScroll()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := m.DetailScroll(); got == detailStart {
+		t.Fatalf("expected pgup to keep scrolling detail view, got %d", got)
 	}
 }
 

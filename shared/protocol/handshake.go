@@ -24,6 +24,7 @@ const (
 	MethodSessionPlan                              = "session.plan"
 	MethodSessionGetMainView                       = "session.getMainView"
 	MethodSessionGetTranscriptPage                 = "session.getTranscriptPage"
+	MethodSessionGetCommittedTranscriptSuffix      = "session.getCommittedTranscriptSuffix"
 	MethodSessionGetInitialInput                   = "session.getInitialInput"
 	MethodSessionPersistInputDraft                 = "session.persistInputDraft"
 	MethodSessionRetargetWorkspace                 = "session.retargetWorkspace"
@@ -86,6 +87,7 @@ var allowedPreAuthMethods = []string{
 	MethodSessionListByProject,
 	MethodSessionGetMainView,
 	MethodSessionGetTranscriptPage,
+	MethodSessionGetCommittedTranscriptSuffix,
 	MethodSessionGetInitialInput,
 	MethodProcessList,
 	MethodProcessGet,

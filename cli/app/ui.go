@@ -14,7 +14,6 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/theme"
 	"builder/shared/transcriptdiag"
@@ -122,6 +121,19 @@ type runtimeTranscriptRefreshedMsg struct {
 	transcript    clientui.TranscriptPage
 	recoveryCause clientui.TranscriptRecoveryCause
 	err           error
+}
+
+type runtimeCommittedTranscriptSuffixRefreshedMsg struct {
+	token  uint64
+	req    clientui.CommittedTranscriptSuffixRequest
+	suffix clientui.CommittedTranscriptSuffix
+	err    error
+}
+
+type nativeResizeTranscriptSuffixRefreshedMsg struct {
+	token  uint64
+	suffix clientui.CommittedTranscriptSuffix
+	err    error
 }
 
 type runtimeTranscriptRetryMsg struct {
@@ -362,13 +374,6 @@ func WithUITheme(theme string) UIOption {
 	}
 }
 
-func WithUIAlternateScreenPolicy(policy config.TUIAlternateScreenPolicy) UIOption {
-	return func(m *uiModel) {
-		m.tuiAlternateScreen = policy
-		m.altScreenActive = policy == config.TUIAlternateScreenAlways
-	}
-}
-
 func WithUIInitialTranscript(entries []UITranscriptEntry) UIOption {
 	return func(m *uiModel) {
 		m.initialTranscript = append([]UITranscriptEntry(nil), entries...)
@@ -539,8 +544,7 @@ func newUIInputFeatureState() uiInputFeatureState {
 
 func newUIPresentationFeatureState() uiPresentationFeatureState {
 	return uiPresentationFeatureState{
-		theme:              theme.Auto,
-		tuiAlternateScreen: config.TUIAlternateScreenAuto,
+		theme: theme.Auto,
 	}
 }
 
@@ -733,13 +737,16 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 		m.waitRuntimeEventAfterHydration = true
 	}
 	if m.nativeFlushSequence != flushSequenceBefore {
-		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_wait_flush", map[string]string{
 			"session_id":             strings.TrimSpace(m.sessionID),
 			"mode":                   string(m.view.Mode()),
 			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
 			"native_flush_sequence":  strconv.FormatUint(m.nativeFlushSequence, 10),
 		}))
+		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
+		if result.awaitsHydration {
+			return m, cmd
+		}
 		return m, cmd
 	}
 	if result.awaitsHydration {

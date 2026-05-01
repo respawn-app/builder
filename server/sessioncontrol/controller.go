@@ -12,7 +12,7 @@ import (
 	"builder/shared/config"
 )
 
-type SessionPicker func([]session.Summary, string, config.TUIAlternateScreenPolicy) (launch.SessionSelection, error)
+type SessionPicker func([]session.Summary, string) (launch.SessionSelection, error)
 
 type Controller struct {
 	Config       config.App
@@ -33,7 +33,7 @@ func (c Controller) PlanSession(ctx context.Context, req launch.SessionRequest) 
 	}
 	if c.PickSession != nil {
 		planner.PickSession = func(summaries []session.Summary) (launch.SessionSelection, error) {
-			return c.PickSession(summaries, c.Config.Settings.Theme, c.Config.Settings.TUIAlternateScreen)
+			return c.PickSession(summaries, c.Config.Settings.Theme)
 		}
 	}
 	return planner.PlanSession(ctx, req)

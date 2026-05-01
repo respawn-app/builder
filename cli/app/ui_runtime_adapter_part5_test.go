@@ -176,8 +176,8 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 	if !strings.Contains(view, pendingSpinnerLine(0, "echo a")) {
 		t.Fatalf("expected unresolved tool to keep spinner in live view, got %q", view)
 	}
-	if !strings.Contains(view, "$ echo b") {
-		t.Fatalf("expected completed sibling to use final shell symbol in live view, got %q", view)
+	if !strings.Contains(view, "$  echo b") {
+		t.Fatalf("expected completed live shell command to align with two spaces after symbol, got %q", view)
 	}
 	if strings.Contains(view, pendingSpinnerLine(0, "echo b")) {
 		t.Fatalf("did not expect completed sibling to keep spinner in live view, got %q", view)

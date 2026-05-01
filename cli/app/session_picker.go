@@ -8,7 +8,6 @@ import (
 
 	"builder/cli/tui"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	glamouransi "github.com/charmbracelet/glamour/ansi"
@@ -347,13 +346,9 @@ func humanTime(ts time.Time) string {
 	return ts.Local().Format("2006-01-02 15:04")
 }
 
-func runSessionPicker(summaries []clientui.SessionSummary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+func runSessionPicker(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 	model := newSessionPickerModel(summaries, theme)
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return sessionPickerResult{}, err

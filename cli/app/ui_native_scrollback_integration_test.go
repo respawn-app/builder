@@ -5,7 +5,6 @@ import (
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
@@ -798,7 +797,6 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 		nil,
 		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "u1"},
 			{Role: "assistant", Text: "a1"},

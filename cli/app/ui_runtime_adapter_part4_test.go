@@ -221,7 +221,7 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
+	if m.transientStatus != "" {
 		t.Fatalf("did not expect authoritative hydrate warning when live committed tool path already matches, got status=%q", m.transientStatus)
 	}
 	if got, want := len(m.transcriptEntries), 3; got != want {
@@ -281,7 +281,7 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
+	if m.transientStatus != "" {
 		t.Fatalf("did not expect authoritative hydrate warning when reviewer status path already matches, got status=%q", m.transientStatus)
 	}
 	if got, want := len(m.transcriptEntries), 2; got != want {
