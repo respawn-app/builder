@@ -53,7 +53,7 @@ The expensive failure is when model half-remembers a decision, forgets an in-fli
 
 ### Everything is customizable & transparent
 
-- Unlike popular harnesses, Builder supports customizing **subagent roles**, **compaction algorithms**, web search, supervisor and main model **system prompts**, skills, tools, reminders, caching, and more. 
+- Unlike popular harnesses, Builder supports customizing **subagent roles**, **compaction algorithms**, web search, supervisor and main model **system prompts**, skills, tools, reminders, caching, and more.
 - With local overrides of everything, create **per-project system prompts**, skill bundles, subagent roles and share the setup with your team via a single `.toml` file.
 - The default UI is **fast, non-flickering, native transcript**. Unlike some providers, Builder's detailed mode lets you **inspect every input and output** so there's no surprises, ever.
 
@@ -93,7 +93,7 @@ Builder covers the core coding-agent loop and the surrounding engineering workfl
 
 ## Philosophy
 
-Builder is intentionally narrow. It optimizes for engineers who want a strong model, collaborative workflows, and great outputs. 
+Builder is intentionally narrow. It optimizes for engineers who want a strong model, collaborative workflows, and great outputs.
 The model stays unburdened; the harness should provide infrastructure around it. As such, there will not be:
 
 - MCP support; MCP is outdated, use `mcporter` or migrate to CLIs.
