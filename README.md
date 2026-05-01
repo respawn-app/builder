@@ -2,8 +2,6 @@
   <img src="./docs/public/builder-social-preview.png" alt="Builder" width="900">
 </p>
 
-<h1 align="center">Builder</h1>
-
 <p align="center">
   <strong>Builder is a high-performance coding agent for professional Agentic Engineers focusing on output quality and long-running tasks.</strong>
 </p>
@@ -50,6 +48,10 @@ The expensive failure is when model half-remembers a decision, forgets an in-fli
 - Efficient shells. **Tools run async** with the main model: no timeouts, no retries, and compact file-based inspection of shell outputs lead to **1.6-2x token savings**.
 - Cache invalidation tracking. Unlike some harnesses that drain your limits in minutes due to a caching bug, with Builder **you know about every unwanted cache miss**. Not that they will happen, with Builder's **lock-based cache preservation** mechanisms.
 - **Shell-native, scriptable search/read stack** with optimized `rg` config enables **40% more efficient searches** instead of clunky Search, Glob, Grep, Read, Scroll chains.
+
+<p align="center">
+  <img src="./docs/public/readme/builder-shells.webp" alt="Builder showing async background shell processes in the terminal" width="900">
+</p>
 
 ### Everything is customizable & transparent
 
