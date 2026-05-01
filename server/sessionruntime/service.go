@@ -119,7 +119,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			cleanup()
 		}
 		if strings.TrimSpace(leaseID) != "" {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+			_, _ = s.validateRuntimeLease(context.Background(), sessionID, leaseID)
 		}
 		s.failActivation(sessionID, handle, err)
 	}()
@@ -128,9 +128,6 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if err := store.EnsureDurable(); err != nil {
-		return serverapi.SessionRuntimeActivateResponse{}, err
-	}
-	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
@@ -230,7 +227,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	sessionID := strings.TrimSpace(req.SessionID)
 	leaseID := strings.TrimSpace(req.LeaseID)
 	leaseErr := error(nil)
-	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
+	if _, err := s.validateRuntimeLease(ctx, sessionID, leaseID); err != nil {
 		leaseErr = err
 	}
 	s.mu.Lock()
@@ -544,10 +541,6 @@ func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requ
 		s.failTakeover(sessionID, handle, takeover, err)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
-		s.failTakeover(sessionID, handle, takeover, err)
-		return serverapi.SessionRuntimeActivateResponse{}, err
-	}
 	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
 	if err != nil {
 		s.failTakeover(sessionID, handle, takeover, err)
@@ -556,7 +549,7 @@ func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requ
 	leaseID := strings.TrimSpace(lease.LeaseID)
 	if !s.completeTakeover(sessionID, handle, takeover, requestID, leaseID) {
 		if strings.TrimSpace(leaseID) != "" {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+			_, _ = s.validateRuntimeLease(context.Background(), sessionID, leaseID)
 		}
 		err := errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 		finishRuntimeTakeover(takeover, "", err)
@@ -680,18 +673,11 @@ func (s *Service) createRuntimeLease(ctx context.Context, sessionID string, requ
 	return s.metadataStore.CreateRuntimeLease(ctx, sessionID, requestID)
 }
 
-func (s *Service) releaseRuntimeLease(ctx context.Context, sessionID string, leaseID string) (metadata.RuntimeLeaseRecord, error) {
+func (s *Service) validateRuntimeLease(ctx context.Context, sessionID string, leaseID string) (metadata.RuntimeLeaseRecord, error) {
 	if s == nil || s.metadataStore == nil {
 		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
 	}
-	return s.metadataStore.ReleaseRuntimeLease(ctx, sessionID, leaseID)
-}
-
-func (s *Service) releaseStaleRuntimeLeases(ctx context.Context, sessionID string) error {
-	if s == nil || s.metadataStore == nil {
-		return fmt.Errorf("metadata store is required")
-	}
-	return s.metadataStore.ReleaseActiveRuntimeLeasesBySession(ctx, sessionID)
+	return s.metadataStore.ValidateRuntimeLease(ctx, sessionID, leaseID)
 }
 
 func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {

@@ -21,11 +21,8 @@ type RuntimeLease struct {
 	SessionID        string
 	ClientID         string
 	RequestID        string
-	State            string
 	CreatedAtUnixMs  int64
 	AcquiredAtUnixMs int64
-	ReleasedAtUnixMs int64
-	ExpiresAtUnixMs  int64
 	MetadataJson     string
 }
 

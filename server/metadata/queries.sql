@@ -439,22 +439,16 @@ INSERT INTO runtime_leases (
     session_id,
     client_id,
     request_id,
-    state,
     created_at_unix_ms,
     acquired_at_unix_ms,
-    released_at_unix_ms,
-    expires_at_unix_ms,
     metadata_json
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(session_id),
     sqlc.arg(client_id),
     sqlc.arg(request_id),
-    sqlc.arg(state),
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(acquired_at_unix_ms),
-    sqlc.arg(released_at_unix_ms),
-    sqlc.arg(expires_at_unix_ms),
     sqlc.arg(metadata_json)
 );
 
@@ -464,29 +458,9 @@ SELECT
     session_id,
     client_id,
     request_id,
-    state,
     created_at_unix_ms,
     acquired_at_unix_ms,
-    released_at_unix_ms,
-    expires_at_unix_ms,
     metadata_json
 FROM runtime_leases
 WHERE id = sqlc.arg(lease_id)
 LIMIT 1;
-
--- name: ReleaseRuntimeLeaseByID :execrows
-UPDATE runtime_leases
-SET
-    state = 'released',
-    released_at_unix_ms = sqlc.arg(released_at_unix_ms)
-WHERE id = sqlc.arg(lease_id)
-  AND session_id = sqlc.arg(session_id)
-  AND state <> 'released';
-
--- name: ReleaseActiveRuntimeLeasesBySession :exec
-UPDATE runtime_leases
-SET
-    state = 'released',
-    released_at_unix_ms = sqlc.arg(released_at_unix_ms)
-WHERE session_id = sqlc.arg(session_id)
-  AND state = 'active';
