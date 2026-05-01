@@ -43,6 +43,30 @@ func (m *uiModel) runtimeStatus() clientui.RuntimeStatus {
 	return status
 }
 
+func (m *uiModel) cachedRuntimeStatus() clientui.RuntimeStatus {
+	client := m.runtimeClient()
+	view := clientui.RuntimeMainView{}
+	if cached, ok := client.(interface {
+		CachedMainView() (clientui.RuntimeMainView, bool)
+	}); ok {
+		if cachedView, hasCached := cached.CachedMainView(); hasCached {
+			view = cachedView
+		}
+	} else if client != nil {
+		view = client.MainView()
+	} else {
+		view = clientui.RuntimeMainView{
+			Status:  m.localRuntimeStatus(),
+			Session: m.localRuntimeSessionView(),
+		}
+	}
+	status := view.Status
+	if m.runtimeContextUsageAppliesTo(view.Session.SessionID) {
+		status.ContextUsage = m.runtimeContextUsage
+	}
+	return status
+}
+
 func (m *uiModel) refreshRuntimeStatus() clientui.RuntimeStatus {
 	view := m.refreshRuntimeMainView()
 	status := view.Status

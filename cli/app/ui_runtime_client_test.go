@@ -28,8 +28,11 @@ type countingSessionViewClient struct {
 	view              clientui.RuntimeMainView
 	page              clientui.TranscriptPage
 	suffix            clientui.CommittedTranscriptSuffix
+	suffixErr         error
 	pageForRequest    func(serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage
 	count             atomic.Int32
+	pageCount         atomic.Int32
+	suffixCount       atomic.Int32
 	lastTranscriptReq serverapi.SessionTranscriptPageRequest
 	lastSuffixReq     serverapi.SessionCommittedTranscriptSuffixRequest
 }
@@ -43,6 +46,7 @@ func (c *countingSessionViewClient) GetSessionTranscriptPage(ctx context.Context
 	_ = ctx
 	c.lastTranscriptReq = req
 	c.count.Add(1)
+	c.pageCount.Add(1)
 	if c.pageForRequest != nil {
 		return serverapi.SessionTranscriptPageResponse{Transcript: c.pageForRequest(req)}, nil
 	}
@@ -53,6 +57,10 @@ func (c *countingSessionViewClient) GetSessionCommittedTranscriptSuffix(ctx cont
 	_ = ctx
 	c.lastSuffixReq = req
 	c.count.Add(1)
+	c.suffixCount.Add(1)
+	if c.suffixErr != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, c.suffixErr
+	}
 	return serverapi.SessionCommittedTranscriptSuffixResponse{Suffix: c.suffix}, nil
 }
 
@@ -261,6 +269,52 @@ func TestRuntimeClientRefreshCommittedTranscriptSuffixUsesSessionViewSuffixAPI(t
 	cached := runtimeClient.SessionView()
 	if cached.Transcript.Revision != 12 || cached.Transcript.CommittedEntryCount != 5 {
 		t.Fatalf("cached transcript metadata = %+v, want revision 12 count 5", cached.Transcript)
+	}
+}
+
+func TestRuntimeClientCommittedSuffixDisablesUnsupportedRPC(t *testing.T) {
+	reads := &countingSessionViewClient{
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     7,
+			TotalEntries: 4,
+			Offset:       2,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "page fallback"}},
+		},
+		suffixErr: serverapi.ErrMethodNotFound,
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls).(*sessionRuntimeClient)
+	req := clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 2, Limit: 1}
+
+	suffix, err := runtimeClient.RefreshCommittedTranscriptSuffix(req)
+	if err != nil {
+		t.Fatalf("refresh committed transcript suffix fallback: %v", err)
+	}
+	if suffix.StartEntryCount != 2 || suffix.NextEntryCount != 3 || suffix.Entries[0].Text != "page fallback" {
+		t.Fatalf("unexpected fallback suffix: %+v", suffix)
+	}
+	if reads.suffixCount.Load() != 1 || reads.pageCount.Load() != 1 {
+		t.Fatalf("first refresh counts suffix=%d page=%d, want 1/1", reads.suffixCount.Load(), reads.pageCount.Load())
+	}
+
+	reads.suffixErr = nil
+	reads.suffix = clientui.CommittedTranscriptSuffix{
+		SessionID:           "session-1",
+		CommittedEntryCount: 4,
+		StartEntryCount:     2,
+		NextEntryCount:      3,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "rpc should stay disabled"}},
+	}
+	suffix, err = runtimeClient.RefreshCommittedTranscriptSuffix(req)
+	if err != nil {
+		t.Fatalf("second refresh committed transcript suffix fallback: %v", err)
+	}
+	if suffix.Entries[0].Text != "page fallback" {
+		t.Fatalf("expected cached unsupported capability to keep page fallback, got %+v", suffix)
+	}
+	if reads.suffixCount.Load() != 1 || reads.pageCount.Load() != 2 {
+		t.Fatalf("second refresh counts suffix=%d page=%d, want 1/2", reads.suffixCount.Load(), reads.pageCount.Load())
 	}
 }
 

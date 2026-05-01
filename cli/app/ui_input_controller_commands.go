@@ -118,8 +118,19 @@ func (m *uiModel) backTeleportInput() string {
 }
 
 func (m *uiModel) latestAssistantFinalAnswer() string {
+	return m.latestAssistantFinalAnswerFromStatus(true)
+}
+
+func (m *uiModel) cachedLatestAssistantFinalAnswer() string {
+	return m.latestAssistantFinalAnswerFromStatus(false)
+}
+
+func (m *uiModel) latestAssistantFinalAnswerFromStatus(refresh bool) string {
 	if m.hasRuntimeClient() {
-		status := m.refreshRuntimeStatus()
+		status := m.cachedRuntimeStatus()
+		if refresh {
+			status = m.refreshRuntimeStatus()
+		}
 		if answer := strings.TrimSpace(status.LastCommittedAssistantFinalAnswer); answer != "" {
 			return status.LastCommittedAssistantFinalAnswer
 		}
@@ -129,7 +140,7 @@ func (m *uiModel) latestAssistantFinalAnswer() string {
 }
 
 func (m *uiModel) hasAssistantFinalAnswerToCopy() bool {
-	return strings.TrimSpace(m.latestAssistantFinalAnswer()) != ""
+	return strings.TrimSpace(m.cachedLatestAssistantFinalAnswer()) != ""
 }
 
 func (c uiInputController) handleCopyCommand() (tea.Model, tea.Cmd) {

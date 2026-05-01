@@ -41,6 +41,7 @@ type runtimeControlFakeClient struct {
 	discardQueuedText      string
 	discardQueuedCount     int
 	recordedPromptHistory  string
+	refreshMainViewCalls   int
 	err                    error
 	appendErr              error
 	shouldCompactErr       error
@@ -66,6 +67,7 @@ func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
 	return clientui.RuntimeMainView{Status: f.status, Session: f.sessionView}
 }
 func (f *runtimeControlFakeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	f.refreshMainViewCalls++
 	return f.MainView(), f.err
 }
 func (f *runtimeControlFakeClient) Transcript() clientui.TranscriptPage {

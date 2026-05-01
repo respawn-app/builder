@@ -33,9 +33,10 @@ type sessionRuntimeClient struct {
 	connectionStateObserver func(error)
 	leaseRecoveryWarning    func(string, clientui.EntryVisibility)
 
-	mu          sync.RWMutex
-	mainView    clientui.RuntimeMainView
-	hasMainView bool
+	mu                   sync.RWMutex
+	mainView             clientui.RuntimeMainView
+	hasMainView          bool
+	suffixRPCUnsupported bool
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
@@ -268,6 +269,13 @@ func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool)
 	return view, true
 }
 
+func (c *sessionRuntimeClient) CachedMainView() (clientui.RuntimeMainView, bool) {
+	if c == nil {
+		return clientui.RuntimeMainView{}, false
+	}
+	return c.cachedMainView()
+}
+
 func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clientui.RuntimeMainView {
 	if view.Session.SessionID == "" {
 		view.Session.SessionID = c.sessionID
@@ -372,13 +380,19 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 
 func (c *sessionRuntimeClient) refreshCommittedTranscriptSuffixSync(req clientui.CommittedTranscriptSuffixRequest, timeout time.Duration) (clientui.CommittedTranscriptSuffix, error) {
 	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
-	suffixClient, ok := c.reads.(client.SessionCommittedTranscriptSuffixClient)
-	if !ok {
+	fallbackToPage := func() (clientui.CommittedTranscriptSuffix, error) {
 		page, err := c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Offset: req.AfterEntryCount, Limit: req.Limit}, timeout)
 		if err != nil {
 			return clientui.CommittedTranscriptSuffix{SessionID: c.sessionID}, err
 		}
 		return committedTranscriptSuffixFromPage(page), nil
+	}
+	suffixClient, ok := c.reads.(client.SessionCommittedTranscriptSuffixClient)
+	if !ok {
+		return fallbackToPage()
+	}
+	if c.committedSuffixRPCUnsupported() {
+		return fallbackToPage()
 	}
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
@@ -389,6 +403,10 @@ func (c *sessionRuntimeClient) refreshCommittedTranscriptSuffixSync(req clientui
 	})
 	c.notifyConnectionState(err)
 	if err != nil {
+		if errors.Is(err, serverapi.ErrMethodNotFound) {
+			c.setCommittedSuffixRPCUnsupported()
+			return fallbackToPage()
+		}
 		return clientui.CommittedTranscriptSuffix{SessionID: c.sessionID}, err
 	}
 	suffix := resp.Suffix
@@ -402,6 +420,18 @@ func (c *sessionRuntimeClient) refreshCommittedTranscriptSuffixSync(req clientui
 		}
 	})
 	return suffix, nil
+}
+
+func (c *sessionRuntimeClient) committedSuffixRPCUnsupported() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.suffixRPCUnsupported
+}
+
+func (c *sessionRuntimeClient) setCommittedSuffixRPCUnsupported() {
+	c.mu.Lock()
+	c.suffixRPCUnsupported = true
+	c.mu.Unlock()
 }
 
 func (c *sessionRuntimeClient) transcriptDiagnosticsEnabled() bool {
