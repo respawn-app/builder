@@ -310,6 +310,23 @@ func freeformToolOutputSummary(freeform string) string {
 	return "User answered: " + freeform
 }
 
+func buildOngoingToolOutputText(req Request, resp Response) string {
+	freeform := normalizedFreeformAnswer(resp)
+	if resp.SelectedOptionNumber <= 0 {
+		return freeformToolOutputSummary(freeform)
+	}
+	suggestions := normalizedSuggestions(req.Suggestions)
+	optionIndex := resp.SelectedOptionNumber - 1
+	if optionIndex < 0 || optionIndex >= len(suggestions) {
+		return ""
+	}
+	base := suggestions[optionIndex]
+	if freeform == "" {
+		return base
+	}
+	return base + "\nUser also said:\n" + freeform
+}
+
 func validateApprovalDecision(decision ApprovalDecision) error {
 	switch decision {
 	case ApprovalDecisionAllowOnce, ApprovalDecisionAllowSession, ApprovalDecisionDeny:
@@ -382,7 +399,8 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if err := json.Unmarshal(c.Input, &in); err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
-	resp, err := t.broker.Ask(ctx, in.request(c.ID))
+	req := in.request(c.ID)
+	resp, err := t.broker.Ask(ctx, req)
 	if err != nil {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
@@ -394,5 +412,5 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if marshalErr != nil {
 		return tools.Result{}, marshalErr
 	}
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, OngoingText: buildOngoingToolOutputText(req, resp)}, nil
 }

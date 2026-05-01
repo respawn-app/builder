@@ -264,9 +264,13 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
-		nextRole := roleFromEntry(m.transcript[resultIdx])
+		resultEntry := m.transcript[resultIdx]
+		nextRole := roleFromEntry(resultEntry)
 		if nextRole.IsToolResult() {
-			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
+			answer = strings.TrimSpace(resultEntry.Text)
+			if opts.mode == transcriptBlockModeOngoing {
+				answer = strings.TrimSpace(ongoingTranscriptText(resultEntry))
+			}
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 			consumed[resultIdx] = struct{}{}
 		}
