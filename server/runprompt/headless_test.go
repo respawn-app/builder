@@ -15,6 +15,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/primaryrun"
+	"builder/server/registry"
 	"builder/server/session"
 	"builder/shared/config"
 	"builder/shared/serverapi"
@@ -125,6 +126,9 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	if err := store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 1) {
@@ -177,6 +181,57 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 	}
 	if got := store.Meta().Continuation; got == nil || got.OpenAIBaseURL != server.URL {
 		t.Fatalf("expected persisted continuation preserved, got %+v", got)
+	}
+}
+
+func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 1) {
+			return
+		}
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		testopenai.WriteCompletedResponseStream(w, "done", 1, 1)
+	}))
+	defer server.Close()
+
+	runtimes := registry.NewRuntimeRegistry()
+	client := NewLoopbackRunPromptClient(HeadlessBootstrap{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings: config.Settings{
+				Model:         "gpt-5",
+				OpenAIBaseURL: server.URL,
+			},
+		},
+		ContainerDir: containerDir,
+		AuthManager: auth.NewManager(auth.NewMemoryStore(auth.State{
+			Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
+		}), nil, time.Now),
+		RuntimeRegistry: runtimes,
+	})
+
+	if _, err := client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID:   "runtime-cleanup-1",
+		SelectedSessionID: store.Meta().SessionID,
+		Prompt:            "hello",
+	}, nil); err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if runtimes.IsSessionRuntimeActive(store.Meta().SessionID) {
+		t.Fatalf("expected run prompt runtime to unregister after completion")
 	}
 }
 

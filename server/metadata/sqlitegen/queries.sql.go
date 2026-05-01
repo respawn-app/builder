@@ -92,11 +92,8 @@ SELECT
     session_id,
     client_id,
     request_id,
-    state,
     created_at_unix_ms,
     acquired_at_unix_ms,
-    released_at_unix_ms,
-    expires_at_unix_ms,
     metadata_json
 FROM runtime_leases
 WHERE id = ?1
@@ -111,11 +108,8 @@ func (q *Queries) GetRuntimeLeaseByID(ctx context.Context, leaseID string) (Runt
 		&i.SessionID,
 		&i.ClientID,
 		&i.RequestID,
-		&i.State,
 		&i.CreatedAtUnixMs,
 		&i.AcquiredAtUnixMs,
-		&i.ReleasedAtUnixMs,
-		&i.ExpiresAtUnixMs,
 		&i.MetadataJson,
 	)
 	return i, err
@@ -486,11 +480,8 @@ INSERT INTO runtime_leases (
     session_id,
     client_id,
     request_id,
-    state,
     created_at_unix_ms,
     acquired_at_unix_ms,
-    released_at_unix_ms,
-    expires_at_unix_ms,
     metadata_json
 ) VALUES (
     ?1,
@@ -499,10 +490,7 @@ INSERT INTO runtime_leases (
     ?4,
     ?5,
     ?6,
-    ?7,
-    ?8,
-    ?9,
-    ?10
+    ?7
 )
 `
 
@@ -511,11 +499,8 @@ type InsertRuntimeLeaseParams struct {
 	SessionID        string
 	ClientID         string
 	RequestID        string
-	State            string
 	CreatedAtUnixMs  int64
 	AcquiredAtUnixMs int64
-	ReleasedAtUnixMs int64
-	ExpiresAtUnixMs  int64
 	MetadataJson     string
 }
 
@@ -525,11 +510,8 @@ func (q *Queries) InsertRuntimeLease(ctx context.Context, arg InsertRuntimeLease
 		arg.SessionID,
 		arg.ClientID,
 		arg.RequestID,
-		arg.State,
 		arg.CreatedAtUnixMs,
 		arg.AcquiredAtUnixMs,
-		arg.ReleasedAtUnixMs,
-		arg.ExpiresAtUnixMs,
 		arg.MetadataJson,
 	)
 	return err
@@ -849,49 +831,6 @@ func (q *Queries) ListWorktreesByWorkspaceID(ctx context.Context, workspaceID st
 		return nil, err
 	}
 	return items, nil
-}
-
-const releaseActiveRuntimeLeasesBySession = `-- name: ReleaseActiveRuntimeLeasesBySession :exec
-UPDATE runtime_leases
-SET
-    state = 'released',
-    released_at_unix_ms = ?1
-WHERE session_id = ?2
-  AND state = 'active'
-`
-
-type ReleaseActiveRuntimeLeasesBySessionParams struct {
-	ReleasedAtUnixMs int64
-	SessionID        string
-}
-
-func (q *Queries) ReleaseActiveRuntimeLeasesBySession(ctx context.Context, arg ReleaseActiveRuntimeLeasesBySessionParams) error {
-	_, err := q.db.ExecContext(ctx, releaseActiveRuntimeLeasesBySession, arg.ReleasedAtUnixMs, arg.SessionID)
-	return err
-}
-
-const releaseRuntimeLeaseByID = `-- name: ReleaseRuntimeLeaseByID :execrows
-UPDATE runtime_leases
-SET
-    state = 'released',
-    released_at_unix_ms = ?1
-WHERE id = ?2
-  AND session_id = ?3
-  AND state <> 'released'
-`
-
-type ReleaseRuntimeLeaseByIDParams struct {
-	ReleasedAtUnixMs int64
-	LeaseID          string
-	SessionID        string
-}
-
-func (q *Queries) ReleaseRuntimeLeaseByID(ctx context.Context, arg ReleaseRuntimeLeaseByIDParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, releaseRuntimeLeaseByID, arg.ReleasedAtUnixMs, arg.LeaseID, arg.SessionID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
 }
 
 const updateSessionExecutionTargetByID = `-- name: UpdateSessionExecutionTargetByID :execrows
