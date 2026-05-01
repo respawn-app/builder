@@ -65,9 +65,15 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 }
 
 func TestBusyEnterRunsExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
-	m := newProjectedStaticUIModel(WithUIFastModeAvailable(true))
+	client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{FastModeAvailable: true, FastModeEnabled: true}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.fastModeAvailable = false
 	m.busy = true
 	m.activity = uiActivityRunning
+	m.input = "/fa"
+	if picker := m.slashCommandPicker(); !picker.visible || len(picker.matches) != 0 {
+		t.Fatalf("expected picker visible without /fast matches, got %+v", picker)
+	}
 	m.input = "/fast on"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -89,6 +95,9 @@ func TestBusyEnterRunsExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
 	}
 	if !updated.fastModeEnabled {
 		t.Fatal("expected busy /fast to enable fast mode")
+	}
+	if !client.setFastModeArg {
+		t.Fatal("expected runtime client fast mode setter to receive true")
 	}
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "Fast mode enabled") {

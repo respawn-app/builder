@@ -23,6 +23,9 @@ type stubServiceBackend struct {
 	uninstallStop bool
 	calls         []serviceAction
 	err           error
+	installErr    error
+	restartErr    error
+	statusErr     error
 }
 
 func (s *stubServiceBackend) Name() string { return "stub" }
@@ -31,6 +34,9 @@ func (s *stubServiceBackend) Install(_ context.Context, _ serviceSpec, force boo
 	s.calls = append(s.calls, serviceActionInstall)
 	s.installForce = force
 	s.installStart = start
+	if s.installErr != nil {
+		return s.installErr
+	}
 	return s.err
 }
 
@@ -52,11 +58,17 @@ func (s *stubServiceBackend) Stop(context.Context, serviceSpec) error {
 
 func (s *stubServiceBackend) Restart(context.Context, serviceSpec) error {
 	s.calls = append(s.calls, serviceActionRestart)
+	if s.restartErr != nil {
+		return s.restartErr
+	}
 	return s.err
 }
 
 func (s *stubServiceBackend) Status(context.Context, serviceSpec) (serviceStatus, error) {
 	s.calls = append(s.calls, serviceActionStatus)
+	if s.statusErr != nil {
+		return s.status, s.statusErr
+	}
 	return s.status, s.err
 }
 
@@ -160,6 +172,50 @@ func TestServiceRestartIfInstalledRefreshesRegistrationBeforeRestart(t *testing.
 	}
 	if !strings.Contains(stdout.String(), "sessions may fail briefly") {
 		t.Fatalf("stdout = %q, want restart warning", stdout.String())
+	}
+}
+
+func TestServiceRestartIfInstalledStopsWhenRefreshFails(t *testing.T) {
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true}, installErr: errors.New("install failed")}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall}
+	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
+		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
+	}
+	if strings.Contains(strings.Join(actionsToStrings(backend.calls), ","), string(serviceActionRestart)) {
+		t.Fatalf("restart should not be called after install failure: %+v", backend.calls)
+	}
+	if !strings.Contains(stderr.String(), "install failed") {
+		t.Fatalf("stderr = %q, want install error", stderr.String())
+	}
+}
+
+func TestServiceRestartIfInstalledSurfacesRestartFailureAfterRefresh(t *testing.T) {
+	backend := &stubServiceBackend{status: serviceStatus{Installed: true}, restartErr: errors.New("restart failed")}
+	withServiceCommandTestBackend(t, backend)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	want := []serviceAction{serviceActionStatus, serviceActionStatus, serviceActionInstall, serviceActionRestart}
+	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
+		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
+	}
+	if !backend.installForce || backend.installStart {
+		t.Fatalf("refresh flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
+	}
+	if !strings.Contains(stderr.String(), "restart failed") {
+		t.Fatalf("stderr = %q, want restart error", stderr.String())
 	}
 }
 

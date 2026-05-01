@@ -84,11 +84,14 @@ func (m *uiModel) syncOngoingTailViewFromRuntimeState() {
 	if m == nil || !m.hasRuntimeClient() {
 		return
 	}
-	page := m.localRuntimeTranscript()
+	totalEntries := m.transcriptTotalEntries
+	if totalEntries < m.transcriptBaseOffset+len(m.transcriptEntries) {
+		totalEntries = m.transcriptBaseOffset + len(m.transcriptEntries)
+	}
 	m.forwardToView(tui.SetConversationMsg{
-		BaseOffset:   page.Offset,
-		TotalEntries: page.TotalEntries,
-		Entries:      transcriptEntriesFromPage(page),
+		BaseOffset:   m.transcriptBaseOffset,
+		TotalEntries: totalEntries,
+		Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
 		Ongoing:      m.view.OngoingStreamingText(),
 		OngoingError: m.view.OngoingErrorText(),
 	})

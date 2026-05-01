@@ -195,6 +195,11 @@ func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) 
 		t.Fatalf("EnsureDurable: %v", err)
 	}
 
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 1) {
 			return
@@ -202,6 +207,8 @@ func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) 
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
+		startedOnce.Do(func() { close(started) })
+		<-release
 		testopenai.WriteCompletedResponseStream(w, "done", 1, 1)
 	}))
 	defer server.Close()
@@ -223,12 +230,32 @@ func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) 
 		RuntimeRegistry: runtimes,
 	})
 
-	if _, err := client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
-		ClientRequestID:   "runtime-cleanup-1",
-		SelectedSessionID: store.Meta().SessionID,
-		Prompt:            "hello",
-	}, nil); err != nil {
-		t.Fatalf("RunPrompt: %v", err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+			ClientRequestID:   "runtime-cleanup-1",
+			SelectedSessionID: store.Meta().SessionID,
+			Prompt:            "hello",
+		}, nil)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for /responses request")
+	}
+	if !runtimes.IsSessionRuntimeActive(store.Meta().SessionID) {
+		t.Fatalf("expected run prompt runtime active while request is in flight")
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunPrompt: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunPrompt did not finish")
 	}
 	if runtimes.IsSessionRuntimeActive(store.Meta().SessionID) {
 		t.Fatalf("expected run prompt runtime to unregister after completion")
