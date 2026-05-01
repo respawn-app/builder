@@ -64,8 +64,8 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 	}
 }
 
-func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
-	m := newProjectedStaticUIModel()
+func TestBusyEnterRunsExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIFastModeAvailable(true))
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/fast on"
@@ -73,7 +73,7 @@ func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected transient status command for blocked busy /fast")
+		t.Fatal("expected transient status command for busy /fast")
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected no queued messages, got %+v", updated.queued)
@@ -82,14 +82,17 @@ func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) 
 		t.Fatalf("expected no pending injected messages, got %+v", updated.pendingInjected)
 	}
 	if updated.inputSubmitLocked {
-		t.Fatal("did not expect locked input for blocked busy /fast")
+		t.Fatal("did not expect locked input for busy /fast")
 	}
 	if updated.input != "" {
-		t.Fatalf("expected input cleared for blocked busy /fast, got %q", updated.input)
+		t.Fatalf("expected input cleared for busy /fast, got %q", updated.input)
+	}
+	if !updated.fastModeEnabled {
+		t.Fatal("expected busy /fast to enable fast mode")
 	}
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(status, "cannot run /fast while model is working") {
-		t.Fatalf("expected busy /fast error in status line, got %q", status)
+	if !strings.Contains(status, "Fast mode enabled") {
+		t.Fatalf("expected busy /fast success in status line, got %q", status)
 	}
 }
 
