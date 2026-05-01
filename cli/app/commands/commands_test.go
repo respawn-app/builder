@@ -13,8 +13,8 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/thinking"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /thinking command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
-	if command, ok := r.Command("/fast"); !ok || command.RunWhileBusy {
-		t.Fatalf("expected /fast command to require idle, got %+v, ok=%v", command, ok)
+	if command, ok := r.Command("/fast"); !ok || !command.RunWhileBusy {
+		t.Fatalf("expected /fast command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
 	if command, ok := r.Command("/supervisor"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /supervisor command to be runnable while busy, got %+v, ok=%v", command, ok)

@@ -327,9 +327,19 @@ func (c uiInputController) handleRollbackSelectionKey(msg tea.KeyMsg) (tea.Model
 	case tea.KeyEsc:
 		return m, c.stopRollbackSelectionFlowCmd()
 	case tea.KeyUp:
+		if m.rollback.selection <= 0 {
+			if cmd := m.requestRollbackSelectionPage(-1); cmd != nil {
+				return m, cmd
+			}
+		}
 		m.moveRollbackSelection(-1)
 		return m, nil
 	case tea.KeyDown:
+		if m.rollback.selection >= len(m.rollback.candidates)-1 {
+			if cmd := m.requestRollbackSelectionPage(1); cmd != nil {
+				return m, cmd
+			}
+		}
 		m.moveRollbackSelection(1)
 		return m, nil
 	case tea.KeyEnter:

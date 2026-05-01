@@ -2,11 +2,15 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
 
@@ -80,4 +84,107 @@ func TestOpenAllowsDatabaseAtRemovedMigrationVersion(t *testing.T) {
 	if err := reopened.Close(); err != nil {
 		t.Fatalf("close reopened store: %v", err)
 	}
+}
+
+func TestOpenMigratesRuntimeLeaseLivenessColumnsAway(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "db", "main.sqlite3")
+	db, err := openDatabaseAtVersionForTest(t, root, dbPath, 3)
+	if err != nil {
+		t.Fatalf("open test database at version 3: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO projects (id, display_name, created_at_unix_ms, updated_at_unix_ms, metadata_json)
+VALUES ('project-1', 'Project', 1, 1, '{}');
+INSERT INTO workspaces (id, project_id, canonical_root_path, display_name, availability, is_primary, git_metadata_json, created_at_unix_ms, updated_at_unix_ms)
+VALUES ('workspace-1', 'project-1', '/tmp/workspace-1', 'workspace', 'available', 1, '{}', 1, 1);
+INSERT INTO sessions (id, project_id, workspace_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json)
+VALUES ('session-1', 'project-1', 'workspace-1', 'projects/project-1/sessions/session-1', '', '', '', '', 1, 1, 0, 0, 0, 0, '.', '{}', '{}', '{}', '{}');
+INSERT INTO runtime_leases (id, session_id, client_id, request_id, state, created_at_unix_ms, acquired_at_unix_ms, released_at_unix_ms, expires_at_unix_ms, metadata_json)
+VALUES ('lease-1', 'session-1', '', 'request-1', 'active', 1, 1, 0, 0, '{}');
+`); err != nil {
+		t.Fatalf("seed version 3 runtime lease: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close version 3 db: %v", err)
+	}
+
+	store, err := Open(root)
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	columns := runtimeLeaseColumns(t, store.db)
+	for _, removed := range []string{"state", "released_at_unix_ms", "expires_at_unix_ms"} {
+		if columns[removed] {
+			t.Fatalf("runtime_leases column %q should have been removed; columns=%+v", removed, columns)
+		}
+	}
+	if _, err := store.ValidateRuntimeLease(t.Context(), "session-1", "lease-1"); err != nil {
+		t.Fatalf("ValidateRuntimeLease after migration: %v", err)
+	}
+}
+
+func openDatabaseAtVersionForTest(t *testing.T, root string, dbPath string, version int64) (*sql.DB, error) {
+	t.Helper()
+	db, err := openDatabaseAtPathWithoutMigrationsForTest(root, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrations, goose.WithLogger(goose.NopLogger()), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := provider.UpTo(context.Background(), version); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func openDatabaseAtPathWithoutMigrationsForTest(root string, dbPath string) (*sql.DB, error) {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureDatabase(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func runtimeLeaseColumns(t *testing.T, db *sql.DB) map[string]bool {
+	t.Helper()
+	rows, err := db.Query("PRAGMA table_info(runtime_leases)")
+	if err != nil {
+		t.Fatalf("query runtime_leases columns: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan runtime_leases column: %v", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate runtime_leases columns: %v", err)
+	}
+	return columns
 }

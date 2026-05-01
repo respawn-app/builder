@@ -610,6 +610,9 @@ func TestToolCallSerializesSelectedOptionWithFreeformAsPlainText(t *testing.T) {
 	if payload == "" {
 		t.Fatal("expected non-empty plain-text summary")
 	}
+	if result.OngoingText != "beta\nUser also said:\nneed extra context" {
+		t.Fatalf("unexpected ongoing text: %q", result.OngoingText)
+	}
 }
 
 func TestToolCallSerializesPureFreeformAsPlainText(t *testing.T) {

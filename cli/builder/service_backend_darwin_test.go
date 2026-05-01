@@ -77,6 +77,33 @@ func TestLaunchdStartBootstrapsUnloadedServiceWithoutKickstart(t *testing.T) {
 	}
 }
 
+func TestLaunchdRestartKickstartsLoadedServiceWithoutBootstrap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := testLaunchdServiceSpec(t)
+	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
+		case "launchctl\x00kickstart\x00-k\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	if err := (launchdServiceBackend{}).Restart(context.Background(), spec); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "kickstart", "-k", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %#v, want %#v", *calls, want)
+	}
+}
+
 func TestLaunchdStartFallsBackToKickstartWhenBootstrapFindsMatchingLoadedService(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := testLaunchdServiceSpec(t)

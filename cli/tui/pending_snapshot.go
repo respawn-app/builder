@@ -85,6 +85,7 @@ func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []Transcrip
 		combined := m.toolCallDisplayText(entry, block.role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
 		lines = m.flattenEntryWithMetaAndSymbol(block.role, combined, true, entry.ToolCall, spinnerSymbol)
 	}
+	lines = m.ongoingToolWithTreeGuideWithSymbol(block.role, lines, spinnerSymbol)
 	return ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex, entryEnd: block.entryEnd}, true
 }
 

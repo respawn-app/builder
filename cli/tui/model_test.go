@@ -682,3 +682,122 @@ func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
 		t.Fatalf("expected answer to use user color in detail view, got %q", colored)
 	}
 }
+
+func TestOngoingAskQuestionRendersSelectedOptionText(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Choose scope?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "User chose option #2. They also said: include tests",
+		OngoingText: "Recursive scan\nUser also said:\ninclude tests",
+	})
+
+	plain := plainTranscript(m.View())
+	if !containsInOrder(plain, "?", "Choose scope?", "Recursive scan", "User also said:", "include tests") {
+		t.Fatalf("expected ongoing answer to show selected option text and commentary, got %q", plain)
+	}
+	if !containsInOrder(plain, "? Choose scope?", "│ User also said:", "└ include tests") {
+		t.Fatalf("expected ongoing ask_question response to render tree guides, got %q", plain)
+	}
+	if strings.Contains(plain, "option #2") || strings.Contains(plain, "flat scan") {
+		t.Fatalf("expected ongoing answer to omit numeric summary and unchosen suggestions, got %q", plain)
+	}
+}
+
+func TestOngoingMultilineToolBlocksRenderTreeGuides(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Patch",
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			Command:     "./docs/a.md +2\n./docs/b.md +5\n./docs/c.md +8",
+			CompactText: "./docs/a.md +2\n./docs/b.md +5\n./docs/c.md +8",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_patch"})
+
+	plain := plainTranscript(m.View())
+	if !containsInOrder(plain, "⇄ ./docs/a.md +2", "│ ./docs/b.md +5", "└ ./docs/c.md +8") {
+		t.Fatalf("expected multiline ongoing tool block to render tree guides, got %q", plain)
+	}
+}
+
+func TestOngoingWrappedToolBlocksRenderTreeGuides(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 34})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "inspect a very long generated transcript rendering path",
+		ToolCallID: "call_tool",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "custom_tool",
+			Command:     "inspect a very long generated transcript rendering path",
+			CompactText: "inspect a very long generated transcript rendering path",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_tool"})
+
+	plain := plainTranscript(m.View())
+	if !containsInOrder(plain, "• inspect a very long generated", "└ transcript rendering path") {
+		t.Fatalf("expected wrapped ongoing tool block to render tree guide, got %q", plain)
+	}
+}
+
+func TestPendingOngoingMultilineToolBlockRendersTreeGuidesWithSpinner(t *testing.T) {
+	entries := []TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       "Patch",
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			Command:     "./docs/a.md +2\n./docs/b.md +5",
+			CompactText: "./docs/a.md +2\n./docs/b.md +5",
+		},
+	}}
+
+	plain := plainTranscript(RenderPendingOngoingSnapshot(entries, "dark", 80, "*"))
+	if !containsInOrder(plain, "* ./docs/a.md +2", "└ ./docs/b.md +5") {
+		t.Fatalf("expected pending multiline ongoing tool block to render tree guides with spinner, got %q", plain)
+	}
+}
+
+func TestDetailAskQuestionKeepsToolResultTextWhenOngoingTextDiffers(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Choose scope?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "User chose option #2. They also said: include tests",
+		OngoingText: "Recursive scan\nUser also said:\ninclude tests",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	plain := plainTranscript(m.View())
+	if !strings.Contains(plain, "User chose option #2. They also said: include tests") {
+		t.Fatalf("expected detail answer to keep raw tool result text, got %q", plain)
+	}
+	if strings.Contains(plain, "User also said:") {
+		t.Fatalf("expected detail answer to ignore ongoing-only text, got %q", plain)
+	}
+}

@@ -14,7 +14,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | `/compact <instructions>` | optional free-form text | Compact the current context. Trailing text is passed through as compaction instructions. |
 | `/name <title>` | optional free-form text | Set the session title. Empty input resets it. |
 | <code>/thinking &lt;low&#124;medium&#124;high&#124;xhigh&gt;</code> | optional single value | Set the thinking level. Empty input shows the current level. |
-| <code>/fast [on&#124;off&#124;status]</code> | optional single value | Toggle or inspect Fast mode. |
+| <code>/fast [on&#124;off&#124;status]</code> | optional single value | Toggle or inspect Fast mode; it can be changed while the model is working and applies to the next model request. |
 | <code>/supervisor [on&#124;off]</code> | optional single value | Toggle supervisor invocation. |
 | <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
 | `/status` | none | Open a page with detailed information about the config, git, runtime, and model. |

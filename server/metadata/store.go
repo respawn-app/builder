@@ -46,26 +46,17 @@ type Binding struct {
 	WorkspaceStatus string
 }
 
-const (
-	runtimeLeaseStateActive   = "active"
-	runtimeLeaseStateReleased = "released"
-)
-
+// Runtime leases are durable controller tokens, not durable runtime liveness.
+// Do not add active/released state here: whether a session runtime is active is
+// process-local state owned by sessionruntime.Service and RuntimeRegistry.
 type RuntimeLeaseRecord struct {
 	LeaseID      string
 	SessionID    string
 	RequestID    string
-	State        string
 	CreatedAt    time.Time
 	AcquiredAt   time.Time
-	ReleasedAt   time.Time
-	ExpiresAt    time.Time
 	ClientID     string
 	MetadataJSON string
-}
-
-func (r RuntimeLeaseRecord) Active() bool {
-	return strings.TrimSpace(r.State) == runtimeLeaseStateActive
 }
 
 type WorktreeRecord struct {
@@ -914,7 +905,6 @@ func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, reques
 		LeaseID:    "lease-" + uuid.NewString(),
 		SessionID:  strings.TrimSpace(sessionID),
 		RequestID:  strings.TrimSpace(requestID),
-		State:      runtimeLeaseStateActive,
 		CreatedAt:  now,
 		AcquiredAt: now,
 		ClientID:   "",
@@ -930,11 +920,8 @@ func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, reques
 		SessionID:        record.SessionID,
 		ClientID:         record.ClientID,
 		RequestID:        record.RequestID,
-		State:            record.State,
 		CreatedAtUnixMs:  record.CreatedAt.UnixMilli(),
 		AcquiredAtUnixMs: record.AcquiredAt.UnixMilli(),
-		ReleasedAtUnixMs: 0,
-		ExpiresAtUnixMs:  0,
 		MetadataJson:     "{}",
 	}); err != nil {
 		return RuntimeLeaseRecord{}, fmt.Errorf("insert runtime lease: %w", err)
@@ -942,47 +929,29 @@ func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, reques
 	return record, nil
 }
 
-func (s *Store) ReleaseRuntimeLease(ctx context.Context, sessionID string, leaseID string) (RuntimeLeaseRecord, error) {
+// ValidateRuntimeLease validates that a durable controller token exists and
+// belongs to the session. It intentionally does not persist release/liveness
+// state; active runtime ownership is process-local and must stay out of SQLite.
+func (s *Store) ValidateRuntimeLease(ctx context.Context, sessionID string, leaseID string) (RuntimeLeaseRecord, error) {
 	if s == nil || s.queries == nil {
 		return RuntimeLeaseRecord{}, errors.New("metadata store is required")
 	}
-	record, err := s.getRuntimeLeaseByID(ctx, leaseID)
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return RuntimeLeaseRecord{}, errors.New("session id is required")
+	}
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if trimmedLeaseID == "" {
+		return RuntimeLeaseRecord{}, errors.New("lease id is required")
+	}
+	record, err := s.getRuntimeLeaseByID(ctx, trimmedLeaseID)
 	if err != nil {
 		return RuntimeLeaseRecord{}, err
 	}
-	if strings.TrimSpace(record.SessionID) != strings.TrimSpace(sessionID) {
-		return RuntimeLeaseRecord{}, fmt.Errorf("runtime lease %q does not belong to session %q", strings.TrimSpace(leaseID), strings.TrimSpace(sessionID))
-	}
-	if record.Active() {
-		releasedAt := time.Now().UTC()
-		if _, err := s.queries.ReleaseRuntimeLeaseByID(ctx, sqlitegen.ReleaseRuntimeLeaseByIDParams{
-			LeaseID:          record.LeaseID,
-			SessionID:        record.SessionID,
-			ReleasedAtUnixMs: releasedAt.UnixMilli(),
-		}); err != nil {
-			return RuntimeLeaseRecord{}, fmt.Errorf("release runtime lease: %w", err)
-		}
-		record.State = runtimeLeaseStateReleased
-		record.ReleasedAt = releasedAt
+	if strings.TrimSpace(record.SessionID) != trimmedSessionID {
+		return RuntimeLeaseRecord{}, fmt.Errorf("runtime lease %q does not belong to session %q", trimmedLeaseID, trimmedSessionID)
 	}
 	return record, nil
-}
-
-func (s *Store) ReleaseActiveRuntimeLeasesBySession(ctx context.Context, sessionID string) error {
-	if s == nil || s.queries == nil {
-		return errors.New("metadata store is required")
-	}
-	trimmedSessionID := strings.TrimSpace(sessionID)
-	if trimmedSessionID == "" {
-		return errors.New("session id is required")
-	}
-	if err := s.queries.ReleaseActiveRuntimeLeasesBySession(ctx, sqlitegen.ReleaseActiveRuntimeLeasesBySessionParams{
-		SessionID:        trimmedSessionID,
-		ReleasedAtUnixMs: time.Now().UTC().UnixMilli(),
-	}); err != nil {
-		return fmt.Errorf("release active runtime leases: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) ResolvePersistedSession(ctx context.Context, sessionID string) (session.PersistedSessionRecord, error) {
@@ -1269,11 +1238,8 @@ func runtimeLeaseRecordFromRow(row sqlitegen.RuntimeLease) RuntimeLeaseRecord {
 		LeaseID:      row.ID,
 		SessionID:    row.SessionID,
 		RequestID:    row.RequestID,
-		State:        row.State,
 		CreatedAt:    timeFromStoredTimestamp(row.CreatedAtUnixMs),
 		AcquiredAt:   timeFromStoredTimestamp(row.AcquiredAtUnixMs),
-		ReleasedAt:   timeFromStoredTimestamp(row.ReleasedAtUnixMs),
-		ExpiresAt:    timeFromStoredTimestamp(row.ExpiresAtUnixMs),
 		ClientID:     row.ClientID,
 		MetadataJSON: row.MetadataJson,
 	}

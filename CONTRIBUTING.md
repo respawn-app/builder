@@ -10,6 +10,24 @@ This helps avoid wasted work and gives maintainers a chance to confirm scope, ap
 
 Changes are less likely to be accepted if they add broad configurability, plugin-style surface area, extra UI chrome, or product direction that conflicts with the repository's design principles.
 
+## Product Boundaries
+
+Builder is intentionally narrow. Feature proposals are expected to improve reliability, output quality, observability, long-running work, or composability without adding avoidable model burden.
+
+These directions are part of the current product boundary and are unlikely to be accepted:
+
+- **Native in-process subagent orchestration.** Use separate headless Builder runs through `builder run`, named subagent roles, shell scripts, tmux, or background shells. Keeping side agents as normal Builder processes makes them scriptable, inspectable, resumable, and easy to kill.
+- **Plan mode as a dedicated product surface.** Frontier models can already plan, revise, and ask questions. Builder should not add a UI mode that constrains the model or encourages ceremonial planning output.
+- **MCP as a first-class integration surface.** Builder prefers a small model-facing tool set and normal CLI programs. If a capability can be exposed as a command-line tool or script, that is usually the better integration path.
+- **Extra UI chrome or vibe-coding surfaces.** Builder's UI should stay focused on terminal-native engineering work: steering, inspection, review, session control, and long-running execution.
+- **Runtime toolset or model switching for active sessions.** Changing these mid-session can invalidate prompt caches and alter the model contract. Prefer per-session config, subagent roles, or new sessions.
+- **Microcompaction.** Compaction should preserve continuity and cache behavior. Tiny frequent rewrites add cost and risk without enough benefit.
+- **Built-in sandboxing as a trust boundary.** Sandboxing should be done with real isolation such as containers, VMs, or remote environments. Builder may support workflows that run inside those environments, but the CLI itself should not pretend that a fragile local sandbox is a security boundary.
+- **A dedicated WebFetch tool.** Use shell-accessible tools or scripts that return raw Markdown, such as Jina Reader wrappers. This keeps web access transparent and avoids another model-facing tool.
+- **Anthropic, Gemini, or Antigravity subscription usage.** These will not be supported unless their terms allow third-party harnesses. API-key or compatible-provider work should still fit the normal provider capability model.
+
+This list is not a substitute for design review. If a proposal appears to conflict with a boundary but solves an important reliability or quality problem, open an issue and describe the tradeoff clearly before writing code.
+
 ## Development Setup
 
 Current prerequisites:

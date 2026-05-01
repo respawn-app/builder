@@ -64,16 +64,22 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 	}
 }
 
-func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
-	m := newProjectedStaticUIModel()
+func TestBusyEnterRunsExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
+	client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{FastModeAvailable: true, FastModeEnabled: true}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.fastModeAvailable = false
 	m.busy = true
 	m.activity = uiActivityRunning
+	m.input = "/fa"
+	if picker := m.slashCommandPicker(); !picker.visible || len(picker.matches) != 0 {
+		t.Fatalf("expected picker visible without /fast matches, got %+v", picker)
+	}
 	m.input = "/fast on"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected transient status command for blocked busy /fast")
+		t.Fatal("expected transient status command for busy /fast")
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected no queued messages, got %+v", updated.queued)
@@ -82,14 +88,20 @@ func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) 
 		t.Fatalf("expected no pending injected messages, got %+v", updated.pendingInjected)
 	}
 	if updated.inputSubmitLocked {
-		t.Fatal("did not expect locked input for blocked busy /fast")
+		t.Fatal("did not expect locked input for busy /fast")
 	}
 	if updated.input != "" {
-		t.Fatalf("expected input cleared for blocked busy /fast, got %q", updated.input)
+		t.Fatalf("expected input cleared for busy /fast, got %q", updated.input)
+	}
+	if !updated.fastModeEnabled {
+		t.Fatal("expected busy /fast to enable fast mode")
+	}
+	if !client.setFastModeArg {
+		t.Fatal("expected runtime client fast mode setter to receive true")
 	}
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(status, "cannot run /fast while model is working") {
-		t.Fatalf("expected busy /fast error in status line, got %q", status)
+	if !strings.Contains(status, "Fast mode enabled") {
+		t.Fatalf("expected busy /fast success in status line, got %q", status)
 	}
 }
 

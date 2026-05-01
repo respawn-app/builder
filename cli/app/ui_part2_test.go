@@ -63,6 +63,28 @@ func TestRollbackSelectionUsesAbsoluteTranscriptEntryIndexWhenPaged(t *testing.T
 	}
 }
 
+func TestRollbackRefreshClearsPendingPageSelectionOutsideSelectionMode(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: tui.TranscriptRoleUser, Text: "older"},
+		{Role: tui.TranscriptRoleAssistant, Text: "answer"},
+		{Role: tui.TranscriptRoleUser, Text: "newer"},
+	}
+	m.rollback.phase = uiRollbackPhaseEditing
+	m.rollback.selection = 1
+	m.rollback.pendingSelectionAnchor = 2
+	m.rollback.pendingSelectionDelta = -1
+
+	m.refreshRollbackCandidates()
+
+	if m.rollback.pendingSelectionAnchor != -1 || m.rollback.pendingSelectionDelta != 0 {
+		t.Fatalf("pending page selection not cleared: anchor=%d delta=%d", m.rollback.pendingSelectionAnchor, m.rollback.pendingSelectionDelta)
+	}
+	if m.rollback.selection != 1 {
+		t.Fatalf("selection changed outside selection mode: got %d want 1", m.rollback.selection)
+	}
+}
+
 func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 80)
 	for i := 0; i < 40; i++ {
@@ -102,6 +124,53 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	mid := len(lines) / 2
 	if diff := absInt(selectedLine - mid); diff > 2 {
 		t.Fatalf("expected selected rollback message near viewport middle, line=%d mid=%d", selectedLine, mid)
+	}
+}
+
+func TestRollbackSelectionEdgeArrowRecentersWhenNoPageAvailable(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 80)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := newProjectedStaticUIModel(WithUIInitialTranscript(entries))
+	m.termWidth = 100
+	m.termHeight = 8
+	m.syncViewport()
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !testRollbackSelecting(m) {
+		t.Fatal("expected rollback selection mode")
+	}
+	for testRollbackSelection(m) > 0 {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	selected := testRollbackCandidates(m)[testRollbackSelection(m)].Text
+	for i := 0; i < 6; i++ {
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+	if got := m.view.DetailScroll(); got == 0 {
+		t.Fatalf("expected page down to move detail scroll away from focused edge, got %d", got)
+	}
+	if strings.Contains(stripANSIAndTrimRight(m.view.View()), selected) {
+		t.Fatalf("expected page down to move selected rollback point out of view, got %q", stripANSIAndTrimRight(m.view.View()))
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.view.DetailScroll(); got != 0 {
+		t.Fatalf("expected edge up fallback to restore focused clamped detail scroll, got %d", got)
+	}
+	lines := strings.Split(stripANSIAndTrimRight(m.view.View()), "\n")
+	selectedLine := -1
+	for idx, line := range lines {
+		if strings.Contains(line, selected) {
+			selectedLine = idx
+			break
+		}
+	}
+	if selectedLine < 0 {
+		t.Fatalf("expected edge up to refocus selected rollback point %q, got %q", selected, stripANSIAndTrimRight(m.view.View()))
 	}
 }
 

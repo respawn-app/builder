@@ -290,7 +290,7 @@ func TestResolvePersistedSessionUsesReboundWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestRuntimeLeaseLifecycleIsIdempotent(t *testing.T) {
+func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)
 	projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
@@ -306,27 +306,36 @@ func TestRuntimeLeaseLifecycleIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
-	if !lease.Active() {
-		t.Fatalf("expected active lease, got %+v", lease)
+	if lease.LeaseID == "" || lease.SessionID != sess.Meta().SessionID || lease.RequestID != "req-1" {
+		t.Fatalf("unexpected lease record: %+v", lease)
 	}
 
-	released, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	validated, err := store.ValidateRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
 	if err != nil {
-		t.Fatalf("ReleaseRuntimeLease: %v", err)
+		t.Fatalf("ValidateRuntimeLease: %v", err)
 	}
-	if released.Active() {
-		t.Fatalf("expected released lease, got %+v", released)
-	}
-	if released.ReleasedAt.IsZero() {
-		t.Fatal("expected released_at to be populated")
+	if validated.LeaseID != lease.LeaseID || validated.SessionID != lease.SessionID {
+		t.Fatalf("validated lease = %+v, want %+v", validated, lease)
 	}
 
-	again, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	again, err := store.ValidateRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
 	if err != nil {
-		t.Fatalf("ReleaseRuntimeLease second call: %v", err)
+		t.Fatalf("ValidateRuntimeLease retry: %v", err)
 	}
-	if again.Active() {
-		t.Fatalf("expected second release to remain released, got %+v", again)
+	if again.LeaseID != lease.LeaseID || again.SessionID != lease.SessionID {
+		t.Fatalf("retry validated lease = %+v, want %+v", again, lease)
+	}
+}
+
+func TestValidateRuntimeLeaseRejectsBlankIDsBeforeLookup(t *testing.T) {
+	ctx := context.Background()
+	store, _, _ := newMetadataTestStore(t)
+
+	if _, err := store.ValidateRuntimeLease(ctx, " ", "lease-1"); err == nil || !strings.Contains(err.Error(), "session id is required") {
+		t.Fatalf("ValidateRuntimeLease blank session err = %v, want session id required", err)
+	}
+	if _, err := store.ValidateRuntimeLease(ctx, "session-1", " "); err == nil || !strings.Contains(err.Error(), "lease id is required") {
+		t.Fatalf("ValidateRuntimeLease blank lease err = %v, want lease id required", err)
 	}
 }
 

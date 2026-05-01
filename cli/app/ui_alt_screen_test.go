@@ -1,9 +1,11 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"builder/cli/tui"
+	"builder/shared/clientui"
 )
 
 func TestToggleTranscriptModeUsesFixedDetailAltScreen(t *testing.T) {
@@ -63,5 +65,60 @@ func TestNativeReplayCmdForModeTransitionPreservesAppendOnlyWhenScreenNotReplace
 	}
 	if got := stripANSIText(flush.Text); got != "after" {
 		t.Fatalf("expected append-only replay of deferred delta, got %q", got)
+	}
+}
+
+func TestReturningFromDetailSyncsCommittedSuffixTailIntoOngoingView(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleUser, Text: "prompt", Committed: true}}
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, TotalEntries: 1})
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode=%q want detail", m.view.Mode())
+	}
+
+	_ = m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            2,
+		CommittedEntryCount: 2,
+		StartEntryCount:     1,
+		NextEntryCount:      2,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "answer"}},
+	})
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("mode=%q want ongoing", m.view.Mode())
+	}
+	if got := stripANSIAndTrimRight(m.view.OngoingSnapshot()); !containsAny(got, "answer") {
+		t.Fatalf("expected committed suffix in ongoing tail after detail restore, got %q", got)
+	}
+}
+
+func TestReturningFromDetailPreservesLiveTransientTailInOngoingView(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleUser, Text: "prompt", Committed: true}}
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, TotalEntries: 1})
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode=%q want detail", m.view.Mode())
+	}
+
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{
+		Role:      tui.TranscriptRoleToolCall,
+		Text:      "echo live",
+		Transient: true,
+	})
+	m.transcriptTotalEntries = 2
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("mode=%q want ongoing", m.view.Mode())
+	}
+	if got := stripANSIAndTrimRight(m.view.OngoingSnapshot()); !strings.Contains(got, "echo live") {
+		t.Fatalf("expected live transient tail after detail restore, got %q", got)
 	}
 }

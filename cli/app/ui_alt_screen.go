@@ -64,6 +64,9 @@ func (m *uiModel) transitionTranscriptModeWithOptions(options transcriptModeTran
 	} else if prevMode != nextMode && m.inputMode() == uiInputModeMain {
 		m.restorePrimaryInputMode()
 	}
+	if prevMode != nextMode && nextMode == tui.ModeOngoing {
+		m.syncOngoingTailViewFromRuntimeState()
+	}
 	if prevMode != nextMode {
 		m.invalidateNativeResizeReplay()
 	}
@@ -75,6 +78,23 @@ func (m *uiModel) transitionTranscriptModeWithOptions(options transcriptModeTran
 		return nil
 	}
 	return sequenceCmds(clearCmd, transitionCmd, nativeReplayCmd, detailLoadCmd)
+}
+
+func (m *uiModel) syncOngoingTailViewFromRuntimeState() {
+	if m == nil || !m.hasRuntimeClient() {
+		return
+	}
+	totalEntries := m.transcriptTotalEntries
+	if totalEntries < m.transcriptBaseOffset+len(m.transcriptEntries) {
+		totalEntries = m.transcriptBaseOffset + len(m.transcriptEntries)
+	}
+	m.forwardToView(tui.SetConversationMsg{
+		BaseOffset:   m.transcriptBaseOffset,
+		TotalEntries: totalEntries,
+		Entries:      append([]tui.TranscriptEntry(nil), m.transcriptEntries...),
+		Ongoing:      m.view.OngoingStreamingText(),
+		OngoingError: m.view.OngoingErrorText(),
+	})
 }
 
 func (m *uiModel) clearCmdForModeTransition(prev, next tui.Mode) tea.Cmd {

@@ -101,6 +101,7 @@ func (f *runtimeControlFakeClient) SetThinkingLevel(level string) error {
 }
 func (f *runtimeControlFakeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 	f.setFastModeArg = enabled
+	f.status.FastModeEnabled = enabled
 	return true, f.err
 }
 func (f *runtimeControlFakeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {

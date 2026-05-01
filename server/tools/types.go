@@ -17,11 +17,12 @@ type Call struct {
 }
 
 type Result struct {
-	CallID  string          `json:"call_id"`
-	Name    toolspec.ID     `json:"name"`
-	Output  json.RawMessage `json:"output"`
-	IsError bool            `json:"is_error"`
-	Summary string          `json:"summary,omitempty"`
+	CallID      string          `json:"call_id"`
+	Name        toolspec.ID     `json:"name"`
+	Output      json.RawMessage `json:"output"`
+	IsError     bool            `json:"is_error"`
+	Summary     string          `json:"summary,omitempty"`
+	OngoingText string          `json:"ongoing_text,omitempty"`
 }
 
 type Definition struct {
