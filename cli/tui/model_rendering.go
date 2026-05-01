@@ -198,9 +198,13 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	if resultIdx >= 0 {
 		entryEnd = resultIdx
 	}
+	lines := m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall)
+	if opts.mode == transcriptBlockModeOngoing {
+		lines = m.ongoingToolWithTreeGuideWithSymbol(blockRole, lines, "")
+	}
 	return ongoingBlock{
 		role:       blockRole,
-		lines:      m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall),
+		lines:      lines,
 		entryIndex: m.absoluteTranscriptIndex(entryIndex),
 		entryEnd:   m.absoluteTranscriptIndex(entryEnd),
 	}
@@ -275,9 +279,13 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 			consumed[resultIdx] = struct{}{}
 		}
 	}
+	lines := m.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, opts.mode == transcriptBlockModeDetail)
+	if opts.mode == transcriptBlockModeOngoing {
+		lines = m.ongoingToolWithTreeGuideWithSymbol(blockRole, lines, "")
+	}
 	return ongoingBlock{
 		role:       blockRole,
-		lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, opts.mode == transcriptBlockModeDetail),
+		lines:      lines,
 		entryIndex: m.absoluteTranscriptIndex(entryIndex),
 		entryEnd:   m.absoluteTranscriptIndex(entryIndex),
 	}

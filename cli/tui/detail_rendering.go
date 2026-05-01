@@ -45,6 +45,17 @@ func (m Model) detailWithTreeGuideWithSymbol(role RenderIntent, lines []string, 
 	return out
 }
 
+func (m Model) ongoingToolWithTreeGuideWithSymbol(role RenderIntent, lines []string, symbolOverride string) []string {
+	if !isToolHeadlineRole(role) || len(lines) < 2 {
+		return lines
+	}
+	out := append([]string(nil), lines...)
+	for idx := 1; idx < len(out); idx++ {
+		out[idx] = m.detailTreeGuideLine(role, out[idx], idx == len(out)-1, true, symbolOverride)
+	}
+	return out
+}
+
 func (m Model) detailTreeGuideLine(role RenderIntent, line string, last bool, expanded bool, symbolOverride string) string {
 	connector := detailTreeMiddle
 	if last {
