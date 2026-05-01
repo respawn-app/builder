@@ -9,7 +9,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/runtime"
 	"builder/shared/clientui"
-	"builder/shared/config"
 	"builder/shared/transcript"
 	"builder/shared/uiglyphs"
 
@@ -616,110 +615,99 @@ func TestRollbackForkSubmissionUsesPagedDetailAbsoluteIndex(t *testing.T) {
 	}
 }
 
-func TestRollbackTransitionsByAltScreenPolicy(t *testing.T) {
-	tests := []struct {
-		name       string
-		policy     config.TUIAlternateScreenPolicy
-		altOnEntry bool
-	}{
-		{name: "auto", policy: config.TUIAlternateScreenAuto, altOnEntry: true},
-		{name: "never", policy: config.TUIAlternateScreenNever, altOnEntry: false},
-	}
+func TestRollbackTransitionsUseFixedDetailAltScreen(t *testing.T) {
+	altOnEntry := true
 
-	for _, tt := range tests {
-		t.Run(tt.name+"/ongoing_to_picker_to_edit_to_picker", func(t *testing.T) {
-			m := newProjectedStaticUIModel(
-				WithUIAlternateScreenPolicy(tt.policy),
-				WithUIInitialTranscript([]UITranscriptEntry{
-					{Role: "user", Text: "u1"},
-					{Role: "assistant", Text: "a1"},
-					{Role: "user", Text: "u2"},
-				}),
-			)
-			m.termWidth = 80
-			m.termHeight = 10
-			m.syncViewport()
+	t.Run("ongoing_to_picker_to_edit_to_picker", func(t *testing.T) {
+		m := newProjectedStaticUIModel(
+			WithUIInitialTranscript([]UITranscriptEntry{
+				{Role: "user", Text: "u1"},
+				{Role: "assistant", Text: "a1"},
+				{Role: "user", Text: "u2"},
+			}),
+		)
+		m.termWidth = 80
+		m.termHeight = 10
+		m.syncViewport()
 
-			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-			m = next.(*uiModel)
-			if cmd == nil {
-				t.Fatal("expected picker entry transition command")
-			}
-			if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != tt.altOnEntry {
-				t.Fatalf("unexpected picker entry state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
-			}
-			m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
-			if testRollbackSelection(m) != 1 {
-				t.Fatalf("expected mouse wheel ignored while selecting, got selection %d", testRollbackSelection(m))
-			}
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = next.(*uiModel)
+		if cmd == nil {
+			t.Fatal("expected picker entry transition command")
+		}
+		if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != altOnEntry {
+			t.Fatalf("unexpected picker entry state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
+		}
+		m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		if testRollbackSelection(m) != 1 {
+			t.Fatalf("expected mouse wheel ignored while selecting, got selection %d", testRollbackSelection(m))
+		}
 
-			next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			m = next.(*uiModel)
-			if cmd == nil {
-				t.Fatal("expected edit transition command")
-			}
-			if !testRollbackEditing(m) || m.view.Mode() != tui.ModeOngoing {
-				t.Fatalf("unexpected edit state: editing=%t mode=%q", testRollbackEditing(m), m.view.Mode())
-			}
-			beforeScroll := m.view.OngoingScroll()
-			m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
-			if got := m.view.OngoingScroll(); got != beforeScroll {
-				t.Fatalf("expected mouse wheel ignored while editing, got scroll %d want %d", got, beforeScroll)
-			}
+		next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(*uiModel)
+		if cmd == nil {
+			t.Fatal("expected edit transition command")
+		}
+		if !testRollbackEditing(m) || m.view.Mode() != tui.ModeOngoing {
+			t.Fatalf("unexpected edit state: editing=%t mode=%q", testRollbackEditing(m), m.view.Mode())
+		}
+		beforeScroll := m.view.OngoingScroll()
+		m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		if got := m.view.OngoingScroll(); got != beforeScroll {
+			t.Fatalf("expected mouse wheel ignored while editing, got scroll %d want %d", got, beforeScroll)
+		}
 
-			next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-			m = next.(*uiModel)
-			if cmd == nil {
-				t.Fatal("expected edit cancel transition command")
-			}
-			if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != tt.altOnEntry {
-				t.Fatalf("unexpected picker restore state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
-			}
-		})
+		next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = next.(*uiModel)
+		if cmd == nil {
+			t.Fatal("expected edit cancel transition command")
+		}
+		if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != altOnEntry {
+			t.Fatalf("unexpected picker restore state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
+		}
+	})
 
-		t.Run(tt.name+"/detail_to_picker_to_edit_to_picker", func(t *testing.T) {
-			m := newProjectedStaticUIModel(
-				WithUIAlternateScreenPolicy(tt.policy),
-				WithUIInitialTranscript([]UITranscriptEntry{
-					{Role: "user", Text: "u1"},
-					{Role: "assistant", Text: "a1"},
-					{Role: "user", Text: "u2"},
-				}),
-			)
-			m.termWidth = 80
-			m.termHeight = 10
-			m.syncViewport()
-			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-			if m.view.Mode() != tui.ModeDetail || m.altScreenActive != tt.altOnEntry {
-				t.Fatalf("unexpected detail state before picker: mode=%q alt=%t", m.view.Mode(), m.altScreenActive)
-			}
+	t.Run("detail_to_picker_to_edit_to_picker", func(t *testing.T) {
+		m := newProjectedStaticUIModel(
+			WithUIInitialTranscript([]UITranscriptEntry{
+				{Role: "user", Text: "u1"},
+				{Role: "assistant", Text: "a1"},
+				{Role: "user", Text: "u2"},
+			}),
+		)
+		m.termWidth = 80
+		m.termHeight = 10
+		m.syncViewport()
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+		if m.view.Mode() != tui.ModeDetail || m.altScreenActive != altOnEntry {
+			t.Fatalf("unexpected detail state before picker: mode=%q alt=%t", m.view.Mode(), m.altScreenActive)
+		}
 
-			m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-			m = next.(*uiModel)
-			if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != tt.altOnEntry {
-				t.Fatalf("unexpected detail picker state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
-			}
+		m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = next.(*uiModel)
+		if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != altOnEntry {
+			t.Fatalf("unexpected detail picker state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
+		}
 
-			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			m = next.(*uiModel)
-			if !testRollbackEditing(m) || m.view.Mode() != tui.ModeDetail {
-				t.Fatalf("unexpected detail edit state: editing=%t mode=%q", testRollbackEditing(m), m.view.Mode())
-			}
-			beforeScroll := m.view.DetailScroll()
-			m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
-			if got := m.view.DetailScroll(); got != beforeScroll {
-				t.Fatalf("expected mouse wheel ignored while detail edit active, got scroll %d want %d", got, beforeScroll)
-			}
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(*uiModel)
+		if !testRollbackEditing(m) || m.view.Mode() != tui.ModeDetail {
+			t.Fatalf("unexpected detail edit state: editing=%t mode=%q", testRollbackEditing(m), m.view.Mode())
+		}
+		beforeScroll := m.view.DetailScroll()
+		m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		if got := m.view.DetailScroll(); got != beforeScroll {
+			t.Fatalf("expected mouse wheel ignored while detail edit active, got scroll %d want %d", got, beforeScroll)
+		}
 
-			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-			m = next.(*uiModel)
-			if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != tt.altOnEntry {
-				t.Fatalf("unexpected detail picker restore state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
-			}
-		})
-	}
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = next.(*uiModel)
+		if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail || m.altScreenActive != altOnEntry {
+			t.Fatalf("unexpected detail picker restore state: selecting=%t mode=%q alt=%t", testRollbackSelecting(m), m.view.Mode(), m.altScreenActive)
+		}
+	})
 }
 
 func TestUpDownRouteByTranscriptMode(t *testing.T) {

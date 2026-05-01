@@ -120,14 +120,14 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 			cfg: config.App{
 				WorkspaceRoot:   cfg.WorkspaceRoot,
 				PersistenceRoot: cfg.PersistenceRoot,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+				Settings:        config.Settings{Theme: "dark"},
 			},
 			containerDir: containerDir,
 			sessionViewClient: stubSessionViewClient{getSessionMainView: func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 				return serverapi.SessionMainViewResponse{MainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{ExecutionTarget: clientui.SessionExecutionTarget{WorkspaceRoot: cfg.WorkspaceRoot}}}}, nil
 			}},
 		},
-		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 			if len(summaries) != 2 {
 				t.Fatalf("expected two summaries, got %d", len(summaries))
 			}
@@ -183,7 +183,7 @@ func TestSessionLaunchPlannerMarksNoOtherSessionsForDirectSingleSessionResume(t 
 		cfg: config.App{
 			WorkspaceRoot:   cfg.WorkspaceRoot,
 			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			Settings:        config.Settings{Theme: "dark"},
 		},
 		containerDir: containerDir,
 	})
@@ -209,7 +209,7 @@ func TestSessionLaunchPlannerPickerSelectionMissingMetadataMarksRecoveryInsteadO
 			cfg: config.App{
 				WorkspaceRoot:   workspaceRoot,
 				PersistenceRoot: root,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+				Settings:        config.Settings{Theme: "dark"},
 			},
 			projectID: binding.ProjectID,
 			projectViewClient: client.NewLoopbackProjectViewClient(projectBindingFlowStubProjectViewService{
@@ -219,10 +219,10 @@ func TestSessionLaunchPlannerPickerSelectionMissingMetadataMarksRecoveryInsteadO
 				return serverapi.SessionMainViewResponse{}, errors.New("missing selected session")
 			}},
 			sessionLaunch: stubSessionLaunchClient{planSession: func(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
-				return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{SessionID: "missing-session", WorkspaceRoot: workspaceRoot, ActiveSettings: config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto}}}, nil
+				return serverapi.SessionPlanResponse{Plan: serverapi.SessionPlan{SessionID: "missing-session", WorkspaceRoot: workspaceRoot, ActiveSettings: config.Settings{Theme: "dark"}}}, nil
 			}},
 		},
-		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 			picked := summaries[0]
 			return sessionPickerResult{Session: &picked}, nil
 		},
@@ -294,11 +294,11 @@ func TestSessionLaunchPlannerInteractiveUsesMigratedLegacySession(t *testing.T) 
 			cfg: config.App{
 				WorkspaceRoot:   cfg.WorkspaceRoot,
 				PersistenceRoot: cfg.PersistenceRoot,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+				Settings:        config.Settings{Theme: "dark"},
 			},
 			containerDir: containerDir,
 		},
-		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
 			if len(summaries) != 1 {
 				t.Fatalf("expected one legacy summary, got %d", len(summaries))
 			}
@@ -335,7 +335,7 @@ func TestSessionLaunchPlannerPropagatesServerOwnershipToStatusConfig(t *testing.
 					cfg: config.App{
 						WorkspaceRoot:   "/tmp/workspace-a",
 						PersistenceRoot: root,
-						Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+						Settings:        config.Settings{Theme: "dark"},
 					},
 					containerDir: containerDir,
 				},
@@ -370,7 +370,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 			cfg: config.App{
 				WorkspaceRoot:   "/tmp/workspace-a",
 				PersistenceRoot: root,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto, OpenAIBaseURL: "http://config.local/v1"},
+				Settings:        config.Settings{Theme: "dark", OpenAIBaseURL: "http://config.local/v1"},
 			},
 			containerDir: containerDir,
 			sessionViewClient: stubSessionViewClient{getSessionMainView: func(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
@@ -378,7 +378,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 				return serverapi.SessionMainViewResponse{}, nil
 			}},
 		},
-		pickSession: func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+		pickSession: func([]clientui.SessionSummary, string) (sessionPickerResult, error) {
 			t.Fatal("did not expect picker for explicit session id")
 			return sessionPickerResult{}, nil
 		},

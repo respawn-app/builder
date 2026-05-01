@@ -12,6 +12,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/core"
+	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/protocol"
 	"builder/shared/rpcwire"
@@ -266,6 +267,17 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 				return serverapi.SessionTranscriptPageResponse{}, err
 			}
 			return g.core.SessionViewClient().GetSessionTranscriptPage(ctx, params)
+		})
+	case protocol.MethodSessionGetCommittedTranscriptSuffix:
+		return decodeAndHandle(req, func(params serverapi.SessionCommittedTranscriptSuffixRequest) (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionCommittedTranscriptSuffixResponse{}, err
+			}
+			suffixClient, ok := g.core.SessionViewClient().(client.SessionCommittedTranscriptSuffixClient)
+			if !ok {
+				return serverapi.SessionCommittedTranscriptSuffixResponse{}, errors.New("session committed transcript suffix client is required")
+			}
+			return suffixClient.GetSessionCommittedTranscriptSuffix(ctx, params)
 		})
 	case protocol.MethodSessionGetInitialInput:
 		return decodeAndHandle(req, func(params serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {

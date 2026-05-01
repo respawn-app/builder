@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"builder/cli/tui"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -68,6 +69,9 @@ func (r uiWindowFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			}
 		}
 		m.nativeResizeReplayAt = time.Time{}
+		if refresh := m.requestNativeResizeCommittedTranscriptSuffix(msg.token); refresh != nil {
+			return handledUIFeatureUpdate(m, refresh)
+		}
 		if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
 			return handledUIFeatureUpdate(m, replay)
 		}
@@ -75,6 +79,68 @@ func (r uiWindowFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			return handledUIFeatureUpdate(m, nil)
 		}
 		return handledUIFeatureUpdate(m, tea.ClearScreen)
+	case nativeResizeTranscriptSuffixRefreshedMsg:
+		if msg.token != m.nativeResizeReplayToken || m.view.Mode() != tui.ModeOngoing {
+			return handledUIFeatureUpdate(m, nil)
+		}
+		if msg.err != nil {
+			m.observeRuntimeRequestResult(msg.err)
+			if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
+				return handledUIFeatureUpdate(m, replay)
+			}
+			return handledUIFeatureUpdate(m, tea.ClearScreen)
+		}
+		m.observeRuntimeRequestResult(nil)
+		cmd := m.applyCommittedTranscriptSuffixForNativeReplay(msg.suffix)
+		return handledUIFeatureUpdate(m, cmd)
 	}
 	return uiFeatureUpdateResult{}
+}
+
+func (m *uiModel) requestNativeResizeCommittedTranscriptSuffix(token uint64) tea.Cmd {
+	if m == nil || !m.hasRuntimeClient() {
+		return nil
+	}
+	client, ok := m.runtimeClient().(interface {
+		RefreshCommittedTranscriptSuffix(clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error)
+	})
+	if !ok {
+		return nil
+	}
+	req := m.startupCommittedTranscriptSuffixRequest()
+	return func() tea.Msg {
+		suffix, err := client.RefreshCommittedTranscriptSuffix(req)
+		return nativeResizeTranscriptSuffixRefreshedMsg{token: token, suffix: suffix, err: err}
+	}
+}
+
+func (m *uiModel) applyCommittedTranscriptSuffixForNativeReplay(suffix clientui.CommittedTranscriptSuffix) tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	page := transcriptPageFromCommittedTranscriptSuffix(suffix)
+	entries := transcriptEntriesFromPage(page)
+	m.runtimeAdapter().applyAuthoritativeOngoingTailPage(page, entries, false)
+	m.detailTranscript.syncTail(page)
+	m.forwardToView(tui.SetConversationMsg{
+		BaseOffset:   page.Offset,
+		TotalEntries: page.TotalEntries,
+		Entries:      entries,
+		Ongoing:      page.Ongoing,
+		OngoingError: page.OngoingError,
+	})
+	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
+	if len(committedEntries) == 0 {
+		m.resetNativeHistoryState()
+		m.nativeHistoryReplayed = true
+		if spacer := m.emitEmptyNativeScrollbackSpacer(true); spacer != nil {
+			return spacer
+		}
+		return tea.ClearScreen
+	}
+	m.rebaseNativeProjection(m.nativeCommittedProjection(committedEntries), m.transcriptBaseOffset, len(committedEntries))
+	if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
+		return replay
+	}
+	return tea.ClearScreen
 }

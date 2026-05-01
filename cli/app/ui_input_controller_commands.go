@@ -118,8 +118,12 @@ func (m *uiModel) backTeleportInput() string {
 }
 
 func (m *uiModel) latestAssistantFinalAnswer() string {
-	if answer := strings.TrimSpace(m.runtimeStatus().LastCommittedAssistantFinalAnswer); answer != "" {
-		return m.runtimeStatus().LastCommittedAssistantFinalAnswer
+	if m.hasRuntimeClient() {
+		status := m.refreshRuntimeStatus()
+		if answer := strings.TrimSpace(status.LastCommittedAssistantFinalAnswer); answer != "" {
+			return status.LastCommittedAssistantFinalAnswer
+		}
+		return ""
 	}
 	return localLastCommittedAssistantFinalAnswer(m.transcriptEntries)
 }

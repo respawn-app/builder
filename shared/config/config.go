@@ -18,8 +18,6 @@ const (
 	globalAuthConfigName = "auth.json"
 )
 
-type TUIAlternateScreenPolicy string
-
 type CompactionMode string
 type BGShellsOutputMode string
 type CacheWarningMode string
@@ -32,10 +30,6 @@ type WorktreeSettings struct {
 }
 
 const (
-	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
-	TUIAlternateScreenAlways TUIAlternateScreenPolicy = "always"
-	TUIAlternateScreenNever  TUIAlternateScreenPolicy = "never"
-
 	CompactionModeNative CompactionMode = "native"
 	CompactionModeLocal  CompactionMode = "local"
 	CompactionModeNone   CompactionMode = "none"
@@ -103,7 +97,6 @@ type Settings struct {
 	SystemPromptFiles                []SystemPromptFile
 	ModelCapabilities                ModelCapabilitiesOverride
 	Theme                            string
-	TUIAlternateScreen               TUIAlternateScreenPolicy
 	NotificationMethod               string
 	ToolPreambles                    bool
 	PriorityRequestMode              bool

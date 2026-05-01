@@ -87,6 +87,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	}
 	m.transcriptRevision = max(m.transcriptRevision, evt.TranscriptRevision)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, max(evt.CommittedEntryCount, m.transcriptBaseOffset+len(m.transcriptEntries)))
+	m.observeDirectCommittedEventDelivery(evt)
 	m.refreshRollbackCandidates()
 	if plan.mode == projectedTranscriptEntryPlanAppend && replaceLoadedSyntheticEntries {
 		m.forwardToView(tui.SetConversationMsg{
@@ -135,4 +136,26 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	}
 	m.logProjectedTranscriptAppliedDiag(evt, plan, incomingCount, len(entries), startOffset, entries, true)
 	return m.syncNativeHistoryFromTranscript(), true, false
+}
+
+func (m *uiModel) observeDirectCommittedEventDelivery(evt clientui.Event) {
+	if m == nil || !evt.CommittedTranscriptChanged || evt.CommittedEntryCount <= 0 {
+		return
+	}
+	// User echoes still use the direct event path to preserve prompt responsiveness.
+	// Keep the SSOT delivery cursor in step so the following committed suffix starts
+	// after that already-emitted user row instead of duplicating it from SSOT.
+	if evt.Kind != clientui.EventUserMessageFlushed {
+		return
+	}
+	if !m.ongoingCommittedDelivery.initialized {
+		m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(evt.CommittedEntryCount, evt.TranscriptRevision)
+		return
+	}
+	if evt.CommittedEntryCount > m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount {
+		m.ongoingCommittedDelivery.lastEmittedCommittedEntryCount = evt.CommittedEntryCount
+	}
+	if evt.TranscriptRevision > m.ongoingCommittedDelivery.lastEmittedTranscriptRevision {
+		m.ongoingCommittedDelivery.lastEmittedTranscriptRevision = evt.TranscriptRevision
+	}
 }

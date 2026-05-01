@@ -842,8 +842,9 @@ func TestRuntimeAuthoritativeHydrateRepairsOngoingScrollbackWithoutContinuityLos
 		},
 	}})
 	baselineLen := out.Len()
-	waitForTestCondition(t, 2*time.Second, "authoritative hydrate divergence status visible", func() bool {
-		return strings.Contains(stripANSIAndTrimRight(model.View()), nativeHistoryDivergenceStatusMessage)
+	waitForTestCondition(t, 2*time.Second, "authoritative hydrate divergence rebased", func() bool {
+		got := stripANSIAndTrimRight(model.nativeRenderedSnapshot)
+		return strings.Contains(got, "after") && !strings.Contains(got, "before")
 	})
 
 	program.Quit()
@@ -864,8 +865,5 @@ func TestRuntimeAuthoritativeHydrateRepairsOngoingScrollbackWithoutContinuityLos
 	}
 	if normalized := normalizedOutput(out.String()); !strings.Contains(normalized, "before") {
 		t.Fatalf("expected previously emitted ongoing scrollback to remain intact, got %q", normalized)
-	}
-	if !strings.Contains(stripANSIAndTrimRight(model.View()), nativeHistoryDivergenceStatusMessage) {
-		t.Fatalf("expected authoritative hydrate divergence to surface status, got %q", stripANSIAndTrimRight(model.View()))
 	}
 }

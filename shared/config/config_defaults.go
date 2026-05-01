@@ -26,7 +26,6 @@ const (
 	defaultPreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
 	defaultReviewerFrequency             = "edits"
 	defaultReviewerTimeoutSec            = 60
-	defaultTUIAlternateScreen            = "auto"
 	defaultCompactionMode                = "local"
 	defaultServerHost                    = "127.0.0.1"
 	defaultServerPort                    = 53082

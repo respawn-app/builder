@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"builder/server/auth"
-	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -145,12 +144,11 @@ func TestInteractiveAuthInteractorOffersEnvAPIKeyChoiceWhenAvailable(t *testing.
 	}
 
 	_, err := interactor.Interact(ctx, authInteraction{
-		Manager:         mgr,
-		State:           auth.EmptyState(),
-		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
-		HasEnvAPIKey:    true,
+		Manager:      mgr,
+		State:        auth.EmptyState(),
+		Gate:         auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:        "dark",
+		HasEnvAPIKey: true,
 	})
 	if err != nil {
 		t.Fatalf("interact: %v", err)
@@ -178,12 +176,11 @@ func TestInteractiveAuthInteractorRejectsEnvAPIKeyChoiceWithoutAvailableKey(t *t
 	}
 
 	_, err := interactor.Interact(context.Background(), authInteraction{
-		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
-		State:           auth.EmptyState(),
-		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
-		HasEnvAPIKey:    false,
+		Manager:      auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
+		State:        auth.EmptyState(),
+		Gate:         auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:        "dark",
+		HasEnvAPIKey: false,
 	})
 	if err == nil || err.Error() != "OPENAI_API_KEY is not available" {
 		t.Fatalf("expected missing OPENAI_API_KEY error, got %v", err)
@@ -198,11 +195,10 @@ func TestInteractiveAuthInteractorRejectsUnknownAuthMethodChoice(t *testing.T) {
 	}
 
 	_, err := interactor.Interact(context.Background(), authInteraction{
-		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
-		State:           auth.EmptyState(),
-		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
+		Manager: auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
+		State:   auth.EmptyState(),
+		Gate:    auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:   "dark",
 	})
 	if err == nil || err.Error() != "unknown auth method \"bogus\"" {
 		t.Fatalf("expected unknown auth method error, got %v", err)
@@ -240,13 +236,12 @@ func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *t
 	}
 
 	_, err := interactor.Interact(ctx, authInteraction{
-		Manager:         mgr,
-		State:           auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
-		StoredState:     auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
-		Gate:            auth.StartupGate{Ready: true},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
-		HasEnvAPIKey:    true,
+		Manager:      mgr,
+		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
+		StoredState:  auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
+		Gate:         auth.StartupGate{Ready: true},
+		Theme:        "dark",
+		HasEnvAPIKey: true,
 	})
 	if err != nil {
 		t.Fatalf("interact: %v", err)
@@ -293,12 +288,11 @@ func TestInteractiveAuthInteractorChoosingOAuthWithEnvRemembersSavedPreference(t
 	}
 
 	_, err := interactor.Interact(ctx, authInteraction{
-		Manager:         mgr,
-		State:           auth.EmptyState(),
-		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
-		HasEnvAPIKey:    true,
+		Manager:      mgr,
+		State:        auth.EmptyState(),
+		Gate:         auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:        "dark",
+		HasEnvAPIKey: true,
 	})
 	if err != nil {
 		t.Fatalf("interact: %v", err)
@@ -366,11 +360,10 @@ func TestInteractiveAuthInteractorRetriesWithFlowErrorAndClearsOnSuccess(t *test
 	}
 
 	_, err := interactor.Interact(ctx, authInteraction{
-		Manager:         mgr,
-		State:           auth.EmptyState(),
-		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
-		Theme:           "dark",
-		AlternateScreen: config.TUIAlternateScreenAuto,
+		Manager: mgr,
+		State:   auth.EmptyState(),
+		Gate:    auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:   "dark",
 	})
 	if err != nil {
 		t.Fatalf("interact: %v", err)

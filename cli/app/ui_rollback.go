@@ -191,7 +191,7 @@ func (m *uiModel) suppressRollbackAlternateScrollIfNeeded() tea.Cmd {
 	if m == nil || m.rollback.suppressedAlternateScroll {
 		return nil
 	}
-	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive || !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
+	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive {
 		return nil
 	}
 	m.rollback.suppressedAlternateScroll = true
@@ -203,7 +203,7 @@ func (m *uiModel) restoreRollbackAlternateScrollIfNeeded() tea.Cmd {
 		return nil
 	}
 	m.rollback.suppressedAlternateScroll = false
-	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive || !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
+	if m.view.Mode() != tui.ModeDetail || !m.altScreenActive {
 		return nil
 	}
 	return enableAlternateScrollCmd()

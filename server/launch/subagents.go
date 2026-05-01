@@ -90,8 +90,6 @@ func applySubagentRoleOverrides(settings *config.Settings, role config.SubagentR
 			settings.ModelCapabilities.SupportsVisionInputs = role.Settings.ModelCapabilities.SupportsVisionInputs
 		case "theme":
 			settings.Theme = role.Settings.Theme
-		case "tui_alternate_screen":
-			settings.TUIAlternateScreen = role.Settings.TUIAlternateScreen
 		case "notification_method":
 			settings.NotificationMethod = role.Settings.NotificationMethod
 		case "tool_preambles":

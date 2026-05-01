@@ -182,6 +182,7 @@ func (a uiRuntimeAdapter) applyAuthoritativeOngoingTailPage(page clientui.Transc
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
 	m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
 	m.transcriptRevision = max(m.transcriptRevision, page.Revision)
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(page.Offset+len(committedTranscriptEntriesForApp(entries)), m.transcriptRevision)
 	m.transcriptLiveDirty = false
 	if !preserveLiveReasoning {
 		m.reasoningLiveDirty = false

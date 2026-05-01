@@ -13,6 +13,10 @@ type SessionViewClient interface {
 	GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error)
 }
 
+type SessionCommittedTranscriptSuffixClient interface {
+	GetSessionCommittedTranscriptSuffix(ctx context.Context, req serverapi.SessionCommittedTranscriptSuffixRequest) (serverapi.SessionCommittedTranscriptSuffixResponse, error)
+}
+
 type loopbackSessionViewClient struct {
 	service serverapi.SessionViewService
 }
@@ -33,6 +37,13 @@ func (c *loopbackSessionViewClient) GetSessionTranscriptPage(ctx context.Context
 		return serverapi.SessionTranscriptPageResponse{}, errors.New("session view service is required")
 	}
 	return c.service.GetSessionTranscriptPage(ctx, req)
+}
+
+func (c *loopbackSessionViewClient) GetSessionCommittedTranscriptSuffix(ctx context.Context, req serverapi.SessionCommittedTranscriptSuffixRequest) (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, errors.New("session view service is required")
+	}
+	return c.service.GetSessionCommittedTranscriptSuffix(ctx, req)
 }
 
 func (c *loopbackSessionViewClient) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {

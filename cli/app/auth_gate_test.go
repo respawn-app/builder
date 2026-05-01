@@ -55,7 +55,7 @@ func (s *stubAuthInteractor) Interactive() bool {
 func TestEnsureAuthReadyHeadlessReturnsStartupErrorWithoutCredentials(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 
-	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, config.Settings{Model: "gpt-5", Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto}, &headlessAuthInteractor{
+	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, config.Settings{Model: "gpt-5", Theme: "dark"}, &headlessAuthInteractor{
 		lookupEnv: func(string) string { return "" },
 	})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {

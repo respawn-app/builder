@@ -5,15 +5,13 @@ import (
 	"strings"
 
 	"builder/server/auth"
-	"builder/shared/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type authSuccessScreenData struct {
-	Theme           string
-	AlternateScreen config.TUIAlternateScreenPolicy
-	Method          auth.Method
+	Theme  string
+	Method auth.Method
 }
 
 type authSuccessScreenModel struct {
@@ -93,11 +91,7 @@ func authSuccessScreenTitle(method auth.Method) string {
 
 var runAuthSuccessScreen = func(data authSuccessScreenData) error {
 	model := newAuthSuccessScreenModel(data)
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(data.AlternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	_, err := program.Run()
 	return err
 }

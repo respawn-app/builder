@@ -81,7 +81,7 @@ func (p *runtimeLaunchPlan) CurrentControllerLeaseID() string {
 	return strings.TrimSpace(p.ControllerLeaseID)
 }
 
-type sessionPickerRunner func([]clientui.SessionSummary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error)
+type sessionPickerRunner func([]clientui.SessionSummary, string) (sessionPickerResult, error)
 
 type sessionViewReader interface {
 	GetSessionMainView(ctx context.Context, req serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error)
@@ -95,8 +95,8 @@ type launchPlanner struct {
 func newSessionLaunchPlanner(server embeddedServer) *launchPlanner {
 	return &launchPlanner{
 		server: server,
-		pickSession: func(summaries []clientui.SessionSummary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-			return runSessionPickerFlow(summaries, theme, alternateScreenPolicy)
+		pickSession: func(summaries []clientui.SessionSummary, theme string) (sessionPickerResult, error) {
+			return runSessionPickerFlow(summaries, theme)
 		},
 	}
 }
@@ -211,7 +211,7 @@ func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunc
 		return resolvedSessionPlanRequest{}, errors.New("session picker is required")
 	}
 	cfg := p.server.Config()
-	picked, err := p.pickSession(summaries, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
+	picked, err := p.pickSession(summaries, cfg.Settings.Theme)
 	if err != nil {
 		return resolvedSessionPlanRequest{}, err
 	}
@@ -348,9 +348,6 @@ func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {
 
 func logLaunchPlanStart(logger *runLogger, plan sessionLaunchPlan, startLogLine string) {
 	logger.Logf("%s", startLogLine)
-	if plan.Mode == launchModeInteractive && plan.ActiveSettings.TUIAlternateScreen == config.TUIAlternateScreenAlways {
-		logger.Logf("ui.scrollback.native keeps main UI startup in normal buffer even with tui_alternate_screen=always")
-	}
 	logger.Logf("config.settings path=%s created=%t", plan.Source.SettingsPath, plan.Source.CreatedDefaultConfig)
 	for _, line := range configSourceLines(plan.Source) {
 		logger.Logf("config.source %s", line)

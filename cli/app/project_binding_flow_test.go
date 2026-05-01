@@ -47,11 +47,11 @@ func TestEnsureInteractiveProjectBindingBindsRegisteredWorkspaceWithoutPrompt(t 
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error) {
 		t.Fatal("did not expect binding picker for registered workspace")
 		return projectBindingPickerResult{}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(string, string) (string, error) {
 		t.Fatal("did not expect project name prompt for registered workspace")
 		return "", nil
 	}
@@ -108,13 +108,13 @@ func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsUnknownWorkspace(
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		if len(projects) != 1 {
 			t.Fatalf("expected parent project to appear in picker, got %+v", projects)
 		}
 		return projectBindingPickerResult{CreateNew: true}, nil
 	}
-	runProjectNamePromptFlow = func(defaultName string, theme string, policy config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(defaultName string, theme string) (string, error) {
 		if want := filepath.Base(nested); defaultName != want {
 			t.Fatalf("default project name = %q, want %q", defaultName, want)
 		}
@@ -172,13 +172,13 @@ func TestEnsureInteractiveProjectBindingCreatesProjectForUnknownWorkspace(t *tes
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		if len(projects) != 0 {
 			t.Fatalf("expected no projects, got %+v", projects)
 		}
 		return projectBindingPickerResult{CreateNew: true}, nil
 	}
-	runProjectNamePromptFlow = func(defaultName string, theme string, policy config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(defaultName string, theme string) (string, error) {
 		if want := filepath.Base(workspace); defaultName != want {
 			t.Fatalf("default project name = %q, want %q", defaultName, want)
 		}
@@ -247,18 +247,18 @@ func TestEnsureInteractiveProjectBindingUsesServerBrowsingForMissingServerPath(t
 		runServerProjectPickerFlow = originalRemotePicker
 		runProjectWorkspacePickerFlow = originalWorkspacePicker
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error) {
 		t.Fatal("did not expect local binding picker in server-browsing mode")
 		return projectBindingPickerResult{}, nil
 	}
-	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		if len(projects) != 1 || projects[0].ProjectID != "project-1" {
 			t.Fatalf("unexpected server projects: %+v", projects)
 		}
 		picked := projects[0]
 		return projectBindingPickerResult{Project: &picked}, nil
 	}
-	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string, config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string) (projectWorkspacePickerResult, error) {
 		t.Fatal("did not expect workspace picker for single workspace project")
 		return projectWorkspacePickerResult{}, nil
 	}
@@ -364,14 +364,14 @@ func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProjec
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		if len(projects) != 1 || projects[0].ProjectID != bindingA.ProjectID {
 			t.Fatalf("unexpected projects: %+v", projects)
 		}
 		picked := projects[0]
 		return projectBindingPickerResult{Project: &picked}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(string, string) (string, error) {
 		t.Fatal("did not expect project name prompt when attaching to existing project")
 		return "", nil
 	}
@@ -423,11 +423,11 @@ func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *te
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error) {
 		picked := clientui.ProjectSummary{ProjectID: "project-missing", DisplayName: "Missing Project"}
 		return projectBindingPickerResult{Project: &picked}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(string, string) (string, error) {
 		t.Fatal("did not expect project name prompt when attaching to existing project")
 		return "", nil
 	}
@@ -472,10 +472,10 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error) {
 		return projectBindingPickerResult{Canceled: true}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(string, string) (string, error) {
 		t.Fatal("did not expect project name prompt after picker cancel")
 		return "", nil
 	}
@@ -519,10 +519,10 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string) (projectBindingPickerResult, error) {
 		return projectBindingPickerResult{CreateNew: true}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+	runProjectNamePromptFlow = func(string, string) (string, error) {
 		return "", context.Canceled
 	}
 
@@ -571,7 +571,7 @@ func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(
 		runServerProjectPickerFlow = originalRemotePicker
 		runProjectWorkspacePickerFlow = originalWorkspacePicker
 	})
-	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+	runServerProjectPickerFlow = func(projects []clientui.ProjectSummary, theme string) (projectBindingPickerResult, error) {
 		model := newProjectBindingPickerModel(projects, theme, projectPickerOptions{
 			AllowCreate:    false,
 			HeaderMarkdown: serverProjectPickerHeaderMarkdown,
@@ -587,7 +587,7 @@ func TestEnsureInteractiveServerBrowsingBindingUsesConfiguredServerPickerNotice(
 		picked := projects[0]
 		return projectBindingPickerResult{Project: &picked}, nil
 	}
-	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string, config.TUIAlternateScreenPolicy) (projectWorkspacePickerResult, error) {
+	runProjectWorkspacePickerFlow = func([]clientui.ProjectWorkspaceSummary, string) (projectWorkspacePickerResult, error) {
 		t.Fatal("did not expect workspace picker for single workspace project")
 		return projectWorkspacePickerResult{}, nil
 	}

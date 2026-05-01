@@ -29,6 +29,9 @@ func (m Model) entryPrefix(role RenderIntent, symbolOverride string) string {
 	if symbol == "" {
 		return ""
 	}
+	if isToolHeadlineRole(role) && m.toolSymbolGap > 1 {
+		return symbol + strings.Repeat(" ", m.toolSymbolGap)
+	}
 	return symbol + " "
 }
 

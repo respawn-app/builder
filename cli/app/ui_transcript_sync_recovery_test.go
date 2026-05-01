@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"builder/cli/tui"
+	"builder/server/llm"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 
@@ -120,6 +121,202 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	if client.calls != 2 {
 		t.Fatalf("refresh call count = %d, want 2", client.calls)
 	}
+}
+
+func TestSupervisorTerminalEventsReachOngoingBeforeDetail(t *testing.T) {
+	m, ongoing := newSupervisorTerminalFenceRepro(t)
+
+	if !strings.Contains(ongoing, "updated final after supervisor") || !strings.Contains(ongoing, "Supervisor ran: 1 suggestion, applied.") {
+		t.Fatalf("expected ongoing to receive final assistant and supervisor rows before detail, got %q", ongoing)
+	}
+	if m.waitRuntimeEventAfterHydration {
+		t.Fatal("expected hydration fence to clear after stale authoritative response")
+	}
+	if got := len(m.runtimeEvents); got != 0 {
+		t.Fatalf("expected terminal row events consumed before detail, got %d queued events", got)
+	}
+}
+
+func TestDetailHydrationStillReadsSupervisorTerminalRowsFromSSOT(t *testing.T) {
+	m, ongoing := newSupervisorTerminalFenceRepro(t)
+	if !strings.Contains(ongoing, "updated final after supervisor") || !strings.Contains(ongoing, "Supervisor ran: 1 suggestion, applied.") {
+		t.Fatalf("expected ongoing delivered before detail, got %q", ongoing)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, cmd)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode = %q, want detail", m.view.Mode())
+	}
+
+	// The real workaround is an authoritative detail hydration. The dirty flag
+	// avoids the duplicate-page short-circuit because this repro intentionally
+	// starts from an already-primed detail tail.
+	m.runtimeTranscriptDirty = true
+	next, cmd = m.Update(detailTranscriptLoadMsg{})
+	m = next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	var detailRefresh runtimeTranscriptRefreshedMsg
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			detailRefresh = typed
+		}
+	}
+	if detailRefresh.token == 0 {
+		t.Fatalf("expected detail hydration after ongoing miss, got %+v", msgs)
+	}
+
+	next, cmd = m.Update(detailRefresh)
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, cmd)
+	detailAfterHydration := stripANSIAndTrimRight(m.view.View())
+	if !strings.Contains(detailAfterHydration, "updated final after supervisor") || !strings.Contains(detailAfterHydration, "Supervisor ran: 1 suggestion, applied.") {
+		t.Fatalf("expected detail hydration to repair missing terminal rows, got %q", detailAfterHydration)
+	}
+}
+
+func newSupervisorTerminalFenceRepro(t *testing.T) (*uiModel, string) {
+	t.Helper()
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{
+			{
+				SessionID:    "session-1",
+				Revision:     12,
+				TotalEntries: 2,
+				Entries: []clientui.ChatEntry{
+					{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)},
+					{Role: "user", Text: "supervisor feedback"},
+				},
+			},
+			{
+				SessionID:    "session-1",
+				Revision:     13,
+				TotalEntries: 4,
+				Entries: []clientui.ChatEntry{
+					{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)},
+					{Role: "user", Text: "supervisor feedback"},
+					{Role: "assistant", Text: "updated final after supervisor", Phase: string(llm.MessagePhaseFinal)},
+					{Role: "reviewer_status", Text: "Supervisor ran: 1 suggestion, applied."},
+				},
+			},
+		},
+	}
+	runtimeEvents := make(chan clientui.Event, 2)
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         13,
+		CommittedEntryCount:        4,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "updated final after supervisor",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         13,
+		CommittedEntryCount:        4,
+		CommittedEntryStart:        3,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "reviewer_status", Text: "Supervisor ran: 1 suggestion, applied."}},
+	}
+	close(runtimeEvents)
+
+	m := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	m.startupCmds = nil
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.activity = uiActivityRunning
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 100})
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
+	}); cmd != nil {
+		m = applyRuntimeEventBatchMessagesFromCommand(t, m, cmd)
+	}
+
+	next, cmd := m.Update(runtimeEventBatchMsg{events: []clientui.Event{
+		{
+			Kind:                       clientui.EventUserMessageFlushed,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         12,
+			CommittedEntryCount:        2,
+			CommittedEntryStart:        1,
+			CommittedEntryStartSet:     true,
+			UserMessage:                "supervisor feedback",
+			TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "supervisor feedback"}},
+		},
+		{
+			Kind:                       clientui.EventConversationUpdated,
+			StepID:                     "step-1",
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         13,
+			CommittedEntryCount:        4,
+		},
+	}})
+	m = next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	nativeFlushSeen := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+		}
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			nativeFlushSeen = true
+			if next, flushCmd := m.Update(flush); flushCmd != nil {
+				m = next.(*uiModel)
+				m = applyRuntimeEventBatchMessagesFromCommand(t, m, flushCmd)
+			} else {
+				m = next.(*uiModel)
+			}
+		}
+	}
+	if refresh.token == 0 {
+		t.Fatalf("expected committed-advance hydration command, got %+v", msgs)
+	}
+	if !nativeFlushSeen {
+		t.Fatalf("expected committed user flush to arm native flush fence, got %+v", msgs)
+	}
+
+	next, cmd = m.Update(refresh)
+	m = next.(*uiModel)
+	m = applyRuntimeEventBatchMessagesFromCommand(t, m, cmd)
+	return m, stripANSIAndTrimRight(m.view.OngoingSnapshot())
+}
+
+func applyRuntimeEventBatchMessagesFromCommand(t *testing.T, m *uiModel, cmd tea.Cmd) *uiModel {
+	t.Helper()
+	msgs := collectCmdMessages(t, cmd)
+	for guard := 0; len(msgs) > 0 && guard < 20; guard++ {
+		msg := msgs[0]
+		msgs = msgs[1:]
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			next, nextCmd := m.Update(flush)
+			m = next.(*uiModel)
+			msgs = append(msgs, collectCmdMessages(t, nextCmd)...)
+			continue
+		}
+		batch, ok := msg.(runtimeEventBatchMsg)
+		if !ok {
+			continue
+		}
+		next, nextCmd := m.Update(batch)
+		m = next.(*uiModel)
+		msgs = append(msgs, collectCmdMessages(t, nextCmd)...)
+	}
+	return m
 }
 
 func TestDeferredContinuityRefreshPreservesRecoveryCauseAcrossBusyHydration(t *testing.T) {

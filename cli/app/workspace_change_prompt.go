@@ -1,16 +1,14 @@
 package app
 
 import (
+	"builder/shared/serverapi"
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
-
-	"builder/shared/config"
-	"builder/shared/serverapi"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
+	"path/filepath"
+	"strings"
 )
 
 const (
@@ -56,7 +54,7 @@ func maybeHandlePickedSessionWorkspaceChange(ctx context.Context, server embedde
 	if comparableWorkspaceChangeRoot(currentRoot) == "" || comparableWorkspaceChangeRoot(selectedRoot) == "" || comparableWorkspaceChangeRoot(currentRoot) == comparableWorkspaceChangeRoot(selectedRoot) {
 		return sessionWorkspaceChangeProceed, nil
 	}
-	result, err := runWorkspaceChangePromptFlow(selectedRoot, currentRoot, server.Config().Settings.Theme, server.Config().Settings.TUIAlternateScreen)
+	result, err := runWorkspaceChangePromptFlow(selectedRoot, currentRoot, server.Config().Settings.Theme)
 	if err != nil {
 		return sessionWorkspaceChangeProceed, err
 	}
@@ -213,13 +211,9 @@ func (m *workspaceChangePromptModel) optionLine(index int, label string) string 
 	return fmt.Sprintf("%d. %s", index+1, label)
 }
 
-func runWorkspaceChangePrompt(selectedRoot string, currentRoot string, theme string, alternateScreen config.TUIAlternateScreenPolicy) (workspaceChangePromptResult, error) {
+func runWorkspaceChangePrompt(selectedRoot string, currentRoot string, theme string) (workspaceChangePromptResult, error) {
 	model := newWorkspaceChangePromptModel(selectedRoot, currentRoot, theme)
-	options := []tea.ProgramOption{}
-	if shouldUseStartupPickerAltScreen(alternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	program := tea.NewProgram(model, options...)
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
 		return workspaceChangePromptResult{}, err

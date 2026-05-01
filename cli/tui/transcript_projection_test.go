@@ -6,6 +6,8 @@ import (
 
 	"builder/server/llm"
 	"builder/shared/transcript"
+
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestCommittedOngoingProjectionRenderAppendDeltaFromAppendedEntry(t *testing.T) {
@@ -126,6 +128,39 @@ func TestCommittedOngoingProjectionCommitFrontierWaitsForToolResult(t *testing.T
 	}
 	if strings.Contains(delta, "prompt") {
 		t.Fatalf("expected committed delta to exclude previously emitted prompt, got %q", delta)
+	}
+}
+
+func TestPendingToolSpacingDoesNotChangeCommittedOrDetailSpacing(t *testing.T) {
+	entries := []TranscriptEntry{
+		{Role: "tool_call", Text: "echo done", ToolCallID: "done", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo done"}},
+		{Role: "tool_result_ok", Text: "done", ToolCallID: "done"},
+	}
+	m := NewModel(WithPreviewLines(20), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, SetConversationMsg{Entries: entries})
+
+	committed := xansi.Strip(m.View())
+	if !strings.Contains(committed, "$ echo done") || strings.Contains(committed, "$  echo done") {
+		t.Fatalf("expected committed tool spacing unchanged, got %q", committed)
+	}
+
+	detail := updateModel(t, m, ToggleModeMsg{})
+	detailView := xansi.Strip(detail.View())
+	if !strings.Contains(detailView, "$ echo done") || strings.Contains(detailView, "$  echo done") {
+		t.Fatalf("expected detail tool spacing unchanged, got %q", detailView)
+	}
+
+	pending := xansi.Strip(RenderPendingOngoingSnapshot([]TranscriptEntry{
+		{Role: "tool_call", Text: "echo pending", ToolCallID: "pending", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo pending"}},
+		{Role: "tool_call", Text: "echo done", ToolCallID: "done", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo done"}},
+		{Role: "tool_result_ok", Text: "done", ToolCallID: "done"},
+	}, "dark", 80, "⢎"))
+	if !strings.Contains(pending, "⢎ echo pending") {
+		t.Fatalf("expected pending spinner spacing, got %q", pending)
+	}
+	if !strings.Contains(pending, "$  echo done") {
+		t.Fatalf("expected live completed tool spacing with two spaces, got %q", pending)
 	}
 }
 

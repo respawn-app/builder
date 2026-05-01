@@ -113,9 +113,9 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 	}
 }
 
-func TestNativeAlwaysPolicyDisablesAltScreenAndShowsReplayAfterWindowSize(t *testing.T) {
+func TestMainUIStartsInNormalBufferAndShowsReplayAfterWindowSize(t *testing.T) {
 	out := &bytes.Buffer{}
-	settings := config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways}
+	settings := config.Settings{}
 	model := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "startup replay marker"}}),
 	)

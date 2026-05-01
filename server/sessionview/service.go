@@ -199,6 +199,31 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 	return serverapi.SessionTranscriptPageResponse{}, errors.New("session store resolver is required")
 }
 
+func (s *Service) GetSessionCommittedTranscriptSuffix(ctx context.Context, req serverapi.SessionCommittedTranscriptSuffixRequest) (serverapi.SessionCommittedTranscriptSuffixResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, err
+	}
+	suffixReq := clientui.NormalizeCommittedTranscriptSuffixRequest(clientui.CommittedTranscriptSuffixRequest{
+		AfterEntryCount: req.AfterEntryCount,
+		Limit:           req.Limit,
+	})
+	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, err
+	} else if runtimeEngine != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{Suffix: runtimeview.CommittedTranscriptSuffixFromRuntime(runtimeEngine, suffixReq)}, nil
+	}
+	if store, err := s.resolveSessionStore(ctx, req.SessionID); err != nil {
+		return serverapi.SessionCommittedTranscriptSuffixResponse{}, err
+	} else if store != nil {
+		suffix, err := s.dormantCommittedTranscriptSuffixFromStore(ctx, store, suffixReq)
+		if err != nil {
+			return serverapi.SessionCommittedTranscriptSuffixResponse{}, err
+		}
+		return serverapi.SessionCommittedTranscriptSuffixResponse{Suffix: suffix}, nil
+	}
+	return serverapi.SessionCommittedTranscriptSuffixResponse{}, errors.New("session store resolver is required")
+}
+
 func (s *Service) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.RunGetResponse{}, err
@@ -327,6 +352,38 @@ func (s *Service) dormantTranscriptPageFromStore(ctx context.Context, store *ses
 			clientui.TranscriptPageRequest{Offset: pageOffset, Limit: limit},
 		), nil
 	})
+}
+
+func (s *Service) dormantCommittedTranscriptSuffixFromStore(ctx context.Context, store *session.Store, req clientui.CommittedTranscriptSuffixRequest) (clientui.CommittedTranscriptSuffix, error) {
+	if store == nil {
+		return clientui.CommittedTranscriptSuffix{}, errors.New("session store is required")
+	}
+	req = clientui.NormalizeCommittedTranscriptSuffixRequest(req)
+	meta := store.Meta()
+	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
+	cacheWarningMode := s.cacheWarningModeValue()
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{
+		Offset:           req.AfterEntryCount,
+		Limit:            req.Limit,
+		CacheWarningMode: cacheWarningMode,
+	})
+	if err != nil {
+		return clientui.CommittedTranscriptSuffix{}, err
+	}
+	startEntryCount := req.AfterEntryCount
+	if total := scan.TotalEntries(); startEntryCount > total {
+		startEntryCount = total
+	}
+	return runtimeview.CommittedTranscriptSuffixFromCollectedChat(
+		meta.SessionID,
+		meta.Name,
+		freshness,
+		meta.LastSequence,
+		runtimeview.ChatSnapshotFromRuntime(scan.CollectedPageSnapshot()),
+		scan.TotalEntries(),
+		startEntryCount,
+		req,
+	), nil
 }
 
 func scanDormantTranscript(ctx context.Context, store *session.Store, req runtime.PersistedTranscriptScanRequest) (*runtime.PersistedTranscriptScan, error) {

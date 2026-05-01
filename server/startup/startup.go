@@ -77,7 +77,7 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 		return nil, err
 	}
 	if !req.AllowUnauthenticated {
-		if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, bootstrapReq.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, authHandler); err != nil {
+		if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, bootstrapReq.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, authHandler); err != nil {
 			return nil, err
 		}
 	}
@@ -125,7 +125,6 @@ func EnsureReady(ctx context.Context, state AuthState, authHandler AuthHandler) 
 		state.AuthManager(),
 		state.OAuthOptions(),
 		cfg.Settings.Theme,
-		cfg.Settings.TUIAlternateScreen,
 		lookupEnv(authHandler),
 		authpolicy.RequiresStartupAuth(cfg.Settings),
 		true,

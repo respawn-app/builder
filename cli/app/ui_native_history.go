@@ -9,8 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const nativeHistoryDivergenceStatusMessage = "Transcript sync bug: ongoing scrollback may be stale until reconnect"
-
 func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
@@ -75,7 +73,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		}
 		if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
 			m.acceptNativeProjectionWithoutReplay(projection)
-			return m.sequenceNativeStreamingScrollback(m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError))
+			return m.sequenceNativeStreamingScrollback(nil)
 		}
 		m.acceptNativeProjectionWithoutReplay(projection)
 		return m.sequenceNativeStreamingScrollback(m.reportNativeProjectionDivergence(projection, previousProjection))
@@ -366,7 +364,7 @@ func (m *uiModel) reportNativeProjectionDivergence(current tui.TranscriptProject
 		panic(fmt.Sprintf("same-session committed transcript divergence requires root-cause fix: rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks)))
 	}
 	m.logf("ui.native_history.divergence_detected rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks))
-	return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
+	return nil
 }
 
 func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, baseOffset int, committedCount int) {
@@ -455,7 +453,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 			}
 			if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
 				m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
-				return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
+				return nil
 			}
 			m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
 			return m.reportNativeProjectionDivergence(m.nativeProjection, m.nativeRenderedProjection)
@@ -703,6 +701,11 @@ func (m *uiModel) discardPendingNativeHistoryFlushes() {
 }
 
 func (m *uiModel) handleNativeHistoryFlush(msg nativeHistoryFlushMsg) tea.Cmd {
+	defer func() {
+		if m.ongoingCommittedDelivery.initialized {
+			m.ongoingCommittedDelivery.ackNativeFlush(m.nativeFlushedSequence)
+		}
+	}()
 	if msg.Sequence == 0 {
 		if !msg.AllowBlank && strings.TrimSpace(msg.Text) == "" {
 			if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {

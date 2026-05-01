@@ -73,8 +73,7 @@ func TestEnsureReadyUsesAuthHandlerLookupEnv(t *testing.T) {
 	sawInteraction := false
 	err := EnsureReady(context.Background(), stubAuthState{
 		cfg: config.App{Settings: config.Settings{
-			Theme:              "dark",
-			TUIAlternateScreen: config.TUIAlternateScreenAuto,
+			Theme: "dark",
 		}},
 		oauthOpts: auth.OpenAIOAuthOptions{ClientID: "client-test"},
 		mgr:       mgr,
@@ -92,9 +91,6 @@ func TestEnsureReadyUsesAuthHandlerLookupEnv(t *testing.T) {
 			}
 			if req.Theme != "dark" {
 				t.Fatalf("theme = %q, want dark", req.Theme)
-			}
-			if req.AlternateScreen != config.TUIAlternateScreenAuto {
-				t.Fatalf("alternate screen policy = %q, want auto", req.AlternateScreen)
 			}
 			return true
 		},
@@ -115,9 +111,8 @@ func TestEnsureReadyPromptsDuringExplicitReauthWhenStartupAuthIsOptional(t *test
 	called := false
 	err := EnsureReady(context.Background(), stubAuthState{
 		cfg: config.App{Settings: config.Settings{
-			Theme:              "dark",
-			TUIAlternateScreen: config.TUIAlternateScreenAuto,
-			OpenAIBaseURL:      "http://127.0.0.1:8080/v1",
+			Theme:         "dark",
+			OpenAIBaseURL: "http://127.0.0.1:8080/v1",
 		}},
 		mgr: mgr,
 	}, stubAuthHandler{
