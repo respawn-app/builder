@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	serverbootstrap "builder/server/bootstrap"
 	"builder/server/embedded"
+	"builder/server/generated"
 	"builder/server/metadata"
 	"builder/server/rootlock"
 	"builder/shared/config"
@@ -237,10 +240,22 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	authHandler := startupEnvAuthHandler{}
 	onboarding := startupNoopOnboarding{}
 	registerStartupWorkspace(t, workspace)
+	generatedCalls := 0
+	restoreGeneratedSync := serverbootstrap.SetGeneratedSyncForTest(func(ctx context.Context, opts generated.SyncOptions) (generated.SyncResult, error) {
+		generatedCalls++
+		return generated.Sync(ctx, opts)
+	})
+	defer restoreGeneratedSync()
 
 	appCore, err := StartCore(context.Background(), request, authHandler, onboarding)
 	if err != nil {
 		t.Fatalf("StartCore: %v", err)
+	}
+	if generatedCalls != 1 {
+		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".builder", ".generated", "skills", "skill-creator", "SKILL.md")); err != nil {
+		t.Fatalf("expected StartCore to seed generated skills through bootstrap: %v", err)
 	}
 
 	wrapped := &embedded.Server{Core: appCore}

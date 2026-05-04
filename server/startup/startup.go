@@ -101,7 +101,7 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 	if err != nil {
 		return nil, err
 	}
-	appCore, err := core.New(cfg, authSupport, runtimeSupport)
+	appCore, err := core.NewWithContext(ctx, cfg, authSupport, runtimeSupport)
 	if err != nil {
 		_ = runtimeSupport.Background.Close()
 		return nil, err

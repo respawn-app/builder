@@ -15,6 +15,8 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	serverbootstrap "builder/server/bootstrap"
+	"builder/server/generated"
 	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/runtime"
@@ -115,7 +117,8 @@ func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *se
 }
 
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
 	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
@@ -123,6 +126,12 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	workspace := t.TempDir()
 	registerEmbeddedWorkspace(t, workspace)
 	authHandler := &testAuthHandler{lookupEnv: os.Getenv}
+	generatedCalls := 0
+	restoreGeneratedSync := serverbootstrap.SetGeneratedSyncForTest(func(ctx context.Context, opts generated.SyncOptions) (generated.SyncResult, error) {
+		generatedCalls++
+		return generated.Sync(ctx, opts)
+	})
+	defer restoreGeneratedSync()
 	onboarding := &testOnboardingHandler{
 		ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 			path, created, err := config.WriteDefaultSettingsFile()
@@ -148,6 +157,12 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close() })
+	if _, err := os.Stat(filepath.Join(home, ".builder", ".generated", "skills", "skill-creator", "SKILL.md")); err != nil {
+		t.Fatalf("expected embedded startup to seed generated skills through bootstrap: %v", err)
+	}
+	if generatedCalls != 1 {
+		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
+	}
 
 	if !onboarding.called {
 		t.Fatal("expected onboarding handler to run")

@@ -77,13 +77,15 @@ Builder discovers skills from:
 - `<workspace>/.builder/skills`
 - `~/.builder/skills`
 
+Builder also seeds preinstalled skills into `~/.builder/.generated/skills`. Do not edit `~/.builder/.generated`; copy a generated skill into a workspace or global skill root to customize it.
+
 You can disable individual skills for new sessions in `~/.builder/config.toml`:
 
 ```toml
 [skills]
 apiresult = false
 ```
-Changes will take effect when you start a new sesssion.
+Changes take effect when you start a new session.
 
 Builder discovers custom slash commands from Markdown files in:
 

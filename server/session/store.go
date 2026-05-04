@@ -424,6 +424,14 @@ func (s *Store) MarkAgentsInjected() error {
 	})
 }
 
+func (s *Store) MarkGeneratedRecoveredWarningIssued() error {
+	return s.mutateAndPersist(func() error {
+		s.meta.GeneratedRecoveredWarningIssued = true
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
+}
+
 func (s *Store) MarkModelDispatchLocked(contract LockedContract) error {
 	return s.mutateAndPersist(func() error {
 		s.meta.ModelRequestCount++

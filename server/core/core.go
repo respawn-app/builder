@@ -13,6 +13,7 @@ import (
 	"builder/server/authbootstrap"
 	"builder/server/authstatus"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/generated"
 	"builder/server/launch"
 	"builder/server/metadata"
 	"builder/server/primaryrun"
@@ -96,10 +97,23 @@ func (unregisteredRunPromptClient) RunPrompt(context.Context, serverapi.RunPromp
 }
 
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	return NewWithContext(context.Background(), cfg, authSupport, runtimeSupport)
+}
+
+func NewWithContext(ctx context.Context, cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	rootLease, err := rootlock.Acquire(cfg.PersistenceRoot)
 	if err != nil {
 		return nil, err
 	}
+	generatedSupport, err := serverbootstrap.BuildGeneratedSupport(ctx)
+	if err != nil {
+		_ = rootLease.Close()
+		return nil, err
+	}
+	runtimeSupport.Generated = generatedSupport
 	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, nil); err != nil {
 		_ = rootLease.Close()
 		return nil, err
@@ -141,7 +155,17 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
-	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...).
+		WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
+			nonEmpty, err := generated.RecoveredRootNonEmpty()
+			if err != nil {
+				return "", false, err
+			}
+			if !nonEmpty {
+				return "", false, nil
+			}
+			return generated.RecoveredWarning(), true, nil
+		})
 	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)

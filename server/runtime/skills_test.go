@@ -376,6 +376,106 @@ func TestSkillsContextMessageSkipsConfigDisabledSkills(t *testing.T) {
 	}
 }
 
+func TestGeneratedSkillsAreInjectedAfterUserSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+	generatedSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected skills context")
+	}
+	expected := []string{
+		"- Home Skill: from home (file: " + filepath.ToSlash(homeSkillPath) + ")",
+		"- Workspace Skill: from workspace (file: " + filepath.ToSlash(workspaceSkillPath) + ")",
+		"- skill-creator: generated (file: " + filepath.ToSlash(generatedSkillPath) + ")",
+	}
+	previous := -1
+	for _, text := range expected {
+		idx := strings.Index(content, text)
+		if idx < 0 {
+			t.Fatalf("expected %q in skills context %q", text, content)
+		}
+		if idx <= previous {
+			t.Fatalf("expected generated skill after user skills, got %q", content)
+		}
+		previous = idx
+	}
+}
+
+func TestUserSkillDuplicateNameBehaviorIsUnchanged(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "same-skill-global"), "same-skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "same-skill-workspace"), "same-skill", "from workspace")
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected skills context")
+	}
+	homeEntry := "- same-skill: from home (file: " + filepath.ToSlash(homeSkillPath) + ")"
+	workspaceEntry := "- same-skill: from workspace (file: " + filepath.ToSlash(workspaceSkillPath) + ")"
+	homeIdx := strings.Index(content, homeEntry)
+	workspaceIdx := strings.Index(content, workspaceEntry)
+	if homeIdx < 0 || workspaceIdx < 0 {
+		t.Fatalf("expected both same-name user skills to remain, got %q", content)
+	}
+	if homeIdx >= workspaceIdx {
+		t.Fatalf("expected existing global-before-workspace order to remain, got %q", content)
+	}
+}
+
+func TestGeneratedSkillIsShadowedByUserSkillName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	userSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "skill-creator"), "skill-creator", "workspace")
+	writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected skills context")
+	}
+	if !strings.Contains(content, "- skill-creator: workspace (file: "+filepath.ToSlash(userSkillPath)+")") {
+		t.Fatalf("expected user skill to remain, got %q", content)
+	}
+	if strings.Contains(content, "generated") {
+		t.Fatalf("expected generated skill to be shadowed, got %q", content)
+	}
+}
+
+func TestGeneratedSkillIsDisabledBySkillToggle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+
+	content, found, err := skillsContextMessageWithDisabled(workspace, map[string]bool{"skill-creator": true})
+	if err != nil {
+		t.Fatalf("skillsContextMessageWithDisabled: %v", err)
+	}
+	if found {
+		t.Fatalf("expected disabled generated skill to be omitted, got %q", content)
+	}
+}
+
 func TestInspectSkillsMarksConfigDisabledSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -395,6 +495,33 @@ func TestInspectSkillsMarksConfigDisabledSkills(t *testing.T) {
 	}
 	if !inspections[0].Disabled {
 		t.Fatalf("expected skill to be marked disabled, got %+v", inspections[0])
+	}
+}
+
+func TestInspectSkillsMarksGeneratedShadowedAndDisabled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "skill-creator"), "skill-creator", "workspace")
+	generatedPath := writeTestSkill(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), "skill-creator", "generated")
+
+	inspections, err := InspectSkills(workspace, map[string]bool{"skill-creator": true})
+	if err != nil {
+		t.Fatalf("InspectSkills: %v", err)
+	}
+	var generatedInspection *SkillInspection
+	for idx := range inspections {
+		if inspections[idx].Path == filepath.ToSlash(generatedPath) {
+			generatedInspection = &inspections[idx]
+			break
+		}
+	}
+	if generatedInspection == nil {
+		t.Fatalf("expected generated inspection, got %+v", inspections)
+	}
+	if generatedInspection.SourceKind != string(skillSourceGenerated) || !generatedInspection.Shadowed || !generatedInspection.Disabled {
+		t.Fatalf("expected generated skill to be shadowed and disabled, got %+v", *generatedInspection)
 	}
 }
 

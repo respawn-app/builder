@@ -74,24 +74,25 @@ type WorktreeReminderState struct {
 }
 
 type Meta struct {
-	SessionID                    string                 `json:"session_id"`
-	Name                         string                 `json:"name,omitempty"`
-	FirstPromptPreview           string                 `json:"first_prompt_preview,omitempty"`
-	InputDraft                   string                 `json:"input_draft,omitempty"`
-	ParentSessionID              string                 `json:"parent_session_id,omitempty"`
-	WorkspaceRoot                string                 `json:"workspace_root"`
-	WorkspaceContainer           string                 `json:"workspace_container"`
-	Continuation                 *ContinuationContext   `json:"continuation,omitempty"`
-	CreatedAt                    time.Time              `json:"created_at"`
-	UpdatedAt                    time.Time              `json:"updated_at"`
-	LastSequence                 int64                  `json:"last_sequence"`
-	ModelRequestCount            int64                  `json:"model_request_count"`
-	InFlightStep                 bool                   `json:"in_flight_step"`
-	AgentsInjected               bool                   `json:"agents_injected"`
-	CompactionSoonReminderIssued bool                   `json:"compaction_soon_reminder_issued,omitempty"`
-	WorktreeReminder             *WorktreeReminderState `json:"worktree_reminder,omitempty"`
-	UsageState                   *UsageState            `json:"usage_state,omitempty"`
-	Locked                       *LockedContract        `json:"locked,omitempty"`
+	SessionID                       string                 `json:"session_id"`
+	Name                            string                 `json:"name,omitempty"`
+	FirstPromptPreview              string                 `json:"first_prompt_preview,omitempty"`
+	InputDraft                      string                 `json:"input_draft,omitempty"`
+	ParentSessionID                 string                 `json:"parent_session_id,omitempty"`
+	WorkspaceRoot                   string                 `json:"workspace_root"`
+	WorkspaceContainer              string                 `json:"workspace_container"`
+	Continuation                    *ContinuationContext   `json:"continuation,omitempty"`
+	CreatedAt                       time.Time              `json:"created_at"`
+	UpdatedAt                       time.Time              `json:"updated_at"`
+	LastSequence                    int64                  `json:"last_sequence"`
+	ModelRequestCount               int64                  `json:"model_request_count"`
+	InFlightStep                    bool                   `json:"in_flight_step"`
+	AgentsInjected                  bool                   `json:"agents_injected"`
+	CompactionSoonReminderIssued    bool                   `json:"compaction_soon_reminder_issued,omitempty"`
+	GeneratedRecoveredWarningIssued bool                   `json:"generated_recovered_warning_issued,omitempty"`
+	WorktreeReminder                *WorktreeReminderState `json:"worktree_reminder,omitempty"`
+	UsageState                      *UsageState            `json:"usage_state,omitempty"`
+	Locked                          *LockedContract        `json:"locked,omitempty"`
 }
 
 type Event struct {

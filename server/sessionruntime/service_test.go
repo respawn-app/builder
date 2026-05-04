@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/server/auth"
 	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/registry"
@@ -346,6 +347,113 @@ func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *te
 	}
 	if len(fixture.service.handles) != 0 {
 		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
+	}
+}
+
+func TestActivateSessionRuntimeIgnoresRecoveredWarningProviderError(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.authManager = auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-test"},
+		},
+	}), nil, time.Now)
+	fixture.service.WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
+		return "", false, errors.New("recovered dir unreadable")
+	})
+
+	resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-warning-error",
+		SessionID:       fixture.store.Meta().SessionID,
+		ActiveSettings: config.Settings{
+			Model: "gpt-5",
+			Reviewer: config.ReviewerSettings{
+				Frequency: "off",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime should ignore recovered warning lookup errors: %v", err)
+	}
+	if strings.TrimSpace(resp.LeaseID) == "" {
+		t.Fatalf("expected runtime activation lease, got %+v", resp)
+	}
+}
+
+func TestAppendRecoveredWarningIfNeededPersistsOnce(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	warning := "generated warning"
+	if err := fixture.store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	fixture.service.WithGeneratedRecoveredWarning(warning)
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("append warning: %v", err)
+	}
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("append duplicate warning: %v", err)
+	}
+	count := 0
+	if err := fixture.store.WalkEvents(func(evt session.Event) error {
+		if evt.Kind != "local_entry" {
+			return nil
+		}
+		var entry recoveredWarningEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			return err
+		}
+		if entry.Role == "warning" && entry.Text == warning {
+			count++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("warning count = %d, want 1", count)
+	}
+	if !fixture.store.Meta().GeneratedRecoveredWarningIssued {
+		t.Fatal("expected generated recovered warning marker to be persisted")
+	}
+	reopened, err := session.OpenByID(fixture.config.PersistenceRoot, fixture.store.Meta().SessionID, fixture.metadata.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	if !reopened.Meta().GeneratedRecoveredWarningIssued {
+		t.Fatal("expected generated recovered warning marker to survive reopen")
+	}
+	if err := fixture.service.appendRecoveredWarningIfNeeded(reopened); err != nil {
+		t.Fatalf("append warning after reopen: %v", err)
+	}
+	reopenedCount := 0
+	if err := reopened.WalkEvents(func(evt session.Event) error {
+		if evt.Kind != "local_entry" {
+			return nil
+		}
+		var entry recoveredWarningEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			return err
+		}
+		if entry.Role == "warning" && entry.Text == warning {
+			reopenedCount++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk reopened events: %v", err)
+	}
+	if reopenedCount != 1 {
+		t.Fatalf("reopened warning count = %d, want 1", reopenedCount)
+	}
+}
+
+func TestAppendRecoveredWarningIfNeededIgnoresProviderError(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
+		return "", false, errors.New("recovered dir unreadable")
+	})
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("expected warning lookup errors to be non-fatal, got %v", err)
 	}
 }
 

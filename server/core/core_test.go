@@ -11,6 +11,7 @@ import (
 
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/generated"
 	"builder/server/metadata"
 	"builder/server/rootlock"
 	"builder/shared/clientui"
@@ -118,6 +119,12 @@ func TestNewRejectsSecondCoreForSamePersistenceRoot(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	generatedCalls := 0
+	restoreGeneratedSync := serverbootstrap.SetGeneratedSyncForTest(func(ctx context.Context, opts generated.SyncOptions) (generated.SyncResult, error) {
+		generatedCalls++
+		return generated.Sync(ctx, opts)
+	})
+	defer restoreGeneratedSync()
 
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
@@ -138,6 +145,9 @@ func TestNewRejectsSecondCoreForSamePersistenceRoot(t *testing.T) {
 		t.Fatalf("New first: %v", err)
 	}
 	t.Cleanup(func() { _ = first.Close() })
+	if generatedCalls != 1 {
+		t.Fatalf("generated sync calls after first core = %d, want 1", generatedCalls)
+	}
 
 	authSupportB, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
 	if err != nil {
@@ -152,6 +162,9 @@ func TestNewRejectsSecondCoreForSamePersistenceRoot(t *testing.T) {
 	_, err = New(resolved.Config, authSupportB, runtimeSupportB)
 	if !errors.Is(err, rootlock.ErrPersistenceRootBusy) {
 		t.Fatalf("New second error = %v, want ErrPersistenceRootBusy", err)
+	}
+	if generatedCalls != 1 {
+		t.Fatalf("generated sync calls after rejected second core = %d, want 1", generatedCalls)
 	}
 }
 

@@ -228,3 +228,4 @@ Notes:
 
 - Skill toggles are only applied when Builder creates a new conversation/session.
 - Use `"quoted names"` to refer to skill keys containing spaces.
+- Preinstalled skills are seeded into `~/.builder/.generated/skills`; disable them here instead of editing generated files.
