@@ -124,13 +124,11 @@ func Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 			return result, err
 		}
 	}
-	nonEmpty, err := recoveredRootNonEmpty(paths.recoveryRoot)
-	if err != nil {
-		return result, err
-	}
-	result.RecoveredRootNonEmpty = nonEmpty
-	if nonEmpty {
-		result.RecoveredWarning = recoveredWarningText
+	if nonEmpty, err := recoveredRootNonEmpty(paths.recoveryRoot); err == nil {
+		result.RecoveredRootNonEmpty = nonEmpty
+		if nonEmpty {
+			result.RecoveredWarning = recoveredWarningText
+		}
 	}
 	return result, nil
 }

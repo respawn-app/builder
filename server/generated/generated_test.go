@@ -343,6 +343,26 @@ func TestSyncDetectsRecoveredRootNonEmptyWithoutNewRecovery(t *testing.T) {
 	}
 }
 
+func TestSyncIgnoresRecoveredRootWarningCheckFailure(t *testing.T) {
+	home := t.TempDir()
+	builderRoot := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(builderRoot, 0o755); err != nil {
+		t.Fatalf("mkdir builder root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(builderRoot, "recovered"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write recovered file: %v", err)
+	}
+
+	result, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()})
+	if err != nil {
+		t.Fatalf("sync with invalid recovered root: %v", err)
+	}
+	if result.RecoveredRootNonEmpty || result.RecoveredWarning != "" {
+		t.Fatalf("expected warning check failure to be ignored, got %+v", result)
+	}
+	assertFile(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator", "SKILL.md"), testSkillMarkdown("skill-creator", "create skills"))
+}
+
 func TestSyncWritesMarkerWithTreeHash(t *testing.T) {
 	home := t.TempDir()
 	if _, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()}); err != nil {
