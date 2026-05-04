@@ -378,6 +378,9 @@ func TestAppendRecoveredWarningIfNeededPersistsOnce(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("warning count = %d, want 1", count)
 	}
+	if !fixture.store.Meta().GeneratedRecoveredWarningIssued {
+		t.Fatal("expected generated recovered warning marker to be persisted")
+	}
 }
 
 func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {

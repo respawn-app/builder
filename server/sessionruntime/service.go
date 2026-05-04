@@ -2,7 +2,6 @@ package sessionruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -118,23 +117,7 @@ func (s *Service) appendRecoveredWarningIfNeeded(store *session.Store) error {
 	if !ok || warning == "" || store == nil {
 		return nil
 	}
-	found := false
-	if err := store.WalkEvents(func(evt session.Event) error {
-		if evt.Kind != "local_entry" {
-			return nil
-		}
-		var entry recoveredWarningEntry
-		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
-			return err
-		}
-		if strings.TrimSpace(entry.Role) == "warning" && strings.TrimSpace(entry.Text) == warning {
-			found = true
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if found {
+	if store.Meta().GeneratedRecoveredWarningIssued {
 		return nil
 	}
 	_, appendErr := store.AppendEvent("", "local_entry", recoveredWarningEntry{
@@ -142,7 +125,10 @@ func (s *Service) appendRecoveredWarningIfNeeded(store *session.Store) error {
 		Role:       "warning",
 		Text:       warning,
 	})
-	return appendErr
+	if appendErr != nil {
+		return appendErr
+	}
+	return store.MarkGeneratedRecoveredWarningIssued()
 }
 
 func (s *Service) generatedRecoveredWarning() (string, bool, error) {

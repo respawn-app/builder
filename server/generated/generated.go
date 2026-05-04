@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -312,7 +313,7 @@ func hashTree(entries []treeEntry) string {
 }
 
 func hashActualTree(root string) (string, error) {
-	entries := make([]treeEntry, 0)
+	items := make([]actualTreeItem, 0)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -334,23 +335,59 @@ func hashActualTree(root string) (string, error) {
 		}
 		mode := info.Mode()
 		if mode.IsDir() {
-			entries = append(entries, treeEntry{Path: rel, Kind: treeEntryDir})
+			items = append(items, actualTreeItem{Path: rel, Kind: treeEntryDir})
 			return nil
 		}
 		if !mode.IsRegular() {
 			return fmt.Errorf("generated entry %s has unsupported mode %s", rel, mode)
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		entries = append(entries, treeEntry{Path: rel, Kind: treeEntryFile, Content: data})
+		items = append(items, actualTreeItem{Path: rel, Kind: treeEntryFile, FilePath: path})
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	return hashTree(entries), nil
+	return hashActualTreeItems(items)
+}
+
+type actualTreeItem struct {
+	Path     string
+	Kind     treeEntryKind
+	FilePath string
+}
+
+func hashActualTreeItems(items []actualTreeItem) (string, error) {
+	sorted := append([]actualTreeItem(nil), items...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Path != sorted[j].Path {
+			return sorted[i].Path < sorted[j].Path
+		}
+		return sorted[i].Kind < sorted[j].Kind
+	})
+	h := sha256.New()
+	buffer := make([]byte, 32*1024)
+	for _, item := range sorted {
+		h.Write([]byte(item.Path))
+		h.Write([]byte{0})
+		h.Write([]byte(item.Kind))
+		h.Write([]byte{0})
+		if item.Kind == treeEntryFile {
+			file, err := os.Open(item.FilePath)
+			if err != nil {
+				return "", err
+			}
+			_, copyErr := io.CopyBuffer(h, file, buffer)
+			closeErr := file.Close()
+			if copyErr != nil {
+				return "", copyErr
+			}
+			if closeErr != nil {
+				return "", closeErr
+			}
+		}
+		h.Write([]byte{0})
+	}
+	return treeHashPrefix + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func writeExpectedTree(root string, entries []treeEntry, treeHash string) error {
