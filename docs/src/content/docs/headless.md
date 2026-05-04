@@ -21,6 +21,10 @@ Continue an existing headless session:
 builder run --continue <session-id> "<prompt>"
 ```
 
+Shell commands started by Builder receive `BUILDER_SESSION_ID`.
+Use `builder session-id` inside those commands to print the caller session id.
+`builder run` does not implicitly continue that caller session; use `--session` or `--continue` when you want to resume a specific headless session.
+
 ## Session Behavior
 
 Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run or issue tool preambles.

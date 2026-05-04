@@ -16,6 +16,7 @@ import (
 	serverstartup "builder/server/startup"
 	"builder/shared/buildinfo"
 	"builder/shared/config"
+	"builder/shared/sessionenv"
 )
 
 type stubServeServer struct {
@@ -122,6 +123,31 @@ func TestRootCommandMapsSessionFlagsToInteractiveApp(t *testing.T) {
 	}
 	if got.SessionID != "session-123" {
 		t.Fatalf("unexpected interactive option mapping: %+v", got)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRootCommandIgnoresBuilderSessionEnvByDefault(t *testing.T) {
+	original := runInteractiveApp
+	t.Cleanup(func() {
+		runInteractiveApp = original
+	})
+	var got app.Options
+	runInteractiveApp = func(ctx context.Context, opts app.Options) error {
+		got = opts
+		return nil
+	}
+	t.Setenv(sessionenv.BuilderSessionID, "session-from-env")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--force-interactive"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got.SessionID != "" {
+		t.Fatalf("session id = %q, want empty", got.SessionID)
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
@@ -509,6 +535,77 @@ func TestEffectiveSessionIDPrefersContinueAlias(t *testing.T) {
 
 	if _, err := effectiveSessionID(commonFlags{SessionID: "abc", ContinueID: "xyz"}); err == nil {
 		t.Fatal("expected conflicting --session/--continue error")
+	}
+}
+
+func TestRunSubcommandIgnoresBuilderSessionEnvByDefault(t *testing.T) {
+	original := runPromptApp
+	t.Cleanup(func() {
+		runPromptApp = original
+	})
+	var gotOpts app.Options
+	runPromptApp = func(ctx context.Context, opts app.Options, prompt string, timeout time.Duration, progress io.Writer) (app.RunPromptResult, error) {
+		gotOpts = opts
+		return app.RunPromptResult{Result: "done"}, nil
+	}
+	t.Setenv(sessionenv.BuilderSessionID, "session-from-env")
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create stdout temp file: %v", err)
+	}
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr temp file: %v", err)
+	}
+	os.Stdout = stdoutFile
+	os.Stderr = stderrFile
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
+	})
+
+	if code := rootCommand([]string{"run", "hello"}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if gotOpts.SessionID != "" {
+		t.Fatalf("session id = %q, want empty", gotOpts.SessionID)
+	}
+}
+
+func TestSessionIDSubcommandPrintsBuilderSessionEnv(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, " session-from-env ")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if code := rootCommand([]string{"session-id"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if stdout.String() != "session-from-env\n" {
+		t.Fatalf("stdout = %q, want session id", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestSessionIDSubcommandFailsOutsideBuilderShell(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if code := rootCommand([]string{"session-id"}, strings.NewReader(""), &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "BUILDER_SESSION_ID is not set") {
+		t.Fatalf("stderr = %q, want missing env error", stderr.String())
 	}
 }
 

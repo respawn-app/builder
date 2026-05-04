@@ -136,6 +136,41 @@ func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
 	}
 }
 
+func TestEnrichEnvForSessionEmbedsOwnerSessionID(t *testing.T) {
+	env := envSliceToMap(t, enrichEnvForSession([]string{
+		"BUILDER_SESSION_ID=stale",
+		"KEEP=1",
+	}, "session-abc"))
+
+	if env["BUILDER_SESSION_ID"] != "session-abc" {
+		t.Fatalf("BUILDER_SESSION_ID = %q, want session-abc", env["BUILDER_SESSION_ID"])
+	}
+	if env["KEEP"] != "1" {
+		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
+	}
+}
+
+func TestManagerStartEmbedsOwnerSessionIDInProcessEnv(t *testing.T) {
+	manager := newBackgroundTestManager(t)
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"/bin/sh", "-c", "printf %s \"$BUILDER_SESSION_ID\""},
+		DisplayCommand: "print builder session id",
+		OwnerSessionID: "session-env-123",
+		Workdir:        t.TempDir(),
+		YieldTime:      time.Second,
+		MaxOutputChars: 1000,
+	})
+	if err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	if result.Output != "session-env-123" {
+		t.Fatalf("output = %q, want session-env-123", result.Output)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("exit code = %v, want 0", result.ExitCode)
+	}
+}
+
 func TestEnrichEnvAddsManagedRGConfigPathWhenAvailable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

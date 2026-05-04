@@ -29,6 +29,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder run [flags] <prompt>",
 		"  builder serve [flags]",
 		"  builder service <status|install|uninstall|start|stop|restart>",
+		"  builder session-id",
 		"  builder project [path]",
 		"  builder project list",
 		"  builder project create --path <server-path> --name <project-name>",
@@ -40,12 +41,14 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  `builder run` executes one headless prompt and exits.",
 		"  `builder serve` starts the app server in daemon mode.",
 		"  `builder service` manages the Builder server background service.",
+		"  `builder session-id` prints the caller session id when invoked from a Builder shell command.",
 		"  `builder project` / `attach` / `rebind` inspect or repair workspace bindings.",
 	)
 	writeHelpSection(out, "Commands:",
 		"  run      Execute a headless prompt against a workspace and print the final result.",
 		"  serve    Start the Builder app server and keep serving until interrupted.",
 		"  service  Install, inspect, or restart the Builder server background service.",
+		"  session-id  Print the Builder caller session id from BUILDER_SESSION_ID.",
 		"  project  Inspect project bindings, list projects, or create a project.",
 		"  attach   Attach another workspace path to an existing project.",
 		"  rebind   Retarget one session to a different workspace root.",
@@ -55,6 +58,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder run --fast \"summarize the repo\"",
 		"  builder service status",
 		"  builder service install",
+		"  builder session-id",
 		"  builder project",
 		"  builder attach ../other-checkout",
 		"  builder rebind <session-id> ../moved-workspace",
@@ -93,6 +97,20 @@ func writeRunUsage(fs *flag.FlagSet) {
 	)
 	writeHelpSection(out, "Flags:")
 	fs.PrintDefaults()
+}
+
+func writeSessionIDUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder session-id:",
+		"  builder session-id",
+	)
+	writeHelpSection(out, "What This Does:",
+		"  Print BUILDER_SESSION_ID when invoked from a shell command started by Builder.",
+		"  The command fails outside Builder-managed shell commands.",
+	)
 }
 
 func writeProjectUsage(fs *flag.FlagSet) {

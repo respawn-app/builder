@@ -63,7 +63,7 @@ func (r *Runner) applyHook(ctx context.Context, req Request, originalOutput stri
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, hookPath)
-	cmd.Env = shellenv.Enrich(os.Environ())
+	cmd.Env = shellenv.EnrichForSession(os.Environ(), req.OwnerSessionID)
 	cmd.Stdin = bytes.NewReader(payload)
 	stdout := newLimitedBuffer(maxHookOutputBytes)
 	stderr := newLimitedBuffer(maxHookOutputBytes)

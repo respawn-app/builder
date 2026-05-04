@@ -54,3 +54,22 @@ func TestEnrichAppliesAgentShellDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestEnrichForSessionAddsBuilderSessionID(t *testing.T) {
+	env := envMap(t, EnrichForSession([]string{"KEEP=1"}, " session-123 "))
+
+	if env["BUILDER_SESSION_ID"] != "session-123" {
+		t.Fatalf("BUILDER_SESSION_ID = %q, want session-123", env["BUILDER_SESSION_ID"])
+	}
+	if env["KEEP"] != "1" {
+		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
+	}
+}
+
+func TestEnrichForSessionOverridesExistingBuilderSessionID(t *testing.T) {
+	env := envMap(t, EnrichForSession([]string{"BUILDER_SESSION_ID=stale"}, "real-session"))
+
+	if env["BUILDER_SESSION_ID"] != "real-session" {
+		t.Fatalf("BUILDER_SESSION_ID = %q, want real-session", env["BUILDER_SESSION_ID"])
+	}
+}

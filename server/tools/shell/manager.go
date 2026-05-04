@@ -119,7 +119,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	}
 	cmd := exec.CommandContext(context.Background(), req.Command[0], req.Command[1:]...)
 	cmd.Dir = workdir
-	cmd.Env = enrichEnv(os.Environ())
+	cmd.Env = enrichEnvForSession(os.Environ(), req.OwnerSessionID)
 	prepareManagedExec(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
