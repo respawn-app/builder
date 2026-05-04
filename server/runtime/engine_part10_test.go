@@ -134,6 +134,78 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	}
 }
 
+func TestFreshChildSessionReinjectsDeveloperContextEvenWhenParentAlreadyInjected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	globalDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, "AGENTS.md")
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, "AGENTS.md")
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	storeRoot := t.TempDir()
+	parent, err := session.Create(storeRoot, "parent", workspace)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := parent.MarkAgentsInjected(); err != nil {
+		t.Fatalf("mark parent agents injected: %v", err)
+	}
+	child, err := session.NewLazy(storeRoot, "child", workspace)
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	if err := session.InitializeChildFromParent(child, parent); err != nil {
+		t.Fatalf("initialize child: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(child, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "first child turn"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+	messages := requestMessages(client.calls[0])
+	if len(messages) < 5 {
+		t.Fatalf("expected environment, AGENTS, and user messages, got %+v", messages)
+	}
+	if messages[0].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment reinjected first, got %+v", messages[0])
+	}
+	if messages[1].MessageType != llm.MessageTypeSkills || !strings.Contains(messages[1].Content, "workspace-skill") {
+		t.Fatalf("expected skills reinjected after environment, got %+v", messages[1])
+	}
+	if messages[2].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[2].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS reinjected, got %+v", messages[2])
+	}
+	if messages[3].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(messages[3].Content, "source: "+workspacePath) {
+		t.Fatalf("expected workspace AGENTS reinjected, got %+v", messages[3])
+	}
+	if messages[4].Role != llm.RoleUser || messages[4].Content != "first child turn" {
+		t.Fatalf("expected user message after reinjected context, got %+v", messages[4])
+	}
+}
+
 func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

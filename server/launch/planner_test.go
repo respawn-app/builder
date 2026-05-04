@@ -304,8 +304,8 @@ func TestPlannerNewChildSessionPreservesParentWorktreeContext(t *testing.T) {
 	if childMeta.ParentSessionID != parent.Meta().SessionID {
 		t.Fatalf("child parent session id = %q, want %q", childMeta.ParentSessionID, parent.Meta().SessionID)
 	}
-	if !childMeta.AgentsInjected {
-		t.Fatal("expected child to inherit agents-injected state")
+	if childMeta.AgentsInjected {
+		t.Fatal("expected fresh child to reinject developer context on its first turn")
 	}
 	if childMeta.Locked == nil || childMeta.Locked.Model != "locked-parent-model" {
 		t.Fatalf("child locked contract = %+v, want parent model lock", childMeta.Locked)

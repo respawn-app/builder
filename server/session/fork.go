@@ -107,7 +107,7 @@ func InitializeChildFromParent(child *Store, parent *Store) error {
 	parentMeta := parent.Meta()
 	child.mu.Lock()
 	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
-	child.meta.AgentsInjected = parentMeta.AgentsInjected
+	child.meta.AgentsInjected = false
 	child.meta.WorkspaceRoot = parentMeta.WorkspaceRoot
 	child.meta.WorkspaceContainer = parentMeta.WorkspaceContainer
 	child.meta.WorktreeReminder = forkedWorktreeReminderState(parentMeta.WorktreeReminder)
