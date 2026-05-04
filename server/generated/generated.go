@@ -26,6 +26,8 @@ const (
 	generatedSkillsDir   = "skills"
 	markerFileName       = ".builder-generated.json"
 	markerSchemaVersion  = 1
+	generatedDirPerm     = fs.FileMode(0o755)
+	generatedFilePerm    = fs.FileMode(0o644)
 	treeHashPrefix       = "sha256:"
 	recoveredWarningText = "~/.builder/.generated folder was edited. This shouldn't be done and is a user error. Your edited folder was recovered to ~/.builder/recovered. Please clean and remove that folder to make this warning go away, and do not attempt to edit ~/.builder/.generated in the future as it is overwritten on every startup and intended for seeding files for usage by the agent only. If you wanted to disable skills there, disable them in config.toml according to documentation."
 	readmeFileName       = "README.md"
@@ -65,6 +67,7 @@ const (
 type treeEntry struct {
 	Path    string
 	Kind    treeEntryKind
+	Perm    fs.FileMode
 	Content []byte
 }
 
@@ -252,8 +255,8 @@ func expectedTree(customFS fs.FS) ([]treeEntry, error) {
 		source = prompts.GeneratedSkillsFS
 	}
 	entries := []treeEntry{
-		{Path: readmeFileName, Kind: treeEntryFile, Content: []byte(generatedReadme)},
-		{Path: generatedSkillsDir, Kind: treeEntryDir},
+		{Path: readmeFileName, Kind: treeEntryFile, Perm: generatedFilePerm, Content: []byte(generatedReadme)},
+		{Path: generatedSkillsDir, Kind: treeEntryDir, Perm: generatedDirPerm},
 	}
 	if err := fs.WalkDir(source, generatedSkillsDir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -267,7 +270,7 @@ func expectedTree(customFS fs.FS) ([]treeEntry, error) {
 		rel := filepath.ToSlash(path)
 		if mode.IsDir() {
 			if rel != generatedSkillsDir {
-				entries = append(entries, treeEntry{Path: rel, Kind: treeEntryDir})
+				entries = append(entries, treeEntry{Path: rel, Kind: treeEntryDir, Perm: generatedDirPerm})
 			}
 			return nil
 		}
@@ -278,7 +281,7 @@ func expectedTree(customFS fs.FS) ([]treeEntry, error) {
 		if err != nil {
 			return err
 		}
-		entries = append(entries, treeEntry{Path: rel, Kind: treeEntryFile, Content: data})
+		entries = append(entries, treeEntry{Path: rel, Kind: treeEntryFile, Perm: generatedFilePerm, Content: data})
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("walk generated assets: %w", err)
@@ -303,6 +306,8 @@ func hashTree(entries []treeEntry) string {
 		h.Write([]byte(entry.Path))
 		h.Write([]byte{0})
 		h.Write([]byte(entry.Kind))
+		h.Write([]byte{0})
+		h.Write([]byte(entry.Perm.String()))
 		h.Write([]byte{0})
 		if entry.Kind == treeEntryFile {
 			h.Write(entry.Content)
@@ -335,13 +340,13 @@ func hashActualTree(root string) (string, error) {
 		}
 		mode := info.Mode()
 		if mode.IsDir() {
-			items = append(items, actualTreeItem{Path: rel, Kind: treeEntryDir})
+			items = append(items, actualTreeItem{Path: rel, Kind: treeEntryDir, Perm: mode.Perm()})
 			return nil
 		}
 		if !mode.IsRegular() {
 			return fmt.Errorf("generated entry %s has unsupported mode %s", rel, mode)
 		}
-		items = append(items, actualTreeItem{Path: rel, Kind: treeEntryFile, FilePath: path})
+		items = append(items, actualTreeItem{Path: rel, Kind: treeEntryFile, Perm: mode.Perm(), FilePath: path})
 		return nil
 	})
 	if err != nil {
@@ -353,6 +358,7 @@ func hashActualTree(root string) (string, error) {
 type actualTreeItem struct {
 	Path     string
 	Kind     treeEntryKind
+	Perm     fs.FileMode
 	FilePath string
 }
 
@@ -370,6 +376,8 @@ func hashActualTreeItems(items []actualTreeItem) (string, error) {
 		h.Write([]byte(item.Path))
 		h.Write([]byte{0})
 		h.Write([]byte(item.Kind))
+		h.Write([]byte{0})
+		h.Write([]byte(item.Perm.String()))
 		h.Write([]byte{0})
 		if item.Kind == treeEntryFile {
 			file, err := os.Open(item.FilePath)
@@ -407,15 +415,15 @@ func writeExpectedTree(root string, entries []treeEntry, treeHash string) error 
 	for _, entry := range sortedTree(entries) {
 		target := filepath.Join(tempRoot, filepath.FromSlash(entry.Path))
 		if entry.Kind == treeEntryDir {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, generatedDirPerm); err != nil {
 				return fmt.Errorf("create generated dir %s: %w", entry.Path, err)
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), generatedDirPerm); err != nil {
 			return fmt.Errorf("create generated file parent %s: %w", entry.Path, err)
 		}
-		if err := os.WriteFile(target, entry.Content, 0o644); err != nil {
+		if err := os.WriteFile(target, entry.Content, generatedFilePerm); err != nil {
 			return fmt.Errorf("write generated file %s: %w", entry.Path, err)
 		}
 	}

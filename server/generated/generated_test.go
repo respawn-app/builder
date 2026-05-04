@@ -129,6 +129,52 @@ func TestSyncRecoversAddedDeletedAndRenamedEntries(t *testing.T) {
 	}
 }
 
+func TestSyncRecoversPermissionOnlyEdits(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		perm   os.FileMode
+		verify func(t *testing.T, path string)
+	}{
+		{
+			name: "file",
+			path: filepath.Join("skills", "skill-creator", "SKILL.md"),
+			perm: 0o755,
+			verify: func(t *testing.T, path string) {
+				assertPerm(t, path, generatedFilePerm)
+			},
+		},
+		{
+			name: "directory",
+			path: filepath.Join("skills", "skill-creator"),
+			perm: 0o700,
+			verify: func(t *testing.T, path string) {
+				assertPerm(t, path, generatedDirPerm)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if _, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			target := filepath.Join(home, ".builder", ".generated", tc.path)
+			if err := os.Chmod(target, tc.perm); err != nil {
+				t.Fatalf("chmod generated %s: %v", tc.path, err)
+			}
+			result, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()})
+			if err != nil {
+				t.Fatalf("recover mode edit: %v", err)
+			}
+			if !result.Recovered {
+				t.Fatalf("expected recovery for mode edit: %+v", result)
+			}
+			tc.verify(t, target)
+		})
+	}
+}
+
 func TestSyncRecoversSymlinkWithoutFollowing(t *testing.T) {
 	home := t.TempDir()
 	if _, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()}); err != nil {
@@ -275,5 +321,16 @@ func assertFile(t *testing.T, path, want string) {
 	}
 	if string(data) != want {
 		t.Fatalf("%s = %q, want %q", path, string(data), want)
+	}
+}
+
+func assertPerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s perm = %s, want %s", path, got, want)
 	}
 }
