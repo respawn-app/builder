@@ -53,6 +53,10 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	generatedSupport, err := serverbootstrap.BuildGeneratedSupport(ctx)
+	if err != nil {
+		return nil, err
+	}
 	cfg := resolved.Config
 	store := hooks.Auth.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
 	authSupport, err := serverbootstrap.BuildAuthSupport(store, req.LookupEnv, req.Now)
@@ -82,6 +86,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	runtimeSupport.Generated = generatedSupport
 	appCore, err := core.New(cfg, authSupport, runtimeSupport)
 	if err != nil {
 		_ = runtimeSupport.Background.Close()

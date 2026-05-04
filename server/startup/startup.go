@@ -70,6 +70,10 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 	if err != nil {
 		return nil, err
 	}
+	generatedSupport, err := serverbootstrap.BuildGeneratedSupport(ctx)
+	if err != nil {
+		return nil, err
+	}
 	cfg := resolved.Config
 	store := authHandler.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
 	authSupport, err := serverbootstrap.BuildAuthSupport(store, bootstrapReq.LookupEnv, bootstrapReq.Now)
@@ -101,6 +105,7 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 	if err != nil {
 		return nil, err
 	}
+	runtimeSupport.Generated = generatedSupport
 	appCore, err := core.New(cfg, authSupport, runtimeSupport)
 	if err != nil {
 		_ = runtimeSupport.Background.Close()

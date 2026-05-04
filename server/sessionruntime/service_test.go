@@ -349,6 +349,37 @@ func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *te
 	}
 }
 
+func TestAppendRecoveredWarningIfNeededPersistsOnce(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	warning := "generated warning"
+	fixture.service.WithGeneratedRecoveredWarning(warning)
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("append warning: %v", err)
+	}
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("append duplicate warning: %v", err)
+	}
+	count := 0
+	if err := fixture.store.WalkEvents(func(evt session.Event) error {
+		if evt.Kind != "local_entry" {
+			return nil
+		}
+		var entry recoveredWarningEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			return err
+		}
+		if entry.Role == "warning" && entry.Text == warning {
+			count++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("warning count = %d, want 1", count)
+	}
+}
+
 func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")

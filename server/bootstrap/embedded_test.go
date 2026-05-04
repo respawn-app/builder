@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/generated"
 	"builder/shared/config"
 )
 
@@ -58,6 +59,29 @@ func TestBuildRuntimeSupportUsesConfigSettings(t *testing.T) {
 	}
 	if support.BackgroundRouter == nil {
 		t.Fatal("expected background router")
+	}
+}
+
+func TestBuildGeneratedSupportUsesSharedSyncPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	result, err := BuildGeneratedSupport(context.Background())
+	if err != nil {
+		t.Fatalf("BuildGeneratedSupport: %v", err)
+	}
+	wantSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	if result.GeneratedSkillsRoot != wantSkillsRoot {
+		t.Fatalf("generated skills root = %q, want %q", result.GeneratedSkillsRoot, wantSkillsRoot)
+	}
+	if _, err := os.Stat(filepath.Join(wantSkillsRoot, "skill-creator", "SKILL.md")); err != nil {
+		t.Fatalf("expected generated skill to be seeded: %v", err)
+	}
+	if result.RecoveredWarning != "" {
+		t.Fatalf("did not expect recovered warning on clean seed, got %+v", result)
+	}
+	if generated.RecoveredWarning() == "" {
+		t.Fatal("expected generated warning text to be available")
 	}
 }
 

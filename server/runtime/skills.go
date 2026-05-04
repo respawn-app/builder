@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"builder/prompts"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"builder/prompts"
+	generatedassets "builder/server/generated"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +31,7 @@ type injectedSkill struct {
 	Name        string
 	Description string
 	Path        string
+	SourceKind  skillSourceKind
 }
 
 type SkillMetadata struct {
@@ -48,6 +51,19 @@ type skillDiscoveryIssue struct {
 	Reason string
 }
 
+type skillSourceKind string
+
+const (
+	skillSourceGlobal    skillSourceKind = "global"
+	skillSourceWorkspace skillSourceKind = "workspace"
+	skillSourceGenerated skillSourceKind = "generated"
+)
+
+type skillRoot struct {
+	Path string
+	Kind skillSourceKind
+}
+
 func skillsContextMessage(workspaceRoot string) (string, bool, error) {
 	return skillsContextMessageWithDisabled(workspaceRoot, nil)
 }
@@ -65,23 +81,24 @@ func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[s
 }
 
 func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool) ([]injectedSkill, []skillDiscoveryIssue, error) {
-	roots, err := skillsInjectionRoots(workspaceRoot)
+	roots, err := skillDiscoveryRoots(workspaceRoot)
 	if err != nil {
 		return nil, nil, err
 	}
-	out := make([]injectedSkill, 0)
+	candidates := make([]injectedSkill, 0)
 	issues := make([]skillDiscoveryIssue, 0)
+	userSkillNames := map[string]bool{}
 	seenPaths := map[string]bool{}
 	for _, root := range roots {
-		entries, readErr := readSkillsDir(root)
+		entries, readErr := readSkillsDir(root.Path)
 		if readErr != nil {
 			if os.IsNotExist(readErr) {
 				continue
 			}
-			return nil, nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
+			return nil, nil, fmt.Errorf("read skills directory %q: %w", root.Path, readErr)
 		}
 		for _, entry := range entries {
-			resolution := resolveSkillDir(root, entry)
+			resolution := resolveSkillDir(root.Path, entry)
 			if resolution.Issue != nil {
 				issues = append(issues, *resolution.Issue)
 			}
@@ -93,15 +110,28 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 			if !ok {
 				continue
 			}
-			if disabledSkills[normalizeSkillToggleName(skill.Name)] {
-				continue
-			}
 			if seenPaths[skill.Path] {
 				continue
 			}
 			seenPaths[skill.Path] = true
-			out = append(out, skill)
+			skill.SourceKind = root.Kind
+			candidates = append(candidates, skill)
+			if root.Kind != skillSourceGenerated {
+				userSkillNames[normalizeSkillToggleName(skill.Name)] = true
+			}
 		}
+	}
+
+	out := make([]injectedSkill, 0, len(candidates))
+	for _, skill := range candidates {
+		nameKey := normalizeSkillToggleName(skill.Name)
+		if disabledSkills[nameKey] {
+			continue
+		}
+		if skill.SourceKind == skillSourceGenerated && userSkillNames[nameKey] {
+			continue
+		}
+		out = append(out, skill)
 	}
 	return out, issues, nil
 }
@@ -169,27 +199,44 @@ func formatSkillDiscoveryWarning(issue skillDiscoveryIssue) string {
 }
 
 func skillsInjectionRoots(workspaceRoot string) ([]string, error) {
+	roots, err := skillDiscoveryRoots(workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(roots))
+	for _, root := range roots {
+		paths = append(paths, root.Path)
+	}
+	return paths, nil
+}
+
+func skillDiscoveryRoots(workspaceRoot string) ([]skillRoot, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	paths := make([]string, 0, 2)
+	roots := make([]skillRoot, 0, 3)
 	seen := map[string]bool{}
-	addPath := func(path string) {
+	addPath := func(path string, kind skillSourceKind) {
 		cleaned := filepath.Clean(path)
 		if cleaned == "" || seen[cleaned] {
 			return
 		}
 		seen[cleaned] = true
-		paths = append(paths, cleaned)
+		roots = append(roots, skillRoot{Path: cleaned, Kind: kind})
 	}
 
-	addPath(filepath.Join(home, agentsGlobalDirName, skillsDirName))
+	addPath(filepath.Join(home, agentsGlobalDirName, skillsDirName), skillSourceGlobal)
 	if strings.TrimSpace(workspaceRoot) != "" {
-		addPath(filepath.Join(workspaceRoot, agentsGlobalDirName, skillsDirName))
+		addPath(filepath.Join(workspaceRoot, agentsGlobalDirName, skillsDirName), skillSourceWorkspace)
 	}
-	return paths, nil
+	generatedRoot, err := generatedassets.GeneratedSkillsRoot()
+	if err != nil {
+		return nil, err
+	}
+	addPath(generatedRoot, skillSourceGenerated)
+	return roots, nil
 }
 
 func parseInjectedSkill(path string) (injectedSkill, bool) {

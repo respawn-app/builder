@@ -13,6 +13,7 @@ import (
 	"builder/server/authbootstrap"
 	"builder/server/authstatus"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/generated"
 	"builder/server/launch"
 	"builder/server/metadata"
 	"builder/server/primaryrun"
@@ -141,7 +142,17 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
-	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...).
+		WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
+			nonEmpty, err := generated.RecoveredRootNonEmpty()
+			if err != nil {
+				return "", false, err
+			}
+			if !nonEmpty {
+				return "", false, nil
+			}
+			return generated.RecoveredWarning(), true, nil
+		})
 	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)

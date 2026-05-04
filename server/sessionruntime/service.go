@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -22,21 +23,24 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
 
 	"github.com/google/uuid"
 )
 
 type Service struct {
-	persistenceRoot  string
-	metadataStore    *metadata.Store
-	authManager      *auth.Manager
-	fastModeState    *runtime.FastModeState
-	background       *shelltool.Manager
-	backgroundRouter *runtimewire.BackgroundEventRouter
-	runtimes         *registry.RuntimeRegistry
-	sessionStores    *registry.SessionStoreRegistry
-	storeOptions     []session.StoreOption
+	persistenceRoot          string
+	metadataStore            *metadata.Store
+	authManager              *auth.Manager
+	fastModeState            *runtime.FastModeState
+	background               *shelltool.Manager
+	backgroundRouter         *runtimewire.BackgroundEventRouter
+	runtimes                 *registry.RuntimeRegistry
+	sessionStores            *registry.SessionStoreRegistry
+	storeOptions             []session.StoreOption
+	recoveredWarning         string
+	recoveredWarningProvider func() (string, bool, error)
 
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
@@ -84,6 +88,75 @@ func NewService(persistenceRoot string, metadataStore *metadata.Store, authManag
 	}
 }
 
+func (s *Service) WithGeneratedRecoveredWarning(warning string) *Service {
+	if s == nil {
+		return nil
+	}
+	s.recoveredWarning = strings.TrimSpace(warning)
+	return s
+}
+
+func (s *Service) WithGeneratedRecoveredWarningProvider(provider func() (string, bool, error)) *Service {
+	if s == nil {
+		return nil
+	}
+	s.recoveredWarningProvider = provider
+	return s
+}
+
+type recoveredWarningEntry struct {
+	Visibility transcript.EntryVisibility `json:"visibility,omitempty"`
+	Role       string                     `json:"role"`
+	Text       string                     `json:"text"`
+}
+
+func (s *Service) appendRecoveredWarningIfNeeded(store *session.Store) error {
+	warning, ok, err := s.generatedRecoveredWarning()
+	if err != nil {
+		return err
+	}
+	if !ok || warning == "" || store == nil {
+		return nil
+	}
+	found := false
+	if err := store.WalkEvents(func(evt session.Event) error {
+		if evt.Kind != "local_entry" {
+			return nil
+		}
+		var entry recoveredWarningEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			return err
+		}
+		if strings.TrimSpace(entry.Role) == "warning" && strings.TrimSpace(entry.Text) == warning {
+			found = true
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, appendErr := store.AppendEvent("", "local_entry", recoveredWarningEntry{
+		Visibility: transcript.EntryVisibilityAll,
+		Role:       "warning",
+		Text:       warning,
+	})
+	return appendErr
+}
+
+func (s *Service) generatedRecoveredWarning() (string, bool, error) {
+	if s == nil {
+		return "", false, nil
+	}
+	if s.recoveredWarningProvider != nil {
+		warning, ok, err := s.recoveredWarningProvider()
+		return strings.TrimSpace(warning), ok, err
+	}
+	warning := strings.TrimSpace(s.recoveredWarning)
+	return warning, warning != "", nil
+}
+
 func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
@@ -128,6 +201,9 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if err := store.EnsureDurable(); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := s.appendRecoveredWarningIfNeeded(store); err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)

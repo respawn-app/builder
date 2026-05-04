@@ -558,10 +558,24 @@ func statusSkillLine(skill runtime.SkillInspection, tokenCounts map[string]int) 
 	if name == "" {
 		name = filepath.Base(filepath.Dir(skill.Path))
 	}
-	if skill.Disabled {
-		return name + " " + lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("disabled")
+	labels := make([]string, 0, 3)
+	if skill.SourceKind == "generated" {
+		labels = append(labels, "generated")
 	}
-	return fmt.Sprintf("%s (%s)", name, statusTokenShort(tokenCounts[strings.TrimSpace(skill.Path)]))
+	if skill.Disabled {
+		labels = append(labels, lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("disabled"))
+	}
+	if skill.Shadowed {
+		labels = append(labels, "shadowed")
+	}
+	if skill.Disabled || skill.Shadowed {
+		return fmt.Sprintf("%s %s", name, strings.Join(labels, " "))
+	}
+	summary := fmt.Sprintf("%s (%s)", name, statusTokenShort(tokenCounts[strings.TrimSpace(skill.Path)]))
+	if len(labels) > 0 {
+		return summary + " " + strings.Join(labels, " ")
+	}
+	return summary
 }
 
 func statusSkillFailureLine(skill runtime.SkillInspection) string {

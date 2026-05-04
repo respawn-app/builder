@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/generated"
 	"builder/server/launch"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
@@ -43,6 +44,21 @@ type RuntimeSupport struct {
 	FastModeState    *runtime.FastModeState
 	Background       *shelltool.Manager
 	BackgroundRouter *runtimewire.BackgroundEventRouter
+	Generated        generated.SyncResult
+}
+
+var syncGenerated = generated.Sync
+
+func SetGeneratedSyncForTest(fn func(context.Context, generated.SyncOptions) (generated.SyncResult, error)) func() {
+	previous := syncGenerated
+	if fn == nil {
+		syncGenerated = generated.Sync
+	} else {
+		syncGenerated = fn
+	}
+	return func() {
+		syncGenerated = previous
+	}
 }
 
 func ResolveConfig(req Request) (ConfigPlan, error) {
@@ -127,6 +143,13 @@ func BuildRuntimeSupport(cfg config.App) (RuntimeSupport, error) {
 		Background:       background,
 		BackgroundRouter: runtimewire.NewBackgroundEventRouter(background, cfg.Settings.ShellOutputMaxChars, shelltool.NormalizeBackgroundOutputMode(string(cfg.Settings.BGShellsOutput))),
 	}, nil
+}
+
+func BuildGeneratedSupport(ctx context.Context) (generated.SyncResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return syncGenerated(ctx, generated.SyncOptions{})
 }
 
 func loadConfig(loadOpts config.LoadOptions, workspaceRoot, openAIBaseURL string, useOpenAIBaseURL bool) (config.App, error) {

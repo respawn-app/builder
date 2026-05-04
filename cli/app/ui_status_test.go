@@ -100,6 +100,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		Skills: []runtime.SkillInspection{
 			{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
 			{Name: "local helper", Path: "/Users/test/.builder/skills/local-helper/SKILL.md", Loaded: true, Disabled: true},
+			{Name: "skill-creator", Path: "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md", Loaded: true, SourceKind: "generated"},
 			{Name: "broken", Path: "/Users/test/.builder/skills/broken/SKILL.md", Loaded: false, Reason: "missing SKILL.md"},
 		},
 		AgentsPaths:     []string{"/Users/test/.builder/AGENTS.md", "/tmp/workdir/AGENTS.md"},
@@ -144,7 +145,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
 	}
-	for _, want := range []string{"3 skills", "/Users/test/.builder/skills", "├─ apiresult (0k)", "├─ local helper disabled", "└─ ! broken (missing SKILL.md)"} {
+	for _, want := range []string{"4 skills", "/Users/test/.builder/skills", "apiresult (0k)", "local helper disabled", "! broken (missing SKILL.md)", "/Users/test/.builder/.generated/skills", "skill-creator (0k) generated"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected grouped skill rendering to contain %q, got %q", want, plain)
 		}
@@ -317,6 +318,68 @@ func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.
 	}
 	if groups[0].Skills[1].Path != "/Users/test/.builder/skills/broken/SKILL.md" {
 		t.Fatalf("expected broken skill path to remain in SKILL.md form, got %+v", groups[0].Skills[1])
+	}
+}
+
+func TestStatusSkillLineMarksGeneratedAndShadowed(t *testing.T) {
+	line := stripANSIAndTrimRight(statusSkillLine(runtime.SkillInspection{
+		Name:       "skill-creator",
+		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
+		Loaded:     true,
+		SourceKind: "generated",
+		Shadowed:   true,
+	}, nil))
+	for _, want := range []string{"skill-creator", "generated", "shadowed"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("expected status skill line to contain %q, got %q", want, line)
+		}
+	}
+}
+
+func TestStatusSkillLinePreservesTokenCountForActiveGeneratedSkill(t *testing.T) {
+	path := "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md"
+	active := stripANSIAndTrimRight(statusSkillLine(runtime.SkillInspection{
+		Name:       "skill-creator",
+		Path:       path,
+		Loaded:     true,
+		SourceKind: "generated",
+	}, map[string]int{path: 1234}))
+	for _, want := range []string{"skill-creator", "(1.2k)", "generated"} {
+		if !strings.Contains(active, want) {
+			t.Fatalf("expected active generated line to contain %q, got %q", want, active)
+		}
+	}
+	disabled := stripANSIAndTrimRight(statusSkillLine(runtime.SkillInspection{
+		Name:       "disabled-skill",
+		Path:       path,
+		Loaded:     true,
+		SourceKind: "generated",
+		Disabled:   true,
+	}, map[string]int{path: 1234}))
+	if !strings.Contains(disabled, "generated") || !strings.Contains(disabled, "disabled") || strings.Contains(disabled, "(1.2k)") {
+		t.Fatalf("expected disabled generated line to be label-only, got %q", disabled)
+	}
+	shadowed := stripANSIAndTrimRight(statusSkillLine(runtime.SkillInspection{
+		Name:       "shadowed-skill",
+		Path:       path,
+		Loaded:     true,
+		SourceKind: "generated",
+		Shadowed:   true,
+	}, map[string]int{path: 1234}))
+	if !strings.Contains(shadowed, "generated") || !strings.Contains(shadowed, "shadowed") || strings.Contains(shadowed, "(1.2k)") {
+		t.Fatalf("expected shadowed generated line to be label-only, got %q", shadowed)
+	}
+}
+
+func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".builder", "recovered", "old"), 0o755); err != nil {
+		t.Fatalf("mkdir recovered: %v", err)
+	}
+	result := defaultUIStatusCollector{}.CollectEnvironment(context.Background(), uiStatusRequest{WorkspaceRoot: t.TempDir()}, uiStatusSnapshot{})
+	if !strings.Contains(result.CollectorWarning, "~/.builder/.generated folder was edited") {
+		t.Fatalf("expected recovered generated warning, got %q", result.CollectorWarning)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/auth"
+	"builder/server/generated"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/shared/client"
@@ -471,8 +472,13 @@ func (defaultUIStatusCollector) CollectGit(ctx context.Context, req uiStatusRequ
 
 func (defaultUIStatusCollector) CollectEnvironment(_ context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusEnvironmentStageResult {
 	result := uiStatusEnvironmentStageResult{}
-	warnings := make([]string, 0, 2)
+	warnings := make([]string, 0, 3)
 	workspaceRoot := statusEnvironmentRoot(req.WorkspaceRoot, statusExecutionTarget(req))
+	if recovered, err := generated.RecoveredRootNonEmpty(); err != nil {
+		warnings = append(warnings, "generated: "+err.Error())
+	} else if recovered {
+		warnings = append(warnings, generated.RecoveredWarning())
+	}
 	skills, skillsErr := runtime.InspectSkills(workspaceRoot, config.DisabledSkillToggles(req.Settings))
 	if skillsErr != nil {
 		warnings = append(warnings, "skills: "+skillsErr.Error())

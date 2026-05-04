@@ -9,6 +9,13 @@
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
 - First-run onboarding may optionally symlink skills and slash-command roots from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout; normal runtime discovery still reads only Builder-owned directories.
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
+- Preinstalled skills are seeded from binary-embedded deterministic assets under `prompts/skills/**` into hardcoded `~/.builder/.generated/skills`; generated assets do not use configured session persistence root.
+- `~/.builder/.generated` is deterministic, destructible, overwritten on server startup, and not user-owned. Generated sync runs on server startup (`builder serve` or embedded server), not in clients.
+- Generated asset integrity uses `.generated/.builder-generated.json` with schema, Builder version, and tree hash excluding the marker. Clean old generated trees upgrade in place; edited/add/delete/rename/symlink/invalid-marker states move the whole `.generated` entry to `~/.builder/recovered/<UTC timestamp>/.generated`, then regenerate.
+- If `~/.builder/recovered` is non-empty, every new session gets a user-facing, non-model-visible warning asking the user to clean recovered files and not edit `~/.builder/.generated`; existing sessions are not warned every turn.
+- Generated skills are always seeded regardless of config. Existing `[skills]` toggles only disable injection by normalized skill name.
+- Generated skills are shadowed by any user skill with the same normalized name from workspace/global roots. Do not redesign existing non-generated duplicate behavior as part of generated skills.
+- Initial preinstalled skill framework ships `skill-creator`, but `prompts/skills/skill-creator/SKILL.md` must be valid before commit: non-empty file, valid frontmatter with non-empty `name` and `description`, non-empty body. Generated skill validation must also reject duplicate generated skill names and symlinks/non-regular entries.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
 - Source layout is a single Go module organized under top-level `cli/`, `server/`, and `shared/` roots: CLI/frontend-owned packages live under `cli/`, authoritative runtime/persistence/tool/auth packages live under `server/`, and boundary-safe shared contracts/helpers live under `shared/`.
