@@ -73,6 +73,47 @@ type WorktreeReminderState struct {
 	IssuedCompactionCount int                  `json:"issued_compaction_count,omitempty"`
 }
 
+type GoalStatus string
+
+const (
+	GoalStatusActive   GoalStatus = "active"
+	GoalStatusPaused   GoalStatus = "paused"
+	GoalStatusComplete GoalStatus = "complete"
+)
+
+type GoalActor string
+
+const (
+	GoalActorUser   GoalActor = "user"
+	GoalActorAgent  GoalActor = "agent"
+	GoalActorSystem GoalActor = "system"
+)
+
+type GoalState struct {
+	ID        string     `json:"id"`
+	Objective string     `json:"objective"`
+	Status    GoalStatus `json:"status"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type GoalSetEvent struct {
+	Goal           GoalState `json:"goal"`
+	Actor          GoalActor `json:"actor"`
+	ReplacedGoalID string    `json:"replaced_goal_id,omitempty"`
+}
+
+type GoalStatusUpdatedEvent struct {
+	Goal           GoalState  `json:"goal"`
+	Actor          GoalActor  `json:"actor"`
+	PreviousStatus GoalStatus `json:"previous_status"`
+}
+
+type GoalClearedEvent struct {
+	Goal  GoalState `json:"goal"`
+	Actor GoalActor `json:"actor"`
+}
+
 type Meta struct {
 	SessionID                       string                 `json:"session_id"`
 	Name                            string                 `json:"name,omitempty"`
@@ -92,6 +133,7 @@ type Meta struct {
 	GeneratedRecoveredWarningIssued bool                   `json:"generated_recovered_warning_issued,omitempty"`
 	WorktreeReminder                *WorktreeReminderState `json:"worktree_reminder,omitempty"`
 	UsageState                      *UsageState            `json:"usage_state,omitempty"`
+	Goal                            *GoalState             `json:"goal,omitempty"`
 	Locked                          *LockedContract        `json:"locked,omitempty"`
 }
 

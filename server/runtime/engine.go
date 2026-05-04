@@ -176,6 +176,8 @@ type Engine struct {
 	compactionSoonReminderIssued bool
 	pendingHandoffRequest        *handoffRequest
 	pendingHandoffFutureMessage  string
+	goalLoopRunning              bool
+	goalLoopSuspended            bool
 
 	tokenUsage        *tokenUsageTracker
 	collaboratorsOnce sync.Once
@@ -324,6 +326,11 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			return nil, err
 		}
 	}
+	if meta.Goal != nil && meta.Goal.Status == session.GoalStatusActive {
+		if err := eng.startGoalLoop(false); err != nil {
+			return nil, err
+		}
+	}
 
 	return eng, nil
 }
@@ -406,6 +413,11 @@ func (e *Engine) DiscardQueuedUserMessagesMatching(text string) int {
 
 func (e *Engine) Interrupt() error {
 	e.ensureOrchestrationCollaborators()
+	e.mu.Lock()
+	if e.goalActiveLocked() {
+		e.goalLoopSuspended = true
+	}
+	e.mu.Unlock()
 	return e.stepLifecycle.Interrupt()
 }
 
@@ -415,6 +427,9 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	}
 
 	e.ensureOrchestrationCollaborators()
+	e.mu.Lock()
+	e.goalLoopSuspended = false
+	e.mu.Unlock()
 	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 		e.mu.Lock()
 		hasQueuedInjected := len(e.pendingInjected) > 0

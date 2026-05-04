@@ -275,6 +275,9 @@ func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID strin
 	if err := e.applyPendingHandoffIfNeeded(ctx, stepID); err != nil {
 		return err
 	}
+	if err := e.requireAskQuestionForActiveGoal(); err != nil {
+		return err
+	}
 	if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 		return err
 	}

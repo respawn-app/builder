@@ -30,6 +30,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder serve [flags]",
 		"  builder service <status|install|uninstall|start|stop|restart>",
 		"  builder session-id",
+		"  builder goal <show|set|pause|resume|clear|complete>",
 		"  builder project [path]",
 		"  builder project list",
 		"  builder project create --path <server-path> --name <project-name>",
@@ -42,6 +43,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  `builder serve` starts the app server in daemon mode.",
 		"  `builder service` manages the Builder server background service.",
 		"  `builder session-id` prints the caller session id when invoked from a Builder shell command.",
+		"  `builder goal` manages the active session goal through the live runtime.",
 		"  `builder project` / `attach` / `rebind` inspect or repair workspace bindings.",
 	)
 	writeHelpSection(out, "Commands:",
@@ -49,6 +51,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  serve    Start the Builder app server and keep serving until interrupted.",
 		"  service  Install, inspect, or restart the Builder server background service.",
 		"  session-id  Print the Builder caller session id from BUILDER_SESSION_ID.",
+		"  goal     Show or update the live session goal.",
 		"  project  Inspect project bindings, list projects, or create a project.",
 		"  attach   Attach another workspace path to an existing project.",
 		"  rebind   Retarget one session to a different workspace root.",
@@ -59,6 +62,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder service status",
 		"  builder service install",
 		"  builder session-id",
+		"  builder goal show",
 		"  builder project",
 		"  builder attach ../other-checkout",
 		"  builder rebind <session-id> ../moved-workspace",
@@ -111,6 +115,46 @@ func writeSessionIDUsage(fs *flag.FlagSet) {
 		"  Print BUILDER_SESSION_ID when invoked from a shell command started by Builder.",
 		"  The command fails outside Builder-managed shell commands.",
 	)
+}
+
+func writeGoalUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	writeHelpSection(out, "Usage of builder goal:",
+		"  builder goal show [--json] [--session <id>]",
+		"  builder goal set [--session <id>] <objective>",
+		"  builder goal pause [--session <id>]",
+		"  builder goal resume [--session <id>]",
+		"  builder goal clear [--session <id>]",
+		"  builder goal complete [--session <id>]",
+	)
+	writeHelpSection(out, "What This Does:",
+		"  Manage the live runtime goal for a session.",
+		"  Inside Builder shell commands, BUILDER_SESSION_ID targets the caller session automatically.",
+		"  Outside Builder shell commands, pass --session <id>.",
+	)
+}
+
+func writeGoalShowUsage(fs *flag.FlagSet) {
+	writeGoalUsage(fs)
+}
+
+func writeGoalSetUsage(fs *flag.FlagSet) {
+	writeGoalUsage(fs)
+}
+
+func writeGoalStatusUsage(fs *flag.FlagSet, _ string) {
+	writeGoalUsage(fs)
+}
+
+func writeGoalCompleteUsage(fs *flag.FlagSet) {
+	writeGoalUsage(fs)
+}
+
+func writeGoalClearUsage(fs *flag.FlagSet) {
+	writeGoalUsage(fs)
 }
 
 func writeProjectUsage(fs *flag.FlagSet) {

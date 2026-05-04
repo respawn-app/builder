@@ -65,6 +65,7 @@ type RunState struct {
 	Busy       bool
 	RunID      string
 	Status     RunStatus
+	GoalLoop   bool
 	StartedAt  time.Time
 	FinishedAt time.Time
 }

@@ -184,6 +184,39 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 	}
 }
 
+func TestLoopbackRunPromptClientRejectsSelectedSessionWithGoal(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if _, err := store.SetGoal("ship feature", session.GoalActorUser); err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+
+	client := NewLoopbackRunPromptClient(HeadlessBootstrap{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings:        config.Settings{Model: "gpt-5"},
+		},
+		ContainerDir: containerDir,
+	})
+
+	_, err = client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID:   "goal-reject-1",
+		SelectedSessionID: store.Meta().SessionID,
+		Prompt:            "continue",
+	}, nil)
+	if !errors.Is(err, ErrHeadlessGoalSession) {
+		t.Fatalf("RunPrompt error = %v, want ErrHeadlessGoalSession", err)
+	}
+}
+
 func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")

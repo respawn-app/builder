@@ -22,6 +22,7 @@ const (
 	ActionSetSupervisor     Action = "set_supervisor"
 	ActionSetAutoCompaction Action = "set_auto_compaction"
 	ActionStatus            Action = "status"
+	ActionGoal              Action = "goal"
 	ActionProcesses         Action = "processes"
 	ActionWorktree          Action = "worktree"
 	ActionCopy              Action = "copy"
@@ -42,6 +43,8 @@ type Result struct {
 	FastMode           string
 	SupervisorMode     string
 	AutoCompactionMode string
+	GoalMode           string
+	GoalObjective      string
 }
 
 type Handler func(args string) Result
@@ -103,6 +106,20 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("status", "Open a detailed status overlay for the current session/runtime", RegisterOptions{RunWhileBusy: true}, func(string) Result {
 		return Result{Handled: true, Action: ActionStatus}
+	})
+	r.RegisterWithOptions("goal", "Set or manage the current session goal (usage: /goal [pause|resume|clear|<objective>])", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		mode := "show"
+		objective := strings.TrimSpace(args)
+		switch strings.ToLower(objective) {
+		case "pause", "resume", "clear":
+			mode = strings.ToLower(objective)
+			objective = ""
+		default:
+			if objective != "" {
+				mode = "set"
+			}
+		}
+		return Result{Handled: true, Action: ActionGoal, GoalMode: mode, GoalObjective: objective}
 	})
 	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}

@@ -146,6 +146,30 @@ func (c *leaseRetryRuntimeControlClient) RecordPromptHistory(context.Context, se
 	return nil
 }
 
+func (c *leaseRetryRuntimeControlClient) ShowGoal(context.Context, serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) SetGoal(context.Context, serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) PauseGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) ResumeGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) CompleteGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
+func (c *leaseRetryRuntimeControlClient) ClearGoal(context.Context, serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+
 func TestRuntimeClientSubmitUserMessageRecoversInvalidControllerLease(t *testing.T) {
 	controls := &leaseRetryRuntimeControlClient{}
 	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)

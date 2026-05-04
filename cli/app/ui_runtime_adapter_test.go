@@ -173,6 +173,24 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestDeveloperErrorFeedbackLocalEntryAppearsInOngoing(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind: clientui.EventLocalEntryAdded,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "developer_error_feedback",
+			Text:       "Goal loop stopped: provider down",
+			Visibility: clientui.EntryVisibilityAll,
+		}},
+	})
+
+	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if !strings.Contains(ongoing, "Goal loop stopped: provider down") {
+		t.Fatalf("expected developer error feedback in ongoing scrollback, got %q", ongoing)
+	}
+}
+
 func TestProjectRuntimeEventKeepsReviewerCompletedAsStatusOnlyEvent(t *testing.T) {
 	evt := projectRuntimeEvent(runtime.Event{
 		Kind: runtime.EventReviewerCompleted,

@@ -2,26 +2,32 @@ package sessionenv
 
 import "testing"
 
-func TestLookupBuilderSessionIDTrimsValue(t *testing.T) {
-	got, ok := LookupBuilderSessionID(func(key string) (string, bool) {
-		if key != BuilderSessionID {
-			t.Fatalf("key = %q, want %q", key, BuilderSessionID)
-		}
-		return " session-123 ", true
-	})
-	if !ok {
-		t.Fatal("expected session id")
+func TestLookupBuilderSessionID(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+		ok   bool
+	}{
+		{name: "missing"},
+		{name: "blank", env: map[string]string{BuilderSessionID: " \t\n"}},
+		{name: "trims", env: map[string]string{BuilderSessionID: " session-1 \n"}, want: "session-1", ok: true},
 	}
-	if got != "session-123" {
-		t.Fatalf("session id = %q, want session-123", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := LookupBuilderSessionID(func(key string) (string, bool) {
+				value, exists := tt.env[key]
+				return value, exists
+			})
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("LookupBuilderSessionID = (%q, %t), want (%q, %t)", got, ok, tt.want, tt.ok)
+			}
+		})
 	}
 }
 
-func TestLookupBuilderSessionIDRejectsMissingOrBlank(t *testing.T) {
-	if got, ok := LookupBuilderSessionID(func(string) (string, bool) { return "", false }); ok || got != "" {
-		t.Fatalf("missing session id = %q/%v, want empty false", got, ok)
-	}
-	if got, ok := LookupBuilderSessionID(func(string) (string, bool) { return " \t", true }); ok || got != "" {
-		t.Fatalf("blank session id = %q/%v, want empty false", got, ok)
+func TestLookupBuilderSessionIDNilLookup(t *testing.T) {
+	if got, ok := LookupBuilderSessionID(nil); got != "" || ok {
+		t.Fatalf("LookupBuilderSessionID(nil) = (%q, %t), want empty false", got, ok)
 	}
 }

@@ -55,6 +55,7 @@ type uiInputFeatureState struct {
 	promptHistoryDraftCursor int
 	busy                     bool
 	activity                 uiActivity
+	goalRun                  bool
 	compacting               bool
 	reviewerRunning          bool
 	reviewerBlocking         bool
@@ -135,6 +136,7 @@ type uiStatusFeatureState struct {
 	statusCollector             uiStatusCollector
 	statusRepository            uiStatusRepository
 	status                      uiStatusOverlayState
+	goal                        uiGoalOverlayState
 	statusGitBackgroundInFlight bool
 	clipboardImagePaster        uiClipboardImagePaster
 	clipboardTextCopier         uiClipboardTextCopier

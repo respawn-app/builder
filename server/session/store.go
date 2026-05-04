@@ -381,6 +381,110 @@ func (s *Store) SetWorktreeReminderState(state *WorktreeReminderState) error {
 	return s.observePersistence(snapshot)
 }
 
+func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
+	trimmedObjective := strings.TrimSpace(objective)
+	if trimmedObjective == "" {
+		return GoalState{}, errors.New("goal objective is required")
+	}
+	normalizedActor, err := normalizeGoalActor(actor)
+	if err != nil {
+		return GoalState{}, err
+	}
+	s.mu.Lock()
+	now := time.Now().UTC()
+	replacedGoalID := ""
+	if s.meta.Goal != nil {
+		replacedGoalID = strings.TrimSpace(s.meta.Goal.ID)
+	}
+	goal := GoalState{
+		ID:        uuid.NewString(),
+		Objective: trimmedObjective,
+		Status:    GoalStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.meta.Goal = cloneGoalState(&goal)
+	evt, err := s.buildEventLocked("", "goal_set", GoalSetEvent{Goal: goal, Actor: normalizedActor, ReplacedGoalID: replacedGoalID}, now)
+	if err != nil {
+		s.mu.Unlock()
+		return GoalState{}, err
+	}
+	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.mu.Unlock()
+	if err != nil {
+		return GoalState{}, err
+	}
+	if err := s.observePersistence(observation); err != nil {
+		return GoalState{}, err
+	}
+	return goal, nil
+}
+
+func (s *Store) SetGoalStatus(status GoalStatus, actor GoalActor) (GoalState, error) {
+	normalizedStatus, err := normalizeGoalStatus(status)
+	if err != nil {
+		return GoalState{}, err
+	}
+	normalizedActor, err := normalizeGoalActor(actor)
+	if err != nil {
+		return GoalState{}, err
+	}
+	s.mu.Lock()
+	if s.meta.Goal == nil {
+		s.mu.Unlock()
+		return GoalState{}, errors.New("goal is not set")
+	}
+	now := time.Now().UTC()
+	goal := *cloneGoalState(s.meta.Goal)
+	previousStatus := goal.Status
+	goal.Status = normalizedStatus
+	goal.UpdatedAt = now
+	s.meta.Goal = cloneGoalState(&goal)
+	evt, err := s.buildEventLocked("", "goal_status_updated", GoalStatusUpdatedEvent{Goal: goal, Actor: normalizedActor, PreviousStatus: previousStatus}, now)
+	if err != nil {
+		s.mu.Unlock()
+		return GoalState{}, err
+	}
+	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.mu.Unlock()
+	if err != nil {
+		return GoalState{}, err
+	}
+	if err := s.observePersistence(observation); err != nil {
+		return GoalState{}, err
+	}
+	return goal, nil
+}
+
+func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
+	normalizedActor, err := normalizeGoalActor(actor)
+	if err != nil {
+		return GoalState{}, err
+	}
+	s.mu.Lock()
+	if s.meta.Goal == nil {
+		s.mu.Unlock()
+		return GoalState{}, errors.New("goal is not set")
+	}
+	now := time.Now().UTC()
+	goal := *cloneGoalState(s.meta.Goal)
+	s.meta.Goal = nil
+	evt, err := s.buildEventLocked("", "goal_cleared", GoalClearedEvent{Goal: goal, Actor: normalizedActor}, now)
+	if err != nil {
+		s.mu.Unlock()
+		return GoalState{}, err
+	}
+	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.mu.Unlock()
+	if err != nil {
+		return GoalState{}, err
+	}
+	if err := s.observePersistence(observation); err != nil {
+		return GoalState{}, err
+	}
+	return goal, nil
+}
+
 func (s *Store) SetUsageState(state *UsageState) error {
 	s.mu.Lock()
 
@@ -533,18 +637,10 @@ func (s *Store) BackfillLockedReviewerPrompt(reviewerPrompt string) error {
 func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 	s.mu.Lock()
 
-	body, err := json.Marshal(payload)
+	evt, err := s.buildEventLocked(stepID, kind, payload, time.Now().UTC())
 	if err != nil {
 		s.mu.Unlock()
-		return Event{}, fmt.Errorf("marshal event payload: %w", err)
-	}
-
-	evt := Event{
-		Seq:       s.meta.LastSequence + 1,
-		Timestamp: time.Now().UTC(),
-		Kind:      kind,
-		StepID:    stepID,
-		Payload:   body,
+		return Event{}, err
 	}
 	s.captureFirstPromptPreviewLocked([]Event{evt})
 	s.advanceConversationFreshnessLocked([]Event{evt})
@@ -559,6 +655,20 @@ func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 		return Event{}, err
 	}
 	return evt, nil
+}
+
+func (s *Store) buildEventLocked(stepID, kind string, payload any, now time.Time) (Event, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return Event{}, fmt.Errorf("marshal event payload: %w", err)
+	}
+	return Event{
+		Seq:       s.meta.LastSequence + 1,
+		Timestamp: now,
+		Kind:      kind,
+		StepID:    stepID,
+		Payload:   body,
+	}, nil
 }
 
 func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, error) {

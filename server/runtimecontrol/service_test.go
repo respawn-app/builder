@@ -93,6 +93,143 @@ func TestServiceSubmitUserMessageReturnsTypedRuntimeUnavailable(t *testing.T) {
 	}
 }
 
+func TestServiceGoalCommandsDoNotRequireControllerLease(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	verifier := &stubRuntimeLeaseVerifier{err: serverapi.ErrInvalidControllerLease}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil).WithControllerLeaseVerifier(verifier)
+
+	setResp, err := service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
+		ClientRequestID: "goal-set-1",
+		SessionID:       store.Meta().SessionID,
+		Objective:       "ship goal mode",
+		Actor:           "user",
+	})
+	if err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+	if setResp.Goal == nil || setResp.Goal.Objective != "ship goal mode" || setResp.Goal.Status != "active" {
+		t.Fatalf("set goal response = %+v", setResp.Goal)
+	}
+	showResp, err := service.ShowGoal(context.Background(), serverapi.RuntimeGoalShowRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("ShowGoal: %v", err)
+	}
+	if showResp.Goal == nil || showResp.Goal.ID != setResp.Goal.ID {
+		t.Fatalf("show goal response = %+v, want id %q", showResp.Goal, setResp.Goal.ID)
+	}
+	completeResp, err := service.CompleteGoal(context.Background(), serverapi.RuntimeGoalStatusRequest{
+		ClientRequestID: "goal-complete-1",
+		SessionID:       store.Meta().SessionID,
+		Actor:           "agent",
+	})
+	if err != nil {
+		t.Fatalf("CompleteGoal: %v", err)
+	}
+	if completeResp.Goal == nil || completeResp.Goal.Status != "complete" {
+		t.Fatalf("complete goal response = %+v", completeResp.Goal)
+	}
+	if verifier.calls != 0 {
+		t.Fatalf("lease verifier calls = %d, want 0", verifier.calls)
+	}
+}
+
+func TestServiceSetGoalPropagatesGoalLoopStartError(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+
+	_, err = service.SetGoal(context.Background(), serverapi.RuntimeGoalSetRequest{
+		ClientRequestID: "goal-set-ask-disabled",
+		SessionID:       store.Meta().SessionID,
+		Objective:       "ship goal mode",
+		Actor:           "user",
+	})
+	if !errors.Is(err, runtime.ErrGoalRequiresAskQuestion) {
+		t.Fatalf("SetGoal error = %v, want ErrGoalRequiresAskQuestion", err)
+	}
+	if goal := store.Meta().Goal; goal != nil {
+		t.Fatalf("goal persisted after failed preflight: %+v", goal)
+	}
+	events, readErr := store.ReadEvents()
+	if readErr != nil {
+		t.Fatalf("ReadEvents: %v", readErr)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events persisted after failed preflight: %+v", events)
+	}
+}
+
+func TestServiceShowGoalReportsRuntimeSuspension(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+	if err := engine.Interrupt(); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+
+	resp, err := service.ShowGoal(context.Background(), serverapi.RuntimeGoalShowRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("ShowGoal: %v", err)
+	}
+	if resp.Goal == nil || !resp.Goal.Suspended {
+		t.Fatalf("goal response = %+v, want suspended", resp.Goal)
+	}
+}
+
+func TestServiceCompleteGoalAlreadyCompleteDoesNotDuplicateAudit(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+	if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+	if _, err := service.CompleteGoal(context.Background(), serverapi.RuntimeGoalStatusRequest{ClientRequestID: "complete-1", SessionID: store.Meta().SessionID, Actor: "agent"}); err != nil {
+		t.Fatalf("CompleteGoal first: %v", err)
+	}
+	before, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents before: %v", err)
+	}
+	if _, err := service.CompleteGoal(context.Background(), serverapi.RuntimeGoalStatusRequest{ClientRequestID: "complete-2", SessionID: store.Meta().SessionID, Actor: "agent"}); err != nil {
+		t.Fatalf("CompleteGoal second: %v", err)
+	}
+	after, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("events after duplicate complete = %d, want %d", len(after), len(before))
+	}
+}
+
 func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {

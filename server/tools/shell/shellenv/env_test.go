@@ -3,6 +3,8 @@ package shellenv
 import (
 	"strings"
 	"testing"
+
+	"builder/shared/sessionenv"
 )
 
 func envMap(t *testing.T, in []string) map[string]string {
@@ -55,11 +57,10 @@ func TestEnrichAppliesAgentShellDefaults(t *testing.T) {
 	}
 }
 
-func TestEnrichForSessionAddsBuilderSessionID(t *testing.T) {
-	env := envMap(t, EnrichForSession([]string{"KEEP=1"}, " session-123 "))
-
-	if env["BUILDER_SESSION_ID"] != "session-123" {
-		t.Fatalf("BUILDER_SESSION_ID = %q, want session-123", env["BUILDER_SESSION_ID"])
+func TestEnrichForSessionInjectsBuilderSessionID(t *testing.T) {
+	env := envMap(t, EnrichForSession([]string{"PATH=/bin", "KEEP=1"}, " session-1 "))
+	if got := env[sessionenv.BuilderSessionID]; got != "session-1" {
+		t.Fatalf("%s = %q, want session-1", sessionenv.BuilderSessionID, got)
 	}
 	if env["KEEP"] != "1" {
 		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
@@ -67,9 +68,15 @@ func TestEnrichForSessionAddsBuilderSessionID(t *testing.T) {
 }
 
 func TestEnrichForSessionOverridesExistingBuilderSessionID(t *testing.T) {
-	env := envMap(t, EnrichForSession([]string{"BUILDER_SESSION_ID=stale"}, "real-session"))
+	env := envMap(t, EnrichForSession([]string{sessionenv.BuilderSessionID + "=old"}, "new"))
+	if got := env[sessionenv.BuilderSessionID]; got != "new" {
+		t.Fatalf("%s = %q, want new", sessionenv.BuilderSessionID, got)
+	}
+}
 
-	if env["BUILDER_SESSION_ID"] != "real-session" {
-		t.Fatalf("BUILDER_SESSION_ID = %q, want real-session", env["BUILDER_SESSION_ID"])
+func TestEnrichForSessionOmitsBlankSessionID(t *testing.T) {
+	env := envMap(t, EnrichForSession(nil, " \n\t"))
+	if _, exists := env[sessionenv.BuilderSessionID]; exists {
+		t.Fatalf("%s should be omitted for blank session id", sessionenv.BuilderSessionID)
 	}
 }

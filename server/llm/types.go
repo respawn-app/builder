@@ -62,6 +62,7 @@ const (
 	MessageTypeHeadlessModeExit          MessageType = "headless_mode_exit"
 	MessageTypeWorktreeMode              MessageType = "worktree_mode"
 	MessageTypeWorktreeModeExit          MessageType = "worktree_mode_exit"
+	MessageTypeGoal                      MessageType = "goal"
 )
 
 type Message struct {

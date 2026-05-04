@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"builder/cli/tui"
@@ -47,6 +48,31 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 	}
 	if status.LastCommittedAssistantFinalAnswer != "done" {
 		t.Fatalf("last committed assistant answer = %q, want done", status.LastCommittedAssistantFinalAnswer)
+	}
+}
+
+func TestRuntimeStatusLineShowsGoalStatus(t *testing.T) {
+	client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{
+		Goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"},
+	}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "goal active") {
+		t.Fatalf("expected status line to include goal status, got %q", status)
+	}
+}
+
+func TestRuntimeStatusLineShowsGoalProgressWord(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.windowSizeKnown = true
+	m.activity = uiActivityRunning
+	m.goalRun = true
+	status := uiViewLayout{model: m}.renderStatusLine(100, uiThemeStyles(m.theme))
+
+	if !strings.Contains(stripANSIAndTrimRight(status), "goal") {
+		t.Fatalf("expected status line to include goal progress word, got %q", status)
 	}
 }
 

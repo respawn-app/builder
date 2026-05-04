@@ -39,6 +39,30 @@ var CompactionSoonReminderPrompt string
 //go:embed compaction_soon_reminder_trigger_handoff.md
 var CompactionSoonReminderTriggerHandoffPrompt string
 
+//go:embed goal/nudge.md
+var GoalNudgePrompt string
+
+//go:embed goal/set.md
+var GoalSetPrompt string
+
+//go:embed goal/pause.md
+var GoalPausePrompt string
+
+//go:embed goal/resume.md
+var GoalResumePrompt string
+
+//go:embed goal/clear.md
+var GoalClearPrompt string
+
+//go:embed goal/complete.md
+var GoalCompletePrompt string
+
+//go:embed goal/agent_command_denied.md
+var GoalAgentCommandDeniedPrompt string
+
+//go:embed goal/complete_confirm_required.md
+var GoalCompleteConfirmRequiredPrompt string
+
 //go:embed review_prompt.md
 var ReviewPrompt string
 
@@ -104,8 +128,27 @@ func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 	return strings.TrimSpace(CompactionSoonReminderPrompt)
 }
 
+func RenderGoalNudgePrompt(objective, status string) string {
+	return renderTemplatePlaceholders(GoalNudgePrompt, map[string]string{
+		"{{objective}}": strings.TrimSpace(objective),
+		"{{status}}":    strings.TrimSpace(status),
+	})
+}
+
+func RenderGoalSetPrompt(objective string) string {
+	return renderTemplatePlaceholders(GoalSetPrompt, map[string]string{
+		"{{objective}}": strings.TrimSpace(objective),
+	})
+}
+
+func RenderGoalResumePrompt(objective string) string {
+	return renderTemplatePlaceholders(GoalResumePrompt, map[string]string{
+		"{{objective}}": strings.TrimSpace(objective),
+	})
+}
+
 func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) string {
-	return renderWorktreePrompt(WorktreeModePrompt, map[string]string{
+	return renderTemplatePlaceholders(WorktreeModePrompt, map[string]string{
 		"{{branch}}":         strings.TrimSpace(branch),
 		"{{cwd}}":            strings.TrimSpace(cwd),
 		"{{worktree_path}}":  strings.TrimSpace(worktreePath),
@@ -114,7 +157,7 @@ func RenderWorktreeModePrompt(branch, cwd, worktreePath, workspaceRoot string) s
 }
 
 func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot string) string {
-	return renderWorktreePrompt(WorktreeModeExitPrompt, map[string]string{
+	return renderTemplatePlaceholders(WorktreeModeExitPrompt, map[string]string{
 		"{{branch}}":         strings.TrimSpace(branch),
 		"{{cwd}}":            strings.TrimSpace(cwd),
 		"{{worktree_path}}":  strings.TrimSpace(worktreePath),
@@ -150,7 +193,7 @@ func renderSystemPromptTemplateErr(text string, args SystemPromptTemplateArgs, d
 	return out.String(), nil
 }
 
-func renderWorktreePrompt(template string, replacements map[string]string) string {
+func renderTemplatePlaceholders(template string, replacements map[string]string) string {
 	text := strings.TrimSpace(template)
 	if text == "" {
 		return ""

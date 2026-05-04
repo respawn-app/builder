@@ -68,6 +68,9 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		return m, sequenceCmds(prefixCmd, c.startCompaction(commandResult.Args))
 	case commands.ActionStatus:
 		return m, sequenceCmds(prefixCmd, c.startStatusFlowCmd())
+	case commands.ActionGoal:
+		next, cmd := c.handleGoalCommand(commandResult.GoalMode, commandResult.GoalObjective)
+		return next, sequenceCmds(prefixCmd, cmd)
 	case commands.ActionProcesses:
 		args := strings.Fields(strings.TrimSpace(commandResult.Args))
 		if len(args) == 0 {

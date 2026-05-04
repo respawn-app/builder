@@ -24,10 +24,15 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		spin = renderReviewerStatus(m.spinnerFrame)
 	} else if m.compacting {
 		spin = renderCompactionStatus(m.spinnerFrame)
+	} else if m.goalRun && m.activity == uiActivityRunning {
+		spin = renderGoalStatus(m.spinnerFrame)
 	}
 	segments := make([]string, 0, 5)
 	if modeLabel := l.statusModeLabel(); modeLabel != "" {
 		segments = append(segments, style.meta.Render(modeLabel))
+	}
+	if goalLabel := l.statusGoalLabel(); goalLabel != "" {
+		segments = append(segments, style.meta.Render(goalLabel))
 	}
 	segments = append(segments, style.meta.Render(l.statusModelLabel()))
 	if branchLabel := l.statusBranchLabel(); branchLabel != "" {
@@ -67,6 +72,18 @@ func (l uiViewLayout) statusModeLabel() string {
 		return "editing"
 	}
 	return ""
+}
+
+func (l uiViewLayout) statusGoalLabel() string {
+	goal := l.model.runtimeStatus().Goal
+	if goal == nil {
+		return ""
+	}
+	status := strings.TrimSpace(goal.Status)
+	if status == "" {
+		return ""
+	}
+	return "goal " + status
 }
 
 func (l uiViewLayout) statusBranchLabel() string {
@@ -325,5 +342,11 @@ func renderCompactionStatus(frame int) string {
 func renderReviewerStatus(frame int) string {
 	indicator := renderStatusSpinner(statusGreenColor(), frame)
 	keyword := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("reviewing")
+	return indicator + " " + keyword
+}
+
+func renderGoalStatus(frame int) string {
+	indicator := renderStatusSpinner(statusAmberColor(), frame)
+	keyword := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true).Render("goal")
 	return indicator + " " + keyword
 }

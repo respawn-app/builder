@@ -300,6 +300,26 @@ func (c *countingRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bo
 	return c.inner.SetAutoCompactionEnabled(enabled)
 }
 
+func (c *countingRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ShowGoal()
+}
+
+func (c *countingRuntimeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
+	return c.inner.SetGoal(objective)
+}
+
+func (c *countingRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.PauseGoal()
+}
+
+func (c *countingRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ResumeGoal()
+}
+
+func (c *countingRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ClearGoal()
+}
+
 func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
 	return c.inner.AppendLocalEntry(role, text)
 }

@@ -29,6 +29,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 		"supervisor":     true,
 		"autocompaction": true,
 		"status":         true,
+		"goal":           true,
 		"ps":             true,
 		"worktree":       false,
 		"copy":           true,
@@ -80,6 +81,26 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			name:           "status opens overlay while busy",
 			input:          "/status",
 			wantStatusMode: true,
+		},
+		{
+			name:               "goal pause executes while busy",
+			input:              "/goal pause",
+			wantStatusContains: "Goal paused",
+		},
+		{
+			name:               "goal set is blocked while busy",
+			input:              "/goal ship feature",
+			wantStatusContains: "cannot set /goal while model is working",
+		},
+		{
+			name:               "goal show is blocked while busy",
+			input:              "/goal",
+			wantStatusContains: "cannot show /goal while model is working",
+		},
+		{
+			name:               "goal resume is blocked while busy",
+			input:              "/goal resume",
+			wantStatusContains: "cannot resume /goal while model is working",
 		},
 		{
 			name:            "ps opens overlay while busy",

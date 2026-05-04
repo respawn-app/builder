@@ -78,6 +78,24 @@ func (transcriptDiagTestRuntimeControlClient) DiscardQueuedUserMessagesMatching(
 func (transcriptDiagTestRuntimeControlClient) RecordPromptHistory(context.Context, serverapi.RuntimeRecordPromptHistoryRequest) error {
 	return nil
 }
+func (transcriptDiagTestRuntimeControlClient) ShowGoal(context.Context, serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SetGoal(context.Context, serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) PauseGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) ResumeGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) CompleteGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) ClearGoal(context.Context, serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return serverapi.RuntimeGoalShowResponse{}, nil
+}
 
 var _ client.SessionViewClient = transcriptDiagTestSessionViewClient{}
 var _ client.RuntimeControlClient = transcriptDiagTestRuntimeControlClient{}
