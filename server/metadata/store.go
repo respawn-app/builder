@@ -1018,10 +1018,11 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		return fmt.Errorf("get existing session execution target: %w", targetErr)
 	}
 	metadataJSON, err := marshalJSON(map[string]any{
-		"workspace_root":                  snapshot.Meta.WorkspaceRoot,
-		"workspace_container":             snapshot.Meta.WorkspaceContainer,
-		"compaction_soon_reminder_issued": snapshot.Meta.CompactionSoonReminderIssued,
-		"worktree_reminder":               persistedWorktreeReminder,
+		"workspace_root":                     snapshot.Meta.WorkspaceRoot,
+		"workspace_container":                snapshot.Meta.WorkspaceContainer,
+		"compaction_soon_reminder_issued":    snapshot.Meta.CompactionSoonReminderIssued,
+		"generated_recovered_warning_issued": snapshot.Meta.GeneratedRecoveredWarningIssued,
+		"worktree_reminder":                  persistedWorktreeReminder,
 	})
 	if err != nil {
 		return err
@@ -1116,10 +1117,11 @@ func defaultJSONObject(value string) string {
 
 func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Meta, error) {
 	metadataPayload := struct {
-		WorkspaceRoot                string                         `json:"workspace_root"`
-		WorkspaceContainer           string                         `json:"workspace_container"`
-		CompactionSoonReminderIssued bool                           `json:"compaction_soon_reminder_issued"`
-		WorktreeReminder             *session.WorktreeReminderState `json:"worktree_reminder"`
+		WorkspaceRoot                   string                         `json:"workspace_root"`
+		WorkspaceContainer              string                         `json:"workspace_container"`
+		CompactionSoonReminderIssued    bool                           `json:"compaction_soon_reminder_issued"`
+		GeneratedRecoveredWarningIssued bool                           `json:"generated_recovered_warning_issued"`
+		WorktreeReminder                *session.WorktreeReminderState `json:"worktree_reminder"`
 	}{}
 	if err := unmarshalStoredJSON(row.MetadataJson, &metadataPayload); err != nil {
 		return session.Meta{}, fmt.Errorf("decode session metadata json: %w", err)
@@ -1156,24 +1158,25 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 		workspaceContainer = filepath.Base(filepath.Clean(workspaceRoot))
 	}
 	return session.Meta{
-		SessionID:                    row.ID,
-		Name:                         row.Name,
-		FirstPromptPreview:           row.FirstPromptPreview,
-		InputDraft:                   row.InputDraft,
-		ParentSessionID:              row.ParentSessionID,
-		WorkspaceRoot:                workspaceRoot,
-		WorkspaceContainer:           workspaceContainer,
-		Continuation:                 continuation,
-		CreatedAt:                    timeFromStoredTimestamp(row.CreatedAtUnixMs),
-		UpdatedAt:                    timeFromStoredTimestamp(row.UpdatedAtUnixMs),
-		LastSequence:                 row.LastSequence,
-		ModelRequestCount:            row.ModelRequestCount,
-		InFlightStep:                 row.InFlightStep != 0,
-		AgentsInjected:               row.AgentsInjected != 0,
-		CompactionSoonReminderIssued: metadataPayload.CompactionSoonReminderIssued,
-		WorktreeReminder:             metadataPayload.WorktreeReminder,
-		UsageState:                   usageState,
-		Locked:                       locked,
+		SessionID:                       row.ID,
+		Name:                            row.Name,
+		FirstPromptPreview:              row.FirstPromptPreview,
+		InputDraft:                      row.InputDraft,
+		ParentSessionID:                 row.ParentSessionID,
+		WorkspaceRoot:                   workspaceRoot,
+		WorkspaceContainer:              workspaceContainer,
+		Continuation:                    continuation,
+		CreatedAt:                       timeFromStoredTimestamp(row.CreatedAtUnixMs),
+		UpdatedAt:                       timeFromStoredTimestamp(row.UpdatedAtUnixMs),
+		LastSequence:                    row.LastSequence,
+		ModelRequestCount:               row.ModelRequestCount,
+		InFlightStep:                    row.InFlightStep != 0,
+		AgentsInjected:                  row.AgentsInjected != 0,
+		CompactionSoonReminderIssued:    metadataPayload.CompactionSoonReminderIssued,
+		GeneratedRecoveredWarningIssued: metadataPayload.GeneratedRecoveredWarningIssued,
+		WorktreeReminder:                metadataPayload.WorktreeReminder,
+		UsageState:                      usageState,
+		Locked:                          locked,
 	}, nil
 }
 
