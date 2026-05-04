@@ -187,6 +187,14 @@ func TestSyncRecoversPermissionOnlyEdits(t *testing.T) {
 				assertPerm(t, path, generatedDirPerm)
 			},
 		},
+		{
+			name: "root-directory",
+			path: ".",
+			perm: 0o755,
+			verify: func(t *testing.T, path string) {
+				assertPerm(t, path, generatedRootPerm)
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

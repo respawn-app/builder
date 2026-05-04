@@ -26,6 +26,7 @@ const (
 	generatedSkillsDir   = "skills"
 	markerFileName       = ".builder-generated.json"
 	markerSchemaVersion  = 1
+	generatedRootPerm    = fs.FileMode(0o700)
 	generatedDirPerm     = fs.FileMode(0o755)
 	generatedFilePerm    = fs.FileMode(0o644)
 	treeHashPrefix       = "sha256:"
@@ -306,6 +307,15 @@ func hashActualTree(root string) (string, error) {
 			return err
 		}
 		if path == root {
+			info, err := os.Lstat(path)
+			if err != nil {
+				return err
+			}
+			mode := info.Mode()
+			if !mode.IsDir() {
+				return fmt.Errorf("generated root has unsupported mode %s", mode)
+			}
+			items = append(items, actualTreeItem{Path: ".", Kind: treeEntryDir, Perm: mode.Perm()})
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -387,6 +397,9 @@ func writeExpectedTree(root string, entries []treeEntry) error {
 	tempRoot, err := os.MkdirTemp(filepath.Dir(root), ".generated-tmp-")
 	if err != nil {
 		return fmt.Errorf("create generated temp root: %w", err)
+	}
+	if err := os.Chmod(tempRoot, generatedRootPerm); err != nil {
+		return fmt.Errorf("set generated temp root mode: %w", err)
 	}
 	cleanup := true
 	defer func() {
