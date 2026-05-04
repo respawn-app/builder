@@ -94,9 +94,9 @@ func Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 	needsSeed := false
 	needsRecovery := false
-	if state.missing || state.empty {
+	if state.missing {
 		needsSeed = true
-	} else if state.unsupportedRoot {
+	} else if state.empty || state.unsupportedRoot {
 		needsRecovery = true
 	} else {
 		clean, err := generatedRootMatchesMarker(paths.generatedRoot)

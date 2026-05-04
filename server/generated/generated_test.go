@@ -130,6 +130,40 @@ func TestSyncRecoversAddedDeletedAndRenamedEntries(t *testing.T) {
 	}
 }
 
+func TestSyncRecoversEmptiedGeneratedRoot(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".builder", ".generated")
+	if _, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read generated root: %v", err)
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			t.Fatalf("empty generated root: %v", err)
+		}
+	}
+
+	result, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()})
+	if err != nil {
+		t.Fatalf("recover empty root: %v", err)
+	}
+	if !result.Recovered {
+		t.Fatalf("expected recovery for empty generated root: %+v", result)
+	}
+	wantRecovery := filepath.Join(home, ".builder", "recovered", "2026-05-04T18-43-16Z", ".generated")
+	info, err := os.Stat(wantRecovery)
+	if err != nil {
+		t.Fatalf("expected recovered empty generated root: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected recovered generated root to be a directory, mode=%s", info.Mode())
+	}
+	assertFile(t, filepath.Join(root, "skills", "skill-creator", "SKILL.md"), testSkillMarkdown("skill-creator", "create skills"))
+}
+
 func TestSyncRecoversPermissionOnlyEdits(t *testing.T) {
 	tests := []struct {
 		name   string
