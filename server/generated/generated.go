@@ -88,7 +88,6 @@ func Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if err != nil {
 		return result, err
 	}
-	expectedHash := hashTree(expected)
 	state, err := inspectGeneratedRoot(paths.generatedRoot)
 	if err != nil {
 		return result, err
@@ -120,7 +119,7 @@ func Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		needsSeed = true
 	}
 	if needsSeed {
-		if err := writeExpectedTree(paths.generatedRoot, expected, expectedHash); err != nil {
+		if err := writeExpectedTree(paths.generatedRoot, expected); err != nil {
 			return result, err
 		}
 	}
@@ -300,23 +299,6 @@ func sortedTree(entries []treeEntry) []treeEntry {
 	return out
 }
 
-func hashTree(entries []treeEntry) string {
-	h := sha256.New()
-	for _, entry := range sortedTree(entries) {
-		h.Write([]byte(entry.Path))
-		h.Write([]byte{0})
-		h.Write([]byte(entry.Kind))
-		h.Write([]byte{0})
-		h.Write([]byte(entry.Perm.String()))
-		h.Write([]byte{0})
-		if entry.Kind == treeEntryFile {
-			h.Write(entry.Content)
-		}
-		h.Write([]byte{0})
-	}
-	return treeHashPrefix + hex.EncodeToString(h.Sum(nil))
-}
-
 func hashActualTree(root string) (string, error) {
 	items := make([]actualTreeItem, 0)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -398,7 +380,7 @@ func hashActualTreeItems(items []actualTreeItem) (string, error) {
 	return treeHashPrefix + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func writeExpectedTree(root string, entries []treeEntry, treeHash string) error {
+func writeExpectedTree(root string, entries []treeEntry) error {
 	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
 		return fmt.Errorf("create generated parent: %w", err)
 	}
@@ -415,7 +397,7 @@ func writeExpectedTree(root string, entries []treeEntry, treeHash string) error 
 	for _, entry := range sortedTree(entries) {
 		target := filepath.Join(tempRoot, filepath.FromSlash(entry.Path))
 		if entry.Kind == treeEntryDir {
-			if err := os.MkdirAll(target, generatedDirPerm); err != nil {
+			if err := os.MkdirAll(target, entry.Perm); err != nil {
 				return fmt.Errorf("create generated dir %s: %w", entry.Path, err)
 			}
 			continue
@@ -423,9 +405,13 @@ func writeExpectedTree(root string, entries []treeEntry, treeHash string) error 
 		if err := os.MkdirAll(filepath.Dir(target), generatedDirPerm); err != nil {
 			return fmt.Errorf("create generated file parent %s: %w", entry.Path, err)
 		}
-		if err := os.WriteFile(target, entry.Content, generatedFilePerm); err != nil {
+		if err := os.WriteFile(target, entry.Content, entry.Perm); err != nil {
 			return fmt.Errorf("write generated file %s: %w", entry.Path, err)
 		}
+	}
+	treeHash, err := hashActualTree(tempRoot)
+	if err != nil {
+		return fmt.Errorf("hash generated temp root: %w", err)
 	}
 	markerData, err := json.MarshalIndent(marker{SchemaVersion: markerSchemaVersion, BuilderVersion: buildinfo.Version, TreeHash: treeHash}, "", "  ")
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -173,6 +174,27 @@ func TestSyncRecoversPermissionOnlyEdits(t *testing.T) {
 			tc.verify(t, target)
 		})
 	}
+}
+
+func TestSyncMarkerTracksOnDiskModesUnderRestrictiveUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0o077)
+	t.Cleanup(func() {
+		syscall.Umask(oldUmask)
+	})
+
+	home := t.TempDir()
+	if _, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	result, err := Sync(context.Background(), SyncOptions{HomeDir: home, FS: testGeneratedFS(), Now: fixedNow()})
+	if err != nil {
+		t.Fatalf("sync clean generated root: %v", err)
+	}
+	if result.Recovered {
+		t.Fatalf("did not expect recovery for clean umask-masked tree: %+v", result)
+	}
+	assertPerm(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator", "SKILL.md"), 0o600)
+	assertPerm(t, filepath.Join(home, ".builder", ".generated", "skills", "skill-creator"), 0o700)
 }
 
 func TestSyncRecoversSymlinkWithoutFollowing(t *testing.T) {
