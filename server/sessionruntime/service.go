@@ -112,7 +112,7 @@ type recoveredWarningEntry struct {
 func (s *Service) appendRecoveredWarningIfNeeded(store *session.Store) error {
 	warning, ok, err := s.generatedRecoveredWarning()
 	if err != nil {
-		return err
+		return nil
 	}
 	if !ok || warning == "" || store == nil {
 		return nil

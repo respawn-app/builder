@@ -383,6 +383,16 @@ func TestAppendRecoveredWarningIfNeededPersistsOnce(t *testing.T) {
 	}
 }
 
+func TestAppendRecoveredWarningIfNeededIgnoresProviderError(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.WithGeneratedRecoveredWarningProvider(func() (string, bool, error) {
+		return "", false, errors.New("recovered dir unreadable")
+	})
+	if err := fixture.service.appendRecoveredWarningIfNeeded(fixture.store); err != nil {
+		t.Fatalf("expected warning lookup errors to be non-fatal, got %v", err)
+	}
+}
+
 func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
