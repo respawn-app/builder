@@ -97,10 +97,23 @@ func (unregisteredRunPromptClient) RunPrompt(context.Context, serverapi.RunPromp
 }
 
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	return NewWithContext(context.Background(), cfg, authSupport, runtimeSupport)
+}
+
+func NewWithContext(ctx context.Context, cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	rootLease, err := rootlock.Acquire(cfg.PersistenceRoot)
 	if err != nil {
 		return nil, err
 	}
+	generatedSupport, err := serverbootstrap.BuildGeneratedSupport(ctx)
+	if err != nil {
+		_ = rootLease.Close()
+		return nil, err
+	}
+	runtimeSupport.Generated = generatedSupport
 	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, nil); err != nil {
 		_ = rootLease.Close()
 		return nil, err
