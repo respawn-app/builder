@@ -284,12 +284,7 @@ func shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg llm.Message, pr
 	if currentCommittedCount <= previousCommittedCount {
 		return false
 	}
-	// Tool completion transcript visibility is owned by the rich tool_call_completed
-	// event; the persisted llm.RoleTool mirror exists for request reconstruction.
-	if msg.Role == llm.RoleTool {
-		return false
-	}
-	return true
+	return msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeGoal
 }
 
 func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {

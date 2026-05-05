@@ -103,6 +103,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/goal"); got.Action != ActionGoal || got.GoalMode != GoalModeShow {
 		t.Fatalf("expected ActionGoal show, got %+v", got)
 	}
+	if got := r.Execute("/goal show"); got.Action != ActionGoal || got.GoalMode != GoalModeShow || got.GoalObjective != "" {
+		t.Fatalf("expected ActionGoal show for explicit show, got %+v", got)
+	}
 	if got := r.Execute("/goal ship feature"); got.Action != ActionGoal || got.GoalMode != GoalModeSet || got.GoalObjective != "ship feature" {
 		t.Fatalf("expected ActionGoal set, got %+v", got)
 	}

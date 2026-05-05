@@ -391,7 +391,7 @@ func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
 		return GoalState{}, err
 	}
 	s.mu.Lock()
-	now := time.Now().UTC()
+	now := goalTimestamp()
 	replacedGoalID := ""
 	if s.meta.Goal != nil {
 		replacedGoalID = strings.TrimSpace(s.meta.Goal.ID)
@@ -434,7 +434,7 @@ func (s *Store) SetGoalStatus(status GoalStatus, actor GoalActor) (GoalState, er
 		s.mu.Unlock()
 		return GoalState{}, errors.New("goal is not set")
 	}
-	now := time.Now().UTC()
+	now := goalTimestamp()
 	goal := *cloneGoalState(s.meta.Goal)
 	previousStatus := goal.Status
 	goal.Status = normalizedStatus
@@ -466,7 +466,7 @@ func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
 		s.mu.Unlock()
 		return GoalState{}, errors.New("goal is not set")
 	}
-	now := time.Now().UTC()
+	now := goalTimestamp()
 	goal := *cloneGoalState(s.meta.Goal)
 	s.meta.Goal = nil
 	evt, err := s.buildEventLocked("", "goal_cleared", GoalClearedEvent{Goal: goal, Actor: normalizedActor}, now)
@@ -483,6 +483,10 @@ func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
 		return GoalState{}, err
 	}
 	return goal, nil
+}
+
+func goalTimestamp() time.Time {
+	return time.Now().UTC().Round(0)
 }
 
 func (s *Store) SetUsageState(state *UsageState) error {

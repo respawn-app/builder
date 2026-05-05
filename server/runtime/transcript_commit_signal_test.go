@@ -232,8 +232,8 @@ func TestHostedToolOnlyMissingPhaseTurnEmitsCommittedConversationUpdatedAfterHos
 	if msg.Content != "done" {
 		t.Fatalf("assistant content = %q, want done", msg.Content)
 	}
-	if got := committedConversationUpdatedCountAfterLastUserFlush(events); got != 2 {
-		t.Fatalf("committed conversation_updated count after missing-phase hosted-only turn = %d, want 2; events=%+v", got, events)
+	if got := committedConversationUpdatedCountAfterLastUserFlush(events); got != 1 {
+		t.Fatalf("committed conversation_updated count after missing-phase hosted-only turn = %d, want 1; events=%+v", got, events)
 	}
 }
 

@@ -121,6 +121,9 @@ func NewDefaultRegistry() *Registry {
 		mode := GoalModeShow
 		objective := strings.TrimSpace(args)
 		switch strings.ToLower(objective) {
+		case string(GoalModeShow):
+			mode = GoalModeShow
+			objective = ""
 		case string(GoalModePause):
 			mode = GoalModePause
 			objective = ""
