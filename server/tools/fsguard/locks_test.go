@@ -38,3 +38,24 @@ func TestLockPathsDoesNotBlockUnrelatedPaths(t *testing.T) {
 		t.Fatal("same path lock did not unblock")
 	}
 }
+
+func TestLockPathsNormalizesEquivalentPaths(t *testing.T) {
+	unlockA := LockPaths([]string{"a/../x"})
+	same := make(chan struct{})
+	go func() {
+		unlockB := LockPaths([]string{"./x"})
+		unlockB()
+		close(same)
+	}()
+	select {
+	case <-same:
+		t.Fatal("equivalent path lock did not block")
+	case <-time.After(50 * time.Millisecond):
+	}
+	unlockA()
+	select {
+	case <-same:
+	case <-time.After(time.Second):
+		t.Fatal("equivalent path lock did not unblock")
+	}
+}

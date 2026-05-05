@@ -356,13 +356,24 @@ func (t *Tool) resolvePath(ctx context.Context, requested string) (resolvedPath,
 	if err != nil {
 		return resolvedPath{}, err
 	}
-	if approved[cleaned] {
+	if approved[cleaned] && canReuseOutsideApproval(cleaned, real) {
 		approved[real] = true
 	}
 	if _, err := t.outsideGuard().Allow(ctx, requested, real, approved); err != nil {
 		return resolvedPath{}, err
 	}
 	return resolvedPath{requested: requested, cleaned: cleaned, real: real, symlink: t.isUserSymlink(cleaned, real)}, nil
+}
+
+func canReuseOutsideApproval(cleaned string, real string) bool {
+	if cleaned == real {
+		return true
+	}
+	info, err := os.Lstat(cleaned)
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeSymlink == 0
 }
 
 func (t *Tool) isUserSymlink(cleaned string, real string) bool {

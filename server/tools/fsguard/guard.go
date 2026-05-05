@@ -162,7 +162,15 @@ func (g Guard) isWithinWorkspace(real string) (bool, error) {
 	for {
 		info, statErr := os.Stat(current)
 		if statErr != nil {
-			return false, fmt.Errorf("stat candidate path %q: %w", current, statErr)
+			if !errors.Is(statErr, os.ErrNotExist) {
+				return false, fmt.Errorf("stat candidate path %q: %w", current, statErr)
+			}
+			next := filepath.Dir(current)
+			if next == current {
+				return false, fmt.Errorf("stat candidate path %q: %w", real, statErr)
+			}
+			current = next
+			continue
 		}
 		if os.SameFile(info, g.workspaceRootInfo) {
 			return true, nil

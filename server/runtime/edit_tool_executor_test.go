@@ -106,6 +106,8 @@ func (t capturingTool) Call(_ context.Context, c tools.Call) (tools.Result, erro
 	var payload map[string]any
 	if err := json.Unmarshal(c.Input, &payload); err != nil {
 		out, _ := json.Marshal("Edit failed: expected JSON object input.")
+		// Tool-logic failures are returned in Result.IsError, not as a Go error.
+		//nolint:nilerr
 		return tools.Result{CallID: c.ID, Name: c.Name, Output: out, IsError: true, Summary: "Edit failed: expected JSON object input."}, nil
 	}
 	out, _ := json.Marshal("ok")

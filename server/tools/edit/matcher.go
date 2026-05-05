@@ -25,7 +25,7 @@ func selectReplacement(content string, in input) (replacementSelection, error) {
 		return replacementSelection{}, failf("old_string matched 0 occurrences")
 	}
 	if !in.ReplaceAll && len(matches) != 1 {
-		return replacementSelection{}, failf("old_string matched multiple occurrences")
+		return replacementSelection{}, failf("old_string matched %d occurrences; pass replace_all=true or extend old_string with surrounding context to make it unique", len(matches))
 	}
 	selected := matches
 	if in.ReplaceAll {

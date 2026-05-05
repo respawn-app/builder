@@ -32,7 +32,7 @@ func editErrorResult(c tools.Call, err error) tools.Result {
 	if err != nil {
 		message = err.Error()
 	}
-	if !strings.HasPrefix(strings.TrimSpace(message), "Edit failed:") {
+	if !strings.HasPrefix(strings.TrimSpace(message), "Edit failed") {
 		message = "Edit failed: " + strings.TrimSpace(message)
 	}
 	body, _ := json.Marshal(message)

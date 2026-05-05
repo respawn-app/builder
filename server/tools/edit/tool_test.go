@@ -55,7 +55,7 @@ func TestExactReplaceAndReplaceAll(t *testing.T) {
 		"old_string": "one",
 		"new_string": "ONE",
 	})
-	if !first.IsError || !strings.Contains(toolResultText(t, first), "multiple occurrences") {
+	if !first.IsError || !strings.Contains(toolResultText(t, first), "matched 2 occurrences") {
 		t.Fatalf("expected multiple occurrence failure, got %+v text=%q", first, toolResultText(t, first))
 	}
 
@@ -195,20 +195,62 @@ func TestContextAwareFallbackRejectsCommonMiddleLineWithoutBoundaryMatch(t *test
 	}
 }
 
-func TestOutsideWorkspaceSymlinkAliasUsesSingleCallApproval(t *testing.T) {
+func TestContextAwareFallbackAcceptsNormalizedBoundaryAndMiddleLines(t *testing.T) {
+	content := "alpha   beta\nTODO item\nomega   tail\n"
+	old := "alpha beta\nTODO item\nomega tail\n"
+
+	matches := contextAwareMatches(content, old)
+	if len(matches) != 1 {
+		t.Fatalf("context-aware matches = %d, want 1", len(matches))
+	}
+	if matches[0].actual != content {
+		t.Fatalf("matched actual = %q, want %q", matches[0].actual, content)
+	}
+}
+
+func TestOutsideWorkspaceAncestorAliasUsesSingleCallApproval(t *testing.T) {
 	workspace := t.TempDir()
-	outside, err := os.MkdirTemp(".", "edit-outside-approval-")
+	outside := newNonTemporaryOutsideDir(t)
+	targetDir := filepath.Join(outside, "target")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("create outside target dir: %v", err)
+	}
+	target := filepath.Join(targetDir, "target.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("seed outside target: %v", err)
+	}
+	alias := filepath.Join(outside, "alias")
+	if err := os.Symlink(targetDir, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	prompts := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, fsguard.Request) (fsguard.Approval, error) {
+		prompts++
+		return fsguard.Approval{Decision: fsguard.DecisionAllowOnce}, nil
+	}))
 	if err != nil {
-		t.Fatalf("create outside dir: %v", err)
+		t.Fatalf("new edit tool: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(outside) })
-	outside, err = filepath.Abs(outside)
+
+	result := callEdit(t, tool, map[string]any{"path": filepath.Join(alias, "target.txt"), "old_string": "old", "new_string": "new"})
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+	if prompts != 1 {
+		t.Fatalf("outside approval prompts = %d, want 1", prompts)
+	}
+	got, err := os.ReadFile(target)
 	if err != nil {
-		t.Fatalf("resolve outside dir: %v", err)
+		t.Fatalf("read target: %v", err)
 	}
-	if filepath.IsAbs(outside) && strings.Contains(outside, string(filepath.Separator)+"tmp"+string(filepath.Separator)) {
-		t.Skip("test outside dir is under temporary editable root")
+	if string(got) != "new\n" {
+		t.Fatalf("target content = %q", string(got))
 	}
+}
+
+func TestOutsideWorkspaceFinalSymlinkRequiresRealPathApproval(t *testing.T) {
+	workspace := t.TempDir()
+	outside := newNonTemporaryOutsideDir(t)
 	target := filepath.Join(outside, "target.txt")
 	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
 		t.Fatalf("seed outside target: %v", err)
@@ -230,16 +272,26 @@ func TestOutsideWorkspaceSymlinkAliasUsesSingleCallApproval(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected success, got %s", string(result.Output))
 	}
-	if prompts != 1 {
-		t.Fatalf("outside approval prompts = %d, want 1", prompts)
+	if prompts != 2 {
+		t.Fatalf("outside approval prompts = %d, want 2", prompts)
 	}
-	got, err := os.ReadFile(target)
+}
+
+func newNonTemporaryOutsideDir(t *testing.T) string {
+	t.Helper()
+	outside, err := os.MkdirTemp(".", "edit-outside-approval-")
 	if err != nil {
-		t.Fatalf("read target: %v", err)
+		t.Fatalf("create outside dir: %v", err)
 	}
-	if string(got) != "new\n" {
-		t.Fatalf("target content = %q", string(got))
+	t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	outside, err = filepath.Abs(outside)
+	if err != nil {
+		t.Fatalf("resolve outside dir: %v", err)
 	}
+	if filepath.IsAbs(outside) && strings.Contains(outside, string(filepath.Separator)+"tmp"+string(filepath.Separator)) {
+		t.Skip("test outside dir is under temporary editable root")
+	}
+	return outside
 }
 
 func newTestTool(t *testing.T, dir string) *Tool {

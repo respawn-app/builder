@@ -1,6 +1,7 @@
 package fsguard
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -9,7 +10,8 @@ import (
 var pathLocks sync.Map
 
 func LockPath(path string) func() {
-	value, _ := pathLocks.LoadOrStore(path, &sync.Mutex{})
+	key := canonicalLockKey(path)
+	value, _ := pathLocks.LoadOrStore(key, &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
@@ -22,15 +24,15 @@ func LockPaths(paths []string) func() {
 	seen := map[string]struct{}{}
 	ordered := make([]string, 0, len(paths))
 	for _, path := range paths {
-		trimmed := strings.TrimSpace(path)
-		if trimmed == "" {
+		key := canonicalLockKey(path)
+		if key == "" {
 			continue
 		}
-		if _, ok := seen[trimmed]; ok {
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[trimmed] = struct{}{}
-		ordered = append(ordered, trimmed)
+		seen[key] = struct{}{}
+		ordered = append(ordered, key)
 	}
 	sort.Strings(ordered)
 	unlocks := make([]func(), 0, len(ordered))
@@ -42,4 +44,15 @@ func LockPaths(paths []string) func() {
 			unlocks[i]()
 		}
 	}
+}
+
+func canonicalLockKey(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(trimmed); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(trimmed)
 }
