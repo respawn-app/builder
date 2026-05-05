@@ -19,9 +19,10 @@ import (
 )
 
 const uiRuntimeControlTimeout = 3 * time.Second
-const uiRuntimeReadTimeout = 300 * time.Millisecond
 const uiRuntimeHydrationReadTimeout = 10 * time.Second
 const runtimeLeaseRecoveryWarningText = "Lost connection to the session runtime; reconnected."
+
+var uiRuntimeReadTimeout = 300 * time.Millisecond
 
 type sessionRuntimeClient struct {
 	reads                   client.SessionViewClient

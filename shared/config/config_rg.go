@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 const managedRGConfigName = "rg.conf"
@@ -33,4 +34,14 @@ func EnsureManagedRGConfigFile() (path string, created bool, err error) {
 		return "", false, fmt.Errorf("write managed rg config: %w", err)
 	}
 	return path, created, nil
+}
+
+func writeManagedRGConfigFileForSettingsPath(settingsPath string) (string, error) {
+	trimmed := strings.TrimSpace(settingsPath)
+	if trimmed == "" {
+		return "", fmt.Errorf("settings path is required")
+	}
+	path := filepath.Join(filepath.Dir(trimmed), managedRGConfigName)
+	_, err := writeSettingsFileIfMissing(path, managedRGConfigContents)
+	return path, err
 }

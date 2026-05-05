@@ -31,10 +31,14 @@ import (
 
 type testAuthHandler struct {
 	lookupEnv      func(string) string
+	state          *auth.State
 	interactCalled bool
 }
 
 func (h *testAuthHandler) WrapStore(base auth.Store) auth.Store {
+	if h != nil && h.state != nil {
+		return auth.NewMemoryStore(*h.state)
+	}
 	return authflow.WrapStoreWithEnvAPIKeyOverride(base, h.lookupEnv)
 }
 
@@ -45,6 +49,18 @@ func (h *testAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool
 func (h *testAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
 	h.interactCalled = true
 	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
+}
+
+func readyEmbeddedAuthHandler() *testAuthHandler {
+	state := auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "in-memory-test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}
+	return &testAuthHandler{state: &state}
 }
 
 type testOnboardingHandler struct {
@@ -119,13 +135,12 @@ func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *se
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
 	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
 
 	workspace := t.TempDir()
 	registerEmbeddedWorkspace(t, workspace)
-	authHandler := &testAuthHandler{lookupEnv: os.Getenv}
+	authHandler := readyEmbeddedAuthHandler()
 	generatedCalls := 0
 	restoreGeneratedSync := serverbootstrap.SetGeneratedSyncForTest(func(ctx context.Context, opts generated.SyncOptions) (generated.SyncResult, error) {
 		generatedCalls++
@@ -193,7 +208,6 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 11) {
@@ -219,7 +233,7 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 		},
 		LookupEnv: os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -291,7 +305,6 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -324,7 +337,7 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 		},
 		LookupEnv: os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -433,13 +446,12 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
 		LookupEnv:     os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -508,13 +520,12 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
 		LookupEnv:     os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -567,13 +578,12 @@ func TestProjectViewClientListsCurrentProjectAndSessions(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
 		LookupEnv:     os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -636,13 +646,12 @@ func TestProcessViewClientListsBackgroundProcessesWithRunOwnership(t *testing.T)
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
 		LookupEnv:     os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()
@@ -699,13 +708,12 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
 		LookupEnv:     os.Getenv,
 	}, StartHooks{
-		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Auth: readyEmbeddedAuthHandler(),
 		Onboarding: &testOnboardingHandler{
 			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
 				path, created, err := config.WriteDefaultSettingsFile()

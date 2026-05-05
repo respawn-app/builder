@@ -17,17 +17,17 @@ import (
 )
 
 const (
-	worktreeOverlayHeaderLines    = 3
-	worktreeOverlayFooterLines    = 1
-	worktreeOverlayRowLines       = 3
-	worktreeCreateRowID           = "__create__"
-	worktreeOverlayMaxErrorLines  = 4
-	worktreeCreateResolveDebounce = 150 * time.Millisecond
+	worktreeOverlayHeaderLines   = 3
+	worktreeOverlayFooterLines   = 1
+	worktreeOverlayRowLines      = 3
+	worktreeCreateRowID          = "__create__"
+	worktreeOverlayMaxErrorLines = 4
 )
 
 var (
-	worktreeOverlayRailGlyph = uiglyphs.SelectionRailGlyph
-	worktreeOverlayRailBlank = uiglyphs.SelectionRailBlank
+	worktreeOverlayRailGlyph      = uiglyphs.SelectionRailGlyph
+	worktreeOverlayRailBlank      = uiglyphs.SelectionRailBlank
+	worktreeCreateResolveDebounce = 150 * time.Millisecond
 )
 
 type uiWorktreeOverlayPhase string

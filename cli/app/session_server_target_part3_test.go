@@ -268,8 +268,8 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	}
 
 	result, err := srv.Background().Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"/bin/sh", "-lc", "printf 'daemon process output\n'; sleep 5"},
-		DisplayCommand: "printf 'daemon process output'; sleep 5",
+		Command:        []string{"/bin/sh", "-lc", "printf 'daemon process output\n'; sleep 0.2"},
+		DisplayCommand: "printf 'daemon process output'; sleep 0.2",
 		Workdir:        workspace,
 		YieldTime:      time.Millisecond,
 		OwnerSessionID: plan.SessionID,
@@ -336,7 +336,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 			Model:                 "gpt-5",
 			OpenAIBaseURL:         fakeResponses.URL,
 			OpenAIBaseURLExplicit: true,
-		}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+		}, readyMemoryAuthHandler())
 		if err != nil {
 			t.Fatalf("startEmbeddedServer: %v", err)
 		}
@@ -632,15 +632,6 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if refreshed.MainView.Session.Transcript.CommittedEntryCount == 0 {
 		t.Fatalf("expected transcript metadata, got %+v", refreshed.MainView.Session.Transcript)
 	}
-}
-
-func newHeadlessAuthInteractorWithEnvKey(key string) authInteractor {
-	return &headlessAuthInteractor{lookupEnv: func(env string) string {
-		if env == "OPENAI_API_KEY" {
-			return key
-		}
-		return ""
-	}}
 }
 
 func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {

@@ -408,10 +408,9 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -447,10 +446,9 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -510,10 +508,9 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -580,10 +577,9 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -680,10 +676,9 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -820,10 +815,9 @@ func TestEmbeddedAppServerRoutesBackgroundCompletionToOwningSessionOnly(t *testi
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}

@@ -12,12 +12,13 @@ import (
 func TestBootstrapAppIgnoresOAuthIssuerOverrideEnv(t *testing.T) {
 	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
 	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	registerAppWorkspace(t, workspace)
 
-	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	readyAuth := readyMemoryAuthHandler()
+	readyAuth.lookupEnv = os.Getenv
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyAuth)
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}

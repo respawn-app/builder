@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,10 +24,12 @@ import (
 	"builder/shared/serverapi"
 )
 
-type envAuthHandler struct{}
+type envAuthHandler struct {
+	lookupEnv func(string) string
+}
 
-func (envAuthHandler) WrapStore(base auth.Store) auth.Store {
-	return authflow.WrapStoreWithEnvAPIKeyOverride(base, os.Getenv)
+func (h envAuthHandler) WrapStore(base auth.Store) auth.Store {
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, h.LookupEnv)
 }
 
 func (envAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
@@ -37,11 +40,35 @@ func (envAuthHandler) Interact(context.Context, authflow.InteractionRequest) (au
 	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
-func (envAuthHandler) LookupEnv(key string) string {
-	return os.Getenv(key)
+func (h envAuthHandler) LookupEnv(key string) string {
+	if h.lookupEnv != nil {
+		return h.lookupEnv(key)
+	}
+	return testAuthLookupEnv(key)
+}
+
+func testAuthLookupEnv(key string) string {
+	if key == "OPENAI_API_KEY" {
+		return "in-memory-test-key"
+	}
+	return ""
 }
 
 type noopOnboarding struct{}
+
+type notifyingListener struct {
+	net.Listener
+	acceptDone chan struct{}
+	once       sync.Once
+}
+
+func (l *notifyingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		l.once.Do(func() { close(l.acceptDone) })
+	}
+	return conn, err
+}
 
 func (noopOnboarding) EnsureOnboardingReady(_ context.Context, req startup.OnboardingRequest) (config.App, error) {
 	path, created, err := config.WriteDefaultSettingsFile()
@@ -83,11 +110,38 @@ func configureServeTestServerPort(t *testing.T) {
 	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
 
+func TestReserveTestListenReservationDrainerStopsAfterRelease(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	listener := &notifyingListener{Listener: base, acceptDone: make(chan struct{})}
+	addr := listener.Addr().String()
+	t.Cleanup(func() { ReleaseTestListenReservation(addr) })
+
+	ReserveTestListenReservation(listener)
+	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("dial reserved listener: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("expected reserved listener drainer to close accepted connection")
+	}
+	_ = conn.Close()
+
+	ReleaseTestListenReservation(addr)
+	select {
+	case <-listener.acceptDone:
+	case <-time.After(time.Second):
+		t.Fatal("reserved listener drainer did not exit after release")
+	}
+}
+
 func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -138,7 +192,6 @@ func TestStartRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -177,7 +230,6 @@ func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -245,7 +297,6 @@ func TestServeExposesDerivedLocalUnixSocketAndCleansStalePath(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -341,7 +392,6 @@ func TestServeDegradesToTCPWhenDerivedLocalSocketFails(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -403,7 +453,7 @@ func TestServeStartsUnauthenticatedAndReportsBootstrapReadiness(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, AllowUnauthenticated: true}
-	authHandler := envAuthHandler{}
+	authHandler := envAuthHandler{lookupEnv: func(string) string { return "" }}
 	onboarding := noopOnboarding{}
 	registerServeWorkspace(t, workspace)
 
@@ -475,7 +525,6 @@ func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	registerServeWorkspace(t, workspace)
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}

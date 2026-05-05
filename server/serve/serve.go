@@ -50,6 +50,17 @@ func ReserveTestListenReservation(listener net.Listener) {
 	}
 	testListenReservations[addr] = listener
 	testListenReservationsMu.Unlock()
+	go drainTestListenReservation(listener)
+}
+
+func drainTestListenReservation(listener net.Listener) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}
 }
 
 func ReleaseTestListenReservation(addr string) {

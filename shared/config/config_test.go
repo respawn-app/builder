@@ -13,6 +13,40 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestPreparePersistenceRootRefusesProcessStartRootUnderGoTest(t *testing.T) {
+	originalHome := processStartHome
+	originalAccountHome := processStartAccountHome
+	processStartHome = filepath.Join(string(filepath.Separator), "builder-test-home")
+	processStartAccountHome = ""
+	t.Cleanup(func() {
+		processStartHome = originalHome
+		processStartAccountHome = originalAccountHome
+	})
+
+	_, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder"))
+	if err == nil {
+		t.Fatal("expected process-start persistence root to be refused under go test")
+	}
+	if !strings.Contains(err.Error(), "refusing to use protected persistence root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPreparePersistenceRootAllowsIsolatedTempHomeUnderGoTest(t *testing.T) {
+	originalHome := processStartHome
+	originalAccountHome := processStartAccountHome
+	processStartHome = t.TempDir()
+	processStartAccountHome = filepath.Join(string(filepath.Separator), "builder-real-home")
+	t.Cleanup(func() {
+		processStartHome = originalHome
+		processStartAccountHome = originalAccountHome
+	})
+
+	if _, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder")); err != nil {
+		t.Fatalf("prepare temp persistence root: %v", err)
+	}
+}
+
 func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -132,6 +166,68 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.Reviewer.VerboseOutput {
 		t.Fatalf("expected default reviewer verbose_output=false")
+	}
+}
+
+func TestLoadUsesExplicitConfigRootWithoutHomeMutation(t *testing.T) {
+	configRoot := t.TempDir()
+	workspace := t.TempDir()
+
+	cfg, err := Load(workspace, LoadOptions{ConfigRoot: configRoot})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Source.HomeSettingsPath != filepath.Join(configRoot, "config.toml") {
+		t.Fatalf("home settings path = %q, want explicit config root", cfg.Source.HomeSettingsPath)
+	}
+	if cfg.PersistenceRoot != configRoot {
+		t.Fatalf("persistence root = %q, want explicit config root", cfg.PersistenceRoot)
+	}
+	if _, err := os.Stat(filepath.Join(configRoot, managedRGConfigName)); err != nil {
+		t.Fatalf("expected managed rg config in explicit config root: %v", err)
+	}
+}
+
+func TestLoadExplicitConfigRootOverridesNestedPersistenceRoot(t *testing.T) {
+	configRoot := t.TempDir()
+	otherRoot := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), []byte("persistence_root = \""+filepath.ToSlash(otherRoot)+"\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{ConfigRoot: configRoot})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.PersistenceRoot != configRoot {
+		t.Fatalf("persistence root = %q, want explicit config root %q", cfg.PersistenceRoot, configRoot)
+	}
+	if got := cfg.Source.Sources["persistence_root"]; got != "config_root" {
+		t.Fatalf("persistence_root source = %q, want config_root", got)
+	}
+}
+
+func TestWriteManagedRGConfigFileForSettingsPathRejectsEmptyPath(t *testing.T) {
+	if _, err := writeManagedRGConfigFileForSettingsPath(" \t "); err == nil {
+		t.Fatal("expected empty settings path error")
+	}
+}
+
+func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.PersistenceRoot != filepath.Join(home, ".builder") {
+		t.Fatalf("persistence root = %q, want HOME-scoped root", cfg.PersistenceRoot)
+	}
+	if cfg.Source.HomeSettingsPath != filepath.Join(home, ".builder", "config.toml") {
+		t.Fatalf("home settings path = %q, want HOME-scoped config", cfg.Source.HomeSettingsPath)
 	}
 }
 

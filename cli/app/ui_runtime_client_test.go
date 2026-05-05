@@ -1349,6 +1349,8 @@ func TestRuntimeClientRefreshTranscriptUpdatesMainViewChatForWindowedOngoingTail
 }
 
 func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
+	withUIRuntimeReadTimeout(t, time.Millisecond)
+
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",
 		blockingSessionViewClient{},
@@ -1365,7 +1367,16 @@ func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
 	}
 }
 
+func withUIRuntimeReadTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	original := uiRuntimeReadTimeout
+	uiRuntimeReadTimeout = timeout
+	t.Cleanup(func() { uiRuntimeReadTimeout = original })
+}
+
 func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
+	withUIRuntimeReadTimeout(t, time.Millisecond)
+
 	reads := &blockingCountingSessionViewClient{}
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",

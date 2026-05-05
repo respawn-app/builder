@@ -59,6 +59,15 @@ type runtimeControlFakeClient struct {
 	compactionCalls     int
 }
 
+type blockingRuntimeControlClient struct {
+	runtimeControlFakeClient
+}
+
+func (c *blockingRuntimeControlClient) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
+	<-ctx.Done()
+	return llm.Response{}, ctx.Err()
+}
+
 type fakeShellHandler struct{}
 
 func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolExecCommand }
@@ -162,7 +171,7 @@ func TestServiceSetGoalMemoNormalizesObjectiveWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
 	}
-	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	engine, err := runtime.New(store, &blockingRuntimeControlClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
 	if err != nil {
 		t.Fatalf("create runtime engine: %v", err)
 	}

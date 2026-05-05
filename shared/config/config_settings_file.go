@@ -13,9 +13,21 @@ import (
 )
 
 func resolveSettingsFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	return resolveSettingsFilePathInRoot("")
+}
+
+func resolveSettingsFilePathInRoot(root string) (string, error) {
+	trimmed := strings.TrimSpace(root)
+	if trimmed != "" {
+		absRoot, err := filepath.Abs(trimmed)
+		if err != nil {
+			return "", fmt.Errorf("resolve settings root: %w", err)
+		}
+		return filepath.Join(absRoot, "config.toml"), nil
+	}
+	home, err := currentHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
 	return filepath.Join(home, ".builder", "config.toml"), nil
 }
