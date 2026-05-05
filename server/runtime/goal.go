@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"builder/prompts"
 	"builder/server/llm"
@@ -14,6 +15,7 @@ import (
 )
 
 const goalObjectivePreviewMaxRunes = 120
+const goalLoopBusyRetryDelay = 50 * time.Millisecond
 
 var ErrGoalRequiresAskQuestion = errors.New("active goal requires ask_question to be enabled; enable ask_question or pause/clear the goal")
 var errGoalLoopInactive = errors.New("goal loop inactive")
@@ -123,6 +125,12 @@ func (e *Engine) runGoalLoop(ctx context.Context, firstTurnAlreadyPrompted bool)
 			return
 		}
 		if _, err := e.runGoalTurn(ctx, appendNudge); err != nil {
+			if errors.Is(err, errExclusiveStepBusy) {
+				if !e.waitBeforeGoalLoopBusyRetry(ctx) {
+					return
+				}
+				continue
+			}
 			e.recordGoalLoopError(err)
 			return
 		}
@@ -156,6 +164,17 @@ func (e *Engine) runGoalTurn(ctx context.Context, appendNudge bool) (assistant l
 		return llm.Message{}, nil
 	}
 	return assistant, err
+}
+
+func (e *Engine) waitBeforeGoalLoopBusyRetry(ctx context.Context) bool {
+	timer := time.NewTimer(goalLoopBusyRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (e *Engine) recordGoalLoopError(err error) {

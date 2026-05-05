@@ -426,6 +426,52 @@ func TestGoalLoopInterruptSuspendsUntilResumeRestarts(t *testing.T) {
 	}
 }
 
+func TestGoalLoopRetriesWhenExclusiveStepIsBusy(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := newScriptedGoalLoopClient()
+	engine, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	baseLifecycle := engine.stepLifecycle
+	attempts := 0
+	engine.stepLifecycle = &stubExclusiveStepLifecycle{runFn: func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
+		attempts++
+		if attempts == 1 {
+			return errExclusiveStepBusy
+		}
+		return baseLifecycle.Run(ctx, options, fn)
+	}}
+	client.beforeReturn = func(call int) {
+		if call == 1 {
+			_, _ = engine.SetGoalStatus(session.GoalStatusComplete, session.GoalActorAgent)
+		}
+	}
+	if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+	if err := engine.StartGoalLoop(); err != nil {
+		t.Fatalf("StartGoalLoop: %v", err)
+	}
+	client.waitStarted(t, 1)
+	client.releaseCall(1)
+	waitGoalLoopRunning(t, engine, false)
+	if attempts < 2 {
+		t.Fatalf("goal loop attempts = %d, want retry after busy step lifecycle", attempts)
+	}
+	if got := client.callCount(); got != 1 {
+		t.Fatalf("model calls = %d, want 1", got)
+	}
+	for _, entry := range engine.ChatSnapshot().Entries {
+		if entry.Role == string(transcript.EntryRoleDeveloperErrorFeedback) && strings.Contains(entry.Text, errExclusiveStepBusy.Error()) {
+			t.Fatalf("did not expect busy retry to persist goal-loop error, entries=%+v", engine.ChatSnapshot().Entries)
+		}
+	}
+}
+
 func TestNewRestartsPersistedActiveGoalLoop(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "workspace-x", "/tmp/workspace-x")

@@ -19,10 +19,33 @@ if [ "${BUILDER_TEST_INHERIT_ENV:-}" != "1" ]; then
 fi
 
 log_file="$(mktemp -t builder-go-test.XXXXXX.log)"
+test_pid=""
 cleanup() {
     rm -f "$log_file"
 }
 trap cleanup EXIT
+
+terminate_test_process_group() {
+    if [ -z "${test_pid:-}" ] || ! kill -0 "$test_pid" 2>/dev/null; then
+        return
+    fi
+    kill -TERM "-$test_pid" 2>/dev/null || kill -TERM "$test_pid" 2>/dev/null || true
+    sleep 2
+    kill -KILL "-$test_pid" 2>/dev/null || kill -KILL "$test_pid" 2>/dev/null || true
+}
+
+handle_interrupt() {
+    terminate_test_process_group
+    exit 130
+}
+
+handle_term() {
+    terminate_test_process_group
+    exit 143
+}
+
+trap handle_interrupt INT
+trap handle_term TERM
 
 timeout_seconds="${BUILDER_TEST_TIMEOUT_SECONDS:-120}"
 case "$timeout_seconds" in
@@ -67,18 +90,19 @@ deadline=$((SECONDS + timeout_seconds))
 while kill -0 "$test_pid" 2>/dev/null; do
     if [ "$SECONDS" -ge "$deadline" ]; then
         timed_out=1
-        kill -TERM "-$test_pid" 2>/dev/null || kill -TERM "$test_pid" 2>/dev/null || true
-        sleep 2
-        kill -KILL "-$test_pid" 2>/dev/null || kill -KILL "$test_pid" 2>/dev/null || true
+        terminate_test_process_group
         break
     fi
     sleep 1
 done
 
-if wait "$test_pid"; then
+set +e
+wait "$test_pid"
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
     exit 0
 fi
-status=$?
 
 if [ "$timed_out" -eq 1 ] || [ "$status" -eq 143 ] || [ "$status" -eq 137 ]; then
     printf 'test suite exceeded %ds wall-clock cap; simplify or speed up tests before continuing\n' "$timeout_seconds"
