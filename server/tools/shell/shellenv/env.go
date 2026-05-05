@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/shared/config"
+	"builder/shared/sessionenv"
 )
 
 var overrides = []string{
@@ -40,6 +41,10 @@ var overrides = []string{
 }
 
 func Enrich(base []string) []string {
+	return EnrichForSession(base, "")
+}
+
+func EnrichForSession(base []string, sessionID string) []string {
 	env := make(map[string]string, len(base)+len(overrides))
 	order := make([]string, 0, len(base)+len(overrides))
 
@@ -63,6 +68,13 @@ func Enrich(base []string) []string {
 			order = append(order, key)
 		}
 		env[key] = value
+	}
+
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		if _, exists := env[sessionenv.BuilderSessionID]; !exists {
+			order = append(order, sessionenv.BuilderSessionID)
+		}
+		env[sessionenv.BuilderSessionID] = sessionID
 	}
 
 	if _, exists := env["RIPGREP_CONFIG_PATH"]; !exists {

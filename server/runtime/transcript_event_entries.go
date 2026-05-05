@@ -45,6 +45,8 @@ func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
 
 func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 	switch evt.Kind {
+	case EventConversationUpdated:
+		return VisibleChatEntriesFromMessage(evt.Message)
 	case EventUserMessageFlushed:
 		text := strings.TrimSpace(evt.UserMessage)
 		if text == "" {

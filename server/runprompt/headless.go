@@ -3,6 +3,7 @@ package runprompt
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"builder/server/auth"
 	"builder/server/launch"
@@ -18,6 +19,8 @@ import (
 	"builder/shared/serverapi"
 	"builder/shared/transcriptdiag"
 )
+
+var ErrHeadlessGoalSession = errors.New("headless runs cannot continue sessions with goals; clear the goal first")
 
 type HeadlessBootstrap struct {
 	Config          config.App
@@ -67,6 +70,9 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req 
 	plan, warnings, err = launch.ApplyRunPromptOverrides(plan, req.Overrides, authState)
 	if err != nil {
 		return nil, err
+	}
+	if plan.Store.Meta().Goal != nil {
+		return nil, fmt.Errorf("%w", ErrHeadlessGoalSession)
 	}
 	runtimePlan, err := l.prepareRuntime(plan, progress)
 	if err != nil {

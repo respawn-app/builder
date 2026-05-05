@@ -88,6 +88,32 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 	}
 }
 
+func TestReduceRuntimeEvent_GoalRunStateTracksOnlyBusyGoalTurns(t *testing.T) {
+	started := ReduceRuntimeEvent(
+		RuntimeRunState{},
+		RuntimeConversationState{},
+		PendingInputState{},
+		RuntimeReasoningState{},
+		false,
+		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true, GoalLoop: true}},
+	)
+	if !started.RunState.State.GoalLoop {
+		t.Fatalf("expected goal loop run state after start, got %+v", started.RunState.State)
+	}
+
+	stopped := ReduceRuntimeEvent(
+		started.RunState.State,
+		RuntimeConversationState{},
+		PendingInputState{},
+		RuntimeReasoningState{},
+		true,
+		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: false, GoalLoop: true}},
+	)
+	if stopped.RunState.State.GoalLoop {
+		t.Fatalf("expected goal loop run state cleared after stop, got %+v", stopped.RunState.State)
+	}
+}
+
 func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceOrRecovery(t *testing.T) {
 	plain := ReduceRuntimeEvent(
 		RuntimeRunState{},

@@ -9,6 +9,7 @@ import (
 	"builder/server/primaryrun"
 	"builder/server/requestmemo"
 	"builder/server/runtime"
+	"builder/server/session"
 	"builder/shared/serverapi"
 	"builder/shared/transcript"
 )
@@ -41,6 +42,9 @@ type Service struct {
 	interrupts           *requestmemo.Memo[sessionOnlyMemoRequest, struct{}]
 	queuedDiscards       *requestmemo.Memo[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse]
 	promptHistory        *requestmemo.Memo[sessionTextMemoRequest, struct{}]
+	goals                *requestmemo.Memo[goalSetMemoRequest, serverapi.RuntimeGoalShowResponse]
+	goalStatuses         *requestmemo.Memo[goalStatusMemoRequest, serverapi.RuntimeGoalShowResponse]
+	goalClears           *requestmemo.Memo[goalClearMemoRequest, serverapi.RuntimeGoalShowResponse]
 }
 
 type sessionStringMemoRequest struct {
@@ -74,6 +78,23 @@ type localEntryMemoRequest struct {
 	Visibility transcript.EntryVisibility
 }
 
+type goalSetMemoRequest struct {
+	SessionID string
+	Objective string
+	Actor     string
+}
+
+type goalStatusMemoRequest struct {
+	SessionID string
+	Status    string
+	Actor     string
+}
+
+type goalClearMemoRequest struct {
+	SessionID string
+	Actor     string
+}
+
 func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
 	return &Service{
 		runtimes:       runtimes,
@@ -94,6 +115,9 @@ func NewService(runtimes RuntimeResolver, gate primaryrun.Gate) *Service {
 		interrupts:           requestmemo.New[sessionOnlyMemoRequest, struct{}](),
 		queuedDiscards:       requestmemo.New[sessionTextMemoRequest, serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse](),
 		promptHistory:        requestmemo.New[sessionTextMemoRequest, struct{}](),
+		goals:                requestmemo.New[goalSetMemoRequest, serverapi.RuntimeGoalShowResponse](),
+		goalStatuses:         requestmemo.New[goalStatusMemoRequest, serverapi.RuntimeGoalShowResponse](),
+		goalClears:           requestmemo.New[goalClearMemoRequest, serverapi.RuntimeGoalShowResponse](),
 	}
 }
 
@@ -477,6 +501,149 @@ func (s *Service) RecordPromptHistory(ctx context.Context, req serverapi.Runtime
 	return err
 }
 
+func (s *Service) ShowGoal(ctx context.Context, req serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.RuntimeGoalShowResponse{}, err
+	}
+	engine, err := s.resolve(ctx, req.SessionID)
+	if err != nil {
+		return serverapi.RuntimeGoalShowResponse{}, err
+	}
+	return goalResponse(engine.Goal(), engine.GoalLoopSuspended()), nil
+}
+
+func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.RuntimeGoalShowResponse{}, err
+	}
+	trimmedObjective := strings.TrimSpace(req.Objective)
+	memoReq := goalSetMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Objective: trimmedObjective, Actor: strings.TrimSpace(req.Actor)}
+	return s.goals.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameGoalSetMemoRequest, func(ctx context.Context) (serverapi.RuntimeGoalShowResponse, error) {
+		if err := s.requireOptionalControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		lease, err := s.requireGoalStartPreflight(memoReq.SessionID, engine)
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		defer lease.Release()
+		goal, err := engine.SetGoal(trimmedObjective, session.GoalActor(req.Actor))
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		if err := engine.StartGoalLoop(); err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		return goalResponse(&goal, false), nil
+	})
+}
+
+func (s *Service) PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return s.setGoalStatus(ctx, req, session.GoalStatusPaused)
+}
+
+func (s *Service) ResumeGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return s.setGoalStatus(ctx, req, session.GoalStatusActive)
+}
+
+func (s *Service) CompleteGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return s.setGoalStatus(ctx, req, session.GoalStatusComplete)
+}
+
+func (s *Service) setGoalStatus(ctx context.Context, req serverapi.RuntimeGoalStatusRequest, status session.GoalStatus) (serverapi.RuntimeGoalShowResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.RuntimeGoalShowResponse{}, err
+	}
+	memoReq := goalStatusMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Status: strings.TrimSpace(string(status)), Actor: strings.TrimSpace(req.Actor)}
+	return s.goalStatuses.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameGoalStatusMemoRequest, func(ctx context.Context) (serverapi.RuntimeGoalShowResponse, error) {
+		if err := s.requireOptionalControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		if status == session.GoalStatusComplete {
+			current := engine.Goal()
+			if current != nil && current.Status == session.GoalStatusComplete {
+				return goalResponse(current, false), nil
+			}
+		}
+		if status == session.GoalStatusActive {
+			lease, err := s.requireGoalStartPreflight(memoReq.SessionID, engine)
+			if err != nil {
+				return serverapi.RuntimeGoalShowResponse{}, err
+			}
+			defer lease.Release()
+		}
+		goal, err := engine.SetGoalStatus(status, session.GoalActor(req.Actor))
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		if status == session.GoalStatusActive {
+			if err := engine.StartGoalLoop(); err != nil {
+				return serverapi.RuntimeGoalShowResponse{}, err
+			}
+		}
+		return goalResponse(&goal, false), nil
+	})
+}
+
+func (s *Service) requireGoalStartPreflight(sessionID string, engine *runtime.Engine) (primaryrun.Lease, error) {
+	if engine == nil {
+		return nil, serverapi.ErrRuntimeUnavailable
+	}
+	if err := engine.RequireGoalLoopStartAllowed(); err != nil {
+		return nil, err
+	}
+	return s.acquirePrimaryRun(sessionID)
+}
+
+func (s *Service) ClearGoal(ctx context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.RuntimeGoalShowResponse{}, err
+	}
+	memoReq := goalClearMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Actor: strings.TrimSpace(req.Actor)}
+	return s.goalClears.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameGoalClearMemoRequest, func(ctx context.Context) (serverapi.RuntimeGoalShowResponse, error) {
+		if err := s.requireOptionalControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		engine, err := s.resolve(ctx, req.SessionID)
+		if err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		if _, err := engine.ClearGoal(session.GoalActor(req.Actor)); err != nil {
+			return serverapi.RuntimeGoalShowResponse{}, err
+		}
+		return serverapi.RuntimeGoalShowResponse{}, nil
+	})
+}
+
+func (s *Service) requireOptionalControllerLease(ctx context.Context, sessionID string, leaseID string) error {
+	if strings.TrimSpace(leaseID) == "" {
+		return nil
+	}
+	return s.requireControllerLease(ctx, sessionID, leaseID)
+}
+
+func goalResponse(goal *session.GoalState, suspended bool) serverapi.RuntimeGoalShowResponse {
+	if goal == nil {
+		return serverapi.RuntimeGoalShowResponse{}
+	}
+	return serverapi.RuntimeGoalShowResponse{Goal: &serverapi.RuntimeGoal{
+		ID:        strings.TrimSpace(goal.ID),
+		Objective: goal.Objective,
+		Status:    strings.TrimSpace(string(goal.Status)),
+		Suspended: suspended,
+		CreatedAt: goal.CreatedAt,
+		UpdatedAt: goal.UpdatedAt,
+	}}
+}
+
 func (s *Service) acquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
 	if s == nil || s.gate == nil {
 		return primaryrun.LeaseFunc(func() {}), nil
@@ -506,6 +673,18 @@ func sameSessionOnlyMemoRequest(a sessionOnlyMemoRequest, b sessionOnlyMemoReque
 
 func sameLocalEntryMemoRequest(a localEntryMemoRequest, b localEntryMemoRequest) bool {
 	return a.SessionID == b.SessionID && a.Role == b.Role && a.Text == b.Text && a.Visibility == b.Visibility
+}
+
+func sameGoalSetMemoRequest(a goalSetMemoRequest, b goalSetMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Objective == b.Objective && a.Actor == b.Actor
+}
+
+func sameGoalStatusMemoRequest(a goalStatusMemoRequest, b goalStatusMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Status == b.Status && a.Actor == b.Actor
+}
+
+func sameGoalClearMemoRequest(a goalClearMemoRequest, b goalClearMemoRequest) bool {
+	return a.SessionID == b.SessionID && a.Actor == b.Actor
 }
 
 var _ serverapi.RuntimeControlService = (*Service)(nil)

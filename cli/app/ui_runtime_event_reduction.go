@@ -19,6 +19,7 @@ func (a uiRuntimeAdapter) runtimeRunState() clientui.RuntimeRunState {
 		Compacting:       m.compacting,
 		ReviewerRunning:  m.reviewerRunning,
 		ReviewerBlocking: m.reviewerBlocking,
+		GoalLoop:         m.goalRun,
 	}
 }
 
@@ -43,6 +44,7 @@ func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
 func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) {
 	m := a.model
 	m.busy = reduction.RunState.State.Busy
+	m.goalRun = reduction.RunState.State.GoalLoop
 	m.compacting = reduction.RunState.State.Compacting
 	m.reviewerRunning = reduction.RunState.State.ReviewerRunning
 	m.reviewerBlocking = reduction.RunState.State.ReviewerBlocking

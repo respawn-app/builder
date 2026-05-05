@@ -312,6 +312,36 @@ func (c *Remote) RecordPromptHistory(ctx context.Context, req serverapi.RuntimeR
 	return c.call(ctx, protocol.MethodRuntimeRecordPromptHistory, req, nil)
 }
 
+func (c *Remote) ShowGoal(ctx context.Context, req serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalShow, req, &resp)
+}
+
+func (c *Remote) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalSet, req, &resp)
+}
+
+func (c *Remote) PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalPause, req, &resp)
+}
+
+func (c *Remote) ResumeGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalResume, req, &resp)
+}
+
+func (c *Remote) CompleteGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalComplete, req, &resp)
+}
+
+func (c *Remote) ClearGoal(ctx context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	var resp serverapi.RuntimeGoalShowResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeGoalClear, req, &resp)
+}
+
 func (c *Remote) ListProcesses(ctx context.Context, req serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
 	var resp serverapi.ProcessListResponse
 	return resp, c.call(ctx, protocol.MethodProcessList, req, &resp)

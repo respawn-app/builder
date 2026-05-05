@@ -39,7 +39,18 @@ func (s *stubRuntimeClient) SetReviewerEnabled(bool) (bool, string, error) { ret
 func (s *stubRuntimeClient) SetAutoCompactionEnabled(bool) (bool, bool, error) {
 	return false, false, nil
 }
-func (s *stubRuntimeClient) AppendLocalEntry(string, string) error { return nil }
+func (s *stubRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) { return nil, nil }
+func (s *stubRuntimeClient) SetGoal(string) (*clientui.RuntimeGoal, error) {
+	return &clientui.RuntimeGoal{}, nil
+}
+func (s *stubRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
+	return &clientui.RuntimeGoal{}, nil
+}
+func (s *stubRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
+	return &clientui.RuntimeGoal{}, nil
+}
+func (s *stubRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) { return nil, nil }
+func (s *stubRuntimeClient) AppendLocalEntry(string, string) error     { return nil }
 func (s *stubRuntimeClient) ShouldCompactBeforeUserMessage(context.Context, string) (bool, error) {
 	return false, nil
 }

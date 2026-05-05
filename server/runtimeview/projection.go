@@ -31,6 +31,7 @@ func StatusFromRuntime(engine *runtime.Engine) clientui.RuntimeStatus {
 		return clientui.RuntimeStatus{}
 	}
 	usage := engine.ContextUsage()
+	goal := engine.Goal()
 	return clientui.RuntimeStatus{
 		ReviewerFrequency:                 engine.ReviewerFrequency(),
 		ReviewerEnabled:                   engine.ReviewerEnabled(),
@@ -49,6 +50,19 @@ func StatusFromRuntime(engine *runtime.Engine) clientui.RuntimeStatus {
 			HasCacheHitPercentage: usage.HasCacheHitPercentage,
 		},
 		CompactionCount: engine.CompactionCount(),
+		Goal:            goalStatusFromRuntime(goal, engine.GoalLoopSuspended()),
+	}
+}
+
+func goalStatusFromRuntime(goal *session.GoalState, suspended bool) *clientui.RuntimeGoal {
+	if goal == nil {
+		return nil
+	}
+	return &clientui.RuntimeGoal{
+		ID:        strings.TrimSpace(goal.ID),
+		Objective: goal.Objective,
+		Status:    clientui.RuntimeGoalStatus(strings.TrimSpace(string(goal.Status))),
+		Suspended: suspended,
 	}
 }
 
@@ -112,6 +126,7 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 			Busy:       evt.RunState.Busy,
 			RunID:      evt.RunState.RunID,
 			Status:     clientui.RunStatus(evt.RunState.Status),
+			GoalLoop:   evt.RunState.GoalLoop,
 			StartedAt:  evt.RunState.StartedAt,
 			FinishedAt: evt.RunState.FinishedAt,
 		}

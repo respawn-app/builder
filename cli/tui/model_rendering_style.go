@@ -83,7 +83,7 @@ func (m Model) roleSymbol(role RenderIntent) string {
 	switch role {
 	case RenderIntentTool, RenderIntentToolSuccess, RenderIntentToolError, RenderIntentToolShell, RenderIntentToolShellSuccess, RenderIntentToolShellError, RenderIntentToolPatch, RenderIntentToolPatchSuccess, RenderIntentToolPatchError, RenderIntentToolQuestion, RenderIntentToolQuestionError, RenderIntentToolWebSearch, RenderIntentToolWebSearchSuccess, RenderIntentToolWebSearchError:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case RenderIntentDeveloperContext, RenderIntentDeveloperFeedback, RenderIntentInterruption:
+	case RenderIntentDeveloperContext, RenderIntentDeveloperFeedback, RenderIntentInterruption, RenderIntentGoalFeedback:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
 		if role.IsCompaction() {
@@ -121,6 +121,8 @@ func roleSymbolStyle(role RenderIntent, p palette) roleSymbolColorStyle {
 		return roleSymbolColorStyle{color: p.errorColor}
 	case RenderIntentDeveloperContext:
 		return roleSymbolColorStyle{color: p.foregroundColor}
+	case RenderIntentGoalFeedback:
+		return roleSymbolColorStyle{color: p.primaryColor}
 	case RenderIntentTool, RenderIntentToolShell, RenderIntentToolPatch, RenderIntentToolWebSearch:
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
@@ -161,6 +163,8 @@ func rolePrefix(role RenderIntent) string {
 		return "!"
 	case RenderIntentInterruption:
 		return "!"
+	case RenderIntentGoalFeedback:
+		return "ℹ"
 	default:
 		return ""
 	}
@@ -221,6 +225,8 @@ func styleForRole(role RenderIntent, p palette) lipgloss.Style {
 		return p.warning
 	case RenderIntentInterruption:
 		return p.error
+	case RenderIntentGoalFeedback:
+		return p.primary
 	case RenderIntentReasoning, RenderIntentThinkingTrace:
 		return p.system
 	default:
@@ -257,6 +263,7 @@ type palette struct {
 	tool                     lipgloss.Style
 	toolSuccess              lipgloss.Style
 	toolError                lipgloss.Style
+	primary                  lipgloss.Style
 	system                   lipgloss.Style
 	error                    lipgloss.Style
 	warning                  lipgloss.Style
@@ -291,6 +298,7 @@ func (m Model) palette() palette {
 		tool:                     lipgloss.NewStyle().Foreground(tokens.Transcript.Tool.Lipgloss()),
 		toolSuccess:              lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()),
 		toolError:                lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()),
+		primary:                  lipgloss.NewStyle().Foreground(tokens.App.Primary.Lipgloss()),
 		system:                   lipgloss.NewStyle().Foreground(tokens.Transcript.System.Lipgloss()).Faint(true),
 		error:                    lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()),
 		warning:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Warning.Lipgloss()),

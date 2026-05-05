@@ -26,6 +26,19 @@
 - Core tools: `exec_command`, `write_stdin`, `view_image`, `patch`, `ask_question`.
 - Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
 - One app instance runs one active conversation.
+- Goal management is CLI/runtime-owned. Builder must not add model-callable goal tools, even dynamically; the Builder CLI is the authoritative control surface for creating, updating, pausing, resuming, clearing, and completing goals.
+- Users manage goals primarily through TUI `/goal`; models may only use normal shell commands `builder goal show` and `builder goal complete`, relying on Builder-injected caller session identity for correct session targeting. Agent attempts to run `builder goal set|pause|resume|clear` must fail nonzero with model-facing warning copy from `prompts/goal/agent_command_denied.md`.
+- `/goal <objective>` is immediate: it sets/replaces the session goal and starts a model turn toward that goal right away. If a model turn is currently running, setting/replacing is rejected.
+- `/goal resume` on a completed goal reopens that same goal as active; this is intentional operator recovery for mistaken completion.
+- Goal v1 excludes budgets and accounting. Do not implement token budgets, time budgets, budget-limited status, or goal usage accounting in the first slice.
+- Goal completion is explicit CLI state mutation, not natural-language inference. The model reports completion by running `builder goal complete`; Builder must not infer completion merely from assistant text. Agent-env completion requires hidden `--confirm` after first tripwire failure; human CLI completion does not require confirm.
+- Goal state persists in session metadata for direct resume reads as `{goal_id, objective, status, created_at, updated_at}` with `status` limited to `active|paused|complete` in v1. Goal lifecycle also appends structured audit/projection events: `goal_set`, `goal_status_updated`, and `goal_cleared`, each with actor `user|agent|system`.
+- Goal mode requires `ask_question` for active model loops. Validate active-goal/question parity at the boundary that starts model work and surface a normal runtime error if violated; do not add queue-specific or config-specific special cases. Reopening a session with a persisted active goal must still construct the runtime when `ask_question` is disabled so `builder goal show|pause|clear` can recover the session; only autonomous loop startup is suppressed.
+- Goal CLI must never mutate session DB directly. It must cross live server/runtime RPC using existing app-server discovery/config; if the discovered/default server does not host the target session, fail live-runtime-unavailable.
+- Standalone `builder goal` commands do not acquire controller leases. TUI/user goal mutations stay controller-lease-backed through existing runtime-control paths; model-shell CLI gets narrow lease-free RPC authority for same-session `show` and confirm-gated `complete` only.
+- While a model turn is currently running, TUI goal lifecycle only accepts pause and clear. Set/replacement, resume, and complete are rejected while a model turn is currently running. Runtime-control `SetGoal` and `ResumeGoal` must acquire the primary-run gate before persisting active goal state, so a busy session cannot be left with an active goal and no running loop.
+- Ctrl+C during active goal work keeps persisted status `active` and creates only runtime-local suspension until the next user message/session resume; do not persist an interrupt-specific status or metadata flag.
+- Goal prompts and model-facing goal error copy live under `prompts/goal/`; avoid hardcoded multi-line goal prompts in Go. V1 prompt inventory is `set.md`, `nudge.md`, `pause.md`, `resume.md`, `clear.md`, `complete.md`, `agent_command_denied.md`, and `complete_confirm_required.md`; one-line human UI labels may stay in Go.
 
 ## Command Execution Tool
 
@@ -405,7 +418,7 @@
 - Compact detail viewport scrolling (`Up`/`Down`, `PgUp`/`PgDn`, wheel, and alternate-scroll key events) auto-focuses the selectable item nearest the viewport center so `Enter` expands what the user is visually centered on.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
-- Main status line is compact and fixed: activity indicator, optional git branch, model label, process/server metadata, transient warning; context meter is right-aligned. The activity indicator is followed by one plain space. Later metadata segments use ` · ` separators.
+- Main status line is compact and fixed: activity indicator, optional git branch, model label, process/server metadata, transient warning; context meter is right-aligned. The activity indicator is followed by one plain space. Later metadata segments use ` · ` separators. Goal mode does not add persistent `goal active`/`goal paused`/`goal complete` text; only an active goal turn changes the progress word to primary-blue `goal`.
 - Model label appends thinking level when reasoning effort is supported by the resolved model contract; unknown non-empty model ids default to reasoning-capable.
 - Status line includes right-aligned context meter (10-char bar + `% ctx window`, green/yellow/red at `<50%`, `50-<80%`, `>=80%`).
 

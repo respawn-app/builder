@@ -4,31 +4,55 @@ import (
 	"strings"
 )
 
+type PendingSpinnerFrameFunc func(entry TranscriptEntry, entryIndex int) string
+
 func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width int, spinner string) string {
-	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Render(TranscriptDivider)
+	return renderPendingToolSnapshotProjection(entries, theme, width, uniformPendingSpinnerFrame(spinner)).Render(TranscriptDivider)
 }
 
 func RenderPendingOngoingSnapshot(entries []TranscriptEntry, theme string, width int, spinner string) string {
-	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinner).Render(TranscriptDivider)
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, uniformPendingSpinnerFrame(spinner)).Render(TranscriptDivider)
 }
 
 func RenderPendingToolSnapshotLines(entries []TranscriptEntry, theme string, width int, spinner string) []TranscriptProjectionLine {
-	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Lines(TranscriptDivider)
+	return renderPendingToolSnapshotProjection(entries, theme, width, uniformPendingSpinnerFrame(spinner)).Lines(TranscriptDivider)
 }
 
 func RenderPendingOngoingSnapshotLines(entries []TranscriptEntry, theme string, width int, spinner string) []TranscriptProjectionLine {
-	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinner).Lines(TranscriptDivider)
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, uniformPendingSpinnerFrame(spinner)).Lines(TranscriptDivider)
 }
 
-func renderPendingToolSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinner string) TranscriptProjection {
+func RenderPendingToolSnapshotWithSpinnerFrames(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) string {
+	return renderPendingToolSnapshotProjection(entries, theme, width, spinnerForEntry).Render(TranscriptDivider)
+}
+
+func RenderPendingToolSnapshotLinesWithSpinnerFrames(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) []TranscriptProjectionLine {
+	return renderPendingToolSnapshotProjection(entries, theme, width, spinnerForEntry).Lines(TranscriptDivider)
+}
+
+func RenderPendingOngoingSnapshotWithSpinnerFrames(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) string {
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinnerForEntry).Render(TranscriptDivider)
+}
+
+func RenderPendingOngoingSnapshotLinesWithSpinnerFrames(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) []TranscriptProjectionLine {
+	return renderPendingOngoingSnapshotProjection(entries, theme, width, spinnerForEntry).Lines(TranscriptDivider)
+}
+
+func uniformPendingSpinnerFrame(spinner string) PendingSpinnerFrameFunc {
+	return func(TranscriptEntry, int) string {
+		return spinner
+	}
+}
+
+func renderPendingToolSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) TranscriptProjection {
 	pending := PendingToolEntries(entries)
 	if len(pending) == 0 {
 		return TranscriptProjection{}
 	}
-	return renderPendingOngoingSnapshotProjection(pending, theme, width, spinner)
+	return renderPendingOngoingSnapshotProjection(pending, theme, width, spinnerForEntry)
 }
 
-func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinner string) TranscriptProjection {
+func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinnerForEntry PendingSpinnerFrameFunc) TranscriptProjection {
 	if len(entries) == 0 {
 		return TranscriptProjection{}
 	}
@@ -39,15 +63,15 @@ func renderPendingOngoingSnapshotProjection(entries []TranscriptEntry, theme str
 	model.toolSymbolGap = 2
 	model.transcript = append([]TranscriptEntry(nil), entries...)
 	blocks := model.buildOngoingBlocks(false)
-	blocks = model.applyPendingSpinner(blocks, entries, spinner)
+	blocks = model.applyPendingSpinner(blocks, entries, spinnerForEntry)
 	if len(blocks) == 0 {
 		return TranscriptProjection{}
 	}
 	return projectionFromOngoingBlocks(blocks)
 }
 
-func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEntry, spinner string) []ongoingBlock {
-	if strings.TrimSpace(spinner) == "" {
+func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEntry, spinnerForEntry PendingSpinnerFrameFunc) []ongoingBlock {
+	if spinnerForEntry == nil {
 		return blocks
 	}
 	consumedResults := make(map[int]struct{})
@@ -55,6 +79,11 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 	out := make([]ongoingBlock, 0, len(blocks))
 	for _, block := range blocks {
 		if !m.shouldRenderPendingSpinner(block, entries, consumedResults, resultIndex) {
+			out = append(out, block)
+			continue
+		}
+		spinner := spinnerForEntry(entries[block.entryIndex], block.entryIndex)
+		if strings.TrimSpace(spinner) == "" {
 			out = append(out, block)
 			continue
 		}

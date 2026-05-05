@@ -20,6 +20,7 @@ type defaultExclusiveStepLifecycle struct {
 
 	mu        sync.Mutex
 	busy      bool
+	goalLoop  bool
 	cancel    context.CancelFunc
 	activeRun uint64
 	runSeq    uint64
@@ -29,7 +30,7 @@ type defaultExclusiveStepLifecycle struct {
 }
 
 func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) (err error) {
-	stepCtx, stepID, err := s.begin(ctx)
+	stepCtx, stepID, err := s.begin(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -53,6 +54,7 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 				Busy:      true,
 				RunID:     snapshot.RunID,
 				Status:    snapshot.Status,
+				GoalLoop:  snapshot.GoalLoop,
 				StartedAt: snapshot.StartedAt,
 			}})
 		}
@@ -71,6 +73,7 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 			if snapshot != nil {
 				state.RunID = snapshot.RunID
 				state.Status = snapshot.Status
+				state.GoalLoop = snapshot.GoalLoop
 				state.StartedAt = snapshot.StartedAt
 				state.FinishedAt = snapshot.FinishedAt
 			}
@@ -141,7 +144,7 @@ func (s *defaultExclusiveStepLifecycle) Snapshot() *RunSnapshot {
 	return cloneRunSnapshot(s.snapshotLocked())
 }
 
-func (s *defaultExclusiveStepLifecycle) begin(ctx context.Context) (context.Context, string, error) {
+func (s *defaultExclusiveStepLifecycle) begin(ctx context.Context, options exclusiveStepOptions) (context.Context, string, error) {
 	s.mu.Lock()
 	if s.busy {
 		s.mu.Unlock()
@@ -153,6 +156,7 @@ func (s *defaultExclusiveStepLifecycle) begin(ctx context.Context) (context.Cont
 	stepID := uuid.NewString()
 	startedAt := time.Now().UTC()
 	s.busy = true
+	s.goalLoop = options.GoalLoop
 	s.cancel = cancel
 	s.activeRun = s.runSeq
 	s.runID = runID
@@ -170,6 +174,7 @@ func (s *defaultExclusiveStepLifecycle) begin(ctx context.Context) (context.Cont
 func (s *defaultExclusiveStepLifecycle) end() {
 	s.mu.Lock()
 	s.busy = false
+	s.goalLoop = false
 	s.cancel = nil
 	s.activeRun = 0
 	s.runID = ""
@@ -186,6 +191,7 @@ func (s *defaultExclusiveStepLifecycle) snapshotLocked() *RunSnapshot {
 		RunID:     s.runID,
 		StepID:    s.stepID,
 		Status:    RunStatusRunning,
+		GoalLoop:  s.goalLoop,
 		StartedAt: s.startedAt,
 	}
 }
@@ -200,6 +206,7 @@ func (s *defaultExclusiveStepLifecycle) snapshotWithFinishedAt(finishedAt time.T
 		RunID:      s.runID,
 		StepID:     s.stepID,
 		Status:     status,
+		GoalLoop:   s.goalLoop,
 		StartedAt:  s.startedAt,
 		FinishedAt: finishedAt,
 	}

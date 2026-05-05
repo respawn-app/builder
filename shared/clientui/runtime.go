@@ -23,6 +23,21 @@ type RuntimeContextUsage struct {
 	HasCacheHitPercentage bool
 }
 
+type RuntimeGoal struct {
+	ID        string
+	Objective string
+	Status    RuntimeGoalStatus
+	Suspended bool
+}
+
+type RuntimeGoalStatus string
+
+const (
+	RuntimeGoalStatusActive   RuntimeGoalStatus = "active"
+	RuntimeGoalStatusPaused   RuntimeGoalStatus = "paused"
+	RuntimeGoalStatusComplete RuntimeGoalStatus = "complete"
+)
+
 type RuntimeStatus struct {
 	ReviewerFrequency                 string
 	ReviewerEnabled                   bool
@@ -36,6 +51,7 @@ type RuntimeStatus struct {
 	CompactionMode                    string
 	ContextUsage                      RuntimeContextUsage
 	CompactionCount                   int
+	Goal                              *RuntimeGoal
 	Update                            UpdateStatus
 }
 
@@ -111,6 +127,11 @@ type RuntimeClient interface {
 	SetFastModeEnabled(enabled bool) (bool, error)
 	SetReviewerEnabled(enabled bool) (bool, string, error)
 	SetAutoCompactionEnabled(enabled bool) (bool, bool, error)
+	ShowGoal() (*RuntimeGoal, error)
+	SetGoal(objective string) (*RuntimeGoal, error)
+	PauseGoal() (*RuntimeGoal, error)
+	ResumeGoal() (*RuntimeGoal, error)
+	ClearGoal() (*RuntimeGoal, error)
 	AppendLocalEntry(role, text string) error
 	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 	SubmitUserMessage(ctx context.Context, text string) (string, error)

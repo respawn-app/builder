@@ -776,8 +776,8 @@ func TestInitializeChildFromParentCopiesContextWithoutConversationState(t *testi
 	if meta.WorkspaceRoot != "/tmp/work-parent" || meta.WorkspaceContainer != "workspace-parent" {
 		t.Fatalf("workspace context = root %q container %q, want parent", meta.WorkspaceRoot, meta.WorkspaceContainer)
 	}
-	if !meta.AgentsInjected {
-		t.Fatal("expected agents-injected state to be copied")
+	if meta.AgentsInjected {
+		t.Fatal("expected fresh child to reinject developer context on its first turn")
 	}
 	if meta.Locked == nil || meta.Locked.Model != "locked-parent" || len(meta.Locked.EnabledTools) != 2 {
 		t.Fatalf("locked contract = %+v, want parent lock", meta.Locked)

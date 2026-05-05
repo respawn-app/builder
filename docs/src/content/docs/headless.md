@@ -21,6 +21,10 @@ Continue an existing headless session:
 builder run --continue <session-id> "<prompt>"
 ```
 
+Shell commands started by Builder receive `BUILDER_SESSION_ID`.
+Use `builder session-id` inside those commands to print the caller session id.
+`builder run` does not implicitly continue that caller session; use `--session` or `--continue` when you want to resume a specific headless session.
+
 ## Session Behavior
 
 Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run or issue tool preambles.
@@ -29,6 +33,7 @@ That makes them suitable for background execution and automation and saves token
 - `--agent <role>` selects a named subagent role from `[subagents.<role>]` in `~/.builder/config.toml`.
 - Subagent roles inherit the main config and then override only the keys you set in that role table.
 - Continuing a session reuses most of initial config and parameters.
+- Sessions with a goal cannot be continued headlessly. Clear the goal from the interactive session before using `builder run --continue`.
 - The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile.
 
 ## Workspace Binding

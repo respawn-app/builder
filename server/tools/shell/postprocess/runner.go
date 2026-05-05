@@ -23,6 +23,7 @@ type Request struct {
 	ParsedArgs      []string
 	CommandName     string
 	Workdir         string
+	OwnerSessionID  string
 	ExitCode        *int
 	Raw             bool
 	Output          string

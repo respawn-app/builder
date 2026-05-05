@@ -29,6 +29,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 		"supervisor":     true,
 		"autocompaction": true,
 		"status":         true,
+		"goal":           true,
 		"ps":             true,
 		"worktree":       false,
 		"copy":           true,
@@ -64,7 +65,9 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 		wantFastModeEnabled bool
 		wantStatusMode      bool
 		wantProcessMode     bool
+		wantGoalMode        bool
 		wantStatusContains  string
+		wantStatusOmits     string
 	}{
 		{
 			name:            "name executes immediately while busy",
@@ -80,6 +83,27 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			name:           "status opens overlay while busy",
 			input:          "/status",
 			wantStatusMode: true,
+		},
+		{
+			name:            "goal pause executes while busy without duplicate local status",
+			input:           "/goal pause",
+			wantStatusOmits: "Goal paused",
+		},
+		{
+			name:               "goal set is blocked while busy",
+			input:              "/goal ship feature",
+			wantStatusContains: "cannot set /goal while model is working",
+		},
+		{
+			name:            "goal dashboard opens while busy",
+			input:           "/goal",
+			wantGoalMode:    true,
+			wantStatusOmits: "cannot show /goal while model is working",
+		},
+		{
+			name:               "goal resume is blocked while busy",
+			input:              "/goal resume",
+			wantStatusContains: "cannot resume /goal while model is working",
 		},
 		{
 			name:            "ps opens overlay while busy",
@@ -155,10 +179,19 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			if got := updated.inputMode() == uiInputModeProcessList; got != tt.wantProcessMode {
 				t.Fatalf("process overlay open=%t, want %t", got, tt.wantProcessMode)
 			}
+			if got := updated.inputMode() == uiInputModeGoal; got != tt.wantGoalMode {
+				t.Fatalf("goal overlay open=%t, want %t", got, tt.wantGoalMode)
+			}
 			if tt.wantStatusContains != "" {
 				status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
 				if !strings.Contains(status, tt.wantStatusContains) {
 					t.Fatalf("expected status line to contain %q, got %q", tt.wantStatusContains, status)
+				}
+			}
+			if tt.wantStatusOmits != "" {
+				status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+				if strings.Contains(status, tt.wantStatusOmits) {
+					t.Fatalf("did not expect status line to contain %q, got %q", tt.wantStatusOmits, status)
 				}
 			}
 		})

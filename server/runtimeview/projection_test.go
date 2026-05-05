@@ -94,6 +94,28 @@ func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	}
 }
 
+func TestStatusFromRuntimeIncludesSuspendedGoal(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	engine, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	if _, err := engine.SetGoal("ship feature", session.GoalActorUser); err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	if err := engine.Interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+
+	status := StatusFromRuntime(engine)
+	if status.Goal == nil || !status.Goal.Suspended {
+		t.Fatalf("goal status = %+v, want suspended goal", status.Goal)
+	}
+}
+
 func TestEventFromRuntimeProjectsLocalEntry(t *testing.T) {
 	view := EventFromRuntime(runtime.Event{
 		Kind:   runtime.EventLocalEntryAdded,

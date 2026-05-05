@@ -608,8 +608,35 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 	if _, err := remote.RetargetSessionWorkspace(context.Background(), serverapi.SessionRetargetWorkspaceRequest{ClientRequestID: "retarget-foreign", SessionID: foreignSession.Meta().SessionID, WorkspaceRoot: resolvedA.Config.WorkspaceRoot}); err == nil {
 		t.Fatal("expected foreign-project session retarget to be rejected")
 	}
+	conn := dialGateway(t, server)
+	defer func() { _ = conn.Close() }()
+	handshakeGateway(t, conn)
+	callGateway(t, conn, "attach-project-for-foreign-goal-checks", protocol.MethodAttachProject, protocol.AttachProjectRequest{ProjectID: bindingA.ProjectID}, nil)
+	assertForeignGoalAccessRejected(t, conn, foreignSession.Meta().SessionID)
 	if bindingA.ProjectID == bindingB.ProjectID {
 		t.Fatalf("expected distinct project ids, both=%q", bindingA.ProjectID)
+	}
+}
+
+func assertForeignGoalAccessRejected(t *testing.T, conn *websocket.Conn, sessionID string) {
+	t.Helper()
+	wantMessage := "session " + strconv.Quote(sessionID) + " not available"
+	for _, tc := range []struct {
+		name   string
+		method string
+		params any
+	}{
+		{name: "show", method: protocol.MethodRuntimeGoalShow, params: serverapi.RuntimeGoalShowRequest{SessionID: sessionID}},
+		{name: "set", method: protocol.MethodRuntimeGoalSet, params: serverapi.RuntimeGoalSetRequest{ClientRequestID: "foreign-goal-set", SessionID: sessionID, Objective: "ship", Actor: "user"}},
+		{name: "pause", method: protocol.MethodRuntimeGoalPause, params: serverapi.RuntimeGoalStatusRequest{ClientRequestID: "foreign-goal-pause", SessionID: sessionID, Actor: "user"}},
+		{name: "resume", method: protocol.MethodRuntimeGoalResume, params: serverapi.RuntimeGoalStatusRequest{ClientRequestID: "foreign-goal-resume", SessionID: sessionID, Actor: "user"}},
+		{name: "complete", method: protocol.MethodRuntimeGoalComplete, params: serverapi.RuntimeGoalStatusRequest{ClientRequestID: "foreign-goal-complete", SessionID: sessionID, Actor: "agent"}},
+		{name: "clear", method: protocol.MethodRuntimeGoalClear, params: serverapi.RuntimeGoalClearRequest{ClientRequestID: "foreign-goal-clear", SessionID: sessionID, Actor: "user"}},
+	} {
+		err := callGatewayExpectError(t, conn, "foreign-goal-"+tc.name, tc.method, tc.params)
+		if err.Code != protocol.ErrCodeInternalError || err.Message != wantMessage {
+			t.Fatalf("foreign goal %s error = code %d message %q, want code %d message %q", tc.name, err.Code, err.Message, protocol.ErrCodeInternalError, wantMessage)
+		}
 	}
 }
 

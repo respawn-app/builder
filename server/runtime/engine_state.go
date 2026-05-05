@@ -73,7 +73,7 @@ func messagePreservesLastCommittedAssistantFinalAnswer(message llm.Message) bool
 		return false
 	}
 	switch message.MessageType {
-	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeHandoffFutureMessage, llm.MessageTypeReviewerFeedback:
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeGoal, llm.MessageTypeHandoffFutureMessage, llm.MessageTypeReviewerFeedback:
 		return true
 	default:
 		return false
@@ -660,6 +660,10 @@ func (e *Engine) emitConversationUpdated(stepID string) {
 
 func (e *Engine) emitCommittedTranscriptAdvanced(stepID string) {
 	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
+}
+
+func (e *Engine) emitCommittedMessageTranscriptAdvanced(stepID string, msg llm.Message) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true, Message: msg})
 }
 
 func eventMayInferCommittedEntryStart(kind EventKind) bool {

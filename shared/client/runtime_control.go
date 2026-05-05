@@ -25,6 +25,12 @@ type RuntimeControlClient interface {
 	QueueUserMessage(ctx context.Context, req serverapi.RuntimeQueueUserMessageRequest) error
 	DiscardQueuedUserMessagesMatching(ctx context.Context, req serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error)
 	RecordPromptHistory(ctx context.Context, req serverapi.RuntimeRecordPromptHistoryRequest) error
+	ShowGoal(ctx context.Context, req serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error)
+	SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error)
+	PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error)
+	ResumeGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error)
+	CompleteGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error)
+	ClearGoal(ctx context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error)
 }
 
 type loopbackRuntimeControlClient struct {
@@ -152,4 +158,46 @@ func (c *loopbackRuntimeControlClient) RecordPromptHistory(ctx context.Context, 
 		return errors.New("runtime control service is required")
 	}
 	return c.service.RecordPromptHistory(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) ShowGoal(ctx context.Context, req serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.ShowGoal(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.SetGoal(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) PauseGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.PauseGoal(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) ResumeGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.ResumeGoal(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) CompleteGoal(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.CompleteGoal(ctx, req)
+}
+
+func (c *loopbackRuntimeControlClient) ClearGoal(ctx context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.RuntimeGoalShowResponse{}, errors.New("runtime control service is required")
+	}
+	return c.service.ClearGoal(ctx, req)
 }

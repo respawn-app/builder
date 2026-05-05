@@ -22,11 +22,22 @@ const (
 	ActionSetSupervisor     Action = "set_supervisor"
 	ActionSetAutoCompaction Action = "set_auto_compaction"
 	ActionStatus            Action = "status"
+	ActionGoal              Action = "goal"
 	ActionProcesses         Action = "processes"
 	ActionWorktree          Action = "worktree"
 	ActionCopy              Action = "copy"
 	ActionBack              Action = "back"
 	ActionUnhandled         Action = "unhandled"
+)
+
+type GoalMode string
+
+const (
+	GoalModeShow   GoalMode = "show"
+	GoalModeSet    GoalMode = "set"
+	GoalModePause  GoalMode = "pause"
+	GoalModeResume GoalMode = "resume"
+	GoalModeClear  GoalMode = "clear"
 )
 
 type Result struct {
@@ -42,6 +53,8 @@ type Result struct {
 	FastMode           string
 	SupervisorMode     string
 	AutoCompactionMode string
+	GoalMode           GoalMode
+	GoalObjective      string
 }
 
 type Handler func(args string) Result
@@ -103,6 +116,29 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("status", "Open a detailed status overlay for the current session/runtime", RegisterOptions{RunWhileBusy: true}, func(string) Result {
 		return Result{Handled: true, Action: ActionStatus}
+	})
+	r.RegisterWithOptions("goal", "Set or manage the current session goal (usage: /goal [show|pause|resume|clear|<objective>])", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		mode := GoalModeShow
+		objective := strings.TrimSpace(args)
+		switch strings.ToLower(objective) {
+		case string(GoalModeShow):
+			mode = GoalModeShow
+			objective = ""
+		case string(GoalModePause):
+			mode = GoalModePause
+			objective = ""
+		case string(GoalModeResume):
+			mode = GoalModeResume
+			objective = ""
+		case string(GoalModeClear):
+			mode = GoalModeClear
+			objective = ""
+		default:
+			if objective != "" {
+				mode = GoalModeSet
+			}
+		}
+		return Result{Handled: true, Action: ActionGoal, GoalMode: mode, GoalObjective: objective}
 	})
 	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}

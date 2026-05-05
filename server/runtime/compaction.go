@@ -1051,26 +1051,26 @@ func (e *Engine) pendingHandoffFutureMessageSnapshot() string {
 	return strings.TrimSpace(e.pendingHandoffFutureMessage)
 }
 
-func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string) error {
+func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string) (bool, error) {
 	if futureMessage := e.pendingHandoffFutureMessageSnapshot(); futureMessage != "" {
 		if err := e.appendMessage(stepID, handoffFutureAgentMessage(futureMessage)); err != nil {
-			return err
+			return false, err
 		}
 		e.clearPendingHandoffFutureMessage()
-		return nil
+		return false, nil
 	}
 	req := e.pendingHandoffRequestSnapshot()
 	if req == nil {
-		return nil
+		return false, nil
 	}
 	if _, err := e.compactNow(ctx, stepID, compactionModeHandoff, req.summarizerPrompt, false); err != nil {
 		if e.pendingHandoffFutureMessageSnapshot() != "" {
 			e.clearPendingHandoffRequest()
 		}
-		return err
+		return false, err
 	}
 	e.clearPendingHandoffRequest()
-	return nil
+	return true, nil
 }
 
 func withCompactionSummaryLabel(items []llm.ResponseItem, label string) []llm.ResponseItem {

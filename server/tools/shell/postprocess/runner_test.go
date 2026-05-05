@@ -125,6 +125,28 @@ func TestRunnerUserHookReplacesOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerUserHookInheritsOwnerSessionID(t *testing.T) {
+	hookPath := writeHookScript(t, `#!/bin/sh
+printf '{"processed":true,"replaced_output":"%s"}' "$BUILDER_SESSION_ID"
+`)
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:       toolspec.ToolExecCommand,
+		CommandText:    "printf hi",
+		OwnerSessionID: "session-hook-123",
+		Output:         "hi",
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !result.Processed {
+		t.Fatal("expected user hook to mark output processed")
+	}
+	if result.Output != "session-hook-123" {
+		t.Fatalf("output = %q, want session-hook-123", result.Output)
+	}
+}
+
 func TestRunnerAllModeFallsBackToBuiltinWhenHookFails(t *testing.T) {
 	hookPath := writeHookScript(t, "#!/bin/sh\nprintf 'not-json\n'")
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeAll, HookPath: hookPath})

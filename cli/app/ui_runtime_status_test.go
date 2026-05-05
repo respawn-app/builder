@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"builder/cli/tui"
@@ -9,6 +10,10 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/clientui"
+	"builder/shared/theme"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
@@ -47,6 +52,41 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 	}
 	if status.LastCommittedAssistantFinalAnswer != "done" {
 		t.Fatalf("last committed assistant answer = %q, want done", status.LastCommittedAssistantFinalAnswer)
+	}
+}
+
+func TestRuntimeStatusLineHidesGoalStatusText(t *testing.T) {
+	for _, goalStatus := range []clientui.RuntimeGoalStatus{clientui.RuntimeGoalStatusActive, clientui.RuntimeGoalStatusPaused, clientui.RuntimeGoalStatusComplete} {
+		client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{
+			Goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: goalStatus},
+		}}
+		m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+		status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+		if strings.Contains(status, "goal active") || strings.Contains(status, "goal paused") || strings.Contains(status, "goal complete") {
+			t.Fatalf("did not expect status line to include goal status text for %s, got %q", goalStatus, status)
+		}
+	}
+}
+
+func TestRuntimeStatusLineShowsGoalProgressWord(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.windowSizeKnown = true
+	m.activity = uiActivityRunning
+	m.goalRun = true
+	status := uiViewLayout{model: m}.renderStatusLine(100, uiThemeStyles(m.theme))
+
+	if !strings.Contains(stripANSIAndTrimRight(status), "goal") {
+		t.Fatalf("expected status line to include goal progress word, got %q", status)
+	}
+	primary := foregroundTrueColorEscape(theme.ResolvePalette(m.theme).App.Primary.TrueColor)
+	if !strings.Contains(status, primary) {
+		t.Fatalf("expected goal progress indicator to use primary color escape %q, got %q", primary, status)
 	}
 }
 

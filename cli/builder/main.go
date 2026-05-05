@@ -17,6 +17,7 @@ import (
 	"builder/cli/selfcmd"
 	"builder/shared/buildinfo"
 	"builder/shared/config"
+	"builder/shared/sessionenv"
 	"golang.org/x/term"
 )
 
@@ -102,6 +103,12 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	}
 	if len(args) > 0 && args[0] == "service" {
 		return serviceSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "session-id" {
+		return sessionIDSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "goal" {
+		return goalSubcommand(args[1:], stdout, stderr)
 	}
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
@@ -345,7 +352,34 @@ func effectiveSessionID(flags commonFlags) (string, error) {
 	if continueID != "" {
 		return continueID, nil
 	}
-	return sessionID, nil
+	if sessionID != "" {
+		return sessionID, nil
+	}
+	return "", nil
+}
+
+func sessionIDSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	sessionFS := flag.NewFlagSet("builder session-id", flag.ContinueOnError)
+	sessionFS.SetOutput(stderr)
+	sessionFS.Usage = func() { writeSessionIDUsage(sessionFS) }
+	if err := sessionFS.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if remaining := sessionFS.Args(); len(remaining) > 0 {
+		fmt.Fprintf(stderr, "unknown arguments: %s\n\n", strings.Join(remaining, " "))
+		sessionFS.Usage()
+		return 2
+	}
+	sessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv)
+	if !ok {
+		fmt.Fprintf(stderr, "%s is not set; this command only works inside Builder shell commands\n", sessionenv.BuilderSessionID)
+		return 1
+	}
+	_, _ = fmt.Fprintln(stdout, sessionID)
+	return 0
 }
 
 func markExplicitCommonFlags(fs *flag.FlagSet, flags *commonFlags) {

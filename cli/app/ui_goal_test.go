@@ -1,0 +1,335 @@
+package app
+
+import (
+	"strings"
+	"testing"
+
+	"builder/cli/tui"
+	"builder/shared/clientui"
+	"builder/shared/transcript"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func TestGoalCommandOpensGoalOverlay(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.goal.isOpen() {
+		t.Fatal("expected /goal to open goal overlay")
+	}
+	if updated.inputMode() != uiInputModeGoal {
+		t.Fatalf("input mode = %q, want goal", updated.inputMode())
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("view mode = %q, want detail", updated.view.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected /goal to emit overlay transition command")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	for _, want := range []string{"Goal", "Status: active", "ship feature"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected goal overlay to contain %q, got %q", want, plain)
+		}
+	}
+}
+
+func TestGoalCommandOpensGoalOverlayWhileBusy(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.goal.isOpen() {
+		t.Fatal("expected /goal to open goal overlay while busy")
+	}
+	if updated.inputMode() != uiInputModeGoal {
+		t.Fatalf("input mode = %q, want goal", updated.inputMode())
+	}
+	if plain := stripANSIAndTrimRight(updated.View()); !strings.Contains(plain, "Status: active") || !strings.Contains(plain, "ship feature") {
+		t.Fatalf("expected busy goal overlay content, got %q", plain)
+	}
+}
+
+func TestGoalSetRendersCommittedGoalFeedbackBeforeLaterRuntimeEvents(t *testing.T) {
+	runtimeEvents := make(chan clientui.Event, 2)
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         1,
+		CommittedEntryCount:        1,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:        string(transcript.EntryRoleGoalFeedback),
+			Text:        "goal detail",
+			OngoingText: `Goal set: "ship feature"`,
+			Visibility:  clientui.EntryVisibilityAll,
+		}},
+	}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "later model output"}
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal ship feature"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if client.setGoalArg != "ship feature" {
+		t.Fatalf("set goal arg = %q, want ship feature", client.setGoalArg)
+	}
+	raw := waitRuntimeEvent(runtimeEvents)()
+	batch, ok := raw.(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected runtime event batch, got %T", raw)
+	}
+	if len(batch.events) != 1 || batch.events[0].AssistantDelta != "" {
+		t.Fatalf("expected first runtime batch to contain only goal feedback, got %+v", batch.events)
+	}
+	next, _ = updated.Update(batch)
+	updated = next.(*uiModel)
+
+	if view := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(view, `Goal set: "ship feature"`) {
+		t.Fatalf("expected goal feedback in ongoing transcript before later event, got %q", view)
+	}
+	if view := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); strings.Contains(view, "later model output") {
+		t.Fatalf("later runtime event rendered before explicit delivery: %q", view)
+	}
+}
+
+func TestGoalLifecycleCommandsDoNotAppendDuplicateLocalFeedback(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		initialGoal *clientui.RuntimeGoal
+		drive       func(*testing.T, *uiModel, *runtimeControlFakeClient) *uiModel
+		check       func(*testing.T, *runtimeControlFakeClient)
+	}{
+		{
+			name:        "set",
+			input:       "/goal ship feature",
+			initialGoal: nil,
+			check: func(t *testing.T, client *runtimeControlFakeClient) {
+				t.Helper()
+				if client.setGoalArg != "ship feature" {
+					t.Fatalf("set goal arg = %q, want ship feature", client.setGoalArg)
+				}
+			},
+		},
+		{
+			name:        "pause",
+			input:       "/goal pause",
+			initialGoal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"},
+			check: func(t *testing.T, client *runtimeControlFakeClient) {
+				t.Helper()
+				if client.pauseGoalCalls != 1 {
+					t.Fatalf("pause calls = %d, want 1", client.pauseGoalCalls)
+				}
+			},
+		},
+		{
+			name:        "resume",
+			input:       "/goal resume",
+			initialGoal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "paused"},
+			check: func(t *testing.T, client *runtimeControlFakeClient) {
+				t.Helper()
+				if client.resumeGoalCalls != 1 {
+					t.Fatalf("resume calls = %d, want 1", client.resumeGoalCalls)
+				}
+			},
+		},
+		{
+			name:        "clear",
+			input:       "/goal clear",
+			initialGoal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"},
+			drive: func(t *testing.T, m *uiModel, client *runtimeControlFakeClient) *uiModel {
+				t.Helper()
+				next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				updated := next.(*uiModel)
+				next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+				return next.(*uiModel)
+			},
+			check: func(t *testing.T, client *runtimeControlFakeClient) {
+				t.Helper()
+				if client.clearGoalCalls != 1 {
+					t.Fatalf("clear calls = %d, want 1", client.clearGoalCalls)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &runtimeControlFakeClient{goal: cloneRuntimeGoal(tt.initialGoal)}
+			m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+			m.termWidth = 100
+			m.termHeight = 20
+			m.windowSizeKnown = true
+			m.input = tt.input
+
+			var updated *uiModel
+			if tt.drive != nil {
+				updated = tt.drive(t, m, client)
+			} else {
+				next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				updated = next.(*uiModel)
+			}
+			tt.check(t, client)
+			if client.appendedRole != "" || client.appendedText != "" {
+				t.Fatalf("did not expect duplicate local goal feedback, got role=%q text=%q", client.appendedRole, client.appendedText)
+			}
+			status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+			for _, forbidden := range []string{"Goal set", "Goal paused", "Goal resumed", "Goal cleared"} {
+				if strings.Contains(status, forbidden) {
+					t.Fatalf("did not expect duplicate transient goal status %q, got %q", forbidden, status)
+				}
+			}
+		})
+	}
+}
+
+func TestGoalCommandWithoutGoalShowsLocalHint(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, noGoalHint) {
+		t.Fatalf("expected no-goal hint %q, got %q", noGoalHint, plain)
+	}
+}
+
+func TestGoalClearActiveGoalRequiresConfirmation(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal clear"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.goal.isOpen() || updated.goal.confirmMode != "clear" {
+		t.Fatalf("expected clear confirmation overlay, got %+v", updated.goal)
+	}
+	if client.clearGoalCalls != 0 {
+		t.Fatalf("clear calls before confirm = %d, want 0", client.clearGoalCalls)
+	}
+	if plain := stripANSIAndTrimRight(updated.View()); !strings.Contains(plain, "Clear active goal?") || !strings.Contains(plain, "Tab/arrows toggle") {
+		t.Fatalf("expected clear confirmation text, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated = next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatal("expected goal overlay closed after confirm")
+	}
+	if client.clearGoalCalls != 1 {
+		t.Fatalf("clear calls after confirm = %d, want 1", client.clearGoalCalls)
+	}
+}
+
+func TestGoalClearSuspendedActiveGoalSkipsConfirmation(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active", Suspended: true}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal clear"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatalf("expected suspended active clear to skip confirmation, got %+v", updated.goal)
+	}
+	if client.clearGoalCalls != 1 {
+		t.Fatalf("clear calls = %d, want 1", client.clearGoalCalls)
+	}
+}
+
+func TestGoalConfirmationEnterUsesSelectedAction(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal clear"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatal("expected default cancel selection to close overlay")
+	}
+	if client.clearGoalCalls != 0 {
+		t.Fatalf("clear calls after cancel selection = %d, want 0", client.clearGoalCalls)
+	}
+
+	m = newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal clear"
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatal("expected confirm selection to close overlay")
+	}
+	if client.clearGoalCalls != 1 {
+		t.Fatalf("clear calls after confirm selection = %d, want 1", client.clearGoalCalls)
+	}
+}
+
+func TestGoalReplaceActiveGoalRequiresConfirmation(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "old goal", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal new goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.goal.isOpen() || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
+		t.Fatalf("expected replace confirmation overlay, got %+v", updated.goal)
+	}
+	if client.setGoalArg != "" {
+		t.Fatalf("set goal before confirm = %q, want empty", client.setGoalArg)
+	}
+	if plain := stripANSIAndTrimRight(updated.View()); !strings.Contains(plain, "Replace active goal?") || !strings.Contains(plain, "New: new goal") {
+		t.Fatalf("expected replace confirmation text, got %q", plain)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated = next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatal("expected goal overlay closed after confirm")
+	}
+	if client.setGoalArg != "new goal" {
+		t.Fatalf("set goal after confirm = %q, want new goal", client.setGoalArg)
+	}
+}

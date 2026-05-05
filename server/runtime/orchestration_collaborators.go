@@ -10,6 +10,7 @@ import (
 type exclusiveStepOptions struct {
 	EmitRunState        bool
 	PersistRunLifecycle bool
+	GoalLoop            bool
 }
 
 type exclusiveStepLifecycle interface {

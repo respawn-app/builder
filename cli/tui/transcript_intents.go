@@ -32,6 +32,7 @@ const (
 	TranscriptRoleDeveloperFeedback         TranscriptRole = TranscriptRole(transcript.EntryRoleDeveloperFeedback)
 	TranscriptRoleDeveloperErrorFeedback    TranscriptRole = TranscriptRole(transcript.EntryRoleDeveloperErrorFeedback)
 	TranscriptRoleInterruption              TranscriptRole = TranscriptRole(transcript.EntryRoleInterruption)
+	TranscriptRoleGoalFeedback              TranscriptRole = TranscriptRole(transcript.EntryRoleGoalFeedback)
 )
 
 type RenderIntent string
@@ -70,6 +71,7 @@ const (
 	RenderIntentDeveloperFeedback         RenderIntent = RenderIntent(TranscriptRoleDeveloperFeedback)
 	RenderIntentDeveloperErrorFeedback    RenderIntent = RenderIntent(TranscriptRoleDeveloperErrorFeedback)
 	RenderIntentInterruption              RenderIntent = RenderIntent(TranscriptRoleInterruption)
+	RenderIntentGoalFeedback              RenderIntent = RenderIntent(TranscriptRoleGoalFeedback)
 )
 
 func TranscriptRoleFromWire(role string) TranscriptRole {
@@ -170,6 +172,8 @@ func (r TranscriptRole) DisplayIntent(phase llm.MessagePhase) RenderIntent {
 		return RenderIntentDeveloperErrorFeedback
 	case TranscriptRoleInterruption:
 		return RenderIntentInterruption
+	case TranscriptRoleGoalFeedback:
+		return RenderIntentGoalFeedback
 	case TranscriptRoleToolResult, TranscriptRoleToolResultOK:
 		return RenderIntentToolSuccess
 	case TranscriptRoleToolResultError:

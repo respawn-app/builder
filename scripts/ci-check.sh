@@ -42,7 +42,7 @@ run_build() {
 }
 
 run_test() {
-	echo "==> go test"
+	echo "==> test"
 	./scripts/test.sh ./...
 }
 

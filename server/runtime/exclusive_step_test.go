@@ -594,6 +594,9 @@ func TestBackgroundNoticeSchedulerSchedulesAfterBusyStepEnds(t *testing.T) {
 	if pending := scheduler.pendingSnapshot(); len(pending) != 0 {
 		t.Fatalf("expected queued notices to be drained, got %+v", pending)
 	}
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close engine: %v", err)
+	}
 }
 
 func TestContextCompactorUsesExclusiveStepLifecycle(t *testing.T) {

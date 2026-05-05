@@ -37,3 +37,39 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptPlaceholder(t *testing.T) 
 		t.Fatalf("expected default prompt placeholder rendered, got %q", rendered)
 	}
 }
+
+func TestRenderGoalNudgePrompt(t *testing.T) {
+	rendered := RenderGoalNudgePrompt("ship /goal mode", "active")
+	for _, want := range []string{
+		"ship /goal mode",
+		"Current goal status: active",
+		"builder goal complete",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected goal nudge to contain %q, got %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected goal nudge placeholders rendered, got %q", rendered)
+	}
+}
+
+func TestRenderGoalSetPrompt(t *testing.T) {
+	rendered := RenderGoalSetPrompt("ship /goal mode")
+	if !strings.Contains(rendered, "ship /goal mode") {
+		t.Fatalf("expected goal set prompt to contain objective, got %q", rendered)
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected goal set placeholders rendered, got %q", rendered)
+	}
+}
+
+func TestRenderGoalResumePrompt(t *testing.T) {
+	rendered := RenderGoalResumePrompt("ship /goal mode")
+	if !strings.Contains(rendered, "ship /goal mode") {
+		t.Fatalf("expected goal resume prompt to contain objective, got %q", rendered)
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected goal resume placeholders rendered, got %q", rendered)
+	}
+}

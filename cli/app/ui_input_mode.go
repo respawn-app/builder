@@ -12,6 +12,7 @@ const (
 	uiInputModeMain              uiInputMode = "main"
 	uiInputModeAsk               uiInputMode = "ask"
 	uiInputModeStatus            uiInputMode = "status"
+	uiInputModeGoal              uiInputMode = "goal"
 	uiInputModeWorktree          uiInputMode = "worktree"
 	uiInputModeRollbackSelection uiInputMode = "rollback_selection"
 	uiInputModeRollbackEdit      uiInputMode = "rollback_edit"
@@ -74,6 +75,17 @@ type uiStatusOverlayState struct {
 	sectionWarnings    map[uiStatusSection]string
 }
 
+type uiGoalOverlayState struct {
+	open               bool
+	ownsTranscriptMode bool
+	scroll             int
+	goal               *clientui.RuntimeGoal
+	confirmMode        string
+	confirmSelection   int
+	pendingObjective   string
+	error              string
+}
+
 func (s uiAskState) hasCurrent() bool {
 	return s.current != nil
 }
@@ -95,6 +107,10 @@ func (s uiRollbackState) isActive() bool {
 }
 
 func (s uiStatusOverlayState) isOpen() bool {
+	return s.open
+}
+
+func (s uiGoalOverlayState) isOpen() bool {
 	return s.open
 }
 

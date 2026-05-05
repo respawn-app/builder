@@ -115,6 +115,123 @@ func normalizedOutput(v string) string {
 	return strings.Join(strings.Fields(xansi.Strip(v)), " ")
 }
 
+type lockedBuffer struct {
+	mu         sync.Mutex
+	buffer     bytes.Buffer
+	firstWrite chan struct{}
+	once       sync.Once
+}
+
+func newLockedBuffer() *lockedBuffer {
+	return &lockedBuffer{firstWrite: make(chan struct{})}
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.once.Do(func() { close(b.firstWrite) })
+	return b.buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+func (b *lockedBuffer) Started() <-chan struct{} {
+	return b.firstWrite
+}
+
+type observedUISnapshot struct {
+	Mode                 tui.Mode
+	OngoingSnapshot      string
+	OngoingStreamingText string
+	SawAssistantDelta    bool
+}
+
+type observedUIWaiter struct {
+	check func(observedUISnapshot) bool
+	ready chan struct{}
+}
+
+type observedUIModel struct {
+	model   *uiModel
+	mu      sync.Mutex
+	latest  observedUISnapshot
+	waiters []observedUIWaiter
+}
+
+func newObservedUIModel(model *uiModel) *observedUIModel {
+	observed := &observedUIModel{model: model}
+	observed.captureLocked()
+	return observed
+}
+
+func (m *observedUIModel) Init() tea.Cmd {
+	return m.model.Init()
+}
+
+func (m *observedUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.model.Update(msg)
+	if updated, ok := next.(*uiModel); ok {
+		m.model = updated
+	}
+	m.mu.Lock()
+	m.captureLocked()
+	m.notifyWaitersLocked()
+	m.mu.Unlock()
+	return m, cmd
+}
+
+func (m *observedUIModel) View() string {
+	return m.model.View()
+}
+
+func (m *observedUIModel) waitFor(t *testing.T, timeout time.Duration, description string, check func(observedUISnapshot) bool) {
+	t.Helper()
+	waitForSignal(t, timeout, description, m.readyWhen(check))
+}
+
+func (m *observedUIModel) snapshot() observedUISnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.latest
+}
+
+func (m *observedUIModel) readyWhen(check func(observedUISnapshot) bool) <-chan struct{} {
+	ready := make(chan struct{})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if check(m.latest) {
+		close(ready)
+		return ready
+	}
+	m.waiters = append(m.waiters, observedUIWaiter{check: check, ready: ready})
+	return ready
+}
+
+func (m *observedUIModel) captureLocked() {
+	m.latest = observedUISnapshot{
+		Mode:                 m.model.view.Mode(),
+		OngoingSnapshot:      stripANSIAndTrimRight(m.model.view.OngoingSnapshot()),
+		OngoingStreamingText: m.model.view.OngoingStreamingText(),
+		SawAssistantDelta:    m.model.sawAssistantDelta,
+	}
+}
+
+func (m *observedUIModel) notifyWaitersLocked() {
+	remaining := m.waiters[:0]
+	for _, waiter := range m.waiters {
+		if waiter.check(m.latest) {
+			close(waiter.ready)
+			continue
+		}
+		remaining = append(remaining, waiter)
+	}
+	m.waiters = remaining
+}
+
 func waitForTestCondition(t *testing.T, timeout time.Duration, description string, check func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -126,6 +243,15 @@ func waitForTestCondition(t *testing.T, timeout time.Duration, description strin
 			t.Fatalf("timed out waiting for %s", description)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForSignal(t *testing.T, timeout time.Duration, description string, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for %s", description)
 	}
 }
 
@@ -161,9 +287,10 @@ type gatedStreamClient struct {
 }
 
 type deferredFinalQueuedInjectionStreamClient struct {
-	mu    sync.Mutex
-	calls int
-	delay time.Duration
+	mu           sync.Mutex
+	calls        int
+	releaseFirst <-chan struct{}
+	firstDelta   chan<- struct{}
 }
 
 type queuedSteerDuringBlockingToolClient struct {
@@ -298,6 +425,26 @@ func (c *countingRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, 
 
 func (c *countingRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	return c.inner.SetAutoCompactionEnabled(enabled)
+}
+
+func (c *countingRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ShowGoal()
+}
+
+func (c *countingRuntimeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
+	return c.inner.SetGoal(objective)
+}
+
+func (c *countingRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.PauseGoal()
+}
+
+func (c *countingRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ResumeGoal()
+}
+
+func (c *countingRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) {
+	return c.inner.ClearGoal()
 }
 
 func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
@@ -436,14 +583,17 @@ func (c *deferredFinalQueuedInjectionStreamClient) GenerateStream(_ context.Cont
 	c.mu.Lock()
 	call := c.calls
 	c.calls++
-	delay := c.delay
+	releaseFirst := c.releaseFirst
 	c.mu.Unlock()
 	if call == 0 {
 		if onDelta != nil {
 			onDelta("foreground done")
 		}
-		if delay > 0 {
-			time.Sleep(delay)
+		if c.firstDelta != nil {
+			close(c.firstDelta)
+		}
+		if releaseFirst != nil {
+			<-releaseFirst
 		}
 		return llm.Response{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},

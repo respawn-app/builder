@@ -93,6 +93,10 @@ func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool)
 		if m.worktreeClient == nil {
 			return "worktree client is unavailable", true
 		}
+	case commands.ActionGoal:
+		if m.busy && commandResult.GoalMode != commands.GoalModePause && commandResult.GoalMode != commands.GoalModeClear {
+			return busyGoalCommandMessage(commandResult.GoalMode), true
+		}
 	}
 	return "", false
 }

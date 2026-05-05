@@ -164,6 +164,39 @@ func TestPendingToolSpacingDoesNotChangeCommittedOrDetailSpacing(t *testing.T) {
 	}
 }
 
+func TestPendingOngoingSnapshotLinesUsePerEntrySpinnerCallback(t *testing.T) {
+	entries := []TranscriptEntry{
+		{Role: "tool_call", Text: "echo alpha", ToolCallID: "call_alpha", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo alpha"}},
+		{Role: "tool_call", Text: "echo beta", ToolCallID: "call_beta", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo beta"}},
+	}
+	seen := make([]string, 0, len(entries))
+
+	lines := RenderPendingOngoingSnapshotLinesWithSpinnerFrames(entries, "dark", 80, func(entry TranscriptEntry, entryIndex int) string {
+		seen = append(seen, entry.ToolCallID)
+		if entryIndex == 0 {
+			return "A"
+		}
+		return "B"
+	})
+	rendered := xansi.Strip(TranscriptProjection{Blocks: []TranscriptProjectionBlock{{
+		DividerGroup: "tool",
+		Lines: func() []string {
+			out := make([]string, 0, len(lines))
+			for _, line := range lines {
+				out = append(out, line.Text)
+			}
+			return out
+		}(),
+	}}}.Render(TranscriptDivider))
+
+	if !containsInOrder(rendered, "A echo alpha", "B echo beta") {
+		t.Fatalf("expected per-entry pending spinner frames, got %q", rendered)
+	}
+	if len(seen) != 2 || seen[0] != "call_alpha" || seen[1] != "call_beta" {
+		t.Fatalf("spinner callback entries = %+v, want call_alpha/call_beta", seen)
+	}
+}
+
 func TestRenderAppendDeltaFromIgnoresHiddenSourceIndexShifts(t *testing.T) {
 	previous := TranscriptProjection{Blocks: []TranscriptProjectionBlock{{
 		Role:         "user",

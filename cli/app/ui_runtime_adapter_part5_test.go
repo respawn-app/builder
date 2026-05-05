@@ -1,14 +1,17 @@
 package app
 
 import (
+	"fmt"
+	"strings"
+	"testing"
+
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"strings"
-	"testing"
 )
 
 func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionReasoningClear(t *testing.T) {
@@ -173,13 +176,15 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 
 	rawView := m.View()
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, pendingSpinnerLine(0, "echo a")) {
+	callA := m.transcriptEntries[1]
+	callB := m.transcriptEntries[2]
+	if !strings.Contains(view, pendingSpinnerLine(pendingToolSpinnerFrameForEntry(0, callA, 1), "echo a")) {
 		t.Fatalf("expected unresolved tool to keep spinner in live view, got %q", view)
 	}
 	if !strings.Contains(view, "$  echo b") {
 		t.Fatalf("expected completed live shell command to align with two spaces after symbol, got %q", view)
 	}
-	if strings.Contains(view, pendingSpinnerLine(0, "echo b")) {
+	if strings.Contains(view, pendingSpinnerLine(pendingToolSpinnerFrameForEntry(0, callB, 2), "echo b")) {
 		t.Fatalf("did not expect completed sibling to keep spinner in live view, got %q", view)
 	}
 	if strings.Contains(view, "waiting") {
@@ -187,6 +192,64 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 	}
 	assertContainsColoredShellSymbol(t, rawView, "dark success", transcriptToolSuccessColorHex("dark"))
 	assertNoColoredShellSymbol(t, rawView, "dark pending", transcriptToolPendingColorHex("dark"))
+}
+
+func TestApplyChatSnapshotOffsetsParallelPendingToolSpinners(t *testing.T) {
+	alphaID, betaID := pendingSpinnerTestToolIDs(t)
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.spinnerFrame = 0
+
+	cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Entries: []runtime.ChatEntry{
+		{Role: "tool_call", Text: "echo alpha", ToolCallID: alphaID, ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo alpha"}},
+		{Role: "tool_call", Text: "echo beta", ToolCallID: betaID, ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo beta"}},
+	}})
+	if cmd != nil {
+		_ = cmd()
+	}
+	m.syncViewport()
+
+	alphaFrame := pendingToolSpinnerFrameForEntry(0, m.transcriptEntries[0], 0)
+	betaFrame := pendingToolSpinnerFrameForEntry(0, m.transcriptEntries[1], 1)
+	if alphaFrame == 0 || betaFrame == 0 {
+		t.Fatalf("expected pending tool frames to start away from status frame 0, got alpha=%d beta=%d", alphaFrame, betaFrame)
+	}
+	if alphaFrame == betaFrame {
+		t.Fatalf("expected parallel pending tools to use different spinner phases, got frame %d", alphaFrame)
+	}
+
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, pendingSpinnerLine(alphaFrame, "echo alpha")) {
+		t.Fatalf("expected alpha tool spinner frame %d, got %q", alphaFrame, view)
+	}
+	if !strings.Contains(view, pendingSpinnerLine(betaFrame, "echo beta")) {
+		t.Fatalf("expected beta tool spinner frame %d, got %q", betaFrame, view)
+	}
+}
+
+func pendingSpinnerTestToolIDs(t *testing.T) (string, string) {
+	t.Helper()
+	var first string
+	firstFrame := 0
+	for i := 0; i < 64; i++ {
+		id := fmt.Sprintf("call_%d", i)
+		frame := pendingToolSpinnerFrameForEntry(0, tui.TranscriptEntry{Role: "tool_call", ToolCallID: id}, 0)
+		if frame == 0 {
+			continue
+		}
+		if first == "" {
+			first = id
+			firstFrame = frame
+			continue
+		}
+		if frame != firstFrame {
+			return first, id
+		}
+	}
+	t.Fatal("expected test tool ids with non-zero distinct pending spinner frames")
+	return "", ""
 }
 
 func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {

@@ -52,6 +52,13 @@ func (c *gatedRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, err
 func (c *gatedRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	return c.inner.SetAutoCompactionEnabled(enabled)
 }
+func (c *gatedRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) { return c.inner.ShowGoal() }
+func (c *gatedRuntimeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
+	return c.inner.SetGoal(objective)
+}
+func (c *gatedRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error)  { return c.inner.PauseGoal() }
+func (c *gatedRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) { return c.inner.ResumeGoal() }
+func (c *gatedRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error)  { return c.inner.ClearGoal() }
 func (c *gatedRuntimeClient) AppendLocalEntry(role, text string) error {
 	return c.inner.AppendLocalEntry(role, text)
 }

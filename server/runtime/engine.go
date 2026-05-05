@@ -30,6 +30,7 @@ const (
 	commentaryWithoutToolCallsWarning = "You sent a commentary-channel message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final-channel message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final-channel message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the commentary channel along with tool calls. Otherwise, do not include tool calls with your final message responses."
 	finalWithoutContentWarning        = "You sent a final-channel message with empty content- this is wrong. If you are done, send a non-empty final message. If you intend to keep working, send a commentary-channel message with tool calls. If you actually wanted to just stay silent, send exactly 'NO_OP' as the final response."
+	goalNoopFinalWarning              = "Unfortunately NO_OP is not available when goal is active to prevent stalling indefinitely. Please use write_stdin polls instead if you want to wait for something"
 	reviewerNoopToken                 = "NO_OP"
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )
@@ -176,6 +177,8 @@ type Engine struct {
 	compactionSoonReminderIssued bool
 	pendingHandoffRequest        *handoffRequest
 	pendingHandoffFutureMessage  string
+	goalLoopRunning              bool
+	goalLoopSuspended            bool
 
 	tokenUsage        *tokenUsageTracker
 	collaboratorsOnce sync.Once
@@ -324,6 +327,14 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			return nil, err
 		}
 	}
+	if meta.Goal != nil && meta.Goal.Status == session.GoalStatusActive {
+		if err := eng.startGoalLoop(false); err != nil {
+			if errors.Is(err, ErrGoalRequiresAskQuestion) {
+				return eng, nil
+			}
+			return nil, err
+		}
+	}
 
 	return eng, nil
 }
@@ -406,6 +417,11 @@ func (e *Engine) DiscardQueuedUserMessagesMatching(text string) int {
 
 func (e *Engine) Interrupt() error {
 	e.ensureOrchestrationCollaborators()
+	e.mu.Lock()
+	if e.goalActiveLocked() {
+		e.goalLoopSuspended = true
+	}
+	e.mu.Unlock()
 	return e.stepLifecycle.Interrupt()
 }
 
@@ -415,6 +431,9 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	}
 
 	e.ensureOrchestrationCollaborators()
+	e.mu.Lock()
+	e.goalLoopSuspended = false
+	e.mu.Unlock()
 	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 		e.mu.Lock()
 		hasQueuedInjected := len(e.pendingInjected) > 0

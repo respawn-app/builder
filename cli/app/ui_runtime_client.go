@@ -631,6 +631,101 @@ func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, boo
 	})
 	return resp.Changed, resp.Enabled, nil
 }
+
+func (c *sessionRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.ShowGoal(ctx, serverapi.RuntimeGoalShowRequest{SessionID: c.sessionID})
+	if err != nil {
+		return nil, err
+	}
+	goal := runtimeGoalFromAPI(resp.Goal)
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Status.Goal = cloneRuntimeGoal(goal)
+	})
+	return goal, nil
+}
+
+func (c *sessionRuntimeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeGoalShowResponse, error) {
+		return c.controls.SetGoal(ctx, serverapi.RuntimeGoalSetRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Objective: objective, Actor: "user"})
+	})
+	if err != nil {
+		return nil, err
+	}
+	goal := runtimeGoalFromAPI(resp.Goal)
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Status.Goal = cloneRuntimeGoal(goal)
+	})
+	return goal, nil
+}
+
+func (c *sessionRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
+	return c.setGoalStatus(func(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+		return c.controls.PauseGoal(ctx, req)
+	})
+}
+
+func (c *sessionRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
+	return c.setGoalStatus(func(ctx context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+		return c.controls.ResumeGoal(ctx, req)
+	})
+}
+
+func (c *sessionRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeGoalShowResponse, error) {
+		return c.controls.ClearGoal(ctx, serverapi.RuntimeGoalClearRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Actor: "user"})
+	})
+	if err != nil {
+		return nil, err
+	}
+	goal := runtimeGoalFromAPI(resp.Goal)
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Status.Goal = cloneRuntimeGoal(goal)
+	})
+	return goal, nil
+}
+
+func (c *sessionRuntimeClient) setGoalStatus(call func(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error)) (*clientui.RuntimeGoal, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeGoalShowResponse, error) {
+		return call(ctx, serverapi.RuntimeGoalStatusRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Actor: "user"})
+	})
+	if err != nil {
+		return nil, err
+	}
+	goal := runtimeGoalFromAPI(resp.Goal)
+	c.patchMainView(func(view *clientui.RuntimeMainView) {
+		view.Status.Goal = cloneRuntimeGoal(goal)
+	})
+	return goal, nil
+}
+
+func runtimeGoalFromAPI(goal *serverapi.RuntimeGoal) *clientui.RuntimeGoal {
+	if goal == nil {
+		return nil
+	}
+	return &clientui.RuntimeGoal{
+		ID:        goal.ID,
+		Objective: goal.Objective,
+		Status:    clientui.RuntimeGoalStatus(strings.TrimSpace(goal.Status)),
+		Suspended: goal.Suspended,
+	}
+}
+
+func cloneRuntimeGoal(goal *clientui.RuntimeGoal) *clientui.RuntimeGoal {
+	if goal == nil {
+		return nil
+	}
+	cloned := *goal
+	return &cloned
+}
+
 func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()

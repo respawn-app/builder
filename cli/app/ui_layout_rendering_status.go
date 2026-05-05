@@ -24,6 +24,8 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		spin = renderReviewerStatus(m.spinnerFrame)
 	} else if m.compacting {
 		spin = renderCompactionStatus(m.spinnerFrame)
+	} else if m.goalRun && m.activity == uiActivityRunning {
+		spin = renderGoalStatus(m.theme, m.spinnerFrame)
 	}
 	segments := make([]string, 0, 5)
 	if modeLabel := l.statusModeLabel(); modeLabel != "" {
@@ -325,5 +327,12 @@ func renderCompactionStatus(frame int) string {
 func renderReviewerStatus(frame int) string {
 	indicator := renderStatusSpinner(statusGreenColor(), frame)
 	keyword := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("reviewing")
+	return indicator + " " + keyword
+}
+
+func renderGoalStatus(theme string, frame int) string {
+	color := uiPalette(theme).primary
+	indicator := renderStatusSpinner(color, frame)
+	keyword := lipgloss.NewStyle().Foreground(color).Bold(true).Render("goal")
 	return indicator + " " + keyword
 }

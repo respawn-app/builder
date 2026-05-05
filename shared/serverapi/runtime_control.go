@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"builder/shared/transcript"
 )
@@ -155,6 +156,45 @@ type RuntimeRecordPromptHistoryRequest struct {
 	Text              string `json:"text"`
 }
 
+type RuntimeGoal struct {
+	ID        string    `json:"id"`
+	Objective string    `json:"objective"`
+	Status    string    `json:"status"`
+	Suspended bool      `json:"suspended,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type RuntimeGoalShowRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+type RuntimeGoalShowResponse struct {
+	Goal *RuntimeGoal `json:"goal,omitempty"`
+}
+
+type RuntimeGoalSetRequest struct {
+	ClientRequestID   string `json:"client_request_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id,omitempty"`
+	Objective         string `json:"objective"`
+	Actor             string `json:"actor"`
+}
+
+type RuntimeGoalStatusRequest struct {
+	ClientRequestID   string `json:"client_request_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id,omitempty"`
+	Actor             string `json:"actor"`
+}
+
+type RuntimeGoalClearRequest struct {
+	ClientRequestID   string `json:"client_request_id"`
+	SessionID         string `json:"session_id"`
+	ControllerLeaseID string `json:"controller_lease_id,omitempty"`
+	Actor             string `json:"actor"`
+}
+
 type RuntimeControlService interface {
 	SetSessionName(ctx context.Context, req RuntimeSetSessionNameRequest) error
 	SetThinkingLevel(ctx context.Context, req RuntimeSetThinkingLevelRequest) error
@@ -173,6 +213,12 @@ type RuntimeControlService interface {
 	QueueUserMessage(ctx context.Context, req RuntimeQueueUserMessageRequest) error
 	DiscardQueuedUserMessagesMatching(ctx context.Context, req RuntimeDiscardQueuedUserMessagesMatchingRequest) (RuntimeDiscardQueuedUserMessagesMatchingResponse, error)
 	RecordPromptHistory(ctx context.Context, req RuntimeRecordPromptHistoryRequest) error
+	ShowGoal(ctx context.Context, req RuntimeGoalShowRequest) (RuntimeGoalShowResponse, error)
+	SetGoal(ctx context.Context, req RuntimeGoalSetRequest) (RuntimeGoalShowResponse, error)
+	PauseGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
+	ResumeGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
+	CompleteGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
+	ClearGoal(ctx context.Context, req RuntimeGoalClearRequest) (RuntimeGoalShowResponse, error)
 }
 
 func validateRuntimeSessionID(sessionID string) error {
@@ -191,6 +237,15 @@ func validateClientRequestID(clientRequestID string) error {
 		return errors.New("client_request_id is required")
 	}
 	return nil
+}
+
+func validateGoalActor(actor string) error {
+	switch strings.TrimSpace(actor) {
+	case "user", "agent", "system":
+		return nil
+	default:
+		return errors.New("actor must be user, agent, or system")
+	}
 }
 
 func (r RuntimeSetSessionNameRequest) Validate() error {
@@ -336,4 +391,37 @@ func (r RuntimeRecordPromptHistoryRequest) Validate() error {
 		return err
 	}
 	return validateControllerLeaseID(r.ControllerLeaseID)
+}
+func (r RuntimeGoalShowRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeGoalSetRequest) Validate() error {
+	if err := validateClientRequestID(r.ClientRequestID); err != nil {
+		return err
+	}
+	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.Objective) == "" {
+		return errors.New("objective is required")
+	}
+	return validateGoalActor(r.Actor)
+}
+func (r RuntimeGoalStatusRequest) Validate() error {
+	if err := validateClientRequestID(r.ClientRequestID); err != nil {
+		return err
+	}
+	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+		return err
+	}
+	return validateGoalActor(r.Actor)
+}
+func (r RuntimeGoalClearRequest) Validate() error {
+	if err := validateClientRequestID(r.ClientRequestID); err != nil {
+		return err
+	}
+	if err := validateRuntimeSessionID(r.SessionID); err != nil {
+		return err
+	}
+	return validateGoalActor(r.Actor)
 }

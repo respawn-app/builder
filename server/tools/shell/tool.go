@@ -30,7 +30,11 @@ func marshalNoHTMLEscape(v any) (json.RawMessage, error) {
 }
 
 func enrichEnv(base []string) []string {
-	return shellenv.Enrich(base)
+	return enrichEnvForSession(base, "")
+}
+
+func enrichEnvForSession(base []string, sessionID string) []string {
+	return shellenv.EnrichForSession(base, sessionID)
 }
 
 func sanitizeOutput(s string) string {

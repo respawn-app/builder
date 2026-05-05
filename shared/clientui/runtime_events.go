@@ -7,6 +7,7 @@ type RuntimeRunState struct {
 	Compacting       bool
 	ReviewerRunning  bool
 	ReviewerBlocking bool
+	GoalLoop         bool
 }
 
 type RuntimeConversationState struct {
@@ -217,6 +218,7 @@ func ReduceRuntimeRunStateEvent(state RuntimeRunState, activityRunning bool, evt
 			return reduction
 		}
 		reduction.State.Busy = evt.RunState.Busy
+		reduction.State.GoalLoop = evt.RunState.Busy && evt.RunState.GoalLoop
 		if evt.RunState.Busy {
 			reduction.Activity = RuntimeActivityRunning
 			return reduction

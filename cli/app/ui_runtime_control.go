@@ -62,6 +62,51 @@ func (m *uiModel) setRuntimeAutoCompactionEnabled(enabled bool) (bool, bool, err
 	return false, false, nil
 }
 
+func (m *uiModel) showRuntimeGoal() (*clientui.RuntimeGoal, error) {
+	if client := m.runtimeClient(); client != nil {
+		goal, err := client.ShowGoal()
+		m.observeRuntimeRequestResult(err)
+		return goal, err
+	}
+	return nil, nil
+}
+
+func (m *uiModel) setRuntimeGoal(objective string) (*clientui.RuntimeGoal, error) {
+	if client := m.runtimeClient(); client != nil {
+		goal, err := client.SetGoal(objective)
+		m.observeRuntimeRequestResult(err)
+		return goal, err
+	}
+	return nil, nil
+}
+
+func (m *uiModel) pauseRuntimeGoal() (*clientui.RuntimeGoal, error) {
+	if client := m.runtimeClient(); client != nil {
+		goal, err := client.PauseGoal()
+		m.observeRuntimeRequestResult(err)
+		return goal, err
+	}
+	return nil, nil
+}
+
+func (m *uiModel) resumeRuntimeGoal() (*clientui.RuntimeGoal, error) {
+	if client := m.runtimeClient(); client != nil {
+		goal, err := client.ResumeGoal()
+		m.observeRuntimeRequestResult(err)
+		return goal, err
+	}
+	return nil, nil
+}
+
+func (m *uiModel) clearRuntimeGoal() (*clientui.RuntimeGoal, error) {
+	if client := m.runtimeClient(); client != nil {
+		goal, err := client.ClearGoal()
+		m.observeRuntimeRequestResult(err)
+		return goal, err
+	}
+	return nil, nil
+}
+
 func (m *uiModel) appendRuntimeLocalEntry(role, text string) error {
 	if client := m.runtimeClient(); client != nil {
 		err := client.AppendLocalEntry(role, text)

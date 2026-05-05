@@ -513,6 +513,53 @@ func TestResolvePersistedSessionPreservesWorktreeReminderStateFromMetadata(t *te
 	}
 }
 
+func TestResolvePersistedSessionPreservesGoalStateFromMetadata(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	sess, err := session.Create(
+		config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		filepath.Base(cfg.WorkspaceRoot),
+		cfg.WorkspaceRoot,
+		store.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	goal, err := sess.SetGoal("ship durable goal metadata", session.GoalActorUser)
+	if err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+
+	reopened, err := session.OpenByID(cfg.PersistenceRoot, sess.Meta().SessionID, store.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.OpenByID: %v", err)
+	}
+	persisted := reopened.Meta().Goal
+	if persisted == nil {
+		t.Fatal("expected persisted goal state")
+	}
+	if *persisted != goal {
+		t.Fatalf("goal = %+v, want %+v", *persisted, goal)
+	}
+}
+
 func TestRebindWorkspaceRetargetsDescendantWorktrees(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()

@@ -25,6 +25,11 @@ type runtimeControlFakeClient struct {
 	setFastModeArg         bool
 	setReviewerArg         bool
 	setAutoCompactArg      bool
+	goal                   *clientui.RuntimeGoal
+	setGoalArg             string
+	pauseGoalCalls         int
+	resumeGoalCalls        int
+	clearGoalCalls         int
 	appendedRole           string
 	appendedText           string
 	shouldCompactText      string
@@ -111,6 +116,35 @@ func (f *runtimeControlFakeClient) SetReviewerEnabled(enabled bool) (bool, strin
 func (f *runtimeControlFakeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	f.setAutoCompactArg = enabled
 	return true, enabled, f.err
+}
+func (f *runtimeControlFakeClient) ShowGoal() (*clientui.RuntimeGoal, error) {
+	return cloneRuntimeGoal(f.goal), f.err
+}
+func (f *runtimeControlFakeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
+	f.setGoalArg = objective
+	f.goal = &clientui.RuntimeGoal{ID: "goal-1", Objective: objective, Status: "active"}
+	return cloneRuntimeGoal(f.goal), f.err
+}
+func (f *runtimeControlFakeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
+	f.pauseGoalCalls++
+	if f.goal == nil {
+		f.goal = &clientui.RuntimeGoal{ID: "goal-1", Objective: "objective"}
+	}
+	f.goal.Status = "paused"
+	return cloneRuntimeGoal(f.goal), f.err
+}
+func (f *runtimeControlFakeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
+	f.resumeGoalCalls++
+	if f.goal == nil {
+		f.goal = &clientui.RuntimeGoal{ID: "goal-1", Objective: "objective"}
+	}
+	f.goal.Status = "active"
+	return cloneRuntimeGoal(f.goal), f.err
+}
+func (f *runtimeControlFakeClient) ClearGoal() (*clientui.RuntimeGoal, error) {
+	f.clearGoalCalls++
+	f.goal = nil
+	return nil, f.err
 }
 func (f *runtimeControlFakeClient) AppendLocalEntry(role, text string) error {
 	f.appendedRole = role
@@ -214,6 +248,21 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if changed, enabled, err := m.setRuntimeAutoCompactionEnabled(false); !changed || enabled || err != nil {
 		t.Fatalf("set runtime autocompaction = (%t, %t, %v), want (true, false, nil)", changed, enabled, err)
 	}
+	if goal, err := m.setRuntimeGoal("ship goal"); err != nil || goal == nil || goal.Objective != "ship goal" || goal.Status != "active" {
+		t.Fatalf("set runtime goal = (%+v, %v), want active ship goal", goal, err)
+	}
+	if goal, err := m.pauseRuntimeGoal(); err != nil || goal == nil || goal.Status != "paused" {
+		t.Fatalf("pause runtime goal = (%+v, %v), want paused goal", goal, err)
+	}
+	if goal, err := m.resumeRuntimeGoal(); err != nil || goal == nil || goal.Status != "active" {
+		t.Fatalf("resume runtime goal = (%+v, %v), want active goal", goal, err)
+	}
+	if goal, err := m.showRuntimeGoal(); err != nil || goal == nil || goal.Status != "active" {
+		t.Fatalf("show runtime goal = (%+v, %v), want active goal", goal, err)
+	}
+	if goal, err := m.clearRuntimeGoal(); err != nil || goal != nil {
+		t.Fatalf("clear runtime goal = (%+v, %v), want nil goal", goal, err)
+	}
 	m.appendRuntimeLocalEntry("system", "hello")
 	shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt")
 	if err != nil || !shouldCompact {
@@ -257,6 +306,9 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if !client.setFastModeArg || !client.setReviewerArg || client.setAutoCompactArg {
 		t.Fatalf("unexpected toggle args: fast=%t reviewer=%t autocompact=%t", client.setFastModeArg, client.setReviewerArg, client.setAutoCompactArg)
 	}
+	if client.setGoalArg != "ship goal" || client.pauseGoalCalls != 1 || client.resumeGoalCalls != 1 || client.clearGoalCalls != 1 {
+		t.Fatalf("unexpected goal helper side effects: set=%q pause=%d resume=%d clear=%d", client.setGoalArg, client.pauseGoalCalls, client.resumeGoalCalls, client.clearGoalCalls)
+	}
 	if client.appendedRole != "system" || client.appendedText != "hello" {
 		t.Fatalf("unexpected appended local entry: role=%q text=%q", client.appendedRole, client.appendedText)
 	}
@@ -288,6 +340,21 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	}
 	if changed, enabled, err := m.setRuntimeAutoCompactionEnabled(true); changed || enabled || err != nil {
 		t.Fatalf("set runtime autocompaction without client = (%t, %t, %v), want (false, false, nil)", changed, enabled, err)
+	}
+	if goal, err := m.showRuntimeGoal(); goal != nil || err != nil {
+		t.Fatalf("show runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
+	}
+	if goal, err := m.setRuntimeGoal("goal"); goal != nil || err != nil {
+		t.Fatalf("set runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
+	}
+	if goal, err := m.pauseRuntimeGoal(); goal != nil || err != nil {
+		t.Fatalf("pause runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
+	}
+	if goal, err := m.resumeRuntimeGoal(); goal != nil || err != nil {
+		t.Fatalf("resume runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
+	}
+	if goal, err := m.clearRuntimeGoal(); goal != nil || err != nil {
+		t.Fatalf("clear runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
 	}
 	if shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt"); shouldCompact || err != nil {
 		t.Fatalf("runtime should compact without client = (%t, %v), want (false, nil)", shouldCompact, err)
@@ -403,6 +470,21 @@ func TestRuntimeControlHelpersPropagateRuntimeErrors(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.engine = &runtimeControlFakeClient{err: boom}
 
+	if _, err := m.showRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("show runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.setRuntimeGoal("goal"); !errors.Is(err, boom) {
+		t.Fatalf("set runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.pauseRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("pause runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.resumeRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("resume runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.clearRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("clear runtime goal error = %v, want boom", err)
+	}
 	if err := m.setRuntimeSessionName("name"); !errors.Is(err, boom) {
 		t.Fatalf("set runtime session name error = %v, want boom", err)
 	}

@@ -11,6 +11,43 @@ import (
 	"testing"
 )
 
+func TestProjectedCommittedGoalFeedbackAppendsImmediately(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.forwardToView(tui.SetViewportSizeMsg{Width: 100, Lines: 20})
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         1,
+		CommittedEntryCount:        1,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:        string(transcript.EntryRoleGoalFeedback),
+			Text:        "Goal set developer prompt detail",
+			OngoingText: `Goal set: "ship feature"`,
+			Visibility:  clientui.EntryVisibilityAll,
+		}},
+	}, false)
+	if cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected direct goal feedback append, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
+	}
+	if got, want := len(m.transcriptEntries), 1; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	entry := m.transcriptEntries[0]
+	if entry.Role != tui.TranscriptRoleGoalFeedback || entry.OngoingText != `Goal set: "ship feature"` || entry.Transient || !entry.Committed {
+		t.Fatalf("goal feedback entry = %+v", entry)
+	}
+	if view := stripANSIAndTrimRight(m.view.OngoingSnapshot()); !strings.Contains(view, `Goal set: "ship feature"`) {
+		t.Fatalf("expected ongoing view to update immediately, got %q", view)
+	}
+}
+
 func TestProjectedAssistantMessageUsesCommittedEntryStartWhenPersistedToolCallsShareCommittedCount(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
