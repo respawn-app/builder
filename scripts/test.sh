@@ -104,8 +104,10 @@ if [ "$status" -eq 0 ]; then
     exit 0
 fi
 
-if [ "$timed_out" -eq 1 ] || [ "$status" -eq 143 ] || [ "$status" -eq 137 ]; then
+if [ "$timed_out" -eq 1 ]; then
     printf 'test suite exceeded %ds wall-clock cap; simplify or speed up tests before continuing\n' "$timeout_seconds"
+elif [ "$status" -eq 143 ] || [ "$status" -eq 137 ]; then
+    printf 'test process was terminated by a signal (exit status %d)\n' "$status"
 fi
 cat "$log_file"
 exit 1
