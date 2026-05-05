@@ -188,6 +188,32 @@ func TestLoadUsesExplicitConfigRootWithoutHomeMutation(t *testing.T) {
 	}
 }
 
+func TestLoadExplicitConfigRootOverridesNestedPersistenceRoot(t *testing.T) {
+	configRoot := t.TempDir()
+	otherRoot := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), []byte("persistence_root = \""+filepath.ToSlash(otherRoot)+"\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{ConfigRoot: configRoot})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.PersistenceRoot != configRoot {
+		t.Fatalf("persistence root = %q, want explicit config root %q", cfg.PersistenceRoot, configRoot)
+	}
+	if got := cfg.Source.Sources["persistence_root"]; got != "config_root" {
+		t.Fatalf("persistence_root source = %q, want config_root", got)
+	}
+}
+
+func TestWriteManagedRGConfigFileForSettingsPathRejectsEmptyPath(t *testing.T) {
+	if _, err := writeManagedRGConfigFileForSettingsPath(" \t "); err == nil {
+		t.Fatal("expected empty settings path error")
+	}
+}
+
 func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

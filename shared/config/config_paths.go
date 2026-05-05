@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
 var processStartHome = os.Getenv("HOME")
@@ -76,7 +77,7 @@ func refuseRealPersistenceRootUnderGoTest(absRoot string) error {
 	if os.Getenv("BUILDER_ALLOW_REAL_PERSISTENCE_ROOT_IN_TESTS") == "1" {
 		return nil
 	}
-	if !strings.HasSuffix(filepath.Base(os.Args[0]), ".test") {
+	if !testing.Testing() {
 		return nil
 	}
 	for _, home := range protectedPersistenceRootHomes() {

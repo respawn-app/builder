@@ -99,6 +99,9 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 	if err := configRegistry.applyCLI(opts, &state, sources); err != nil {
 		return App{}, err
 	}
+	if err := applyExplicitConfigRootPersistence(opts, &state, sources); err != nil {
+		return App{}, err
+	}
 	inheritReviewerDefaults(&state.Settings)
 
 	if err := validateSettings(state.Settings, sources); err != nil {
@@ -140,6 +143,20 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 			Sources:                       sources,
 		},
 	}, nil
+}
+
+func applyExplicitConfigRootPersistence(opts LoadOptions, state *settingsState, sources map[string]string) error {
+	configRoot := strings.TrimSpace(opts.ConfigRoot)
+	if configRoot == "" {
+		return nil
+	}
+	absConfigRoot, err := filepath.Abs(configRoot)
+	if err != nil {
+		return fmt.Errorf("resolve config root: %w", err)
+	}
+	state.PersistenceRoot = absConfigRoot
+	sources["persistence_root"] = "config_root"
+	return nil
 }
 
 func appendSystemPromptFileFromConfig(raw settingsFile, settingsPath string, scope SystemPromptFileScope, state *settingsState) error {
