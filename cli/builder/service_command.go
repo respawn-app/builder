@@ -245,6 +245,17 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 			if !status.Installed {
 				return 0
 			}
+			healthStatus, healthPID := probeServiceHealth(ctx, spec)
+			if healthStatus == protocol.HealthStatusOK && !serviceOwnsHealthyServer(status, healthPID, spec) {
+				fmt.Fprintln(stdout, "Builder background service is installed, but a Builder server is already running outside the background service.")
+				fmt.Fprintln(stdout, "Refreshing service registration without starting it; restart skipped to avoid disrupting the running session.")
+				if err := backend.Install(ctx, spec, true, false); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+				fmt.Fprintf(stdout, "Updated %s registration.\n", serviceDisplayName)
+				return 0
+			}
 			if err := ensureNoUnmanagedServerConflict(ctx, backend, spec); err != nil {
 				fmt.Fprintln(stderr, err)
 				return 1
@@ -266,6 +277,15 @@ func runServiceCommandAction(ctx context.Context, action serviceAction, opts ser
 	return 0
 }
 
+func serviceOwnsHealthyServer(status serviceStatus, healthPID int, spec serviceSpec) bool {
+	if !status.Running || !status.Loaded {
+		return false
+	}
+	pidProof := status.PID > 0 && healthPID > 0 && status.PID == healthPID
+	commandProof := len(status.Command) > 0 && commandArgsEqual(status.Command, serviceCommand(spec))
+	return pidProof || commandProof
+}
+
 func ensureNoUnmanagedServerConflict(ctx context.Context, backend serviceBackend, spec serviceSpec) error {
 	status, err := backend.Status(ctx, spec)
 	if err != nil {
@@ -273,9 +293,7 @@ func ensureNoUnmanagedServerConflict(ctx context.Context, backend serviceBackend
 	}
 	healthStatus, healthPID := probeServiceHealth(ctx, spec)
 	healthRunning := healthStatus == protocol.HealthStatusOK
-	pidProof := status.PID > 0 && healthPID > 0 && status.PID == healthPID
-	commandProof := len(status.Command) > 0 && commandArgsEqual(status.Command, serviceCommand(spec))
-	backendOwnsHealthyServer := healthRunning && status.Running && status.Loaded && (pidProof || commandProof)
+	backendOwnsHealthyServer := healthRunning && serviceOwnsHealthyServer(status, healthPID, spec)
 	if healthRunning && !backendOwnsHealthyServer {
 		pidText := ""
 		if healthPID > 0 {

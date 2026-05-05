@@ -41,7 +41,7 @@ builder service uninstall --keep-running
 
 `install` starts the service after registration. `--no-start` only writes the service registration.
 `uninstall` stops the service before removing registration. `--keep-running` removes registration without stopping an already-running process.
-`restart --if-installed` is used by package updates: it exits successfully without output when no service is installed.
+`restart --if-installed` is used by package updates: it exits successfully without output when no service is installed. If a manual Builder server is already running, it refreshes the service registration without starting the service.
 On macOS, restart rewrites the LaunchAgent, unloads the loaded job, and bootstraps it again. Starting an unloaded LaunchAgent relies on launchd `RunAtLoad`; no separate kickstart is needed.
 
 ## Backends
@@ -74,7 +74,7 @@ builder service status --json
 
 ## Port Conflicts
 
-Service lifecycle commands refuse to change the service when Builder's configured server endpoint is already owned by a manual `builder serve` process or by a non-Builder listener.
+Service lifecycle commands refuse to change the service when Builder's configured server endpoint is already owned by a manual `builder serve` process or by a non-Builder listener. Package-update restarts with `restart --if-installed` are the exception: they refresh registration and skip starting the service while a manual Builder server is running.
 If you started `builder serve` manually, stop that process before installing, starting, or restarting the background service.
 
 Running another server on a different configured port is fine. Builder only checks the endpoint resolved from `server_host` and `server_port`.
