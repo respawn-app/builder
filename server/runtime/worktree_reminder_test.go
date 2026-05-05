@@ -200,6 +200,8 @@ func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
 }
 
 func TestSubmitUserMessageDoesNotConsumeWorktreeReminderAfterModelFailure(t *testing.T) {
+	withGenerateRetryDelays(t, nil)
+
 	prevPrompt := prompts.WorktreeModePrompt
 	prompts.WorktreeModePrompt = "enter {{branch}}"
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()

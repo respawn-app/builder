@@ -10,7 +10,7 @@ import (
 	"builder/shared/transcriptdiag"
 )
 
-const sessionActivityResubscribeDelay = 250 * time.Millisecond
+var sessionActivityResubscribeDelay = 250 * time.Millisecond
 
 type sessionActivitySubscriber func(context.Context, uint64) (serverapi.SessionActivitySubscription, error)
 

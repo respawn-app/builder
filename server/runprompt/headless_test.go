@@ -296,6 +296,8 @@ func TestLoopbackRunPromptClientUnregistersRuntimeAfterCompletion(t *testing.T) 
 }
 
 func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")

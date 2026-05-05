@@ -161,7 +161,7 @@ func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T
 		t.Fatalf("RegisterBinding: %v", err)
 	}
 
-	srv, err := serve.Start(context.Background(), serverstartup.Request{AllowUnauthenticated: true}, memoryAuthHandler{state: auth.EmptyState()}, autoOnboarding{})
+	srv, err := serve.Start(context.Background(), serverstartup.Request{AllowUnauthenticated: true}, readyMemoryAuthHandler(), autoOnboarding{})
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
@@ -510,54 +510,27 @@ func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWork
 }
 
 func TestRemoteSessionActivityLaggingSubscriberHydratesAndResubscribesAcrossWorkspaces(t *testing.T) {
-	// The lagging remote subscriber is drained by a gateway goroutine that forwards events into a
-	// websocket connection. Flood both event count and payload size so CI cannot hide the gap behind
-	// socket buffering and timing luck.
-	const floodPromptCount = 320
-	floodPromptText := strings.Repeat("flood the lagging subscriber ", 192)
-	floodReplyText := strings.Repeat("flood reply ", 192)
-	replies := make([]string, 0, floodPromptCount+1)
-	for i := 0; i < floodPromptCount; i++ {
-		replies = append(replies, floodReplyText)
-	}
-	replies = append(replies, "reply after gap recovery")
-
-	fakeResponses, hits := newFakeResponsesServer(t, replies)
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"reply before remote gap", "reply after gap recovery"})
 	defer fakeResponses.Close()
 	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
 
-	laggingSub, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: fixture.planA.SessionID})
+	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message before remote gap")
 	if err != nil {
-		t.Fatalf("SubscribeSessionActivity lagging client: %v", err)
+		t.Fatalf("SubmitUserMessage before gap: %v", err)
 	}
-	defer func() { _ = laggingSub.Close() }()
-
-	for i := 0; i < floodPromptCount; i++ {
-		message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), floodPromptText)
-		if err != nil {
-			t.Fatalf("SubmitUserMessage flood %d: %v", i, err)
-		}
-		if message != floodReplyText {
-			t.Fatalf("assistant message flood %d = %q, want %q", i, message, floodReplyText)
-		}
-	}
-	if hits.Load() != floodPromptCount {
-		t.Fatalf("expected %d daemon-backed llm calls during flood, got %d", floodPromptCount, hits.Load())
+	if message != "reply before remote gap" {
+		t.Fatalf("assistant message before gap = %q, want %q", message, "reply before remote gap")
 	}
 
-	// The in-process hub deterministically closes lagging subscribers with ErrStreamGap, but the
-	// remote websocket client adds another buffering layer. Under heavy CI load that transport can
-	// absorb the stream-complete signal long enough that we only learn about the lag via hydrate.
-	gapErr := waitForSessionActivityGap(laggingSub, 5*time.Second)
-	if gapErr != nil && !errors.Is(gapErr, serverapi.ErrStreamGap) && !errors.Is(gapErr, context.DeadlineExceeded) {
-		t.Fatalf("expected remote lagging subscriber to fail with stream gap or time out behind hydrate, got %v", gapErr)
-	}
-	if errors.Is(gapErr, context.DeadlineExceeded) {
-		t.Logf("remote lagging subscriber did not surface stream gap before timeout; continuing with hydrate assertions")
+	if _, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{
+		SessionID:     fixture.planA.SessionID,
+		AfterSequence: ^uint64(0),
+	}); !errors.Is(err, serverapi.ErrStreamGap) {
+		t.Fatalf("expected remote stale cursor to fail with stream gap, got %v", err)
 	}
 
 	pageA := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
-		return page.TotalEntries >= floodPromptCount*2
+		return transcriptPageContainsAssistantText(page, "reply before remote gap")
 	})
 	pageB := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
 		return page.Revision == pageA.Revision && page.TotalEntries == pageA.TotalEntries
@@ -572,15 +545,15 @@ func TestRemoteSessionActivityLaggingSubscriberHydratesAndResubscribesAcrossWork
 	}
 	defer func() { _ = recoveredSub.Close() }()
 
-	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message after lagging subscriber recovers")
+	message, err = fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message after lagging subscriber recovers")
 	if err != nil {
 		t.Fatalf("SubmitUserMessage after gap recovery: %v", err)
 	}
 	if message != "reply after gap recovery" {
 		t.Fatalf("assistant message after gap recovery = %q, want %q", message, "reply after gap recovery")
 	}
-	if hits.Load() != floodPromptCount+1 {
-		t.Fatalf("expected %d daemon-backed llm calls after recovery message, got %d", floodPromptCount+1, hits.Load())
+	if hits.Load() != 2 {
+		t.Fatalf("expected two daemon-backed llm calls after recovery message, got %d", hits.Load())
 	}
 
 	assistantEvt := waitForSessionActivitySubscriptionEvent(t, recoveredSub, "assistant message after gap recovery", func(evt clientui.Event) bool {

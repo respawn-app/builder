@@ -13,7 +13,20 @@ import (
 	"builder/shared/serverapi"
 )
 
+func useFastStreamResubscribeDelays(t *testing.T) {
+	t.Helper()
+	originalSessionDelay := sessionActivityResubscribeDelay
+	originalPromptDelay := promptActivityResubscribeDelay
+	sessionActivityResubscribeDelay = time.Millisecond
+	promptActivityResubscribeDelay = time.Millisecond
+	t.Cleanup(func() {
+		sessionActivityResubscribeDelay = originalSessionDelay
+		promptActivityResubscribeDelay = originalPromptDelay
+	})
+}
+
 func TestStartSessionActivityEventsResubscribesFromLastSequenceAfterStreamGap(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -48,6 +61,7 @@ func TestStartSessionActivityEventsResubscribesFromLastSequenceAfterStreamGap(t 
 }
 
 func TestStartSessionActivityEventsEmitsExplicitGapWhenCursorReplayUnavailable(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -71,6 +85,7 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenCursorReplayUnavailable(t
 }
 
 func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithoutCursor(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -100,6 +115,7 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithout
 }
 
 func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -140,11 +156,12 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 	select {
 	case evt := <-eventsB:
 		t.Fatalf("unexpected cross-stream event on stream B: %+v", evt)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 }
 
 func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -175,11 +192,12 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 	select {
 	case duplicate := <-events:
 		t.Fatalf("unexpected duplicate pending prompt after resubscribe: %+v", duplicate.req)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 }
 
 func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromSnapshot(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -214,6 +232,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 }
 
 func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotReadFails(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -324,7 +343,6 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for prompt channel to close")
 	}
-	time.Sleep(150 * time.Millisecond)
 }
 
 func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
@@ -365,10 +383,11 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	first := waitPromptEvent(t, events)
 	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	waitForPromptAskCallCount(t, control, 1)
 	select {
 	case retried := <-events:
 		t.Fatalf("did not expect retry after terminal prompt error: %+v", retried.req)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 	if got := control.askCallCount(); got != 1 {
 		t.Fatalf("AnswerAsk call count = %d, want 1", got)
@@ -400,10 +419,11 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
 		t.Fatalf("expected prompt resolution event, got %+v", resolved)
 	}
+	waitForPromptAskCallCount(t, control, 1)
 	select {
 	case retried := <-events:
 		t.Fatalf("did not expect stale retry after local resolution: %+v", retried.req)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 	if got := control.askCallCount(); got != 1 {
 		t.Fatalf("AnswerAsk call count = %d, want 1", got)
@@ -436,7 +456,7 @@ func TestPendingPromptEventRetryUsesLatestControllerLease(t *testing.T) {
 	select {
 	case evt := <-events:
 		t.Fatalf("did not expect prompt requeue after successful lease recovery: %+v", evt.req)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 }
 

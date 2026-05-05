@@ -3,20 +3,41 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
 
 var processStartHome = os.Getenv("HOME")
+var processStartAccountHome = accountHomeDir()
+
+func accountHomeDir() string {
+	current, err := user.Current()
+	if err != nil || current == nil {
+		return ""
+	}
+	return strings.TrimSpace(current.HomeDir)
+}
+
+func currentHomeDir() (string, error) {
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		return home, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return home, nil
+}
 
 func expandTildePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" || !strings.HasPrefix(trimmed, "~") {
 		return trimmed, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := currentHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
 	if trimmed == "~" {
 		return home, nil
@@ -58,18 +79,60 @@ func refuseRealPersistenceRootUnderGoTest(absRoot string) error {
 	if !strings.HasSuffix(filepath.Base(os.Args[0]), ".test") {
 		return nil
 	}
-	home := strings.TrimSpace(processStartHome)
-	if home == "" {
-		return nil
+	for _, home := range protectedPersistenceRootHomes() {
+		realRoot, err := filepath.Abs(filepath.Join(home, ".builder"))
+		if err != nil {
+			return fmt.Errorf("resolve protected persistence root: %w", err)
+		}
+		if filepath.Clean(absRoot) == filepath.Clean(realRoot) {
+			return fmt.Errorf("refusing to use protected persistence root %s from a Go test binary; tests must provide an isolated config root before calling Load", absRoot)
+		}
 	}
-	realRoot, err := filepath.Abs(filepath.Join(home, ".builder"))
+	return nil
+}
+
+func protectedPersistenceRootHomes() []string {
+	accountHome := strings.TrimSpace(processStartAccountHome)
+	envHome := strings.TrimSpace(processStartHome)
+	if accountHome == "" {
+		if envHome == "" {
+			return nil
+		}
+		return []string{envHome}
+	}
+	if envHome == "" || filepath.Clean(envHome) == filepath.Clean(accountHome) {
+		return []string{accountHome}
+	}
+	if isPathInsideTempDir(envHome) {
+		return []string{accountHome}
+	}
+	return []string{accountHome, envHome}
+}
+
+func isPathInsideTempDir(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return false
+	}
+	absPath, err := filepath.Abs(trimmed)
 	if err != nil {
-		return fmt.Errorf("resolve process-start persistence root: %w", err)
+		return false
 	}
-	if filepath.Clean(absRoot) != filepath.Clean(realRoot) {
-		return nil
+	absTemp, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return false
 	}
-	return fmt.Errorf("refusing to use process-start persistence root %s from a Go test binary; tests must provide an isolated config root before calling Load", absRoot)
+	rel, err := filepath.Rel(absTemp, absPath)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }
 
 func prepareWorktreeBaseDir(persistenceRoot string, path string) (string, error) {

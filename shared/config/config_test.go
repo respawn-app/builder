@@ -15,15 +15,35 @@ func TestMain(m *testing.M) {
 
 func TestPreparePersistenceRootRefusesProcessStartRootUnderGoTest(t *testing.T) {
 	originalHome := processStartHome
+	originalAccountHome := processStartAccountHome
 	processStartHome = filepath.Join(string(filepath.Separator), "builder-test-home")
-	t.Cleanup(func() { processStartHome = originalHome })
+	processStartAccountHome = ""
+	t.Cleanup(func() {
+		processStartHome = originalHome
+		processStartAccountHome = originalAccountHome
+	})
 
 	_, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder"))
 	if err == nil {
 		t.Fatal("expected process-start persistence root to be refused under go test")
 	}
-	if !strings.Contains(err.Error(), "refusing to use process-start persistence root") {
+	if !strings.Contains(err.Error(), "refusing to use protected persistence root") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPreparePersistenceRootAllowsIsolatedTempHomeUnderGoTest(t *testing.T) {
+	originalHome := processStartHome
+	originalAccountHome := processStartAccountHome
+	processStartHome = t.TempDir()
+	processStartAccountHome = filepath.Join(string(filepath.Separator), "builder-real-home")
+	t.Cleanup(func() {
+		processStartHome = originalHome
+		processStartAccountHome = originalAccountHome
+	})
+
+	if _, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder")); err != nil {
+		t.Fatalf("prepare temp persistence root: %v", err)
 	}
 }
 
@@ -165,6 +185,23 @@ func TestLoadUsesExplicitConfigRootWithoutHomeMutation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(configRoot, managedRGConfigName)); err != nil {
 		t.Fatalf("expected managed rg config in explicit config root: %v", err)
+	}
+}
+
+func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.PersistenceRoot != filepath.Join(home, ".builder") {
+		t.Fatalf("persistence root = %q, want HOME-scoped root", cfg.PersistenceRoot)
+	}
+	if cfg.Source.HomeSettingsPath != filepath.Join(home, ".builder", "config.toml") {
+		t.Fatalf("home settings path = %q, want HOME-scoped config", cfg.Source.HomeSettingsPath)
 	}
 }
 

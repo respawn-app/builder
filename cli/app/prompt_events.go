@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const promptActivityResubscribeDelay = 250 * time.Millisecond
+var promptActivityResubscribeDelay = 250 * time.Millisecond
 
 type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
 type pendingPromptSnapshotProvider func(context.Context) (map[string]struct{}, error)

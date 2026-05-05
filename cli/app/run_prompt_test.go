@@ -29,7 +29,8 @@ import (
 )
 
 type memoryAuthHandler struct {
-	state auth.State
+	state     auth.State
+	lookupEnv func(string) string
 }
 
 func readyMemoryAuthHandler() memoryAuthHandler {
@@ -41,6 +42,18 @@ func readyMemoryAuthHandler() memoryAuthHandler {
 		},
 		UpdatedAt: time.Now().UTC(),
 	}}
+}
+
+func saveReadyAppAuthState(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load auth config: %v", err)
+	}
+	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
+	if err := store.Save(context.Background(), readyMemoryAuthHandler().state); err != nil {
+		t.Fatalf("save auth state: %v", err)
+	}
 }
 
 type headlessProjectViewStubService struct {
@@ -156,7 +169,10 @@ func (memoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) 
 	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
-func (memoryAuthHandler) LookupEnv(string) string {
+func (h memoryAuthHandler) LookupEnv(key string) string {
+	if h.lookupEnv != nil {
+		return h.lookupEnv(key)
+	}
 	return ""
 }
 
@@ -301,6 +317,7 @@ func TestRunPromptUsesConfiguredDaemonWithoutLocalAuth(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
+	saveReadyAppAuthState(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"daemon reply"})
 	defer fakeResponses.Close()
@@ -355,6 +372,7 @@ func TestRunPromptRejectsIncompatibleConfiguredDaemonAndFallsBackToEmbedded(t *t
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
+	saveReadyAppAuthState(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -609,6 +627,7 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
+	saveReadyAppAuthState(t, workspace)
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
 	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {

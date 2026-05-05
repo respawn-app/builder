@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,10 +24,12 @@ import (
 	"builder/shared/serverapi"
 )
 
-type envAuthHandler struct{}
+type envAuthHandler struct {
+	lookupEnv func(string) string
+}
 
-func (envAuthHandler) WrapStore(base auth.Store) auth.Store {
-	return authflow.WrapStoreWithEnvAPIKeyOverride(base, testAuthLookupEnv)
+func (h envAuthHandler) WrapStore(base auth.Store) auth.Store {
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, h.LookupEnv)
 }
 
 func (envAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
@@ -37,7 +40,10 @@ func (envAuthHandler) Interact(context.Context, authflow.InteractionRequest) (au
 	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
-func (envAuthHandler) LookupEnv(key string) string {
+func (h envAuthHandler) LookupEnv(key string) string {
+	if h.lookupEnv != nil {
+		return h.lookupEnv(key)
+	}
 	return testAuthLookupEnv(key)
 }
 
@@ -49,6 +55,20 @@ func testAuthLookupEnv(key string) string {
 }
 
 type noopOnboarding struct{}
+
+type notifyingListener struct {
+	net.Listener
+	acceptDone chan struct{}
+	once       sync.Once
+}
+
+func (l *notifyingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		l.once.Do(func() { close(l.acceptDone) })
+	}
+	return conn, err
+}
 
 func (noopOnboarding) EnsureOnboardingReady(_ context.Context, req startup.OnboardingRequest) (config.App, error) {
 	path, created, err := config.WriteDefaultSettingsFile()
@@ -88,6 +108,34 @@ func configureServeTestServerPort(t *testing.T) {
 	t.Cleanup(func() { ReleaseTestListenReservation(listener.Addr().String()) })
 	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
 	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
+}
+
+func TestReserveTestListenReservationDrainerStopsAfterRelease(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	listener := &notifyingListener{Listener: base, acceptDone: make(chan struct{})}
+	addr := listener.Addr().String()
+	t.Cleanup(func() { ReleaseTestListenReservation(addr) })
+
+	ReserveTestListenReservation(listener)
+	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("dial reserved listener: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("expected reserved listener drainer to close accepted connection")
+	}
+	_ = conn.Close()
+
+	ReleaseTestListenReservation(addr)
+	select {
+	case <-listener.acceptDone:
+	case <-time.After(time.Second):
+		t.Fatal("reserved listener drainer did not exit after release")
+	}
 }
 
 func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
@@ -405,7 +453,7 @@ func TestServeStartsUnauthenticatedAndReportsBootstrapReadiness(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true, AllowUnauthenticated: true}
-	authHandler := envAuthHandler{}
+	authHandler := envAuthHandler{lookupEnv: func(string) string { return "" }}
 	onboarding := noopOnboarding{}
 	registerServeWorkspace(t, workspace)
 

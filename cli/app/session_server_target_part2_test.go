@@ -471,7 +471,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 		t.Fatalf("save auth state: %v", err)
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 		}, true, nil
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 		return []string{"-test.run=^TestStartSessionServerHelperDaemonProcess$"}
 	}
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -814,7 +814,7 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 	}()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}

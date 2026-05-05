@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
+	"time"
 )
 
 type worktreeCommandTestClient struct {
@@ -96,6 +97,10 @@ func newWorktreeTestRuntimeClient(sessionID string) *sessionRuntimeClient {
 
 func newWorktreeTestModel(t *testing.T, client *worktreeCommandTestClient, opts ...UIOption) *uiModel {
 	t.Helper()
+	originalDebounce := worktreeCreateResolveDebounce
+	worktreeCreateResolveDebounce = time.Millisecond
+	t.Cleanup(func() { worktreeCreateResolveDebounce = originalDebounce })
+
 	allOpts := []UIOption{WithUIWorktreeClient(client), WithUISessionID("session-1")}
 	allOpts = append(allOpts, opts...)
 	model := newProjectedTestUIModel(newWorktreeTestRuntimeClient("session-1"), nil, nil, allOpts...)

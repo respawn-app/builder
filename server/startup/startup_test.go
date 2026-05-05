@@ -145,8 +145,8 @@ func TestEnsureReadyRequiresAuthManager(t *testing.T) {
 func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	handler := stubAuthHandler{
 		lookupEnv: func(key string) string {
-			if key == "OPENAI_API_KEY" {
-				return "sk-test"
+			if key == "BUILDER_LOOKUP_TEST" {
+				return "lookup-value"
 			}
 			return ""
 		},
@@ -183,8 +183,8 @@ func TestBuildRequestMapsStartupOptionsAndLookupEnv(t *testing.T) {
 	if req.LoadOptions.Tools != "shell,patch" {
 		t.Fatalf("tools = %q, want shell,patch", req.LoadOptions.Tools)
 	}
-	if got := req.LookupEnv("OPENAI_API_KEY"); got != "sk-test" {
-		t.Fatalf("lookup env returned %q, want sk-test", got)
+	if got := req.LookupEnv("BUILDER_LOOKUP_TEST"); got != "lookup-value" {
+		t.Fatalf("lookup env returned %q, want lookup-value", got)
 	}
 }
 

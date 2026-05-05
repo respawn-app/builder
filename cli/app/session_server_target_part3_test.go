@@ -268,8 +268,8 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	}
 
 	result, err := srv.Background().Start(context.Background(), shelltool.ExecRequest{
-		Command:        []string{"/bin/sh", "-lc", "printf 'daemon process output\n'; sleep 5"},
-		DisplayCommand: "printf 'daemon process output'; sleep 5",
+		Command:        []string{"/bin/sh", "-lc", "printf 'daemon process output\n'; sleep 0.2"},
+		DisplayCommand: "printf 'daemon process output'; sleep 0.2",
 		Workdir:        workspace,
 		YieldTime:      time.Millisecond,
 		OwnerSessionID: plan.SessionID,

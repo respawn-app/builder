@@ -25,9 +25,9 @@ func resolveSettingsFilePathInRoot(root string) (string, error) {
 		}
 		return filepath.Join(absRoot, "config.toml"), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := currentHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
 	return filepath.Join(home, ".builder", "config.toml"), nil
 }

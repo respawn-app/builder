@@ -513,10 +513,9 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
@@ -595,10 +594,9 @@ func TestNativeProgramRendersBackgroundCompletionFromShellManagerWhileIdle(t *te
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "sk-test")
 	registerAppWorkspace(t, workspace)
 
-	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("start embedded server: %v", err)
 	}
