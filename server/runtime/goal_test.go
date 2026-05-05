@@ -601,6 +601,9 @@ func TestNewOpensPersistedActiveGoalWhenAskQuestionDisabled(t *testing.T) {
 	if goal == nil || goal.Status != session.GoalStatusActive || goal.Objective != "ship goal mode" {
 		t.Fatalf("goal after reopen = %+v", goal)
 	}
+	if !engine.GoalLoopSuspended() {
+		t.Fatal("expected reopened active goal to be reported suspended when ask_question is disabled")
+	}
 	waitGoalLoopRunning(t, engine, false)
 	if got := client.callCount(); got != 0 {
 		t.Fatalf("model calls = %d, want 0", got)

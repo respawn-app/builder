@@ -91,6 +91,9 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 		return nil
 	}
 	if err := e.requireAskQuestionForGoalLoopStart(); err != nil {
+		if errors.Is(err, ErrGoalRequiresAskQuestion) {
+			e.goalLoopSuspended = true
+		}
 		e.mu.Unlock()
 		return err
 	}
