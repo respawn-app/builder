@@ -356,6 +356,9 @@ func (t *Tool) resolvePath(ctx context.Context, requested string) (resolvedPath,
 	if err != nil {
 		return resolvedPath{}, err
 	}
+	if approved[cleaned] {
+		approved[real] = true
+	}
 	if _, err := t.outsideGuard().Allow(ctx, requested, real, approved); err != nil {
 		return resolvedPath{}, err
 	}

@@ -184,14 +184,32 @@ func normalizeQuotes(text string) string {
 }
 
 func contextAwareMatches(content, old string) []rangeMatch {
-	expected := nonEmptyLines(old)
+	expected := normalizedNonEmptyLines(old)
 	if len(expected) < 3 {
 		return nil
 	}
-	middle := strings.TrimSpace(expected[len(expected)/2])
-	return lineWindowMatches(content, old, func(actual, expected string) bool {
-		return strings.Contains(normalizeWhitespace(actual), normalizeWhitespace(middle))
-	})
+	middleIndex := len(expected) / 2
+	return lineWindowMatches(content, old, funcWindow(len(lineSpans(old)), func(actual []lineSpan) bool {
+		actualLines := normalizedNonEmptyLines(sliceText(actual))
+		if len(actualLines) != len(expected) {
+			return false
+		}
+		return actualLines[0] == expected[0] &&
+			actualLines[middleIndex] == expected[middleIndex] &&
+			actualLines[len(actualLines)-1] == expected[len(expected)-1]
+	}))
+}
+
+func normalizedNonEmptyLines(text string) []string {
+	lines := nonEmptyLines(text)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		normalized := normalizeWhitespace(line)
+		if normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
 }
 
 type lineSpan struct {

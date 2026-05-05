@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"builder/server/tools"
+	"builder/server/tools/fsguard"
 	"builder/shared/toolspec"
 )
 
@@ -165,6 +166,79 @@ func TestDeletionIncludesFollowingNewlineAfterUniqueness(t *testing.T) {
 	}
 	if string(got) != "before\nafter\n" {
 		t.Fatalf("deleted content = %q", string(got))
+	}
+}
+
+func TestContextAwareFallbackRejectsCommonMiddleLineWithoutBoundaryMatch(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	original := "alpha\nTODO\nomega\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	tool := newTestTool(t, dir)
+
+	result := callEdit(t, tool, map[string]any{
+		"path":       "a.txt",
+		"old_string": "before\nTODO\nafter\n",
+		"new_string": "changed\n",
+	})
+	if !result.IsError || !strings.Contains(toolResultText(t, result), "matched 0 occurrences") {
+		t.Fatalf("expected 0-match failure, got %+v text=%q", result, toolResultText(t, result))
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("file was unexpectedly changed: %q", string(got))
+	}
+}
+
+func TestOutsideWorkspaceSymlinkAliasUsesSingleCallApproval(t *testing.T) {
+	workspace := t.TempDir()
+	outside, err := os.MkdirTemp(".", "edit-outside-approval-")
+	if err != nil {
+		t.Fatalf("create outside dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	outside, err = filepath.Abs(outside)
+	if err != nil {
+		t.Fatalf("resolve outside dir: %v", err)
+	}
+	if filepath.IsAbs(outside) && strings.Contains(outside, string(filepath.Separator)+"tmp"+string(filepath.Separator)) {
+		t.Skip("test outside dir is under temporary editable root")
+	}
+	target := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("seed outside target: %v", err)
+	}
+	link := filepath.Join(outside, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	prompts := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, fsguard.Request) (fsguard.Approval, error) {
+		prompts++
+		return fsguard.Approval{Decision: fsguard.DecisionAllowOnce}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new edit tool: %v", err)
+	}
+
+	result := callEdit(t, tool, map[string]any{"path": link, "old_string": "old", "new_string": "new"})
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+	if prompts != 1 {
+		t.Fatalf("outside approval prompts = %d, want 1", prompts)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "new\n" {
+		t.Fatalf("target content = %q", string(got))
 	}
 }
 
