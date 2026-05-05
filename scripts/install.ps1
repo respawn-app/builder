@@ -134,20 +134,30 @@ function Resolve-LatestVersion {
     Fail "Failed to resolve latest version."
 }
 function Resolve-Arch {
+    try {
+        $signature = @'
+using System;
+using System.Runtime.InteropServices;
+public static class BuilderNativeArchitecture {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+}
+'@
+        Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
+        $processMachine = 0
+        $nativeMachine = 0
+        $ok = [BuilderNativeArchitecture]::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle, [ref]$processMachine, [ref]$nativeMachine)
+        if ($ok) {
+            if ($nativeMachine -eq 0xAA64) { return "arm64" }
+            if ($nativeMachine -eq 0x8664) { return "amd64" }
+        }
+    } catch {}
     $arch = $env:PROCESSOR_ARCHITEW6432
-    if ([string]::IsNullOrWhiteSpace($arch)) {
-        $arch = $env:PROCESSOR_ARCHITECTURE
-    }
-    if ([string]::IsNullOrWhiteSpace($arch)) {
-        Fail "Unable to resolve Windows architecture."
-    }
+    if ([string]::IsNullOrWhiteSpace($arch)) { $arch = $env:PROCESSOR_ARCHITECTURE }
+    if ([string]::IsNullOrWhiteSpace($arch)) { Fail "Unable to resolve Windows architecture." }
     $normalized = $arch.Trim().ToLowerInvariant()
-    if ($normalized -eq "amd64" -or $normalized -eq "x64") {
-        return "amd64"
-    }
-    if ($normalized -eq "arm64" -or $normalized -eq "aarch64") {
-        return "arm64"
-    }
+    if ($normalized -eq "amd64" -or $normalized -eq "x64") { return "amd64" }
+    if ($normalized -eq "arm64" -or $normalized -eq "aarch64") { return "arm64" }
     Fail "Unsupported Windows architecture: $arch"
 }
 function New-TempDirectory {

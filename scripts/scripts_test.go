@@ -152,6 +152,7 @@ func TestWindowsInstallerScriptDocumentsSupportedFlags(t *testing.T) {
 		"BUILDER_RELEASE_BASE",
 		"Git.Git",
 		"BurntSushi.ripgrep.MSVC",
+		"IsWow64Process2",
 		"UninstallString",
 		"checksums.txt",
 	} {
