@@ -13,6 +13,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestPreparePersistenceRootRefusesProcessStartRootUnderGoTest(t *testing.T) {
+	originalHome := processStartHome
+	processStartHome = filepath.Join(string(filepath.Separator), "builder-test-home")
+	t.Cleanup(func() { processStartHome = originalHome })
+
+	_, err := preparePersistenceRoot(filepath.Join(processStartHome, ".builder"))
+	if err == nil {
+		t.Fatal("expected process-start persistence root to be refused under go test")
+	}
+	if !strings.Contains(err.Error(), "refusing to use process-start persistence root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -132,6 +146,25 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.Reviewer.VerboseOutput {
 		t.Fatalf("expected default reviewer verbose_output=false")
+	}
+}
+
+func TestLoadUsesExplicitConfigRootWithoutHomeMutation(t *testing.T) {
+	configRoot := t.TempDir()
+	workspace := t.TempDir()
+
+	cfg, err := Load(workspace, LoadOptions{ConfigRoot: configRoot})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Source.HomeSettingsPath != filepath.Join(configRoot, "config.toml") {
+		t.Fatalf("home settings path = %q, want explicit config root", cfg.Source.HomeSettingsPath)
+	}
+	if cfg.PersistenceRoot != configRoot {
+		t.Fatalf("persistence root = %q, want explicit config root", cfg.PersistenceRoot)
+	}
+	if _, err := os.Stat(filepath.Join(configRoot, managedRGConfigName)); err != nil {
+		t.Fatalf("expected managed rg config in explicit config root: %v", err)
 	}
 }
 

@@ -60,6 +60,7 @@ type LoadOptions struct {
 	ModelTimeoutSeconds int
 	Tools               string
 	OpenAIBaseURL       string
+	ConfigRoot          string
 }
 
 type Timeouts struct {

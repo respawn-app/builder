@@ -408,7 +408,6 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	registerAppWorkspace(t, workspace)
 
 	firstStarted := make(chan struct{})

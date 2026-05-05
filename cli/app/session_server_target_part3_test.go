@@ -336,7 +336,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 			Model:                 "gpt-5",
 			OpenAIBaseURL:         fakeResponses.URL,
 			OpenAIBaseURLExplicit: true,
-		}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+		}, readyMemoryAuthHandler())
 		if err != nil {
 			t.Fatalf("startEmbeddedServer: %v", err)
 		}
@@ -632,15 +632,6 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if refreshed.MainView.Session.Transcript.CommittedEntryCount == 0 {
 		t.Fatalf("expected transcript metadata, got %+v", refreshed.MainView.Session.Transcript)
 	}
-}
-
-func newHeadlessAuthInteractorWithEnvKey(key string) authInteractor {
-	return &headlessAuthInteractor{lookupEnv: func(env string) string {
-		if env == "OPENAI_API_KEY" {
-			return key
-		}
-		return ""
-	}}
 }
 
 func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {

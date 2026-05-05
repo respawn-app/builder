@@ -193,7 +193,6 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 11) {
@@ -291,7 +290,6 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -433,7 +431,6 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
@@ -508,7 +505,6 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
@@ -567,7 +563,6 @@ func TestProjectViewClientListsCurrentProjectAndSessions(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
@@ -636,7 +631,6 @@ func TestProcessViewClientListsBackgroundProcessesWithRunOwnership(t *testing.T)
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,
@@ -699,7 +693,6 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerEmbeddedWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
 		WorkspaceRoot: workspace,

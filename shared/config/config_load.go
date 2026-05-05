@@ -33,7 +33,7 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 		return App{}, errors.New("workspace root is required")
 	}
 
-	homeSettingsPath, err := resolveSettingsFilePath()
+	homeSettingsPath, err := resolveSettingsFilePathInRoot(opts.ConfigRoot)
 	if err != nil {
 		return App{}, err
 	}
@@ -71,6 +71,13 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 
 	state := configRegistry.defaultState()
 	sources := configRegistry.defaultSourceMap()
+	if configRoot := strings.TrimSpace(opts.ConfigRoot); configRoot != "" {
+		absConfigRoot, err := filepath.Abs(configRoot)
+		if err != nil {
+			return App{}, fmt.Errorf("resolve config root: %w", err)
+		}
+		state.PersistenceRoot = absConfigRoot
+	}
 
 	if err := configRegistry.applyFile(homeFileConfig, homeSettingsPath, &state, sources); err != nil {
 		return App{}, err
@@ -102,8 +109,8 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 	if err != nil {
 		return App{}, err
 	}
-	if _, _, err := EnsureManagedRGConfigFile(); err != nil {
-		return App{}, err
+	if _, err := writeManagedRGConfigFileForSettingsPath(homeSettingsPath); err != nil {
+		return App{}, fmt.Errorf("write managed rg config: %w", err)
 	}
 	absWorktreeBaseDir, err := prepareWorktreeBaseDir(absPersistenceRoot, state.Settings.Worktrees.BaseDir)
 	if err != nil {

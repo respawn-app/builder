@@ -22,7 +22,6 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 11) {
@@ -114,7 +113,6 @@ func TestRunPromptFastRoleUsesRoleLevelProviderSettingsForHeuristics(t *testing.
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -179,7 +177,6 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, hits := newFakeResponsesServer(t, []string{"first response", "second response"})
 	defer server.Close()
@@ -246,7 +243,6 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, hits := newFakeResponsesServer(t, []string{"created via explicit base url", "resumed via continuation"})
 	defer server.Close()

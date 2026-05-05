@@ -198,7 +198,7 @@ func TestLookupEnvFallsBackToProcessEnvWhenHandlerMissing(t *testing.T) {
 type startupEnvAuthHandler struct{}
 
 func (startupEnvAuthHandler) WrapStore(base auth.Store) auth.Store {
-	return authflow.WrapStoreWithEnvAPIKeyOverride(base, os.Getenv)
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, startupTestAuthLookupEnv)
 }
 
 func (startupEnvAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
@@ -210,7 +210,14 @@ func (startupEnvAuthHandler) Interact(context.Context, authflow.InteractionReque
 }
 
 func (startupEnvAuthHandler) LookupEnv(key string) string {
-	return os.Getenv(key)
+	return startupTestAuthLookupEnv(key)
+}
+
+func startupTestAuthLookupEnv(key string) string {
+	if key == "OPENAI_API_KEY" {
+		return "in-memory-test-key"
+	}
+	return ""
 }
 
 type startupNoopOnboarding struct{}
@@ -234,7 +241,6 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := startupEnvAuthHandler{}
@@ -310,9 +316,8 @@ func TestHeadlessHandlersStartCoreWithoutCLIFrontendDependencies(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
-	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	authHandler, onboardingHandler := NewHeadlessHandlers(startupTestAuthLookupEnv)
 	registerStartupWorkspace(t, workspace)
 	appCore, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
 	if err != nil {
@@ -338,9 +343,8 @@ func TestStartCoreRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
-	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	authHandler, onboardingHandler := NewHeadlessHandlers(startupTestAuthLookupEnv)
 	registerStartupWorkspace(t, workspace)
 	first, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
 	if err != nil {

@@ -125,7 +125,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 		Model:                 "gpt-5",
 		OpenAIBaseURL:         fakeResponses.URL,
 		OpenAIBaseURLExplicit: true,
-	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}

@@ -34,3 +34,9 @@ func EnsureManagedRGConfigFile() (path string, created bool, err error) {
 	}
 	return path, created, nil
 }
+
+func writeManagedRGConfigFileForSettingsPath(settingsPath string) (string, error) {
+	path := filepath.Join(filepath.Dir(settingsPath), managedRGConfigName)
+	_, err := writeSettingsFileIfMissing(path, managedRGConfigContents)
+	return path, err
+}

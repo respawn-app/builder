@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+var processStartHome = os.Getenv("HOME")
+
 func expandTildePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" || !strings.HasPrefix(trimmed, "~") {
@@ -37,6 +39,9 @@ func preparePersistenceRoot(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve persistence root: %w", err)
 	}
+	if err := refuseRealPersistenceRootUnderGoTest(absRoot); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(absRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create persistence root: %w", err)
 	}
@@ -44,6 +49,27 @@ func preparePersistenceRoot(path string) (string, error) {
 		return "", fmt.Errorf("create sessions root: %w", err)
 	}
 	return absRoot, nil
+}
+
+func refuseRealPersistenceRootUnderGoTest(absRoot string) error {
+	if os.Getenv("BUILDER_ALLOW_REAL_PERSISTENCE_ROOT_IN_TESTS") == "1" {
+		return nil
+	}
+	if !strings.HasSuffix(filepath.Base(os.Args[0]), ".test") {
+		return nil
+	}
+	home := strings.TrimSpace(processStartHome)
+	if home == "" {
+		return nil
+	}
+	realRoot, err := filepath.Abs(filepath.Join(home, ".builder"))
+	if err != nil {
+		return fmt.Errorf("resolve process-start persistence root: %w", err)
+	}
+	if filepath.Clean(absRoot) != filepath.Clean(realRoot) {
+		return nil
+	}
+	return fmt.Errorf("refusing to use process-start persistence root %s from a Go test binary; tests must provide an isolated config root before calling Load", absRoot)
 }
 
 func prepareWorktreeBaseDir(persistenceRoot string, path string) (string, error) {

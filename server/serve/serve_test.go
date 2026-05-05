@@ -26,7 +26,7 @@ import (
 type envAuthHandler struct{}
 
 func (envAuthHandler) WrapStore(base auth.Store) auth.Store {
-	return authflow.WrapStoreWithEnvAPIKeyOverride(base, os.Getenv)
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, testAuthLookupEnv)
 }
 
 func (envAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
@@ -38,7 +38,14 @@ func (envAuthHandler) Interact(context.Context, authflow.InteractionRequest) (au
 }
 
 func (envAuthHandler) LookupEnv(key string) string {
-	return os.Getenv(key)
+	return testAuthLookupEnv(key)
+}
+
+func testAuthLookupEnv(key string) string {
+	if key == "OPENAI_API_KEY" {
+		return "in-memory-test-key"
+	}
+	return ""
 }
 
 type noopOnboarding struct{}
@@ -87,7 +94,6 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -138,7 +144,6 @@ func TestStartRejectsSecondOwnerForSamePersistenceRoot(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -177,7 +182,6 @@ func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -245,7 +249,6 @@ func TestServeExposesDerivedLocalUnixSocketAndCleansStalePath(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -341,7 +344,6 @@ func TestServeDegradesToTCPWhenDerivedLocalSocketFails(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
@@ -475,7 +477,6 @@ func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	registerServeWorkspace(t, workspace)
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}

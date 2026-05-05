@@ -91,7 +91,7 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 	}()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestConfiguredDaemonPlanSessionUsesSessionWorkspaceLocalConfig(t *testing.T
 	}()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}
@@ -851,7 +851,7 @@ func TestStartSessionServerUnregisteredWorkspaceStartsRegistrationCapableServer(
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
 
-	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
 	if err != nil {
 		t.Fatalf("startSessionServer: %v", err)
 	}

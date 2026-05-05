@@ -32,6 +32,17 @@ type memoryAuthHandler struct {
 	state auth.State
 }
 
+func readyMemoryAuthHandler() memoryAuthHandler {
+	return memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "in-memory-test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}
+}
+
 type headlessProjectViewStubService struct {
 	listProjectsResp serverapi.ProjectListResponse
 	listProjectsErr  error
@@ -147,6 +158,10 @@ func (memoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) 
 
 func (memoryAuthHandler) LookupEnv(string) string {
 	return ""
+}
+
+func (memoryAuthHandler) Interactive() bool {
+	return false
 }
 
 type autoOnboarding struct{}
@@ -340,7 +355,6 @@ func TestRunPromptRejectsIncompatibleConfiguredDaemonAndFallsBackToEmbedded(t *t
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -382,7 +396,6 @@ func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if testopenai.HandleInputTokenCount(w, r, 1) {
@@ -596,7 +609,6 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
-	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
 	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {

@@ -353,8 +353,6 @@ func createServiceTestSession(t *testing.T, store *metadata.Store, cfg config.Ap
 func initGitRepo(t *testing.T, root string) {
 	t.Helper()
 	runGit(t, root, "init", "-q")
-	runGit(t, root, "config", "user.email", "builder@test.invalid")
-	runGit(t, root, "config", "user.name", "Builder Test")
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o644); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
@@ -373,7 +371,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = sanitizedGitTestEnv(os.Environ())
+	cmd.Env = appendGitCommitIdentityEnv(sanitizedGitTestEnv(os.Environ()))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
@@ -398,6 +396,15 @@ func sanitizedGitTestEnv(base []string) []string {
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+func appendGitCommitIdentityEnv(env []string) []string {
+	return append(env,
+		"GIT_AUTHOR_NAME=builder-test",
+		"GIT_AUTHOR_EMAIL=builder-test@example.invalid",
+		"GIT_COMMITTER_NAME=builder-test",
+		"GIT_COMMITTER_EMAIL=builder-test@example.invalid",
+	)
 }
 
 func currentGitTopLevel(t *testing.T, dir string) string {

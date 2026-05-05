@@ -446,8 +446,6 @@ func TestGatewayRemoteResolveWorktreeCreateTarget(t *testing.T) {
 func initGatewayGitWorkspace(t *testing.T, workspaceRoot string) {
 	t.Helper()
 	runGatewayGit(t, workspaceRoot, "init", "-b", "main")
-	runGatewayGit(t, workspaceRoot, "config", "user.email", "builder-test@example.com")
-	runGatewayGit(t, workspaceRoot, "config", "user.name", "Builder Test")
 	readmePath := filepath.Join(workspaceRoot, "README.md")
 	if err := os.WriteFile(readmePath, []byte("gateway test\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile README.md: %v", err)
@@ -460,7 +458,7 @@ func runGatewayGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = sanitizedGatewayGitTestEnv(os.Environ())
+	cmd.Env = appendGitCommitIdentityEnv(sanitizedGatewayGitTestEnv(os.Environ()))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
@@ -485,6 +483,15 @@ func sanitizedGatewayGitTestEnv(base []string) []string {
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+func appendGitCommitIdentityEnv(env []string) []string {
+	return append(env,
+		"GIT_AUTHOR_NAME=builder-test",
+		"GIT_AUTHOR_EMAIL=builder-test@example.invalid",
+		"GIT_COMMITTER_NAME=builder-test",
+		"GIT_COMMITTER_EMAIL=builder-test@example.invalid",
+	)
 }
 
 func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testing.T) {
