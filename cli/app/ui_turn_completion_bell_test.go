@@ -441,6 +441,32 @@ func TestManualCompactWithQueuedSteeringDoesNotRing(t *testing.T) {
 	}
 }
 
+func TestManualCompactRingsAfterQueuedLocalCommandDrains(t *testing.T) {
+	ringer := &countRinger{}
+	bells := newUnfocusedBellHooks(ringer)
+	m := newProjectedStaticUIModel(WithUITurnQueueHook(bells))
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+	m.compactionOrigin = uiCompactionOriginManual
+	m.queued = []string{"/status"}
+
+	next, cmd := m.Update(compactDoneMsg{})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued local command to run after compaction")
+	}
+	if updated.busy || len(updated.queued) != 0 {
+		t.Fatalf("expected queued local command to drain to idle, busy=%t queued=%+v", updated.busy, updated.queued)
+	}
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count after queued local command drain = %d, want 1", got)
+	}
+	if got := ringer.Last(); got != "builder: Compaction finished" {
+		t.Fatalf("last ring = %q, want compaction completion", got)
+	}
+}
+
 func TestFailedManualCompactClearsCompactionBell(t *testing.T) {
 	tests := []struct {
 		name string

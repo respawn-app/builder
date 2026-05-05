@@ -451,7 +451,9 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	m.logf("compaction.done")
 	if len(m.queued) > 0 {
 		c.notifyUserCompactionCompleted(compactionOrigin, false)
-		return c.flushQueuedInputs(queueDrainAuto)
+		next, cmd := c.flushQueuedInputs(queueDrainAuto)
+		c.notifyTurnQueueDrainedIfIdle()
+		return next, cmd
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
