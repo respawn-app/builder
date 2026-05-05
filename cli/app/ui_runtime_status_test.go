@@ -56,7 +56,7 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 }
 
 func TestRuntimeStatusLineHidesGoalStatusText(t *testing.T) {
-	for _, goalStatus := range []string{"active", "paused", "complete"} {
+	for _, goalStatus := range []clientui.RuntimeGoalStatus{clientui.RuntimeGoalStatusActive, clientui.RuntimeGoalStatusPaused, clientui.RuntimeGoalStatusComplete} {
 		client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{
 			Goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship feature", Status: goalStatus},
 		}}

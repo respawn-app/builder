@@ -26,6 +26,7 @@ import (
 
 type recordingGoalRemote struct {
 	showReq     []serverapi.RuntimeGoalShowRequest
+	setReq      []serverapi.RuntimeGoalSetRequest
 	completeReq []serverapi.RuntimeGoalStatusRequest
 	goal        *serverapi.RuntimeGoal
 }
@@ -37,8 +38,9 @@ func (r *recordingGoalRemote) ShowGoal(_ context.Context, req serverapi.RuntimeG
 	return serverapi.RuntimeGoalShowResponse{Goal: r.goal}, nil
 }
 
-func (r *recordingGoalRemote) SetGoal(context.Context, serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+func (r *recordingGoalRemote) SetGoal(_ context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	r.setReq = append(r.setReq, req)
+	return serverapi.RuntimeGoalShowResponse{Goal: r.goal}, nil
 }
 
 func (r *recordingGoalRemote) PauseGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
@@ -95,6 +97,23 @@ func TestGoalAgentEnvDeniesMutationWithoutDialing(t *testing.T) {
 	}
 	if len(remote.showReq) != 0 || len(remote.completeReq) != 0 {
 		t.Fatalf("remote was called: %+v", remote)
+	}
+}
+
+func TestGoalSetRejectsEmptyObjectiveBeforeDialing(t *testing.T) {
+	remote := &recordingGoalRemote{}
+	restore := replaceGoalCommandRemoteOpener(t, remote)
+	defer restore()
+
+	stderr := new(strings.Builder)
+	if code := goalSubcommand([]string{"set", "--session", "session-1", "   "}, new(strings.Builder), stderr); code != 2 {
+		t.Fatalf("goal set empty exit = %d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "goal set requires an objective") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if len(remote.setReq) != 0 {
+		t.Fatalf("set called for empty objective: %+v", remote.setReq)
 	}
 }
 

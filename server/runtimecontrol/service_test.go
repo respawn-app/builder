@@ -157,6 +157,51 @@ func TestServiceGoalCommandsDoNotRequireControllerLease(t *testing.T) {
 	}
 }
 
+func TestServiceSetGoalMemoNormalizesObjectiveWhitespace(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	defer func() { _ = engine.Close() }()
+	service := NewService(stubRuntimeResolver{engine: engine}, nil)
+
+	req := serverapi.RuntimeGoalSetRequest{
+		ClientRequestID: "goal-set-retry",
+		SessionID:       store.Meta().SessionID,
+		Objective:       "  ship memo goal  ",
+		Actor:           "user",
+	}
+	first, err := service.SetGoal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetGoal first: %v", err)
+	}
+	req.Objective = "ship memo goal"
+	second, err := service.SetGoal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("SetGoal equivalent retry: %v", err)
+	}
+	if first.Goal == nil || second.Goal == nil || first.Goal.ID != second.Goal.ID {
+		t.Fatalf("retry goal = %+v, want same id as %+v", second.Goal, first.Goal)
+	}
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	goalSetEvents := 0
+	for _, evt := range events {
+		if evt.Kind == "goal_set" {
+			goalSetEvents++
+		}
+	}
+	if goalSetEvents != 1 {
+		t.Fatalf("goal_set event count = %d, want 1", goalSetEvents)
+	}
+}
+
 func TestServiceSetGoalPropagatesGoalLoopStartError(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"builder/cli/app/commands"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 
@@ -12,14 +13,14 @@ import (
 
 const noGoalHint = "No goal to manage yet. First, start a goal with /goal <objective>"
 
-func (c uiInputController) handleGoalCommand(mode string, objective string) (tea.Model, tea.Cmd) {
+func (c uiInputController) handleGoalCommand(mode commands.GoalMode, objective string) (tea.Model, tea.Cmd) {
 	m := c.model
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "show", "":
+	switch mode {
+	case commands.GoalModeShow, "":
 		return m, c.startGoalFlowCmd()
-	case "set":
+	case commands.GoalModeSet:
 		if m.busy {
-			errText := busyGoalCommandMessage("set")
+			errText := busyGoalCommandMessage(commands.GoalModeSet)
 			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 		}
 		current, err := m.showRuntimeGoal()
@@ -40,16 +41,16 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
 		return m, c.appendGoalFeedback("Goal set")
-	case "pause":
+	case commands.GoalModePause:
 		_, err := m.pauseRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
 		return m, c.appendGoalFeedback("Goal paused")
-	case "resume":
+	case commands.GoalModeResume:
 		if m.busy {
-			errText := busyGoalCommandMessage("resume")
+			errText := busyGoalCommandMessage(commands.GoalModeResume)
 			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 		}
 		_, err := m.resumeRuntimeGoal()
@@ -58,7 +59,7 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
 		return m, c.appendGoalFeedback("Goal resumed")
-	case "clear":
+	case commands.GoalModeClear:
 		current, err := m.showRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
@@ -78,14 +79,14 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 		}
 		return m, c.appendGoalFeedback("Goal cleared")
 	default:
-		errText := "Usage: /goal [pause|resume|clear|<objective>]"
+		errText := "Usage: /goal [show|pause|resume|clear|<objective>]"
 		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 	}
 }
 
-func busyGoalCommandMessage(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "resume":
+func busyGoalCommandMessage(mode commands.GoalMode) string {
+	switch mode {
+	case commands.GoalModeResume:
 		return "cannot resume /goal while model is working"
 	default:
 		return "cannot set /goal while model is working"
@@ -93,7 +94,7 @@ func busyGoalCommandMessage(mode string) string {
 }
 
 func goalIsActive(goal *clientui.RuntimeGoal) bool {
-	return goal != nil && strings.TrimSpace(goal.Status) == "active"
+	return goal != nil && goal.Status == clientui.RuntimeGoalStatusActive
 }
 
 func goalRequiresClearConfirmation(goal *clientui.RuntimeGoal) bool {
@@ -345,7 +346,7 @@ func (l uiViewLayout) goalOverlayContentLines(width int) []string {
 	}
 	goal := m.goal.goal
 	appendGap()
-	appendWrapped("Status: "+strings.TrimSpace(goal.Status), boldStyle)
+	appendWrapped("Status: "+strings.TrimSpace(string(goal.Status)), boldStyle)
 	if strings.TrimSpace(goal.ID) != "" {
 		appendWrapped("ID: "+strings.TrimSpace(goal.ID), subtleStyle)
 	}

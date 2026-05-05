@@ -61,7 +61,7 @@ func goalStatusFromRuntime(goal *session.GoalState, suspended bool) *clientui.Ru
 	return &clientui.RuntimeGoal{
 		ID:        strings.TrimSpace(goal.ID),
 		Objective: goal.Objective,
-		Status:    strings.TrimSpace(string(goal.Status)),
+		Status:    clientui.RuntimeGoalStatus(strings.TrimSpace(string(goal.Status))),
 		Suspended: suspended,
 	}
 }

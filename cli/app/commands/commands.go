@@ -30,6 +30,16 @@ const (
 	ActionUnhandled         Action = "unhandled"
 )
 
+type GoalMode string
+
+const (
+	GoalModeShow   GoalMode = "show"
+	GoalModeSet    GoalMode = "set"
+	GoalModePause  GoalMode = "pause"
+	GoalModeResume GoalMode = "resume"
+	GoalModeClear  GoalMode = "clear"
+)
+
 type Result struct {
 	Handled            bool
 	Action             Action
@@ -43,7 +53,7 @@ type Result struct {
 	FastMode           string
 	SupervisorMode     string
 	AutoCompactionMode string
-	GoalMode           string
+	GoalMode           GoalMode
 	GoalObjective      string
 }
 
@@ -107,16 +117,22 @@ func NewDefaultRegistry() *Registry {
 	r.RegisterWithOptions("status", "Open a detailed status overlay for the current session/runtime", RegisterOptions{RunWhileBusy: true}, func(string) Result {
 		return Result{Handled: true, Action: ActionStatus}
 	})
-	r.RegisterWithOptions("goal", "Set or manage the current session goal (usage: /goal [pause|resume|clear|<objective>])", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
-		mode := "show"
+	r.RegisterWithOptions("goal", "Set or manage the current session goal (usage: /goal [show|pause|resume|clear|<objective>])", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		mode := GoalModeShow
 		objective := strings.TrimSpace(args)
 		switch strings.ToLower(objective) {
-		case "pause", "resume", "clear":
-			mode = strings.ToLower(objective)
+		case string(GoalModePause):
+			mode = GoalModePause
+			objective = ""
+		case string(GoalModeResume):
+			mode = GoalModeResume
+			objective = ""
+		case string(GoalModeClear):
+			mode = GoalModeClear
 			objective = ""
 		default:
 			if objective != "" {
-				mode = "set"
+				mode = GoalModeSet
 			}
 		}
 		return Result{Handled: true, Action: ActionGoal, GoalMode: mode, GoalObjective: objective}

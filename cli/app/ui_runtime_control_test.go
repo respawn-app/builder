@@ -470,6 +470,21 @@ func TestRuntimeControlHelpersPropagateRuntimeErrors(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.engine = &runtimeControlFakeClient{err: boom}
 
+	if _, err := m.showRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("show runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.setRuntimeGoal("goal"); !errors.Is(err, boom) {
+		t.Fatalf("set runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.pauseRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("pause runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.resumeRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("resume runtime goal error = %v, want boom", err)
+	}
+	if _, err := m.clearRuntimeGoal(); !errors.Is(err, boom) {
+		t.Fatalf("clear runtime goal error = %v, want boom", err)
+	}
 	if err := m.setRuntimeSessionName("name"); !errors.Is(err, boom) {
 		t.Fatalf("set runtime session name error = %v, want boom", err)
 	}

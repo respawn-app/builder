@@ -84,18 +84,15 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 	if e == nil {
 		return nil
 	}
-	goal := e.Goal()
-	if goal == nil || goal.Status != session.GoalStatusActive {
-		return nil
-	}
-	if err := e.RequireGoalLoopStartAllowed(); err != nil {
-		return err
-	}
 	e.ensureOrchestrationCollaborators()
 	e.mu.Lock()
 	if !e.goalActiveLocked() {
 		e.mu.Unlock()
 		return nil
+	}
+	if err := e.requireAskQuestionForGoalLoopStart(); err != nil {
+		e.mu.Unlock()
+		return err
 	}
 	e.goalLoopSuspended = false
 	if e.goalLoopRunning {

@@ -76,7 +76,7 @@ Concrete integration points:
 
 - `shared/serverapi/runtime_control.go`: add goal DTOs and `RuntimeControlService` methods. Mirror existing request shape: `ClientRequestID`, `SessionID`, `ControllerLeaseID` for TUI-driven mutations, plus explicit validation funcs.
 - `shared/client/runtime_control.go`: extend `RuntimeControlClient` and loopback client.
-- `shared/protocol/handshake.go`: add `runtime.goalShow`, `runtime.goalSet`, `runtime.goalPause`, `runtime.goalResume`, `runtime.goalClear`, `runtime.goalComplete` constants.
+- `shared/protocol/handshake.go`: add `runtime.goal.show`, `runtime.goal.set`, `runtime.goal.pause`, `runtime.goal.resume`, `runtime.goal.clear`, `runtime.goal.complete` constants.
 - `shared/client/remote.go`: add remote wrappers after RPC method semantics are fixed. Follow existing runtime-control wrapper style rather than adding a second transport path.
 - `server/transport/gateway.go`: add `decodeAndHandle` cases in runtime-control section and guard each with `requireSessionInActiveProject(ctx, state, params.SessionID)`.
 - `server/core/core.go`: runtime control service already composes as `runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)`. New service methods should flow through this existing client.
@@ -254,7 +254,7 @@ Pitfalls from existing architecture:
 
 - Existing `SubmitQueuedUserMessages` retries while exclusive step busy. Goal loop must not create a hidden busy-wait or starve interrupts.
 - Auto-continuation should use normal run lifecycle events so TUI spinner/status remains consistent.
-- TUI resume with active goal must not auto-start. Keep persisted active goal separate from runtime-local "eligible to continue now" flag.
+- TUI session resume with active goal auto-starts the goal loop when preflight passes. If `ask_question` is disabled, runtime soft-opens without starting autonomous work, and goal show/pause/clear remain available.
 
 Exit criteria:
 

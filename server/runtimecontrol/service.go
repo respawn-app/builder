@@ -516,7 +516,8 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 	if err := req.Validate(); err != nil {
 		return serverapi.RuntimeGoalShowResponse{}, err
 	}
-	memoReq := goalSetMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Objective: req.Objective, Actor: strings.TrimSpace(req.Actor)}
+	trimmedObjective := strings.TrimSpace(req.Objective)
+	memoReq := goalSetMemoRequest{SessionID: strings.TrimSpace(req.SessionID), Objective: trimmedObjective, Actor: strings.TrimSpace(req.Actor)}
 	return s.goals.Do(ctx, strings.TrimSpace(req.ClientRequestID), memoReq, sameGoalSetMemoRequest, func(ctx context.Context) (serverapi.RuntimeGoalShowResponse, error) {
 		if err := s.requireOptionalControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
@@ -530,7 +531,7 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
 		defer lease.Release()
-		goal, err := engine.SetGoal(req.Objective, session.GoalActor(req.Actor))
+		goal, err := engine.SetGoal(trimmedObjective, session.GoalActor(req.Actor))
 		if err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}

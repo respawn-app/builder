@@ -139,6 +139,10 @@ func goalSetSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	objective := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if objective == "" {
+		fmt.Fprintln(stderr, "goal set requires an objective")
+		return 2
+	}
 	remote, err := goalCommandRemoteOpener(context.Background())
 	if err != nil {
 		fmt.Fprintln(stderr, err)

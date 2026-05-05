@@ -713,7 +713,7 @@ func runtimeGoalFromAPI(goal *serverapi.RuntimeGoal) *clientui.RuntimeGoal {
 	return &clientui.RuntimeGoal{
 		ID:        goal.ID,
 		Objective: goal.Objective,
-		Status:    goal.Status,
+		Status:    clientui.RuntimeGoalStatus(strings.TrimSpace(goal.Status)),
 		Suspended: goal.Suspended,
 	}
 }

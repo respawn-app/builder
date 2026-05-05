@@ -100,19 +100,19 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/goal"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /goal command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
-	if got := r.Execute("/goal"); got.Action != ActionGoal || got.GoalMode != "show" {
+	if got := r.Execute("/goal"); got.Action != ActionGoal || got.GoalMode != GoalModeShow {
 		t.Fatalf("expected ActionGoal show, got %+v", got)
 	}
-	if got := r.Execute("/goal ship feature"); got.Action != ActionGoal || got.GoalMode != "set" || got.GoalObjective != "ship feature" {
+	if got := r.Execute("/goal ship feature"); got.Action != ActionGoal || got.GoalMode != GoalModeSet || got.GoalObjective != "ship feature" {
 		t.Fatalf("expected ActionGoal set, got %+v", got)
 	}
-	if got := r.Execute("/goal pause"); got.Action != ActionGoal || got.GoalMode != "pause" {
+	if got := r.Execute("/goal pause"); got.Action != ActionGoal || got.GoalMode != GoalModePause {
 		t.Fatalf("expected ActionGoal pause, got %+v", got)
 	}
-	if got := r.Execute("/goal resume"); got.Action != ActionGoal || got.GoalMode != "resume" {
+	if got := r.Execute("/goal resume"); got.Action != ActionGoal || got.GoalMode != GoalModeResume {
 		t.Fatalf("expected ActionGoal resume, got %+v", got)
 	}
-	if got := r.Execute("/goal clear"); got.Action != ActionGoal || got.GoalMode != "clear" {
+	if got := r.Execute("/goal clear"); got.Action != ActionGoal || got.GoalMode != GoalModeClear {
 		t.Fatalf("expected ActionGoal clear, got %+v", got)
 	}
 	if got := r.Execute("/copy"); got.Action != ActionCopy {

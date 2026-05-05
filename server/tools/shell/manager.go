@@ -119,7 +119,8 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	}
 	cmd := exec.CommandContext(context.Background(), req.Command[0], req.Command[1:]...)
 	cmd.Dir = workdir
-	cmd.Env = enrichEnvForSession(os.Environ(), req.OwnerSessionID)
+	ownerSessionID := strings.TrimSpace(req.OwnerSessionID)
+	cmd.Env = enrichEnvForSession(os.Environ(), ownerSessionID)
 	prepareManagedExec(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -131,7 +132,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	}
 	entry := &processEntry{
 		id:             id,
-		ownerSessionID: strings.TrimSpace(req.OwnerSessionID),
+		ownerSessionID: ownerSessionID,
 		ownerRunID:     strings.TrimSpace(req.OwnerRunID),
 		ownerStepID:    strings.TrimSpace(req.OwnerStepID),
 		command:        strings.TrimSpace(req.DisplayCommand),

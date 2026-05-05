@@ -26,9 +26,17 @@ type RuntimeContextUsage struct {
 type RuntimeGoal struct {
 	ID        string
 	Objective string
-	Status    string
+	Status    RuntimeGoalStatus
 	Suspended bool
 }
+
+type RuntimeGoalStatus string
+
+const (
+	RuntimeGoalStatusActive   RuntimeGoalStatus = "active"
+	RuntimeGoalStatusPaused   RuntimeGoalStatus = "paused"
+	RuntimeGoalStatusComplete RuntimeGoalStatus = "complete"
+)
 
 type RuntimeStatus struct {
 	ReviewerFrequency                 string

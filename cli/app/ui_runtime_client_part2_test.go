@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestRuntimeClientMainViewDoesNotRefreshCachedSnapshotBehindUIBack(t *testing.T) {
@@ -47,13 +48,31 @@ type leaseRetryRuntimeControlClient struct {
 	firstSubmitErr error
 	appendErr      error
 	submitLeaseID  []string
+	goalLeaseID    []string
 	localEntries   []serverapi.RuntimeAppendLocalEntryRequest
+	showGoalResp   serverapi.RuntimeGoalShowResponse
+	setGoalResp    serverapi.RuntimeGoalShowResponse
+	pauseGoalResp  serverapi.RuntimeGoalShowResponse
+	resumeGoalResp serverapi.RuntimeGoalShowResponse
+	clearGoalResp  serverapi.RuntimeGoalShowResponse
 }
 
 func (c *leaseRetryRuntimeControlClient) submitLeaseIDs() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.submitLeaseID...)
+}
+
+func (c *leaseRetryRuntimeControlClient) goalLeaseIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.goalLeaseID...)
+}
+
+func (c *leaseRetryRuntimeControlClient) resetGoalLeaseIDs() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.goalLeaseID = nil
 }
 
 func (c *leaseRetryRuntimeControlClient) appendedLocalEntries() []serverapi.RuntimeAppendLocalEntryRequest {
@@ -147,27 +166,124 @@ func (c *leaseRetryRuntimeControlClient) RecordPromptHistory(context.Context, se
 }
 
 func (c *leaseRetryRuntimeControlClient) ShowGoal(context.Context, serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+	return c.showGoalResp, nil
 }
 
-func (c *leaseRetryRuntimeControlClient) SetGoal(context.Context, serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+func (c *leaseRetryRuntimeControlClient) SetGoal(_ context.Context, req serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return c.goalWriteResponse(req.ControllerLeaseID, c.setGoalResp)
 }
 
-func (c *leaseRetryRuntimeControlClient) PauseGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+func (c *leaseRetryRuntimeControlClient) PauseGoal(_ context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return c.goalWriteResponse(req.ControllerLeaseID, c.pauseGoalResp)
 }
 
-func (c *leaseRetryRuntimeControlClient) ResumeGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+func (c *leaseRetryRuntimeControlClient) ResumeGoal(_ context.Context, req serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return c.goalWriteResponse(req.ControllerLeaseID, c.resumeGoalResp)
 }
 
 func (c *leaseRetryRuntimeControlClient) CompleteGoal(context.Context, serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
 	return serverapi.RuntimeGoalShowResponse{}, nil
 }
 
-func (c *leaseRetryRuntimeControlClient) ClearGoal(context.Context, serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
-	return serverapi.RuntimeGoalShowResponse{}, nil
+func (c *leaseRetryRuntimeControlClient) ClearGoal(_ context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
+	return c.goalWriteResponse(req.ControllerLeaseID, c.clearGoalResp)
+}
+
+func (c *leaseRetryRuntimeControlClient) goalWriteResponse(leaseID string, resp serverapi.RuntimeGoalShowResponse) (serverapi.RuntimeGoalShowResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.goalLeaseID = append(c.goalLeaseID, leaseID)
+	if leaseID == "lease-old" {
+		return serverapi.RuntimeGoalShowResponse{}, serverapi.ErrInvalidControllerLease
+	}
+	return resp, nil
+}
+
+func TestRuntimeClientGoalMethodsPatchCachedMainView(t *testing.T) {
+	showGoal := &serverapi.RuntimeGoal{ID: "goal-show", Objective: "show goal", Status: "paused", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	setGoal := &serverapi.RuntimeGoal{ID: "goal-set", Objective: "set goal", Status: "active", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pauseGoal := &serverapi.RuntimeGoal{ID: "goal-pause", Objective: "pause goal", Status: "paused", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	resumeGoal := &serverapi.RuntimeGoal{ID: "goal-resume", Objective: "resume goal", Status: "active", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	controls := &leaseRetryRuntimeControlClient{
+		showGoalResp:   serverapi.RuntimeGoalShowResponse{Goal: showGoal},
+		setGoalResp:    serverapi.RuntimeGoalShowResponse{Goal: setGoal},
+		pauseGoalResp:  serverapi.RuntimeGoalShowResponse{Goal: pauseGoal},
+		resumeGoalResp: serverapi.RuntimeGoalShowResponse{Goal: resumeGoal},
+		clearGoalResp:  serverapi.RuntimeGoalShowResponse{},
+	}
+	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
+	leaseManager := newControllerLeaseManager("lease-old")
+	leaseManager.SetRecoverFunc(func(context.Context) (string, error) { return "lease-new", nil })
+	runtimeClient.SetControllerLeaseManager(leaseManager)
+
+	goal, err := runtimeClient.ShowGoal()
+	if err != nil {
+		t.Fatalf("ShowGoal: %v", err)
+	}
+	assertRuntimeClientGoalCached(t, runtimeClient, goal, runtimeGoalFromAPI(showGoal))
+	assertRuntimeGoalConversionDropsAPITimestamps(t, goal, showGoal)
+
+	for _, tt := range []struct {
+		name string
+		call func() (*clientui.RuntimeGoal, error)
+		want *serverapi.RuntimeGoal
+	}{
+		{name: "set", call: func() (*clientui.RuntimeGoal, error) { return runtimeClient.SetGoal("set goal") }, want: setGoal},
+		{name: "pause", call: runtimeClient.PauseGoal, want: pauseGoal},
+		{name: "resume", call: runtimeClient.ResumeGoal, want: resumeGoal},
+		{name: "clear", call: runtimeClient.ClearGoal, want: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			leaseManager.Set("lease-old")
+			controls.resetGoalLeaseIDs()
+			goal, err := tt.call()
+			if err != nil {
+				t.Fatalf("%s goal: %v", tt.name, err)
+			}
+			if got := controls.goalLeaseIDs(); !reflect.DeepEqual(got, []string{"lease-old", "lease-new"}) {
+				t.Fatalf("%s goal lease ids = %+v, want [lease-old lease-new]", tt.name, got)
+			}
+			assertRuntimeClientGoalCached(t, runtimeClient, goal, runtimeGoalFromAPI(tt.want))
+		})
+	}
+}
+
+func TestCloneRuntimeGoalReturnsIndependentCopy(t *testing.T) {
+	original := &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship", Status: clientui.RuntimeGoalStatusActive, Suspended: true}
+	cloned := cloneRuntimeGoal(original)
+	original.ID = "goal-2"
+	original.Objective = "mutated"
+	original.Status = clientui.RuntimeGoalStatusPaused
+	original.Suspended = false
+
+	want := &clientui.RuntimeGoal{ID: "goal-1", Objective: "ship", Status: clientui.RuntimeGoalStatusActive, Suspended: true}
+	if !reflect.DeepEqual(cloned, want) {
+		t.Fatalf("clone = %+v, want %+v", cloned, want)
+	}
+}
+
+func assertRuntimeClientGoalCached(t *testing.T, runtimeClient *sessionRuntimeClient, got *clientui.RuntimeGoal, want *clientui.RuntimeGoal) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("goal = %+v, want %+v", got, want)
+	}
+	view, ok := runtimeClient.CachedMainView()
+	if !ok {
+		t.Fatal("expected cached main view")
+	}
+	if !reflect.DeepEqual(view.Status.Goal, want) {
+		t.Fatalf("cached goal = %+v, want %+v", view.Status.Goal, want)
+	}
+}
+
+func assertRuntimeGoalConversionDropsAPITimestamps(t *testing.T, got *clientui.RuntimeGoal, source *serverapi.RuntimeGoal) {
+	t.Helper()
+	if source == nil || source.CreatedAt.IsZero() || source.UpdatedAt.IsZero() {
+		t.Fatal("test source goal must include timestamps")
+	}
+	if got == nil || got.ID != source.ID || got.Objective != source.Objective || string(got.Status) != source.Status || got.Suspended != source.Suspended {
+		t.Fatalf("converted goal = %+v, source = %+v", got, source)
+	}
 }
 
 func TestRuntimeClientSubmitUserMessageRecoversInvalidControllerLease(t *testing.T) {
