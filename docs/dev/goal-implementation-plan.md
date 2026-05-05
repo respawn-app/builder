@@ -80,7 +80,7 @@ Concrete integration points:
 - `shared/client/remote.go`: add remote wrappers after RPC method semantics are fixed. Follow existing runtime-control wrapper style rather than adding a second transport path.
 - `server/transport/gateway.go`: add `decodeAndHandle` cases in runtime-control section and guard each with `requireSessionInActiveProject(ctx, state, params.SessionID)`.
 - `server/core/core.go`: runtime control service already composes as `runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)`. New service methods should flow through this existing client.
-- `server/runtimecontrol/service.go`: add memo fields and methods beside existing setters. Reuse `Service.resolve`, `requestmemo.Memo`, `requireControllerLease`, and `acquirePrimaryRun` where a goal operation starts model work.
+- `server/runtimecontrol/service.go`: add memo fields and methods beside existing setters. Reuse `Service.resolve`, `requestmemo.Memo`, `requireControllerLease`, and a shared active-goal start preflight helper where a goal operation starts model work. The preflight validates `ask_question`, acquires the primary-run gate, and must complete before persisting active goal metadata/events.
 - `server/runtime/engine.go`: add engine methods for `GoalShow/Set/Pause/Resume/Clear/Complete`. Mutations call `session.Store` goal methods and append model-visible developer messages from `prompts/goal/`.
 - `server/runtime/step_executor.go: defaultStepExecutor.prepareModelTurn`: validate active-goal + `ask_question` enabled before request build/model dispatch. Existing request tool exposure is based on `Engine.Config.EnabledTools`, so parity can check for `toolspec.ToolAskQuestion`.
 - `server/runtime/engine_request.go: buildRequestPlanWithExtraItems` and `server/runtime/worktree_reminder.go`: reference pattern for request-time injected meta messages. Goal nudge differs because PRD requires persisted transcript entry; use this as caution, not blind copy.
@@ -96,7 +96,7 @@ Pitfalls from existing architecture:
 
 - Existing runtime mutations require `ControllerLeaseID`. External `builder goal` from shell will have `BUILDER_SESSION_ID` but not necessarily a controller lease; resolve the open decision above before implementing CLI mutations.
 - `Service.resolve` only returns live runtimes. That matches PRD. Do not auto-activate dormant sessions from goal CLI.
-- Runtime-control submit methods use `primaryrun.Gate`; goal set/resume may start model work and must avoid racing active steps.
+- Runtime-control submit methods use `primaryrun.Gate`; goal set/resume may start model work and must reject active primary runs before persisting active goal state.
 
 Exit criteria:
 
@@ -192,7 +192,7 @@ Exit criteria:
 - [ ] `/goal` with goal opens read-only alt-screen dashboard.
 - [ ] Dashboard exposes pause/resume/clear actions; pause/resume refresh state in place, clear closes after mutation.
 - [ ] Add alt-screen confirmation for replacement and active/running clear. No goal text editor in v1.
-- [ ] While a model turn is running, accept only pause and clear; reject set/replace/resume.
+- [ ] While a model turn is running, `/goal` still opens the read-only dashboard; accept only pause and clear mutations; reject set/replace/resume.
 - [ ] Ensure slash commands call runtime RPC/client methods, not session store directly.
 
 Concrete integration points:
@@ -230,7 +230,7 @@ Exit criteria:
 - [ ] When active and idle, immediately continue goal work by injecting `prompts/goal/nudge.md`.
 - [ ] Queued user messages wait until goal is complete.
 - [ ] Ctrl+C interrupts current turn, keeps persisted status `active`, and sets non-persisted runtime suspension until next user message/session resume.
-- [ ] On TUI session resume with active goal, start idle, show `goal active`, and do not auto-start until next user message.
+- [ ] On TUI session resume with active goal, auto-start the goal loop when preflight passes; if `ask_question` is disabled, soft-open the runtime without starting autonomous work so goal show/pause/clear remain available.
 - [ ] Headless `builder run --continue <session> ...` fails when session has any goal and tells user to clear it first.
 - [ ] Add tests for loop continuation, queue suppression, interrupt suspension, and headless failure.
 
@@ -267,10 +267,10 @@ Exit criteria:
 ## Workstream 7: Projection, Status, And Transcript UX
 
 - [ ] Add goal state to runtime status/client UI projection.
-- [ ] Status line shows `goal active`, `goal paused`, or `goal complete`.
-- [ ] Spinner progress word for active goal turn is `goal`.
+- [ ] Status line omits persistent `goal active`, `goal paused`, and `goal complete` text.
+- [ ] Spinner progress word for active goal turn is `goal` in the primary blue accent.
 - [ ] Detail transcript shows exact developer message model received.
-- [ ] Ongoing transcript shows compact dedicated ongoing text, including goal set and continuation notices.
+- [ ] Ongoing transcript shows exactly one primary-blue info-style persistent line for goal lifecycle and continuation notices; do not add separate transient status-line lifecycle copy.
 - [ ] Add projection/reducer tests for goal events and local/developer transcript entries.
 
 Concrete integration points:
@@ -280,7 +280,7 @@ Concrete integration points:
 - `server/runtimeview/projection.go: EventFromRuntime`: if adding `runtime.EventGoalChanged`, project it to `clientui.Event`.
 - `shared/clientui/runtime_events.go`: reducer should patch cached runtime status/goal from goal events, similar context usage patching in `sessionRuntimeClient.observeRuntimeEventStatus`.
 - `cli/app/ui_runtime_events.go`: ensure goal events update `uiModel` cached status if event reducer does not already carry whole status.
-- `cli/app/ui_layout_rendering_status.go`: add `goal active|paused|complete` segment near mode/model. Progress word should become `goal` during goal turns, not during unrelated turns.
+- `cli/app/ui_layout_rendering_status.go`: keep persistent goal status text out of the status line. Progress word should become primary-blue `goal` during goal turns, not during unrelated turns.
 - `server/runtime/engine_message_ops.go`: `appendPersistedLocalEntryWithOngoingText` already supports a single stored entry with detail text plus compact ongoing text. Goal lifecycle entries can use this for UI-visible ongoing text; model-visible developer messages still require `appendMessage`.
 - `server/runtime/transcript_message_visibility.go`: inspect before implementation if using `llm.Message.CompactContent` instead of local entries for developer messages.
 
@@ -288,13 +288,13 @@ Tests to add:
 
 - `server/runtimeview/projection_test.go`: goal state appears in `RuntimeStatus`; goal event projects correctly if event exists.
 - `shared/clientui/runtime_events_test.go`: reducer patches goal state.
-- `cli/app/ui_runtime_status_test.go` plus focused statusline rendering coverage under `cli/app`: status line includes goal segment; progress label switches to `goal` only for goal turn.
-- Runtime transcript tests: detail transcript contains exact developer prompt; ongoing transcript uses dedicated compact text from same lifecycle action.
+- `cli/app/ui_runtime_status_test.go` plus focused statusline rendering coverage under `cli/app`: status line omits persistent goal status text; progress label switches to `goal` only for goal turn.
+- Runtime transcript tests: detail transcript contains exact developer prompt; ongoing transcript uses dedicated compact text from the same lifecycle action and only one `goal_feedback` entry.
 
 Pitfalls from existing architecture:
 
-- Existing local entries are UI-visible but not model-visible; developer messages are model-visible. PRD says lifecycle action appends structured event and persisted developer-message transcript entry, so implementation may need both message and local/projection data or a typed message compact field.
-- Do not rewrite ongoing normal-buffer history when goal status changes; append or statusline-update only.
+- Existing local entries are UI-visible but not model-visible; developer messages are model-visible. Goal lifecycle uses typed developer messages with compact `goal_feedback` projection, not an extra UI local entry.
+- Do not rewrite ongoing normal-buffer history when goal status changes; append one persistent `goal_feedback` row only.
 - Keep projection DTO source server-owned; TUI should not read session metadata directly.
 
 Exit criteria:

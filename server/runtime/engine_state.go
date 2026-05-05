@@ -662,6 +662,10 @@ func (e *Engine) emitCommittedTranscriptAdvanced(stepID string) {
 	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
 }
 
+func (e *Engine) emitCommittedMessageTranscriptAdvanced(stepID string, msg llm.Message) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true, Message: msg})
+}
+
 func eventMayInferCommittedEntryStart(kind EventKind) bool {
 	switch kind {
 	case EventCompactionCompleted, EventCompactionFailed:

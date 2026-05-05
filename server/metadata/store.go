@@ -1023,6 +1023,7 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		"compaction_soon_reminder_issued":    snapshot.Meta.CompactionSoonReminderIssued,
 		"generated_recovered_warning_issued": snapshot.Meta.GeneratedRecoveredWarningIssued,
 		"worktree_reminder":                  persistedWorktreeReminder,
+		"goal":                               snapshot.Meta.Goal,
 	})
 	if err != nil {
 		return err
@@ -1122,6 +1123,7 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 		CompactionSoonReminderIssued    bool                           `json:"compaction_soon_reminder_issued"`
 		GeneratedRecoveredWarningIssued bool                           `json:"generated_recovered_warning_issued"`
 		WorktreeReminder                *session.WorktreeReminderState `json:"worktree_reminder"`
+		Goal                            *session.GoalState             `json:"goal"`
 	}{}
 	if err := unmarshalStoredJSON(row.MetadataJson, &metadataPayload); err != nil {
 		return session.Meta{}, fmt.Errorf("decode session metadata json: %w", err)
@@ -1175,6 +1177,7 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 		CompactionSoonReminderIssued:    metadataPayload.CompactionSoonReminderIssued,
 		GeneratedRecoveredWarningIssued: metadataPayload.GeneratedRecoveredWarningIssued,
 		WorktreeReminder:                metadataPayload.WorktreeReminder,
+		Goal:                            metadataPayload.Goal,
 		UsageState:                      usageState,
 		Locked:                          locked,
 	}, nil

@@ -133,6 +133,46 @@ func TestSandboxServeUpReportsHostPortInUse(t *testing.T) {
 	}
 }
 
+func TestTestScriptEnforcesWallClockTimeout(t *testing.T) {
+	root := repoRoot(t)
+	tempPkg, err := os.MkdirTemp(root, "script-timeout-test-*")
+	if err != nil {
+		t.Fatalf("create temp package: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempPkg) }()
+
+	if err := os.WriteFile(filepath.Join(tempPkg, "slow_test.go"), []byte(`package slowtest
+
+import (
+	"testing"
+	"time"
+)
+
+func TestSlow(t *testing.T) {
+	time.Sleep(5 * time.Second)
+}
+`), 0o644); err != nil {
+		t.Fatalf("write slow test: %v", err)
+	}
+
+	script := filepath.Join(root, "scripts", "test.sh")
+	relPkg, err := filepath.Rel(root, tempPkg)
+	if err != nil {
+		t.Fatalf("relative temp package: %v", err)
+	}
+	cmd := exec.Command(script, "./"+filepath.ToSlash(relPkg), "-count=1")
+	cmd.Dir = root
+	cmd.Env = append(sanitizedScriptTestEnv(os.Environ()), "BUILDER_TEST_TIMEOUT_SECONDS=1")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected timeout failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "test suite exceeded 1s wall-clock cap") {
+		t.Fatalf("expected timeout message, got %q", text)
+	}
+}
+
 func gitHookEnv(t *testing.T, root string) []string {
 	t.Helper()
 	gitDir := gitOutput(t, root, "rev-parse", "--git-dir")

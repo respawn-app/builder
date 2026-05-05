@@ -274,7 +274,7 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	if err == nil {
 		if shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg, previousCommittedCount, e.CommittedTranscriptEntryCount()) {
-			e.emitCommittedTranscriptAdvanced(stepID)
+			e.emitCommittedMessageTranscriptAdvanced(stepID, msg)
 		}
 	}
 	return err

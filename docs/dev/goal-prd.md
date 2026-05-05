@@ -14,7 +14,7 @@ Builder needs a first-class way to run long-running objectives across multiple t
 - `/goal <objective>` is immediate: it sets the session goal and starts a model turn toward that goal right away.
 - Budgets are out of scope for v1. Do not implement token budgets, time budgets, budget-limited status, or budget accounting in the first slice.
 - Goal completion is reported through Builder CLI, not through model tools. The model should use `builder goal complete` from a shell command after auditing completion. Agent-env completion requires hidden `--confirm`; human CLI completion does not.
-- Goal mode requires the `ask_question` tool while an active goal can start model work. Validate this at the boundary that starts the model loop and surface a normal runtime error if the parity check fails.
+- Goal mode requires the `ask_question` tool while an active goal can start model work. Validate this at the boundary that starts the model loop and surface a normal runtime error if the parity check fails. Session reopen must still construct the runtime when a persisted active goal cannot auto-start because `ask_question` is disabled, so goal show/pause/clear remain available.
 - Do not mutate session DB directly from CLI. Goal CLI commands must go through live server/runtime RPC and fail if the target session is not reachable.
 
 ## Goals
@@ -83,15 +83,15 @@ Goal prompt sources live under `prompts/goal/`. Do not hardcode non-trivial goal
 
 Goal loop behavior:
 
-- After `/goal <objective>`, Builder creates one transcript entry with dedicated ongoing text such as `You set a goal: "<objective preview>"`; detail mode shows the exact developer message the model received.
+- After `/goal <objective>`, Builder creates one transcript entry with dedicated ongoing text such as `Goal set: "<objective preview>"`; detail mode shows the exact developer message the model received.
 - While active and idle, Builder immediately continues goal work until the goal is paused, completed, cleared, interrupted, or a runtime error occurs.
 - Queued user messages wait until the goal is complete. Direct user steering/interruption uses existing runtime behavior; do not add special queue semantics beyond goal-loop scheduling.
-- While a model turn is currently running, only `/goal pause` and `/goal clear` are accepted among lifecycle commands. `/goal set`/replacement, `/goal resume`, and `/goal complete` are rejected while a model turn is currently running.
+- While a model turn is currently running, `/goal` opens the read-only dashboard and `/goal pause` and `/goal clear` are accepted lifecycle commands. `/goal set`/replacement, `/goal resume`, and `/goal complete` are rejected while a model turn is currently running. Runtime-control set/replacement and resume acquire the primary-run gate before writing active goal state, so rejection leaves persisted goal metadata and audit events unchanged.
 - `/goal pause` while a model request is in flight appends/persists the normal developer message immediately; the in-flight request only sees it if existing steering/follow-up logic would include it later.
 - Ctrl+C interrupts the current turn, keeps persisted status `active`, and creates only runtime-local suspension until the next user message/session resume. `/goal pause` during runtime-local suspension changes persisted status to `paused`.
-- On session resume with an active goal, start idle, show `goal active` in status/transcript, and continue the loop on the next user message.
+- On session resume with an active goal, start the goal loop when goal preflight passes. If `ask_question` is disabled, open the runtime without starting the autonomous loop so `/goal` and `builder goal show|pause|clear` can recover the session.
 - Headless `builder run --continue <session> ...` fails if that session has a goal and tells the user to clear the goal first.
-- Before any model loop starts, validate active-goal/ask_question parity. If `ask_question` is disabled while an active goal can run, fail like a model/API runtime error. Suggested copy: `please allow the model to ask questions for goals to work. If model encounters a blocker, it will ask you for help instead of spinning forever or implementing hacky workarounds`.
+- Before any model loop starts, validate active-goal/ask_question parity. If `ask_question` is disabled while an active goal can run, fail like a model/API runtime error. Session construction is the exception: it may soft-open without starting the autonomous loop to keep goal management reachable. Suggested copy: `please allow the model to ask questions for goals to work. If model encounters a blocker, it will ask you for help instead of spinning forever or implementing hacky workarounds`.
 
 ## Persistence
 
@@ -119,13 +119,13 @@ Resume read path: runtime reads session metadata goal state directly. Event log 
 
 ## UI
 
-Goal status should be visible without reading transcript history. Initial display:
+Goal status should be visible from `/goal` without reading transcript history. Initial display:
 
 - Active: `goal active`
 - Paused: `goal paused`
 - Complete: `goal complete`
 
-When a goal turn is running, the progress word next to the spinner should be `goal`.
+When a goal turn is running, the progress word next to the spinner should be `goal` and use the primary blue accent. The normal status line must not include a persistent `goal active`, `goal paused`, or `goal complete` text segment.
 
 `/goal` opens a read-only alt-screen dashboard when a goal exists. Dashboard v1 may expose pause/resume/clear actions via keybindings; mutation stays in the dashboard and refreshes state for pause/resume, and closes for clear. If no goal exists, `/goal` prints: `No goal to manage yet. First, start a goal with <command>`.
 
@@ -135,9 +135,9 @@ Replacement and active-goal clear use proper alt-screen confirmation UI, not a t
 
 User-visible injected reminders should be explicit but low-noise:
 
-- Ongoing transcript: show a compact local entry when Builder starts goal-driven continuation, for example `Goal: continue <objective preview>`.
+- Ongoing transcript: show exactly one primary-blue info-style persistent line for each goal lifecycle action or continuation, for example `ℹ Goal paused` or `ℹ Goal: continue <objective preview>`.
 - Detail transcript: include the full injected goal nudge prompt so power users can audit exactly what the model saw.
-- Status line: show current goal state (`goal active`, `goal paused`, `goal complete`) without requiring transcript scanning.
+- Status line: do not show goal lifecycle notices or a persistent goal-state text segment. During a goal turn only, show the primary-blue `goal` progress word next to the spinner.
 - Slash command output: `/goal` shows the dashboard when a goal exists, otherwise the empty-state hint.
 
 The model sees the full nudge prompt as a developer message. It should read as operational steering, not hidden state. It should push the model toward planning, editing, verifying, and auditing completion against evidence before reporting completion through the CLI.

@@ -14,6 +14,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 func TestGoalSetPersistsGoalAndDeveloperPrompt(t *testing.T) {
@@ -57,8 +58,51 @@ func TestGoalSetPersistsGoalAndDeveloperPrompt(t *testing.T) {
 	if msg.Content != prompts.RenderGoalSetPrompt("ship goal mode") {
 		t.Fatalf("message content = %q", msg.Content)
 	}
+	if msg.CompactContent != `Goal set: "ship goal mode"` {
+		t.Fatalf("compact content = %q, want goal set preview", msg.CompactContent)
+	}
 	if !strings.Contains(msg.CompactContent, "ship goal mode") {
 		t.Fatalf("compact content = %q, want objective preview", msg.CompactContent)
+	}
+}
+
+func TestGoalSetEmitsCommittedGoalFeedbackEvent(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	events := make([]Event, 0, 1)
+	engine, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+
+	if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1: %+v", len(events), events)
+	}
+	evt := events[0]
+	if evt.Kind != EventConversationUpdated || !evt.CommittedTranscriptChanged {
+		t.Fatalf("event = %+v, want committed conversation update", evt)
+	}
+	entries := TranscriptEntriesFromEvent(evt)
+	if len(entries) != 1 {
+		t.Fatalf("event transcript entries len = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Role != string(transcript.EntryRoleGoalFeedback) || entry.OngoingText != `Goal set: "ship goal mode"` {
+		t.Fatalf("event transcript entry = %+v, want goal feedback", entry)
+	}
+	if !evt.CommittedEntryStartSet || evt.CommittedEntryStart != 0 || evt.CommittedEntryCount != 1 {
+		t.Fatalf("event committed range start=%d set=%t count=%d, want start 0 count 1", evt.CommittedEntryStart, evt.CommittedEntryStartSet, evt.CommittedEntryCount)
 	}
 }
 
@@ -106,6 +150,51 @@ func TestGoalStatusAndClearPersistDeveloperPrompts(t *testing.T) {
 	}
 	if messages[4].Content != prompts.GoalClearPrompt {
 		t.Fatalf("clear prompt = %q", messages[4].Content)
+	}
+}
+
+func TestGoalLifecycleMessagesProjectAsSingleGoalFeedbackEntry(t *testing.T) {
+	tests := []struct {
+		name    string
+		message llm.Message
+		ongoing string
+	}{
+		{
+			name:    "set",
+			message: llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeGoal, Content: prompts.RenderGoalSetPrompt("ship goal mode"), CompactContent: "Goal set: \"ship goal mode\""},
+			ongoing: "Goal set: \"ship goal mode\"",
+		},
+		{
+			name:    "pause",
+			message: llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeGoal, Content: prompts.GoalPausePrompt, CompactContent: "Goal paused"},
+			ongoing: "Goal paused",
+		},
+		{
+			name:    "resume",
+			message: llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeGoal, Content: prompts.RenderGoalResumePrompt("ship goal mode"), CompactContent: "Goal resumed: \"ship goal mode\""},
+			ongoing: "Goal resumed: \"ship goal mode\"",
+		},
+		{
+			name:    "clear",
+			message: llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeGoal, Content: prompts.GoalClearPrompt, CompactContent: "Goal cleared"},
+			ongoing: "Goal cleared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := VisibleChatEntriesFromMessage(tt.message)
+			if len(entries) != 1 {
+				t.Fatalf("entries len = %d, want exactly one", len(entries))
+			}
+			entry := entries[0]
+			if entry.Role != string(transcript.EntryRoleGoalFeedback) {
+				t.Fatalf("role = %q, want %q", entry.Role, transcript.EntryRoleGoalFeedback)
+			}
+			if entry.OngoingText != tt.ongoing {
+				t.Fatalf("ongoing text = %q, want %q", entry.OngoingText, tt.ongoing)
+			}
+		})
 	}
 }
 
@@ -200,6 +289,9 @@ func TestGoalDeveloperMessageVisibleInOngoingWithDetailPrompt(t *testing.T) {
 		t.Fatalf("entries len = %d, want 1", len(entries))
 	}
 	entry := entries[0]
+	if entry.Role != string(transcript.EntryRoleGoalFeedback) {
+		t.Fatalf("goal role = %q, want %q", entry.Role, transcript.EntryRoleGoalFeedback)
+	}
 	if entry.Visibility != "all" {
 		t.Fatalf("goal visibility = %q, want all", entry.Visibility)
 	}
@@ -380,6 +472,48 @@ func TestNewRestartsPersistedActiveGoalLoop(t *testing.T) {
 	}
 	if !foundNudge {
 		t.Fatalf("goal developer messages did not include reopened nudge: %+v", messages)
+	}
+}
+
+func TestNewOpensPersistedActiveGoalWhenAskQuestionDisabled(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	client := newScriptedGoalLoopClient()
+	engine, err := New(reopenedStore, client, tools.NewRegistry(), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolExecCommand}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = engine.Close() }()
+
+	goal := engine.Goal()
+	if goal == nil || goal.Status != session.GoalStatusActive || goal.Objective != "ship goal mode" {
+		t.Fatalf("goal after reopen = %+v", goal)
+	}
+	waitGoalLoopRunning(t, engine, false)
+	if got := client.callCount(); got != 0 {
+		t.Fatalf("model calls = %d, want 0", got)
+	}
+	if _, err := engine.SetGoalStatus(session.GoalStatusPaused, session.GoalActorUser); err != nil {
+		t.Fatalf("pause goal after soft reopen: %v", err)
+	}
+	if goal := engine.Goal(); goal == nil || goal.Status != session.GoalStatusPaused {
+		t.Fatalf("goal after pause = %+v", goal)
+	}
+	if _, err := engine.ClearGoal(session.GoalActorUser); err != nil {
+		t.Fatalf("clear goal after soft reopen: %v", err)
+	}
+	if goal := engine.Goal(); goal != nil {
+		t.Fatalf("goal after clear = %+v, want nil", goal)
 	}
 }
 

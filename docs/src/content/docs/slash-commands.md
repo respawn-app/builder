@@ -37,7 +37,8 @@ Canonical forms only. Some commands also accept aliases.
 - `Enter` runs the selected command immediately, even when the name is only partially typed.
 - `Tab` on a partial command autocompletes the selected command and inserts a trailing space so you can continue with arguments.
 - `Tab` on an exact known command adds it into the queue. Use this to make chains of prompts and slash commands like /compact -> /review -> /prompts:commit.
-- While the model is working on an active goal, `/goal pause` and `/goal clear` run immediately; setting, showing, or resuming a goal is rejected until the runtime is idle.
+- While the model is working on an active goal, `/goal` still opens the read-only goal page. `/goal pause` and `/goal clear` run immediately and append one persistent goal info line; setting or resuming a goal is rejected until the runtime is idle.
+- If `ask_question` is disabled, Builder opens sessions with active goals for management, but goal set/resume fails until `ask_question` is enabled; pause and clear remain available.
 
 ### 2. Built-In and Custom Prompts
 

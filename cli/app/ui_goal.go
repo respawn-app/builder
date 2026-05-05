@@ -16,10 +16,6 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 	m := c.model
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "show", "":
-		if m.busy {
-			errText := busyGoalCommandMessage("show")
-			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
-		}
 		return m, c.startGoalFlowCmd()
 	case "set":
 		if m.busy {
@@ -38,30 +34,30 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 			}
 			return m, nil
 		}
-		goal, err := m.setRuntimeGoal(objective)
+		_, err = m.setRuntimeGoal(objective)
 		if err != nil {
 			detailErr := formatSubmissionError(err)
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
-		return m, c.appendSystemFeedbackWithStatus(goalStatusNotice("Goal set", goal), c.showSuccessStatus("Goal set"))
+		return m, c.appendGoalFeedback("Goal set")
 	case "pause":
-		goal, err := m.pauseRuntimeGoal()
+		_, err := m.pauseRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
-		return m, c.appendSystemFeedbackWithStatus(goalStatusNotice("Goal paused", goal), c.showSuccessStatus("Goal paused"))
+		return m, c.appendGoalFeedback("Goal paused")
 	case "resume":
 		if m.busy {
 			errText := busyGoalCommandMessage("resume")
 			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
 		}
-		goal, err := m.resumeRuntimeGoal()
+		_, err := m.resumeRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
-		return m, c.appendSystemFeedbackWithStatus(goalStatusNotice("Goal resumed", goal), c.showSuccessStatus("Goal resumed"))
+		return m, c.appendGoalFeedback("Goal resumed")
 	case "clear":
 		current, err := m.showRuntimeGoal()
 		if err != nil {
@@ -80,7 +76,7 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 			detailErr := formatSubmissionError(err)
 			return m, c.appendErrorFeedbackWithStatus(detailErr, c.showErrorStatus(detailErr))
 		}
-		return m, c.appendSystemFeedbackWithStatus("Goal cleared", c.showSuccessStatus("Goal cleared"))
+		return m, c.appendGoalFeedback("Goal cleared")
 	default:
 		errText := "Usage: /goal [pause|resume|clear|<objective>]"
 		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
@@ -89,8 +85,6 @@ func (c uiInputController) handleGoalCommand(mode string, objective string) (tea
 
 func busyGoalCommandMessage(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "show":
-		return "cannot show /goal while model is working"
 	case "resume":
 		return "cannot resume /goal while model is working"
 	default:
@@ -106,11 +100,8 @@ func goalRequiresClearConfirmation(goal *clientui.RuntimeGoal) bool {
 	return goalIsActive(goal) && !goal.Suspended
 }
 
-func goalStatusNotice(prefix string, goal *clientui.RuntimeGoal) string {
-	if goal == nil || strings.TrimSpace(goal.Status) == "" {
-		return prefix
-	}
-	return prefix + " (" + strings.TrimSpace(goal.Status) + ")"
+func (c uiInputController) appendGoalFeedback(text string) tea.Cmd {
+	return nil
 }
 
 func (c uiInputController) startGoalFlowCmd() tea.Cmd {
@@ -195,20 +186,20 @@ func (c uiInputController) handleGoalConfirmKey(msg tea.KeyMsg) (tea.Model, tea.
 		objective := m.goal.pendingObjective
 		switch mode {
 		case "replace":
-			goal, err := m.setRuntimeGoal(objective)
+			_, err := m.setRuntimeGoal(objective)
 			if err != nil {
 				m.goal.error = err.Error()
 				return m, nil
 			}
 			overlayCmd := c.stopGoalFlowCmd()
-			return m, sequenceCmds(overlayCmd, c.appendSystemFeedbackWithStatus(goalStatusNotice("Goal set", goal), c.showSuccessStatus("Goal set")))
+			return m, sequenceCmds(overlayCmd, c.appendGoalFeedback("Goal set"))
 		case "clear":
 			if _, err := m.clearRuntimeGoal(); err != nil {
 				m.goal.error = err.Error()
 				return m, nil
 			}
 			overlayCmd := c.stopGoalFlowCmd()
-			return m, sequenceCmds(overlayCmd, c.appendSystemFeedbackWithStatus("Goal cleared", c.showSuccessStatus("Goal cleared")))
+			return m, sequenceCmds(overlayCmd, c.appendGoalFeedback("Goal cleared"))
 		}
 	}
 	return m, nil

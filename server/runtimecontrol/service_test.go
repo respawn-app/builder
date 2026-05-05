@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"builder/server/llm"
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
@@ -31,6 +32,22 @@ type stubRuntimeLeaseVerifier struct {
 func (s *stubRuntimeLeaseVerifier) RequireControllerLease(context.Context, string, string) error {
 	s.calls++
 	return s.err
+}
+
+type stubPrimaryRunGate struct {
+	err      error
+	acquire  int
+	release  int
+	sessions []string
+}
+
+func (g *stubPrimaryRunGate) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
+	g.acquire++
+	g.sessions = append(g.sessions, sessionID)
+	if g.err != nil {
+		return nil, g.err
+	}
+	return primaryrun.LeaseFunc(func() { g.release++ }), nil
 }
 
 type runtimeControlFakeClient struct {
@@ -169,6 +186,98 @@ func TestServiceSetGoalPropagatesGoalLoopStartError(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("events persisted after failed preflight: %+v", events)
+	}
+}
+
+func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(t *testing.T) {
+	tests := []struct {
+		name       string
+		prepare    func(t *testing.T, engine *runtime.Engine)
+		call       func(context.Context, *Service, string) error
+		assertGoal func(t *testing.T, goal *session.GoalState)
+	}{
+		{
+			name: "set",
+			call: func(ctx context.Context, service *Service, sessionID string) error {
+				_, err := service.SetGoal(ctx, serverapi.RuntimeGoalSetRequest{
+					ClientRequestID: "goal-set-busy",
+					SessionID:       sessionID,
+					Objective:       "ship goal mode",
+					Actor:           "user",
+				})
+				return err
+			},
+			assertGoal: func(t *testing.T, goal *session.GoalState) {
+				t.Helper()
+				if goal != nil {
+					t.Fatalf("goal persisted after busy set: %+v", goal)
+				}
+			},
+		},
+		{
+			name: "resume",
+			prepare: func(t *testing.T, engine *runtime.Engine) {
+				t.Helper()
+				if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+					t.Fatalf("SetGoal: %v", err)
+				}
+				if _, err := engine.SetGoalStatus(session.GoalStatusPaused, session.GoalActorUser); err != nil {
+					t.Fatalf("pause goal: %v", err)
+				}
+			},
+			call: func(ctx context.Context, service *Service, sessionID string) error {
+				_, err := service.ResumeGoal(ctx, serverapi.RuntimeGoalStatusRequest{
+					ClientRequestID: "goal-resume-busy",
+					SessionID:       sessionID,
+					Actor:           "user",
+				})
+				return err
+			},
+			assertGoal: func(t *testing.T, goal *session.GoalState) {
+				t.Helper()
+				if goal == nil || goal.Status != session.GoalStatusPaused {
+					t.Fatalf("goal after busy resume = %+v, want paused", goal)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+			if err != nil {
+				t.Fatalf("create session store: %v", err)
+			}
+			engine, err := runtime.New(store, &runtimeControlFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+			if err != nil {
+				t.Fatalf("create runtime engine: %v", err)
+			}
+			if tt.prepare != nil {
+				tt.prepare(t, engine)
+			}
+			before, err := store.ReadEvents()
+			if err != nil {
+				t.Fatalf("ReadEvents before: %v", err)
+			}
+			gate := &stubPrimaryRunGate{err: primaryrun.ErrActivePrimaryRun}
+			service := NewService(stubRuntimeResolver{engine: engine}, gate)
+
+			err = tt.call(context.Background(), service, store.Meta().SessionID)
+			if !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+				t.Fatalf("goal start error = %v, want ErrActivePrimaryRun", err)
+			}
+			tt.assertGoal(t, store.Meta().Goal)
+			after, err := store.ReadEvents()
+			if err != nil {
+				t.Fatalf("ReadEvents after: %v", err)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("events after busy rejection = %d, want %d", len(after), len(before))
+			}
+			if gate.acquire != 1 || gate.release != 0 {
+				t.Fatalf("gate acquire/release = %d/%d, want 1/0", gate.acquire, gate.release)
+			}
+		})
 	}
 }
 

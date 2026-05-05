@@ -488,42 +488,42 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodRuntimeGoalShow:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalShowRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().ShowGoal(ctx, params)
 		})
 	case protocol.MethodRuntimeGoalSet:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalSetRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().SetGoal(ctx, params)
 		})
 	case protocol.MethodRuntimeGoalPause:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().PauseGoal(ctx, params)
 		})
 	case protocol.MethodRuntimeGoalResume:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().ResumeGoal(ctx, params)
 		})
 	case protocol.MethodRuntimeGoalComplete:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalStatusRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().CompleteGoal(ctx, params)
 		})
 	case protocol.MethodRuntimeGoalClear:
 		return decodeAndHandle(req, func(params serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireGoalSessionAccess(ctx, state, params.SessionID); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
 			return g.core.RuntimeControlClient().ClearGoal(ctx, params)
@@ -702,6 +702,13 @@ func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *conn
 		return err
 	}
 	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
+}
+
+func (g *Gateway) requireGoalSessionAccess(ctx context.Context, state *connectionState, sessionID string) error {
+	if strings.TrimSpace(state.attachedProject) == "" && strings.TrimSpace(g.core.ProjectID()) == "" {
+		return nil
+	}
+	return g.requireSessionInActiveProject(ctx, state, sessionID)
 }
 
 func (g *Gateway) requireSessionInAttachedProject(ctx context.Context, state *connectionState, sessionID string) error {

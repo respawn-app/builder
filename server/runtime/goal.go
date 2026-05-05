@@ -223,7 +223,7 @@ func (e *Engine) requireAskQuestionForGoalLoopStart() error {
 }
 
 func goalSetCompactText(objective string) string {
-	return "You set a goal: " + strconvQuoteForGoalPreview(objective)
+	return "Goal set: " + strconvQuoteForGoalPreview(objective)
 }
 
 func goalStatusPrompt(goal session.GoalState) string {

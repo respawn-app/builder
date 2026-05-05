@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 func TestRuntimeEventCanDeferCommittedConversationFence(t *testing.T) {
@@ -24,6 +25,40 @@ func TestRuntimeEventCanDeferCommittedConversationFence(t *testing.T) {
 	update.RecoveryCause = clientui.TranscriptRecoveryCauseStreamGap
 	if runtimeEventCanDeferCommittedConversationFence(update) {
 		t.Fatal("expected recovery conversation update to be non-deferrable")
+	}
+}
+
+func TestWaitRuntimeEventDoesNotDeferCommittedGoalFeedback(t *testing.T) {
+	ch := make(chan clientui.Event, 2)
+	ch <- clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        1,
+		CommittedEntryStart:        0,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:        string(transcript.EntryRoleGoalFeedback),
+			Text:        "goal detail",
+			OngoingText: `Goal set: "ship feature"`,
+			Visibility:  clientui.EntryVisibilityAll,
+		}},
+	}
+	ch <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "later"}
+
+	raw := waitRuntimeEvent(ch)()
+	msg, ok := raw.(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected runtimeEventBatchMsg, got %T", raw)
+	}
+	if len(msg.events) != 1 {
+		t.Fatalf("first batch len = %d, want only goal feedback event", len(msg.events))
+	}
+	if msg.events[0].Kind != clientui.EventConversationUpdated || len(msg.events[0].TranscriptEntries) != 1 {
+		t.Fatalf("first event = %+v, want committed goal feedback", msg.events[0])
+	}
+	if msg.carry != nil {
+		t.Fatalf("did not expect later event carried behind goal feedback, got %+v", *msg.carry)
 	}
 }
 

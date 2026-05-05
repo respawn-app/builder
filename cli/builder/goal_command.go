@@ -315,7 +315,7 @@ func writeGoalShowText(stdout io.Writer, goal *serverapi.RuntimeGoal) {
 		fmt.Fprintln(stdout, "No goal")
 		return
 	}
-	fmt.Fprintf(stdout, "Goal: %s\nStatus: %s\nID: %s\n", goal.Objective, goal.Status, goal.ID)
+	fmt.Fprintf(stdout, "Goal: %s\nStatus: %s\n", goal.Objective, goal.Status)
 }
 
 func formatGoalCommandError(err error) string {
