@@ -182,11 +182,12 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	out := &bytes.Buffer{}
+	out := newLockedBuffer()
 	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	observed := newObservedUIModel(model)
 
 	program := tea.NewProgram(
-		model,
+		observed,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
 		tea.WithoutSignals(),
@@ -197,7 +198,7 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 		done <- runErr
 	}()
 
-	time.Sleep(40 * time.Millisecond)
+	waitForSignal(t, 2*time.Second, "program startup output", out.Started())
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
 	submitDone := make(chan error, 1)
 	go func() {
@@ -263,11 +264,12 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	out := &bytes.Buffer{}
+	out := newLockedBuffer()
 	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	observed := newObservedUIModel(model)
 
 	program := tea.NewProgram(
-		model,
+		observed,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
 		tea.WithoutSignals(),
@@ -278,7 +280,7 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 		done <- runErr
 	}()
 
-	time.Sleep(40 * time.Millisecond)
+	waitForSignal(t, 2*time.Second, "program startup output", out.Started())
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
 	submitDone := make(chan error, 1)
 	go func() {
@@ -873,11 +875,12 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	out := &bytes.Buffer{}
+	out := newLockedBuffer()
 	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	observed := newObservedUIModel(model)
 
 	program := tea.NewProgram(
-		model,
+		observed,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
 		tea.WithoutSignals(),
@@ -888,7 +891,7 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 		done <- runErr
 	}()
 
-	time.Sleep(40 * time.Millisecond)
+	waitForSignal(t, 2*time.Second, "program startup output", out.Started())
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
 	submitDone := make(chan error, 1)
 	go func() {
@@ -905,17 +908,9 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 	close(blockingTool.release)
 
 	waitForSubmitResult(t, 2*time.Second, submitDone)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if containsInOrder(normalizedOutput(out.String()), "run task", "after steer") {
-			break
-		}
-		if time.Now().After(deadline) {
-			snapshot := eng.ChatSnapshot()
-			t.Fatalf("timed out waiting for follow-up assistant resolves after blocking tool output=%q flush_seq=%d flushed_seq=%d pending_flushes=%d runtime_transcript=%+v ui_transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q", normalizedOutput(out.String()), model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), snapshot.Entries, model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	observed.waitFor(t, 2*time.Second, "queued steer and follow-up visible in ongoing scrollback", func(snapshot observedUISnapshot) bool {
+		return containsInOrder(snapshot.OngoingSnapshot, "steer now", "after steer")
+	})
 
 	snapshot := eng.ChatSnapshot()
 	hasQueuedUser := false
@@ -928,10 +923,6 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 	if !hasQueuedUser {
 		t.Fatalf("expected runtime transcript to contain queued steer, got %+v", snapshot.Entries)
 	}
-	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "run task", "steer now", "after steer") {
-		t.Fatalf("expected queued steer visible in ongoing scrollback, got run=%d steer=%d after=%d flush_seq=%d flushed_seq=%d pending_flushes=%d output=%q runtime_transcript=%+v ui_transcript=%+v native_snapshot=%q ongoing=%q", strings.Index(normalized, "run task"), strings.Index(normalized, "steer now"), strings.Index(normalized, "after steer"), model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), normalized, snapshot.Entries, model.transcriptEntries, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
-	}
-
 	program.Quit()
 	select {
 	case runErr := <-done:
@@ -940,9 +931,5 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("program did not terminate")
-	}
-
-	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "run task", "steer now", "after steer") {
-		t.Fatalf("expected queued steer visible in ongoing scrollback, got %q", normalized)
 	}
 }
