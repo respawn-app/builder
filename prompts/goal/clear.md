@@ -1,3 +1,2 @@
 The user cleared the session goal.
-
-Stop treating the previous goal as active.
+The goal is no longer active. If you're mid-implementation, ask the user how they want to proceed now that the goal is gone.

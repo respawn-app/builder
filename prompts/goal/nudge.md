@@ -11,7 +11,7 @@ Work mode:
 - Avoid repeating work already completed in this session.
 - Prefer evidence from files, commands, tests, docs, and runtime output over assumptions.
 - If requirements are unclear, ask the operator instead of guessing.
-- If blocked, report the blocker and the smallest useful next step.
+- If blocked, report the blocker and the smallest useful next step via `ask_question`.
 
 Completion discipline:
 - Before reporting completion, audit the goal against current evidence.
@@ -22,5 +22,3 @@ Completion discipline:
 ```sh
 builder goal complete
 ```
-
-Builder injects the caller session id into shell commands, so the command targets this session automatically. Do not use a model tool for goal state; goal lifecycle is managed by Builder CLI/runtime.
