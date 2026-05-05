@@ -5,12 +5,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLaunchdInstallReloadsLoadedServiceBeforeBootstrap(t *testing.T) {
@@ -157,6 +161,100 @@ func TestLaunchdRestartIfInstalledReplacesStaleLoadedServiceAfterTransientBootst
 	}
 	if !strings.Contains(stdout.String(), "Restarted Builder background service.") {
 		t.Fatalf("stdout = %q, want restart confirmation", stdout.String())
+	}
+}
+
+func TestLaunchdReloadWaitsForOldServerBeforeBootstrap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	serverRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		serverRequests++
+		if serverRequests == 1 {
+			_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
+			return
+		}
+		http.Error(w, "stopped", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	spec := testLaunchdServiceSpec(t)
+	spec.Endpoint = server.URL
+	path := mustLaunchdPlistPath(t)
+	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			if serverRequests < 2 {
+				t.Fatalf("bootstrap happened before old server health went down")
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	if err := reloadLaunchdService(context.Background(), spec, path); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootout", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %#v, want %#v", *calls, want)
+	}
+}
+
+func TestLaunchdReloadExplainsOldServerStillRunningInsteadOfBootstrapCodeFive(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	originalTimeout := launchdServiceShutdownTimeout
+	originalInterval := launchdServiceShutdownPollInterval
+	launchdServiceShutdownTimeout = time.Millisecond
+	launchdServiceShutdownPollInterval = time.Millisecond
+	t.Cleanup(func() {
+		launchdServiceShutdownTimeout = originalTimeout
+		launchdServiceShutdownPollInterval = originalInterval
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
+	}))
+	t.Cleanup(server.Close)
+	spec := testLaunchdServiceSpec(t)
+	spec.Endpoint = server.URL
+	path := mustLaunchdPlistPath(t)
+	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	err := reloadLaunchdService(context.Background(), spec, path)
+	if err == nil {
+		t.Fatal("expected reload to fail while old server is still healthy")
+	}
+	if !strings.Contains(err.Error(), "old Builder server did not exit") || !strings.Contains(err.Error(), "sudo will not fix this") || !strings.Contains(err.Error(), "Bootstrap error 5") {
+		t.Fatalf("error = %v, want actionable old-server message", err)
+	}
+	if countLaunchdCommand(*calls, "bootstrap") != 0 {
+		t.Fatalf("bootstrap should not run while old server still owns port, calls=%#v", *calls)
 	}
 }
 

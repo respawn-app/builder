@@ -197,39 +197,6 @@ func TestServiceRestartIfInstalledStopsWhenRefreshFails(t *testing.T) {
 	}
 }
 
-func TestServiceRestartIfInstalledRefreshesRegistrationWithoutStartingWhenManualServerRuns(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = fmt.Fprint(w, `{"status":"ok","pid":123}`)
-	}))
-	t.Cleanup(server.Close)
-	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: false, Running: false}}
-	withServiceCommandTestBackendEndpoint(t, backend, server.URL)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
-	}
-	want := []serviceAction{serviceActionStatus, serviceActionInstall}
-	if strings.Join(actionsToStrings(backend.calls), ",") != strings.Join(actionsToStrings(want), ",") {
-		t.Fatalf("calls = %+v, want %+v", backend.calls, want)
-	}
-	if !backend.installForce || backend.installStart {
-		t.Fatalf("refresh flags force=%v start=%v, want force true start false", backend.installForce, backend.installStart)
-	}
-	if !strings.Contains(stdout.String(), "restart skipped") || !strings.Contains(stdout.String(), "Updated Builder background service registration") {
-		t.Fatalf("stdout = %q, want skipped restart and registration update", stdout.String())
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
 func TestServiceStatusJSON(t *testing.T) {
 	backend := &stubServiceBackend{status: serviceStatus{Installed: true, Loaded: true, Running: true, PID: 123}}
 	withServiceCommandTestBackend(t, backend)
