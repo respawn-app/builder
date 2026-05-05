@@ -219,6 +219,17 @@ jobs:
           fi
           bash scripts/release-artifacts.sh "${args[@]}"
 
+      - name: Smoke test Windows installer
+        if: ${{ matrix.goos == 'windows' }}
+        env:
+          VERSION: ${{ needs.prepare_release.outputs.version }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          bash scripts/release-artifacts.sh smoke-windows-installer \
+            --version "$VERSION" \
+            --goarch "$GOARCH" \
+            --dist-dir dist
+
   publish_release:
     needs:
       - prepare_release

@@ -13,6 +13,7 @@ Usage:
   scripts/release-artifacts.sh verify-manifest [--dist-dir dist]
   scripts/release-artifacts.sh verify-linux-static --version X.Y.Z [--dist-dir dist]
   scripts/release-artifacts.sh smoke-test --version X.Y.Z --goos <os> --goarch <arch> --archive-ext <ext> [--binary-ext <ext>] [--dist-dir dist]
+  scripts/release-artifacts.sh smoke-windows-installer --version X.Y.Z --goarch <arch> [--dist-dir dist]
 USAGE
 }
 
@@ -187,6 +188,62 @@ smoke_test() {
 	"$binary_path" --help >/dev/null
 }
 
+to_powershell_path() {
+	local value="$1"
+	if command -v cygpath >/dev/null 2>&1; then
+		cygpath -w "$value"
+		return
+	fi
+	printf '%s\n' "$value"
+}
+
+smoke_windows_installer() {
+	require_value "--version" "$version"
+	require_value "--goarch" "$goarch"
+	if ! command -v powershell >/dev/null 2>&1; then
+		echo "powershell is required for Windows installer smoke test" >&2
+		exit 1
+	fi
+
+	local dist_path normalized tag asset archive_path smoke_dir release_base release_dir install_dir install_script
+	dist_path="$(resolve_path "$dist_dir")"
+	normalized="${version#v}"
+	tag="v${normalized}"
+	asset="builder_${normalized}_windows_${goarch}.zip"
+	archive_path="$dist_path/$asset"
+	if [ ! -f "$archive_path" ]; then
+		echo "missing Windows release archive: $archive_path" >&2
+		exit 1
+	fi
+	if [ ! -f "$dist_path/checksums.txt" ]; then
+		echo "missing release checksum manifest: $dist_path/checksums.txt" >&2
+		exit 1
+	fi
+
+	smoke_dir="$(mktemp -d)"
+	release_base="$smoke_dir/releases"
+	release_dir="$release_base/$tag"
+	install_dir="$smoke_dir/install"
+	mkdir -p "$release_dir" "$install_dir"
+	cp "$archive_path" "$release_dir/$asset"
+	cp "$dist_path/checksums.txt" "$release_dir/checksums.txt"
+	install_script="$(to_powershell_path "$repo_root/scripts/install.ps1")"
+
+	BUILDER_RELEASE_BASE="$(to_powershell_path "$release_base")" \
+		powershell -NoProfile -ExecutionPolicy Bypass -File "$install_script" \
+		-Version "$normalized" \
+		-InstallDir "$(to_powershell_path "$install_dir")" \
+		-Yes \
+		-NoPath \
+		-NoDeps \
+		-NoServiceRestart
+
+	powershell -NoProfile -ExecutionPolicy Bypass -File "$install_script" \
+		-Uninstall \
+		-InstallDir "$(to_powershell_path "$install_dir")" \
+		-Yes
+}
+
 mode="${1:-}"
 if [ -z "$mode" ]; then
 	usage >&2
@@ -259,6 +316,9 @@ verify-linux-static)
 	;;
 smoke-test)
 	smoke_test
+	;;
+smoke-windows-installer)
+	smoke_windows_installer
 	;;
 *)
 	echo "Unknown mode: $mode" >&2

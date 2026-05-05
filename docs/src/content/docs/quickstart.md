@@ -12,6 +12,12 @@ brew tap respawn-app/tap
 brew install builder-cli
 ```
 
+### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
+```
+
 ### Standalone binaries via GitHub Releases
 
 These versions are **not auto-updated**. Please keep them updated manually.
