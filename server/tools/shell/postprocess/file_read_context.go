@@ -283,6 +283,10 @@ func parseHeadTailLineLimit(isTail bool, value string) (int, bool, bool) {
 		}
 		return 0, startLine <= 1, true
 	}
+	if isTail && strings.HasPrefix(trimmed, "-") {
+		lineLimit, ok := parsePositiveLineLimit(strings.TrimPrefix(trimmed, "-"))
+		return lineLimit, false, ok
+	}
 	lineLimit, ok := parsePositiveLineLimit(trimmed)
 	return lineLimit, false, ok
 }

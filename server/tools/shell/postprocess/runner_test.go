@@ -221,6 +221,9 @@ func TestRunnerBuiltinFileReadSkipsFullHeadTailAndLargeFiles(t *testing.T) {
 	}{
 		{name: "head full", command: "head -n 10 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
 		{name: "tail full", command: "tail -n 10 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
+		{name: "tail negative full", command: "tail -n -5 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
+		{name: "tail compact negative full", command: "tail -n-5 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
+		{name: "tail long negative full", command: "tail --lines=-5 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
 		{name: "tail from first line", command: "tail -n +1 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
 		{name: "tail compact from first line", command: "tail -n+1 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
 		{name: "tail long from first line", command: "tail --lines=+1 " + shellQuote(smallPath), output: "line 1\nline 2\n"},
