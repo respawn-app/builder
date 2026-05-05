@@ -125,7 +125,7 @@ jobs:
             os.Exit(1)
           }
           GO
-          mkdir -p recovery-release/v${VERSION} recovery-install recovery-staging
+          mkdir -p "recovery-release/v${VERSION}" "recovery-install" "recovery-staging"
           GOOS=windows GOARCH=amd64 go build -o recovery-install/builder.exe fake-builder.go
           cp recovery-install/builder.exe "recovery-staging/builder_${VERSION}_windows_amd64.exe"
           powershell -NoProfile -Command "Compress-Archive -LiteralPath 'recovery-staging/builder_${VERSION}_windows_amd64.exe' -DestinationPath 'recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip' -Force"

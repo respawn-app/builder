@@ -55,8 +55,8 @@ function Get-UserHome {
 }
 function Resolve-InstallDir([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
-        $home = Get-UserHome
-        return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $home ".builder") "bin"))
+        $userHome = Get-UserHome
+        return [System.IO.Path]::GetFullPath((Join-Path (Join-Path $userHome ".builder") "bin"))
     }
     $expanded = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Value)
     return [System.IO.Path]::GetFullPath($expanded)
@@ -114,7 +114,19 @@ function Resolve-LatestVersion {
     try {
         $latestUrl = "https://github.com/$Repo/releases/latest"
         $response = Invoke-WebRequest -Uri $latestUrl -UseBasicParsing
-        $finalUrl = $response.BaseResponse.ResponseUri.AbsoluteUri
+        $finalUrl = ""
+        try {
+            if ($null -ne $response.BaseResponse.RequestMessage -and $null -ne $response.BaseResponse.RequestMessage.RequestUri) {
+                $finalUrl = $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+            }
+        } catch {}
+        if ([string]::IsNullOrWhiteSpace($finalUrl)) {
+            try {
+                if ($null -ne $response.BaseResponse.ResponseUri) {
+                    $finalUrl = $response.BaseResponse.ResponseUri.AbsoluteUri
+                }
+            } catch {}
+        }
         $marker = "/releases/tag/"
         $index = $finalUrl.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase)
         if ($index -ge 0) {
@@ -508,13 +520,13 @@ function Test-ServiceCommandUsesBuilderPath([object]$Status, [string]$BuilderPat
 }
 function Stop-ServiceForUpdate([string]$BuilderPath) {
     $status = Get-ServiceStatusForUpdate $BuilderPath
-    if ($status -eq $null -or -not [bool]$status.installed) { return }
-    if (-not (Test-ServiceCommandUsesBuilderPath $status $BuilderPath)) { return }
-    if (-not [bool]$status.running) { return }
+    if ($null -eq $status -or -not [bool]$status.installed) { return $false }
+    if (-not (Test-ServiceCommandUsesBuilderPath $status $BuilderPath)) { return $false }
+    if (-not [bool]$status.running) { return $false }
     if ($NoServiceRestart) {
         Fail "Builder background service is running from $BuilderPath. Stop it before updating, or rerun without -NoServiceRestart."
     }
-    Write-Output "Stopping Builder background service before update..."
+    Write-Host "Stopping Builder background service before update..."
     $stopOutput = & $BuilderPath service stop 2>&1
     if ($LASTEXITCODE -ne 0) { Fail "Failed to stop Builder background service before update: $stopOutput" }
     return $true
