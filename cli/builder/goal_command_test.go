@@ -16,7 +16,6 @@ import (
 
 	"builder/prompts"
 	"builder/server/metadata"
-	"builder/server/primaryrun"
 	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -101,6 +100,7 @@ func TestGoalAgentEnvDeniesMutationWithoutDialing(t *testing.T) {
 }
 
 func TestGoalSetRejectsEmptyObjectiveBeforeDialing(t *testing.T) {
+	t.Setenv("BUILDER_SESSION_ID", "")
 	remote := &recordingGoalRemote{}
 	restore := replaceGoalCommandRemoteOpener(t, remote)
 	defer restore()
@@ -256,7 +256,7 @@ func TestGoalCommandSubprocessTargetsLiveSessionFromUnboundWorktree(t *testing.T
 	}
 }
 
-func TestGoalCommandSubprocessSetRejectsActivePrimaryRunBeforePersisting(t *testing.T) {
+func TestGoalCommandSubprocessSetPersistsWhilePrimaryRunActive(t *testing.T) {
 	builderPath := filepath.Join(t.TempDir(), "builder")
 	buildCmd := exec.Command("go", "build", "-o", builderPath, ".")
 	if output, err := buildCmd.CombinedOutput(); err != nil {
@@ -303,7 +303,6 @@ func TestGoalCommandSubprocessSetRejectsActivePrimaryRunBeforePersisting(t *test
 			close(releaseModelRequest)
 		})
 	}
-	defer releaseModel()
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case modelRequestStarted <- struct{}{}:
@@ -316,6 +315,7 @@ func TestGoalCommandSubprocessSetRejectsActivePrimaryRunBeforePersisting(t *test
 		}
 	}))
 	defer modelServer.Close()
+	defer releaseModel()
 
 	cleanup := startBindingCommandServer(t, unboundWorktree)
 	defer cleanup()
@@ -366,11 +366,14 @@ func TestGoalCommandSubprocessSetRejectsActivePrimaryRunBeforePersisting(t *test
 	}
 
 	stdout, stderr, err := runGoalCommandSubprocessRaw(t, builderPath, unboundWorktree, "", "set", "--session", store.Meta().SessionID, "new goal while busy")
-	if err == nil {
-		t.Fatalf("goal set succeeded during active primary run stdout=%q stderr=%q", stdout, stderr)
+	if err != nil {
+		t.Fatalf("goal set failed during active primary run: %v stdout=%q stderr=%q", err, stdout, stderr)
 	}
-	if !strings.Contains(stderr, primaryrun.ErrActivePrimaryRun.Error()) {
-		t.Fatalf("goal set stderr = %q, want active primary run", stderr)
+	if stderr != "" {
+		t.Fatalf("goal set stderr = %q, want empty", stderr)
+	}
+	if !strings.Contains(stdout, "Goal: new goal while busy") || !strings.Contains(stdout, "Status: active") {
+		t.Fatalf("goal set stdout = %q", stdout)
 	}
 	record, err := metadataStore.ResolvePersistedSession(context.Background(), store.Meta().SessionID)
 	if err != nil {
@@ -379,17 +382,21 @@ func TestGoalCommandSubprocessSetRejectsActivePrimaryRunBeforePersisting(t *test
 	if record.Meta == nil {
 		t.Fatal("persisted session metadata missing")
 	}
-	if goal := record.Meta.Goal; goal != nil {
-		t.Fatalf("goal persisted after busy subprocess set: %+v", goal)
+	if goal := record.Meta.Goal; goal == nil || goal.Objective != "new goal while busy" || goal.Status != session.GoalStatusActive {
+		t.Fatalf("persisted goal = %+v", goal)
 	}
 	events, err := store.ReadEvents()
 	if err != nil {
 		t.Fatalf("ReadEvents: %v", err)
 	}
+	foundGoalSet := false
 	for _, event := range events {
 		if event.Kind == "goal_set" {
-			t.Fatalf("goal_set event persisted after busy subprocess set: %+v", event)
+			foundGoalSet = true
 		}
+	}
+	if !foundGoalSet {
+		t.Fatalf("goal_set event not persisted after busy subprocess set")
 	}
 
 	cancelSubmit()

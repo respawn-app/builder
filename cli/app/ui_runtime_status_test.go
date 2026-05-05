@@ -181,6 +181,23 @@ func TestRuntimeStatusUsesLoopbackRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestRuntimeMainViewActiveRunSeedsBusyGoalState(t *testing.T) {
+	client := &runtimeControlFakeClient{mainView: clientui.RuntimeMainView{
+		Session: clientui.RuntimeSessionView{SessionID: "session-1"},
+		ActiveRun: &clientui.RunView{
+			RunID:     "run-1",
+			SessionID: "session-1",
+			StepID:    "step-1",
+			Status:    clientui.RunStatusRunning,
+			GoalLoop:  true,
+		},
+	}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUISessionID("session-1"))
+	if !m.busy || !m.goalRun || m.activity != uiActivityRunning {
+		t.Fatalf("startup run state = busy:%t goal:%t activity:%v, want active goal run", m.busy, m.goalRun, m.activity)
+	}
+}
+
 func TestRuntimeStatusUsesLiveContextUsageFromRuntimeEvents(t *testing.T) {
 	client := &runtimeControlFakeClient{status: clientui.RuntimeStatus{
 		ContextUsage: clientui.RuntimeContextUsage{UsedTokens: 100, WindowTokens: 1_000},

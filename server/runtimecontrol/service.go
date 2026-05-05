@@ -526,11 +526,9 @@ func (s *Service) SetGoal(ctx context.Context, req serverapi.RuntimeGoalSetReque
 		if err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
-		lease, err := s.requireGoalStartPreflight(memoReq.SessionID, engine)
-		if err != nil {
+		if err := engine.RequireGoalLoopStartAllowed(); err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
 		}
-		defer lease.Release()
 		goal, err := engine.SetGoal(trimmedObjective, session.GoalActor(req.Actor))
 		if err != nil {
 			return serverapi.RuntimeGoalShowResponse{}, err
@@ -574,11 +572,9 @@ func (s *Service) setGoalStatus(ctx context.Context, req serverapi.RuntimeGoalSt
 			}
 		}
 		if status == session.GoalStatusActive {
-			lease, err := s.requireGoalStartPreflight(memoReq.SessionID, engine)
-			if err != nil {
+			if err := engine.RequireGoalLoopStartAllowed(); err != nil {
 				return serverapi.RuntimeGoalShowResponse{}, err
 			}
-			defer lease.Release()
 		}
 		goal, err := engine.SetGoalStatus(status, session.GoalActor(req.Actor))
 		if err != nil {
@@ -591,16 +587,6 @@ func (s *Service) setGoalStatus(ctx context.Context, req serverapi.RuntimeGoalSt
 		}
 		return goalResponse(&goal, false), nil
 	})
-}
-
-func (s *Service) requireGoalStartPreflight(sessionID string, engine *runtime.Engine) (primaryrun.Lease, error) {
-	if engine == nil {
-		return nil, serverapi.ErrRuntimeUnavailable
-	}
-	if err := engine.RequireGoalLoopStartAllowed(); err != nil {
-		return nil, err
-	}
-	return s.acquirePrimaryRun(sessionID)
 }
 
 func (s *Service) ClearGoal(ctx context.Context, req serverapi.RuntimeGoalClearRequest) (serverapi.RuntimeGoalShowResponse, error) {

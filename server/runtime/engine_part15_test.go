@@ -241,6 +241,14 @@ func TestManualCompactionLocalFailsWhenModelAttemptsToolCalls(t *testing.T) {
 	if !strings.Contains(err.Error(), "tool calls") {
 		t.Fatalf("expected tool-call error, got %v", err)
 	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected manual local compaction to fail without retry, got %d requests", len(client.calls))
+	}
+	for _, item := range client.calls[0].Items {
+		if item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_1" {
+			t.Fatalf("did not expect manual compaction request to inject synthetic failed tool output, got %+v", client.calls[0].Items)
+		}
+	}
 }
 
 func TestManualCompactionDisabledWhenModeNone(t *testing.T) {

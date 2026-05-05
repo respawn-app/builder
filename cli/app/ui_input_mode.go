@@ -2,8 +2,9 @@ package app
 
 import (
 	"builder/cli/tui"
-
 	"builder/shared/clientui"
+
+	"github.com/charmbracelet/glamour"
 )
 
 type uiInputMode string
@@ -84,6 +85,9 @@ type uiGoalOverlayState struct {
 	confirmSelection   int
 	pendingObjective   string
 	error              string
+	markdownTheme      string
+	markdownWidth      int
+	markdownRenderer   *glamour.TermRenderer
 }
 
 func (s uiAskState) hasCurrent() bool {

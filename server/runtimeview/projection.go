@@ -202,6 +202,7 @@ func RunViewFromRuntime(sessionID string, snapshot *runtime.RunSnapshot) *client
 		SessionID:  sessionID,
 		StepID:     snapshot.StepID,
 		Status:     clientui.RunStatus(snapshot.Status),
+		GoalLoop:   snapshot.GoalLoop,
 		StartedAt:  snapshot.StartedAt,
 		FinishedAt: snapshot.FinishedAt,
 	}

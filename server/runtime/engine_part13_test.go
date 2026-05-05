@@ -394,6 +394,311 @@ func TestPrepareModelTurnSkipsAutoCompactionAfterPendingHandoffCompaction(t *tes
 	}
 }
 
+func TestPendingTriggerHandoffFailsToolCallsAndRetriesLocalSummary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:    "call_summary_tool",
+					Name:  string(toolspec.ToolExecCommand),
+					Input: json.RawMessage(`{"cmd":"pwd"}`),
+				},
+				{
+					ID:    "call_search_summary_tool",
+					Name:  string(toolspec.ToolWebSearch),
+					Input: json.RawMessage(`{"query":"handoff"}`),
+				},
+			},
+			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolWebSearch, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_tool_retry", Name: string(toolspec.ToolTriggerHandoff)}, "keep API details", "")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("apply pending handoff: %v", err)
+	}
+	if eng.pendingHandoffRequest != nil {
+		t.Fatalf("expected successful retry to clear pending handoff, got %+v", eng.pendingHandoffRequest)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected local summary retry after failed tool call, got %d requests", len(client.calls))
+	}
+	assertRequestsPreserveCacheIdentity(t, client.calls[0], client.calls[1])
+
+	foundFailedOutputs := map[string]bool{}
+	for _, item := range client.calls[1].Items {
+		if item.Type != llm.ResponseItemTypeFunctionCallOutput {
+			continue
+		}
+		var payload struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(item.Output, &payload); err != nil {
+			t.Fatalf("unmarshal failed tool output: %v", err)
+		}
+		if payload.Error == handoffCompactionToolsDisabledMessage {
+			foundFailedOutputs[item.CallID] = true
+		}
+	}
+	for _, callID := range []string{"call_summary_tool", "call_search_summary_tool"} {
+		if !foundFailedOutputs[callID] {
+			t.Fatalf("expected failed handoff tool output for %s, got items=%+v", callID, client.calls[1].Items)
+		}
+	}
+}
+
+func TestPendingTriggerHandoffFailsMalformedToolCallWithEmptyID(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant},
+		ToolCalls: []llm.ToolCall{{
+			Name:  string(toolspec.ToolExecCommand),
+			Input: json.RawMessage(`{"cmd":"pwd"}`),
+		}},
+		Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_empty_id", Name: string(toolspec.ToolTriggerHandoff)}, "keep API details", "resume with tests")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil || err.Error() != "local compaction summary attempted tool call with empty id" {
+		t.Fatalf("expected malformed empty-id tool-call error, got %v", err)
+	}
+	if eng.pendingHandoffRequest == nil {
+		t.Fatal("expected malformed handoff failure to keep pending request queued")
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected malformed response to fail without retry, got %d requests", len(client.calls))
+	}
+}
+
+func assertRequestsPreserveCacheIdentity(t *testing.T, first llm.Request, retry llm.Request) {
+	t.Helper()
+	if first.PromptCacheKey == "" {
+		t.Fatal("expected first request to have prompt cache key")
+	}
+	if retry.PromptCacheKey != first.PromptCacheKey {
+		t.Fatalf("retry PromptCacheKey = %q, want %q", retry.PromptCacheKey, first.PromptCacheKey)
+	}
+	if retry.PromptCacheScope != first.PromptCacheScope {
+		t.Fatalf("retry PromptCacheScope = %q, want %q", retry.PromptCacheScope, first.PromptCacheScope)
+	}
+	firstTools, err := json.Marshal(first.Tools)
+	if err != nil {
+		t.Fatalf("marshal first tools: %v", err)
+	}
+	retryTools, err := json.Marshal(retry.Tools)
+	if err != nil {
+		t.Fatalf("marshal retry tools: %v", err)
+	}
+	if string(retryTools) != string(firstTools) {
+		t.Fatalf("retry tools changed\nwant=%s\n got=%s", firstTools, retryTools)
+	}
+}
+
+func TestPendingTriggerHandoffRetriesCustomToolCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{{
+				ID:          "call_custom_summary_tool",
+				Name:        string(toolspec.ToolPatch),
+				Custom:      true,
+				CustomInput: "*** Begin Patch\n*** End Patch",
+			}},
+			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []toolspec.ID{toolspec.ToolPatch, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_custom_tool_retry", Name: string(toolspec.ToolTriggerHandoff)}, "keep API details", "")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("apply pending handoff: %v", err)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected local summary retry after custom tool call, got %d requests", len(client.calls))
+	}
+	assertRequestsPreserveCacheIdentity(t, client.calls[0], client.calls[1])
+
+	foundCustomFailedOutput := false
+	for _, item := range client.calls[1].Items {
+		if item.Type != llm.ResponseItemTypeCustomToolOutput || item.CallID != "call_custom_summary_tool" {
+			continue
+		}
+		foundCustomFailedOutput = true
+		var payload struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(item.Output, &payload); err != nil {
+			t.Fatalf("unmarshal failed custom tool output: %v", err)
+		}
+		if payload.Error != handoffCompactionToolsDisabledMessage {
+			t.Fatalf("custom failed output error = %q, want %q", payload.Error, handoffCompactionToolsDisabledMessage)
+		}
+	}
+	if !foundCustomFailedOutput {
+		t.Fatalf("expected custom failed tool output in retry request, items=%+v", client.calls[1].Items)
+	}
+}
+
+func TestPendingTriggerHandoffLeavesRequestPendingWhenSummaryRetryStillToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_summary_tool_1",
+				Name:  string(toolspec.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"pwd"}`),
+			}},
+			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_summary_tool_2",
+				Name:  string(toolspec.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"pwd"}`),
+			}},
+			Usage: llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_summary_tool_3",
+				Name:  string(toolspec.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"pwd"}`),
+			}},
+			Usage: llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_summary_tool_4",
+				Name:  string(toolspec.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"pwd"}`),
+			}},
+			Usage: llm.Usage{InputTokens: 400, WindowTokens: 2_000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_second_failure", Name: string(toolspec.ToolTriggerHandoff)}, "keep API details", "resume with tests")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil || err.Error() != "local compaction summary attempted tool calls" {
+		t.Fatalf("expected repeated tool-call summary error, got %v", err)
+	}
+	if eng.pendingHandoffRequest == nil {
+		t.Fatal("expected failed handoff retry to keep pending request queued")
+	}
+	if got, want := eng.pendingHandoffRequest.futureAgentMessage, "resume with tests"; got != want {
+		t.Fatalf("pending future_agent_message after retry failure = %q, want %q", got, want)
+	}
+	if len(client.calls) != 4 {
+		t.Fatalf("expected original summary request and three retries, got %d", len(client.calls))
+	}
+	for idx, call := range client.calls[1:] {
+		if len(call.Tools) == 0 {
+			t.Fatalf("expected retry request %d to keep tools exposed for cache stability", idx+1)
+		}
+		assertRequestsPreserveCacheIdentity(t, client.calls[0], call)
+	}
+}
+
 func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

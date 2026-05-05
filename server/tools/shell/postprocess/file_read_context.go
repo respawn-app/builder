@@ -362,93 +362,145 @@ func classifySedFileRead(args []string) (fileReadCandidate, bool) {
 	if !ok || len(scripts) == 0 {
 		return fileReadCandidate{}, false
 	}
-	readOnly, certainlyFull := classifySedScripts(scripts, suppressDefault)
-	if !readOnly {
+	classification, ok := classifySedScripts(scripts, suppressDefault)
+	if !ok {
 		return fileReadCandidate{}, false
 	}
-	return fileReadCandidate{path: path, certainlyFull: certainlyFull}, true
+	candidate := fileReadCandidate{path: path, certainlyFull: classification.certainlyFull}
+	if classification.canInferFullFromLineCount {
+		candidate.fullWhenLineCountAtMost = classification.fullWhenLineCountAtMost
+		candidate.canInferFullFromLineCount = true
+	}
+	return candidate, true
 }
 
-func classifySedScripts(scripts []string, suppressDefault bool) (bool, bool) {
+type sedScriptClassification struct {
+	certainlyFull             bool
+	fullWhenLineCountAtMost   int
+	canInferFullFromLineCount bool
+}
+
+func classifySedScripts(scripts []string, suppressDefault bool) (sedScriptClassification, bool) {
+	classifications := make([]sedScriptClassification, 0, len(scripts))
 	anyPartial := false
 	for _, script := range scripts {
-		classified, full := classifySedScript(script, suppressDefault)
-		if !classified {
-			return false, false
+		classification, ok := classifySedScript(script, suppressDefault)
+		if !ok {
+			return sedScriptClassification{}, false
 		}
-		if !full {
+		classifications = append(classifications, classification)
+		if !classification.certainlyFull {
 			anyPartial = true
 		}
 	}
-	return true, !anyPartial
+	if !anyPartial {
+		return sedScriptClassification{certainlyFull: true}, true
+	}
+	if len(classifications) == 1 && classifications[0].canInferFullFromLineCount {
+		return classifications[0], true
+	}
+	return sedScriptClassification{}, true
 }
 
-func classifySedScript(script string, suppressDefault bool) (bool, bool) {
+func classifySedScript(script string, suppressDefault bool) (sedScriptClassification, bool) {
 	if script == unknownSedScript {
-		return true, false
+		return sedScriptClassification{}, true
 	}
 	trimmed := strings.TrimSpace(script)
 	if trimmed == "" {
-		return true, !suppressDefault
+		return sedScriptClassification{certainlyFull: !suppressDefault}, true
 	}
-	command, hasAddress, ok := sedSingleCommand(trimmed)
+	summary, ok := sedSingleCommand(trimmed)
 	if !ok {
-		return false, false
+		return sedScriptClassification{}, false
 	}
-	if command == 'p' && suppressDefault {
-		return true, !hasAddress
+	if summary.command == 'p' && suppressDefault {
+		return sedScriptClassification{
+			certainlyFull:             !summary.hasAddress || summary.fullRange,
+			fullWhenLineCountAtMost:   summary.fullWhenLineCountAtMost,
+			canInferFullFromLineCount: summary.canInferFullFromLineCount,
+		}, true
 	}
-	if command == 'd' && !suppressDefault {
-		return true, false
+	if summary.command == 'd' && !suppressDefault {
+		return sedScriptClassification{}, true
 	}
-	return false, false
+	return sedScriptClassification{}, false
 }
 
-func sedSingleCommand(script string) (byte, bool, bool) {
+type sedCommandSummary struct {
+	command                   byte
+	hasAddress                bool
+	fullRange                 bool
+	fullWhenLineCountAtMost   int
+	canInferFullFromLineCount bool
+}
+
+func sedSingleCommand(script string) (sedCommandSummary, bool) {
 	trimmed := strings.TrimSpace(script)
-	i, hasAddress, ok := consumeSedAddress(trimmed, 0)
+	i, firstAddress, ok := consumeSedAddress(trimmed, 0)
 	if !ok {
-		return 0, false, false
+		return sedCommandSummary{}, false
 	}
+	summary := sedCommandSummary{hasAddress: firstAddress.present}
 	rest := strings.TrimSpace(trimmed[i:])
-	if hasAddress && strings.HasPrefix(rest, ",") {
+	if firstAddress.present && strings.HasPrefix(rest, ",") {
 		rangeTail := strings.TrimSpace(strings.TrimPrefix(rest, ","))
 		next, secondAddress, ok := consumeSedAddress(rangeTail, 0)
-		if !ok || !secondAddress {
-			return 0, false, false
+		if !ok || !secondAddress.present {
+			return sedCommandSummary{}, false
+		}
+		summary.fullRange = firstAddress.numeric && firstAddress.line == 1 && secondAddress.endOfFile
+		if firstAddress.numeric && firstAddress.line == 1 && secondAddress.numeric {
+			summary.fullWhenLineCountAtMost = secondAddress.line
+			summary.canInferFullFromLineCount = true
 		}
 		rest = strings.TrimSpace(rangeTail[next:])
 	}
-	if hasAddress && strings.HasPrefix(rest, "!") {
+	if firstAddress.present && strings.HasPrefix(rest, "!") {
 		rest = strings.TrimSpace(strings.TrimPrefix(rest, "!"))
+		summary.fullRange = false
+		summary.canInferFullFromLineCount = false
 	}
 	if len(rest) != 1 {
-		return 0, false, false
+		return sedCommandSummary{}, false
 	}
-	return rest[0], hasAddress, true
+	summary.command = rest[0]
+	return summary, true
 }
 
-func consumeSedAddress(script string, start int) (int, bool, bool) {
+type sedAddress struct {
+	present   bool
+	numeric   bool
+	line      int
+	endOfFile bool
+}
+
+func consumeSedAddress(script string, start int) (int, sedAddress, bool) {
 	i := start
 	for i < len(script) && script[i] == ' ' {
 		i++
 	}
 	if i >= len(script) {
-		return i, false, true
+		return i, sedAddress{}, true
 	}
 	switch {
 	case script[i] >= '0' && script[i] <= '9':
+		start := i
 		for i < len(script) && script[i] >= '0' && script[i] <= '9' {
 			i++
 		}
-		return i, true, true
+		line, ok := parsePositiveLineLimit(script[start:i])
+		if !ok {
+			return 0, sedAddress{}, false
+		}
+		return i, sedAddress{present: true, numeric: true, line: line}, true
 	case script[i] == '$':
-		return i + 1, true, true
+		return i + 1, sedAddress{present: true, endOfFile: true}, true
 	case script[i] == '/':
 		end, ok := consumeSedDelimitedAddress(script, i, '/')
-		return end, ok, ok
+		return end, sedAddress{present: ok}, ok
 	default:
-		return i, false, true
+		return i, sedAddress{}, true
 	}
 }
 

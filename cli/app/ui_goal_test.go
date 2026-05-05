@@ -304,6 +304,118 @@ func TestGoalConfirmationEnterUsesSelectedAction(t *testing.T) {
 	}
 }
 
+func TestGoalSetWhileBusyCanReplaceActiveGoalWithConfirmation(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "old goal", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/goal new goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.goal.isOpen() || updated.goal.confirmMode != "replace" || updated.goal.pendingObjective != "new goal" {
+		t.Fatalf("expected busy replace confirmation overlay, got %+v", updated.goal)
+	}
+	if client.setGoalArg != "" {
+		t.Fatalf("set goal before confirm = %q, want empty", client.setGoalArg)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated = next.(*uiModel)
+	if updated.goal.isOpen() {
+		t.Fatal("expected goal overlay closed after confirm")
+	}
+	if client.setGoalArg != "new goal" {
+		t.Fatalf("set goal after confirm = %q, want new goal", client.setGoalArg)
+	}
+}
+
+func TestGoalOverlayRendersObjectiveMarkdown(t *testing.T) {
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "Ship **bold** goal\n\n- one\n- two", Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	raw := updated.View()
+	plain := stripANSIAndTrimRight(raw)
+	if strings.Contains(plain, "**bold**") {
+		t.Fatalf("expected markdown markers rendered away, got %q", plain)
+	}
+	if !strings.Contains(plain, "bold") || !strings.Contains(plain, "one") || !strings.Contains(plain, "two") {
+		t.Fatalf("expected rendered markdown content, got %q", plain)
+	}
+	if !strings.Contains(raw, "\x1b[") {
+		t.Fatalf("expected markdown renderer ANSI styling, got %q", raw)
+	}
+}
+
+func TestGoalOverlayWrapsLongMarkdownObjective(t *testing.T) {
+	objective := "This **important** goal objective must keep the final tail phrase visible after wrapping."
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: objective, Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 32
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "visible after wrapping") {
+		t.Fatalf("expected long markdown objective tail to survive wrapping, got %q", plain)
+	}
+}
+
+func TestGoalOverlayWrapsLongMarkdownListItem(t *testing.T) {
+	objective := "- This **important** list item must keep the final list tail visible after wrapping."
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: objective, Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 34
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "after wrapping") {
+		t.Fatalf("expected long markdown list item tail to survive wrapping, got %q", plain)
+	}
+}
+
+func TestGoalOverlayMarkdownCacheRewrapsAfterWidthChange(t *testing.T) {
+	objective := "This **important** goal objective must change wrapping when the overlay width changes."
+	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: objective, Status: "active"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 80
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/goal"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	wide := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(wide, "important goal objective must change wrapping") {
+		t.Fatalf("expected wide render to keep phrase on one line, got %q", wide)
+	}
+
+	updated.termWidth = 32
+	narrow := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(narrow, "important goal objective must change wrapping") {
+		t.Fatalf("expected narrow render to rewrap cached markdown, got %q", narrow)
+	}
+	if !strings.Contains(narrow, "overlay width changes") {
+		t.Fatalf("expected narrow render to preserve tail after rewrap, got %q", narrow)
+	}
+}
+
 func TestGoalReplaceActiveGoalRequiresConfirmation(t *testing.T) {
 	client := &runtimeControlFakeClient{goal: &clientui.RuntimeGoal{ID: "goal-1", Objective: "old goal", Status: "active"}}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

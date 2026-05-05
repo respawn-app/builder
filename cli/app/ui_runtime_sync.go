@@ -188,7 +188,7 @@ func (m *uiModel) handleRuntimeMainViewRefreshed(msg runtimeMainViewRefreshedMsg
 		return nil
 	}
 	m.observeRuntimeRequestResult(nil)
-	m.setRuntimeContextUsage(msg.view.Session.SessionID, msg.view.Status.ContextUsage)
+	m.applyRuntimeMainViewState(msg.view)
 	return m.runtimeAdapter().applyProjectedSessionMetadata(msg.view.Session)
 }
 

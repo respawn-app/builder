@@ -243,7 +243,7 @@ func TestServiceSetGoalPropagatesGoalLoopStartError(t *testing.T) {
 	}
 }
 
-func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(t *testing.T) {
+func TestServiceActiveGoalUpdatesDoNotUsePrimaryRunGate(t *testing.T) {
 	tests := []struct {
 		name       string
 		prepare    func(t *testing.T, engine *runtime.Engine)
@@ -263,8 +263,8 @@ func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(
 			},
 			assertGoal: func(t *testing.T, goal *session.GoalState) {
 				t.Helper()
-				if goal != nil {
-					t.Fatalf("goal persisted after busy set: %+v", goal)
+				if goal == nil || goal.Status != session.GoalStatusActive || goal.Objective != "ship goal mode" {
+					t.Fatalf("goal after busy set = %+v, want active ship goal mode", goal)
 				}
 			},
 		},
@@ -289,8 +289,8 @@ func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(
 			},
 			assertGoal: func(t *testing.T, goal *session.GoalState) {
 				t.Helper()
-				if goal == nil || goal.Status != session.GoalStatusPaused {
-					t.Fatalf("goal after busy resume = %+v, want paused", goal)
+				if goal == nil || goal.Status != session.GoalStatusActive {
+					t.Fatalf("goal after busy resume = %+v, want active", goal)
 				}
 			},
 		},
@@ -306,6 +306,7 @@ func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(
 			if err != nil {
 				t.Fatalf("create runtime engine: %v", err)
 			}
+			defer func() { _ = engine.Close() }()
 			if tt.prepare != nil {
 				tt.prepare(t, engine)
 			}
@@ -317,19 +318,19 @@ func TestServiceActiveGoalStartPreflightRejectsActivePrimaryRunBeforePersisting(
 			service := NewService(stubRuntimeResolver{engine: engine}, gate)
 
 			err = tt.call(context.Background(), service, store.Meta().SessionID)
-			if !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
-				t.Fatalf("goal start error = %v, want ErrActivePrimaryRun", err)
+			if err != nil {
+				t.Fatalf("goal update while primary run active: %v", err)
 			}
 			tt.assertGoal(t, store.Meta().Goal)
 			after, err := store.ReadEvents()
 			if err != nil {
 				t.Fatalf("ReadEvents after: %v", err)
 			}
-			if len(after) != len(before) {
-				t.Fatalf("events after busy rejection = %d, want %d", len(after), len(before))
+			if len(after) <= len(before) {
+				t.Fatalf("events after goal update = %d, want > %d", len(after), len(before))
 			}
-			if gate.acquire != 1 || gate.release != 0 {
-				t.Fatalf("gate acquire/release = %d/%d, want 1/0", gate.acquire, gate.release)
+			if gate.acquire != 0 || gate.release != 0 {
+				t.Fatalf("gate acquire/release = %d/%d, want 0/0", gate.acquire, gate.release)
 			}
 		})
 	}

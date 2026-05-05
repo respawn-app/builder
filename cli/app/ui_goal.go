@@ -8,6 +8,7 @@ import (
 	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -19,10 +20,6 @@ func (c uiInputController) handleGoalCommand(mode commands.GoalMode, objective s
 	case commands.GoalModeShow, "":
 		return m, c.startGoalFlowCmd()
 	case commands.GoalModeSet:
-		if m.busy {
-			errText := busyGoalCommandMessage(commands.GoalModeSet)
-			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
-		}
 		current, err := m.showRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
@@ -49,10 +46,6 @@ func (c uiInputController) handleGoalCommand(mode commands.GoalMode, objective s
 		}
 		return m, c.appendGoalFeedback("Goal paused")
 	case commands.GoalModeResume:
-		if m.busy {
-			errText := busyGoalCommandMessage(commands.GoalModeResume)
-			return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
-		}
 		_, err := m.resumeRuntimeGoal()
 		if err != nil {
 			detailErr := formatSubmissionError(err)
@@ -81,15 +74,6 @@ func (c uiInputController) handleGoalCommand(mode commands.GoalMode, objective s
 	default:
 		errText := "Usage: /goal [show|pause|resume|clear|<objective>]"
 		return m, c.appendErrorFeedbackWithStatus(errText, c.showErrorStatus(errText))
-	}
-}
-
-func busyGoalCommandMessage(mode commands.GoalMode) string {
-	switch mode {
-	case commands.GoalModeResume:
-		return "cannot resume /goal while model is working"
-	default:
-		return "cannot set /goal while model is working"
 	}
 }
 
@@ -277,6 +261,68 @@ const (
 	goalConfirmSelectionConfirm
 )
 
+type goalOverlayLineBuilder struct {
+	model *uiModel
+	width int
+	lines []string
+}
+
+func newGoalOverlayLineBuilder(model *uiModel, width int) *goalOverlayLineBuilder {
+	return &goalOverlayLineBuilder{model: model, width: width, lines: make([]string, 0, 24)}
+}
+
+func (b *goalOverlayLineBuilder) appendWrapped(text string, lineStyle lipgloss.Style) {
+	wrapped := wrapLine(strings.TrimRight(text, " \t"), b.width)
+	if len(wrapped) == 0 {
+		b.lines = append(b.lines, padRight("", b.width))
+		return
+	}
+	for _, line := range wrapped {
+		b.lines = append(b.lines, padANSIRight(lineStyle.Render(line), b.width))
+	}
+}
+
+func (b *goalOverlayLineBuilder) appendMarkdown(text string) {
+	renderer := b.goalMarkdownRenderer()
+	if renderer == nil {
+		b.appendWrapped(text, lipgloss.Style{})
+		return
+	}
+	rendered, err := renderer.Render(text)
+	if err != nil {
+		b.appendWrapped(text, lipgloss.Style{})
+		return
+	}
+	for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+		b.lines = append(b.lines, padANSIRight(line, b.width))
+	}
+}
+
+func (b *goalOverlayLineBuilder) goalMarkdownRenderer() *glamour.TermRenderer {
+	if b.model == nil {
+		return nil
+	}
+	theme := strings.TrimSpace(b.model.theme)
+	width := b.width
+	if width < 1 {
+		width = 1
+	}
+	if b.model.goal.markdownRenderer != nil && b.model.goal.markdownTheme == theme && b.model.goal.markdownWidth == width {
+		return b.model.goal.markdownRenderer
+	}
+	renderer := newStartupMarkdownRendererWithWordWrap(theme, width)
+	b.model.goal.markdownTheme = theme
+	b.model.goal.markdownWidth = width
+	b.model.goal.markdownRenderer = renderer
+	return renderer
+}
+
+func (b *goalOverlayLineBuilder) appendGap() {
+	if len(b.lines) > 0 {
+		b.lines = append(b.lines, padRight("", b.width))
+	}
+}
+
 func (m *uiModel) toggleGoalConfirmSelection() {
 	if m.goal.confirmSelection == goalConfirmSelectionConfirm {
 		m.goal.confirmSelection = goalConfirmSelectionCancel
@@ -313,92 +359,62 @@ func (l uiViewLayout) goalOverlayContentLines(width int) []string {
 	boldStyle := lipgloss.NewStyle().Bold(true)
 	subtleStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
 	warningStyle := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true)
-	lines := make([]string, 0, 24)
-	appendWrapped := func(text string, lineStyle lipgloss.Style) {
-		wrapped := wrapLine(strings.TrimRight(text, " \t"), width)
-		if len(wrapped) == 0 {
-			lines = append(lines, padRight("", width))
-			return
-		}
-		for _, line := range wrapped {
-			lines = append(lines, padANSIRight(lineStyle.Render(line), width))
-		}
-	}
-	appendGap := func() {
-		if len(lines) > 0 {
-			lines = append(lines, padRight("", width))
-		}
-	}
+	builder := newGoalOverlayLineBuilder(m, width)
 
-	appendWrapped("Goal", titleStyle)
+	builder.appendWrapped("Goal", titleStyle)
 	if strings.TrimSpace(m.goal.confirmMode) != "" {
 		return l.goalConfirmContentLines(width, titleStyle, boldStyle, subtleStyle, warningStyle)
 	}
 	if strings.TrimSpace(m.goal.error) != "" {
-		appendGap()
-		appendWrapped("Could not load goal: "+m.goal.error, warningStyle)
-		return lines
+		builder.appendGap()
+		builder.appendWrapped("Could not load goal: "+m.goal.error, warningStyle)
+		return builder.lines
 	}
 	if m.goal.goal == nil {
-		appendGap()
-		appendWrapped(noGoalHint, subtleStyle)
-		return lines
+		builder.appendGap()
+		builder.appendWrapped(noGoalHint, subtleStyle)
+		return builder.lines
 	}
 	goal := m.goal.goal
-	appendGap()
-	appendWrapped("Status: "+strings.TrimSpace(string(goal.Status)), boldStyle)
+	builder.appendGap()
+	builder.appendWrapped("Status: "+strings.TrimSpace(string(goal.Status)), boldStyle)
 	if strings.TrimSpace(goal.ID) != "" {
-		appendWrapped("ID: "+strings.TrimSpace(goal.ID), subtleStyle)
+		builder.appendWrapped("ID: "+strings.TrimSpace(goal.ID), subtleStyle)
 	}
-	appendGap()
-	appendWrapped("Objective", titleStyle)
-	appendWrapped(goal.Objective, lipgloss.Style{})
-	appendGap()
-	appendWrapped("Esc/q closes. /goal pause, /goal resume, /goal clear manage lifecycle.", subtleStyle)
-	return lines
+	builder.appendGap()
+	builder.appendWrapped("Objective", titleStyle)
+	builder.appendMarkdown(goal.Objective)
+	builder.appendGap()
+	builder.appendWrapped("Esc/q closes. /goal pause, /goal resume, /goal clear manage lifecycle.", subtleStyle)
+	return builder.lines
 }
 
 func (l uiViewLayout) goalConfirmContentLines(width int, titleStyle, boldStyle, subtleStyle, warningStyle lipgloss.Style) []string {
 	m := l.model
-	lines := make([]string, 0, 24)
-	appendWrapped := func(text string, lineStyle lipgloss.Style) {
-		wrapped := wrapLine(strings.TrimRight(text, " \t"), width)
-		if len(wrapped) == 0 {
-			lines = append(lines, padRight("", width))
-			return
-		}
-		for _, line := range wrapped {
-			lines = append(lines, padANSIRight(lineStyle.Render(line), width))
-		}
-	}
-	appendGap := func() {
-		if len(lines) > 0 {
-			lines = append(lines, padRight("", width))
-		}
-	}
+	builder := newGoalOverlayLineBuilder(m, width)
 
-	appendWrapped("Goal", titleStyle)
-	appendGap()
+	builder.appendWrapped("Goal", titleStyle)
+	builder.appendGap()
 	if strings.TrimSpace(m.goal.error) != "" {
-		appendWrapped("Could not update goal: "+m.goal.error, warningStyle)
-		appendGap()
+		builder.appendWrapped("Could not update goal: "+m.goal.error, warningStyle)
+		builder.appendGap()
 	}
 	switch strings.TrimSpace(m.goal.confirmMode) {
 	case "replace":
-		appendWrapped("Replace active goal?", boldStyle)
+		builder.appendWrapped("Replace active goal?", boldStyle)
 		if m.goal.goal != nil {
-			appendWrapped("Current: "+m.goal.goal.Objective, lipgloss.Style{})
+			builder.appendWrapped("Current: "+m.goal.goal.Objective, lipgloss.Style{})
 		}
-		appendWrapped("New: "+m.goal.pendingObjective, lipgloss.Style{})
+		builder.appendWrapped("New: "+m.goal.pendingObjective, lipgloss.Style{})
 	case "clear":
-		appendWrapped("Clear active goal?", boldStyle)
+		builder.appendWrapped("Clear active goal?", boldStyle)
 		if m.goal.goal != nil {
-			appendWrapped(m.goal.goal.Objective, lipgloss.Style{})
+			builder.appendWrapped(m.goal.goal.Objective, lipgloss.Style{})
 		}
 	default:
-		appendWrapped("Confirm goal action?", boldStyle)
+		builder.appendWrapped("Confirm goal action?", boldStyle)
 	}
-	appendGap()
+	builder.appendGap()
 	cancel := "Cancel"
 	confirm := "Confirm"
 	if m.goal.confirmSelection == goalConfirmSelectionCancel {
@@ -408,7 +424,7 @@ func (l uiViewLayout) goalConfirmContentLines(width int, titleStyle, boldStyle, 
 		cancel = "  " + cancel
 		confirm = "> " + confirm
 	}
-	appendWrapped(cancel+"    "+confirm, subtleStyle)
-	appendWrapped("Tab/arrows toggle. Enter selects. Esc cancels.", subtleStyle)
-	return lines
+	builder.appendWrapped(cancel+"    "+confirm, subtleStyle)
+	builder.appendWrapped("Tab/arrows toggle. Enter selects. Esc cancels.", subtleStyle)
+	return builder.lines
 }

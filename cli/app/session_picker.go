@@ -318,9 +318,16 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 }
 
 func newStartupMarkdownRenderer(theme string) *glamour.TermRenderer {
+	return newStartupMarkdownRendererWithWordWrap(theme, 0)
+}
+
+func newStartupMarkdownRendererWithWordWrap(theme string, width int) *glamour.TermRenderer {
+	if width < 0 {
+		width = 0
+	}
 	style := startupMarkdownStyle(theme)
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithWordWrap(0),
+		glamour.WithWordWrap(width),
 		glamour.WithStyles(style),
 	)
 	if err != nil {

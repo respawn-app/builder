@@ -619,13 +619,9 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			enqueueRuntimeLeaseRecoveryWarning(runtimeLeaseRecoveryWarning, text, visibility)
 		})
 	}
-	status := m.runtimeStatus()
-	m.reviewerMode = status.ReviewerFrequency
-	m.reviewerEnabled = status.ReviewerEnabled
-	m.autoCompactionEnabled = status.AutoCompactionEnabled
-	m.fastModeAvailable = status.FastModeAvailable
-	m.fastModeEnabled = status.FastModeEnabled
-	m.conversationFreshness = status.ConversationFreshness
+	mainView := m.runtimeMainView()
+	status := mainView.Status
+	m.applyRuntimeMainViewState(mainView)
 	m.refreshAuthSlashCommandState()
 	if !m.hasRuntimeClient() {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
@@ -633,7 +629,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	m.refreshProcessEntries()
 	var startupNativeHistoryCmd tea.Cmd
 	if m.hasRuntimeClient() {
-		seedView := m.runtimeMainView().Session
+		seedView := mainView.Session
 		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
 		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.startupRuntimeTranscript())
 		startupNativeHistoryCmd = m.requestRuntimeBootstrapTranscriptSync()

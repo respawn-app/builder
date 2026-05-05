@@ -90,9 +90,8 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			wantStatusOmits: "Goal paused",
 		},
 		{
-			name:               "goal set is blocked while busy",
-			input:              "/goal ship feature",
-			wantStatusContains: "cannot set /goal while model is working",
+			name:  "goal set executes while busy",
+			input: "/goal ship feature",
 		},
 		{
 			name:            "goal dashboard opens while busy",
@@ -101,9 +100,8 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 			wantStatusOmits: "cannot show /goal while model is working",
 		},
 		{
-			name:               "goal resume is blocked while busy",
-			input:              "/goal resume",
-			wantStatusContains: "cannot resume /goal while model is working",
+			name:  "goal resume executes while busy",
+			input: "/goal resume",
 		},
 		{
 			name:            "ps opens overlay while busy",
@@ -224,6 +222,11 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 				m.fastModeAvailable = true
 			},
 			wantQueued: []string{"/fast on"},
+		},
+		{
+			name:       "goal resume queues while busy",
+			input:      "/goal resume",
+			wantQueued: []string{"/goal resume"},
 		},
 		{
 			name:               "fast is rejected when unavailable",

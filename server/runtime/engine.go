@@ -327,15 +327,6 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			return nil, err
 		}
 	}
-	if meta.Goal != nil && meta.Goal.Status == session.GoalStatusActive {
-		if err := eng.startGoalLoop(false); err != nil {
-			if errors.Is(err, ErrGoalRequiresAskQuestion) {
-				return eng, nil
-			}
-			return nil, err
-		}
-	}
-
 	return eng, nil
 }
 
