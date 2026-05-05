@@ -683,6 +683,48 @@ func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
 	}
 }
 
+func TestDetailAskQuestionRendersLargeMarkdownQuestionSnapshot(t *testing.T) {
+	question := strings.Join([]string{
+		"Please review **this plan** before I continue:",
+		"",
+		"```kotlin",
+		"fun main() {",
+		"    println(\"hi\")",
+		"}",
+		"```",
+		"",
+		"- Keep the four leading spaces in the code block.",
+		"- Do not collapse blank lines.",
+	}, "\n")
+	m := NewModel(WithPreviewLines(40), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 40, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: question,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "ask_question",
+			Question: question,
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	plain := plainTranscript(m.View())
+	if strings.Contains(plain, "**this plan**") || strings.Contains(plain, "```") {
+		t.Fatalf("expected rendered markdown markers, got %q", plain)
+	}
+	if !containsInOrder(plain,
+		"?",
+		"Please review this plan before I continue:",
+		"fun main() {",
+		"    println(\"hi\")",
+		"}",
+		"Keep the four leading spaces in the code block.",
+		"Do not collapse blank lines.",
+	) {
+		t.Fatalf("ask_question markdown snapshot missing expected content, got %q", plain)
+	}
+}
+
 func TestOngoingAskQuestionRendersSelectedOptionText(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{

@@ -136,7 +136,7 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role RenderIntent, question str
 	if question == "" {
 		question = "ask question"
 	}
-	for _, line := range splitLines(wrapTextForViewport(question, renderWidth)) {
+	for _, line := range m.renderAskQuestionMarkdownLines(role, question, renderWidth) {
 		lines = append(lines, askQuestionLine{text: line, kind: "question"})
 	}
 	if includeSuggestions {
@@ -205,6 +205,25 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role RenderIntent, question str
 		out = append(out, continuationPrefix+display)
 	}
 	return out
+}
+
+func (m Model) renderAskQuestionMarkdownLines(role RenderIntent, question string, renderWidth int) []string {
+	if renderWidth < 1 {
+		renderWidth = 1
+	}
+	if m.md != nil {
+		if rendered, err := m.md.render(role, question, renderWidth); err == nil {
+			lines := splitLines(rendered)
+			if len(lines) > 0 {
+				return lines
+			}
+		}
+	}
+	lines := splitLines(wrapTextForViewport(question, renderWidth))
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {

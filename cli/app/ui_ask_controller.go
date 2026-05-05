@@ -345,7 +345,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 			{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true},
 		}
 	}
-	lines := []askPromptLine{{Text: strings.TrimSpace(req.Question), Kind: askPromptLineKindQuestion}}
+	lines := askQuestionPromptTextLines(req.Question)
 	if askOptionCount(req) > 0 && !m.ask.freeform {
 		visibleOptions := askVisibleOptions(req)
 		for i, s := range visibleOptions {
@@ -399,6 +399,19 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		hint = "Tab to return to picker • Enter to submit"
 	}
 	lines = append(lines, askPromptLine{Text: hint, Kind: askPromptLineKindHint})
+	return lines
+}
+
+func askQuestionPromptTextLines(question string) []askPromptLine {
+	normalized := strings.ReplaceAll(strings.ReplaceAll(question, "\r\n", "\n"), "\r", "\n")
+	if strings.TrimSpace(normalized) == "" {
+		return []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
+	}
+	parts := strings.Split(normalized, "\n")
+	lines := make([]askPromptLine, 0, len(parts))
+	for _, part := range parts {
+		lines = append(lines, askPromptLine{Text: part, Kind: askPromptLineKindQuestion})
+	}
 	return lines
 }
 
