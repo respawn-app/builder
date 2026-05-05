@@ -3,6 +3,7 @@ package postprocess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -113,6 +114,53 @@ func TestRunnerBuiltinFileReadAddsTotalLineCountForPartialSed(t *testing.T) {
 	}
 }
 
+func TestRunnerBuiltinFileReadHandlesReportedSedRangeShape(t *testing.T) {
+	path := writeNestedTextFile(t, filepath.Join("cli", "app", "ui_goal.go"), numberedLines(414))
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
+	exitCode := 0
+	output := numberedLines(414)
+
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandText: "sed -n '1,430p' " + shellQuote(path),
+		ExitCode:    &exitCode,
+		Output:      output,
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Processed {
+		t.Fatal("expected full sed range read to bypass file context marker")
+	}
+	if result.Output != output {
+		t.Fatalf("output = %q", result.Output)
+	}
+}
+
+func TestRunnerBuiltinFileReadAddsTotalLineCountWhenReportedSedRangeIsPartial(t *testing.T) {
+	path := writeNestedTextFile(t, filepath.Join("cli", "app", "ui_goal.go"), numberedLines(431))
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
+	exitCode := 0
+	output := numberedLines(430)
+
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandText: "sed -n '1,430p' " + shellQuote(path),
+		ExitCode:    &exitCode,
+		Output:      output,
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !result.Processed {
+		t.Fatal("expected partial sed range read to include file context marker")
+	}
+	want := "[Total line count: 431]\n" + output
+	if result.Output != want {
+		t.Fatalf("output = %q, want %q", result.Output, want)
+	}
+}
+
 func TestRunnerBuiltinFileReadAddsTotalLineCountForUnknownSedScriptFile(t *testing.T) {
 	path := writeTextFile(t, "example.txt", "line 1\nline 2\nline 3\n")
 	scriptPath := writeTextFile(t, "script.sed", "1,1p\n")
@@ -140,21 +188,72 @@ func TestRunnerBuiltinFileReadSkipsSedWhenFullFileIsKnown(t *testing.T) {
 	path := writeTextFile(t, "example.txt", "line 1\nline 2\n")
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
 	exitCode := 0
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "unaddressed print", command: "sed -n p " + shellQuote(path)},
+		{name: "range starts at first line and exceeds file length", command: "sed -n '1,430p' " + shellQuote(path)},
+		{name: "range starts at first line and ends at last line", command: "sed -n '1,2p' " + shellQuote(path)},
+		{name: "range through eof", command: "sed -n '1,$p' " + shellQuote(path)},
+		{name: "expression range", command: "sed -n -e '1,430p' " + shellQuote(path)},
+	}
 
-	result, err := runner.Apply(context.Background(), Request{
-		ToolName:    toolspec.ToolExecCommand,
-		CommandText: "sed -n p " + shellQuote(path),
-		ExitCode:    &exitCode,
-		Output:      "line 1\nline 2\n",
-	})
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := runner.Apply(context.Background(), Request{
+				ToolName:    toolspec.ToolExecCommand,
+				CommandText: tt.command,
+				ExitCode:    &exitCode,
+				Output:      "line 1\nline 2\n",
+			})
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			if result.Processed {
+				t.Fatal("expected known full-file sed output to bypass file context marker")
+			}
+			if result.Output != "line 1\nline 2\n" {
+				t.Fatalf("output = %q", result.Output)
+			}
+		})
 	}
-	if result.Processed {
-		t.Fatal("expected known full-file sed output to bypass file context marker")
+}
+
+func TestRunnerBuiltinFileReadAddsTotalLineCountForSedRangeEdgeCases(t *testing.T) {
+	largePath := writeTextFile(t, "large.txt", numberedLines(431))
+	smallPath := writeTextFile(t, "small.txt", "line 1\nline 2\n")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
+	exitCode := 0
+	tests := []struct {
+		name      string
+		command   string
+		output    string
+		lineCount int
+	}{
+		{name: "negated range", command: "sed -n '1,430!p' " + shellQuote(largePath), output: "line 431\n", lineCount: 431},
+		{name: "multiple scripts", command: "sed -n -e '1,430p' -e '2,2p' " + shellQuote(smallPath), output: "line 1\nline 2\nline 2\n", lineCount: 2},
 	}
-	if result.Output != "line 1\nline 2\n" {
-		t.Fatalf("output = %q", result.Output)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := runner.Apply(context.Background(), Request{
+				ToolName:    toolspec.ToolExecCommand,
+				CommandText: tt.command,
+				ExitCode:    &exitCode,
+				Output:      tt.output,
+			})
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			if !result.Processed {
+				t.Fatal("expected partial sed read to include file context marker")
+			}
+			want := fmt.Sprintf("[Total line count: %d]\n%s", tt.lineCount, tt.output)
+			if result.Output != want {
+				t.Fatalf("output = %q, want %q", result.Output, want)
+			}
+		})
 	}
 }
 
@@ -471,6 +570,26 @@ func writeTextFile(t *testing.T, name string, contents string) string {
 		t.Fatalf("write text file: %v", err)
 	}
 	return path
+}
+
+func writeNestedTextFile(t *testing.T, name string, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent dirs: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write text file: %v", err)
+	}
+	return path
+}
+
+func numberedLines(count int) string {
+	lines := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func shellQuote(value string) string {
