@@ -111,8 +111,8 @@ func TestMainUIProgramOptionsPreservesTerminalFileOutput(t *testing.T) {
 	state := newUITerminalCursorState()
 	file := &fakeTerminalCursorFile{fd: 42}
 	options := mainUIProgramOptionsWithOutput(config.Settings{}, state, file)
-	if len(options) != 2 {
-		t.Fatalf("main options length = %d, want filter and output options", len(options))
+	if len(options) != 3 {
+		t.Fatalf("main options length = %d, want filter, focus reporting, and output options", len(options))
 	}
 
 	output := mainUIProgramOutputWriter(state, file)

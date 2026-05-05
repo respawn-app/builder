@@ -70,6 +70,7 @@ type uiInputFeatureState struct {
 	queued               []string
 	preSubmitCheckToken  uint64
 	pendingPreSubmitText string
+	compactionOrigin     uiCompactionOrigin
 	submitToken          uint64
 	activeSubmit         activeSubmitState
 
@@ -104,6 +105,7 @@ type uiInputFeatureState struct {
 type uiPresentationFeatureState struct {
 	theme           string
 	altScreenActive bool
+	terminalFocus   *terminalFocusState
 	terminalCursor  *uiTerminalCursorState
 	termWidth       int
 	termHeight      int

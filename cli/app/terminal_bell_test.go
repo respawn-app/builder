@@ -35,6 +35,10 @@ func (r *countRinger) Last() string {
 	return r.last
 }
 
+func newUnfocusedBellHooks(ringer *countRinger) *bellHooks {
+	return newBellHooks(ringer, nil, func() bool { return false })
+}
+
 func TestTerminalBellRingerWritesBellCharacter(t *testing.T) {
 	var out bytes.Buffer
 	notifier := newTerminalNotifier(notificationMethodBEL, &out, nil)
@@ -95,7 +99,7 @@ func TestAutoNotifierFallsBackToBELForWindowsTerminal(t *testing.T) {
 
 func TestBellHooksRingOnAskRequests(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnAsk(askquestion.Request{Question: "question"})
 	hooks.OnAsk(askquestion.Request{Question: "approval", Approval: true})
@@ -121,7 +125,7 @@ func TestBellHooksUseSessionNameAndQuestionTextForAskNotifications(t *testing.T)
 
 func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1"})
@@ -149,9 +153,38 @@ func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	}
 }
 
+func TestBellHooksSuppressTurnCompletionWhileFocused(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil, func() bool { return true })
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "done"}}})
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count while focused = %d, want 0", got)
+	}
+}
+
+func TestBellHooksRingOnToolHeavyTurnEndWithUnknownFocus(t *testing.T) {
+	ringer := &countRinger{}
+	focus := newTerminalFocusState()
+	hooks := newBellHooks(ringer, nil, focus.FocusedForAttention)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "done"}}})
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count with unknown focus = %d, want 1", got)
+	}
+}
+
 func TestBellHooksIncludeAssistantPreviewInTurnCompleteNotification(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -165,7 +198,7 @@ func TestBellHooksIncludeAssistantPreviewInTurnCompleteNotification(t *testing.T
 
 func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -179,7 +212,7 @@ func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 
 func TestBellHooksNoopAssistantDeltaClearsPendingTurnCompletion(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -194,7 +227,7 @@ func TestBellHooksNoopAssistantDeltaClearsPendingTurnCompletion(t *testing.T) {
 
 func TestBellHooksNoopAssistantMessageClearsPendingTurnCompletion(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -209,7 +242,7 @@ func TestBellHooksNoopAssistantMessageClearsPendingTurnCompletion(t *testing.T) 
 
 func TestBellHooksNoopAssistantEventPreservesUnrelatedActiveTurn(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -254,7 +287,7 @@ func TestFormatAssistantPreview(t *testing.T) {
 
 func TestBellHooksIgnoresMismatchedTurnEndStep(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -268,7 +301,7 @@ func TestBellHooksIgnoresMismatchedTurnEndStep(t *testing.T) {
 
 func TestBellHooksRingOnceAfterQueuedTurnsDrain(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -291,7 +324,7 @@ func TestBellHooksRingOnceAfterQueuedTurnsDrain(t *testing.T) {
 
 func TestBellHooksClearPendingTurnCompletionAfterAbort(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer, nil)
+	hooks := newUnfocusedBellHooks(ringer)
 
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
@@ -301,5 +334,48 @@ func TestBellHooksClearPendingTurnCompletionAfterAbort(t *testing.T) {
 
 	if got := ringer.Count(); got != 0 {
 		t.Fatalf("ring count = %d after aborted queue, want 0", got)
+	}
+}
+
+func TestBellHooksRingOnUserCompactionCompletion(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newUnfocusedBellHooks(ringer)
+
+	hooks.OnUserCompactionCompleted(true)
+
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count = %d after user compaction completion, want 1", got)
+	}
+	if got := ringer.Last(); got != "builder: Compaction finished" {
+		t.Fatalf("last message = %q, want %q", got, "builder: Compaction finished")
+	}
+}
+
+func TestBellHooksSuppressUserCompactionCompletionWhileFocused(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil, func() bool { return true })
+
+	hooks.OnUserCompactionCompleted(true)
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count while focused = %d, want 0", got)
+	}
+}
+
+func TestBellHooksDeferUserCompactionCompletionUntilQueueDrains(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newUnfocusedBellHooks(ringer)
+
+	hooks.OnUserCompactionCompleted(false)
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count before queue drain = %d, want 0", got)
+	}
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count after queue drain = %d, want 1", got)
+	}
+	if got := ringer.Last(); got != "builder: Compaction finished" {
+		t.Fatalf("last message = %q, want %q", got, "builder: Compaction finished")
 	}
 }

@@ -347,6 +347,7 @@ type countingTurnQueueHook struct {
 func (h *countingTurnQueueHook) OnProjectedRuntimeEvent(clientui.Event) { h.projected++ }
 func (h *countingTurnQueueHook) OnTurnQueueDrained()                    { h.drained++ }
 func (h *countingTurnQueueHook) OnTurnQueueAborted()                    { h.aborted++ }
+func (h *countingTurnQueueHook) OnUserCompactionCompleted(bool)         {}
 
 func TestRuntimeIdleQueuedDrainNotifiesTurnQueueHookOnce(t *testing.T) {
 	client := &runtimeControlFakeClient{}

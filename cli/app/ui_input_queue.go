@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"builder/cli/app/commands"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -205,6 +207,9 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 	if m.commandRegistry != nil {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
+				if commandResult.Action == commands.ActionCompact {
+					return finalizeSlashCommandCmd(commandResult.Action, c.startQueuedCompaction(commandResult.Args), m.recordPromptHistory(text))
+				}
 				_, cmd := c.applyCommandResult(commandResult)
 				return finalizeSlashCommandCmd(commandResult.Action, cmd, m.recordPromptHistory(text))
 			}

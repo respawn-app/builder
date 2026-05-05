@@ -157,9 +157,27 @@ func (m *uiModel) markActiveSubmitUserMessageFlushed(evt clientui.Event) {
 	}
 }
 
+type uiCompactionOrigin uint8
+
+const (
+	uiCompactionOriginNone uiCompactionOrigin = iota
+	uiCompactionOriginManual
+	uiCompactionOriginQueued
+	uiCompactionOriginPreSubmit
+)
+
 func (c uiInputController) startCompaction(args string) tea.Cmd {
+	return c.startCompactionWithOrigin(args, uiCompactionOriginManual)
+}
+
+func (c uiInputController) startQueuedCompaction(args string) tea.Cmd {
+	return c.startCompactionWithOrigin(args, uiCompactionOriginQueued)
+}
+
+func (c uiInputController) startCompactionWithOrigin(args string, origin uiCompactionOrigin) tea.Cmd {
 	m := c.model
 	c.startBusyActivity(true)
+	m.compactionOrigin = origin
 	m.logf("compaction.start args_chars=%d", len(strings.TrimSpace(args)))
 	m.syncViewport()
 	return tea.Batch(c.compactCmd(args), m.ensureSpinnerTicking())
@@ -168,6 +186,7 @@ func (c uiInputController) startCompaction(args string) tea.Cmd {
 func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
 	m := c.model
 	c.startBusyActivity(true)
+	m.compactionOrigin = uiCompactionOriginPreSubmit
 	m.logf("compaction.pre_submit.start")
 	m.syncViewport()
 	return tea.Batch(c.preSubmitCompactCmd(), m.ensureSpinnerTicking())
@@ -382,6 +401,8 @@ func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea
 
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
+	compactionOrigin := m.compactionOrigin
+	m.compactionOrigin = uiCompactionOriginNone
 	c.finishBusyActivity(true)
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
@@ -406,6 +427,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	m.activity = uiActivityIdle
 	m.logf("compaction.done")
 	if len(m.queued) > 0 {
+		c.notifyUserCompactionCompleted(compactionOrigin, false)
 		return c.flushQueuedInputs(queueDrainAuto)
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
@@ -425,8 +447,21 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		return m, appendCmd
 	}
 	if queuedRuntimeWork {
+		c.notifyUserCompactionCompleted(compactionOrigin, false)
 		return m, c.startQueuedInjectionSubmission()
 	}
+	c.notifyUserCompactionCompleted(compactionOrigin, !m.pendingQueuedDrainAfterHydration)
 	m.syncViewport()
 	return m, nil
+}
+
+func (c uiInputController) notifyUserCompactionCompleted(origin uiCompactionOrigin, queueDrained bool) {
+	m := c.model
+	if m == nil || m.turnQueueHook == nil {
+		return
+	}
+	switch origin {
+	case uiCompactionOriginManual, uiCompactionOriginQueued:
+		m.turnQueueHook.OnUserCompactionCompleted(queueDrained)
+	}
 }

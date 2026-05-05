@@ -360,6 +360,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
 	}, server.PromptControlClient(), leaseManager)
+	terminalFocus := newTerminalFocusState()
 	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
@@ -367,12 +368,13 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 			}
 		}
 		return strings.TrimSpace(plan.SessionName)
-	})
+	}, terminalFocus.FocusedForAttention)
 	wiring := &runtimeWiring{
 		runtimeEvents:         runtimeEvents,
 		askEvents:             askEvents,
 		background:            nil,
 		turnQueueHook:         turnQueueHook,
+		terminalFocus:         terminalFocus,
 		runtimeClient:         runtimeClient,
 		promptControl:         server.PromptControlClient(),
 		runtimeControls:       server.RuntimeControlClient(),

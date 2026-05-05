@@ -454,6 +454,14 @@ func WithUITurnQueueHook(hook turnQueueHook) UIOption {
 	}
 }
 
+func WithUITerminalFocusState(state *terminalFocusState) UIOption {
+	return func(m *uiModel) {
+		if state != nil {
+			m.terminalFocus = state
+		}
+	}
+}
+
 func WithUIPromptHistory(history []string) UIOption {
 	return func(m *uiModel) {
 		m.loadPromptHistory(history)
@@ -548,7 +556,8 @@ func newUIInputFeatureState() uiInputFeatureState {
 
 func newUIPresentationFeatureState() uiPresentationFeatureState {
 	return uiPresentationFeatureState{
-		theme: theme.Auto,
+		theme:         theme.Auto,
+		terminalFocus: newTerminalFocusState(),
 	}
 }
 
@@ -820,6 +829,14 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		probe.probeUIModel(m)
 		return m, nil
 	}
+	switch msg.(type) {
+	case tea.FocusMsg:
+		m.terminalFocus.MarkFocused()
+		return m, nil
+	case tea.BlurMsg:
+		m.terminalFocus.MarkBlurred()
+		return m, nil
+	}
 	if result := m.reduceFeatureMessage(msg); result.handled {
 		return result.bubbleTea()
 	}
@@ -831,6 +848,20 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.forwardToView(msg)
 	m.syncViewport()
 	return m, m.maybeRequestDetailTranscriptPage()
+}
+
+func (m *uiModel) TerminalFocused() bool {
+	if m == nil {
+		return false
+	}
+	return m.terminalFocus.FocusedForAttention()
+}
+
+func (m *uiModel) TerminalFocusKnown() bool {
+	if m == nil {
+		return false
+	}
+	return m.terminalFocus.Known()
 }
 
 func (m *uiModel) setDebugKeyTransientStatus(raw tea.Msg, normalized tea.KeyMsg, source string) {

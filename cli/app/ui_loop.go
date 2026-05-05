@@ -64,6 +64,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIStatusConfig(statusConfig),
 		WithUIStartupUpdateNotice(startupUpdateNotice),
 		WithUITerminalCursorState(terminalCursor),
+		WithUITerminalFocusState(wiring.terminalFocus),
 	)
 	if closable, ok := model.(interface{ Close() }); ok {
 		defer closable.Close()
@@ -89,7 +90,7 @@ func mainUIProgramOptions(active config.Settings, terminalCursor *uiTerminalCurs
 }
 
 func mainUIProgramOptionsWithOutput(active config.Settings, terminalCursor *uiTerminalCursorState, output io.Writer) []tea.ProgramOption {
-	options := []tea.ProgramOption{tea.WithFilter(terminalCursorProgramFilter(terminalCursor))}
+	options := []tea.ProgramOption{tea.WithFilter(terminalCursorProgramFilter(terminalCursor)), tea.WithReportFocus()}
 	if terminalCursor != nil {
 		options = append(options, tea.WithOutput(mainUIProgramOutputWriter(terminalCursor, output)))
 	}
