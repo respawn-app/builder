@@ -86,10 +86,8 @@ jobs:
           GOOS=windows GOARCH=amd64 BUILDER_VERSION="$VERSION" \
             bash scripts/build.sh --output "staging/builder_${VERSION}_windows_amd64.exe"
           powershell -NoProfile -Command "Compress-Archive -LiteralPath 'staging/builder_${VERSION}_windows_amd64.exe' -DestinationPath 'dist/builder_${VERSION}_windows_amd64.zip' -Force"
-          (
-            cd dist
-            shasum -a 256 "builder_${VERSION}_windows_amd64.zip" > checksums.txt
-          )
+          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'dist/builder_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
+          printf '%s  %s\n' "$checksum" "builder_${VERSION}_windows_amd64.zip" > dist/checksums.txt
 
       - name: Smoke test installer
         env:
@@ -131,10 +129,8 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -o recovery-install/builder.exe fake-builder.go
           cp recovery-install/builder.exe "recovery-staging/builder_${VERSION}_windows_amd64.exe"
           powershell -NoProfile -Command "Compress-Archive -LiteralPath 'recovery-staging/builder_${VERSION}_windows_amd64.exe' -DestinationPath 'recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip' -Force"
-          (
-            cd "recovery-release/v${VERSION}"
-            shasum -a 256 "builder_${VERSION}_windows_amd64.zip" > checksums.txt
-          )
+          checksum=$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip').Hash.ToLowerInvariant()")
+          printf '%s  %s\n' "$checksum" "builder_${VERSION}_windows_amd64.zip" > "recovery-release/v${VERSION}/checksums.txt"
           release_base="$(cygpath -w "$PWD/recovery-release")"
           install_dir="$(cygpath -w "$PWD/recovery-install")"
           marker_path="$PWD/recovery-marker.txt"
