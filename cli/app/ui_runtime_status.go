@@ -8,6 +8,28 @@ import (
 	"builder/shared/clientui"
 )
 
+func (m *uiModel) applyRuntimeMainViewState(view clientui.RuntimeMainView) {
+	if m == nil {
+		return
+	}
+	status := view.Status
+	m.reviewerMode = status.ReviewerFrequency
+	m.reviewerEnabled = status.ReviewerEnabled
+	m.autoCompactionEnabled = status.AutoCompactionEnabled
+	m.fastModeAvailable = status.FastModeAvailable
+	m.fastModeEnabled = status.FastModeEnabled
+	m.conversationFreshness = status.ConversationFreshness
+	m.setRuntimeContextUsage(view.Session.SessionID, status.ContextUsage)
+	active := view.ActiveRun != nil && view.ActiveRun.Status == clientui.RunStatusRunning
+	m.busy = active
+	m.goalRun = active && view.ActiveRun.GoalLoop
+	if active {
+		m.activity = uiActivityRunning
+		return
+	}
+	m.activity = uiActivityIdle
+}
+
 func (m *uiModel) runtimeMainView() clientui.RuntimeMainView {
 	if client := m.runtimeClient(); client != nil {
 		return client.MainView()

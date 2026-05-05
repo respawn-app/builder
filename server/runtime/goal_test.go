@@ -528,7 +528,7 @@ func TestGoalLoopRetriesWhenExclusiveStepIsBusy(t *testing.T) {
 	}
 }
 
-func TestNewRestartsPersistedActiveGoalLoop(t *testing.T) {
+func TestNewDoesNotRestartPersistedActiveGoalLoop(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "workspace-x", "/tmp/workspace-x")
 	if err != nil {
@@ -547,33 +547,18 @@ func TestNewRestartsPersistedActiveGoalLoop(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	defer func() { _ = engine.Close() }()
-	client.waitStarted(t, 1)
-
-	if _, err := engine.SetGoalStatus(session.GoalStatusComplete, session.GoalActorAgent); err != nil {
-		t.Fatalf("complete goal: %v", err)
-	}
-	client.releaseCall(1)
 	waitGoalLoopRunning(t, engine, false)
-	if got := client.callCount(); got != 1 {
-		t.Fatalf("model calls = %d, want 1", got)
+	if got := client.callCount(); got != 0 {
+		t.Fatalf("model calls after reopen = %d, want 0", got)
 	}
 	events, err := reopenedStore.ReadEvents()
 	if err != nil {
 		t.Fatalf("ReadEvents: %v", err)
 	}
-	messages := goalDeveloperMessages(t, events)
-	if len(messages) == 0 {
-		t.Fatal("expected reopened goal loop to append nudge message")
-	}
-	foundNudge := false
-	for _, msg := range messages {
+	for _, msg := range goalDeveloperMessages(t, events) {
 		if msg.Content == prompts.RenderGoalNudgePrompt("ship goal mode", "active") {
-			foundNudge = true
-			break
+			t.Fatalf("did not expect reopened session to append goal nudge: %+v", msg)
 		}
-	}
-	if !foundNudge {
-		t.Fatalf("goal developer messages did not include reopened nudge: %+v", messages)
 	}
 }
 
@@ -601,8 +586,8 @@ func TestNewOpensPersistedActiveGoalWhenAskQuestionDisabled(t *testing.T) {
 	if goal == nil || goal.Status != session.GoalStatusActive || goal.Objective != "ship goal mode" {
 		t.Fatalf("goal after reopen = %+v", goal)
 	}
-	if !engine.GoalLoopSuspended() {
-		t.Fatal("expected reopened active goal to be reported suspended when ask_question is disabled")
+	if engine.GoalLoopSuspended() {
+		t.Fatal("did not expect reopened active goal to be reported suspended before an explicit start attempt")
 	}
 	waitGoalLoopRunning(t, engine, false)
 	if got := client.callCount(); got != 0 {
