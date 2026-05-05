@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"builder/server/tools/shellcmd"
 	"builder/shared/toolspec"
 )
 
@@ -40,7 +41,11 @@ func (fileReadContextProcessor) Process(_ context.Context, req Request) (Result,
 		return Result{Output: req.Output}, nil
 	}
 
-	candidate, ok := classifyFileRead(req.CommandName, req.ParsedArgs)
+	args, ok := fileReadArgsWithoutCommand(req.CommandName, req.ParsedArgs)
+	if !ok {
+		return Result{Output: req.Output}, nil
+	}
+	candidate, ok := classifyFileRead(req.CommandName, args)
 	if !ok {
 		return Result{Output: req.Output}, nil
 	}
@@ -66,16 +71,27 @@ func (fileReadContextProcessor) Process(_ context.Context, req Request) (Result,
 	}, nil
 }
 
+func fileReadArgsWithoutCommand(commandName string, parsedArgs []string) ([]string, bool) {
+	normalizedCommand := shellcmd.NormalizeCommandName(commandName)
+	if normalizedCommand == "" || len(parsedArgs) < 2 {
+		return nil, false
+	}
+	if shellcmd.NormalizeCommandName(parsedArgs[0]) != normalizedCommand {
+		return nil, false
+	}
+	return parsedArgs[1:], true
+}
+
 func classifyFileRead(commandName string, args []string) (fileReadCandidate, bool) {
 	switch strings.ToLower(strings.TrimSpace(commandName)) {
 	case "sed":
-		return classifySedFileRead(args[1:])
+		return classifySedFileRead(args)
 	case "head":
-		return classifyHeadTailFileRead(false, args[1:])
+		return classifyHeadTailFileRead(false, args)
 	case "tail":
-		return classifyHeadTailFileRead(true, args[1:])
+		return classifyHeadTailFileRead(true, args)
 	case "get-content", "gc":
-		return classifyPowerShellGetContent(args[1:])
+		return classifyPowerShellGetContent(args)
 	default:
 		return fileReadCandidate{}, false
 	}

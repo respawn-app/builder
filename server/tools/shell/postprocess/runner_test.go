@@ -252,6 +252,27 @@ func TestRunnerBuiltinFileReadSkipsFullHeadTailAndLargeFiles(t *testing.T) {
 	}
 }
 
+func TestRunnerBuiltinFileReadSkipsWhenParsedArgsOmitCommandName(t *testing.T) {
+	path := writeTextFile(t, "example.txt", "line 1\nline 2\nline 3\n")
+	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
+	exitCode := 0
+
+	result, err := runner.Apply(context.Background(), Request{
+		ToolName:    toolspec.ToolExecCommand,
+		CommandName: "tail",
+		ParsedArgs:  []string{"-n", "2", path},
+		Workdir:     filepath.Dir(path),
+		ExitCode:    &exitCode,
+		Output:      "line 2\nline 3\n",
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Processed || result.Output != "line 2\nline 3\n" {
+		t.Fatalf("expected invalid parsed args contract to skip processing, got processed=%t output=%q", result.Processed, result.Output)
+	}
+}
+
 func TestRunnerBuiltinFileReadSkipsComposedCommandsAndWholeFileReads(t *testing.T) {
 	path := writeTextFile(t, "example.txt", "line 1\nline 2\n")
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeBuiltin})
