@@ -382,6 +382,10 @@ func (s *Store) SetWorktreeReminderState(state *WorktreeReminderState) error {
 }
 
 func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
+	return s.SetGoalWithEvents(objective, actor, nil)
+}
+
+func (s *Store) SetGoalWithEvents(objective string, actor GoalActor, extraEvents []EventInput) (GoalState, error) {
 	trimmedObjective := strings.TrimSpace(objective)
 	if trimmedObjective == "" {
 		return GoalState{}, errors.New("goal objective is required")
@@ -393,6 +397,7 @@ func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
 	s.mu.Lock()
 	now := goalTimestamp()
 	replacedGoalID := ""
+	previousGoal := cloneGoalState(s.meta.Goal)
 	if s.meta.Goal != nil {
 		replacedGoalID = strings.TrimSpace(s.meta.Goal.ID)
 	}
@@ -403,13 +408,16 @@ func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	s.meta.Goal = cloneGoalState(&goal)
-	evt, err := s.buildEventLocked("", "goal_set", GoalSetEvent{Goal: goal, Actor: normalizedActor, ReplacedGoalID: replacedGoalID}, now)
+	events, err := s.buildGoalEventsLocked("goal_set", GoalSetEvent{Goal: goal, Actor: normalizedActor, ReplacedGoalID: replacedGoalID}, extraEvents, now)
 	if err != nil {
 		s.mu.Unlock()
 		return GoalState{}, err
 	}
-	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.meta.Goal = cloneGoalState(&goal)
+	observation, err := s.appendEventsAtomicLocked(events)
+	if err != nil {
+		s.meta.Goal = previousGoal
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return GoalState{}, err
@@ -421,6 +429,10 @@ func (s *Store) SetGoal(objective string, actor GoalActor) (GoalState, error) {
 }
 
 func (s *Store) SetGoalStatus(status GoalStatus, actor GoalActor) (GoalState, error) {
+	return s.SetGoalStatusWithEvents(status, actor, nil)
+}
+
+func (s *Store) SetGoalStatusWithEvents(status GoalStatus, actor GoalActor, extraEvents []EventInput) (GoalState, error) {
 	normalizedStatus, err := normalizeGoalStatus(status)
 	if err != nil {
 		return GoalState{}, err
@@ -435,17 +447,21 @@ func (s *Store) SetGoalStatus(status GoalStatus, actor GoalActor) (GoalState, er
 		return GoalState{}, errors.New("goal is not set")
 	}
 	now := goalTimestamp()
+	previousGoalState := *cloneGoalState(s.meta.Goal)
 	goal := *cloneGoalState(s.meta.Goal)
 	previousStatus := goal.Status
 	goal.Status = normalizedStatus
 	goal.UpdatedAt = now
-	s.meta.Goal = cloneGoalState(&goal)
-	evt, err := s.buildEventLocked("", "goal_status_updated", GoalStatusUpdatedEvent{Goal: goal, Actor: normalizedActor, PreviousStatus: previousStatus}, now)
+	events, err := s.buildGoalEventsLocked("goal_status_updated", GoalStatusUpdatedEvent{Goal: goal, Actor: normalizedActor, PreviousStatus: previousStatus}, extraEvents, now)
 	if err != nil {
 		s.mu.Unlock()
 		return GoalState{}, err
 	}
-	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.meta.Goal = cloneGoalState(&goal)
+	observation, err := s.appendEventsAtomicLocked(events)
+	if err != nil {
+		s.meta.Goal = cloneGoalState(&previousGoalState)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return GoalState{}, err
@@ -457,6 +473,10 @@ func (s *Store) SetGoalStatus(status GoalStatus, actor GoalActor) (GoalState, er
 }
 
 func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
+	return s.ClearGoalWithEvents(actor, nil)
+}
+
+func (s *Store) ClearGoalWithEvents(actor GoalActor, extraEvents []EventInput) (GoalState, error) {
 	normalizedActor, err := normalizeGoalActor(actor)
 	if err != nil {
 		return GoalState{}, err
@@ -468,13 +488,16 @@ func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
 	}
 	now := goalTimestamp()
 	goal := *cloneGoalState(s.meta.Goal)
-	s.meta.Goal = nil
-	evt, err := s.buildEventLocked("", "goal_cleared", GoalClearedEvent{Goal: goal, Actor: normalizedActor}, now)
+	events, err := s.buildGoalEventsLocked("goal_cleared", GoalClearedEvent{Goal: goal, Actor: normalizedActor}, extraEvents, now)
 	if err != nil {
 		s.mu.Unlock()
 		return GoalState{}, err
 	}
-	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	s.meta.Goal = nil
+	observation, err := s.appendEventsAtomicLocked(events)
+	if err != nil {
+		s.meta.Goal = cloneGoalState(&goal)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return GoalState{}, err
@@ -487,6 +510,26 @@ func (s *Store) ClearGoal(actor GoalActor) (GoalState, error) {
 
 func goalTimestamp() time.Time {
 	return time.Now().UTC().Round(0)
+}
+
+func (s *Store) buildGoalEventsLocked(kind string, payload any, extraEvents []EventInput, now time.Time) ([]Event, error) {
+	events := make([]Event, 0, 1+len(extraEvents))
+	seq := s.meta.LastSequence
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal event payload: %w", err)
+	}
+	seq++
+	events = append(events, Event{Seq: seq, Timestamp: now, Kind: kind, Payload: body})
+	for _, in := range extraEvents {
+		body, err := json.Marshal(in.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal event payload: %w", err)
+		}
+		seq++
+		events = append(events, Event{Seq: seq, Timestamp: now, Kind: in.Kind, Payload: body})
+	}
+	return events, nil
 }
 
 func (s *Store) SetUsageState(state *UsageState) error {

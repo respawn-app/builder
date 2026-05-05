@@ -38,13 +38,12 @@ func (e *Engine) SetGoal(objective string, actor session.GoalActor) (session.Goa
 	if e == nil || e.store == nil {
 		return session.GoalState{}, fmt.Errorf("runtime engine is required")
 	}
-	goal, err := e.store.SetGoal(objective, actor)
+	msg := e.goalDeveloperMessage(prompts.RenderGoalSetPrompt(strings.TrimSpace(objective)), goalSetCompactText(objective))
+	goal, err := e.store.SetGoalWithEvents(objective, actor, []session.EventInput{{Kind: "message", Payload: msg}})
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	if err := e.appendGoalDeveloperMessage("", prompts.RenderGoalSetPrompt(goal.Objective), goalSetCompactText(goal.Objective)); err != nil {
-		return session.GoalState{}, err
-	}
+	e.appendPersistedGoalDeveloperMessage("", msg)
 	return goal, nil
 }
 
@@ -52,13 +51,13 @@ func (e *Engine) SetGoalStatus(status session.GoalStatus, actor session.GoalActo
 	if e == nil || e.store == nil {
 		return session.GoalState{}, fmt.Errorf("runtime engine is required")
 	}
-	goal, err := e.store.SetGoalStatus(status, actor)
+	promptGoal := goalStateForStatusPrompt(e.Goal(), status)
+	msg := e.goalDeveloperMessage(goalStatusPrompt(promptGoal), goalStatusCompactText(promptGoal))
+	goal, err := e.store.SetGoalStatusWithEvents(status, actor, []session.EventInput{{Kind: "message", Payload: msg}})
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	if err := e.appendGoalDeveloperMessage("", goalStatusPrompt(goal), goalStatusCompactText(goal)); err != nil {
-		return session.GoalState{}, err
-	}
+	e.appendPersistedGoalDeveloperMessage("", msg)
 	return goal, nil
 }
 
@@ -66,13 +65,12 @@ func (e *Engine) ClearGoal(actor session.GoalActor) (session.GoalState, error) {
 	if e == nil || e.store == nil {
 		return session.GoalState{}, fmt.Errorf("runtime engine is required")
 	}
-	goal, err := e.store.ClearGoal(actor)
+	msg := e.goalDeveloperMessage(prompts.GoalClearPrompt, "Goal cleared")
+	goal, err := e.store.ClearGoalWithEvents(actor, []session.EventInput{{Kind: "message", Payload: msg}})
 	if err != nil {
 		return session.GoalState{}, err
 	}
-	if err := e.appendGoalDeveloperMessage("", prompts.GoalClearPrompt, "Goal cleared"); err != nil {
-		return session.GoalState{}, err
-	}
+	e.appendPersistedGoalDeveloperMessage("", msg)
 	return goal, nil
 }
 
@@ -190,12 +188,25 @@ func (e *Engine) goalActiveLocked() bool {
 }
 
 func (e *Engine) appendGoalDeveloperMessage(stepID string, content string, compact string) error {
-	return e.appendMessage(stepID, llm.Message{
+	return e.appendMessage(stepID, e.goalDeveloperMessage(content, compact))
+}
+
+func (e *Engine) goalDeveloperMessage(content string, compact string) llm.Message {
+	return normalizeMessageForTranscript(llm.Message{
 		Role:           llm.RoleDeveloper,
 		MessageType:    llm.MessageTypeGoal,
 		Content:        content,
 		CompactContent: compact,
-	})
+	}, e.transcriptWorkingDir())
+}
+
+func (e *Engine) appendPersistedGoalDeveloperMessage(stepID string, msg llm.Message) {
+	previousCommittedCount := e.CommittedTranscriptEntryCount()
+	e.markCurrentRequestShapeDirty()
+	e.chat.appendMessage(msg)
+	if shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg, previousCommittedCount, e.CommittedTranscriptEntryCount()) {
+		e.emitCommittedMessageTranscriptAdvanced(stepID, msg)
+	}
 }
 
 func (e *Engine) requireAskQuestionForActiveGoal() error {
@@ -234,6 +245,15 @@ func goalStatusPrompt(goal session.GoalState) string {
 	default:
 		return ""
 	}
+}
+
+func goalStateForStatusPrompt(goal *session.GoalState, status session.GoalStatus) session.GoalState {
+	if goal == nil {
+		return session.GoalState{Status: status}
+	}
+	next := *goal
+	next.Status = status
+	return next
 }
 
 func goalStatusCompactText(goal session.GoalState) string {

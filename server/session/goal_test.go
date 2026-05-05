@@ -63,6 +63,29 @@ func TestSetGoalPersistsMetadataAndEvent(t *testing.T) {
 	}
 }
 
+func TestSetGoalWithEventsRollsBackMetadataWhenExtraEventCannotPersist(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	_, err = store.SetGoalWithEvents("ship goal mode", GoalActorUser, []EventInput{{Kind: "message", Payload: func() {}}})
+	if err == nil {
+		t.Fatal("expected SetGoalWithEvents to fail for unmarshalable extra event")
+	}
+	if goal := store.Meta().Goal; goal != nil {
+		t.Fatalf("goal after failed atomic set = %+v, want nil", goal)
+	}
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events after failed atomic set = %+v, want none", events)
+	}
+}
+
 func TestGoalStatusAndClearPersistMetadataAndEvents(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")
