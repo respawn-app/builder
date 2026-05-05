@@ -34,6 +34,8 @@ const (
 	manualCompactionCarryoverHeader        = "# Last user message before handoff (work may have been done after it was sent):"
 	handoffDisabledByUserMessage           = "User disabled the handoff manually for now. They do not want you to hand off at this time, so please keep working or retry this tool later"
 	handoffTooEarlyMessage                 = "trigger_handoff is not enabled yet. Keep working until you receive the reminder that this tool is now enabled, then retry it."
+	handoffCompactionToolsDisabledMessage  = "Tools are disabled during handoff. Do NOT attempt to call any tools. Produce only the requested summary."
+	handoffCompactionToolCallRetries       = 3
 )
 
 var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")
@@ -638,10 +640,10 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, stepID, input, providerID, instructions)
 		if err != nil && errors.Is(err, errRemoteCompactionMissingCheckpoint) {
-			result, err = e.compactLocal(ctx, input, providerID, instructions)
+			result, err = e.compactLocal(ctx, input, providerID, instructions, mode)
 		}
 	} else {
-		result, err = e.compactLocal(ctx, input, providerID, instructions)
+		result, err = e.compactLocal(ctx, input, providerID, instructions, mode)
 	}
 	if err != nil {
 		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
@@ -862,8 +864,8 @@ func isCompactionContextOverflow(err error) bool {
 	return llm.IsContextLengthOverflowError(err)
 }
 
-func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
-	summary, err := e.localCompactionSummary(ctx, input, instructions)
+func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string, mode compactionMode) (compactionResult, error) {
+	summary, err := e.localCompactionSummary(ctx, input, instructions, mode)
 	if err != nil {
 		return compactionResult{}, err
 	}
@@ -890,7 +892,7 @@ func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, pro
 	}, nil
 }
 
-func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.ResponseItem, instructions string) (string, error) {
+func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.ResponseItem, instructions string, mode compactionMode) (string, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return "", err
@@ -907,32 +909,70 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	if err != nil {
 		return "", err
 	}
-	req, err := llm.RequestFromLockedContract(locked, systemPrompt, items, e.requestTools(ctx))
-	if err != nil {
-		return "", err
-	}
-	req.ReasoningEffort = e.ThinkingLevel()
-	req.FastMode = e.FastModeEnabled()
-	req.SessionID = e.conversationSessionID()
-	if e.supportsPromptCacheKey(ctx) {
-		if cacheKey := e.conversationPromptCacheKey(); cacheKey != "" {
-			req.PromptCacheKey = cacheKey
-			req.PromptCacheScope = cachewarn.ScopeConversation
+	requestTools := e.requestTools(ctx)
+	for attempt := 0; ; attempt++ {
+		req, err := llm.RequestFromLockedContract(locked, systemPrompt, items, requestTools)
+		if err != nil {
+			return "", err
 		}
-	}
+		req.ReasoningEffort = e.ThinkingLevel()
+		req.FastMode = e.FastModeEnabled()
+		req.SessionID = e.conversationSessionID()
+		if e.supportsPromptCacheKey(ctx) {
+			if cacheKey := e.conversationPromptCacheKey(); cacheKey != "" {
+				req.PromptCacheKey = cacheKey
+				req.PromptCacheScope = cachewarn.ScopeConversation
+			}
+		}
 
-	resp, err := e.generateWithRetry(ctx, "", req, nil, nil, nil)
-	if err != nil {
-		return "", err
+		resp, err := e.generateWithRetry(ctx, "", req, nil, nil, nil)
+		if err != nil {
+			return "", err
+		}
+		if len(resp.ToolCalls) > 0 {
+			if mode != compactionModeHandoff || attempt >= handoffCompactionToolCallRetries {
+				return "", errors.New("local compaction summary attempted tool calls")
+			}
+			retryItems, err := handoffCompactionToolCallRetryItems(resp)
+			if err != nil {
+				return "", err
+			}
+			items = append(items, retryItems...)
+			continue
+		}
+		summary := strings.TrimSpace(resp.Assistant.Content)
+		if summary == "" {
+			return "", errors.New("local compaction summary was empty")
+		}
+		return summary, nil
 	}
-	if len(resp.ToolCalls) > 0 {
-		return "", errors.New("local compaction summary attempted tool calls")
+}
+
+func handoffCompactionToolCallRetryItems(resp llm.Response) ([]llm.ResponseItem, error) {
+	if len(resp.ToolCalls) == 0 {
+		return nil, nil
 	}
-	summary := strings.TrimSpace(resp.Assistant.Content)
-	if summary == "" {
-		return "", errors.New("local compaction summary was empty")
+	calls := make([]llm.ToolCall, 0, len(resp.ToolCalls))
+	for _, call := range resp.ToolCalls {
+		if strings.TrimSpace(call.ID) == "" {
+			return nil, errors.New("local compaction summary attempted tool call with empty id")
+		}
+		calls = append(calls, call)
 	}
-	return summary, nil
+	items := llm.ItemsFromMessages([]llm.Message{{
+		Role:      llm.RoleAssistant,
+		Content:   resp.Assistant.Content,
+		ToolCalls: calls,
+	}})
+	for _, call := range calls {
+		items = append(items, llm.ResponseItem{
+			Type:   llm.ToolOutputItemType(call.Custom),
+			CallID: strings.TrimSpace(call.ID),
+			Name:   call.Name,
+			Output: mustJSON(map[string]any{"error": handoffCompactionToolsDisabledMessage}),
+		})
+	}
+	return sanitizeItemsForLLM(items), nil
 }
 
 func localCompactionWindow(input []llm.ResponseItem) []llm.ResponseItem {

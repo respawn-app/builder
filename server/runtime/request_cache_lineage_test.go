@@ -383,7 +383,7 @@ func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *
 	}
 	eng.compactionCount = 1
 	input := llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}, {Role: llm.RoleAssistant, Content: "beta"}})
-	if _, err := eng.localCompactionSummary(context.Background(), input, compactionInstructions("keep API details")); err != nil {
+	if _, err := eng.localCompactionSummary(context.Background(), input, compactionInstructions("keep API details"), compactionModeManual); err != nil {
 		t.Fatalf("local compaction summary: %v", err)
 	}
 	if len(client.calls) != 1 {
