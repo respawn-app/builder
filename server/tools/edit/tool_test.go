@@ -218,6 +218,13 @@ func TestContextAwareFallbackAcceptsNormalizedBoundaryAndMiddleLines(t *testing.
 	}
 }
 
+func TestPreserveCurlyQuotesKeepsOpeningSingleQuote(t *testing.T) {
+	got := preserveCurlyQuotes("‘old’", "'new'")
+	if got != "‘new’" {
+		t.Fatalf("preserved quote replacement = %q, want %q", got, "‘new’")
+	}
+}
+
 func TestOutsideWorkspaceAncestorAliasUsesSingleCallApproval(t *testing.T) {
 	workspace := t.TempDir()
 	outside := newNonTemporaryOutsideDir(t)

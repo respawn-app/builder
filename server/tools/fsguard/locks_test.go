@@ -59,3 +59,19 @@ func TestLockPathsNormalizesEquivalentPaths(t *testing.T) {
 		t.Fatal("equivalent path lock did not unblock")
 	}
 }
+
+func TestLockPathEmptyKeyIsNoop(t *testing.T) {
+	unlock := LockPath(" \t")
+	done := make(chan struct{})
+	go func() {
+		unlockB := LockPath("")
+		unlockB()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("empty lock path blocked")
+	}
+	unlock()
+}

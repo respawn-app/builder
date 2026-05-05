@@ -141,7 +141,7 @@ func (g Guard) Allow(ctx context.Context, requestedPath string, resolvedPath str
 		if g.failures.UserDenied != nil {
 			return "", g.failures.UserDenied(req, approval, g.rejectionInstruction)
 		}
-		return "", g.userDenied(requestedPath, approval.Commentary)
+		return "", g.userDenied(requestedPath, approval.Commentary, g.rejectionInstruction)
 	}
 }
 
@@ -199,14 +199,18 @@ func (g Guard) approvalFailed(path, reason string) error {
 	return fmt.Errorf("file edit approval failed for %s: %s", path, reason)
 }
 
-func (g Guard) userDenied(path, commentary string) error {
+func (g Guard) userDenied(path, commentary string, instruction string) error {
 	if g.failures.DefaultUserDenied != nil {
 		return g.failures.DefaultUserDenied(path, commentary)
 	}
-	if strings.TrimSpace(commentary) == "" {
-		return fmt.Errorf("user denied edit for %s", path)
+	message := fmt.Sprintf("user denied edit for %s", path)
+	if strings.TrimSpace(commentary) != "" {
+		message += ": " + strings.TrimSpace(commentary)
 	}
-	return fmt.Errorf("user denied edit for %s: %s", path, commentary)
+	if strings.TrimSpace(instruction) != "" {
+		message += ": " + strings.TrimSpace(instruction)
+	}
+	return errors.New(message)
 }
 
 func (g Guard) logApproved(req Request, reason string) {

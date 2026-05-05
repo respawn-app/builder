@@ -380,6 +380,8 @@ func preserveCurlyQuotes(actual, replacement string) string {
 	}
 	var out strings.Builder
 	inWord := false
+	var prev rune
+	hasPrev := false
 	for _, r := range replacement {
 		switch r {
 		case '"':
@@ -390,7 +392,12 @@ func preserveCurlyQuotes(actual, replacement string) string {
 			}
 			inWord = !inWord
 		case '\'':
-			out.WriteRune('’')
+			if isOpeningSingleQuote(prev, hasPrev) {
+				out.WriteRune('‘')
+			} else {
+				out.WriteRune('’')
+			}
+			inWord = false
 		default:
 			out.WriteRune(r)
 			if unicode.IsLetter(r) || unicode.IsDigit(r) {
@@ -399,6 +406,18 @@ func preserveCurlyQuotes(actual, replacement string) string {
 				inWord = false
 			}
 		}
+		prev = r
+		hasPrev = true
 	}
 	return out.String()
+}
+
+func isOpeningSingleQuote(prev rune, hasPrev bool) bool {
+	if !hasPrev {
+		return true
+	}
+	if unicode.IsSpace(prev) {
+		return true
+	}
+	return strings.ContainsRune("([{<", prev)
 }

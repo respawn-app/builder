@@ -11,6 +11,9 @@ var pathLocks sync.Map
 
 func LockPath(path string) func() {
 	key := canonicalLockKey(path)
+	if key == "" {
+		return func() {}
+	}
 	value, _ := pathLocks.LoadOrStore(key, &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
