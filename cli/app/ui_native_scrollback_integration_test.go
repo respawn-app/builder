@@ -129,6 +129,43 @@ func waitForTestCondition(t *testing.T, timeout time.Duration, description strin
 	}
 }
 
+type uiModelProbeFunc func(*uiModel)
+
+func (f uiModelProbeFunc) probeUIModel(m *uiModel) {
+	f(m)
+}
+
+func waitForProgramModelCondition(t *testing.T, program *tea.Program, timeout time.Duration, description string, check func(*uiModel) bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		result := make(chan bool, 1)
+		program.Send(uiModelProbeFunc(func(m *uiModel) {
+			result <- check(m)
+		}))
+		select {
+		case ok := <-result:
+			if ok {
+				return
+			}
+		case <-time.After(500 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForSignal(t *testing.T, timeout time.Duration, description string, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for %s", description)
+	}
+}
+
 func waitForSubmitResult(t *testing.T, timeout time.Duration, submitDone <-chan error) {
 	t.Helper()
 	select {
@@ -161,9 +198,10 @@ type gatedStreamClient struct {
 }
 
 type deferredFinalQueuedInjectionStreamClient struct {
-	mu    sync.Mutex
-	calls int
-	delay time.Duration
+	mu           sync.Mutex
+	calls        int
+	releaseFirst <-chan struct{}
+	firstDelta   chan<- struct{}
 }
 
 type queuedSteerDuringBlockingToolClient struct {
@@ -456,14 +494,17 @@ func (c *deferredFinalQueuedInjectionStreamClient) GenerateStream(_ context.Cont
 	c.mu.Lock()
 	call := c.calls
 	c.calls++
-	delay := c.delay
+	releaseFirst := c.releaseFirst
 	c.mu.Unlock()
 	if call == 0 {
 		if onDelta != nil {
 			onDelta("foreground done")
 		}
-		if delay > 0 {
-			time.Sleep(delay)
+		if c.firstDelta != nil {
+			close(c.firstDelta)
+		}
+		if releaseFirst != nil {
+			<-releaseFirst
 		}
 		return llm.Response{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},

@@ -711,7 +711,7 @@ func TestHandoffCompactionAppendsFutureMessageBeforeHeadlessReentry(t *testing.T
 	}
 	eng.queueHandoffRequest("", "resume with tests")
 
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
 		t.Fatalf("apply pending handoff: %v", err)
 	}
 

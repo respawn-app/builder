@@ -199,6 +199,7 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForProgramModelCondition(t, program, 2*time.Second, "program ready before deferred final submit", func(*uiModel) bool { return true })
 	submitDone := make(chan error, 1)
 	go func() {
 		_, err := eng.SubmitUserMessage(context.Background(), "trigger")
@@ -554,10 +555,18 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	runtimeEvents := make(chan runtime.Event, 256)
+	releaseFirst := make(chan struct{})
+	firstDelta := make(chan struct{})
+	releasedFirst := false
+	defer func() {
+		if !releasedFirst {
+			close(releaseFirst)
+		}
+	}()
+	var program *tea.Program
 	eng, err := runtime.New(
 		store,
-		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		&deferredFinalQueuedInjectionStreamClient{releaseFirst: releaseFirst, firstDelta: firstDelta},
 		tools.NewRegistry(),
 		runtime.Config{
 			Model: "gpt-5",
@@ -568,7 +577,12 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 				Client:        reviewerNoSuggestionsClient{},
 			},
 			OnEvent: func(evt runtime.Event) {
-				runtimeEvents <- evt
+				if evt.Kind == runtime.EventAssistantDelta {
+					return
+				}
+				if program != nil {
+					program.Send(projectedRuntimeEventMsg(evt))
+				}
 			},
 		},
 	)
@@ -578,9 +592,9 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 	eng.QueueUserMessage("steer now")
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), closedProjectedRuntimeEvents(), closedAskEvents())
 
-	program := tea.NewProgram(
+	program = tea.NewProgram(
 		model,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
@@ -600,13 +614,21 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 		submitDone <- err
 	}()
 
-	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
-		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	waitForSignal(t, 2*time.Second, "first deferred final delta", firstDelta)
+	deltaApplied := false
+	waitForProgramModelCondition(t, program, 2*time.Second, "live deferred final delta visible", func(m *uiModel) bool {
+		if !deltaApplied {
+			_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}))
+			deltaApplied = true
+		}
+		return strings.Contains(m.view.OngoingStreamingText(), "foreground done")
 	})
+	close(releaseFirst)
+	releasedFirst = true
 
 	waitForSubmitResult(t, 2*time.Second, submitDone)
-	waitForTestCondition(t, 2*time.Second, "deferred final committed before queued user flush in output", func() bool {
-		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" || model.sawAssistantDelta {
+	waitForProgramModelCondition(t, program, 2*time.Second, "deferred final committed before queued user flush in output", func(m *uiModel) bool {
+		if strings.TrimSpace(m.view.OngoingStreamingText()) != "" || m.sawAssistantDelta {
 			return false
 		}
 		return containsInOrder(normalizedOutput(out.String()), "run task", "foreground done", "steer now")
@@ -641,10 +663,18 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	runtimeEvents := make(chan runtime.Event, 256)
+	releaseFirst := make(chan struct{})
+	firstDelta := make(chan struct{})
+	releasedFirst := false
+	defer func() {
+		if !releasedFirst {
+			close(releaseFirst)
+		}
+	}()
+	var program *tea.Program
 	eng, err := runtime.New(
 		store,
-		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		&deferredFinalQueuedInjectionStreamClient{releaseFirst: releaseFirst, firstDelta: firstDelta},
 		tools.NewRegistry(),
 		runtime.Config{
 			Model: "gpt-5",
@@ -655,7 +685,12 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 				Client:        reviewerNoSuggestionsClient{},
 			},
 			OnEvent: func(evt runtime.Event) {
-				runtimeEvents <- evt
+				if evt.Kind == runtime.EventAssistantDelta {
+					return
+				}
+				if program != nil {
+					program.Send(projectedRuntimeEventMsg(evt))
+				}
 			},
 		},
 	)
@@ -665,9 +700,9 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 	eng.QueueUserMessage("steer now")
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), closedProjectedRuntimeEvents(), closedAskEvents())
 
-	program := tea.NewProgram(
+	program = tea.NewProgram(
 		model,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
@@ -681,28 +716,37 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForProgramModelCondition(t, program, roundTripTimeout, "program ready before deferred final submit", func(*uiModel) bool { return true })
 	submitDone := make(chan error, 1)
 	go func() {
 		_, err := eng.SubmitUserMessage(context.Background(), "run task")
 		submitDone <- err
 	}()
 
-	waitForTestCondition(t, roundTripTimeout, "live deferred final delta visible", func() bool {
-		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	waitForSignal(t, roundTripTimeout, "first deferred final delta", firstDelta)
+	deltaApplied := false
+	waitForProgramModelCondition(t, program, roundTripTimeout, "live deferred final delta visible", func(m *uiModel) bool {
+		if !deltaApplied {
+			_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}))
+			deltaApplied = true
+		}
+		return strings.Contains(m.view.OngoingStreamingText(), "foreground done")
 	})
+	close(releaseFirst)
+	releasedFirst = true
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, roundTripTimeout, "detail mode active", func() bool {
-		return model.view.Mode() == tui.ModeDetail
+	waitForProgramModelCondition(t, program, roundTripTimeout, "detail mode active", func(m *uiModel) bool {
+		return m.view.Mode() == tui.ModeDetail
 	})
 
 	waitForSubmitResult(t, roundTripTimeout, submitDone)
 
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, roundTripTimeout, "ongoing mode active", func() bool {
-		return model.view.Mode() == tui.ModeOngoing
+	waitForProgramModelCondition(t, program, roundTripTimeout, "ongoing mode active", func(m *uiModel) bool {
+		return m.view.Mode() == tui.ModeOngoing
 	})
-	waitForTestCondition(t, roundTripTimeout, "ongoing view keeps deferred final visible after detail exit", func() bool {
-		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+	waitForProgramModelCondition(t, program, roundTripTimeout, "ongoing view keeps deferred final visible after detail exit", func(m *uiModel) bool {
+		ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 		return strings.Contains(ongoing, "foreground done")
 	})
 
@@ -723,10 +767,18 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	runtimeEvents := make(chan runtime.Event, 256)
+	releaseFirst := make(chan struct{})
+	firstDelta := make(chan struct{})
+	releasedFirst := false
+	defer func() {
+		if !releasedFirst {
+			close(releaseFirst)
+		}
+	}()
+	var program *tea.Program
 	eng, err := runtime.New(
 		store,
-		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		&deferredFinalQueuedInjectionStreamClient{releaseFirst: releaseFirst, firstDelta: firstDelta},
 		tools.NewRegistry(),
 		runtime.Config{
 			Model: "gpt-5",
@@ -737,7 +789,12 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 				Client:        reviewerNoSuggestionsClient{},
 			},
 			OnEvent: func(evt runtime.Event) {
-				runtimeEvents <- evt
+				if evt.Kind == runtime.EventAssistantDelta {
+					return
+				}
+				if program != nil {
+					program.Send(projectedRuntimeEventMsg(evt))
+				}
 			},
 		},
 	)
@@ -747,9 +804,9 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 	eng.QueueUserMessage("steer now")
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), closedProjectedRuntimeEvents(), closedAskEvents())
 
-	program := tea.NewProgram(
+	program = tea.NewProgram(
 		model,
 		tea.WithInput(strings.NewReader("")),
 		tea.WithOutput(out),
@@ -763,27 +820,36 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeComm
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	waitForProgramModelCondition(t, program, 2*time.Second, "program ready before deferred final submit", func(*uiModel) bool { return true })
 	submitDone := make(chan error, 1)
 	go func() {
 		_, err := eng.SubmitUserMessage(context.Background(), "run task")
 		submitDone <- err
 	}()
 
-	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
-		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	waitForSignal(t, 2*time.Second, "first deferred final delta", firstDelta)
+	deltaApplied := false
+	waitForProgramModelCondition(t, program, 2*time.Second, "live deferred final delta visible", func(m *uiModel) bool {
+		if !deltaApplied {
+			_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}))
+			deltaApplied = true
+		}
+		return strings.Contains(m.view.OngoingStreamingText(), "foreground done")
+	})
+	close(releaseFirst)
+	releasedFirst = true
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	waitForProgramModelCondition(t, program, 2*time.Second, "detail mode active", func(m *uiModel) bool {
+		return m.view.Mode() == tui.ModeDetail
 	})
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, 2*time.Second, "detail mode active", func() bool {
-		return model.view.Mode() == tui.ModeDetail
-	})
-	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	waitForTestCondition(t, 2*time.Second, "ongoing mode active before final commit", func() bool {
-		return model.view.Mode() == tui.ModeOngoing
+	waitForProgramModelCondition(t, program, 2*time.Second, "ongoing mode active before final commit", func(m *uiModel) bool {
+		return m.view.Mode() == tui.ModeOngoing
 	})
 
 	waitForSubmitResult(t, 2*time.Second, submitDone)
-	waitForTestCondition(t, 2*time.Second, "ongoing view keeps deferred final visible after early detail exit", func() bool {
-		ongoing := stripANSIAndTrimRight(model.view.OngoingSnapshot())
+	waitForProgramModelCondition(t, program, 2*time.Second, "ongoing view keeps deferred final visible after early detail exit", func(m *uiModel) bool {
+		ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 		return strings.Contains(ongoing, "foreground done")
 	})
 

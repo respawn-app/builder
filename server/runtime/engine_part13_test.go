@@ -304,7 +304,7 @@ func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCa
 	if len(client.calls) != 0 {
 		t.Fatalf("expected handoff scheduling to avoid immediate compaction model call, got %d", len(client.calls))
 	}
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
 		t.Fatalf("apply pending handoff: %v", err)
 	}
 	if len(client.calls) != 1 {
@@ -392,7 +392,7 @@ func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 	}
 
 	client.responses = nil
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
 		t.Fatal("expected first pending handoff attempt to fail when compaction summary response is missing")
 	}
 	if eng.pendingHandoffRequest == nil {
@@ -409,7 +409,7 @@ func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
 		t.Fatalf("retry pending handoff: %v", err)
 	}
 	if eng.pendingHandoffRequest != nil {
@@ -468,7 +468,7 @@ func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecom
 		appendFailures++
 		return errors.New("synthetic future-message append failure")
 	}
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
 		t.Fatal("expected first pending handoff attempt to fail while appending future-agent message")
 	}
 	if len(client.calls) != 1 {
@@ -482,7 +482,7 @@ func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecom
 	}
 
 	eng.beforePersistMessage = nil
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
 		t.Fatalf("retry pending future-agent message append: %v", err)
 	}
 	if len(client.calls) != 1 {
@@ -553,7 +553,7 @@ func TestReopenedSessionAfterTriggerHandoffFutureMessageAppendFailureRetriesWith
 		}
 		return nil
 	}
-	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+	if _, err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
 		t.Fatal("expected handoff future-message append to fail")
 	}
 	if len(client.calls) != 1 {

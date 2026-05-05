@@ -272,11 +272,15 @@ func customToolCallIDs(calls []llm.ToolCall) map[string]bool {
 
 func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID string) error {
 	e := s.engine
-	if err := e.applyPendingHandoffIfNeeded(ctx, stepID); err != nil {
+	handoffCompacted, err := e.applyPendingHandoffIfNeeded(ctx, stepID)
+	if err != nil {
 		return err
 	}
 	if err := e.requireAskQuestionForActiveGoal(); err != nil {
 		return err
+	}
+	if handoffCompacted {
+		return e.maybeAppendCompactionSoonReminder(ctx, stepID)
 	}
 	if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 		return err
