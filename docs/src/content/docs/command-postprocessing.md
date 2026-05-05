@@ -6,7 +6,7 @@ description: Configure Builder's shell command post-processing and ship your own
 ## Overview
 
 Builder can post-process shell command output before it is shown to the model.
-This is meant to reduce command noise and improve usefulness.
+It reduces command noise and adds useful execution context.
 Builder keeps this separate from command execution itself:
 
 - command runs normally
@@ -37,6 +37,18 @@ When `postprocessing_mode = "all"`:
 
 1. Builder built-in processors run first.
 2. Your hook runs second.
+
+## Built-ins
+
+Successful direct `go test ...` commands collapse to `PASS` when output has no benchmarks, coverage, or JSON data.
+
+Direct partial file reads add one context line before output:
+
+```text
+[Total line count: 742]
+```
+
+Builder applies that marker to simple `sed`, `head`, `tail`, `awk` line reads, and simple PowerShell `Get-Content` partial reads. It skips composed commands such as pipelines, whole-file reads, binary files, and files larger than 1 MB.
 
 ## Hook Protocol
 

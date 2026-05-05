@@ -634,6 +634,54 @@ func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	}
 }
 
+func TestExecCommandFileReadPostprocessorHandlesDirectCommandOnly(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "example.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	directInput, _ := json.Marshal(map[string]any{
+		"cmd":           "sed -n '1,1p' " + shellSingleQuote(path),
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 1_000,
+	})
+	directResult, err := execTool.Call(context.Background(), tools.Call{ID: "file-read-direct", Name: toolspec.ToolExecCommand, Input: directInput})
+	if err != nil {
+		t.Fatalf("direct exec_command call error: %v", err)
+	}
+	if directResult.IsError {
+		t.Fatalf("unexpected direct exec_command error: %s", string(directResult.Output))
+	}
+	if got := decodeStringToolOutput(t, directResult); got != "[Total line count: 2]\nalpha" {
+		t.Fatalf("direct output = %q", got)
+	}
+
+	pipelineInput, _ := json.Marshal(map[string]any{
+		"cmd":           "nl -ba " + shellSingleQuote(path) + " | sed -n '1,1p'",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 1_000,
+	})
+	pipelineResult, err := execTool.Call(context.Background(), tools.Call{ID: "file-read-pipeline", Name: toolspec.ToolExecCommand, Input: pipelineInput})
+	if err != nil {
+		t.Fatalf("pipeline exec_command call error: %v", err)
+	}
+	if pipelineResult.IsError {
+		t.Fatalf("unexpected pipeline exec_command error: %s", string(pipelineResult.Output))
+	}
+	pipelineOutput := decodeStringToolOutput(t, pipelineResult)
+	if strings.Contains(pipelineOutput, "[Total line count:") {
+		t.Fatalf("pipeline output should not include file-read context marker, got %q", pipelineOutput)
+	}
+	if !strings.Contains(pipelineOutput, "Exit code 0, output:") || !strings.Contains(pipelineOutput, "alpha") {
+		t.Fatalf("pipeline output missing normal shell response context, got %q", pipelineOutput)
+	}
+}
+
 func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 	workspace := t.TempDir()
 	manager := newBackgroundTestManager(t)
@@ -696,6 +744,10 @@ func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 	if !strings.Contains(secondText, "done") {
 		t.Fatalf("expected restored full output, got %q", secondText)
 	}
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {

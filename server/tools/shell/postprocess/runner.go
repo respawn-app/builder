@@ -57,7 +57,7 @@ func NewRunner(settings Settings) *Runner {
 	return &Runner{
 		mode:       mode,
 		hookPath:   strings.TrimSpace(settings.HookPath),
-		processors: []Processor{goTestSuccessProcessor{}},
+		processors: []Processor{goTestSuccessProcessor{}, fileReadContextProcessor{}},
 	}
 }
 
