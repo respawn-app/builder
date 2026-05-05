@@ -4,11 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -258,6 +261,72 @@ func TestLaunchdReloadExplainsOldServerStillRunningInsteadOfBootstrapCodeFive(t 
 	}
 }
 
+func TestLaunchdRestartIfInstalledRepeatedIntegration(t *testing.T) {
+	if os.Getenv("BUILDER_LAUNCHD_INTEGRATION") != "1" {
+		t.Skip("set BUILDER_LAUNCHD_INTEGRATION=1 to run real launchd service restart integration")
+	}
+	builderPath := strings.TrimSpace(os.Getenv("BUILDER_LAUNCHD_INTEGRATION_BUILDER"))
+	if builderPath == "" {
+		var err error
+		builderPath, err = exec.LookPath("builder")
+		if err != nil {
+			t.Fatalf("find builder binary: %v", err)
+		}
+	}
+	freePort := reserveFreeLocalPort(t)
+	root := t.TempDir()
+	wrapperPath := filepath.Join(root, "builder")
+	wrapper := fmt.Sprintf("#!/bin/sh\nexport BUILDER_SERVER_PORT=%d\nexport BUILDER_PERSISTENCE_ROOT=%s\nexec -a \"$0\" %s \"$@\"\n", freePort, shellQuote(filepath.Join(root, "persist")), shellQuote(builderPath))
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatalf("write builder wrapper: %v", err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	env := append(os.Environ(),
+		"HOME="+home,
+		fmt.Sprintf("BUILDER_SERVER_PORT=%d", freePort),
+		"BUILDER_PERSISTENCE_ROOT="+filepath.Join(root, "persist"),
+	)
+	runBuilder := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(wrapperPath, args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %s failed: %v\n%s", wrapperPath, strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	t.Cleanup(func() {
+		cmd := exec.Command(wrapperPath, "service", "uninstall")
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+
+	runBuilder("service", "install", "--force")
+	lastPID := 0
+	for i := 0; i < 3; i++ {
+		output := runBuilder("service", "restart", "--if-installed")
+		if !strings.Contains(output, "Restarted Builder background service.") {
+			t.Fatalf("restart output = %q, want restart confirmation", output)
+		}
+		status := runBuilder("service", "status", "--json")
+		var decoded serviceStatus
+		if err := json.Unmarshal([]byte(status), &decoded); err != nil {
+			t.Fatalf("decode status JSON: %v; raw=%q", err, status)
+		}
+		if !decoded.Installed || !decoded.Loaded || !decoded.Running || decoded.PID <= 0 {
+			t.Fatalf("status after restart %d = %+v, want installed/loaded/running with pid", i+1, decoded)
+		}
+		if lastPID > 0 && decoded.PID == lastPID {
+			t.Fatalf("pid did not change after restart %d: %d", i+1, decoded.PID)
+		}
+		lastPID = decoded.PID
+	}
+}
+
 func TestLaunchdStartReplacesStaleLoadedServiceAfterTransientBootstrapError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := testLaunchdServiceSpec(t)
@@ -422,4 +491,14 @@ func countLaunchdCommand(calls [][]string, name string) int {
 		}
 	}
 	return count
+}
+
+func reserveFreeLocalPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve local port: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	return listener.Addr().(*net.TCPAddr).Port
 }
