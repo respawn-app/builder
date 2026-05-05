@@ -107,10 +107,14 @@ func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPl
 	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
 		return SessionPlan{}, err
 	}
+	enabledTools, err := ActiveToolIDsForPlan(active, p.Config.Source, meta.Locked)
+	if err != nil {
+		return SessionPlan{}, err
+	}
 	return SessionPlan{
 		Store:               store,
 		ActiveSettings:      active,
-		EnabledTools:        ActiveToolIDs(active, p.Config.Source, meta.Locked),
+		EnabledTools:        enabledTools,
 		ConfiguredModelName: p.Config.Settings.Model,
 		SessionName:         meta.Name,
 		ModelContractLocked: meta.Locked != nil,
@@ -150,7 +154,13 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		if !plan.ModelContractLocked {
 			next.ConfiguredModelName = resolved.Model
 		}
-		next.EnabledTools = ActiveToolIDs(next.ActiveSettings, next.Source, plan.Store.Meta().Locked)
+		roleSource := sourceReportWithSubagentRoleSources(next.Source, plan.ActiveSettings, roleName)
+		enabledTools, err := ActiveToolIDsForPlan(next.ActiveSettings, roleSource, plan.Store.Meta().Locked)
+		if err != nil {
+			return SessionPlan{}, nil, err
+		}
+		next.EnabledTools = enabledTools
+		next.Source = roleSource
 		if strings.TrimSpace(warning) != "" {
 			warnings = append(warnings, warning)
 		}
@@ -207,7 +217,11 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 			next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
 		}
 		if strings.TrimSpace(overrides.Tools) != "" || strings.TrimSpace(overrides.Model) != "" {
-			next.EnabledTools = ActiveToolIDs(next.ActiveSettings, mergedSource, locked)
+			enabledTools, err := ActiveToolIDsForPlan(next.ActiveSettings, mergedSource, locked)
+			if err != nil {
+				return SessionPlan{}, nil, err
+			}
+			next.EnabledTools = enabledTools
 		}
 	}
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
@@ -238,6 +252,23 @@ func mergeOverrideSources(base config.SourceReport, override config.SourceReport
 		}
 	}
 	return merged
+}
+
+func sourceReportWithSubagentRoleSources(base config.SourceReport, settings config.Settings, roleName string) config.SourceReport {
+	normalizedRole := config.NormalizeSubagentRole(roleName)
+	if normalizedRole == "" {
+		return base
+	}
+	role, ok := settings.Subagents[normalizedRole]
+	if !ok || len(role.Sources) == 0 {
+		return base
+	}
+	next := base
+	next.Sources = cloneStringMap(base.Sources)
+	for key := range role.Sources {
+		next.Sources[key] = "subagent"
+	}
+	return next
 }
 
 func (p Planner) openStore(ctx context.Context, req SessionRequest) (*session.Store, error) {
@@ -473,6 +504,11 @@ func EffectiveSettings(base config.Settings, locked *session.LockedContract) con
 }
 
 func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []toolspec.ID {
+	ids, _ := ActiveToolIDsForPlan(settings, source, locked)
+	return ids
+}
+
+func ActiveToolIDsForPlan(settings config.Settings, source config.SourceReport, locked *session.LockedContract) ([]toolspec.ID, error) {
 	if locked != nil {
 		ids := make([]toolspec.ID, 0, len(locked.EnabledTools))
 		for _, raw := range locked.EnabledTools {
@@ -480,9 +516,43 @@ func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked 
 				ids = append(ids, id)
 			}
 		}
-		return DedupeSortToolIDs(ids)
+		return DedupeSortToolIDs(ids), nil
 	}
-	return DedupeSortToolIDs(config.EnabledToolIDs(settings))
+	enabled := cloneEnabledToolSet(settings.EnabledTools)
+	if bothEditToolSourcesDefault(source) {
+		if prefersPatchTool(settings) {
+			enabled[toolspec.ToolPatch] = true
+			enabled[toolspec.ToolEdit] = false
+		} else {
+			enabled[toolspec.ToolPatch] = false
+			enabled[toolspec.ToolEdit] = true
+		}
+	}
+	if enabled[toolspec.ToolPatch] && enabled[toolspec.ToolEdit] {
+		return nil, fmt.Errorf("tools.patch and tools.edit cannot both be enabled; set one to false")
+	}
+	return DedupeSortToolIDs(enabledToolIDs(enabled)), nil
+}
+
+func bothEditToolSourcesDefault(source config.SourceReport) bool {
+	return strings.TrimSpace(source.Sources["tools.patch"]) == "default" && strings.TrimSpace(source.Sources["tools.edit"]) == "default"
+}
+
+func prefersPatchTool(settings config.Settings) bool {
+	if settings.ProviderCapabilities.IsOpenAIFirstParty {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(settings.Model)), "gpt-")
+}
+
+func enabledToolIDs(enabled map[toolspec.ID]bool) []toolspec.ID {
+	ids := make([]toolspec.ID, 0, len(enabled))
+	for _, id := range toolspec.CatalogIDs() {
+		if enabled[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {

@@ -1,0 +1,483 @@
+package edit
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"unicode/utf8"
+
+	"builder/server/tools"
+	"builder/server/tools/fsguard"
+	patchtool "builder/server/tools/patch"
+	"builder/shared/toolspec"
+	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
+)
+
+const (
+	maxEditableBytes = 100 * 1024 * 1024
+	utf8BOM          = "\xef\xbb\xbf"
+)
+
+type Tool struct {
+	workspaceRoot                string
+	workspaceRootReal            string
+	workspaceRootInfo            os.FileInfo
+	workspaceOnly                bool
+	allowOutsideWorkspace        bool
+	outsideWorkspaceApprover     fsguard.Approver
+	outsideWorkspaceSessionMu    sync.RWMutex
+	outsideWorkspaceSessionAllow bool
+}
+
+type resolvedPath struct {
+	requested string
+	cleaned   string
+	real      string
+	symlink   bool
+}
+
+func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error) {
+	abs, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, tools.WrapMissingWorkspaceRootError(abs, fmt.Errorf("resolve workspace real path: %w", err))
+	}
+	rootInfo, err := os.Stat(real)
+	if err != nil {
+		return nil, tools.WrapMissingWorkspaceRootError(abs, fmt.Errorf("stat workspace root: %w", err))
+	}
+	t := &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceRootInfo: rootInfo, workspaceOnly: workspaceOnly}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(t)
+		}
+	}
+	return t, nil
+}
+
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolEdit
+}
+
+func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
+	in, err := parseInput(c.Input)
+	if err != nil {
+		return editErrorResult(c, err), nil
+	}
+	resolved, err := t.resolvePath(ctx, in.Path)
+	if err != nil {
+		return editErrorResult(c, err), nil
+	}
+	unlock := fsguard.LockPaths([]string{resolved.real})
+	defer unlock()
+	outcome, err := t.apply(ctx, resolved, in)
+	if err != nil {
+		return editErrorResult(c, err), nil
+	}
+	message := "ok"
+	if resolved.symlink {
+		message = "ok; warning: edited through symlink, real path is " + resolved.real + "; use that path directly next time"
+	}
+	result := editSuccessResult(c, message)
+	result.Presentation = &transcript.ToolCallMeta{
+		ToolName:     string(toolspec.ToolEdit),
+		Command:      "edit " + resolved.requested,
+		CompactText:  "edit " + resolved.requested,
+		PatchRender:  outcome.rendered,
+		RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		PatchSummary: outcome.rendered.SummaryText(),
+		PatchDetail:  outcome.rendered.DetailText(),
+	}
+	return result, nil
+}
+
+type applyOutcome struct {
+	rendered *patchformat.RenderedPatch
+}
+
+func (t *Tool) apply(ctx context.Context, path resolvedPath, in input) (applyOutcome, error) {
+	select {
+	case <-ctx.Done():
+		return applyOutcome{}, ctx.Err()
+	default:
+	}
+	info, statErr := os.Stat(path.real)
+	if statErr == nil && info.IsDir() {
+		return applyOutcome{}, failf("path is a directory: %s.", path.real)
+	}
+	if in.OldString == "" {
+		return t.create(path, in.NewString, info, statErr)
+	}
+	if errors.Is(statErr, os.ErrNotExist) {
+		return applyOutcome{}, failf("old_string matched 0 occurrences in %s. Provide exact current text or more context.", path.real)
+	}
+	if statErr != nil {
+		return applyOutcome{}, failf("stat path %s: %v", path.real, statErr)
+	}
+	if !info.Mode().IsRegular() {
+		return applyOutcome{}, failf("path is not a regular file: %s.", path.real)
+	}
+	if info.Size() > maxEditableBytes {
+		return applyOutcome{}, failf("maximum editable text file size is 100 MiB.")
+	}
+	if err := rejectBinaryExtension(path.real); err != nil {
+		return applyOutcome{}, err
+	}
+	original, err := os.ReadFile(path.real)
+	if err != nil {
+		return applyOutcome{}, failf("read %s: %v", path.real, err)
+	}
+	text, bom, err := decodeText(original, path.real)
+	if err != nil {
+		return applyOutcome{}, err
+	}
+	selection, err := selectReplacement(text, in)
+	if err != nil {
+		return applyOutcome{}, failf("%s in %s. Provide exact current text or more context.", err.Error(), path.real)
+	}
+	updatedText := applyReplacement(text, selection)
+	next := []byte(updatedText)
+	if bom {
+		next = append([]byte(utf8BOM), next...)
+	}
+	if bytes.Equal(next, original) {
+		return applyOutcome{}, failf("replacement produced no changes.")
+	}
+	if len(next) > maxEditableBytes {
+		return applyOutcome{}, failf("maximum editable text file size is 100 MiB.")
+	}
+	if err := writeAtomicallyIfUnchanged(path.real, next, info); err != nil {
+		return applyOutcome{}, err
+	}
+	return applyOutcome{rendered: renderEditDiff(path.requested, text, updatedText)}, nil
+}
+
+func (t *Tool) create(path resolvedPath, newText string, info os.FileInfo, statErr error) (applyOutcome, error) {
+	if len([]byte(newText)) > maxEditableBytes {
+		return applyOutcome{}, failf("maximum editable text file size is 100 MiB.")
+	}
+	if err := rejectBinaryExtension(path.real); err != nil {
+		return applyOutcome{}, err
+	}
+	if hasMixedLineEndings(newText) {
+		return applyOutcome{}, failf("create content uses mixed line endings.")
+	}
+	if err := rejectBinaryBytes([]byte(newText), path.real); err != nil {
+		return applyOutcome{}, err
+	}
+	existingBOM := false
+	if statErr == nil {
+		if info.IsDir() {
+			return applyOutcome{}, failf("path is a directory: %s.", path.real)
+		}
+		if !info.Mode().IsRegular() {
+			return applyOutcome{}, failf("path is not a regular file: %s.", path.real)
+		}
+		if info.Size() > maxEditableBytes {
+			return applyOutcome{}, failf("maximum editable text file size is 100 MiB.")
+		}
+		data, err := os.ReadFile(path.real)
+		if err != nil {
+			return applyOutcome{}, failf("read %s: %v", path.real, err)
+		}
+		text, bom, err := decodeText(data, path.real)
+		if err != nil {
+			return applyOutcome{}, err
+		}
+		if strings.TrimSpace(text) != "" {
+			return applyOutcome{}, failf("target file already contains text: %s.", path.real)
+		}
+		existingBOM = bom
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return applyOutcome{}, failf("stat path %s: %v", path.real, statErr)
+	}
+	next := []byte(newText)
+	if existingBOM && !strings.HasPrefix(newText, utf8BOM) {
+		next = append([]byte(utf8BOM), next...)
+	}
+	var before os.FileInfo
+	if statErr == nil {
+		before = info
+	}
+	if err := writeAtomicallyIfUnchanged(path.real, next, before); err != nil {
+		return applyOutcome{}, err
+	}
+	return applyOutcome{rendered: renderEditDiff(path.requested, "", string(next))}, nil
+}
+
+func decodeText(data []byte, path string) (string, bool, error) {
+	bom := bytes.HasPrefix(data, []byte(utf8BOM))
+	if bom {
+		data = data[len(utf8BOM):]
+	}
+	if len(data) > maxEditableBytes {
+		return "", false, failf("maximum editable text file size is 100 MiB.")
+	}
+	if err := rejectBinaryBytes(data, path); err != nil {
+		return "", false, err
+	}
+	return string(data), bom, nil
+}
+
+func rejectBinaryBytes(data []byte, path string) error {
+	if bytes.Contains(data, []byte{0}) {
+		return failf("binary file rejected: %s.", path)
+	}
+	if !utf8.Valid(data) {
+		return failf("invalid UTF-8 text file: %s.", path)
+	}
+	prefix := data
+	if len(prefix) > 8192 {
+		prefix = prefix[:8192]
+	}
+	for _, b := range prefix {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' {
+			return failf("binary file rejected: %s.", path)
+		}
+	}
+	return nil
+}
+
+func rejectBinaryExtension(path string) error {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".tiff", ".pdf", ".zip", ".gz", ".tgz", ".xz", ".bz2", ".7z", ".rar", ".tar", ".mp3", ".mp4", ".mov", ".avi", ".mkv", ".exe", ".dll", ".dylib", ".so", ".a", ".o", ".class", ".jar", ".wasm", ".woff", ".woff2", ".ttf", ".otf", ".sqlite", ".sqlite3", ".db":
+		return failf("binary file extension rejected: %s.", path)
+	default:
+		return nil
+	}
+}
+
+func hasMixedLineEndings(text string) bool {
+	hasCRLF := strings.Contains(text, "\r\n")
+	withoutCRLF := strings.ReplaceAll(text, "\r\n", "")
+	hasLF := strings.Contains(withoutCRLF, "\n")
+	hasCR := strings.Contains(withoutCRLF, "\r")
+	styles := 0
+	if hasCRLF {
+		styles++
+	}
+	if hasLF {
+		styles++
+	}
+	if hasCR {
+		styles++
+	}
+	return styles > 1
+}
+
+func writeAtomicallyIfUnchanged(path string, data []byte, before os.FileInfo) error {
+	if before != nil {
+		current, err := os.Stat(path)
+		if err != nil {
+			return failf("target changed before commit: %s.", path)
+		}
+		if current.Size() != before.Size() || !current.ModTime().Equal(before.ModTime()) || current.Mode().Perm() != before.Mode().Perm() {
+			return failf("target changed before commit: %s.", path)
+		}
+	} else if _, err := os.Stat(path); err == nil {
+		return failf("target appeared before commit: %s.", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return failf("stat path %s: %v", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return failf("create parent dir for %s: %v", path, err)
+	}
+	mode := os.FileMode(0o644)
+	if before != nil {
+		mode = before.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".builder-edit-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return failf("stage write failed: %v", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return failf("stage write failed: %v", err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return failf("stage write failed: %v", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return failf("stage write failed: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return failf("stage write failed: %v", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return failf("commit write %s: %v", path, err)
+	}
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
+func (t *Tool) outsideWorkspaceSessionAllowed() bool {
+	t.outsideWorkspaceSessionMu.RLock()
+	defer t.outsideWorkspaceSessionMu.RUnlock()
+	return t.outsideWorkspaceSessionAllow
+}
+
+func (t *Tool) setOutsideWorkspaceSessionAllowed(allow bool) {
+	t.outsideWorkspaceSessionMu.Lock()
+	t.outsideWorkspaceSessionAllow = allow
+	t.outsideWorkspaceSessionMu.Unlock()
+}
+
+func (t *Tool) resolvePath(ctx context.Context, requested string) (resolvedPath, error) {
+	if runtime.GOOS == "windows" && (strings.HasPrefix(requested, `\\`) || strings.HasPrefix(requested, `//`)) {
+		return resolvedPath{}, failf("UNC paths are not allowed.")
+	}
+	candidate := requested
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(t.workspaceRoot, candidate)
+	}
+	cleaned := filepath.Clean(candidate)
+	approved := map[string]bool{}
+	if _, err := t.outsideGuard().Allow(ctx, requested, cleaned, approved); err != nil {
+		return resolvedPath{}, err
+	}
+	real, err := resolveRealTarget(cleaned)
+	if err != nil {
+		return resolvedPath{}, err
+	}
+	if _, err := t.outsideGuard().Allow(ctx, requested, real, approved); err != nil {
+		return resolvedPath{}, err
+	}
+	return resolvedPath{requested: requested, cleaned: cleaned, real: real, symlink: t.isUserSymlink(cleaned, real)}, nil
+}
+
+func (t *Tool) isUserSymlink(cleaned string, real string) bool {
+	if cleaned == real {
+		return false
+	}
+	rel, err := filepath.Rel(t.workspaceRoot, cleaned)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true
+	}
+	expected := filepath.Clean(filepath.Join(t.workspaceRootReal, rel))
+	return expected != real
+}
+
+func resolveRealTarget(cleaned string) (string, error) {
+	if real, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return filepath.Clean(real), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", failf("resolve path %q: %v", cleaned, err)
+	}
+	parent := filepath.Dir(cleaned)
+	for {
+		info, err := os.Stat(parent)
+		if err == nil {
+			if !info.IsDir() {
+				return "", failf("parent path is not a directory: %s.", parent)
+			}
+			parentReal, evalErr := filepath.EvalSymlinks(parent)
+			if evalErr != nil {
+				return "", failf("resolve parent path for %q: %v", cleaned, evalErr)
+			}
+			rel, relErr := filepath.Rel(parent, cleaned)
+			if relErr != nil {
+				return "", failf("resolve path %q: %v", cleaned, relErr)
+			}
+			return filepath.Clean(filepath.Join(parentReal, rel)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", failf("stat parent path for %q: %v", cleaned, err)
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return "", failf("resolve parent path for %q: no existing ancestor", cleaned)
+		}
+		parent = next
+	}
+}
+
+func (t *Tool) outsideGuard() fsguard.Guard {
+	return fsguard.New(
+		t.workspaceRoot,
+		t.workspaceRootReal,
+		t.workspaceRootInfo,
+		t.workspaceOnly,
+		t.allowOutsideWorkspace,
+		t.outsideWorkspaceApprover,
+		t.outsideWorkspaceSessionAllowed,
+		t.setOutsideWorkspaceSessionAllowed,
+		"If it's essential to the task, ask the user to make the edit manually at the end of the task.",
+		fsguard.ErrorLabels{
+			OutsidePath: "edit target outside workspace",
+		},
+		fsguard.FailureFactory{
+			NoPermission: func(path string, reason string) error {
+				return failf("no file edit permission for %s. %s", path, reason)
+			},
+			DefaultApprovalFailed: func(path string, reason string) error {
+				return failf("file edit approval failed for %s. %s", path, reason)
+			},
+			DefaultUserDenied: func(path string, commentary string) error {
+				if strings.TrimSpace(commentary) == "" {
+					return failf("user denied the edit for %s.", path)
+				}
+				return failf("user denied the edit for %s.\nUser said: %s", path, commentary)
+			},
+		},
+		patchtool.IsPathInTemporaryDir,
+		nil,
+	)
+}
+
+func renderEditDiff(path string, oldText string, newText string) *patchformat.RenderedPatch {
+	doc := patchformat.Document{Hunks: []any{patchformat.UpdateFile{
+		Path:    path,
+		Changes: diffLines(oldText, newText),
+	}}}
+	rendered := patchformat.Format(doc, "")
+	return &rendered
+}
+
+func diffLines(oldText, newText string) []patchformat.ChangeLine {
+	oldLines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(oldText, "\r\n", "\n"), "\n"), "\n")
+	newLines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(newText, "\r\n", "\n"), "\n"), "\n")
+	if len(oldLines) == 1 && oldLines[0] == "" {
+		oldLines = nil
+	}
+	if len(newLines) == 1 && newLines[0] == "" {
+		newLines = nil
+	}
+	commonPrefix := 0
+	for commonPrefix < len(oldLines) && commonPrefix < len(newLines) && oldLines[commonPrefix] == newLines[commonPrefix] {
+		commonPrefix++
+	}
+	oldSuffix := len(oldLines)
+	newSuffix := len(newLines)
+	for oldSuffix > commonPrefix && newSuffix > commonPrefix && oldLines[oldSuffix-1] == newLines[newSuffix-1] {
+		oldSuffix--
+		newSuffix--
+	}
+	out := make([]patchformat.ChangeLine, 0, oldSuffix-commonPrefix+newSuffix-commonPrefix)
+	for _, line := range oldLines[commonPrefix:oldSuffix] {
+		out = append(out, patchformat.ChangeLine{Kind: '-', Content: line})
+	}
+	for _, line := range newLines[commonPrefix:newSuffix] {
+		out = append(out, patchformat.ChangeLine{Kind: '+', Content: line})
+	}
+	if len(out) == 0 && oldText != newText {
+		out = append(out, patchformat.ChangeLine{Kind: '-', Content: oldText}, patchformat.ChangeLine{Kind: '+', Content: newText})
+	}
+	return out
+}

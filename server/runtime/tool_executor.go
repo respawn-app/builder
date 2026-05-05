@@ -32,6 +32,9 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		}
 		toolID, knownTool := toolspec.ParseID(call.Name)
 		executableCall := call
+		if knownTool {
+			executableCall.Name = string(toolID)
+		}
 		if call.Custom && knownTool {
 			executableCall.Input = executorInputForCustomTool(toolID, call.CustomInput)
 		}

@@ -8,8 +8,9 @@ import (
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
-	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderRunCommand}}", SystemPromptTemplateArgs{
+	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderRunCommand}} edit={{.ManualEditInstruction}}", SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
+		ManualEditInstruction:        "Use edit.",
 	}, "")
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
@@ -17,6 +18,9 @@ func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
 	expectedCmd := "cmd=" + selfcmd.RunCommandPrefix()
 	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
+	}
+	if !strings.Contains(rendered, "edit=Use edit.") {
+		t.Fatalf("expected manual edit instruction rendered, got %q", rendered)
 	}
 }
 

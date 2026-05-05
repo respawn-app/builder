@@ -17,6 +17,9 @@ func TestParseID(t *testing.T) {
 		{in: "view_image", want: ToolViewImage, ok: true},
 		{in: "read_image", want: ToolViewImage, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
+		{in: "edit", want: ToolEdit, ok: true},
+		{in: "replace", want: ToolEdit, ok: true},
+		{in: "write", want: ToolEdit, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "trigger_handoff", want: ToolTriggerHandoff, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
@@ -40,6 +43,14 @@ func TestParseConfigIDAndConfigName(t *testing.T) {
 	}
 	if got, ok := ParseConfigID("bash"); ok {
 		t.Fatalf("ParseConfigID(bash) unexpectedly resolved to %q", got)
+	}
+	if got, ok := ParseConfigID("edit"); !ok || got != ToolEdit {
+		t.Fatalf("ParseConfigID(edit) = %q, %t", got, ok)
+	}
+	for _, alias := range []string{"replace", "write"} {
+		if got, ok := ParseConfigID(alias); ok {
+			t.Fatalf("ParseConfigID(%s) unexpectedly resolved to %q", alias, got)
+		}
 	}
 	if got := ConfigName(ToolExecCommand); got != "shell" {
 		t.Fatalf("ConfigName(exec_command) = %q, want shell", got)

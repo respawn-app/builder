@@ -39,12 +39,13 @@ type TranscriptWindowSnapshot struct {
 }
 
 type storedToolCompletion struct {
-	CallID      string          `json:"call_id"`
-	Name        string          `json:"name"`
-	IsError     bool            `json:"is_error"`
-	Output      json.RawMessage `json:"output"`
-	Summary     string          `json:"summary,omitempty"`
-	OngoingText string          `json:"ongoing_text,omitempty"`
+	CallID       string                   `json:"call_id"`
+	Name         string                   `json:"name"`
+	IsError      bool                     `json:"is_error"`
+	Output       json.RawMessage          `json:"output"`
+	Summary      string                   `json:"summary,omitempty"`
+	OngoingText  string                   `json:"ongoing_text,omitempty"`
+	Presentation *transcript.ToolCallMeta `json:"presentation,omitempty"`
 }
 
 type chatStore struct {
@@ -155,12 +156,13 @@ func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
 		return fmt.Errorf("decode tool_completed event: %w", err)
 	}
 	s.recordToolCompletion(tools.Result{
-		CallID:      completion.CallID,
-		Name:        toolspec.ID(completion.Name),
-		IsError:     completion.IsError,
-		Output:      completion.Output,
-		Summary:     completion.Summary,
-		OngoingText: completion.OngoingText,
+		CallID:       completion.CallID,
+		Name:         toolspec.ID(completion.Name),
+		IsError:      completion.IsError,
+		Output:       completion.Output,
+		Summary:      completion.Summary,
+		OngoingText:  completion.OngoingText,
+		Presentation: completion.Presentation,
 	})
 	return nil
 }

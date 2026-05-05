@@ -10,6 +10,7 @@ import (
 	"builder/prompts"
 	"builder/server/session"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type systemPromptSnapshotOptions struct {
@@ -28,6 +29,7 @@ func (e *Engine) buildSystemPromptSnapshotForRoot(locked session.LockedContract,
 	}
 	args := prompts.SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: e.estimatedToolCallsForLockedContext(locked),
+		ManualEditInstruction:        manualEditInstruction(e.cfg.EnabledTools),
 	}
 	template, sourcePath, hasCustom, err := readSystemPromptTemplate(systemPromptSnapshotOptions{
 		WorkspaceRoot:     workspaceRoot,
@@ -44,6 +46,18 @@ func (e *Engine) buildSystemPromptSnapshotForRoot(locked session.LockedContract,
 		return rendered, nil
 	}
 	return prompts.MainSystemPrompt(includeToolPreambles, args), nil
+}
+
+func manualEditInstruction(enabled []toolspec.ID) string {
+	for _, id := range enabled {
+		if id == toolspec.ToolPatch {
+			return "Use `patch` for manual code edits. Do not use cat or any other commands when creating or editing files. Formatting commands or bulk edits don't need to be done with the patch tool."
+		}
+		if id == toolspec.ToolEdit {
+			return "Use `edit` for manual code edits. Do not use cat or any other commands when creating or editing files. Formatting commands or bulk edits don't need to be done with the edit tool."
+		}
+	}
+	return "Use shell carefully for manual code edits when no dedicated edit tool is enabled."
 }
 
 func (e *Engine) systemPromptWorkspaceRoot() string {

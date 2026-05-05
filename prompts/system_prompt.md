@@ -26,7 +26,7 @@ These best practices are here to make your life better; follow them unless the u
 
 - **NEVER** use destructive commands like `git reset --hard` or `git checkout --` unless specifically requested by the user.
 - Default to ASCII when editing or creating files. Only introduce non-ASCII or other Unicode characters when there is a clear justification and the file already uses them.
-- Use `patch` for manual code edits. Do not use cat or any other commands when creating or editing files. Formatting commands or bulk edits don't need to be done with the patch tool.
+- {{.ManualEditInstruction}}
 - Do not use Python to read/write files when a simple shell command or patch would suffice.
 - You may be in a dirty git worktree.
   * Do not revert existing changes you did not make unless explicitly requested, since these changes were made by the user.

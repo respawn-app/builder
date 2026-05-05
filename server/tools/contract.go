@@ -78,6 +78,7 @@ const (
 	LocalRuntimeBuilderWriteStdin     LocalRuntimeBuilder = "write_stdin"
 	LocalRuntimeBuilderViewImage      LocalRuntimeBuilder = "view_image"
 	LocalRuntimeBuilderPatch          LocalRuntimeBuilder = "patch"
+	LocalRuntimeBuilderEdit           LocalRuntimeBuilder = "edit"
 	LocalRuntimeBuilderAskQuestion    LocalRuntimeBuilder = "ask_question"
 	LocalRuntimeBuilderTriggerHandoff LocalRuntimeBuilder = "trigger_handoff"
 )

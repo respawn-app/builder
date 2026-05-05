@@ -33,6 +33,9 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 	if r.OngoingText != "" {
 		payload["ongoing_text"] = r.OngoingText
 	}
+	if r.Presentation != nil {
+		payload["presentation"] = r.Presentation
+	}
 	_, err := e.store.AppendEvent(stepID, "tool_completed", payload)
 	if err == nil {
 		e.markCurrentRequestShapeDirtyForSignificantMutation()

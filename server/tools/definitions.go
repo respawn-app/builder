@@ -163,6 +163,44 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
+		ID:             toolspec.ToolEdit,
+		Aliases:        []string{"replace", "write"},
+		Description:    "Replace text in a file, create a missing or empty file, or delete matched text. old_string should match current file content and include enough context to be unique.",
+		DefaultEnabled: false,
+		Contract: localContract(
+			LocalRuntimeBuilderEdit,
+			RequestExposure{Enabled: true},
+			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
+			true,
+			editToolCallMeta(toolspec.ToolEdit),
+			formatEditToolResult,
+		),
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "old_string", "new_string"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "File path to edit. Relative paths resolve from the workspace root; absolute paths are allowed."
+    },
+    "old_string": {
+      "type": "string",
+      "description": "Exact current text to replace. Include enough surrounding context to make the match unique. Use an empty string only to create a missing or empty file."
+    },
+    "new_string": {
+      "type": "string",
+      "description": "Replacement text. Use an empty string to delete the matched text."
+    },
+    "replace_all": {
+      "type": "boolean",
+      "description": "Replace all occurrences of the selected match. Defaults to false."
+    }
+  }
+}`),
+	},
+	{
 		ID:             toolspec.ToolAskQuestion,
 		Aliases:        nil,
 		Description:    "Ask the user a question. You should ask the user when planning or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, architecture, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if applicable, and providing one recommended option you deem best for user goals.",

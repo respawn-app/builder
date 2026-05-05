@@ -1,0 +1,40 @@
+package fsguard
+
+import (
+	"testing"
+	"time"
+)
+
+func TestLockPathsDoesNotBlockUnrelatedPaths(t *testing.T) {
+	unlockA := LockPaths([]string{"a"})
+
+	unrelated := make(chan struct{})
+	go func() {
+		unlockB := LockPaths([]string{"b"})
+		unlockB()
+		close(unrelated)
+	}()
+	select {
+	case <-unrelated:
+	case <-time.After(time.Second):
+		t.Fatal("unrelated path lock blocked")
+	}
+
+	same := make(chan struct{})
+	go func() {
+		unlockA2 := LockPaths([]string{"a"})
+		unlockA2()
+		close(same)
+	}()
+	select {
+	case <-same:
+		t.Fatal("same path lock did not block")
+	case <-time.After(50 * time.Millisecond):
+	}
+	unlockA()
+	select {
+	case <-same:
+	case <-time.After(time.Second):
+		t.Fatal("same path lock did not unblock")
+	}
+}

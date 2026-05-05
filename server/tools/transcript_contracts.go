@@ -168,6 +168,22 @@ func patchToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage
 	}
 }
 
+func editToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
+		path := parseEditToolCallPath(raw)
+		command := "edit"
+		if path != "" {
+			command += " " + path
+		}
+		return transcript.ToolCallMeta{
+			ToolName:    string(toolID),
+			Command:     command,
+			CompactText: command,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		}
+	}
+}
+
 func formatGenericToolResult(result Result) string {
 	output := strings.TrimSpace(formatOutputDefault(result.Output))
 	if output == "" {
@@ -313,6 +329,14 @@ func formatPatchToolResult(result Result) string {
 	return formatGenericToolResult(result)
 }
 
+func formatEditToolResult(result Result) string {
+	var message string
+	if err := json.Unmarshal(result.Output, &message); err == nil {
+		return strings.TrimSpace(message)
+	}
+	return formatGenericToolResult(result)
+}
+
 func formatViewImageToolResult(result Result) string {
 	if summary, ok := formatViewImageOutput(result.Output); ok {
 		return summary
@@ -432,6 +456,24 @@ func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact
 	}
 	r := patchformat.Render(patchText, cwd)
 	return r.DetailText(), r.SummaryText(), &r, true
+}
+
+func parseEditToolCallPath(raw json.RawMessage) string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	for _, name := range []string{"path", "file_path", "filePath"} {
+		rawValue, ok := obj[name]
+		if !ok {
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(rawValue, &value); err == nil {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func detectShellRenderHint(ctx ToolCallContext, toolID toolspec.ID, raw json.RawMessage, command string) *transcript.ToolRenderHint {

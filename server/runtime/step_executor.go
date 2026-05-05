@@ -248,7 +248,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		}
 		customToolCalls := customToolCallIDs(localToolCalls)
 		for _, result := range results {
-			if result.Name == toolspec.ToolPatch && !result.IsError {
+			if isSuccessfulFileEditResult(result) {
 				patchEditsApplied = true
 			}
 			msg := llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}
@@ -261,6 +261,13 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return stepLoopResult{}, err
 		}
 	}
+}
+
+func isSuccessfulFileEditResult(result tools.Result) bool {
+	if result.IsError {
+		return false
+	}
+	return result.Name == toolspec.ToolPatch || result.Name == toolspec.ToolEdit
 }
 
 func customToolCallIDs(calls []llm.ToolCall) map[string]bool {

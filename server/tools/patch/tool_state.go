@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"builder/server/tools/fsguard"
 	patchformat "builder/shared/transcript/patchformat"
 )
 
@@ -49,6 +50,43 @@ func (s *applyState) hasDeletedAncestor(path string) bool {
 
 func (s *applyState) resolve(path string, mustExist bool) (string, error) {
 	return s.tool.resolvePath(s.ctx, path, mustExist, s.approvedOutside)
+}
+
+func (s *applyState) lockDocumentPaths(doc patchformat.Document) (func(), error) {
+	paths := make([]string, 0, len(doc.Hunks))
+	addPath := func(raw string, mustExist bool) error {
+		if strings.TrimSpace(raw) == "" {
+			return nil
+		}
+		resolved, err := s.resolve(raw, mustExist)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, resolved)
+		return nil
+	}
+	for _, hunk := range doc.Hunks {
+		switch op := hunk.(type) {
+		case patchformat.AddFile:
+			if err := addPath(op.Path, false); err != nil {
+				return nil, err
+			}
+		case patchformat.DeleteFile:
+			if err := addPath(op.Path, true); err != nil {
+				return nil, err
+			}
+		case patchformat.UpdateFile:
+			if err := addPath(op.Path, false); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(op.MoveTo) != "" {
+				if err := addPath(op.MoveTo, false); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return fsguard.LockPaths(paths), nil
 }
 
 func (s *applyState) getState(path string) (*patchFileState, error) {

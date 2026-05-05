@@ -198,7 +198,14 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	if resultIdx >= 0 {
 		entryEnd = resultIdx
 	}
-	lines := m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall)
+	effectiveMeta := entry.ToolCall
+	if resultIdx >= 0 && m.transcript[resultIdx].ToolCall != nil {
+		effectiveMeta = m.transcript[resultIdx].ToolCall
+		if isPatchToolCall(effectiveMeta) {
+			blockRole = toolBlockRoleFromResult(roleFromEntry(m.transcript[resultIdx]), RenderIntentToolPatch)
+		}
+	}
+	lines := m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, effectiveMeta)
 	if opts.mode == transcriptBlockModeOngoing {
 		lines = m.ongoingToolWithTreeGuideWithSymbol(blockRole, lines, "")
 	}
@@ -228,6 +235,9 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	resultSummary := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcript[resultIdx]
+		if resultEntry.ToolCall != nil {
+			combined = toolCallDisplayText(resultEntry.ToolCall, combined)
+		}
 		resultRole := roleFromEntry(resultEntry)
 		resultSummary = strings.TrimSpace(resultEntry.ToolResultSummary)
 		omitSuccessfulResult := entry.ToolCall != nil && entry.ToolCall.OmitSuccessfulResult && resultRole != TranscriptRoleToolResultError
@@ -244,6 +254,12 @@ func (m Model) detailToolCallSpec(entryIndex int, entry TranscriptEntry, consume
 	absoluteIndex := m.absoluteTranscriptIndex(entryIndex)
 	absoluteEnd := m.absoluteTranscriptIndex(entryEnd)
 	meta := cloneToolCallMeta(entry.ToolCall)
+	if entryEnd != entryIndex && m.transcript[entryEnd].ToolCall != nil {
+		meta = cloneToolCallMeta(m.transcript[entryEnd].ToolCall)
+		if isPatchToolCall(meta) {
+			blockRole = toolBlockRoleFromResult(roleFromEntry(m.transcript[entryEnd]), RenderIntentToolPatch)
+		}
+	}
 	return detailBlockSpec{
 		role:       blockRole,
 		entryIndex: absoluteIndex,

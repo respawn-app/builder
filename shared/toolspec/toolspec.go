@@ -12,6 +12,7 @@ const (
 	ToolWriteStdin     ID = "write_stdin"
 	ToolViewImage      ID = "view_image"
 	ToolPatch          ID = "patch"
+	ToolEdit           ID = "edit"
 	ToolAskQuestion    ID = "ask_question"
 	ToolTriggerHandoff ID = "trigger_handoff"
 	ToolWebSearch      ID = "web_search"
@@ -19,6 +20,7 @@ const (
 
 var catalogIDs = []ID{
 	ToolAskQuestion,
+	ToolEdit,
 	ToolExecCommand,
 	ToolPatch,
 	ToolTriggerHandoff,
@@ -41,6 +43,7 @@ var parseAliases = map[string]ID{
 	"bash":            ToolExecCommand,
 	"bash_command":    ToolExecCommand,
 	"exec_command":    ToolExecCommand,
+	"edit":            ToolEdit,
 	"patch":           ToolPatch,
 	"read_image":      ToolViewImage,
 	"shell":           ToolExecCommand,
@@ -48,11 +51,14 @@ var parseAliases = map[string]ID{
 	"trigger_handoff": ToolTriggerHandoff,
 	"view_image":      ToolViewImage,
 	"web_search":      ToolWebSearch,
+	"replace":         ToolEdit,
+	"write":           ToolEdit,
 	"write_stdin":     ToolWriteStdin,
 }
 
 var configAliases = map[string]ID{
 	"ask_question":    ToolAskQuestion,
+	"edit":            ToolEdit,
 	"exec_command":    ToolExecCommand,
 	"patch":           ToolPatch,
 	"read_image":      ToolViewImage,

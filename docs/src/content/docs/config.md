@@ -61,7 +61,9 @@ model_request_seconds = 400
 
 [tools]
 shell = true
-patch = true
+# Leave both patch/edit commented to use Builder's model-based default.
+# patch = true
+# edit = false
 view_image = true
 web_search = true
 trigger_handoff = true # proactive compaction by the model
@@ -121,7 +123,7 @@ verbose_output = false # show in ongoing transcript
 | `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `builder run --provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |
 | `openai_base_url` | string | `""` | `BUILDER_OPENAI_BASE_URL` | `builder run --openai-base-url` | OpenAI-compatible base URL. Must be used with `provider_override=openai` or with no explicit provider override. Cannot be changed mid-session. |
 | `store` | bool | `false` | `BUILDER_STORE` |  | Sets OpenAI Responses `store=true` for main model requests. |
-| `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets the `patch` tool edit files outside the workspace root. This is not sandboxing - model can still bypass this easily. |
+| `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets first-class file edit tools edit files outside the workspace root. This is not sandboxing - model can still bypass this easily. |
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
 | `context_compaction_threshold_tokens` | int | `258400` | `BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS` |  | Auto-compaction threshold. Must be `> 0`, `< model_context_window`, and at least `50%` of `model_context_window`. The default is derived from the default context window. |
 | `pre_submit_compaction_lead_tokens` | int | `35000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Fixed pre-submit runway reserve before auto-compaction. Builder compacts before sending the next user prompt once (`context_compaction_threshold_tokens` - this threshold) is reached. |
@@ -146,7 +148,7 @@ Configure the supervisor agent that oversees model changes.
 
 | Key | Type | Default | Env | Description |
 | --- | --- | --- | --- | --- |
-| `reviewer.frequency` | string | `edits` | `BUILDER_REVIEWER_FREQUENCY` | Allowed: `off`, `all`, `edits`. `all` runs the reviewer after every completed assistant turn. `edits` runs it only after successful `patch` edits. |
+| `reviewer.frequency` | string | `edits` | `BUILDER_REVIEWER_FREQUENCY` | Allowed: `off`, `all`, `edits`. `all` runs the reviewer after every completed assistant turn. `edits` runs it only after successful first-class file edits. |
 | `reviewer.model` | string | inherits `model` | `BUILDER_REVIEWER_MODEL` | Separate model for the reviewer pass. If unset, Builder uses main `model`. |
 | `reviewer.thinking_level` | string | inherits `thinking_level` | `BUILDER_REVIEWER_THINKING_LEVEL` | Allowed: `low`, `medium`, `high`, `xhigh`. |
 | `reviewer.system_prompt_file` | string | `""` |  | Path to a custom supervisor system prompt file. Relative paths resolve from the config file directory. Workspace config overrides global config; no CLI or environment override is provided. |
@@ -188,7 +190,8 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `builder run --
 | --- | --- | --- |
 | `tools.ask_question` | `true` | Tool to ask interactive questions |
 | `tools.shell` | `true` | The primary shell tool. Internally this maps to `exec_command`. |
-| `tools.patch` | `true` | The edit tool |
+| `tools.patch` | dynamic | Freeform patch grammar edit tool |
+| `tools.edit` | dynamic | JSON text replacement/create/delete edit tool |
 | `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
 | `tools.web_search` | `true` | Tool to search the web |
@@ -197,6 +200,8 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `builder run --
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
+- `tools.patch` and `tools.edit` are mutually exclusive. If both are left at their defaults, Builder chooses `patch` for first-party OpenAI providers or `gpt-*` model names, and `edit` otherwise.
+- To force `edit`, set `edit = true` and `patch = false`. To force `patch`, set `patch = true` and `edit = false`.
 
 ### Subagents
 

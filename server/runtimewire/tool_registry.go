@@ -3,6 +3,7 @@ package runtimewire
 import (
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
+	edittool "builder/server/tools/edit"
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
@@ -62,6 +63,16 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 			true,
 			patchtool.WithAllowOutsideWorkspace(ctx.AllowNonCwdEdits),
 			patchtool.WithOutsideWorkspaceApprover(ctx.OutsideWorkspaceEditApprover),
+		)
+	case tools.LocalRuntimeBuilderEdit:
+		if ctx.OutsideWorkspaceEditApprover == nil {
+			return nil, fmt.Errorf("edit outside-workspace approver is unavailable")
+		}
+		return edittool.New(
+			ctx.WorkspaceRoot,
+			true,
+			edittool.WithAllowOutsideWorkspace(ctx.AllowNonCwdEdits),
+			edittool.WithOutsideWorkspaceApprover(ctx.OutsideWorkspaceEditApprover),
 		)
 	case tools.LocalRuntimeBuilderAskQuestion:
 		if ctx.AskQuestionBroker == nil {
