@@ -104,6 +104,7 @@ type uiInputFeatureState struct {
 
 type uiPresentationFeatureState struct {
 	theme           string
+	activeSurface   uiSurface
 	altScreenActive bool
 	terminalFocus   *terminalFocusState
 	terminalCursor  *uiTerminalCursorState

@@ -206,8 +206,11 @@ func TestWorktreeCommandOpensOverlayAndRendersPage(t *testing.T) {
 	if updated.inputMode() != uiInputModeWorktree {
 		t.Fatalf("input mode = %q, want %q", updated.inputMode(), uiInputModeWorktree)
 	}
-	if updated.view.Mode() != "detail" {
-		t.Fatalf("view mode = %q, want detail", updated.view.Mode())
+	if updated.view.Mode() != "ongoing" {
+		t.Fatalf("view mode = %q, want ongoing", updated.view.Mode())
+	}
+	if updated.surface() != uiSurfaceWorktree {
+		t.Fatalf("surface = %q, want worktree", updated.surface())
 	}
 	if len(updated.transcriptEntries) != 0 {
 		t.Fatalf("did not expect transcript feedback, got %d entries", len(updated.transcriptEntries))

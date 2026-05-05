@@ -466,17 +466,17 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !testProcessListOpen(updated) || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected /ps overlay open in detail mode, visible=%t mode=%q", testProcessListOpen(updated), updated.view.Mode())
+	if !testProcessListOpen(updated) || updated.surface() != uiSurfaceProcessList {
+		t.Fatalf("expected /ps overlay surface open, visible=%t surface=%q", testProcessListOpen(updated), updated.surface())
 	}
 
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated = next.(*uiModel)
-	if !testProcessListOpen(updated) || !testProcessListOwnsTranscriptMode(updated) {
-		t.Fatalf("expected shift+tab ignored while /ps overlay open, visible=%t overlay=%t", testProcessListOpen(updated), testProcessListOwnsTranscriptMode(updated))
+	if !testProcessListOpen(updated) || !testProcessListSurfaceActive(updated) {
+		t.Fatalf("expected shift+tab ignored while /ps overlay open, visible=%t surface=%t", testProcessListOpen(updated), testProcessListSurfaceActive(updated))
 	}
-	if updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected shift+tab to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected shift+tab to keep ongoing transcript mode while /ps overlay open, got %q", updated.view.Mode())
 	}
 	if cmd != nil {
 		t.Fatal("expected no transcript toggle command while /ps overlay is open")
@@ -484,11 +484,11 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	updated = next.(*uiModel)
-	if !testProcessListOpen(updated) || !testProcessListOwnsTranscriptMode(updated) {
-		t.Fatalf("expected ctrl+t ignored while /ps overlay open, visible=%t overlay=%t", testProcessListOpen(updated), testProcessListOwnsTranscriptMode(updated))
+	if !testProcessListOpen(updated) || !testProcessListSurfaceActive(updated) {
+		t.Fatalf("expected ctrl+t ignored while /ps overlay open, visible=%t surface=%t", testProcessListOpen(updated), testProcessListSurfaceActive(updated))
 	}
-	if updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected ctrl+t to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ctrl+t to keep ongoing transcript mode while /ps overlay open, got %q", updated.view.Mode())
 	}
 	if cmd != nil {
 		t.Fatal("expected no transcript toggle command for ctrl+t while /ps overlay is open")

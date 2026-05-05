@@ -55,7 +55,7 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForTestCondition(t, 2*time.Second, "/ps overlay to close", func() bool {
-		return !model.processList.isOpen() && !model.processList.ownsTranscriptMode && model.view.Mode() == tui.ModeOngoing
+		return !model.processList.isOpen() && model.surface() != uiSurfaceProcessList && model.view.Mode() == tui.ModeOngoing
 	})
 	waitForTestCondition(t, 2*time.Second, "/ps alternate scroll to disable", func() bool {
 		return strings.Count(strings.Join(terminalSequences, ""), "\x1b[?1007l") > 0

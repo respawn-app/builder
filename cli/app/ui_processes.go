@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/tui"
 	"builder/server/tools"
 	"builder/shared/clientui"
 	"builder/shared/textutil"
@@ -76,37 +75,16 @@ func (m *uiModel) openProcessList() {
 
 func (m *uiModel) closeProcessList() {
 	m.processList.open = false
-	m.processList.ownsTranscriptMode = false
 	m.refreshProcessEntries()
 	m.restorePrimaryInputMode()
 }
 
 func (m *uiModel) pushProcessOverlayIfNeeded() tea.Cmd {
-	if m.processList.ownsTranscriptMode {
-		return nil
-	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
-	}
-	m.processList.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceProcessList)
 }
 
 func (m *uiModel) popProcessOverlayIfNeeded() tea.Cmd {
-	if !m.processList.ownsTranscriptMode {
-		return nil
-	}
-	m.processList.ownsTranscriptMode = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
-	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) moveProcessSelection(delta int) {

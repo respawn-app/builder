@@ -25,7 +25,7 @@ func (m *uiModel) refreshRollbackCandidates() {
 	if len(m.rollback.candidates) == 0 {
 		m.rollback.selection = 0
 		m.rollback.phase = uiRollbackPhaseInactive
-		m.rollback.ownsTranscriptMode = false
+		m.rollback.restoreTranscriptMode = ""
 		m.rollback.selectedTranscriptEntry = -1
 		m.rollback.pendingSelectionAnchor = -1
 		m.rollback.pendingSelectionDelta = 0
@@ -209,8 +209,8 @@ func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
 
 func (m *uiModel) clearRollbackFlow() {
 	m.rollback.phase = uiRollbackPhaseInactive
-	m.rollback.ownsTranscriptMode = false
 	m.rollback.suppressedAlternateScroll = false
+	m.rollback.restoreTranscriptMode = ""
 	m.rollback.selectedTranscriptEntry = -1
 	m.rollback.pendingSelectionAnchor = -1
 	m.rollback.pendingSelectionDelta = 0
@@ -220,21 +220,23 @@ func (m *uiModel) clearRollbackFlow() {
 }
 
 func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
-	if m.rollback.ownsTranscriptMode {
+	if m.surface() == uiSurfaceRollbackSelection {
 		return nil
 	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
+	if m.rollback.restoreTranscriptMode == "" {
+		m.rollback.restoreTranscriptMode = m.view.Mode()
 	}
-	m.rollback.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
-		target:                tui.ModeDetail,
-		emitNativeReplay:      true,
-		enableAlternateScroll: false,
-	}); transitionCmd != nil {
-		return transitionCmd
+	if m.view.Mode() == tui.ModeOngoing {
+		surfaceCmd := m.activateSurface(uiSurfaceRollbackSelection)
+		transitionCmd := m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+			target:            tui.ModeDetail,
+			emitNativeReplay:  true,
+			suppressAltScreen: true,
+			preserveSurface:   true,
+		})
+		return sequenceCmds(surfaceCmd, transitionCmd)
 	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceRollbackSelection)
 }
 
 func (m *uiModel) suppressRollbackAlternateScrollIfNeeded() tea.Cmd {
@@ -264,16 +266,24 @@ func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
 }
 
 func (m *uiModel) popRollbackOverlayWithNativeReplay(emitNativeReplay bool) tea.Cmd {
-	if !m.rollback.ownsTranscriptMode {
+	if m.surface() != uiSurfaceRollbackSelection {
 		return nil
 	}
-	m.rollback.ownsTranscriptMode = false
 	m.rollback.suppressedAlternateScroll = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
+	restoreMode := m.rollback.restoreTranscriptMode
+	m.rollback.restoreTranscriptMode = ""
+	if restoreMode == "" {
+		restoreMode = m.view.Mode()
 	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, emitNativeReplay); transitionCmd != nil {
-		return transitionCmd
+	surfaceCmd := m.activateSurface(surfaceForTranscriptMode(restoreMode))
+	transitionCmd := tea.Cmd(nil)
+	if restoreMode != m.view.Mode() {
+		transitionCmd = m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
+			target:            restoreMode,
+			emitNativeReplay:  emitNativeReplay,
+			suppressAltScreen: true,
+			preserveSurface:   true,
+		})
 	}
-	return tea.ClearScreen
+	return sequenceCmds(surfaceCmd, transitionCmd)
 }

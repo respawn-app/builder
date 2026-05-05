@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/tui"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/uiglyphs"
@@ -90,21 +89,20 @@ type uiWorktreeDeleteDialogState struct {
 }
 
 type uiWorktreeOverlayState struct {
-	open               bool
-	ownsTranscriptMode bool
-	loading            bool
-	phase              uiWorktreeOverlayPhase
-	selection          int
-	target             clientui.SessionExecutionTarget
-	entries            []serverapi.WorktreeView
-	errorText          string
-	refreshToken       uint64
-	mutationToken      uint64
-	switchPending      bool
-	selectedID         string
-	intent             uiWorktreeOpenIntent
-	create             uiWorktreeCreateDialogState
-	deleteConfirm      uiWorktreeDeleteDialogState
+	open          bool
+	loading       bool
+	phase         uiWorktreeOverlayPhase
+	selection     int
+	target        clientui.SessionExecutionTarget
+	entries       []serverapi.WorktreeView
+	errorText     string
+	refreshToken  uint64
+	mutationToken uint64
+	switchPending bool
+	selectedID    string
+	intent        uiWorktreeOpenIntent
+	create        uiWorktreeCreateDialogState
+	deleteConfirm uiWorktreeDeleteDialogState
 }
 
 type worktreeListDoneMsg struct {
@@ -351,31 +349,11 @@ func (m *uiModel) closeWorktreeOverlay() {
 }
 
 func (m *uiModel) pushWorktreeOverlayIfNeeded() tea.Cmd {
-	if m.worktrees.ownsTranscriptMode {
-		return nil
-	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
-	}
-	m.worktrees.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceWorktree)
 }
 
 func (m *uiModel) popWorktreeOverlayIfNeeded() tea.Cmd {
-	if !m.worktrees.ownsTranscriptMode {
-		return nil
-	}
-	m.worktrees.ownsTranscriptMode = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
-	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) requestWorktreeListCmd() tea.Cmd {

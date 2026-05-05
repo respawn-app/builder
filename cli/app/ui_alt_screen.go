@@ -37,18 +37,18 @@ func (m *uiModel) toggleTranscriptModeWithOptions(emitNativeReplay bool, skipDet
 }
 
 type transcriptModeTransitionOptions struct {
-	target                tui.Mode
-	skipDetailWarmup      bool
-	emitNativeReplay      bool
-	enableAlternateScroll bool
+	target            tui.Mode
+	skipDetailWarmup  bool
+	emitNativeReplay  bool
+	suppressAltScreen bool
+	preserveSurface   bool
 }
 
 func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup bool, emitNativeReplay bool) tea.Cmd {
 	return m.transitionTranscriptModeWithOptions(transcriptModeTransitionOptions{
-		target:                target,
-		skipDetailWarmup:      skipDetailWarmup,
-		emitNativeReplay:      emitNativeReplay,
-		enableAlternateScroll: true,
+		target:           target,
+		skipDetailWarmup: skipDetailWarmup,
+		emitNativeReplay: emitNativeReplay,
 	})
 }
 
@@ -70,8 +70,14 @@ func (m *uiModel) transitionTranscriptModeWithOptions(options transcriptModeTran
 	if prevMode != nextMode {
 		m.invalidateNativeResizeReplay()
 	}
+	if !options.preserveSurface && (nextMode == tui.ModeOngoing || nextMode == tui.ModeDetail) {
+		m.activeSurface = surfaceForTranscriptMode(nextMode)
+	}
 	clearCmd := m.clearCmdForModeTransition(prevMode, nextMode)
-	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode, options.enableAlternateScroll)
+	transitionCmd := tea.Cmd(nil)
+	if !options.suppressAltScreen {
+		transitionCmd = m.altScreenCmdForModeTransition(prevMode, nextMode)
+	}
 	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, options.emitNativeReplay)
 	detailLoadCmd := m.detailLoadCmdForModeTransition(prevMode, nextMode)
 	if clearCmd == nil && transitionCmd == nil && nativeReplayCmd == nil && detailLoadCmd == nil {
@@ -166,28 +172,11 @@ func sequenceCmds(cmds ...tea.Cmd) tea.Cmd {
 	return tea.Sequence(filtered...)
 }
 
-func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode, enableAlternateScroll bool) tea.Cmd {
+func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
 	if prev == next {
 		return nil
 	}
-	if next == tui.ModeDetail && !m.altScreenActive {
-		m.altScreenActive = true
-		if !enableAlternateScroll {
-			return tea.EnterAltScreen
-		}
-		return tea.Sequence(tea.EnterAltScreen, enableAlternateScrollCmd())
-	}
-	if next == tui.ModeDetail && m.altScreenActive {
-		if !enableAlternateScroll {
-			return nil
-		}
-		return enableAlternateScrollCmd()
-	}
-	if prev == tui.ModeDetail && m.altScreenActive {
-		m.altScreenActive = false
-		return tea.Sequence(disableAlternateScrollCmd(), tea.ExitAltScreen)
-	}
-	return nil
+	return m.altScreenCmdForSurfaceTransition(surfaceForTranscriptMode(prev), surfaceForTranscriptMode(next))
 }
 
 func enableAlternateScrollCmd() tea.Cmd {

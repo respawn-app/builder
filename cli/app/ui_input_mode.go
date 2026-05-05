@@ -37,10 +37,9 @@ type uiAskState struct {
 }
 
 type uiProcessListState struct {
-	open               bool
-	ownsTranscriptMode bool
-	selection          int
-	entries            []clientui.BackgroundProcess
+	open      bool
+	selection int
+	entries   []clientui.BackgroundProcess
 }
 
 type uiRollbackPhase string
@@ -53,8 +52,8 @@ const (
 
 type uiRollbackState struct {
 	phase                     uiRollbackPhase
-	ownsTranscriptMode        bool
 	suppressedAlternateScroll bool
+	restoreTranscriptMode     tui.Mode
 	candidates                []rollbackCandidate
 	selection                 int
 	selectedTranscriptEntry   int
@@ -65,29 +64,27 @@ type uiRollbackState struct {
 }
 
 type uiStatusOverlayState struct {
-	open               bool
-	ownsTranscriptMode bool
-	loading            bool
-	scroll             int
-	snapshot           uiStatusSnapshot
-	error              string
-	refreshToken       uint64
-	pendingSections    map[uiStatusSection]bool
-	sectionWarnings    map[uiStatusSection]string
+	open            bool
+	loading         bool
+	scroll          int
+	snapshot        uiStatusSnapshot
+	error           string
+	refreshToken    uint64
+	pendingSections map[uiStatusSection]bool
+	sectionWarnings map[uiStatusSection]string
 }
 
 type uiGoalOverlayState struct {
-	open               bool
-	ownsTranscriptMode bool
-	scroll             int
-	goal               *clientui.RuntimeGoal
-	confirmMode        string
-	confirmSelection   int
-	pendingObjective   string
-	error              string
-	markdownTheme      string
-	markdownWidth      int
-	markdownRenderer   *glamour.TermRenderer
+	open             bool
+	scroll           int
+	goal             *clientui.RuntimeGoal
+	confirmMode      string
+	confirmSelection int
+	pendingObjective string
+	error            string
+	markdownTheme    string
+	markdownWidth    int
+	markdownRenderer *glamour.TermRenderer
 }
 
 func (s uiAskState) hasCurrent() bool {

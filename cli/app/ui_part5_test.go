@@ -120,7 +120,7 @@ func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 	}
 }
 
-func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
+func TestPSCommandOpensProcessSurfaceInNativeMode(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 14
@@ -132,11 +132,11 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	if !testProcessListOpen(updated) {
 		t.Fatal("expected /ps to open the process list")
 	}
-	if !testProcessListOwnsTranscriptMode(updated) {
-		t.Fatal("expected /ps to push a dedicated overlay")
+	if updated.surface() != uiSurfaceProcessList {
+		t.Fatalf("expected /ps to activate process list surface, got %q", updated.surface())
 	}
-	if updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected /ps to switch into detail mode, got %q", updated.view.Mode())
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected /ps to keep transcript mode ongoing, got %q", updated.view.Mode())
 	}
 	if cmd == nil {
 		t.Fatal("expected /ps open to emit a screen transition command")
@@ -169,7 +169,7 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	if testProcessListOpen(updated) {
 		t.Fatal("expected esc to close the process list")
 	}
-	if testProcessListOwnsTranscriptMode(updated) {
+	if testProcessListSurfaceActive(updated) {
 		t.Fatal("expected process overlay state cleared after close")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {

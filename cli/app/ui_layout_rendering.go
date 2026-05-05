@@ -22,16 +22,14 @@ type queuedPaneEntry struct {
 }
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
-	if l.model.status.isOpen() {
+	switch l.model.surface() {
+	case uiSurfaceStatus:
 		return l.renderStatusOverlay(width, height, style)
-	}
-	if l.model.goal.isOpen() {
+	case uiSurfaceGoal:
 		return l.renderGoalOverlay(width, height, style)
-	}
-	if l.model.worktrees.isOpen() {
+	case uiSurfaceWorktree:
 		return l.renderWorktreeOverlay(width, height, style)
-	}
-	if l.model.processList.isOpen() {
+	case uiSurfaceProcessList:
 		return l.renderProcessList(width, height, style)
 	}
 	if width < 1 {

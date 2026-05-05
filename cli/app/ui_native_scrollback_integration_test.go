@@ -973,7 +973,7 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForTestCondition(t, 2*time.Second, "rollback overlay to open", func() bool {
-		return model.rollback.isSelecting() && model.rollback.ownsTranscriptMode && model.view.Mode() == tui.ModeDetail
+		return model.rollback.isSelecting() && model.surface() == uiSurfaceRollbackSelection && model.view.Mode() == tui.ModeDetail
 	})
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 

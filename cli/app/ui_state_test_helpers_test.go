@@ -76,11 +76,11 @@ func testProcessListOpen(m *uiModel) bool {
 	return m.processList.open
 }
 
-func testProcessListOwnsTranscriptMode(m *uiModel) bool {
+func testProcessListSurfaceActive(m *uiModel) bool {
 	if m == nil {
 		return false
 	}
-	return m.processList.ownsTranscriptMode
+	return m.surface() == uiSurfaceProcessList
 }
 
 func testRollbackSelecting(m *uiModel) bool {
@@ -131,11 +131,11 @@ func testRollbackCandidates(m *uiModel) []rollbackCandidate {
 	return m.rollback.candidates
 }
 
-func testRollbackOwnsTranscriptMode(m *uiModel) bool {
+func testRollbackSelectionSurfaceActive(m *uiModel) bool {
 	if m == nil {
 		return false
 	}
-	return m.rollback.ownsTranscriptMode
+	return m.surface() == uiSurfaceRollbackSelection
 }
 
 func testStatusOpen(m *uiModel) bool {
@@ -145,11 +145,11 @@ func testStatusOpen(m *uiModel) bool {
 	return m.status.open
 }
 
-func testStatusOwnsTranscriptMode(m *uiModel) bool {
+func testStatusSurfaceActive(m *uiModel) bool {
 	if m == nil {
 		return false
 	}
-	return m.status.ownsTranscriptMode
+	return m.surface() == uiSurfaceStatus
 }
 
 func testStatusRefreshToken(m *uiModel) uint64 {

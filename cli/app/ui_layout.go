@@ -43,7 +43,7 @@ func (m *uiModel) View() string {
 }
 
 func (l uiViewLayout) render() string {
-	if l.model.view.Mode() == tui.ModeOngoing {
+	if l.model.surface() == uiSurfaceOngoingTranscript {
 		return l.renderNativeOngoing()
 	}
 	style := uiThemeStyles(l.model.theme)
@@ -62,7 +62,7 @@ func (l uiViewLayout) composeStandardFrame(style uiStyles) (uiRenderFrame, bool)
 		return uiRenderFrame{}, false
 	}
 	frame := uiRenderFrame{width: width, height: height, statusLine: l.renderStatusLine(width, style), padToHeight: true, tailOnly: true}
-	if m.view.Mode() != tui.ModeDetail {
+	if m.surface() == uiSurfaceOngoingTranscript {
 		frame.inputPane = l.renderInputLines(width, style)
 		frame.inputCursor = l.inputPaneCursor(width)
 		frame.queuePane = l.renderQueuedMessagesPane(width)

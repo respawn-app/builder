@@ -65,7 +65,7 @@ func (s *stubProgressiveStatusCollector) CollectEnvironment(_ context.Context, _
 	return s.envResult
 }
 
-func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
+func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
 		CollectedAt:       time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
 		Workdir:           "/tmp/workdir",
@@ -127,11 +127,11 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	if !updated.status.isOpen() {
 		t.Fatal("expected /status to open the status overlay")
 	}
-	if !updated.status.ownsTranscriptMode {
-		t.Fatal("expected /status to push a dedicated overlay")
+	if updated.surface() != uiSurfaceStatus {
+		t.Fatalf("expected /status to push status surface, got %q", updated.surface())
 	}
-	if updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected /status to switch into detail mode, got %q", updated.view.Mode())
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected /status to keep transcript mode ongoing, got %q", updated.view.Mode())
 	}
 	if cmd == nil {
 		t.Fatal("expected /status open to emit a screen transition command")
@@ -165,7 +165,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	if updated.status.isOpen() {
 		t.Fatal("expected esc to close the status overlay")
 	}
-	if updated.status.ownsTranscriptMode {
+	if updated.surface() == uiSurfaceStatus {
 		t.Fatal("expected status overlay state cleared after close")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
