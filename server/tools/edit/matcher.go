@@ -188,16 +188,22 @@ func contextAwareMatches(content, old string) []rangeMatch {
 	if len(expected) < 3 {
 		return nil
 	}
-	middleIndex := len(expected) / 2
 	return lineWindowMatches(content, old, funcWindow(len(lineSpans(old)), func(actual []lineSpan) bool {
 		actualLines := normalizedNonEmptyLines(sliceText(actual))
-		if len(actualLines) != len(expected) {
+		return stringSlicesEqual(actualLines, expected)
+	}))
+}
+
+func stringSlicesEqual(actual []string, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for idx, value := range actual {
+		if value != expected[idx] {
 			return false
 		}
-		return actualLines[0] == expected[0] &&
-			actualLines[middleIndex] == expected[middleIndex] &&
-			actualLines[len(actualLines)-1] == expected[len(expected)-1]
-	}))
+	}
+	return true
 }
 
 func normalizedNonEmptyLines(text string) []string {

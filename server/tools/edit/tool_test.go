@@ -195,6 +195,16 @@ func TestContextAwareFallbackRejectsCommonMiddleLineWithoutBoundaryMatch(t *test
 	}
 }
 
+func TestContextAwareFallbackRejectsMismatchedInteriorLines(t *testing.T) {
+	content := "header\nkeep one\nTODO\nkeep two\nfooter\n"
+	old := "header\nwant one\nTODO\nwant two\nfooter\n"
+
+	matches := contextAwareMatches(content, old)
+	if len(matches) != 0 {
+		t.Fatalf("context-aware matches = %+v, want none", matches)
+	}
+}
+
 func TestContextAwareFallbackAcceptsNormalizedBoundaryAndMiddleLines(t *testing.T) {
 	content := "alpha   beta\nTODO item\nomega   tail\n"
 	old := "alpha beta\nTODO item\nomega tail\n"
