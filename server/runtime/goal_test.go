@@ -276,6 +276,62 @@ func TestGoalTurnAppendsNudgePromptAndRunsModel(t *testing.T) {
 	}
 }
 
+func TestGoalTurnRejectsNoopFinalWithoutAppendingExtraNudge(t *testing.T) {
+	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "NO_OP", Phase: llm.MessagePhaseFinal}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseFinal}},
+	}}
+	engine, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion}})
+	if err != nil {
+		t.Fatalf("create runtime engine: %v", err)
+	}
+	if _, err := engine.SetGoal("ship goal mode", session.GoalActorUser); err != nil {
+		t.Fatalf("SetGoal: %v", err)
+	}
+
+	msg, err := engine.runGoalTurn(t.Context(), true)
+	if err != nil {
+		t.Fatalf("runGoalTurn: %v", err)
+	}
+	if msg.Content != "working" {
+		t.Fatalf("assistant content = %q, want working", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(client.calls))
+	}
+	secondReq := requestMessages(client.calls[1])
+	foundWarning := false
+	for _, reqMsg := range secondReq {
+		if reqMsg.Role == llm.RoleDeveloper && reqMsg.Content == goalNoopFinalWarning {
+			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("NO_OP warning message type = %q, want error_feedback", reqMsg.MessageType)
+			}
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected NO_OP warning in second request, got %+v", secondReq)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	messages := goalDeveloperMessages(t, events)
+	if len(messages) != 2 {
+		t.Fatalf("goal developer messages len = %d, want set+nudge only: %+v", len(messages), messages)
+	}
+	for _, msg := range messages {
+		if msg.Content == goalNoopFinalWarning {
+			t.Fatalf("NO_OP rejection should use error feedback, not goal feedback: %+v", msg)
+		}
+	}
+}
+
 func TestGoalDeveloperMessageVisibleInOngoingWithDetailPrompt(t *testing.T) {
 	msg := llm.Message{
 		Role:           llm.RoleDeveloper,

@@ -197,6 +197,12 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				deferredFinalCommittedStart = -1
 			}
 			if resolvedNoopFinalAnswer {
+				if e.goalActive() {
+					if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: goalNoopFinalWarning}); err != nil {
+						return stepLoopResult{}, err
+					}
+					continue
+				}
 				return stepLoopResult{Message: resolved, ExecutedToolCall: executedToolCall, NoopFinalAnswer: true, AssistantCommittedStart: resolvedCommittedStart, AssistantCommittedStartSet: resolvedCommittedStartSet}, nil
 			}
 

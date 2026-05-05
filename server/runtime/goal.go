@@ -206,6 +206,15 @@ func (e *Engine) goalActiveLocked() bool {
 	return goal != nil && goal.Status == session.GoalStatusActive
 }
 
+func (e *Engine) goalActive() bool {
+	if e == nil {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.goalActiveLocked()
+}
+
 func (e *Engine) appendGoalDeveloperMessage(stepID string, content string, compact string) error {
 	return e.appendMessage(stepID, e.goalDeveloperMessage(content, compact))
 }
