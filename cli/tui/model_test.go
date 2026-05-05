@@ -776,6 +776,71 @@ func TestOngoingMultilineToolBlocksRenderTreeGuides(t *testing.T) {
 	}
 }
 
+func TestOngoingEditResultUsesPatchSummaryHeadline(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "edit server/runtime/compaction.go",
+		ToolCallID: "call_edit",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "edit",
+			Command:     "server/runtime/compaction.go",
+			CompactText: "server/runtime/compaction.go",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_result_ok",
+		ToolCallID: "call_edit",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "edit",
+			Command:      "server/runtime/compaction.go +2 -1",
+			CompactText:  "server/runtime/compaction.go +2 -1",
+			PatchSummary: "server/runtime/compaction.go +2 -1",
+		},
+	})
+
+	plain := plainTranscript(m.View())
+	if !strings.Contains(plain, "⇄ server/runtime/compaction.go +2 -1") {
+		t.Fatalf("expected edit result to use patch summary headline, got %q", plain)
+	}
+	if strings.Contains(plain, "⇄ edit server/runtime/compaction.go") {
+		t.Fatalf("expected edit headline to omit tool name, got %q", plain)
+	}
+}
+
+func TestDetailEditResultUsesPatchSummaryHeadline(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "edit server/runtime/compaction.go",
+		ToolCallID: "call_edit",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "edit",
+			Command:     "server/runtime/compaction.go",
+			CompactText: "server/runtime/compaction.go",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_result_ok",
+		ToolCallID: "call_edit",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "edit",
+			Command:      "server/runtime/compaction.go +2 -1",
+			CompactText:  "server/runtime/compaction.go +2 -1",
+			PatchSummary: "server/runtime/compaction.go +2 -1",
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	plain := plainTranscript(m.View())
+	if !strings.Contains(plain, "⇄ server/runtime/compaction.go +2 -1") {
+		t.Fatalf("expected detail edit result to use patch summary headline, got %q", plain)
+	}
+	if strings.Contains(plain, "⇄ edit server/runtime/compaction.go") {
+		t.Fatalf("expected detail edit headline to omit tool name, got %q", plain)
+	}
+}
+
 func TestOngoingWrappedToolBlocksRenderTreeGuides(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 34})

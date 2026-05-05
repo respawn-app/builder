@@ -84,6 +84,11 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 
 func (t *Tool) apply(ctx context.Context, doc patchformat.Document) error {
 	state := newApplyState(t, ctx)
+	unlock, err := state.lockDocumentPaths(doc)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	for _, h := range doc.Hunks {
 		switch op := h.(type) {
 		case patchformat.AddFile:

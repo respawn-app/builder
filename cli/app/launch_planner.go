@@ -161,7 +161,7 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,
 		Source:        resp.Plan.Source,
 	}
-	return applyCLIOverridesToSessionPlan(plan, cfg), nil
+	return applyCLIOverridesToSessionPlan(plan, cfg)
 }
 
 func loadSelectedSessionWorkspaceRoot(ctx context.Context, sessionViews sessionViewReader, sessionID string) (string, error) {
@@ -269,7 +269,7 @@ func (p *launchPlanner) resolveHasOtherSessions(ctx context.Context, resolved re
 	return false, true
 }
 
-func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {
+func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) (sessionLaunchPlan, error) {
 	sources := cfg.Source.Sources
 	mergedSource := mergeCLISources(plan.Source, cfg.Source)
 	if sourceIsCLI(sources, "model") && !plan.ModelContractLocked {
@@ -296,13 +296,17 @@ func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sess
 			plan.ActiveSettings.EnabledTools = cloneEnabledToolSet(cfg.Settings.EnabledTools)
 		}
 		if hasCLIToolOverride(cfg.Source) || sourceIsCLI(sources, "model") {
-			plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(plan.ActiveSettings, mergedSource, nil))
+			enabledTools, err := activeToolIDs(plan.ActiveSettings, mergedSource, nil)
+			if err != nil {
+				return sessionLaunchPlan{}, err
+			}
+			plan.EnabledTools = dedupeSortToolIDs(enabledTools)
 		}
 	}
 	plan.Source = mergedSource
 	plan.StatusConfig.Settings = plan.ActiveSettings
 	plan.StatusConfig.Source = plan.Source
-	return plan
+	return plan, nil
 }
 
 func sourceIsCLI(sources map[string]string, key string) bool {

@@ -144,6 +144,7 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 			result.IsError = completion.IsError
 			result.Summary = completion.Summary
 			result.OngoingText = completion.OngoingText
+			result.Presentation = completion.Presentation
 		}
 		if result.Name == "" {
 			result.Name = toolspec.ID("tool")

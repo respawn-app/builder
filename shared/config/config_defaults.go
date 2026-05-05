@@ -117,6 +117,8 @@ func settingsTOMLWithRenderingOptions(settings Settings, includeToolSection bool
 	}
 	if includeToolSection {
 		out.WriteString("\n[tools]\n")
+		out.WriteString("# Leave both patch/edit commented to use Builder's model-based default:\n")
+		out.WriteString("# patch for first-party OpenAI or gpt-* models, edit otherwise.\n")
 		writeToolLines(&out, state.Settings.EnabledTools)
 	}
 	shellLines := annotateRenderedLines(filterDefaultLines(lines, "shell"), filterDefaultLines(defaultLines, "shell"), nil)

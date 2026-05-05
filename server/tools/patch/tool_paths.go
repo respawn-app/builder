@@ -7,28 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"builder/server/tools/fsguard"
 )
 
-type OutsideWorkspaceRequest struct {
-	RequestedPath string
-	ResolvedPath  string
-	WorkspaceRoot string
-}
-
-type OutsideWorkspaceDecision int
+type OutsideWorkspaceRequest = fsguard.Request
+type OutsideWorkspaceDecision = fsguard.Decision
 
 const (
-	OutsideWorkspaceDecisionDeny OutsideWorkspaceDecision = iota
-	OutsideWorkspaceDecisionAllowOnce
-	OutsideWorkspaceDecisionAllowSession
+	OutsideWorkspaceDecisionDeny         = fsguard.DecisionDeny
+	OutsideWorkspaceDecisionAllowOnce    = fsguard.DecisionAllowOnce
+	OutsideWorkspaceDecisionAllowSession = fsguard.DecisionAllowSession
 )
 
-type OutsideWorkspaceApproval struct {
-	Decision   OutsideWorkspaceDecision
-	Commentary string
-}
-
-type OutsideWorkspaceApprover func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error)
+type OutsideWorkspaceApproval = fsguard.Approval
+type OutsideWorkspaceApprover = fsguard.Approver
 
 type Option func(*Tool)
 

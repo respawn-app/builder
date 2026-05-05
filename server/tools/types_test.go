@@ -160,6 +160,20 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	if webSearch.EnablesNativeWebSearch("off") {
 		t.Fatalf("expected %s native web search to honor disabled mode", toolspec.ToolWebSearch)
 	}
+
+	edit, ok := DefinitionFor(toolspec.ToolEdit)
+	if !ok {
+		t.Fatalf("expected %s definition", toolspec.ToolEdit)
+	}
+	if !edit.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to be available in local runtime", toolspec.ToolEdit)
+	}
+	if edit.LocalRuntimeBuilder() != LocalRuntimeBuilderEdit {
+		t.Fatalf("expected %s local runtime builder, got %q", toolspec.ToolEdit, edit.LocalRuntimeBuilder())
+	}
+	if !edit.ExposedToModelRequest(RequestExposureContext{}) {
+		t.Fatalf("expected %s to be request-exposed when enabled", toolspec.ToolEdit)
+	}
 }
 
 func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
@@ -198,6 +212,15 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	freeformPatchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`"*** Begin Patch\n*** Update File: custom.go\n-old\n+new\n*** End Patch\n"`))
 	if freeformPatchMeta.PatchSummary != "./custom.go +1 -1" {
 		t.Fatalf("expected custom freeform patch input summary, got %+v", freeformPatchMeta)
+	}
+
+	edit, _ := DefinitionFor(toolspec.ToolEdit)
+	editMeta := edit.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"path":"a.go","old_string":"old","new_string":"new"}`))
+	if editMeta.ToolName != string(toolspec.ToolEdit) || editMeta.Command != "a.go" || editMeta.CompactText != "a.go" {
+		t.Fatalf("unexpected edit transcript metadata: %+v", editMeta)
+	}
+	if editMeta.RenderHint == nil || editMeta.RenderHint.Kind != transcript.ToolRenderKindDiff {
+		t.Fatalf("expected edit diff render hint, got %+v", editMeta.RenderHint)
 	}
 
 	askQuestion, _ := DefinitionFor(toolspec.ToolAskQuestion)

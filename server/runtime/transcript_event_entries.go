@@ -8,6 +8,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/toolspec"
+	"builder/shared/transcript"
 )
 
 func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
@@ -115,11 +116,17 @@ func toolResultChatEntry(result tools.Result) ChatEntry {
 	if result.IsError {
 		role = "tool_result_error"
 	}
+	presentation := result.Presentation
+	if presentation != nil {
+		normalized := transcript.NormalizeToolCallMeta(*presentation)
+		presentation = &normalized
+	}
 	return ChatEntry{
 		Role:              role,
 		Text:              formatToolResult(result),
 		OngoingText:       strings.TrimSpace(result.OngoingText),
 		ToolCallID:        strings.TrimSpace(result.CallID),
 		ToolResultSummary: strings.TrimSpace(result.Summary),
+		ToolCall:          presentation,
 	}
 }

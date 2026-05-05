@@ -429,7 +429,10 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 		"timeouts.model_request_seconds": "env",
 	}}}
 
-	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	updated, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err != nil {
+		t.Fatalf("applyCLIOverridesToSessionPlan: %v", err)
+	}
 	if updated.ActiveSettings.Model != "server-model" || updated.ConfiguredModelName != "server-model" {
 		t.Fatalf("expected server model preserved, got %+v", updated.ActiveSettings)
 	}
@@ -468,7 +471,10 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 		"tools.patch": "cli",
 	}}}
 
-	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	updated, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err != nil {
+		t.Fatalf("applyCLIOverridesToSessionPlan: %v", err)
+	}
 	if updated.ActiveSettings.Model != "locked-model" || updated.ConfiguredModelName != "locked-model" {
 		t.Fatalf("expected locked model preserved, got %+v", updated.ActiveSettings)
 	}
@@ -497,7 +503,10 @@ func TestApplyCLIOverridesToSessionPlanAppliesCLIToolOverrideWithoutModelOverrid
 		"tools.patch": "cli",
 	}}}
 
-	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	updated, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err != nil {
+		t.Fatalf("applyCLIOverridesToSessionPlan: %v", err)
+	}
 	if updated.ActiveSettings.EnabledTools[toolspec.ToolExecCommand] {
 		t.Fatalf("expected shell disabled by cli override, got %+v", updated.ActiveSettings.EnabledTools)
 	}
@@ -531,7 +540,10 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 		"tools.shell": "default",
 	}}}
 
-	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	updated, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err != nil {
+		t.Fatalf("applyCLIOverridesToSessionPlan: %v", err)
+	}
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
@@ -559,11 +571,42 @@ func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrid
 		"tools.shell": "cli",
 	}}}
 
-	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	updated, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err != nil {
+		t.Fatalf("applyCLIOverridesToSessionPlan: %v", err)
+	}
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
 	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolExecCommand {
 		t.Fatalf("expected explicit cli tools to suppress model defaults, got %+v", updated.EnabledTools)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanPropagatesToolSelectionConflict(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "claude-sonnet-4.5",
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolExecCommand: true},
+		},
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: "claude-sonnet-4.5",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.patch": "default", "tools.edit": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model: "claude-sonnet-4.5",
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolPatch: true,
+			toolspec.ToolEdit:  true,
+		},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"tools.patch": "cli",
+		"tools.edit":  "cli",
+	}}}
+
+	_, err := applyCLIOverridesToSessionPlan(plan, cfg)
+	if err == nil || !strings.Contains(err.Error(), "tools.patch and tools.edit cannot both be enabled") {
+		t.Fatalf("error = %v, want tool conflict", err)
 	}
 }
