@@ -201,6 +201,7 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	effectiveMeta := entry.ToolCall
 	if resultIdx >= 0 && m.transcript[resultIdx].ToolCall != nil {
 		effectiveMeta = m.transcript[resultIdx].ToolCall
+		combined = compactToolCallText(effectiveMeta, combined)
 		if isPatchToolCall(effectiveMeta) {
 			blockRole = toolBlockRoleFromResult(roleFromEntry(m.transcript[resultIdx]), RenderIntentToolPatch)
 		}

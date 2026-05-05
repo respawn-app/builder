@@ -171,9 +171,9 @@ func patchToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage
 func editToolCallMeta(toolID toolspec.ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		path := parseEditToolCallPath(raw)
-		command := "edit"
-		if path != "" {
-			command += " " + path
+		command := path
+		if command == "" {
+			command = "file change"
 		}
 		return transcript.ToolCallMeta{
 			ToolName:    string(toolID),

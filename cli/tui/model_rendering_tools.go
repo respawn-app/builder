@@ -259,7 +259,15 @@ func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 }
 
 func isPatchToolCall(meta *transcript.ToolCallMeta) bool {
-	return meta != nil && (meta.HasPatchDetail() || strings.TrimSpace(meta.ToolName) == "patch")
+	if meta == nil {
+		return false
+	}
+	switch strings.TrimSpace(meta.ToolName) {
+	case "patch", "edit":
+		return true
+	default:
+		return meta.HasPatchDetail()
+	}
 }
 
 func isPatchToolBlock(role RenderIntent, meta *transcript.ToolCallMeta) bool {

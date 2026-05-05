@@ -216,7 +216,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 
 	edit, _ := DefinitionFor(toolspec.ToolEdit)
 	editMeta := edit.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"path":"a.go","old_string":"old","new_string":"new"}`))
-	if editMeta.ToolName != string(toolspec.ToolEdit) || editMeta.Command != "edit a.go" || editMeta.CompactText != "edit a.go" {
+	if editMeta.ToolName != string(toolspec.ToolEdit) || editMeta.Command != "a.go" || editMeta.CompactText != "a.go" {
 		t.Fatalf("unexpected edit transcript metadata: %+v", editMeta)
 	}
 	if editMeta.RenderHint == nil || editMeta.RenderHint.Kind != transcript.ToolRenderKindDiff {

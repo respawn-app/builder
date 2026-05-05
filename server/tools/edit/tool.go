@@ -91,8 +91,8 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	result := editSuccessResult(c, message)
 	result.Presentation = &transcript.ToolCallMeta{
 		ToolName:     string(toolspec.ToolEdit),
-		Command:      "edit " + resolved.requested,
-		CompactText:  "edit " + resolved.requested,
+		Command:      outcome.rendered.DetailText(),
+		CompactText:  outcome.rendered.SummaryText(),
 		PatchRender:  outcome.rendered,
 		RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		PatchSummary: outcome.rendered.SummaryText(),

@@ -53,8 +53,8 @@ func TestExecuteToolCallsCanonicalizesEditAliases(t *testing.T) {
 	if got := meta.ToolName; got != string(toolspec.ToolEdit) {
 		t.Fatalf("started tool name = %q, want edit", got)
 	}
-	if got := meta.Command; got != "edit a.go" {
-		t.Fatalf("started text = %q, want edit a.go", got)
+	if got := meta.Command; got != "a.go" {
+		t.Fatalf("started text = %q, want a.go", got)
 	}
 }
 
