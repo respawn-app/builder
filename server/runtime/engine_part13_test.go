@@ -355,6 +355,45 @@ func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCa
 	}
 }
 
+func TestPrepareModelTurnSkipsAutoCompactionAfterPendingHandoffCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handoff summary"},
+			Usage:     llm.Usage{InputTokens: 1_900, WindowTokens: 2_000},
+		}},
+		inputTokenCount: 1_900,
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                 "gpt-5",
+		CompactionMode:        "local",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 1_900, WindowTokens: 2_000})
+	eng.queueHandoffRequest("keep runtime details", "")
+
+	executor := &defaultStepExecutor{engine: eng}
+	if err := executor.prepareModelTurn(context.Background(), "step-1"); err != nil {
+		t.Fatalf("prepare model turn: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected only pending handoff compaction call, got %d calls", len(client.calls))
+	}
+}
+
 func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

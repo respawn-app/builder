@@ -73,7 +73,7 @@ func messagePreservesLastCommittedAssistantFinalAnswer(message llm.Message) bool
 		return false
 	}
 	switch message.MessageType {
-	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeHandoffFutureMessage, llm.MessageTypeReviewerFeedback:
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeGoal, llm.MessageTypeHandoffFutureMessage, llm.MessageTypeReviewerFeedback:
 		return true
 	default:
 		return false

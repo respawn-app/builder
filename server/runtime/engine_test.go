@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
@@ -421,6 +422,29 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReviewerFeedback(t *testi
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: "reviewer suggestions"}); err != nil {
 		t.Fatalf("append reviewer feedback: %v", err)
+	}
+
+	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {
+		t.Fatalf("LastCommittedAssistantFinalAnswer() = %q, want %q", got, "final handoff")
+	}
+}
+
+func TestLastCommittedAssistantFinalAnswerSkipsTrailingGoalFeedback(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if err := eng.appendGoalDeveloperMessage("", prompts.RenderGoalSetPrompt("ship goal mode"), "Goal set: \"ship goal mode\""); err != nil {
+		t.Fatalf("append goal feedback: %v", err)
 	}
 
 	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {

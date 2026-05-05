@@ -99,10 +99,6 @@ type runtimeEventBatchMsg struct {
 	carry  *clientui.Event
 }
 
-type uiModelProbeMessage interface {
-	probeUIModel(*uiModel)
-}
-
 type runtimeConnectionStateChangedMsg struct {
 	err error
 }
@@ -815,10 +811,6 @@ func (m *uiModel) Init() tea.Cmd {
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if probe, ok := msg.(uiModelProbeMessage); ok {
-		probe.probeUIModel(m)
-		return m, nil
-	}
 	if result := m.reduceFeatureMessage(msg); result.handled {
 		return result.bubbleTea()
 	}
