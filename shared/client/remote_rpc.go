@@ -415,6 +415,9 @@ func protocolError(resp *protocol.ResponseError) error {
 		return nil
 	}
 	message := strings.TrimSpace(resp.Message)
+	if resp.Code == protocol.ErrCodeRequestCanceled {
+		return requestCanceledError{message: message}
+	}
 	if message == "" {
 		message = "protocol request failed"
 	}
@@ -447,8 +450,6 @@ func protocolError(resp *protocol.ResponseError) error {
 		return errors.Join(serverapi.ErrPromptAlreadyResolved, errors.New(message))
 	case protocol.ErrCodePromptUnsupported:
 		return errors.Join(serverapi.ErrPromptUnsupported, errors.New(message))
-	case protocol.ErrCodeRequestCanceled:
-		return requestCanceledError{message: message}
 	default:
 		return errors.New(message)
 	}

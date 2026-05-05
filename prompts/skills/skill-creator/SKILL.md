@@ -58,7 +58,7 @@ Follow these rules for authoring skill docs (especially SKILL.md).
   - Bad: "introduced Decompose on April 29th in commit `abcdef`".
   - Bad: <User complains about wrong TDD approach>, you write "Encoding correct TDD patterns, not shallow assertions" (in an attempt to appease the user, but as a result encoding irrelevant emotional statement in docs)
 
-- Do not include global H1 header like `# My Skill`. Do not add spaces after headers.
+- Do not include a global H1 header like `# My Skill`. Do not add extra blank lines immediately after header lines.
 - Do not use eye-candy formatting, fancy diagrams that contain a lot of symbols, or emoji. Skills are read by AI, not humans.
 - Do not include large code examples, or API docs in SKILL.md. Generated, third-party, or optional content like templates / API docs lives either as a reference to SSOT, or in adjacent directories.
 - Keep SKILL.md under ~300 lines of markdown text. If docs don't fit, reference remaining guidance by topic in SKILL.md and use paths relative to the SKILL.md-containing directory (aka "skill dir"), turning SKILL.md into a summary + doc index. It's fine for skills to contain large amounts of text, only SKILL.md needs to stay under 300 lines.

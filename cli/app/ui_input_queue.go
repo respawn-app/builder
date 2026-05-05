@@ -210,12 +210,12 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 				if commandResult.Action == commands.ActionCompact {
 					return finalizeSlashCommandCmd(commandResult.Action, c.startQueuedCompaction(commandResult.Args), m.recordPromptHistory(text))
 				}
-				_, cmd := c.applyCommandResult(commandResult)
+				_, cmd := c.applyQueuedCommandResult(commandResult)
 				return finalizeSlashCommandCmd(commandResult.Action, cmd, m.recordPromptHistory(text))
 			}
 		}
 	}
-	return c.startSubmissionWithPromptHistory(text)
+	return c.startQueuedSubmissionWithPromptHistory(text)
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {

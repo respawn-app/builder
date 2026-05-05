@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -639,8 +638,15 @@ func TestProtocolErrorMapsRequestCanceledCodeToClearMessage(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
-	if strings.Contains(err.Error(), "context canceled") {
-		t.Fatalf("did not expect raw context cancellation message, got %q", err.Error())
+	if err.Error() != "request canceled by client" {
+		t.Fatalf("request canceled error = %q, want request canceled by client", err.Error())
+	}
+}
+
+func TestProtocolErrorMapsEmptyRequestCanceledCodeToClearMessage(t *testing.T) {
+	err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRequestCanceled})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	if err.Error() != "request canceled by client" {
 		t.Fatalf("request canceled error = %q, want request canceled by client", err.Error())

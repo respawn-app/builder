@@ -48,7 +48,7 @@ Direct partial file reads add one context line before output:
 [Total line count: 742]
 ```
 
-Builder applies that marker to simple `sed`, `head`, `tail`, `awk` line reads, and simple PowerShell `Get-Content` partial reads. It skips composed commands such as pipelines, whole-file reads, binary files, and files larger than 1 MB.
+Builder applies that marker to simple `sed`, `head`, `tail`, and PowerShell `Get-Content` partial reads. It skips composed commands such as pipelines, whole-file reads, binary files, and files larger than 1 MB.
 
 ## Hook Protocol
 

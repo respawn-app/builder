@@ -253,6 +253,39 @@ func TestPreSubmitCompactionKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *te
 	}
 }
 
+func TestDirectSubmitQueuesBehindExistingVisibleMessages(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.queued = []string{"first queued"}
+	m.input = "direct submit"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected existing queued message to start before direct submit")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	foundPreSubmit := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			foundPreSubmit = true
+			if typed.text != "first queued" {
+				t.Fatalf("pre-submit text = %q, want first queued", typed.text)
+			}
+		}
+	}
+	if !foundPreSubmit {
+		t.Fatalf("expected pre-submit check for existing queued message, got %+v", msgs)
+	}
+	if updated.pendingPreSubmitText != "first queued" {
+		t.Fatalf("pending pre-submit text = %q, want first queued", updated.pendingPreSubmitText)
+	}
+	if len(updated.queued) != 2 || updated.queued[0] != "first queued" || updated.queued[1] != "direct submit" {
+		t.Fatalf("expected direct submit queued behind existing message, got %+v", updated.queued)
+	}
+}
+
 func TestRuntimeIdleEventResumesVisibleQueuedMessagesWithoutBlankEnter(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

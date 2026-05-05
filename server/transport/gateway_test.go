@@ -122,11 +122,11 @@ func TestCancellationMessageRoundTripsThroughRemoteClient(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ListProjects error = %v, want context.Canceled", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "Canceled polling by user, process active") {
-		t.Fatalf("expected clear cancellation message, got %v", err)
+	if err == nil || err.Error() != message {
+		t.Fatalf("expected cancellation message %q, got %v", message, err)
 	}
-	if strings.Contains(err.Error(), "context canceled") {
-		t.Fatalf("did not expect raw context cancellation message, got %q", err.Error())
+	if message == context.Canceled.Error() {
+		t.Fatalf("test precondition failed: expected normalized message, got %q", message)
 	}
 	requireNoGatewayHandlerError(t, handlerErrs)
 }

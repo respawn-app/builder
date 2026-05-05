@@ -158,7 +158,8 @@ func TestRunnerBuiltinFileReadSkipsSedWhenFullFileIsKnown(t *testing.T) {
 	}
 }
 
-func TestRunnerBuiltinFileReadAddsTotalLineCountForHeadTailAwkAndPowerShell(t *testing.T) {
+func TestRunnerBuiltinFileReadAddsTotalLineCountForHeadTailAndPowerShell(t *testing.T) {
+	// File without trailing newline verifies non-POSIX file handling.
 	path := writeTextFile(t, "example.txt", strings.Join([]string{
 		"line 1",
 		"line 2",
@@ -175,7 +176,6 @@ func TestRunnerBuiltinFileReadAddsTotalLineCountForHeadTailAwkAndPowerShell(t *t
 	}{
 		{name: "head", command: "head -n 2 " + shellQuote(path), output: "line 1\nline 2\n"},
 		{name: "tail", command: "tail -2 " + shellQuote(path), output: "line 4\nline 5\n"},
-		{name: "awk", command: "awk 'NR>=2 && NR<=3' " + shellQuote(path), output: "line 2\nline 3\n"},
 		{name: "powershell head", command: "Get-Content " + shellQuote(path) + " -TotalCount 2", output: "line 1\nline 2\n"},
 		{name: "powershell tail", command: "Get-Content " + shellQuote(path) + " -Tail 2", output: "line 4\nline 5\n"},
 	}
@@ -261,6 +261,7 @@ func TestRunnerBuiltinFileReadSkipsComposedCommandsAndWholeFileReads(t *testing.
 		{name: "cat", command: "cat " + shellQuote(path), output: "line 1\nline 2\n"},
 		{name: "pipeline", command: "nl -ba " + shellQuote(path) + " | sed -n '1,1p'", output: "     1\tline 1\n"},
 		{name: "sed transform", command: "sed 's/line/row/' " + shellQuote(path), output: "row 1\nrow 2\n"},
+		{name: "awk", command: "awk 'NR>=2 && NR<=3' " + shellQuote(path), output: "line 2\n"},
 	}
 
 	for _, tt := range tests {

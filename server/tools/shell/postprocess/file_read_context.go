@@ -74,8 +74,6 @@ func classifyFileRead(commandName string, args []string) (fileReadCandidate, boo
 		return classifyHeadTailFileRead(args[1:])
 	case "tail":
 		return classifyHeadTailFileRead(args[1:])
-	case "awk", "gawk", "mawk", "nawk":
-		return classifyAwkFileRead(args[1:])
 	case "get-content", "gc":
 		return classifyPowerShellGetContent(args[1:])
 	default:
@@ -412,65 +410,6 @@ func consumeSedDelimitedAddress(script string, start int, delimiter byte) (int, 
 		}
 	}
 	return 0, false
-}
-
-func classifyAwkFileRead(args []string) (fileReadCandidate, bool) {
-	if len(args) < 2 {
-		return fileReadCandidate{}, false
-	}
-	files := make([]string, 0, 1)
-	program := ""
-	for i := 0; i < len(args); i++ {
-		arg := strings.TrimSpace(args[i])
-		switch {
-		case arg == "":
-			return fileReadCandidate{}, false
-		case arg == "-f":
-			return fileReadCandidate{}, false
-		case arg == "-F" || arg == "-v":
-			if i+1 >= len(args) {
-				return fileReadCandidate{}, false
-			}
-			i++
-		case strings.HasPrefix(arg, "-F") && len(arg) > 2:
-		case strings.HasPrefix(arg, "-v") && len(arg) > 2:
-		case strings.HasPrefix(arg, "-"):
-			return fileReadCandidate{}, false
-		case program == "":
-			program = arg
-		default:
-			files = append(files, arg)
-		}
-	}
-	if !awkProgramMentionsNR(program) {
-		return fileReadCandidate{}, false
-	}
-	path, ok := singlePath(files)
-	if !ok {
-		return fileReadCandidate{}, false
-	}
-	return fileReadCandidate{path: path}, true
-}
-
-func awkProgramMentionsNR(program string) bool {
-	var identifier strings.Builder
-	flush := func() bool {
-		if identifier.String() == "NR" {
-			return true
-		}
-		identifier.Reset()
-		return false
-	}
-	for _, r := range program {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' {
-			identifier.WriteRune(r)
-			continue
-		}
-		if flush() {
-			return true
-		}
-	}
-	return flush()
 }
 
 func classifyPowerShellGetContent(args []string) (fileReadCandidate, bool) {

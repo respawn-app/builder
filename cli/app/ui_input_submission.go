@@ -12,7 +12,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type preSubmitQueuePosition uint8
+
+const (
+	preSubmitQueueBack preSubmitQueuePosition = iota
+	preSubmitQueueFront
+)
+
 func (c uiInputController) startSubmission(text string) tea.Cmd {
+	return c.startSubmissionWithPreSubmitQueuePosition(text, preSubmitQueueBack)
+}
+
+func (c uiInputController) startSubmissionWithPreSubmitQueuePosition(text string, queuePosition preSubmitQueuePosition) tea.Cmd {
 	m := c.model
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
 		return disconnectCmd
@@ -40,22 +51,34 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 		m.preSubmitCheckToken++
 		token := m.preSubmitCheckToken
 		m.pendingPreSubmitText = text
-		m.queued = append([]string{text}, m.queued...)
+		if queuePosition == preSubmitQueueFront {
+			m.queued = append([]string{text}, m.queued...)
+		} else {
+			m.queued = append(m.queued, text)
+		}
 		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), m.ensureSpinnerTicking())
 	}
 	return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
 }
 
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
+	return c.startSubmissionWithPromptHistoryAndQueuePosition(text, preSubmitQueueBack)
+}
+
+func (c uiInputController) startQueuedSubmissionWithPromptHistory(text string) tea.Cmd {
+	return c.startSubmissionWithPromptHistoryAndQueuePosition(text, preSubmitQueueFront)
+}
+
+func (c uiInputController) startSubmissionWithPromptHistoryAndQueuePosition(text string, queuePosition preSubmitQueuePosition) tea.Cmd {
 	m := c.model
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
 		return disconnectCmd
 	}
 	_, isUserShell := parseUserShellCommand(text)
 	if m.hasRuntimeClient() && !isUserShell {
-		return c.startSubmission(text)
+		return c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition)
 	}
-	return sequenceCmds(m.recordPromptHistory(text), c.startSubmission(text))
+	return sequenceCmds(m.recordPromptHistory(text), c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition))
 }
 
 func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string) tea.Cmd {
