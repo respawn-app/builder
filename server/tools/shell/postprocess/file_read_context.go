@@ -71,9 +71,9 @@ func classifyFileRead(commandName string, args []string) (fileReadCandidate, boo
 	case "sed":
 		return classifySedFileRead(args[1:])
 	case "head":
-		return classifyHeadTailFileRead(args[1:])
+		return classifyHeadTailFileRead(false, args[1:])
 	case "tail":
-		return classifyHeadTailFileRead(args[1:])
+		return classifyHeadTailFileRead(true, args[1:])
 	case "get-content", "gc":
 		return classifyPowerShellGetContent(args[1:])
 	default:
@@ -152,9 +152,10 @@ func countSmallRegularFileLines(path string) (int, bool) {
 	return lines, true
 }
 
-func classifyHeadTailFileRead(args []string) (fileReadCandidate, bool) {
+func classifyHeadTailFileRead(isTail bool, args []string) (fileReadCandidate, bool) {
 	lineLimit := 10
 	limitKnown := true
+	wholeFileRead := false
 	paths := make([]string, 0, 1)
 
 	for i := 0; i < len(args); i++ {
@@ -169,19 +170,31 @@ func classifyHeadTailFileRead(args []string) (fileReadCandidate, bool) {
 			if i+1 >= len(args) {
 				return fileReadCandidate{}, false
 			}
-			nextLimit, ok := parsePositiveLineLimit(args[i+1])
+			nextLimit, wholeFile, ok := parseHeadTailLineLimit(isTail, args[i+1])
 			if !ok {
 				limitKnown = false
+				wholeFileRead = false
+			} else if wholeFile {
+				limitKnown = false
+				wholeFileRead = true
 			} else {
 				lineLimit = nextLimit
+				limitKnown = true
+				wholeFileRead = false
 			}
 			i++
 		case strings.HasPrefix(arg, "--lines="):
-			nextLimit, ok := parsePositiveLineLimit(strings.TrimPrefix(arg, "--lines="))
+			nextLimit, wholeFile, ok := parseHeadTailLineLimit(isTail, strings.TrimPrefix(arg, "--lines="))
 			if !ok {
 				limitKnown = false
+				wholeFileRead = false
+			} else if wholeFile {
+				limitKnown = false
+				wholeFileRead = true
 			} else {
 				lineLimit = nextLimit
+				limitKnown = true
+				wholeFileRead = false
 			}
 		case arg == "-c" || arg == "--bytes":
 			return fileReadCandidate{}, false
@@ -191,15 +204,24 @@ func classifyHeadTailFileRead(args []string) (fileReadCandidate, bool) {
 			nextLimit, ok := parsePositiveLineLimit(strings.TrimPrefix(arg, "-"))
 			if !ok {
 				limitKnown = false
+				wholeFileRead = false
 			} else {
 				lineLimit = nextLimit
+				limitKnown = true
+				wholeFileRead = false
 			}
 		case strings.HasPrefix(arg, "-n"):
-			nextLimit, ok := parsePositiveLineLimit(strings.TrimPrefix(arg, "-n"))
+			nextLimit, wholeFile, ok := parseHeadTailLineLimit(isTail, strings.TrimPrefix(arg, "-n"))
 			if !ok {
 				limitKnown = false
+				wholeFileRead = false
+			} else if wholeFile {
+				limitKnown = false
+				wholeFileRead = true
 			} else {
 				lineLimit = nextLimit
+				limitKnown = true
+				wholeFileRead = false
 			}
 		case arg == "-q" || arg == "-v" || arg == "-z" || arg == "--quiet" || arg == "--silent" || arg == "--verbose" || arg == "--zero-terminated":
 		case strings.HasPrefix(arg, "-"):
@@ -211,6 +233,9 @@ func classifyHeadTailFileRead(args []string) (fileReadCandidate, bool) {
 
 	path, ok := singlePath(paths)
 	if !ok {
+		return fileReadCandidate{}, false
+	}
+	if wholeFileRead {
 		return fileReadCandidate{}, false
 	}
 	candidate := fileReadCandidate{path: path}
@@ -231,6 +256,19 @@ func isHeadTailCompactLineOption(arg string) bool {
 		}
 	}
 	return true
+}
+
+func parseHeadTailLineLimit(isTail bool, value string) (int, bool, bool) {
+	trimmed := strings.TrimSpace(value)
+	if isTail && strings.HasPrefix(trimmed, "+") {
+		startLine, ok := parsePositiveLineLimit(strings.TrimPrefix(trimmed, "+"))
+		if !ok {
+			return 0, false, false
+		}
+		return 0, startLine <= 1, true
+	}
+	lineLimit, ok := parsePositiveLineLimit(trimmed)
+	return lineLimit, false, ok
 }
 
 func parsePositiveLineLimit(value string) (int, bool) {
