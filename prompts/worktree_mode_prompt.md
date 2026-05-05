@@ -1,5 +1,4 @@
-The user has moved this established conversation into a git worktree. The previous environment has now been changed:
+The user has moved this conversation into a git worktree. The previous environment has now been changed. Uncommitted changes from the previous workspace were not brought over:
 - Branch: {{branch}}
-- New cwd: {{cwd}}
-- Worktree path: {{worktree_path}}
+- New cwd / worktree path: {{cwd}}
 - Main workspace root: {{workspace_root}}

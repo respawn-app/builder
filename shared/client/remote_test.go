@@ -633,6 +633,26 @@ func TestProtocolErrorMapsRuntimeUnavailableCode(t *testing.T) {
 	}
 }
 
+func TestProtocolErrorMapsRequestCanceledCodeToClearMessage(t *testing.T) {
+	err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRequestCanceled, Message: "context canceled"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if err.Error() != "request canceled by client" {
+		t.Fatalf("request canceled error = %q, want request canceled by client", err.Error())
+	}
+}
+
+func TestProtocolErrorMapsEmptyRequestCanceledCodeToClearMessage(t *testing.T) {
+	err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRequestCanceled})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if err.Error() != "request canceled by client" {
+		t.Fatalf("request canceled error = %q, want request canceled by client", err.Error())
+	}
+}
+
 func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)

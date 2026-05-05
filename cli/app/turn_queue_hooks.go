@@ -8,4 +8,5 @@ type turnQueueHook interface {
 	OnProjectedRuntimeEvent(evt clientui.Event)
 	OnTurnQueueDrained()
 	OnTurnQueueAborted()
+	OnUserCompactionCompleted(queueDrained bool)
 }

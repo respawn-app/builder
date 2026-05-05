@@ -945,6 +945,9 @@ func protocolError(err error) (int, string) {
 	}
 	message := strings.TrimSpace(err.Error())
 	if errors.Is(err, context.Canceled) {
+		if message == "" || message == context.Canceled.Error() {
+			message = "request canceled by client"
+		}
 		return protocol.ErrCodeRequestCanceled, message
 	}
 	if errors.Is(err, serverapi.ErrStreamGap) {

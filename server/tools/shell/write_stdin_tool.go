@@ -68,7 +68,7 @@ func (t *WriteStdinTool) Call(ctx context.Context, c tools.Call) (tools.Result, 
 		MaxOutputChars: maxChars,
 	})
 	if err != nil {
-		return tools.ErrorResultWith(c, fmt.Sprintf("write_stdin failed: %v", err), marshalNoHTMLEscape), nil
+		return tools.ErrorResultWith(c, formatToolCallError("write_stdin", err), marshalNoHTMLEscape), nil
 	}
 	body, marshalErr := marshalNoHTMLEscape(writeStdinOutput{
 		Output:              formatExecResponse(result),

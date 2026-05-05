@@ -682,6 +682,56 @@ func TestDetailModeStatusLineOmitsModeLabel(t *testing.T) {
 	}
 }
 
+func TestAskQuestionLargeMarkdownPromptPreservesLogicalLines(t *testing.T) {
+	question := strings.Join([]string{
+		"    val preserved = true",
+		"Please review this plan before I continue:",
+		"",
+		"```kotlin",
+		"fun main() {",
+		"    println(\"hi\")",
+		"}",
+		"```",
+		"",
+		"- Keep the four leading spaces in the code block.",
+		"- Do not collapse blank lines.",
+	}, "\n")
+	m := newProjectedStaticUIModel()
+	m.termWidth = 72
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: question}, reply: make(chan askReply, 1)})
+
+	wrapped, _ := m.layout().wrappedAskPromptLines(64)
+	gotLines := make([]string, 0, len(wrapped))
+	for _, line := range wrapped {
+		if strings.Contains(line.Text, "\n") {
+			t.Fatalf("ask prompt line contains embedded newline: %+v", line)
+		}
+		gotLines = append(gotLines, strings.TrimRight(line.Text, " "))
+	}
+	got := strings.Join(gotLines, "\n")
+	want := strings.Join([]string{
+		"    val preserved = true",
+		"Please review this plan before I continue:",
+		"",
+		"```kotlin",
+		"fun main() {",
+		"    println(\"hi\")",
+		"}",
+		"```",
+		"",
+		"- Keep the four leading spaces in the code block.",
+		"- Do not collapse blank lines.",
+		"›",
+		"Enter to submit",
+	}, "\n")
+	if got != want {
+		t.Fatalf("ask prompt snapshot mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
 func TestDoubleEscEntersRollbackSelectionAndEnterStartsEditing(t *testing.T) {
 	m := newProjectedStaticUIModel(WithUIInitialTranscript([]UITranscriptEntry{
 		{Role: "user", Text: "u1"},

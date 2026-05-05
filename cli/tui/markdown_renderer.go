@@ -97,7 +97,7 @@ func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
 
 func isMarkdownRole(role RenderIntent) bool {
 	switch role {
-	case RenderIntentUser, RenderIntentAssistant, RenderIntentAssistantCommentary:
+	case RenderIntentUser, RenderIntentAssistant, RenderIntentAssistantCommentary, RenderIntentToolQuestion, RenderIntentToolQuestionError:
 		return true
 	default:
 		return false

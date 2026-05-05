@@ -42,7 +42,7 @@ builder service uninstall --keep-running
 `install` starts the service after registration. `--no-start` only writes the service registration.
 `uninstall` stops the service before removing registration. `--keep-running` removes registration without stopping an already-running process.
 `restart --if-installed` is used by package updates: it exits successfully without output when no service is installed.
-On macOS, restart rewrites the LaunchAgent, unloads the loaded job, and bootstraps it again. Starting an unloaded LaunchAgent relies on launchd `RunAtLoad`; no separate kickstart is needed.
+On macOS, restart rewrites the LaunchAgent, unloads the loaded job, waits for the old server to stop, and bootstraps it again. Starting an unloaded LaunchAgent relies on launchd `RunAtLoad`; no separate kickstart is needed.
 
 ## Backends
 

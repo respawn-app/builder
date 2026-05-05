@@ -12,7 +12,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type preSubmitQueuePosition uint8
+
+const (
+	preSubmitQueueBack preSubmitQueuePosition = iota
+	preSubmitQueueFront
+)
+
 func (c uiInputController) startSubmission(text string) tea.Cmd {
+	return c.startSubmissionWithPreSubmitQueuePosition(text, preSubmitQueueBack)
+}
+
+func (c uiInputController) startSubmissionWithPreSubmitQueuePosition(text string, queuePosition preSubmitQueuePosition) tea.Cmd {
 	m := c.model
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
 		return disconnectCmd
@@ -40,22 +51,34 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 		m.preSubmitCheckToken++
 		token := m.preSubmitCheckToken
 		m.pendingPreSubmitText = text
-		m.queued = append(m.queued, text)
+		if queuePosition == preSubmitQueueFront {
+			m.queued = append([]string{text}, m.queued...)
+		} else {
+			m.queued = append(m.queued, text)
+		}
 		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), m.ensureSpinnerTicking())
 	}
 	return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
 }
 
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
+	return c.startSubmissionWithPromptHistoryAndQueuePosition(text, preSubmitQueueBack)
+}
+
+func (c uiInputController) startQueuedSubmissionWithPromptHistory(text string) tea.Cmd {
+	return c.startSubmissionWithPromptHistoryAndQueuePosition(text, preSubmitQueueFront)
+}
+
+func (c uiInputController) startSubmissionWithPromptHistoryAndQueuePosition(text string, queuePosition preSubmitQueuePosition) tea.Cmd {
 	m := c.model
 	if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, text); blocked {
 		return disconnectCmd
 	}
 	_, isUserShell := parseUserShellCommand(text)
 	if m.hasRuntimeClient() && !isUserShell {
-		return c.startSubmission(text)
+		return c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition)
 	}
-	return sequenceCmds(m.recordPromptHistory(text), c.startSubmission(text))
+	return sequenceCmds(m.recordPromptHistory(text), c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition))
 }
 
 func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string) tea.Cmd {
@@ -157,9 +180,27 @@ func (m *uiModel) markActiveSubmitUserMessageFlushed(evt clientui.Event) {
 	}
 }
 
+type uiCompactionOrigin uint8
+
+const (
+	uiCompactionOriginNone uiCompactionOrigin = iota
+	uiCompactionOriginManual
+	uiCompactionOriginQueued
+	uiCompactionOriginPreSubmit
+)
+
 func (c uiInputController) startCompaction(args string) tea.Cmd {
+	return c.startCompactionWithOrigin(args, uiCompactionOriginManual)
+}
+
+func (c uiInputController) startQueuedCompaction(args string) tea.Cmd {
+	return c.startCompactionWithOrigin(args, uiCompactionOriginQueued)
+}
+
+func (c uiInputController) startCompactionWithOrigin(args string, origin uiCompactionOrigin) tea.Cmd {
 	m := c.model
 	c.startBusyActivity(true)
+	m.compactionOrigin = origin
 	m.logf("compaction.start args_chars=%d", len(strings.TrimSpace(args)))
 	m.syncViewport()
 	return tea.Batch(c.compactCmd(args), m.ensureSpinnerTicking())
@@ -168,6 +209,7 @@ func (c uiInputController) startCompaction(args string) tea.Cmd {
 func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
 	m := c.model
 	c.startBusyActivity(true)
+	m.compactionOrigin = uiCompactionOriginPreSubmit
 	m.logf("compaction.pre_submit.start")
 	m.syncViewport()
 	return tea.Batch(c.preSubmitCompactCmd(), m.ensureSpinnerTicking())
@@ -382,6 +424,8 @@ func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea
 
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
+	compactionOrigin := m.compactionOrigin
+	m.compactionOrigin = uiCompactionOriginNone
 	c.finishBusyActivity(true)
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
@@ -406,7 +450,10 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	m.activity = uiActivityIdle
 	m.logf("compaction.done")
 	if len(m.queued) > 0 {
-		return c.flushQueuedInputs(queueDrainAuto)
+		c.notifyUserCompactionCompleted(compactionOrigin, false)
+		next, cmd := c.flushQueuedInputs(queueDrainAuto)
+		c.notifyTurnQueueDrainedIfIdle()
+		return next, cmd
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
@@ -425,8 +472,21 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		return m, appendCmd
 	}
 	if queuedRuntimeWork {
+		c.notifyUserCompactionCompleted(compactionOrigin, false)
 		return m, c.startQueuedInjectionSubmission()
 	}
+	c.notifyUserCompactionCompleted(compactionOrigin, !m.pendingQueuedDrainAfterHydration)
 	m.syncViewport()
 	return m, nil
+}
+
+func (c uiInputController) notifyUserCompactionCompleted(origin uiCompactionOrigin, queueDrained bool) {
+	m := c.model
+	if m == nil || m.turnQueueHook == nil {
+		return
+	}
+	switch origin {
+	case uiCompactionOriginManual, uiCompactionOriginQueued:
+		m.turnQueueHook.OnUserCompactionCompleted(queueDrained)
+	}
 }

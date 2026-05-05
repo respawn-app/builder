@@ -11,9 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type launchdServiceBackend struct{}
+
+var launchdServiceShutdownTimeout = 5 * time.Second
+var launchdServiceShutdownPollInterval = 100 * time.Millisecond
 
 func currentServiceBackend() serviceBackend {
 	return launchdServiceBackend{}
@@ -133,8 +137,47 @@ func reloadLaunchdService(ctx context.Context, spec serviceSpec, path string) er
 		if _, err := runServiceCommand(ctx, "launchctl", "bootout", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
 			return err
 		}
+		if err := waitForLaunchdServiceShutdown(ctx, spec); err != nil {
+			return err
+		}
 	}
 	return bootstrapLaunchdService(ctx, spec, path)
+}
+
+func waitForLaunchdServiceShutdown(ctx context.Context, spec serviceSpec) error {
+	timeout := launchdServiceShutdownTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	interval := launchdServiceShutdownPollInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		healthStatus, healthPID := probeServiceHealth(ctx, spec)
+		if healthStatus != "ok" {
+			return nil
+		}
+		loaded, _ := launchdLoaded(ctx)
+		if time.Now().After(deadline) {
+			detail := "Builder server still responds on " + spec.Endpoint
+			if healthPID > 0 {
+				detail = fmt.Sprintf("%s (pid %d)", detail, healthPID)
+			}
+			if loaded {
+				detail += "; launchd still reports the service as loaded"
+			}
+			return fmt.Errorf("stopped launchd job, but the old Builder server did not exit before restart: %s. Not bootstrapping a second server because it would fail with launchctl Bootstrap error 5. Re-running with sudo will not fix this; stop the stale builder process or wait for it to exit, then run `builder service restart` again", detail)
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func bootstrapLaunchdService(ctx context.Context, spec serviceSpec, path string) error {
@@ -142,7 +185,7 @@ func bootstrapLaunchdService(ctx context.Context, spec serviceSpec, path string)
 		if !isTransientLaunchdBootstrapError(err) {
 			return err
 		}
-		return kickstartMatchingLoadedLaunchdService(ctx, spec, err)
+		return replaceStaleLaunchdService(ctx, spec, path, err)
 	}
 	return nil
 }
@@ -155,12 +198,15 @@ func isTransientLaunchdBootstrapError(err error) bool {
 	return commandErr.Name == "launchctl" && commandErr.Result.Code == 5
 }
 
-func kickstartMatchingLoadedLaunchdService(ctx context.Context, spec serviceSpec, cause error) error {
-	loaded, output := launchdLoaded(ctx)
-	if !loaded || !commandArgsEqual(parseLaunchdPrintProgramArguments(output), serviceCommand(spec)) {
-		return cause
+func replaceStaleLaunchdService(ctx context.Context, spec serviceSpec, path string, cause error) error {
+	target := launchdDomain() + "/" + serviceLaunchdLabel
+	if _, err := runServiceCommand(ctx, "launchctl", "bootout", target); err != nil {
+		return errors.Join(cause, err)
 	}
-	if _, err := runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
+	if err := waitForLaunchdServiceShutdown(ctx, spec); err != nil {
+		return errors.Join(cause, err)
+	}
+	if _, err := runServiceCommand(ctx, "launchctl", "bootstrap", launchdDomain(), path); err != nil {
 		return errors.Join(cause, err)
 	}
 	return nil

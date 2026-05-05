@@ -23,6 +23,22 @@ var errRemoteClosed = errors.New("remote client is closed")
 
 const preferredLocalSocketProbeTimeout = 100 * time.Millisecond
 
+type requestCanceledError struct {
+	message string
+}
+
+func (e requestCanceledError) Error() string {
+	message := strings.TrimSpace(e.message)
+	if message == "" || message == context.Canceled.Error() {
+		return "request canceled by client"
+	}
+	return message
+}
+
+func (e requestCanceledError) Unwrap() error {
+	return context.Canceled
+}
+
 type remoteDialPlan struct {
 	endpoints []rpcwire.Endpoint
 }
@@ -399,6 +415,9 @@ func protocolError(resp *protocol.ResponseError) error {
 		return nil
 	}
 	message := strings.TrimSpace(resp.Message)
+	if resp.Code == protocol.ErrCodeRequestCanceled {
+		return requestCanceledError{message: message}
+	}
 	if message == "" {
 		message = "protocol request failed"
 	}
@@ -431,8 +450,6 @@ func protocolError(resp *protocol.ResponseError) error {
 		return errors.Join(serverapi.ErrPromptAlreadyResolved, errors.New(message))
 	case protocol.ErrCodePromptUnsupported:
 		return errors.Join(serverapi.ErrPromptUnsupported, errors.New(message))
-	case protocol.ErrCodeRequestCanceled:
-		return errors.Join(context.Canceled, errors.New(message))
 	default:
 		return errors.New(message)
 	}

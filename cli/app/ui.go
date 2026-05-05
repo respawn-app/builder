@@ -99,6 +99,10 @@ type runtimeEventBatchMsg struct {
 	carry  *clientui.Event
 }
 
+type uiModelProbeMessage interface {
+	probeUIModel(*uiModel)
+}
+
 type runtimeConnectionStateChangedMsg struct {
 	err error
 }
@@ -450,6 +454,14 @@ func WithUITurnQueueHook(hook turnQueueHook) UIOption {
 	}
 }
 
+func WithUITerminalFocusState(state *terminalFocusState) UIOption {
+	return func(m *uiModel) {
+		if state != nil {
+			m.terminalFocus = state
+		}
+	}
+}
+
 func WithUIPromptHistory(history []string) UIOption {
 	return func(m *uiModel) {
 		m.loadPromptHistory(history)
@@ -544,7 +556,8 @@ func newUIInputFeatureState() uiInputFeatureState {
 
 func newUIPresentationFeatureState() uiPresentationFeatureState {
 	return uiPresentationFeatureState{
-		theme: theme.Auto,
+		theme:         theme.Auto,
+		terminalFocus: newTerminalFocusState(),
 	}
 }
 
@@ -722,6 +735,7 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	cmd = tea.Batch(cmd, m.rearmSpinnerTicking())
 	if !result.awaitsHydration {
 		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
+		cmd = sequenceCmds(cmd, m.inputController().resumeQueuedInputsAfterIdleRuntime())
 	}
 	m.syncViewport()
 	if !result.transcriptMutated {
@@ -811,6 +825,18 @@ func (m *uiModel) Init() tea.Cmd {
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if probe, ok := msg.(uiModelProbeMessage); ok {
+		probe.probeUIModel(m)
+		return m, nil
+	}
+	switch msg.(type) {
+	case tea.FocusMsg:
+		m.terminalFocus.MarkFocused()
+		return m, nil
+	case tea.BlurMsg:
+		m.terminalFocus.MarkBlurred()
+		return m, nil
+	}
 	if result := m.reduceFeatureMessage(msg); result.handled {
 		return result.bubbleTea()
 	}
@@ -822,6 +848,20 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.forwardToView(msg)
 	m.syncViewport()
 	return m, m.maybeRequestDetailTranscriptPage()
+}
+
+func (m *uiModel) TerminalFocused() bool {
+	if m == nil {
+		return false
+	}
+	return m.terminalFocus.FocusedForAttention()
+}
+
+func (m *uiModel) TerminalFocusKnown() bool {
+	if m == nil {
+		return false
+	}
+	return m.terminalFocus.Known()
 }
 
 func (m *uiModel) setDebugKeyTransientStatus(raw tea.Msg, normalized tea.KeyMsg, source string) {

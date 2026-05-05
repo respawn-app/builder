@@ -144,20 +144,26 @@ type bellHooks struct {
 	mu                    sync.Mutex
 	notifier              terminalNotifier
 	title                 func() string
+	focused               func() bool
 	currentStep           string
 	toolCalls             int
 	pendingTurnCompletion bool
+	pendingCompaction     bool
 	lastCompletionMessage string
 }
 
-func newBellHooks(notifier terminalNotifier, title func() string) *bellHooks {
+func newBellHooks(notifier terminalNotifier, title func() string, focused ...func() bool) *bellHooks {
 	if notifier == nil {
 		notifier = newBELTerminalNotifier(io.Discard)
 	}
 	if title == nil {
 		title = func() string { return defaultSessionTitle }
 	}
-	return &bellHooks{notifier: notifier, title: title}
+	focusedProvider := func() bool { return false }
+	if len(focused) > 0 && focused[0] != nil {
+		focusedProvider = focused[0]
+	}
+	return &bellHooks{notifier: notifier, title: title, focused: focusedProvider}
 }
 
 func (h *bellHooks) OnAsk(req askquestion.Request) {
@@ -236,6 +242,14 @@ func (h *bellHooks) OnTurnQueueDrained() {
 		return
 	}
 	h.mu.Lock()
+	if h.pendingCompaction {
+		h.pendingCompaction = false
+		h.pendingTurnCompletion = false
+		h.lastCompletionMessage = ""
+		h.mu.Unlock()
+		h.notifyIfUnfocused(compactionCompletionNotificationMessage)
+		return
+	}
 	if !h.pendingTurnCompletion {
 		h.mu.Unlock()
 		return
@@ -244,7 +258,7 @@ func (h *bellHooks) OnTurnQueueDrained() {
 	h.pendingTurnCompletion = false
 	h.lastCompletionMessage = ""
 	h.mu.Unlock()
-	h.notifier.Notify(h.formatMessage(message))
+	h.notifyIfUnfocused(message)
 }
 
 func (h *bellHooks) OnTurnQueueAborted() {
@@ -255,8 +269,28 @@ func (h *bellHooks) OnTurnQueueAborted() {
 	h.currentStep = ""
 	h.toolCalls = 0
 	h.pendingTurnCompletion = false
+	h.pendingCompaction = false
 	h.lastCompletionMessage = ""
 	h.mu.Unlock()
+}
+
+const compactionCompletionNotificationMessage = "Compaction finished"
+
+func (h *bellHooks) OnUserCompactionCompleted(queueDrained bool) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	if !queueDrained {
+		h.pendingCompaction = true
+		h.mu.Unlock()
+		return
+	}
+	h.pendingCompaction = false
+	h.pendingTurnCompletion = false
+	h.lastCompletionMessage = ""
+	h.mu.Unlock()
+	h.notifyIfUnfocused(compactionCompletionNotificationMessage)
 }
 
 func turnCompletionNotificationMessage(assistantContent string) string {
@@ -282,4 +316,20 @@ func (h *bellHooks) formatMessage(message string) string {
 		title = sessionTitle(h.title())
 	}
 	return title + ": " + sanitizeTerminalNotificationMessage(message)
+}
+
+func (h *bellHooks) notifyIfUnfocused(message string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	focused := false
+	if h.focused != nil {
+		focused = h.focused()
+	}
+	h.mu.Unlock()
+	if focused {
+		return
+	}
+	h.notifier.Notify(h.formatMessage(message))
 }

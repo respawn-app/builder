@@ -4,13 +4,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLaunchdInstallReloadsLoadedServiceBeforeBootstrap(t *testing.T) {
@@ -104,7 +111,315 @@ func TestLaunchdRestartKickstartsLoadedServiceWithoutBootstrap(t *testing.T) {
 	}
 }
 
-func TestLaunchdStartFallsBackToKickstartWhenBootstrapFindsMatchingLoadedService(t *testing.T) {
+func TestLaunchdRestartIfInstalledReplacesStaleLoadedServiceAfterTransientBootstrapError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := testLaunchdServiceSpec(t)
+	withLaunchdServiceCommandSpec(t, spec)
+	path := mustLaunchdPlistPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir launch agents: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(renderLaunchdPlist(spec)), 0o644); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+	printCalls := 0
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			printCalls++
+			if printCalls <= 2 {
+				return serviceCommandResult{Stdout: "state = running\npid = 42\narguments = {\n\t/old/builder\n\tserve\n}\n"}, nil
+			}
+			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			if countLaunchdCommand(*calls, "bootstrap") == 1 {
+				return serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}}
+			}
+			return serviceCommandResult{}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
+		{"launchctl", "bootout", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %#v, want %#v", *calls, want)
+	}
+	wantStdout := "Builder background service is installed. Restarting it after update; sessions may fail briefly.\nRestarted Builder background service.\n"
+	if stdout.String() != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), wantStdout)
+	}
+}
+
+func TestLaunchdRestartIfInstalledBootstrapRecoveryFailsWhenBootoutFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := testLaunchdServiceSpec(t)
+	withLaunchdServiceCommandSpec(t, spec)
+	path := mustLaunchdPlistPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir launch agents: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(renderLaunchdPlist(spec)), 0o644); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+	printCalls := 0
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			printCalls++
+			if printCalls <= 2 {
+				return serviceCommandResult{Stdout: "state = running\npid = 42\narguments = {\n\t/old/builder\n\tserve\n}\n"}, nil
+			}
+			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			return serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}}
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stderr: "bootout failed", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "bootout failed", Code: 5}}
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if countLaunchdCommand(*calls, "bootstrap") != 1 || countLaunchdCommand(*calls, "bootout") != 1 {
+		t.Fatalf("calls = %#v, want one bootstrap then failed bootout", *calls)
+	}
+	if !strings.Contains(stderr.String(), "bootout failed") {
+		t.Fatalf("stderr = %q, want bootout failure", stderr.String())
+	}
+}
+
+func TestLaunchdRestartIfInstalledBootstrapRecoveryFailsWhenRetryBootstrapFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := testLaunchdServiceSpec(t)
+	withLaunchdServiceCommandSpec(t, spec)
+	path := mustLaunchdPlistPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir launch agents: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(renderLaunchdPlist(spec)), 0o644); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+	printCalls := 0
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			printCalls++
+			if printCalls <= 2 {
+				return serviceCommandResult{Stdout: "state = running\npid = 42\narguments = {\n\t/old/builder\n\tserve\n}\n"}, nil
+			}
+			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			if countLaunchdCommand(*calls, "bootstrap") == 1 {
+				return serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}}
+			}
+			return serviceCommandResult{Stderr: "retry bootstrap failed", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "retry bootstrap failed", Code: 5}}
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	code := serviceSubcommand([]string{"restart", "--if-installed"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if countLaunchdCommand(*calls, "bootstrap") != 2 || countLaunchdCommand(*calls, "bootout") != 1 {
+		t.Fatalf("calls = %#v, want failed bootstrap, bootout, failed retry bootstrap", *calls)
+	}
+	if !strings.Contains(stderr.String(), "retry bootstrap failed") {
+		t.Fatalf("stderr = %q, want retry bootstrap failure", stderr.String())
+	}
+}
+
+func TestLaunchdReloadWaitsForOldServerBeforeBootstrap(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	serverRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		serverRequests++
+		if serverRequests == 1 {
+			_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
+			return
+		}
+		http.Error(w, "stopped", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	spec := testLaunchdServiceSpec(t)
+	spec.Endpoint = server.URL
+	path := mustLaunchdPlistPath(t)
+	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			if serverRequests < 2 {
+				t.Fatalf("bootstrap happened before old server health went down")
+			}
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	if err := reloadLaunchdService(context.Background(), spec, path); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	want := [][]string{
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootout", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %#v, want %#v", *calls, want)
+	}
+}
+
+func TestLaunchdReloadExplainsOldServerStillRunningInsteadOfBootstrapCodeFive(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	originalTimeout := launchdServiceShutdownTimeout
+	originalInterval := launchdServiceShutdownPollInterval
+	launchdServiceShutdownTimeout = time.Millisecond
+	launchdServiceShutdownPollInterval = time.Millisecond
+	t.Cleanup(func() {
+		launchdServiceShutdownTimeout = originalTimeout
+		launchdServiceShutdownPollInterval = originalInterval
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
+	}))
+	t.Cleanup(server.Close)
+	spec := testLaunchdServiceSpec(t)
+	spec.Endpoint = server.URL
+	path := mustLaunchdPlistPath(t)
+	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	err := reloadLaunchdService(context.Background(), spec, path)
+	if err == nil {
+		t.Fatal("expected reload to fail while old server is still healthy")
+	}
+	if !strings.Contains(err.Error(), "old Builder server did not exit") || !strings.Contains(err.Error(), "sudo will not fix this") || !strings.Contains(err.Error(), "Bootstrap error 5") {
+		t.Fatalf("error = %v, want actionable old-server message", err)
+	}
+	if countLaunchdCommand(*calls, "bootstrap") != 0 {
+		t.Fatalf("bootstrap should not run while old server still owns port, calls=%#v", *calls)
+	}
+}
+
+func TestLaunchdRestartIfInstalledRepeatedIntegration(t *testing.T) {
+	if os.Getenv("BUILDER_LAUNCHD_INTEGRATION") != "1" {
+		t.Skip("set BUILDER_LAUNCHD_INTEGRATION=1 to run real launchd service restart integration")
+	}
+	builderPath := strings.TrimSpace(os.Getenv("BUILDER_LAUNCHD_INTEGRATION_BUILDER"))
+	if builderPath == "" {
+		var err error
+		builderPath, err = exec.LookPath("builder")
+		if err != nil {
+			t.Fatalf("find builder binary: %v", err)
+		}
+	}
+	freePort := reserveFreeLocalPort(t)
+	root := t.TempDir()
+	wrapperPath := filepath.Join(root, "builder")
+	wrapper := fmt.Sprintf("#!/bin/sh\nexport BUILDER_SERVER_PORT=%d\nexport BUILDER_PERSISTENCE_ROOT=%s\nexec -a \"$0\" %s \"$@\"\n", freePort, shellQuote(filepath.Join(root, "persist")), shellQuote(builderPath))
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatalf("write builder wrapper: %v", err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	env := append(os.Environ(),
+		"HOME="+home,
+		fmt.Sprintf("BUILDER_SERVER_PORT=%d", freePort),
+		"BUILDER_PERSISTENCE_ROOT="+filepath.Join(root, "persist"),
+	)
+	runBuilder := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(wrapperPath, args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %s failed: %v\n%s", wrapperPath, strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	t.Cleanup(func() {
+		cmd := exec.Command(wrapperPath, "service", "uninstall")
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+
+	runBuilder("service", "install", "--force")
+	lastPID := 0
+	for i := 0; i < 3; i++ {
+		output := runBuilder("service", "restart", "--if-installed")
+		if !strings.Contains(output, "Restarted Builder background service.") {
+			t.Fatalf("restart output = %q, want restart confirmation", output)
+		}
+		status := runBuilder("service", "status", "--json")
+		var decoded serviceStatus
+		if err := json.Unmarshal([]byte(status), &decoded); err != nil {
+			t.Fatalf("decode status JSON: %v; raw=%q", err, status)
+		}
+		if !decoded.Installed || !decoded.Loaded || !decoded.Running || decoded.PID <= 0 {
+			t.Fatalf("status after restart %d = %+v, want installed/loaded/running with pid", i+1, decoded)
+		}
+		if lastPID > 0 && decoded.PID == lastPID {
+			t.Fatalf("pid did not change after restart %d: %d", i+1, decoded.PID)
+		}
+		lastPID = decoded.PID
+	}
+}
+
+func TestLaunchdStartReplacesStaleLoadedServiceAfterTransientBootstrapError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := testLaunchdServiceSpec(t)
 	path := mustLaunchdPlistPath(t)
@@ -114,19 +429,17 @@ func TestLaunchdStartFallsBackToKickstartWhenBootstrapFindsMatchingLoadedService
 	if err := os.WriteFile(path, []byte(renderLaunchdPlist(spec)), 0o644); err != nil {
 		t.Fatalf("write plist: %v", err)
 	}
-	loadedPrint := "state = running\narguments = {\n\t/usr/local/bin/builder\n\tserve\n}\n"
-	printCalls := 0
-	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
 		switch strings.Join(append([]string{name}, args...), "\x00") {
 		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
-			printCalls++
-			if printCalls == 1 {
-				return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
-			}
-			return serviceCommandResult{Stdout: loadedPrint}, nil
+			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
 		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
-			return serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}}
-		case "launchctl\x00kickstart\x00-k\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			if countLaunchdCommand(*calls, "bootstrap") == 1 {
+				return serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "Bootstrap failed: 5: Input/output error", Code: 5}}
+			}
+			return serviceCommandResult{}, nil
+		case "launchctl\x00bootout\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
 			return serviceCommandResult{}, nil
 		default:
 			return serviceCommandResult{}, errors.New("unexpected command")
@@ -140,8 +453,8 @@ func TestLaunchdStartFallsBackToKickstartWhenBootstrapFindsMatchingLoadedService
 	want := [][]string{
 		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
 		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
-		{"launchctl", "print", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
-		{"launchctl", "kickstart", "-k", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootout", "gui/" + currentUIDText() + "/" + serviceLaunchdLabel},
+		{"launchctl", "bootstrap", "gui/" + currentUIDText(), path},
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls = %#v, want %#v", *calls, want)
@@ -237,6 +550,18 @@ func captureLaunchdServiceCommands(t *testing.T, fn func(context.Context, string
 	return &calls
 }
 
+func withLaunchdServiceCommandSpec(t *testing.T, spec serviceSpec) {
+	t.Helper()
+	originalLoadSpec := loadServiceSpec
+	originalBackendFactory := serviceBackendFactory
+	loadServiceSpec = func() (serviceSpec, error) { return spec, nil }
+	serviceBackendFactory = func() serviceBackend { return launchdServiceBackend{} }
+	t.Cleanup(func() {
+		loadServiceSpec = originalLoadSpec
+		serviceBackendFactory = originalBackendFactory
+	})
+}
+
 func currentUIDText() string {
 	return strconv.Itoa(os.Getuid())
 }
@@ -248,4 +573,24 @@ func mustLaunchdPlistPath(t *testing.T) string {
 		t.Fatalf("launchd plist path: %v", err)
 	}
 	return path
+}
+
+func countLaunchdCommand(calls [][]string, name string) int {
+	count := 0
+	for _, call := range calls {
+		if len(call) >= 2 && call[0] == "launchctl" && call[1] == name {
+			count++
+		}
+	}
+	return count
+}
+
+func reserveFreeLocalPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve local port: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	return listener.Addr().(*net.TCPAddr).Port
 }

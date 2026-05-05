@@ -176,8 +176,10 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
 		}
-		if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
-			return next, cmd
+		if m.busy {
+			if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
+				return next, cmd
+			}
 		}
 		if blocked, disconnectCmd := c.blockDisconnectedSubmission(false, ""); blocked {
 			return m, disconnectCmd
@@ -193,6 +195,14 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.queueInjectedInput(text)
 			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 			return m, nil
+		}
+		if len(m.queued) > 0 {
+			m.queueInput(text)
+			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+			return c.flushQueuedInputs(queueDrainOne)
+		}
+		if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
+			return next, cmd
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			recordCmd := m.recordPromptHistory(text)

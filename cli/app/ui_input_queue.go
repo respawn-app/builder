@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"builder/cli/app/commands"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -184,17 +186,36 @@ func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, te
 	return m, tea.Batch(cmds...)
 }
 
+func (c uiInputController) resumeQueuedInputsAfterIdleRuntime() tea.Cmd {
+	m := c.model
+	if m == nil || m.busy || m.ask.hasCurrent() || len(m.queued) == 0 || m.isInputLocked() || m.pendingQueuedDrainAfterHydration {
+		return nil
+	}
+	if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
+		m.pendingQueuedDrainAfterHydration = true
+		m.queuedDrainReadyAfterHydration = false
+		m.syncViewport()
+		return m.requestRuntimeQueuedDrainTranscriptSync()
+	}
+	_, cmd := c.flushQueuedInputs(queueDrainAuto)
+	c.notifyTurnQueueDrainedIfIdle()
+	return cmd
+}
+
 func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 	m := c.model
 	if m.commandRegistry != nil {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
-				_, cmd := c.applyCommandResult(commandResult)
+				if commandResult.Action == commands.ActionCompact {
+					return finalizeSlashCommandCmd(commandResult.Action, c.startQueuedCompaction(commandResult.Args), m.recordPromptHistory(text))
+				}
+				_, cmd := c.applyQueuedCommandResult(commandResult)
 				return finalizeSlashCommandCmd(commandResult.Action, cmd, m.recordPromptHistory(text))
 			}
 		}
 	}
-	return c.startSubmissionWithPromptHistory(text)
+	return c.startQueuedSubmissionWithPromptHistory(text)
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {

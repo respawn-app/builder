@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -127,6 +128,26 @@ type WriteRequest struct {
 	Input          string
 	YieldTime      time.Duration
 	MaxOutputChars int
+}
+
+type PollingCanceledError struct {
+	SessionID string
+	Active    bool
+}
+
+func (e *PollingCanceledError) Error() string {
+	state := "process finished"
+	if e.Active {
+		state = "process active"
+	}
+	if strings.TrimSpace(e.SessionID) == "" {
+		return fmt.Sprintf("Canceled polling by user, %s", state)
+	}
+	return fmt.Sprintf("Canceled polling by user, %s (session_id %s)", state, strings.TrimSpace(e.SessionID))
+}
+
+func (e *PollingCanceledError) Unwrap() error {
+	return context.Canceled
 }
 
 type processEntry struct {

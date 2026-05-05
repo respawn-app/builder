@@ -12,6 +12,14 @@ import (
 )
 
 func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
+	return c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueBack)
+}
+
+func (c uiInputController) applyQueuedCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
+	return c.applyCommandResultWithPreSubmitQueuePosition(commandResult, preSubmitQueueFront)
+}
+
+func (c uiInputController) applyCommandResultWithPreSubmitQueuePosition(commandResult commands.Result, queuePosition preSubmitQueuePosition) (tea.Model, tea.Cmd) {
 	m := c.model
 	if commandResult.SubmitUser {
 		if blocked, disconnectCmd := c.blockDisconnectedSubmission(true, commandResult.User); blocked {
@@ -25,7 +33,7 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		return m, tea.Quit
 	}
 	if commandResult.SubmitUser {
-		return m, c.startSubmission(commandResult.User)
+		return m, c.startSubmissionWithPreSubmitQueuePosition(commandResult.User, queuePosition)
 	}
 	prefixCmd := tea.Cmd(nil)
 	if commandResult.Text != "" {

@@ -27,6 +27,7 @@ type runtimeWiring struct {
 	askBridge             *askBridge
 	eventBridge           *runtimeEventBridge
 	turnQueueHook         turnQueueHook
+	terminalFocus         *terminalFocusState
 	runtimeEvents         <-chan clientui.Event
 	askEvents             <-chan askEvent
 	background            *shelltool.Manager
@@ -104,9 +105,10 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
+	terminalFocus := newTerminalFocusState()
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod), func() string {
 		return store.Meta().Name
-	})
+	}, terminalFocus.FocusedForAttention)
 
 	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, active, enabledTools, workspaceRoot, mgr, logger, background, runtimewire.RuntimeWiringOptions{
 		Headless: opts.Headless,
@@ -145,6 +147,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		askBridge:     askBridge,
 		eventBridge:   wiring.EventBridge,
 		turnQueueHook: bells,
+		terminalFocus: terminalFocus,
 		background:    wiring.Background,
 		promptHistory: append([]string(nil), wiring.PromptHistory...),
 	}, nil
