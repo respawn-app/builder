@@ -71,13 +71,6 @@ func load(workspaceRoot string, includeWorkspaceLayer bool, opts LoadOptions) (A
 
 	state := configRegistry.defaultState()
 	sources := configRegistry.defaultSourceMap()
-	if configRoot := strings.TrimSpace(opts.ConfigRoot); configRoot != "" {
-		absConfigRoot, err := filepath.Abs(configRoot)
-		if err != nil {
-			return App{}, fmt.Errorf("resolve config root: %w", err)
-		}
-		state.PersistenceRoot = absConfigRoot
-	}
 
 	if err := configRegistry.applyFile(homeFileConfig, homeSettingsPath, &state, sources); err != nil {
 		return App{}, err
