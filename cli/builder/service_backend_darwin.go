@@ -142,7 +142,7 @@ func bootstrapLaunchdService(ctx context.Context, spec serviceSpec, path string)
 		if !isTransientLaunchdBootstrapError(err) {
 			return err
 		}
-		return kickstartMatchingLoadedLaunchdService(ctx, spec, err)
+		return replaceStaleLaunchdService(ctx, path, err)
 	}
 	return nil
 }
@@ -155,12 +155,12 @@ func isTransientLaunchdBootstrapError(err error) bool {
 	return commandErr.Name == "launchctl" && commandErr.Result.Code == 5
 }
 
-func kickstartMatchingLoadedLaunchdService(ctx context.Context, spec serviceSpec, cause error) error {
-	loaded, output := launchdLoaded(ctx)
-	if !loaded || !commandArgsEqual(parseLaunchdPrintProgramArguments(output), serviceCommand(spec)) {
-		return cause
+func replaceStaleLaunchdService(ctx context.Context, path string, cause error) error {
+	target := launchdDomain() + "/" + serviceLaunchdLabel
+	if _, err := runServiceCommand(ctx, "launchctl", "bootout", target); err != nil {
+		return errors.Join(cause, err)
 	}
-	if _, err := runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel); err != nil {
+	if _, err := runServiceCommand(ctx, "launchctl", "bootstrap", launchdDomain(), path); err != nil {
 		return errors.Join(cause, err)
 	}
 	return nil
