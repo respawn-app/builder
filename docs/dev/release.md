@@ -34,10 +34,11 @@ The `release` workflow in `/.github/workflows/release.yml`:
 4. Builds static release binaries through `scripts/build.sh` with the shared release profile.
 5. Packages the release archives and writes `checksums.txt` through `scripts/release-artifacts.sh`.
 6. Verifies the checksum manifest and smoke-tests packaged binaries on Linux, macOS, and Windows before publishing.
-7. Publishes the GitHub release.
-8. Checks out `respawn-app/homebrew-tap`.
-9. Runs `scripts/update-brew-tap.sh` for formula `builder-cli`.
-10. Opens a PR in the tap repo with label `pr-pull`.
+7. Smoke-tests the Windows installer against staged release assets before publishing.
+8. Publishes the GitHub release.
+9. Checks out `respawn-app/homebrew-tap`.
+10. Runs `scripts/update-brew-tap.sh` for formula `builder-cli`.
+11. Opens a PR in the tap repo with label `pr-pull`.
 
 ## What The Tap Automation Does
 
@@ -64,14 +65,21 @@ Verify all of these before considering the release done:
 1. The GitHub release `vX.Y.Z` exists in `respawn-app/builder` and contains the expected assets plus `checksums.txt`.
 2. The tap PR in `respawn-app/homebrew-tap` is closed by the automation.
 3. The formula on tap `master` has the new tag URL and bottle block.
-4. A standalone install works and passes checksum verification when the release publishes `checksums.txt`:
+4. A standalone Unix install works and passes checksum verification when the release publishes `checksums.txt`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
 builder --version
 ```
 
-5. A fresh Homebrew install works after `brew update`:
+5. A standalone Windows install works and passes checksum verification:
+
+```powershell
+irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
+builder --version
+```
+
+6. A fresh Homebrew install works after `brew update`:
 
 ```bash
 brew update
@@ -86,7 +94,7 @@ If short-name resolution is stale on a machine, use the fully qualified formula 
 brew install respawn-app/tap/builder-cli
 ```
 
-6. Clean up the Homebrew and direct installs to restore your local development build:
+7. Clean up the Homebrew and direct installs to restore your local development build:
 
 ```bash
 brew uninstall builder-cli 2>/dev/null || true

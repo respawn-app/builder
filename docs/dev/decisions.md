@@ -519,7 +519,10 @@
 - Workflow runner labels should use `*-latest` aliases where GitHub provides them. ARM smoke-test jobs currently stay on `ubuntu-24.04-arm` and `windows-11-arm` because GitHub does not publish `-latest` aliases for those hosted runners.
 - Linux release binaries must stay statically linked; do not enable PIE or other dynamic-linking release modes.
 - GitHub releases must publish `checksums.txt`, and `scripts/install.sh` verifies archive checksums when that manifest is present.
+- Windows one-command installs are served by `scripts/install.ps1`; the default user install path is `~/.builder/bin/builder.exe`, matching the user-scoped Builder persistence root.
+- Windows installer uninstalls must remove only installer-owned binary/PATH/registry/marker files and never remove Builder config, sessions, auth, worktrees, skills, or winget-installed dependencies.
 - The release workflow must verify the checksum manifest and smoke-test packaged binaries on Linux, macOS, and Windows before publishing.
+- The release workflow must smoke-test `scripts/install.ps1` against staged Windows release assets before publishing.
 - GitHub artifact attestations are intentionally not part of the release pipeline.
 
 ## Experimental Reviewer

@@ -133,6 +133,87 @@ func TestSandboxServeUpReportsHostPortInUse(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallerScriptDocumentsSupportedFlags(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "install.ps1"))
+	if err != nil {
+		t.Fatalf("read install.ps1: %v", err)
+	}
+	text := string(data)
+	for _, needle := range []string{
+		"-Version <vX.Y.Z|X.Y.Z>",
+		"-InstallDir <path>",
+		"-Yes",
+		"-NoPath",
+		"-NoDeps",
+		"-Uninstall",
+		"-Force",
+		"-NoServiceRestart",
+		"BUILDER_RELEASE_BASE",
+		"Git.Git",
+		"BurntSushi.ripgrep.MSVC",
+		"UninstallString",
+		"checksums.txt",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("install.ps1 missing %q", needle)
+		}
+	}
+}
+
+func TestWindowsInstallerStopsRunningServiceBeforeReplacingBinary(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "install.ps1"))
+	if err != nil {
+		t.Fatalf("read install.ps1: %v", err)
+	}
+	text := string(data)
+	stopIndex := strings.Index(text, "Stop-ServiceForUpdate $target")
+	installIndex := strings.Index(text, "Install-ArchiveBinary $extractedBinary $target")
+	if stopIndex < 0 {
+		t.Fatal("install.ps1 does not stop service before binary replacement")
+	}
+	if installIndex < 0 {
+		t.Fatal("install.ps1 does not install archive binary")
+	}
+	if stopIndex > installIndex {
+		t.Fatalf("service stop occurs after binary replacement: stop=%d install=%d", stopIndex, installIndex)
+	}
+}
+
+func TestWindowsInstallerRestartsStoppedServiceAfterFailedUpdate(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "install.ps1"))
+	if err != nil {
+		t.Fatalf("read install.ps1: %v", err)
+	}
+	text := string(data)
+	for _, needle := range []string{
+		"$serviceStoppedForUpdate = [bool](Stop-ServiceForUpdate $target)",
+		"if ($serviceStoppedForUpdate -and -not $installSucceeded)",
+		"Restart-ServiceAfterFailedUpdate $target",
+		"service may be left stopped",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("install.ps1 missing service recovery behavior %q", needle)
+		}
+	}
+}
+
+func TestWindowsInstallerScriptAvoidsPowerShell7OnlySyntax(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "install.ps1"))
+	if err != nil {
+		t.Fatalf("read install.ps1: %v", err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{"??", "ForEach-Object -Parallel"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("install.ps1 contains PowerShell 7-only syntax %q", forbidden)
+		}
+	}
+}
+
 func TestTestScriptEnforcesWallClockTimeout(t *testing.T) {
 	root := repoRoot(t)
 	tempPkg, err := os.MkdirTemp(root, "script-timeout-test-*")

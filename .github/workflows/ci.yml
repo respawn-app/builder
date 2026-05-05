@@ -63,6 +63,97 @@ jobs:
       - name: Test
         run: ./scripts/ci-check.sh test
 
+  windows-installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build mocked Windows release asset
+        env:
+          VERSION: 0.0.0
+        run: |
+          mkdir -p dist staging
+          GOOS=windows GOARCH=amd64 BUILDER_VERSION="$VERSION" \
+            bash scripts/build.sh --output "staging/builder_${VERSION}_windows_amd64.exe"
+          (
+            cd staging
+            zip -q "../dist/builder_${VERSION}_windows_amd64.zip" "builder_${VERSION}_windows_amd64.exe"
+          )
+          (
+            cd dist
+            shasum -a 256 "builder_${VERSION}_windows_amd64.zip" > checksums.txt
+          )
+
+      - name: Smoke test installer
+        env:
+          VERSION: 0.0.0
+        run: bash scripts/release-artifacts.sh smoke-windows-installer --version "$VERSION" --goarch amd64 --dist-dir dist
+
+      - name: Smoke test installer restores stopped service after failure
+        env:
+          VERSION: 0.0.0
+        run: |
+          cat > fake-builder.go <<'GO'
+          package main
+          import (
+            "fmt"
+            "os"
+            "strings"
+          )
+          func mark(value string) {
+            path := os.Getenv("BUILDER_FAKE_MARKER")
+            if path == "" { return }
+            f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+            if err == nil { _, _ = f.WriteString(value + "\n"); _ = f.Close() }
+          }
+          func main() {
+            args := os.Args[1:]
+            if len(args) == 1 && args[0] == "--version" { fmt.Println(os.Getenv("BUILDER_FAKE_VERSION")); return }
+            if len(args) >= 2 && args[0] == "service" && args[1] == "status" {
+              exe, _ := os.Executable()
+              fmt.Printf(`{"installed":true,"loaded":true,"running":true,"command":[%q],"endpoint":"","logs":[]}`+"\n", exe)
+              return
+            }
+            if len(args) >= 2 && args[0] == "service" && args[1] == "stop" { mark("stopped"); return }
+            if len(args) >= 3 && strings.Join(args[:3], " ") == "service restart --if-installed" { mark("restarted"); return }
+            fmt.Fprintf(os.Stderr, "unexpected args: %v\n", args)
+            os.Exit(1)
+          }
+          GO
+          mkdir -p recovery-release/v${VERSION} recovery-install recovery-staging
+          GOOS=windows GOARCH=amd64 go build -o recovery-install/builder.exe fake-builder.go
+          cp recovery-install/builder.exe "recovery-staging/builder_${VERSION}_windows_amd64.exe"
+          (
+            cd recovery-staging
+            zip -q "../recovery-release/v${VERSION}/builder_${VERSION}_windows_amd64.zip" "builder_${VERSION}_windows_amd64.exe"
+          )
+          (
+            cd "recovery-release/v${VERSION}"
+            shasum -a 256 "builder_${VERSION}_windows_amd64.zip" > checksums.txt
+          )
+          release_base="$(cygpath -w "$PWD/recovery-release")"
+          install_dir="$(cygpath -w "$PWD/recovery-install")"
+          marker_path="$PWD/recovery-marker.txt"
+          marker_win="$(cygpath -w "$marker_path")"
+          if BUILDER_RELEASE_BASE="$release_base" BUILDER_FAKE_MARKER="$marker_win" BUILDER_FAKE_VERSION="wrong" \
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 \
+              -Version "$VERSION" -InstallDir "$install_dir" -Yes -NoPath -NoDeps; then
+            echo "installer unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -q '^stopped$' "$marker_path"
+          grep -q '^restarted$' "$marker_path"
+
   docs:
     runs-on: ubuntu-latest
     defaults:
