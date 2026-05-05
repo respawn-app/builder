@@ -6,12 +6,16 @@ import (
 	"builder/server/core"
 	"builder/server/metadata"
 	"builder/server/session"
+	shelltool "builder/server/tools/shell"
 	remoteclient "builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
+	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"golang.org/x/net/websocket"
 	"net/http/httptest"
 	"strconv"
@@ -41,6 +45,22 @@ func configureGatewayTestServerPort(t *testing.T) {
 
 var gatewayTestPortCounter atomic.Uint32
 
+func reportGatewayHandlerError(errs chan<- error, format string, args ...any) {
+	select {
+	case errs <- fmt.Errorf(format, args...):
+	default:
+	}
+}
+
+func requireNoGatewayHandlerError(t *testing.T, errs <-chan error) {
+	t.Helper()
+	select {
+	case err := <-errs:
+		t.Fatal(err)
+	default:
+	}
+}
+
 func TestProtocolErrorMapsRuntimeUnavailable(t *testing.T) {
 	code, _ := protocolError(serverapi.ErrRuntimeUnavailable)
 	if code != protocol.ErrCodeRuntimeUnavailable {
@@ -53,9 +73,62 @@ func TestProtocolErrorMapsContextCanceled(t *testing.T) {
 	if code != protocol.ErrCodeRequestCanceled {
 		t.Fatalf("protocol error code = %d, want %d", code, protocol.ErrCodeRequestCanceled)
 	}
-	if message != context.Canceled.Error() {
-		t.Fatalf("protocol error message = %q, want %q", message, context.Canceled.Error())
+	if message != "request canceled by client" {
+		t.Fatalf("protocol error message = %q, want request canceled by client", message)
 	}
+}
+
+func TestCancellationMessageRoundTripsThroughRemoteClient(t *testing.T) {
+	code, message := protocolError(&shelltool.PollingCanceledError{SessionID: "1000", Active: true})
+	if code != protocol.ErrCodeRequestCanceled {
+		t.Fatalf("protocol error code = %d, want %d", code, protocol.ErrCodeRequestCanceled)
+	}
+
+	handlerErrs := make(chan error, 8)
+	server := httptest.NewServer(rpcwire.NewWebSocketTransport().Handler(func(ctx context.Context, conn rpcwire.Conn) {
+		for event := range conn.Events() {
+			if event.Err != nil {
+				return
+			}
+			req := event.Frame.Request()
+			switch req.Method {
+			case protocol.MethodHandshake:
+				resp := protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(resp)); err != nil {
+					reportGatewayHandlerError(handlerErrs, "send handshake: %w", err)
+					return
+				}
+			case protocol.MethodProjectList:
+				resp := protocol.NewErrorResponse(req.ID, code, message)
+				if err := conn.Send(ctx, rpcwire.FrameFromResponse(resp)); err != nil {
+					reportGatewayHandlerError(handlerErrs, "send project list error: %w", err)
+				}
+				return
+			default:
+				reportGatewayHandlerError(handlerErrs, "unexpected method %q", req.Method)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	remote, err := remoteclient.DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
+	if err != nil {
+		t.Fatalf("DialRemoteURL: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	_, err = remote.ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ListProjects error = %v, want context.Canceled", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "Canceled polling by user, process active") {
+		t.Fatalf("expected clear cancellation message, got %v", err)
+	}
+	if strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("did not expect raw context cancellation message, got %q", err.Error())
+	}
+	requireNoGatewayHandlerError(t, handlerErrs)
 }
 
 func newGatewayTestAuthSupport(t *testing.T, ready bool) serverbootstrap.AuthSupport {

@@ -7,6 +7,7 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +43,23 @@ func waitForManagerCount(t *testing.T, manager *Manager, want int, timeout time.
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("manager count = %d, want %d", manager.Count(), want)
+}
+
+func waitForEntryInteraction(t *testing.T, manager *Manager, id string, timeout time.Duration) {
+	t.Helper()
+	entry, err := manager.entry(id)
+	if err != nil {
+		t.Fatalf("background entry %s: %v", id, err)
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !entry.interactMu.TryLock() {
+			return
+		}
+		entry.interactMu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for write_stdin to start interacting with session %s", id)
 }
 
 func writeExecutableScript(t *testing.T, contents string) string {
@@ -427,6 +445,99 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("expected command output in poll output, got %q", pollText)
 	}
 	waitForManagerCount(t, manager, 0, time.Second)
+}
+
+func TestWriteStdinCancellationReportsActiveProcess(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 2"},
+		DisplayCommand: "sleep 2",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded process, got %+v", result)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan tools.Result, 1)
+	go func() {
+		sessionID, err := strconv.Atoi(result.SessionID)
+		if err != nil {
+			t.Errorf("parse session id: %v", err)
+			done <- tools.Result{}
+			return
+		}
+		pollInput, _ := json.Marshal(map[string]any{
+			"session_id":    sessionID,
+			"yield_time_ms": 5_000,
+		})
+		pollResult, err := pollTool.Call(ctx, tools.Call{ID: "cancel-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
+		if err != nil {
+			t.Errorf("write_stdin call returned transport error: %v", err)
+		}
+		done <- pollResult
+	}()
+
+	waitForEntryInteraction(t, manager, result.SessionID, time.Second)
+	cancel()
+
+	select {
+	case pollResult := <-done:
+		if !pollResult.IsError {
+			t.Fatalf("expected write_stdin error result, got %+v", pollResult)
+		}
+		if !strings.Contains(pollResult.Summary, "Canceled polling by user, process active") {
+			t.Fatalf("expected active-process cancellation summary, got %q", pollResult.Summary)
+		}
+		if strings.Contains(pollResult.Summary, "context canceled") {
+			t.Fatalf("did not expect raw context cancellation summary, got %q", pollResult.Summary)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for canceled write_stdin")
+	}
+	if snapshot, err := manager.Snapshot(result.SessionID); err != nil || !snapshot.Running {
+		t.Fatalf("expected process to remain active after polling cancellation, snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
+func TestManagerWriteStdinCancellationPreservesContextCanceled(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 2"},
+		DisplayCommand: "sleep 2",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = manager.WriteStdin(ctx, WriteRequest{SessionID: result.SessionID, YieldTime: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected canceled polling error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected errors.Is(..., context.Canceled), got %v", err)
+	}
+	var pollErr *PollingCanceledError
+	if !errors.As(err, &pollErr) {
+		t.Fatalf("expected PollingCanceledError, got %T %v", err, err)
+	}
+	if !pollErr.Active {
+		t.Fatalf("expected active process metadata, got %+v", pollErr)
+	}
 }
 
 func TestExecCommandExportsAgentEnv(t *testing.T) {

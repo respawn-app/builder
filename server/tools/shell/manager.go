@@ -267,6 +267,9 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	start := time.Now()
 	output, err := m.collectUntil(ctx, entry, time.Now().Add(yieldTime))
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return ExecResult{}, &PollingCanceledError{SessionID: id, Active: entry.snapshot().Running}
+		}
 		return ExecResult{}, err
 	}
 	snapshot := entry.snapshot()

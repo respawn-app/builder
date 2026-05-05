@@ -2,7 +2,9 @@ package shell
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -27,6 +29,24 @@ func marshalNoHTMLEscape(v any) (json.RawMessage, error) {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+func formatToolCallError(toolName string, err error) string {
+	if err == nil {
+		return fmt.Sprintf("%s failed", toolName)
+	}
+	if errors.Is(err, context.Canceled) {
+		return fmt.Sprintf("%s failed: %s", toolName, cancellationMessage(err))
+	}
+	return fmt.Sprintf("%s failed: %v", toolName, err)
+}
+
+func cancellationMessage(err error) string {
+	var pollErr *PollingCanceledError
+	if errors.As(err, &pollErr) {
+		return pollErr.Error()
+	}
+	return "Canceled by user"
 }
 
 func enrichEnv(base []string) []string {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -630,6 +631,19 @@ func TestProtocolErrorMapsAuthRequiredCode(t *testing.T) {
 func TestProtocolErrorMapsRuntimeUnavailableCode(t *testing.T) {
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRuntimeUnavailable, Message: "runtime missing"}); !errors.Is(err, serverapi.ErrRuntimeUnavailable) {
 		t.Fatalf("expected runtime unavailable, got %v", err)
+	}
+}
+
+func TestProtocolErrorMapsRequestCanceledCodeToClearMessage(t *testing.T) {
+	err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodeRequestCanceled, Message: "context canceled"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("did not expect raw context cancellation message, got %q", err.Error())
+	}
+	if err.Error() != "request canceled by client" {
+		t.Fatalf("request canceled error = %q, want request canceled by client", err.Error())
 	}
 }
 

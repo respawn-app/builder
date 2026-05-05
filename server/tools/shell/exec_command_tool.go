@@ -106,7 +106,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 		Raw:            in.Raw,
 	})
 	if err != nil {
-		return tools.ErrorResultWith(c, fmt.Sprintf("exec_command failed: %v", err), marshalNoHTMLEscape), nil
+		return tools.ErrorResultWith(c, formatToolCallError("exec_command", err), marshalNoHTMLEscape), nil
 	}
 	body, marshalErr := marshalNoHTMLEscape(formatExecResponse(result))
 	if marshalErr != nil {
