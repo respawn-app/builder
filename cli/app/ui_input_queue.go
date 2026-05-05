@@ -184,6 +184,22 @@ func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, te
 	return m, tea.Batch(cmds...)
 }
 
+func (c uiInputController) resumeQueuedInputsAfterIdleRuntime() tea.Cmd {
+	m := c.model
+	if m == nil || m.busy || m.ask.hasCurrent() || len(m.queued) == 0 || m.isInputLocked() || m.pendingQueuedDrainAfterHydration {
+		return nil
+	}
+	if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
+		m.pendingQueuedDrainAfterHydration = true
+		m.queuedDrainReadyAfterHydration = false
+		m.syncViewport()
+		return m.requestRuntimeQueuedDrainTranscriptSync()
+	}
+	_, cmd := c.flushQueuedInputs(queueDrainAuto)
+	c.notifyTurnQueueDrainedIfIdle()
+	return cmd
+}
+
 func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 	m := c.model
 	if m.commandRegistry != nil {

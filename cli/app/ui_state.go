@@ -64,6 +64,9 @@ type uiInputFeatureState struct {
 	autoCompactionEnabled    bool
 	conversationFreshness    clientui.ConversationFreshness
 
+	// UI-side post-turn input queue. It may contain slash commands, shell
+	// commands, and other client-only actions; server queues only runtime
+	// injected user work.
 	queued               []string
 	preSubmitCheckToken  uint64
 	pendingPreSubmitText string

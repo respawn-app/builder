@@ -726,6 +726,7 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	cmd = tea.Batch(cmd, m.rearmSpinnerTicking())
 	if !result.awaitsHydration {
 		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
+		cmd = sequenceCmds(cmd, m.inputController().resumeQueuedInputsAfterIdleRuntime())
 	}
 	m.syncViewport()
 	if !result.transcriptMutated {

@@ -170,6 +170,263 @@ func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
 	}
 }
 
+func TestPreSubmitCompactionKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *testing.T) {
+	client := &runtimeControlFakeClient{shouldCompactResult: true}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.queued = []string{"first queued", "second queued", "third queued"}
+
+	next, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected first queued message to start pre-submit check")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var preSubmit preSubmitCompactionCheckDoneMsg
+	foundPreSubmit := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			preSubmit = typed
+			foundPreSubmit = true
+		}
+	}
+	if !foundPreSubmit {
+		t.Fatalf("expected pre-submit check completion, got %+v", msgs)
+	}
+	if preSubmit.text != "first queued" || !preSubmit.shouldCompact {
+		t.Fatalf("pre-submit check = (%q, %t), want first queued requiring compaction", preSubmit.text, preSubmit.shouldCompact)
+	}
+
+	next, cmd = updated.Update(preSubmit)
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected pre-submit compaction command")
+	}
+	_ = collectCmdMessages(t, cmd)
+	if updated.pendingPreSubmitText != "first queued" {
+		t.Fatalf("pending pre-submit text = %q, want first queued", updated.pendingPreSubmitText)
+	}
+
+	client.shouldCompactResult = false
+	next, cmd = updated.Update(compactDoneMsg{})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected original queued message to resume pre-submit after compaction")
+	}
+	msgs = collectCmdMessages(t, cmd)
+	foundPreSubmit = false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			preSubmit = typed
+			foundPreSubmit = true
+		}
+	}
+	if !foundPreSubmit {
+		t.Fatalf("expected pre-submit completion for original queued message, got %+v", msgs)
+	}
+	if preSubmit.text != "first queued" || preSubmit.shouldCompact {
+		t.Fatalf("resumed pre-submit check = (%q, %t), want first queued without compaction", preSubmit.text, preSubmit.shouldCompact)
+	}
+
+	next, cmd = updated.Update(preSubmit)
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected original queued message to submit after resumed pre-submit")
+	}
+	msgs = collectCmdMessages(t, cmd)
+	var done submitDoneMsg
+	foundDone := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(submitDoneMsg); ok {
+			done = typed
+			foundDone = true
+		}
+	}
+	if !foundDone {
+		t.Fatalf("expected submit completion for original queued message, got %+v", msgs)
+	}
+	if done.submittedText != "first queued" || client.submitText != "first queued" {
+		t.Fatalf("submitted text = (%q, %q), want first queued before later queued items", done.submittedText, client.submitText)
+	}
+	if len(updated.queued) != 2 || updated.queued[0] != "second queued" || updated.queued[1] != "third queued" {
+		t.Fatalf("expected later queued messages preserved in order, got %+v", updated.queued)
+	}
+}
+
+func TestRuntimeIdleEventResumesVisibleQueuedMessagesWithoutBlankEnter(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"first queued", "second queued"}
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     4,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "done"}},
+	}
+
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: false},
+	}})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected runtime idle event to start queued drain hydration")
+	}
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain armed after runtime idle event")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	foundRefresh := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+			foundRefresh = true
+		}
+	}
+	if !foundRefresh {
+		t.Fatalf("expected queued drain transcript refresh, got %+v", msgs)
+	}
+
+	next, cmd = updated.Update(refresh)
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued message to enter pre-submit after hydration")
+	}
+	_ = collectCmdMessages(t, cmd)
+	if updated.pendingPreSubmitText != "first queued" {
+		t.Fatalf("pending pre-submit text = %q, want first queued without blank Enter", updated.pendingPreSubmitText)
+	}
+	if len(updated.queued) != 2 || updated.queued[0] != "first queued" || updated.queued[1] != "second queued" {
+		t.Fatalf("expected runtime pre-submit to own first queued while preserving visible queue order, got %+v", updated.queued)
+	}
+}
+
+func TestRuntimeIdleEventDoesNotDuplicatePendingQueuedDrainHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"first queued", "second queued"}
+	m.pendingQueuedDrainAfterHydration = true
+	m.queuedDrainReadyAfterHydration = false
+
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: false},
+	}})
+	updated := next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected existing queued drain hydration to stay armed")
+	}
+	if len(updated.queued) != 2 || updated.queued[0] != "first queued" || updated.queued[1] != "second queued" {
+		t.Fatalf("expected queued messages preserved without duplicate drain, got %+v", updated.queued)
+	}
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect duplicate queued drain transcript refresh, got %+v", msgs)
+		}
+		if _, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			t.Fatalf("did not expect duplicate queued drain pre-submit, got %+v", msgs)
+		}
+	}
+}
+
+type countingTurnQueueHook struct {
+	projected int
+	drained   int
+	aborted   int
+}
+
+func (h *countingTurnQueueHook) OnProjectedRuntimeEvent(clientui.Event) { h.projected++ }
+func (h *countingTurnQueueHook) OnTurnQueueDrained()                    { h.drained++ }
+func (h *countingTurnQueueHook) OnTurnQueueAborted()                    { h.aborted++ }
+
+func TestRuntimeIdleQueuedDrainNotifiesTurnQueueHookOnce(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	hook := &countingTurnQueueHook{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents(), WithUITurnQueueHook(hook))
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"follow up"}
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     4,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "done"}},
+	}
+
+	next, cmd := m.Update(runtimeEventMsg{event: clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: false},
+	}})
+	updated := next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	foundRefresh := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+			foundRefresh = true
+		}
+	}
+	if !foundRefresh {
+		t.Fatalf("expected queued drain transcript refresh, got %+v", msgs)
+	}
+	if hook.drained != 0 || hook.aborted != 0 {
+		t.Fatalf("hook counts before queued turn starts: drained=%d aborted=%d", hook.drained, hook.aborted)
+	}
+
+	next, cmd = updated.Update(refresh)
+	updated = next.(*uiModel)
+	msgs = collectCmdMessages(t, cmd)
+	var preSubmit preSubmitCompactionCheckDoneMsg
+	foundPreSubmit := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			preSubmit = typed
+			foundPreSubmit = true
+		}
+	}
+	if !foundPreSubmit {
+		t.Fatalf("expected queued follow-up pre-submit, got %+v", msgs)
+	}
+	if hook.drained != 0 || hook.aborted != 0 {
+		t.Fatalf("hook counts while queued turn is running: drained=%d aborted=%d", hook.drained, hook.aborted)
+	}
+
+	next, cmd = updated.Update(preSubmit)
+	updated = next.(*uiModel)
+	msgs = collectCmdMessages(t, cmd)
+	var done submitDoneMsg
+	foundDone := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(submitDoneMsg); ok {
+			done = typed
+			foundDone = true
+		}
+	}
+	if !foundDone {
+		t.Fatalf("expected queued follow-up submit completion, got %+v", msgs)
+	}
+	next, _ = updated.Update(done)
+	updated = next.(*uiModel)
+	if hook.drained != 1 || hook.aborted != 0 {
+		t.Fatalf("hook counts after queued drain: drained=%d aborted=%d", hook.drained, hook.aborted)
+	}
+	if updated.busy || len(updated.queued) != 0 {
+		t.Fatalf("expected queue drained and idle, busy=%t queued=%+v", updated.busy, updated.queued)
+	}
+}
+
 func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true

@@ -40,7 +40,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 		m.preSubmitCheckToken++
 		token := m.preSubmitCheckToken
 		m.pendingPreSubmitText = text
-		m.queued = append(m.queued, text)
+		m.queued = append([]string{text}, m.queued...)
 		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), m.ensureSpinnerTicking())
 	}
 	return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
