@@ -53,7 +53,7 @@ func effectiveSettings(base config.Settings, locked *session.LockedContract) con
 	return launch.EffectiveSettings(base, locked)
 }
 
-func activeToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []toolspec.ID {
+func activeToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) ([]toolspec.ID, error) {
 	return launch.ActiveToolIDs(settings, source, locked)
 }
 

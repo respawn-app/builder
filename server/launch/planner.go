@@ -503,9 +503,8 @@ func EffectiveSettings(base config.Settings, locked *session.LockedContract) con
 	return out
 }
 
-func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []toolspec.ID {
-	ids, _ := ActiveToolIDsForPlan(settings, source, locked)
-	return ids
+func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) ([]toolspec.ID, error) {
+	return ActiveToolIDsForPlan(settings, source, locked)
 }
 
 func ActiveToolIDsForPlan(settings config.Settings, source config.SourceReport, locked *session.LockedContract) ([]toolspec.ID, error) {
