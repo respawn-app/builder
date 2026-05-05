@@ -99,6 +99,48 @@ func TestApplyRunPromptOverridesSubagentExplicitEditToolWins(t *testing.T) {
 	}
 }
 
+func TestApplyRunPromptOverridesSubagentToolSourceSurvivesModelOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	store, err := session.Create(t.TempDir(), "workspace-a", t.TempDir())
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	settings := validLaunchSettings("gpt-5.5")
+	settings.Subagents = map[string]config.SubagentRole{
+		"worker": {
+			Settings: config.Settings{
+				Model: "gpt-5.5",
+				EnabledTools: map[toolspec.ID]bool{
+					toolspec.ToolPatch: false,
+					toolspec.ToolEdit:  true,
+				},
+			},
+			Sources: map[string]string{
+				"tools.patch": "file",
+				"tools.edit":  "file",
+			},
+		},
+	}
+	plan := SessionPlan{
+		Store:          store,
+		ActiveSettings: settings,
+		EnabledTools:   []toolspec.ID{toolspec.ToolPatch},
+		WorkspaceRoot:  t.TempDir(),
+		Source:         defaultToolSources(),
+	}
+
+	updated, _, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: "worker", Model: "gpt-5.5"}, auth.EmptyState())
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if containsTool(updated.EnabledTools, toolspec.ToolPatch) || !containsTool(updated.EnabledTools, toolspec.ToolEdit) {
+		t.Fatalf("enabled tools = %+v, want explicit subagent edit preserved across model override", updated.EnabledTools)
+	}
+	if updated.Source.Sources["tools.edit"] != "subagent" || updated.Source.Sources["tools.patch"] != "subagent" {
+		t.Fatalf("tool sources = %+v, want subagent markers preserved", updated.Source.Sources)
+	}
+}
+
 func defaultToolSources() config.SourceReport {
 	sources := map[string]string{}
 	for _, id := range toolspec.CatalogIDs() {

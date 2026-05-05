@@ -186,7 +186,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		return SessionPlan{}, nil, err
 	}
 	locked := plan.Store.Meta().Locked
-	mergedSource := mergeOverrideSources(plan.Source, loaded.Source)
+	mergedSource := mergeOverrideSources(next.Source, loaded.Source)
 	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
 		originalModel := strings.TrimSpace(next.ActiveSettings.Model)
 		explicitSources := map[string]string{}

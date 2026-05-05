@@ -371,7 +371,7 @@ func canReuseOutsideApproval(cleaned string, real string) bool {
 	}
 	info, err := os.Lstat(cleaned)
 	if err != nil {
-		return false
+		return errors.Is(err, os.ErrNotExist)
 	}
 	return info.Mode()&os.ModeSymlink == 0
 }

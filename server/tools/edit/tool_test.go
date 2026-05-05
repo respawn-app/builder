@@ -248,6 +248,42 @@ func TestOutsideWorkspaceAncestorAliasUsesSingleCallApproval(t *testing.T) {
 	}
 }
 
+func TestOutsideWorkspaceMissingAncestorAliasUsesSingleCallApproval(t *testing.T) {
+	workspace := t.TempDir()
+	outside := newNonTemporaryOutsideDir(t)
+	targetDir := filepath.Join(outside, "target")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("create outside target dir: %v", err)
+	}
+	alias := filepath.Join(outside, "alias")
+	if err := os.Symlink(targetDir, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	prompts := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, fsguard.Request) (fsguard.Approval, error) {
+		prompts++
+		return fsguard.Approval{Decision: fsguard.DecisionAllowOnce}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new edit tool: %v", err)
+	}
+
+	result := callEdit(t, tool, map[string]any{"path": filepath.Join(alias, "new.txt"), "old_string": "", "new_string": "new\n"})
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+	if prompts != 1 {
+		t.Fatalf("outside approval prompts = %d, want 1", prompts)
+	}
+	got, err := os.ReadFile(filepath.Join(targetDir, "new.txt"))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "new\n" {
+		t.Fatalf("target content = %q", string(got))
+	}
+}
+
 func TestOutsideWorkspaceFinalSymlinkRequiresRealPathApproval(t *testing.T) {
 	workspace := t.TempDir()
 	outside := newNonTemporaryOutsideDir(t)
