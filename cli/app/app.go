@@ -13,18 +13,19 @@ import (
 )
 
 type Options struct {
-	WorkspaceRoot         string
-	WorkspaceRootExplicit bool
-	SessionID             string
-	AgentRole             string
-	Model                 string
-	ProviderOverride      string
-	ThinkingLevel         string
-	Theme                 string
-	ModelTimeoutSeconds   int
-	Tools                 string
-	OpenAIBaseURL         string
-	OpenAIBaseURLExplicit bool
+	WorkspaceRoot             string
+	WorkspaceRootExplicit     bool
+	SessionID                 string
+	WorkspaceContextSessionID string
+	AgentRole                 string
+	Model                     string
+	ProviderOverride          string
+	ThinkingLevel             string
+	Theme                     string
+	ModelTimeoutSeconds       int
+	Tools                     string
+	OpenAIBaseURL             string
+	OpenAIBaseURLExplicit     bool
 }
 
 func Run(ctx context.Context, opts Options) error {
