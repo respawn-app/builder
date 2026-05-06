@@ -8,9 +8,10 @@ import (
 )
 
 type uiInputFieldCursor struct {
-	Visible bool
-	Row     int
-	Col     int
+	Visible  bool
+	Row      int
+	Col      int
+	Absolute bool
 }
 
 type uiTerminalCursorPlacement struct {

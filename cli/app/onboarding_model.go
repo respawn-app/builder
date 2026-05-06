@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tuiinput "builder/cli/tui/input"
 	"builder/server/llm"
 	"builder/shared/config"
 	"builder/shared/theme"
@@ -50,25 +51,28 @@ type onboardingStyles struct {
 }
 
 type onboardingModel struct {
-	workflow        onboardingWorkflow
-	state           onboardingFlowState
-	result          onboardingResult
-	globalRoot      string
-	width           int
-	height          int
-	styles          onboardingStyles
-	spinnerClock    frameAnimationClock
-	spinnerFrame    int
-	input           uiSharedTextInput
-	currentScreen   onboardingScreen
-	stepIndex       int
-	cursor          int
-	offset          int
-	selection       map[string]bool
-	errorText       string
-	finalizing      bool
-	finalizingLabel string
-	canceled        bool
+	workflow         onboardingWorkflow
+	state            onboardingFlowState
+	result           onboardingResult
+	globalRoot       string
+	width            int
+	height           int
+	styles           onboardingStyles
+	spinnerClock     frameAnimationClock
+	spinnerFrame     int
+	input            tuiinput.Editor
+	inputMask        rune
+	inputPlaceholder string
+	terminalCursor   *uiTerminalCursorState
+	currentScreen    onboardingScreen
+	stepIndex        int
+	cursor           int
+	offset           int
+	selection        map[string]bool
+	errorText        string
+	finalizing       bool
+	finalizingLabel  string
+	canceled         bool
 }
 
 func newOnboardingStyles(theme string) onboardingStyles {
@@ -97,8 +101,7 @@ func newOnboardingStyles(theme string) onboardingStyles {
 }
 
 func newOnboardingModel(globalRoot string, state onboardingFlowState) *onboardingModel {
-	input := newUISharedTextInput("")
-	input.Focus()
+	input := newSingleLineEditor("")
 	m := &onboardingModel{
 		workflow:   newOnboardingWorkflow(&state),
 		state:      state,
@@ -264,7 +267,7 @@ func (m *onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.currentScreen.Kind == onboardingScreenInput {
-		return m, m.input.Update(msg)
+		return m, updateSingleLineEditorWithAppKeys(&m.input, msg)
 	}
 	return m, nil
 }
@@ -283,7 +286,7 @@ func (m *onboardingModel) submitCurrentScreen() (tea.Model, tea.Cmd) {
 		}
 		err = step.ApplyChoice(&m.state, m.currentScreen.Options[m.cursor].ID)
 	case onboardingScreenInput:
-		err = step.ApplyInput(&m.state, strings.TrimSpace(m.input.Value()))
+		err = step.ApplyInput(&m.state, strings.TrimSpace(singleLineEditorValue(m.input)))
 	case onboardingScreenMulti:
 		err = step.ApplyMultiSelect(&m.state, cloneSelection(m.selection))
 	}
@@ -376,20 +379,23 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 	screen := step.Build(&m.state)
 	previousID := m.currentScreen.ID
 	previousKind := m.currentScreen.Kind
-	inputDraft := m.input.Value()
+	inputDraft := singleLineEditorValue(m.input)
 	m.currentScreen = screen
 	if resetViewport || previousID != screen.ID {
 		m.offset = 0
 	}
 	if screen.Kind == onboardingScreenInput {
 		if !resetViewport && previousID == screen.ID && previousKind == onboardingScreenInput {
-			m.input.SetValue(inputDraft)
+			setSingleLineEditorValue(&m.input, inputDraft)
 		} else {
-			m.input.SetValue(screen.InputValue)
+			setSingleLineEditorValue(&m.input, screen.InputValue)
 		}
-		m.input.SetPlaceholder(screen.Placeholder)
-		m.input.SetPasswordMode(screen.SensitiveInput)
-		m.input.Focus()
+		m.inputPlaceholder = screen.Placeholder
+		if screen.SensitiveInput {
+			m.inputMask = '*'
+		} else {
+			m.inputMask = 0
+		}
 	}
 	if screen.Kind == onboardingScreenMulti {
 		m.selection = cloneSelection(screen.Selection)
@@ -562,6 +568,7 @@ func (m *onboardingModel) ensureCursorVisible() {
 type onboardingRenderedContent struct {
 	lines     []string
 	cursorRow int
+	cursorCol int
 }
 
 func (m *onboardingModel) View() string {
@@ -600,7 +607,30 @@ func (m *onboardingModel) View() string {
 		b.WriteString("\n\n")
 		b.WriteString(strings.Join(footerLines, "\n"))
 	}
+	m.updateTerminalCursor(headerLines, content, visible)
 	return b.String()
+}
+
+func (m *onboardingModel) updateTerminalCursor(headerLines []string, content onboardingRenderedContent, visible []string) {
+	if m.terminalCursor == nil {
+		return
+	}
+	if m.currentScreen.Kind != onboardingScreenInput || content.cursorRow < 0 {
+		m.terminalCursor.Clear()
+		return
+	}
+	visibleCursorRow := content.cursorRow - m.offset
+	if visibleCursorRow < 0 || visibleCursorRow >= len(visible) {
+		m.terminalCursor.Clear()
+		return
+	}
+	m.terminalCursor.Set(uiTerminalCursorPlacement{
+		Visible:   true,
+		CursorRow: len(headerLines) + 2 + visibleCursorRow,
+		CursorCol: content.cursorCol,
+		AnchorRow: max(0, m.height-1),
+		AltScreen: true,
+	})
 }
 
 func (m *onboardingModel) contentHeight() int {
@@ -616,6 +646,7 @@ func (m *onboardingModel) contentHeight() int {
 func (m *onboardingModel) buildContent(width int) onboardingRenderedContent {
 	lines := make([]string, 0, 32)
 	cursorRow := -1
+	cursorCol := 0
 	appendBlank := func() {
 		if len(lines) == 0 || lines[len(lines)-1] == "" {
 			return
@@ -689,19 +720,27 @@ func (m *onboardingModel) buildContent(width int) onboardingRenderedContent {
 		}
 	case onboardingScreenInput:
 		appendBlank()
-		renderedInput := renderEditableInputField(width, 0, m.input.renderSpec("> ", true))
+		renderedInput := renderSingleLineEditor(width, 0, m.input, "> ", true, m.inputMask, m.inputPlaceholder)
 		if renderedInput.Cursor.Visible {
 			cursorRow = len(lines) + renderedInput.Cursor.Row
+			cursorCol = renderedInput.Cursor.Col
 		} else {
 			cursorRow = len(lines)
+			cursorCol = 0
 		}
-		lines = append(lines, renderEditableInputSoftCursorLines(width, renderedInput, m.styles.inputText)...)
+		if m.terminalCursor == nil {
+			lines = append(lines, renderEditableInputSoftCursorLines(width, renderedInput, m.styles.inputText)...)
+		} else {
+			for _, line := range renderedInput.Lines {
+				lines = append(lines, m.styles.inputText.Render(line))
+			}
+		}
 	}
 	if helper := strings.TrimSpace(m.currentScreen.Helper); helper != "" {
 		appendBlank()
 		appendWrapped(helper, m.styles.helper)
 	}
-	return onboardingRenderedContent{lines: lines, cursorRow: cursorRow}
+	return onboardingRenderedContent{lines: lines, cursorRow: cursorRow, cursorCol: cursorCol}
 }
 
 func (m *onboardingModel) renderFooterLines(width int) []string {

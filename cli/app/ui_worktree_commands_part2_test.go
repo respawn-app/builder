@@ -366,8 +366,8 @@ func TestWorktreeCreateDialogSubmitsAndClosesOnSuccess(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	updated.worktrees.create.baseRef.SetValue("HEAD")
-	updated.worktrees.create.branchTarget.SetValue("feature/branch")
+	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "HEAD")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/branch")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -400,7 +400,7 @@ func TestWorktreeCreateDialogDetachedRefResolutionCreatesWithoutBranch(t *testin
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	updated.worktrees.create.branchTarget.SetValue("HEAD~1")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "HEAD~1")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()

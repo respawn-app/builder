@@ -74,6 +74,9 @@ func (l uiViewLayout) composeStandardFrame(style uiStyles) (uiRenderFrame, bool)
 		chatLines = 1
 	}
 	frame.chatPanel = l.renderChatPanel(width, chatLines, style)
+	if m.worktrees.inputCursor.Visible {
+		frame.inputCursor = m.worktrees.inputCursor
+	}
 	return frame, true
 }
 
@@ -151,7 +154,11 @@ func (l uiViewLayout) realCursorFrameCount(frame uiRenderFrame) int {
 	if !l.shouldShowRealTerminalCursor(frame) {
 		return 0
 	}
-	return max(0, frame.inputCursor.Row)*max(1, frame.width) + max(0, frame.inputCursor.Col) + 1
+	row := frame.inputCursor.Row
+	if !frame.inputCursor.Absolute {
+		row = len(frame.chatPanel) + len(frame.pickerPane) + len(frame.queuePane) + len(frame.helpPane) + frame.inputCursor.Row
+	}
+	return max(0, row)*max(1, frame.width) + max(0, frame.inputCursor.Col) + 1
 }
 
 func (l uiViewLayout) shouldShowRealTerminalCursor(frame uiRenderFrame) bool {
@@ -168,7 +175,10 @@ func (l uiViewLayout) updateTerminalCursor(frame uiRenderFrame) {
 		state.Clear()
 		return
 	}
-	absoluteRow := len(frame.chatPanel) + len(frame.pickerPane) + len(frame.queuePane) + len(frame.helpPane) + cursor.Row
+	absoluteRow := cursor.Row
+	if !cursor.Absolute {
+		absoluteRow = len(frame.chatPanel) + len(frame.pickerPane) + len(frame.queuePane) + len(frame.helpPane) + cursor.Row
+	}
 	lines := frame.renderLines()
 	trimStart := 0
 	totalBeforeTrim := len(frame.chatPanel) + len(frame.pickerPane) + len(frame.queuePane) + len(frame.helpPane) + len(frame.inputPane)
@@ -227,6 +237,9 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 		availableStreamingLines = 0
 	}
 	frame.chatPanel = l.renderNativeStreamingLines(width, availableStreamingLines, style)
+	if m.worktrees.inputCursor.Visible {
+		frame.inputCursor = m.worktrees.inputCursor
+	}
 	if m.nativeLiveRegionPad > 0 {
 		pad := make([]string, 0, m.nativeLiveRegionPad+len(frame.chatPanel))
 		for i := 0; i < m.nativeLiveRegionPad; i++ {

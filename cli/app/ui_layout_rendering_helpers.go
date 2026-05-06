@@ -108,15 +108,7 @@ func renderEditableInputSoftCursorFieldLines(width, maxContentLines int, spec ui
 }
 
 func renderEditableInputSoftCursorLines(width int, rendered tuiinput.RenderResult, lineStyle lipgloss.Style) []string {
-	lines := make([]string, 0, len(rendered.Lines))
-	for index, line := range rendered.Lines {
-		if rendered.Cursor.Visible && index == rendered.Cursor.Row {
-			lines = append(lines, renderEditableInputLineWithCursor(line, width, rendered.Cursor.Col, lineStyle))
-			continue
-		}
-		lines = append(lines, lineStyle.Render(padANSIRight(line, width)))
-	}
-	return lines
+	return tuiinput.RenderSoftCursorLines(width, rendered, lineStyle)
 }
 
 func editableInputField(width, maxContentLines int, spec uiEditableInputRenderSpec) tuiinput.Field {
@@ -151,38 +143,6 @@ func byteOffsetForRuneCursor(text string, cursor int) int {
 		runeIndex++
 	}
 	return len(text)
-}
-
-func renderEditableInputLineWithCursor(line string, width int, cursorCol int, lineStyle lipgloss.Style) string {
-	if width < 1 {
-		return lineStyle.Render("")
-	}
-	runes := []rune(line)
-	displayCol := 0
-	for index, r := range runes {
-		rw := runewidth.RuneWidth(r)
-		if rw < 1 {
-			rw = 1
-		}
-		if cursorCol < displayCol+rw {
-			prefix := string(runes[:index])
-			suffix := string(runes[index+1:])
-			return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(r)) + lineStyle.Render(padANSIRight(suffix, width-displayCol-rw))
-		}
-		displayCol += rw
-	}
-	if displayCol < width {
-		cursorCol = min(max(cursorCol, displayCol), width-1)
-		beforeCursor := strings.Repeat(" ", cursorCol-displayCol)
-		afterCursor := strings.Repeat(" ", max(0, width-cursorCol-1))
-		return lineStyle.Render(line+beforeCursor) + lineStyle.Reverse(true).Render(" ") + lineStyle.Render(afterCursor)
-	}
-	if len(runes) == 0 {
-		return lineStyle.Reverse(true).Render(" ")
-	}
-	last := len(runes) - 1
-	prefix := string(runes[:last])
-	return lineStyle.Render(prefix) + lineStyle.Reverse(true).Render(string(runes[last]))
 }
 
 func visibleWrappedLineStart(totalLines, maxContentLines, cursorLine int, trackCursor bool) int {

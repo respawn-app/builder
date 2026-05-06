@@ -6,8 +6,11 @@ import (
 	"builder/shared/theme"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestOnboardingDefaultsPathPreservesAutoWhenUsingDetectedDefault(t *testing.T) {
@@ -46,48 +49,105 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	}
 	model.stepIndex = modelStepIndex
 	model.syncScreen(true)
-	model.input.SetValue("draft-model-alias")
+	setSingleLineEditorValue(&model.input, "draft-model-alias")
 	next, _ := model.Update(onboardingImportDiscoveryDoneMsg{discovery: onboardingImportDiscovery{skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{}, commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{}}})
 	updated := next.(*onboardingModel)
 	if updated.currentScreen.ID != "model" {
 		t.Fatalf("expected to stay on model input screen, got %q", updated.currentScreen.ID)
 	}
-	if got := updated.input.Value(); got != "draft-model-alias" {
+	if got := singleLineEditorValue(updated.input); got != "draft-model-alias" {
 		t.Fatalf("expected import discovery refresh to preserve typed input, got %q", got)
 	}
 }
 
-func TestOnboardingInputRendersSharedTextInputCursor(t *testing.T) {
+func TestOnboardingInputRendersReusableEditorFieldCursor(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
-	model.input = newUISharedTextInput("abc")
-	model.input.Focus()
-	model.input.SetPosition(1)
+	model.input = newSingleLineEditor("abc")
+	setSingleLineEditorPosition(&model.input, 1)
 
 	content := model.buildContent(24)
-	expected := model.input.renderSoftCursorLines(24, 0, "> ", true, model.styles.inputText)
+	expected := renderSingleLineEditorSoftCursorLines(24, 0, model.input, "> ", true, model.styles.inputText, 0, "")
 	if content.cursorRow < 0 || content.cursorRow+len(expected) > len(content.lines) {
 		t.Fatalf("input cursor row %d outside content lines %#v", content.cursorRow, content.lines)
 	}
 	got := content.lines[content.cursorRow : content.cursorRow+len(expected)]
 	if strings.Join(got, "\n") != strings.Join(expected, "\n") {
-		t.Fatalf("onboarding input did not render through shared text input, got %#v want %#v", got, expected)
+		t.Fatalf("onboarding input did not render through reusable text input, got %#v want %#v", got, expected)
 	}
 }
 
-func TestOnboardingInputCursorRowTracksWrappedSharedTextInput(t *testing.T) {
+func TestOnboardingInputCursorRowTracksWrappedReusableEditorField(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
-	model.input = newUISharedTextInput("alpha beta gamma")
-	model.input.Focus()
+	model.input = newSingleLineEditor("alpha beta gamma")
 
 	content := model.buildContent(8)
-	rendered := renderEditableInputField(8, 0, model.input.renderSpec("> ", true))
+	rendered := renderSingleLineEditor(8, 0, model.input, "> ", true, 0, "")
 	if !rendered.Cursor.Visible || rendered.Cursor.Row < 1 {
 		t.Fatalf("expected wrapped input cursor below first row, cursor=%+v lines=%#v", rendered.Cursor, rendered.Lines)
 	}
 	if got, want := content.cursorRow, rendered.Cursor.Row; got != want {
 		t.Fatalf("content cursor row = %d, want %d", got, want)
+	}
+}
+
+func TestOnboardingInputUsesRealAltScreenCursorWhenAvailable(t *testing.T) {
+	state := newUITerminalCursorState()
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.terminalCursor = state
+	model.width = 24
+	model.height = 12
+	model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+	model.input = newSingleLineEditor("alpha beta gamma")
+
+	view := model.View()
+	placement, ok := state.Snapshot()
+	if !ok {
+		t.Fatalf("expected real cursor placement for onboarding input, view=%q", view)
+	}
+	if !placement.AltScreen {
+		t.Fatalf("expected alt-screen cursor placement, got %+v", placement)
+	}
+	if placement.CursorCol >= model.width {
+		t.Fatalf("cursor col %d outside width %d", placement.CursorCol, model.width)
+	}
+	if strings.Contains(view, "\x1b[7") {
+		t.Fatal("did not expect soft cursor when real terminal cursor is available")
+	}
+}
+
+func TestOnboardingEditorFieldDeleteCurrentLineUsesAppKeyAdapter(t *testing.T) {
+	cases := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{name: "ctrl-backspace-csi", key: tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI}},
+		{name: "super-backspace-csi", key: tea.KeyMsg{Type: keyTypeSuperBackspaceCSI}},
+	}
+	if runtime.GOOS == "darwin" {
+		cases = append(cases, struct {
+			name string
+			key  tea.KeyMsg
+		}{name: "darwin-ctrl-u", key: tea.KeyMsg{Type: tea.KeyCtrlU}})
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+			model.currentScreen = onboardingScreen{Kind: onboardingScreenInput, Title: "Enter value"}
+			model.input = newSingleLineEditor("project name")
+			setSingleLineEditorPosition(&model.input, len([]rune("project")))
+
+			next, _ := model.Update(tt.key)
+			updated := next.(*onboardingModel)
+			if got := singleLineEditorValue(updated.input); got != "" {
+				t.Fatalf("value after delete-current-line key = %q, want empty", got)
+			}
+			if got := singleLineEditorPosition(updated.input); got != 0 {
+				t.Fatalf("cursor after delete-current-line key = %d, want 0", got)
+			}
+		})
 	}
 }
 

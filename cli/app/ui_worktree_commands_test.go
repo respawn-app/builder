@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/tui"
 	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -323,7 +324,12 @@ func TestWorktreeCreateDialogNewBranchResolutionEnablesBaseRefFocus(t *testing.T
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.branchTarget.SetValue("feature/new")
+	updatedView, _ := updated.view.Update(tui.SetModeMsg{Mode: tui.ModeDetail})
+	updated.view = updatedView.(tui.Model)
+	if !updated.worktrees.isOpen() || updated.worktrees.phase != uiWorktreeOverlayPhaseCreate {
+		t.Fatalf("expected create overlay open, open=%t phase=%q loading=%t", updated.worktrees.isOpen(), updated.worktrees.phase, updated.worktrees.loading)
+	}
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/new")
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "feature/new", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "feature/new", Kind: serverapi.WorktreeCreateTargetResolutionKindNewBranch}}})
 	updated = next.(*uiModel)
 
@@ -334,6 +340,41 @@ func TestWorktreeCreateDialogNewBranchResolutionEnablesBaseRefFocus(t *testing.T
 	}
 }
 
+func TestWorktreeCreateDialogUsesRealAltScreenCursorWhenAvailable(t *testing.T) {
+	state := newUITerminalCursorState()
+	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
+	m := newWorktreeTestModel(t, client, WithUITerminalCursorState(state))
+	m.termWidth = 40
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.altScreenActive = true
+	m.input = "/worktree create"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	updatedView, _ := updated.view.Update(tui.SetModeMsg{Mode: tui.ModeDetail})
+	updated.view = updatedView.(tui.Model)
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/new")
+	_ = updated.View()
+	if !updated.worktrees.inputCursor.Visible {
+		t.Fatalf("expected worktree input cursor to be visible after render, cursor=%+v mode=%q", updated.worktrees.inputCursor, updated.view.Mode())
+	}
+
+	placement, ok := state.Snapshot()
+	if !ok {
+		t.Fatal("expected real cursor placement for worktree create input")
+	}
+	if !placement.AltScreen {
+		t.Fatalf("expected alt-screen cursor placement, got %+v", placement)
+	}
+	if placement.CursorCol >= updated.termWidth {
+		t.Fatalf("cursor col %d outside width %d", placement.CursorCol, updated.termWidth)
+	}
+	if strings.Contains(updated.View(), "\x1b[7") {
+		t.Fatal("did not expect soft cursor when real terminal cursor is available")
+	}
+}
+
 func TestWorktreeCreateDialogExistingBranchResolutionSkipsBaseRef(t *testing.T) {
 	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
 	m := newWorktreeTestModel(t, client)
@@ -341,7 +382,7 @@ func TestWorktreeCreateDialogExistingBranchResolutionSkipsBaseRef(t *testing.T) 
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.branchTarget.SetValue("main")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "main")
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "main", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "main", Kind: serverapi.WorktreeCreateTargetResolutionKindExistingBranch}}})
 	updated = next.(*uiModel)
 
@@ -398,11 +439,11 @@ func TestWorktreeCreateDialogIgnoresStaleTargetResolutionResponses(t *testing.T)
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	updated.worktrees.create.branchTarget.SetValue("first")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "first")
 	_ = updated.scheduleWorktreeCreateTargetResolution()
 	firstToken := updated.worktrees.create.resolveToken
 
-	updated.worktrees.create.branchTarget.SetValue("second")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "second")
 	_ = updated.scheduleWorktreeCreateTargetResolution()
 	secondToken := updated.worktrees.create.resolveToken
 	if secondToken == firstToken {
@@ -456,7 +497,7 @@ func TestWorktreeCreateDialogRenderStates(t *testing.T) {
 		t.Fatalf("expected base ref visible for blank target state, got %q", blank)
 	}
 
-	updated.worktrees.create.branchTarget.SetValue("feature/new")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/new")
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "feature/new", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "feature/new", Kind: serverapi.WorktreeCreateTargetResolutionKindNewBranch}}})
 	updated = next.(*uiModel)
 	newBranch := stripANSIAndTrimRight(updated.View())
@@ -464,7 +505,7 @@ func TestWorktreeCreateDialogRenderStates(t *testing.T) {
 		t.Fatalf("expected new-branch badge with base ref, got %q", newBranch)
 	}
 
-	updated.worktrees.create.branchTarget.SetValue("main")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "main")
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "main", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "main", Kind: serverapi.WorktreeCreateTargetResolutionKindExistingBranch}}})
 	updated = next.(*uiModel)
 	existing := stripANSIAndTrimRight(updated.View())
@@ -472,7 +513,7 @@ func TestWorktreeCreateDialogRenderStates(t *testing.T) {
 		t.Fatalf("expected existing-branch badge with disabled base ref, got %q", existing)
 	}
 
-	updated.worktrees.create.branchTarget.SetValue("HEAD~1")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "HEAD~1")
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "HEAD~1", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "HEAD~1", Kind: serverapi.WorktreeCreateTargetResolutionKindDetachedRef}}})
 	updated = next.(*uiModel)
 	detached := stripANSIAndTrimRight(updated.View())
@@ -555,7 +596,7 @@ func TestWorktreeCreateDialogClearsResolveErrorWhenTargetBecomesEmpty(t *testing
 		t.Fatal("expected resolve error before clearing input")
 	}
 
-	updated.worktrees.create.branchTarget.SetValue("")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "")
 	next, _ = updated.Update(worktreeCreateTargetResolveDebounceMsg{token: updated.worktrees.create.resolveToken})
 	updated = next.(*uiModel)
 
@@ -578,7 +619,7 @@ func TestWorktreeCreateDialogSubmitResolvesTargetWithBoundedContext(t *testing.T
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.branchTarget.SetValue("main")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "main")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -611,7 +652,7 @@ func TestWorktreeCreateDialogLayoutStaysStableAcrossResolutionStates(t *testing.
 		t.Fatalf("did not expect loading copy in blank state, got %q", strings.Join(blank, "\n"))
 	}
 
-	updated.worktrees.create.branchTarget.SetValue("feature/x")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/x")
 	updated.worktrees.create.resolving = true
 	loadingPlain := stripANSIAndTrimRight(updated.View())
 	if strings.Contains(loadingPlain, "Resolving target") {
@@ -641,7 +682,7 @@ func TestWorktreeCreateDialogLayoutStaysStableAcrossResolutionStates(t *testing.
 	}
 
 	updated.worktrees.create.focus = uiWorktreeCreateFieldBranchTarget
-	updated.worktrees.create.branchTarget.SetValue("HEAD~1")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "HEAD~1")
 	updated.worktrees.create.syncFocus()
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "HEAD~1", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "HEAD~1", Kind: serverapi.WorktreeCreateTargetResolutionKindDetachedRef}}})
 	updated = next.(*uiModel)
@@ -656,7 +697,7 @@ func TestWorktreeCreateDialogLayoutStaysStableAcrossResolutionStates(t *testing.
 	}
 
 	updated.worktrees.create.focus = uiWorktreeCreateFieldBranchTarget
-	updated.worktrees.create.branchTarget.SetValue("feature/new")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/new")
 	updated.worktrees.create.syncFocus()
 	next, _ = updated.Update(worktreeCreateTargetResolveDoneMsg{token: updated.worktrees.create.resolveToken, query: "feature/new", resp: serverapi.WorktreeCreateTargetResolveResponse{Resolution: serverapi.WorktreeCreateTargetResolution{Input: "feature/new", Kind: serverapi.WorktreeCreateTargetResolutionKindNewBranch}}})
 	updated = next.(*uiModel)
@@ -679,7 +720,7 @@ func TestWorktreeCreateDialogLeavesBranchNameBlankWithoutSessionNameSuggestion(t
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
 
-	if got := updated.worktrees.create.branchTarget.Value(); got != "" {
+	if got := singleLineEditorValue(updated.worktrees.create.branchTarget); got != "" {
 		t.Fatalf("branch target default = %q, want empty", got)
 	}
 }
@@ -691,8 +732,8 @@ func TestWorktreeCreateDialogBlankBranchNameValidationDoesNotSendRequest(t *test
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.baseRef.SetValue("HEAD")
-	updated.worktrees.create.branchTarget.SetValue("")
+	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "HEAD")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -724,8 +765,8 @@ func TestWorktreeCreateDialogMutationErrorRendersOnceLocallyAndClamps(t *testing
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.baseRef.SetValue("HEAD")
-	updated.worktrees.create.branchTarget.SetValue("feature/branch")
+	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "HEAD")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/branch")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()
@@ -845,8 +886,8 @@ func TestWorktreeOverlayCreateErrorSuppressesPreexistingStatusNotice(t *testing.
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	updated.worktrees.create.baseRef.SetValue("HEAD")
-	updated.worktrees.create.branchTarget.SetValue("feature/branch")
+	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "HEAD")
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/branch")
 	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
 	updated.worktrees.create.action = uiWorktreeCreateActionCreate
 	updated.worktrees.create.syncFocus()

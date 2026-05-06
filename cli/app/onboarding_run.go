@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -47,7 +48,9 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 		commandImport:        onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
 	model := newOnboardingModel(cfg.PersistenceRoot, state)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	terminalCursor := newUITerminalCursorState()
+	model.terminalCursor = terminalCursor
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithOutput(newUITerminalCursorWriter(os.Stdout, terminalCursor)))
 	finalModel, err := program.Run()
 	if err != nil {
 		return onboardingResult{}, err

@@ -121,7 +121,7 @@ func (r uiWorktreeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}
-		query := strings.TrimSpace(m.worktrees.create.branchTarget.Value())
+		query := strings.TrimSpace(singleLineEditorValue(m.worktrees.create.branchTarget))
 		if query == "" {
 			m.worktrees.create.resolving = false
 			m.worktrees.create.submitPending = false
@@ -138,7 +138,7 @@ func (r uiWorktreeFeatureReducer) Update(msg tea.Msg) uiFeatureUpdateResult {
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}
-		if strings.TrimSpace(m.worktrees.create.branchTarget.Value()) != strings.TrimSpace(msg.query) {
+		if strings.TrimSpace(singleLineEditorValue(m.worktrees.create.branchTarget)) != strings.TrimSpace(msg.query) {
 			m.syncViewport()
 			return handledUIFeatureUpdate(m, nil)
 		}
