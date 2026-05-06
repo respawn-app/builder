@@ -217,11 +217,51 @@ func TestWindowsInstallerScriptAvoidsPowerShell7OnlySyntax(t *testing.T) {
 
 func TestTestScriptEnforcesWallClockTimeout(t *testing.T) {
 	root := repoRoot(t)
-	tempPkg, err := os.MkdirTemp(root, "script-timeout-test-*")
+	relPkg := newSlowTestPackage(t, root, "5 * time.Second")
+
+	script := filepath.Join(root, "scripts", "test.sh")
+	cmd := exec.Command(script, relPkg, "-count=1")
+	cmd.Dir = root
+	cmd.Env = append(
+		sanitizedScriptTestEnv(os.Environ()),
+		"BUILDER_TEST_DISABLE_WALL_CLOCK_CAP=0",
+		"BUILDER_TEST_TIMEOUT_SECONDS=1",
+	)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected timeout failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "test suite exceeded 1s wall-clock cap") {
+		t.Fatalf("expected timeout message, got %q", text)
+	}
+}
+
+func TestTestScriptCanDisableWallClockTimeout(t *testing.T) {
+	root := repoRoot(t)
+	relPkg := newSlowTestPackage(t, root, "1500 * time.Millisecond")
+
+	script := filepath.Join(root, "scripts", "test.sh")
+	cmd := exec.Command(script, relPkg, "-count=1")
+	cmd.Dir = root
+	cmd.Env = append(
+		sanitizedScriptTestEnv(os.Environ()),
+		"BUILDER_TEST_DISABLE_WALL_CLOCK_CAP=1",
+		"BUILDER_TEST_TIMEOUT_SECONDS=1",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected disabled wall-clock timeout to pass: %v (%s)", err, output)
+	}
+}
+
+func newSlowTestPackage(t *testing.T, root string, sleepDuration string) string {
+	t.Helper()
+	tempPkg, err := os.MkdirTemp(root, "_script-timeout-test-*")
 	if err != nil {
 		t.Fatalf("create temp package: %v", err)
 	}
-	defer func() { _ = os.RemoveAll(tempPkg) }()
+	t.Cleanup(func() { _ = os.RemoveAll(tempPkg) })
 
 	if err := os.WriteFile(filepath.Join(tempPkg, "slow_test.go"), []byte(`package slowtest
 
@@ -231,28 +271,17 @@ import (
 )
 
 func TestSlow(t *testing.T) {
-	time.Sleep(5 * time.Second)
+	time.Sleep(`+sleepDuration+`)
 }
 `), 0o644); err != nil {
 		t.Fatalf("write slow test: %v", err)
 	}
 
-	script := filepath.Join(root, "scripts", "test.sh")
 	relPkg, err := filepath.Rel(root, tempPkg)
 	if err != nil {
 		t.Fatalf("relative temp package: %v", err)
 	}
-	cmd := exec.Command(script, "./"+filepath.ToSlash(relPkg), "-count=1")
-	cmd.Dir = root
-	cmd.Env = append(sanitizedScriptTestEnv(os.Environ()), "BUILDER_TEST_TIMEOUT_SECONDS=1")
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("expected timeout failure")
-	}
-	text := string(output)
-	if !strings.Contains(text, "test suite exceeded 1s wall-clock cap") {
-		t.Fatalf("expected timeout message, got %q", text)
-	}
+	return "./" + filepath.ToSlash(relPkg)
 }
 
 func gitHookEnv(t *testing.T, root string) []string {

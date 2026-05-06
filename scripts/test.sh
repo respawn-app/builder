@@ -9,7 +9,7 @@ cd "$repo_root"
 if [ "${BUILDER_TEST_INHERIT_ENV:-}" != "1" ]; then
     while IFS= read -r name; do
         case "$name" in
-            BUILDER_TEST_INHERIT_ENV|BUILDER_TEST_TIMEOUT_SECONDS)
+            BUILDER_TEST_DISABLE_WALL_CLOCK_CAP|BUILDER_TEST_INHERIT_ENV|BUILDER_TEST_TIMEOUT_SECONDS)
                 ;;
             BUILDER_*)
                 unset "$name"
@@ -47,25 +47,49 @@ handle_term() {
 trap handle_interrupt INT
 trap handle_term TERM
 
-timeout_seconds="${BUILDER_TEST_TIMEOUT_SECONDS:-120}"
-case "$timeout_seconds" in
-    ''|*[!0-9]*)
-        printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
+disable_wall_clock_cap="${BUILDER_TEST_DISABLE_WALL_CLOCK_CAP:-0}"
+case "$disable_wall_clock_cap" in
+    0|1)
+        ;;
+    *)
+        printf 'BUILDER_TEST_DISABLE_WALL_CLOCK_CAP must be 0 or 1\n' >&2
         exit 2
         ;;
 esac
-if [ "$timeout_seconds" -le 0 ] || [ "$timeout_seconds" -gt 120 ]; then
-    printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
-    exit 2
-fi
-if ! command -v python3 >/dev/null 2>&1; then
-    printf 'python3 is required to run tests with a wall-clock timeout\n' >&2
-    exit 2
-fi
 
+timeout_seconds="${BUILDER_TEST_TIMEOUT_SECONDS:-120}"
+if [ "$disable_wall_clock_cap" != "1" ]; then
+    case "$timeout_seconds" in
+        ''|*[!0-9]*)
+            printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
+            exit 2
+            ;;
+    esac
+    if [ "$timeout_seconds" -le 0 ] || [ "$timeout_seconds" -gt 120 ]; then
+        printf 'BUILDER_TEST_TIMEOUT_SECONDS must be a positive integer <= 120\n' >&2
+        exit 2
+    fi
+fi
 args=("$@")
 if [ ${#args[@]} -eq 0 ]; then
     args=(./...)
+fi
+
+if [ "$disable_wall_clock_cap" = "1" ]; then
+    set +e
+    go test "${args[@]}" >"$log_file" 2>&1
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
+        exit 0
+    fi
+    cat "$log_file"
+    exit "$status"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    printf 'python3 is required to run tests with a wall-clock timeout\n' >&2
+    exit 2
 fi
 
 python3 - "$log_file" "${args[@]}" <<'PY' &

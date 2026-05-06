@@ -57,6 +57,14 @@ For manual Go test runs outside the full check, use:
 
 This keeps successful runs silent while still printing the captured test log on failure.
 
+The script applies a 120s wall-clock cap by default. To reproduce CI's test
+behavior locally, disable that script-level cap while keeping Go's own package
+timeouts:
+
+```bash
+BUILDER_TEST_DISABLE_WALL_CLOCK_CAP=1 ./scripts/test.sh ./...
+```
+
 If you changed docs under `docs/`, also run:
 
 ```bash
