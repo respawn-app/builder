@@ -12,7 +12,7 @@ Builder reads prompt context from global and workspace files.
 - `~/.builder/AGENTS.md`
 - `<workspace-root>/AGENTS.md`
 
-Workspace instructions are included after global instructions. Builder injects these files into the conversation as developer context, not as the main system prompt.
+Builder injects these files into the conversation as developer context once per session, not as the main system prompt.
 
 ## System Prompt
 
@@ -27,9 +27,7 @@ Priority, lowest to highest:
 - `<workspace-root>/.builder/config.toml` `system_prompt_file`
 - Selected `[subagents.<role>]` `system_prompt_file`
 
-Only non-empty, non-whitespace prompt files count. Empty files are skipped.
-
-`system_prompt_file` paths are resolved relative to the containing `config.toml` directory unless absolute. If no prompt file has content, Builder uses the built-in system prompt.
+`system_prompt_file` paths are resolved relative to the containing `config.toml` directory unless absolute.
 
 Builder reads and renders the selected system prompt file once when the session sends its first model request, stores the fully rendered result in the `system_prompt` session metadata, and reuses that snapshot for later requests. After a session has stored that snapshot, editing prompt files affects new sessions only. Sessions without `system_prompt` capture the current prompt file on their next model request.
 
@@ -41,7 +39,9 @@ System prompt files use Go template syntax with these fields:
 | --- | --- |
 | `{{.BuilderRunCommand}}` | The command prefix for launching a Builder subagent from shell. |
 | `{{.EstimatedToolCallsForContext}}` | Approximate tool-call count that fits in the locked context budget. |
+| `{{.EditingToolName}}` | Active manual editing tool name: `patch`, `edit`, or `shell` when no dedicated edit tool is enabled. |
 | `{{.DefaultSystemPrompt}}` | Builder's rendered built-in system prompt, without tool preambles. |
+
 
 Example:
 

@@ -13,13 +13,13 @@ import (
 
 type SystemPromptTemplateArgs struct {
 	EstimatedToolCallsForContext int
-	ManualEditInstruction        string
+	EditingToolName              string
 }
 
 type systemPromptTemplateData struct {
 	BuilderRunCommand            string
 	EstimatedToolCallsForContext int
-	ManualEditInstruction        string
+	EditingToolName              string
 	DefaultSystemPrompt          string
 }
 
@@ -188,7 +188,7 @@ func renderSystemPromptTemplateErr(text string, args SystemPromptTemplateArgs, d
 	if err := tmpl.Execute(&out, systemPromptTemplateData{
 		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
 		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
-		ManualEditInstruction:        strings.TrimSpace(args.ManualEditInstruction),
+		EditingToolName:              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPrompt:          strings.TrimSpace(defaultSystemPrompt),
 	}); err != nil {
 		return "", fmt.Errorf("render system prompt template: %w", err)

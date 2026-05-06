@@ -8,9 +8,9 @@ import (
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
-	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderRunCommand}} edit={{.ManualEditInstruction}}", SystemPromptTemplateArgs{
+	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderRunCommand}} edit={{.EditingToolName}}", SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
-		ManualEditInstruction:        "Use edit.",
+		EditingToolName:              "edit",
 	}, "")
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
@@ -19,8 +19,8 @@ func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
 	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
 	}
-	if !strings.Contains(rendered, "edit=Use edit.") {
-		t.Fatalf("expected manual edit instruction rendered, got %q", rendered)
+	if !strings.Contains(rendered, "edit=edit") {
+		t.Fatalf("expected editing tool name rendered, got %q", rendered)
 	}
 }
 
@@ -39,6 +39,19 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptPlaceholder(t *testing.T) 
 	}
 	if !strings.Contains(rendered, defaultPrompt) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected default prompt placeholder rendered, got %q", rendered)
+	}
+}
+
+func TestCustomSystemPromptRejectsRemovedManualEditInstructionPlaceholder(t *testing.T) {
+	_, err := RenderCustomSystemPrompt("{{.ManualEditInstruction}}", false, SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: 123,
+		EditingToolName:              "patch",
+	})
+	if err == nil {
+		t.Fatal("expected removed ManualEditInstruction placeholder to fail")
+	}
+	if !strings.Contains(err.Error(), "ManualEditInstruction") {
+		t.Fatalf("expected error to mention ManualEditInstruction, got %v", err)
 	}
 }
 

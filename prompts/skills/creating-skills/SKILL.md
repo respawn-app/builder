@@ -1,19 +1,17 @@
 ---
-name: skill-creator
+name: creating-skills
 description: Create or improve agent skills. Use when the user wants to add a new skill or update an existing skill.
 ---
 
 Skills is a specialized technical documentation standard intended for AI Agents to read on-demand, and designed to teach them a specific technology, tool, or approach that is **outside of their training data** (aka "memory"). Agents learn about skills when they see injected frontmatter description, just like you did in this session for this skill. When agents need the skill, they read SKILL.md and change their behavior to follow skill instructions, just like you are doing right now.
 
-Builder discovers skills from these roots:
+Builder discovers skills from these roots (priority order):
 
-- `<workspace>/.builder/skills`
-- `~/.builder/skills`
+- `<workspace>/.builder/skills` - use workspace skills for project-specific workflows, repository conventions, local tools, or instructions that should travel with a codebase.
+- `~/.builder/skills` - use global skills for reusable personal workflows that apply across all projects.
+- `~/.builder/.generated/skills` - Skills in ~/.builder/.generated/ are ephemeral, do not attempt to edit them or add new ones.
 
-Skills in ~/.builder/.generated/ are ephemeral, do not attempt to edit them.
-Use workspace skills for project-specific workflows, repository conventions, local tools, or instructions that should travel with a codebase. When the user asks to create a skill and it's not evident if it's global or local, use `ask_question` to ask for scope.
-
-Use global skills for reusable personal workflows that apply across projects.
+When the user asks to create a skill and it's not evident if it's global or local, use `ask_question` to ask for scope.
 
 A skill is a directory with a required `SKILL.md` file:
 
@@ -22,7 +20,8 @@ my-skill/
 ├── SKILL.md
 ├── scripts/
 ├── references/
-└── assets/
+├── assets/
+└── ...other...
 ```
 
 Use optional directories only when they reduce context or make repeatable work deterministic:
@@ -46,19 +45,23 @@ description: Do a specific workflow. Use when the user asks for concrete trigger
 `name` and `description` are required.
 
 - Use a stable, lowercase, unique, kebab-case `name`.
-- Write `description` as trigger metadata. Include what the skill does and when to use it. Mention concrete user phrases, task types, tools, files, or domains that should activate the skill. Do not include trigger rules in the body; Builder gives the agent the name, description, and path until the model opens `SKILL.md`.
+- Write `description` as trigger metadata. Include what the skill does and when to use it. Mention concrete user phrases, task types, tools, files, or domains that should activate the skill. Do not include trigger rules in the body; Builder gives the agent the name, description, and path automatically before the model opens `SKILL.md`. Keep description to 1-3 terse sentences, 1-2 lines, and no formatting, as users may have many skills that contribute to load on your memory.
 
 ## Skill content
 Follow these rules for authoring skill docs (especially SKILL.md).
 
-- Important: Do not document anything that you as a model already know - generic APIs of widely known tools you already remember, basic coding guidelines, widespread tools (like git, docker, jetpack compose, java). If the user asks for a skill for a thing you already know / widespread / too generic, assume they are mistaken and explain that you already know the tool. If they insist, proceed with minimal content that does not duplicate known info, like maybe repo-specific patterns observed in real code, specific user preferences, niche tooling stack, repo-scoped architecture guidelines, or similar. Ask yourself a question when designing a skill: "If an AI Agent like me saw this repository/workflow/task, what would they need to know to accomplish it effectively and to user's satisfaction?"
-- Important: Do not include in skills anything that can quickly become outdated or info that isn't practically useful for completion of task and only documents events. Assume skills are updated once a year or more rarely. Do not include temporal data, taken decisions, or explainers of your behavior anywhere in the skill. Avoid mentioning user requests that pertain to this conversation or other guidance/feedback you received.
-  - Bad: "Per user instruction, corrected this skill to explain Decompose Components".
-  - Bad: "Deleted section about committing as requested".
-  - Bad: "introduced Decompose on April 29th in commit `abcdef`".
-  - Bad: <User complains about wrong TDD approach>, you write "Encoding correct TDD patterns, not shallow assertions" (in an attempt to appease the user, but as a result encoding irrelevant emotional statement in docs)
+Overall, treat writing skills like public developer documentation or guidance. Ask yourself a question when designing a skill: "If an agent like me saw this repository/workflow/task for the first time, what would they need to know to accomplish it effectively?".
 
-- Do not include a global H1 header like `# My Skill`. Do not add extra blank lines immediately after header lines.
+- Important: Do not document anything that you as a model already know - generic APIs of widely known tools you already remember, basic coding guidelines, widespread tools (like git, docker, jetpack compose, java). If the user asks for a skill for a thing you already know / widespread / too generic, assume they are mistaken and explain that you already know the tool. If they insist, proceed with minimal content that does not duplicate known info, like maybe repo-specific patterns observed in real code, specific user preferences, niche tooling stack, repo-scoped architecture guidelines, or similar.
+- Important: Do not include in skills anything that can quickly become outdated or info that isn't practically useful for completion of task and only documents events. Assume skills are updated once a year or more rarely. Do not include temporal data, taken decisions, or explainers of your behavior anywhere in the skill. Avoid mentioning user requests that pertain to this conversation or other guidance/feedback you received in skill content.
+  - Bad: "Per user instruction, corrected this skill to explain Decompose Components".
+  - Bad: "Added section about committing as requested".
+  - Bad: "Introduced Decompose on April 29th in commit `abcdef`".
+  - Bad: <User complains about wrong TDD approach>, you write "Encoding correct TDD patterns, not shallow assertions" (in an attempt to appease the user, but as a result encoding irrelevant emotional statement in docs)
+  - Bad: User mentions "skill should apply outside this codebase", you write in the skill "This works especially well outside the original codebase" (You encoded irrelevant info from the user prompt in public documentation)
+- Don't praise or explain what you're writing by contrasting it with an implied worse alternative.
+  - Bad: "Guide to effective test writing, not shallow coverage pumping". Good: "Testing with Kotest"
+- Do not include a global H1 header like `# My Skill`. Do not add extra blank lines immediately after a header line.
 - Do not use eye-candy formatting, fancy diagrams that contain a lot of symbols, or emoji. Skills are read by AI, not humans.
 - Do not include large code examples, or API docs in SKILL.md. Generated, third-party, or optional content like templates / API docs lives either as a reference to SSOT, or in adjacent directories.
 - Keep SKILL.md under ~300 lines of markdown text. If docs don't fit, reference remaining guidance by topic in SKILL.md and use paths relative to the SKILL.md-containing directory (aka "skill dir"), turning SKILL.md into a summary + doc index. It's fine for skills to contain large amounts of text, only SKILL.md needs to stay under 300 lines.
@@ -68,6 +71,19 @@ Follow these rules for authoring skill docs (especially SKILL.md).
 - Assume skills are shared across developers, used on different machines, and public on the internet. Avoid PII, credentials, local references.
 - Don't create scripts or write code in skills "just in case" or for "what might be useful". Scripts are needed for something actually meaningfully codifying/automating a task, or meaningfully reducing the **amount of input/output** to be manually processed by the skill user. For example, for a merge request review/respond skill, you might include a self-contained, one-shot, flexible script to retrieve all existing inline review comments, that will eliminate verbose GraphQL calls. For a docs writing skill, if the doc follows a strict template, you can include a validator script, or a script that sets up a skeleton.
 - Do not apply any oververbosity parameters or other verbosity instructions you received when writing skill doc files. Do not omit info to be able to one-shot the entire skill; write the file in chunks instead.
+- Skills are loaded into your memory, and as you know, it is limited. Respect future agents who will read your skill - avoid fluttery, long-winded explanations, lyrical digressions, maintain high information density throughout the skill.
+
+## Enabling/disabling skills
+
+To disable or enable a skill, edit its config property instead of deleting the files directly, especially for skills in `.generated/` dir.
+
+```toml
+# in ~/.builder/config.toml :
+[skills]
+"skill-name" = false
+```
+
+More info in the `builder-dogfooding` skill, if available, or official docs.
 
 ## Creation Workflow
 1. Identify the scope: workspace or global.

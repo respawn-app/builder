@@ -5,7 +5,6 @@
 - Build a minimal terminal coding agent focused on output quality, speed, and professional workflows.
 - Tech stack: Go + Bubble Tea; no TypeScript.
 - Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, mirrors the root `README.md` as the initial docs home, and uses Algolia DocSearch for site search.
-- v1 excludes MCP, plugins, and native subagent orchestration.
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
 - First-run onboarding may optionally symlink skills and slash-command roots from `~/.claude`, `~/.codex`, or `~/.agents` into Builder's `~/.builder` layout; normal runtime discovery still reads only Builder-owned directories.
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
@@ -25,12 +24,10 @@
 
 - Core tools: `exec_command`, `write_stdin`, `view_image`, `patch`, `ask_question`.
 - Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
-- One app instance runs one active conversation.
 - Goal management is CLI/runtime-owned. Builder must not add model-callable goal tools, even dynamically; the Builder CLI is the authoritative control surface for creating, updating, pausing, resuming, clearing, and completing goals.
 - Users manage goals primarily through TUI `/goal`; models may only use normal shell commands `builder goal show` and `builder goal complete`, relying on Builder-injected caller session identity for correct session targeting. Agent attempts to run `builder goal set|pause|resume|clear` must fail nonzero with model-facing warning copy from `prompts/goal/agent_command_denied.md`.
 - `/goal <objective>` is immediate: it sets/replaces the session goal and starts a model turn toward that goal right away. If a model turn is currently running, setting/replacing is rejected.
 - `/goal resume` on a completed goal reopens that same goal as active; this is intentional operator recovery for mistaken completion.
-- Goal v1 excludes budgets and accounting. Do not implement token budgets, time budgets, budget-limited status, or goal usage accounting in the first slice.
 - Goal completion is explicit CLI state mutation, not natural-language inference. The model reports completion by running `builder goal complete`; Builder must not infer completion merely from assistant text. Agent-env completion requires hidden `--confirm` after first tripwire failure; human CLI completion does not require confirm.
 - Goal state persists in session metadata for direct resume reads as `{goal_id, objective, status, created_at, updated_at}` with `status` limited to `active|paused|complete` in v1. Goal lifecycle also appends structured audit/projection events: `goal_set`, `goal_status_updated`, and `goal_cleared`, each with actor `user|agent|system`.
 - Goal mode requires `ask_question` for active model loops. Validate active-goal/question parity at the boundary that starts model work and surface a normal runtime error if violated; do not add queue-specific or config-specific special cases. Reopening a session with a persisted active goal must still construct the runtime when `ask_question` is disabled so `builder goal show|pause|clear` can recover the session; only autonomous loop startup is suppressed.
@@ -66,10 +63,8 @@
 - Built-in processors may run on both success and failure; each processor decides based on exit code.
 - `exec_command` result JSON stays minimal in v1; processor metadata is internal and not added to the public tool result schema.
 - Built-in processors are implemented as Go code in a composable registry; v1 does not add a declarative filter DSL beyond the single user hook.
-- User-facing docs for command post-processing are part of the first rollout; no scaffold/sample hook file is auto-created in v1.
 - Hook failures must not change the provider-facing command-output envelope in v1. Warning surfacing, if any, stays plain-text-compatible and warning deduplication is optional.
 - If an `exec_command` backgrounds, its selected processing mode persists with that process session for later `write_stdin` polls and completion notices.
-- The first built-in processor in v1 is intentionally trivial: direct simple `go test ...` commands collapse successful output to the exact token `PASS`; failures fall back to unprocessed output.
 - Foreground `exec_command` processing does not add a dedicated raw-output artifact in v1; operators can rerun with `raw=true` when needed.
 - Background shell processes (`exec_command` / `write_stdin`) are app-global, not session-scoped.
 - Background process ids are app-global within one app instance; owner session metadata is advisory for routing notices/history, not an access-control boundary.
@@ -135,13 +130,11 @@
 - The server-driven migration target uses hybrid persistence: SQLite is authoritative for structured metadata and server-owned resources; large append-only session artifacts stay file-backed.
 - The durable domain model is `project > workspace > worktree`; legacy workspace-scoped containers are migration input, not future protocol identity.
 - Sessions remain project-scoped durable objects and carry a mutable current execution target `(workspace_id, worktree_id?, cwd_relpath)`.
-- The Phase 4 topology target is one app-global daemon per persistence root. Clients and daemon converge on the same configured `server_host` and `server_port`, connect directly to that address, and use handshake only for compatibility. Handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
 - The app-global daemon listen configuration is explicit and user-configurable via separate `server_host` and `server_port` settings. Builder uses a fixed built-in default port in the private/dynamic range, binds exactly that configured address, and fails startup if the port is occupied; it must not silently rebind, fall back, or use `:0` ephemeral assignment.
 - Same-machine transport optimization is local-first and additive. On Unix platforms the daemon also exposes a derived Unix domain socket under runtime-local ephemeral state keyed by the persistence root; this does not add a new config surface and does not replace configured TCP.
 - `server_host` and `server_port` remain the durable remote source of truth. Same-machine clients may prefer the derived Unix socket only while the TCP target is still the default local attach target; explicit `server_host` or `server_port` overrides stay authoritative and must continue to dial configured TCP. LAN/remote clients continue to use configured TCP semantics and health/readiness remain bound to configured HTTP/TCP.
 - The default WebSocket transport uses `github.com/lxzan/gws` behind `shared/rpcwire`. The legacy `golang.org/x/net/websocket` adapter was removed after the transport boundary landed; higher layers stay bound to Builder-owned `rpcwire` contracts rather than a library-specific API. Remaining `golang.org/x/net/websocket` imports are test fixtures only and do not participate in runtime transport.
 - JSON-RPC custom error codes in `shared/protocol` are a wire contract. `ErrCodeRequestCanceled` (`-32023`) represents normal request cancellation and clients must map it to `context.Canceled` instead of plain error text.
-- The Phase 4 topology cutover is hard. No discovery-file migration, bridge mode, or compatibility script is maintained for the old workspace-scoped daemon-discovery model.
 - Interactive startup remains workspace-first. When startup cwd is unregistered, Builder enters an explicit post-auth binding flow with a create-new-project action first and a clearly separated existing-project picker below it.
 - That bind/create startup flow is valid only when the client has a meaningful local path and the server can resolve that path.
 - If the client has no meaningful cwd/path for the server, or the server cannot resolve the client path, startup switches to server-browsing mode instead of trying to bind the client path.
