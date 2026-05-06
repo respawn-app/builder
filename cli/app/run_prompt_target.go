@@ -16,6 +16,7 @@ import (
 
 	"builder/server/launch"
 	"builder/server/serve"
+	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -384,6 +385,9 @@ func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg co
 	}
 	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, contextSessionID)
 	if err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			return Options{}, config.App{}, err
+		}
 		return opts, cfg, nil
 	}
 	return resolvedOpts, resolvedCfg, nil

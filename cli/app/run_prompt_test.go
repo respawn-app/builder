@@ -177,6 +177,34 @@ func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
 	}
 }
 
+func TestRunPromptFallsBackWhenWorkspaceContextSessionIsStale(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+	saveReadyAppAuthState(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"workspace reply"})
+	defer fakeResponses.Close()
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:             workspace,
+		WorkspaceContextSessionID: "stale-env-session",
+		Model:                     "gpt-5",
+		OpenAIBaseURL:             fakeResponses.URL,
+		OpenAIBaseURLExplicit:     true,
+	}, "hello from stale context", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "workspace reply" {
+		t.Fatalf("result = %q, want workspace reply", result.Result)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one llm call, got %d", hits.Load())
+	}
+}
+
 type headlessProjectViewStubService struct {
 	listProjectsResp serverapi.ProjectListResponse
 	listProjectsErr  error
