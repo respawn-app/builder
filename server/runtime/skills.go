@@ -18,13 +18,10 @@ import (
 const (
 	skillsDirName             = "skills"
 	skillFileName             = "SKILL.md"
-	skillsInjectedHeader      = "## Skills"
-	skillsInjectedDescription = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill."
-	skillsAvailableHeader     = "### Available skills"
-	skillsHowToUseHeader      = "### How to use skills"
+	skillsAvailableHeader     = "Available skills:"
 )
 
-var skillsHowToUseRules = strings.TrimSpace(prompts.SkillsHowToUseRulesPrompt)
+var skillsPrompt = strings.TrimSpace(prompts.SkillsPrompt)
 var readSkillsDir = os.ReadDir
 
 type injectedSkill struct {
@@ -331,14 +328,11 @@ func normalizedDisabledSkills(disabledSkills map[string]bool) map[string]bool {
 }
 
 func renderSkillsContext(skills []injectedSkill) string {
-	lines := make([]string, 0, len(skills)+5)
-	lines = append(lines, skillsInjectedHeader)
-	lines = append(lines, skillsInjectedDescription)
+	lines := make([]string, 0, len(skills)+2)
+	lines = append(lines, skillsPrompt)
 	lines = append(lines, skillsAvailableHeader)
 	for _, skill := range skills {
-		lines = append(lines, fmt.Sprintf("- %s: %s (file: %s)", skill.Name, skill.Description, skill.Path))
+		lines = append(lines, fmt.Sprintf("- %s: %s . %s", skill.Name, skill.Path, skill.Description))
 	}
-	lines = append(lines, skillsHowToUseHeader)
-	lines = append(lines, skillsHowToUseRules)
 	return strings.Join(lines, "\n")
 }

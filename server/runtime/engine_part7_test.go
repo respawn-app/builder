@@ -201,7 +201,7 @@ func TestAppendMissingReviewerMetaContextLeavesUntypedLegacyMetaInTranscript(t *
 		},
 		{
 			Role:    llm.RoleDeveloper,
-			Content: skillsInjectedHeader + "\n" + skillsAvailableHeader + "\n- legacy-skill: legacy description (file: /tmp/legacy/SKILL.md)",
+			Content: "## Skills\n" + skillsAvailableHeader + "\n- legacy-skill: legacy description (file: /tmp/legacy/SKILL.md)",
 		},
 		{
 			Role:    llm.RoleDeveloper,

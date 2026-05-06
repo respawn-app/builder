@@ -8,7 +8,6 @@ The product philosophy is:
 The scope is intentionally narrow and quality-oriented.
 
 ## Repository Layout
-
 - `cli/builder/main.go`
   - CLI entrypoint for launching the Bubble Tea app.
 - `VERSION`
@@ -59,19 +58,17 @@ The scope is intentionally narrow and quality-oriented.
   - Updates the Homebrew tap formula after a tagged release.
 
 ## Engineering Principles
-
 - Keep the model unburdened.
   - Prefer runtime contracts and deterministic infrastructure over prompt complexity. Minimize extra tools.
 - Design for composability.
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
-- Keep TUI fast, avoid flicker, stable scroll, follow best practices, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
+- Keep TUI fast, avoid flicker, stable scroll, adaptive layouts, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
 - When reviewer comments expose a repeatable bug family, stop hunk-by-hunk fixing. Audit the whole family, implement the family-wide fix, and add regression coverage for the family before returning to the review loop.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
 -  Breaking changes are allowed, but the UX of migration should be straightforward, e.g. a migration note for config entries or a clear error message. Ask user what migration strat they want.
 
 ## Coding Guidelines
-
 - Prefer robust, forward-compatible, reusable, well-architected implementations over hacks, one-shot, temporary fixes or features bolted onto the existing arch.
 - Keep modules cohesive; each package should have one primary responsibility.
 - Introduce interfaces where they reduce coupling, not by default.
@@ -82,7 +79,6 @@ The scope is intentionally narrow and quality-oriented.
 - Keep behavior configurable only when it serves real operator value.
 
 ## When designing model prompts:
-
 - Clearly explain **how** and **when** the model should use the tool in descriptions.
 - Write tool schemas for parameters that specify whether it's optional, what's the default value, what the parameter does, what is its format (iso date/number etc)
 - Minimize parameters, minimize required parameters even more.
@@ -90,15 +86,12 @@ The scope is intentionally narrow and quality-oriented.
 - Keep frequently edited files easily accessible, like the global "system_prompt.md" or "tool_definitions.go" files.
 
 ## Commit guidelines
-
 Format: `<type>[!]: [description]`, `!` = breaking change (requiring migration from users of Builder).
 Use one of these types for all commits: `feat`, `fix`, `feat!`/`breaking`/`api`, `docs`,  `refactor`,  `chore`.
 Examples: `feat: add state recovery`, `feat!: change Saver API`
 If user asks you to fix a github issue and you commit the fix, use 'closes #xx' in description.
 
-
 ## Important rules:
-
 - All business logic covered by tests. Production code is written to be unit-testable.
 - Use red/green TDD when developing new features.
 - Before handing off to the user after code changes, rebuild via `./scripts/build.sh --output ./bin/builder`. Don't ask for confirmation to run/write tests and run checks.

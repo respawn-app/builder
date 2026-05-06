@@ -289,10 +289,10 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	for i, msg := range requestMessages(firstReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeSkills {
 			skillsIdx = i
-			if !strings.Contains(msg.Content, "- home-skill: from home (file: "+filepath.ToSlash(homeSkillPath)+")") {
+			if !strings.Contains(msg.Content, "- home-skill: "+filepath.ToSlash(homeSkillPath)+" . from home") {
 				t.Fatalf("expected injected skills context to include home skill entry, got %q", msg.Content)
 			}
-			if !strings.Contains(msg.Content, "- workspace-skill: from workspace (file: "+filepath.ToSlash(workspaceSkillPath)+")") {
+			if !strings.Contains(msg.Content, "- workspace-skill: "+filepath.ToSlash(workspaceSkillPath)+" . from workspace") {
 				t.Fatalf("expected injected skills context to include workspace skill entry, got %q", msg.Content)
 			}
 		}
@@ -365,7 +365,7 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 		if strings.Contains(msg.Content, "Workspace Skill") {
 			t.Fatalf("did not expect disabled workspace skill in injected skills context, got %q", msg.Content)
 		}
-		if !strings.Contains(msg.Content, "- home-skill: from home (file: "+filepath.ToSlash(homeSkillPath)+")") {
+		if !strings.Contains(msg.Content, "- home-skill: "+filepath.ToSlash(homeSkillPath)+" . from home") {
 			t.Fatalf("expected enabled home skill to remain, got %q", msg.Content)
 		}
 		return
@@ -409,7 +409,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 			continue
 		}
 		foundSkills = true
-		if !strings.Contains(msg.Content, "- valid-skill: from workspace (file: "+filepath.ToSlash(validSkillPath)+")") {
+		if !strings.Contains(msg.Content, "- valid-skill: "+filepath.ToSlash(validSkillPath)+" . from workspace") {
 			t.Fatalf("expected valid skill to remain injected, got %q", msg.Content)
 		}
 		if strings.Contains(msg.Content, "broken-skill") {

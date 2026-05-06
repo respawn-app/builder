@@ -74,8 +74,8 @@ var InitPrompt string
 //go:embed reviewer_system_prompt.md
 var ReviewerSystemPrompt string
 
-//go:embed skills_how_to_use_rules.md
-var SkillsHowToUseRulesPrompt string
+//go:embed skills_prompt.md
+var SkillsPrompt string
 
 //go:embed skills/**
 var GeneratedSkillsFS embed.FS
