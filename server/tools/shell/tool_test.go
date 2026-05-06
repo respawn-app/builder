@@ -432,8 +432,8 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
 	pollText := decodeStringToolOutput(t, pollResult)
-	if !strings.Contains(pollText, "Exit code 0, output:") {
-		t.Fatalf("expected exit code in poll output, got %q", pollText)
+	if strings.Contains(pollText, "Exit code 0, output:") {
+		t.Fatalf("did not expect zero exit code in poll output, got %q", pollText)
 	}
 	if !strings.Contains(pollText, "Wall time:") {
 		t.Fatalf("expected wall time once backgrounded shell completed, got %q", pollText)
@@ -677,8 +677,38 @@ func TestExecCommandFileReadPostprocessorHandlesDirectCommandOnly(t *testing.T) 
 	if strings.Contains(pipelineOutput, "[Total line count:") {
 		t.Fatalf("pipeline output should not include file-read context marker, got %q", pipelineOutput)
 	}
-	if !strings.Contains(pipelineOutput, "Exit code 0, output:") || !strings.Contains(pipelineOutput, "alpha") {
-		t.Fatalf("pipeline output missing normal shell response context, got %q", pipelineOutput)
+	if strings.Contains(pipelineOutput, "Exit code 0, output:") {
+		t.Fatalf("pipeline output should not include zero exit code header, got %q", pipelineOutput)
+	}
+	if !strings.Contains(pipelineOutput, "alpha") {
+		t.Fatalf("pipeline output missing command output, got %q", pipelineOutput)
+	}
+}
+
+func TestExecCommandReportsNonZeroExitCode(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	input, _ := json.Marshal(map[string]any{
+		"cmd":           "printf 'bad\\n'; exit 7",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 1_000,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "nonzero-1", Name: toolspec.ToolExecCommand, Input: input})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	text := decodeStringToolOutput(t, result)
+	if !strings.Contains(text, "Exit code 7, output:") {
+		t.Fatalf("expected non-zero exit code in output, got %q", text)
+	}
+	if !strings.Contains(text, "bad") {
+		t.Fatalf("expected command output, got %q", text)
 	}
 }
 
@@ -785,8 +815,8 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected command to stay foreground after clamp, got %q", text)
 	}
-	if !strings.Contains(text, "Exit code 0, output:") {
-		t.Fatalf("expected exit code in output, got %q", text)
+	if strings.Contains(text, "Exit code 0, output:") {
+		t.Fatalf("did not expect zero exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "done") {
 		t.Fatalf("expected command output, got %q", text)
@@ -964,8 +994,8 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
 	}
 	stdinText := decodeStringToolOutput(t, stdinResult)
-	if !strings.Contains(stdinText, "Exit code 0, output:") {
-		t.Fatalf("expected exit code in stdin output, got %q", stdinText)
+	if strings.Contains(stdinText, "Exit code 0, output:") {
+		t.Fatalf("did not expect zero exit code in stdin output, got %q", stdinText)
 	}
 	if !strings.Contains(stdinText, "Wall time:") {
 		t.Fatalf("expected wall time once interactive background shell completed, got %q", stdinText)

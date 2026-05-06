@@ -214,7 +214,6 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		result.ExitCode = cloneIntPtr(snapshot.ExitCode)
 		result.Output = display
 		result.Warning = processed.Warning
-		result.SemanticProcessed = processed.Processed
 		m.releaseEntry(id)
 		return result, nil
 	}
@@ -228,7 +227,6 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	result.MovedToBackground = true
 	result.Output = display
 	result.Warning = processed.Warning
-	result.SemanticProcessed = processed.Processed
 	m.emitEvent(Event{Type: EventBackgrounded, Snapshot: snapshot})
 	return result, nil
 }
@@ -305,7 +303,6 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		Warning:           appendWarning(warning, processed.Warning),
 		Output:            display,
 		OutputPath:        snapshot.LogPath,
-		SemanticProcessed: processed.Processed,
 		Running:           snapshot.Running,
 		Backgrounded:      snapshot.Backgrounded,
 		ExitCode:          cloneIntPtr(snapshot.ExitCode),

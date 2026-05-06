@@ -12,6 +12,7 @@ Builder keeps this separate from command execution itself:
 - command runs normally
 - Builder sanitizes output
 - Builder optionally applies built-in processors and/or your hook
+- successful commands omit the exit-code header; failed commands include `Exit code N, output:`
 - The model can disable that when it needs the full output
 
 ## Config
@@ -36,7 +37,7 @@ Allowed values:
 ## Built-ins
 
 - Successful direct `go test ...` commands collapse to `PASS` when output has no benchmarks, coverage, or JSON data.
-- Direct partial file reads add information about file size to the output, like `[Total lines: 186]`
+- Direct partial file reads add information about file size to the output, like `[Total line count: 186]`
 
 ## Hook Protocol
 

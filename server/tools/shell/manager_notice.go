@@ -342,20 +342,12 @@ func formatExecResponse(result ExecResult) string {
 	if strings.TrimSpace(result.Warning) != "" {
 		sections = append(sections, result.Warning)
 	}
-	if result.SemanticProcessed && result.ExitCode != nil && *result.ExitCode == 0 && !result.MovedToBackground {
-		if output == "" {
-			sections = append(sections, noOutputText)
-			return strings.Join(sections, "\n")
-		}
-		sections = append(sections, output)
-		return strings.Join(sections, "\n")
-	}
 	if result.MovedToBackground {
 		sections = append(sections, formatBackgroundTransitionLine(result.SessionID, output != ""))
 	}
-	if result.ExitCode != nil {
+	if result.ExitCode != nil && *result.ExitCode != 0 {
 		sections = append(sections, fmt.Sprintf("Exit code %d, output:", *result.ExitCode))
-	} else if strings.TrimSpace(result.SessionID) != "" && !result.MovedToBackground {
+	} else if result.Running && strings.TrimSpace(result.SessionID) != "" && !result.MovedToBackground {
 		sections = append(sections, fmt.Sprintf("Process running with session ID %s", result.SessionID))
 	}
 	if result.Backgrounded && result.ExitCode != nil {

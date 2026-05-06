@@ -97,8 +97,8 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 	if strings.Contains(text, "Log file:") {
 		t.Fatalf("did not expect log file for foreground shell, got %q", text)
 	}
-	if !strings.Contains(text, "Exit code 0, output:") {
-		t.Fatalf("expected exit code in output, got %q", text)
+	if strings.Contains(text, "Exit code 0, output:") {
+		t.Fatalf("did not expect zero exit code in output, got %q", text)
 	}
 	if !strings.Contains(text, "eof") {
 		t.Fatalf("expected EOF branch output, got %q", text)

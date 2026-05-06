@@ -87,7 +87,6 @@ type ExecResult struct {
 	Running           bool
 	Backgrounded      bool
 	MovedToBackground bool
-	SemanticProcessed bool
 }
 
 type BackgroundNoticeSummary struct {
