@@ -22,6 +22,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
@@ -385,12 +386,19 @@ func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg co
 	}
 	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, contextSessionID)
 	if err != nil {
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			return Options{}, config.App{}, err
-		}
-		return opts, cfg, nil
+		// BUILDER_SESSION_ID is an implicit routing contract for shell commands
+		// launched by Builder. If it is present but invalid, failing loudly is
+		// safer than silently running the prompt against an unrelated cwd.
+		return Options{}, config.App{}, workspaceContextSessionError(contextSessionID, err)
 	}
 	return resolvedOpts, resolvedCfg, nil
+}
+
+func workspaceContextSessionError(sessionID string, err error) error {
+	if errors.Is(err, session.ErrSessionNotFound) {
+		return fmt.Errorf("%s points to missing Builder session %q; unset %s or run from a live Builder shell: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), sessionenv.BuilderSessionID, err)
+	}
+	return fmt.Errorf("resolve %s workspace context %q: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), err)
 }
 
 func resolveRunPromptWorkspaceContextSession(opts Options, workspaceRoot string, cfg config.App, sessionID string) (Options, config.App, error) {

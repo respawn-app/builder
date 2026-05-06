@@ -92,33 +92,24 @@ func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *test
 	}
 }
 
-func TestLoadRemoteAttachConfigFallsBackWhenWorkspaceContextSessionIsStale(t *testing.T) {
+func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	configureAppTestServerPort(t)
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
+	if _, err := config.Load(workspace, config.LoadOptions{}); err != nil {
 		t.Fatalf("config.Load workspace: %v", err)
 	}
 
-	got, err := loadRemoteAttachConfig(Options{
+	_, err := loadRemoteAttachConfig(Options{
 		WorkspaceRoot:             workspace,
 		WorkspaceContextSessionID: "stale-env-session",
 	})
-	if err != nil {
-		t.Fatalf("loadRemoteAttachConfig: %v", err)
+	if err == nil {
+		t.Fatal("expected stale workspace context session to fail")
 	}
-	gotCanonical, err := config.CanonicalWorkspaceRoot(got.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("canonical got workspace: %v", err)
-	}
-	wantCanonical, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("canonical want workspace: %v", err)
-	}
-	if gotCanonical != wantCanonical {
-		t.Fatalf("workspace root = %q, want current workspace %q", got.WorkspaceRoot, cfg.WorkspaceRoot)
+	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
+		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
 	}
 }
 
@@ -177,7 +168,7 @@ func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
 	}
 }
 
-func TestRunPromptFallsBackWhenWorkspaceContextSessionIsStale(t *testing.T) {
+func TestRunPromptRejectsStaleWorkspaceContextSession(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -187,21 +178,21 @@ func TestRunPromptFallsBackWhenWorkspaceContextSessionIsStale(t *testing.T) {
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"workspace reply"})
 	defer fakeResponses.Close()
 
-	result, err := RunPrompt(context.Background(), Options{
+	_, err := RunPrompt(context.Background(), Options{
 		WorkspaceRoot:             workspace,
 		WorkspaceContextSessionID: "stale-env-session",
 		Model:                     "gpt-5",
 		OpenAIBaseURL:             fakeResponses.URL,
 		OpenAIBaseURLExplicit:     true,
 	}, "hello from stale context", 0, nil)
-	if err != nil {
-		t.Fatalf("RunPrompt: %v", err)
+	if err == nil {
+		t.Fatal("expected stale workspace context session to fail")
 	}
-	if result.Result != "workspace reply" {
-		t.Fatalf("result = %q, want workspace reply", result.Result)
+	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
+		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
 	}
-	if hits.Load() != 1 {
-		t.Fatalf("expected one llm call, got %d", hits.Load())
+	if hits.Load() != 0 {
+		t.Fatalf("expected no llm calls, got %d", hits.Load())
 	}
 }
 
