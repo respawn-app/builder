@@ -8,17 +8,33 @@ import (
 )
 
 func (e *Engine) materializePendingWorktreeReminder(stepID string) error {
+	return e.materializePendingWorktreeReminderWithOptions(stepID, worktreeReminderMaterializationOptions{})
+}
+
+func (e *Engine) materializePendingWorktreeReminderAfterCompaction(stepID string, previousCompactionCount int) error {
+	if e.compactionCountSnapshot() == previousCompactionCount {
+		return nil
+	}
+	return e.materializePendingWorktreeReminderWithOptions(stepID, worktreeReminderMaterializationOptions{ignoreChatEntryDedupe: true})
+}
+
+type worktreeReminderMaterializationOptions struct {
+	ignoreChatEntryDedupe bool
+}
+
+func (e *Engine) materializePendingWorktreeReminderWithOptions(stepID string, opts worktreeReminderMaterializationOptions) error {
 	state := cloneRuntimeWorktreeReminderState(e.store.Meta().WorktreeReminder)
-	if !shouldInjectWorktreeReminder(state, e.compactionCountSnapshot()) {
+	compactionCount := e.compactionCountSnapshot()
+	if !shouldInjectWorktreeReminder(state, compactionCount) {
 		return nil
 	}
 	message, ok := worktreeReminderMessage(*state)
 	if !ok {
 		return nil
 	}
-	if latestMaterializedWorktreeReminderMatches(e.snapshotItems(), message) || latestMaterializedWorktreeReminderEntryMatches(e.ChatSnapshot().Entries, message) {
+	if latestMaterializedWorktreeReminderMatches(e.snapshotItems(), message) || (!opts.ignoreChatEntryDedupe && latestMaterializedWorktreeReminderEntryMatches(e.ChatSnapshot().Entries, message)) {
 		state.HasIssuedInGeneration = true
-		state.IssuedCompactionCount = e.compactionCountSnapshot()
+		state.IssuedCompactionCount = compactionCount
 		return e.store.SetWorktreeReminderState(state)
 	}
 	if err := e.appendMessage(stepID, message); err != nil {

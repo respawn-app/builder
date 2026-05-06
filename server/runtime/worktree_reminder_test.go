@@ -232,6 +232,99 @@ func TestRunStepLoopMaterializesPendingWorktreeReminder(t *testing.T) {
 	}
 }
 
+func TestRunStepLoopCountsPendingWorktreeReminderBeforeAutoCompaction(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/compact",
+		WorktreePath:  "/tmp/wt-compact",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-compact",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+
+	sawReminderDuringPreCompactionCount := false
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant:   llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+			OutputItems: []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"}},
+			Usage:       llm.Usage{WindowTokens: 2_000},
+		}},
+		inputTokenCountFn: func(req llm.Request) int {
+			hasReminder := requestHasWorktreeReminder(req)
+			if hasReminder && !requestHasCompactionCheckpoint(req) {
+				sawReminderDuringPreCompactionCount = true
+				return 1_000
+			}
+			return 100
+		},
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "compacted seed"},
+				{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+		}},
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "native",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 999, WindowTokens: 2_000})
+
+	if _, err := eng.runStepLoop(context.Background(), "step-1"); err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if !sawReminderDuringPreCompactionCount {
+		t.Fatal("expected auto-compaction token count to include pending worktree reminder")
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one auto-compaction call, got %d", len(client.compactionCalls))
+	}
+	if !requestHasWorktreeReminder(client.calls[0]) {
+		t.Fatalf("expected post-compaction model request to include worktree reminder, messages=%+v", requestMessages(client.calls[0]))
+	}
+	state := store.Meta().WorktreeReminder
+	if state == nil || !state.HasIssuedInGeneration || state.IssuedCompactionCount != 1 {
+		t.Fatalf("expected reminder reissued after compaction, got %+v", state)
+	}
+}
+
+func requestHasWorktreeReminder(req llm.Request) bool {
+	for _, msg := range requestMessages(req) {
+		if msg.Role == llm.RoleDeveloper && (msg.MessageType == llm.MessageTypeWorktreeMode || msg.MessageType == llm.MessageTypeWorktreeModeExit) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestHasCompactionCheckpoint(req llm.Request) bool {
+	for _, item := range req.Items {
+		if item.Type == llm.ResponseItemTypeCompaction || item.MessageType == llm.MessageTypeCompactionSummary {
+			return true
+		}
+	}
+	return false
+}
+
 func TestWorktreeReminderPersistFailureDoesNotDuplicateMaterializedReminder(t *testing.T) {
 	prevPrompt := prompts.WorktreeModePrompt
 	prompts.WorktreeModePrompt = "enter {{branch}}"

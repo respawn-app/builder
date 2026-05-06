@@ -282,6 +282,13 @@ func customToolCallIDs(calls []llm.ToolCall) map[string]bool {
 
 func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID string) error {
 	e := s.engine
+	compactionCountBeforeReminder := e.compactionCountSnapshot()
+	handoffRequestPending := e.pendingHandoffRequestSnapshot() != nil
+	if !handoffRequestPending {
+		if err := e.materializePendingWorktreeReminder(stepID); err != nil {
+			return err
+		}
+	}
 	handoffCompacted, err := e.applyPendingHandoffIfNeeded(ctx, stepID)
 	if err != nil {
 		return err
@@ -295,10 +302,15 @@ func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID strin
 		}
 		return e.maybeAppendCompactionSoonReminder(ctx, stepID)
 	}
+	if handoffRequestPending {
+		if err := e.materializePendingWorktreeReminder(stepID); err != nil {
+			return err
+		}
+	}
 	if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 		return err
 	}
-	if err := e.materializePendingWorktreeReminder(stepID); err != nil {
+	if err := e.materializePendingWorktreeReminderAfterCompaction(stepID, compactionCountBeforeReminder); err != nil {
 		return err
 	}
 	return e.maybeAppendCompactionSoonReminder(ctx, stepID)
