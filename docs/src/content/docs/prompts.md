@@ -7,10 +7,8 @@ Builder reads prompt context from global and workspace files.
 
 ## Instruction Files
 
-`AGENTS.md` files add developer-context instructions to each session:
-
-- `~/.builder/AGENTS.md`
-- `<workspace-root>/AGENTS.md`
+- `~/.builder/AGENTS.md` is a global instructions file injected into every session.
+- `<workspace>/AGENTS.md` adds developer instructions that are specific to the current project.
 
 Builder injects these files into the conversation as developer context once per session, not as the main system prompt.
 
@@ -35,13 +33,10 @@ Builder reads and renders the selected system prompt file once when the session 
 
 System prompt files use Go template syntax with these fields:
 
-| Placeholder | Value |
-| --- | --- |
-| `{{.BuilderRunCommand}}` | The command prefix for launching a Builder subagent from shell. |
-| `{{.EstimatedToolCallsForContext}}` | Approximate tool-call count that fits in the locked context budget. |
-| `{{.EditingToolName}}` | Active manual editing tool name: `patch`, `edit`, or `shell` when no dedicated edit tool is enabled. |
-| `{{.DefaultSystemPrompt}}` | Builder's rendered built-in system prompt, without tool preambles. |
-
+- `{{.BuilderRunCommand}}` - command prefix for launching Builder subagents from shell, e.g. `path/to/builder.exe`
+- `{{.EstimatedToolCallsForContext}}` - estimated function/tool-call budget before compaction/handoff, exact number that varies with model context window, like `185`.
+- `{{.EditingToolName}}` - name of the tool the agent uses to modify files, like `edit` or `patch`. Varies per model.
+- `{{.DefaultSystemPrompt}}` - Full text of the original Builder system prompt, positioning the agent as an expert architect, product engineer, coding agent.
 
 Example:
 
@@ -62,4 +57,4 @@ Tool preambles are appended after the rendered `SYSTEM.md` when `tool_preambles 
 - `~/.builder/config.toml`
 - `<workspace-root>/.builder/config.toml`
 
-The workspace config value takes priority. Builder reads the referenced file when the supervisor first runs for a session, stores the prompt with the session, and reuses that snapshot for later supervisor requests. Editing the file affects only sessions that have not run the supervisor with that override.
+The workspace config value takes priority. Editing the file affects only sessions that have not run the supervisor with that override.

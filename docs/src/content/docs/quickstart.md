@@ -12,18 +12,20 @@ brew tap respawn-app/tap
 brew install builder-cli
 ```
 
-### Windows
-
-```powershell
-irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
-```
-
 ### Standalone binaries via GitHub Releases
 
-These versions are **not auto-updated**. Please keep them updated manually.
+These versions are **not auto-updated**. Please keep them updated manually by re-running install scripts.
+
+Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
+```
+
+Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
 ```
 
 Check the installed version with: `builder --version`
@@ -36,7 +38,7 @@ Run this if you want one shared Builder server to start at login:
 builder service install
 ```
 
-It uses about 70 MB of RAM, lets unlimited frontends stay lightweight by connecting to one local orchestrator, and makes background shells reliable when a terminal frontend exits.
+It uses about 50 MB of RAM, lets unlimited frontends stay lightweight by connecting to one local orchestrator, and makes background shells reliable when a terminal frontend exits.
 See [Builder Server](../server/) for details and service management commands.
 
 ## First Authentication

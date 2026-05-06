@@ -201,22 +201,14 @@ Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
 - `tools.patch` and `tools.edit` are mutually exclusive. If both are left at their defaults, Builder chooses `patch` for first-party OpenAI providers or `gpt-*` model names, and `edit` otherwise.
-- To force `edit`, set `edit = true` and `patch = false`. To force `patch`, set `patch = true` and `edit = false`.
+- To force `edit`, set `edit = true` and `patch = false`.
 
 ### Subagents
 
 `[subagents.<role>]` is a file-only table for named headless subagent roles. Fast is always-present, but you can add custom agents here.
+
 Subagent roles inherit the main config and then override only the keys set in that role table.
 Set `system_prompt_file` inside a subagent role to use a role-specific main system prompt for `builder run --agent <role>`.
-
-```toml
-[subagents.fast]
-model = "gpt-5.4-mini"
-thinking_level = "low"
-
-[subagents.fast.tools]
-patch = false
-```
 
 More info on the [Subagents page](../headless.md).
 
@@ -224,10 +216,10 @@ More info on the [Subagents page](../headless.md).
 
 `[skills]` is a file-only per-skill boolean table in `config.toml` to disable unneeded skills. Keys are matched case-insensitively.
 
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `skills.<skill name>` | `true` | Enables or disables a discovered skill for new sessions. Disabled skills are omitted from the injected skills developer message and shown as `disabled` in `/status`. |
+```toml
+[skills]
+"<skill name>" = true # | false
+```
 
 Notes:
 

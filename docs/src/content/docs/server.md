@@ -18,10 +18,8 @@ The service starts at login and keeps the local server available before any fron
 builder service install
 ```
 
-The background server uses about 70 MB of RAM while idle.
+The background server uses about 50 MB of RAM while idle.
 That cost buys one shared orchestrator for all Builder frontends and makes long-running background shells less dependent on the lifetime of a single terminal frontend.
-
-Homebrew does not install the background service automatically.
 
 ## Commands
 
@@ -41,8 +39,6 @@ builder service uninstall --keep-running
 
 `install` starts the service after registration. `--no-start` only writes the service registration.
 `uninstall` stops the service before removing registration. `--keep-running` removes registration without stopping an already-running process.
-`restart --if-installed` is used by package updates: it exits successfully without output when no service is installed.
-On macOS, restart rewrites the LaunchAgent, unloads the loaded job, waits for the old server to stop, and bootstraps it again. Starting an unloaded LaunchAgent relies on launchd `RunAtLoad`; no separate kickstart is needed.
 
 ## Backends
 
@@ -56,20 +52,6 @@ Linux headless machines may need lingering enabled so the server survives logout
 
 ```bash
 loginctl enable-linger "$USER"
-```
-
-## Status
-
-Human status output includes install state, backend, PID when known, command, endpoint, and log paths.
-
-```bash
-builder service status
-```
-
-JSON output is stable for scripts:
-
-```bash
-builder service status --json
 ```
 
 ## Port Conflicts

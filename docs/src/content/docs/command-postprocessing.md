@@ -33,22 +33,10 @@ Allowed values:
 - `user`: run only your configured hook
 - `all`: run Builder built-ins first, then your configured hook
 
-When `postprocessing_mode = "all"`:
-
-1. Builder built-in processors run first.
-2. Your hook runs second.
-
 ## Built-ins
 
-Successful direct `go test ...` commands collapse to `PASS` when output has no benchmarks, coverage, or JSON data.
-
-Direct partial file reads add one context line before output:
-
-```text
-[Total line count: 742]
-```
-
-Builder applies that marker to simple `sed`, `head`, `tail`, and PowerShell `Get-Content` partial reads. It skips composed commands such as pipelines, whole-file reads, binary files, and files larger than 1 MB.
+- Successful direct `go test ...` commands collapse to `PASS` when output has no benchmarks, coverage, or JSON data.
+- Direct partial file reads add information about file size to the output, like `[Total lines: 186]`
 
 ## Hook Protocol
 
@@ -87,6 +75,4 @@ Hook **must** return JSON like:
 }
 ```
 
-If `processed` is `false`, Builder treats the hook as a no-op.
-
-If the hook path is missing, invalid, times out, or returns invalid JSON, Builder falls back to the next available option (built-in or none).
+Return `{"processed": false}` for no-op passthrough. If the hook is missing, times out, exits nonzero, or returns invalid JSON, Builder falls back to the current output and reports a warning.

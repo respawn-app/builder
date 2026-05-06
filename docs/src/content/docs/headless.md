@@ -4,10 +4,8 @@ description: Headless Builder runs, scriptable output modes, and how interactive
 ---
 
 Builder supports a headless, non-interactive run mode via `builder run`.
-When the interactive Builder session uses subagents, it does so by launching separate headless Builder runs. In other words:
-This keeps the subagent path transparent and scriptable: the feature Builder uses internally is also directly available to human users.
-
-For a shared local server that starts at login, use [`builder service`](../server/).
+When the interactive Builder session uses subagents, it does so by launching separate headless Builder runs.
+This keeps the subagent path transparent and scriptable: the feature Builder uses internally is scriptable and contextual.
 
 Run a single prompt:
 
@@ -21,20 +19,43 @@ Continue an existing headless session:
 builder run --continue <session-id> "<prompt>"
 ```
 
-Shell commands started by Builder receive `BUILDER_SESSION_ID`.
-Use `builder session-id` inside those commands to print the caller session id.
-`builder run` does not implicitly continue that caller session; use `--session` or `--continue` when you want to resume a specific headless session.
+## Subagent Roles
+Roles are needed to create specialized subagent types for different tasks. Treat them like different employees or specialists.
+
+`--agent <role>` selects a named subagent role from `[subagents.<role>]` in the local or global config file. To define a new role, edit the config:
+
+```toml
+[subagents.research]
+model = "gpt-5.5"
+thinking_level = "xhigh"
+system_prompt_file = "research-agent.md"
+priority_request_mode = true
+
+[subagents.research.tools]
+patch = false
+
+[subagents.research.skills]
+"builder-dogfooding" = true
+```
+
+- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile.
+- Subagent roles inherit the main config and then override only the keys you set in that role table.
+
+Useful role-specific keys include:
+
+- `model`, `provider_override`, `openai_base_url`
+- `thinking_level`, `model_verbosity`, `priority_request_mode`
+- `system_prompt_file`
+- `[subagents.<role>.tools]`
+- `[subagents.<role>.skills]`
+- `shell_output_max_chars`, `bg_shells_output`
 
 ## Session Behavior
 
-Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run or issue tool preambles.
-That makes them suitable for background execution and automation and saves tokens, but it also means a headless run should be treated as a single unattended turn. If you continue the headless session as an interactive one (e.g. from the UI), expect the model to be less talkative going forward.
+Headless runs are non-interactive. They do not stop to ask the human operator questions mid-run or issue tool preambles. That makes them suitable for background execution and automation and saves tokens, but it also means a headless run should be treated as a single unattended turn. If you continue the headless session as an interactive one (e.g. from the UI), expect the model to be less talkative going forward.
 
-- `--agent <role>` selects a named subagent role from `[subagents.<role>]` in `~/.builder/config.toml`.
-- Subagent roles inherit the main config and then override only the keys you set in that role table.
 - Continuing a session reuses most of initial config and parameters.
 - Sessions with a goal cannot be continued headlessly. Clear the goal from the interactive session before using `builder run --continue`.
-- The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile.
 
 ## Workspace Binding
 
