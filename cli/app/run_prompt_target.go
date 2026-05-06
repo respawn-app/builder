@@ -372,14 +372,28 @@ func resolveRunPromptWorkspaceConfig(opts Options) (runPromptWorkspaceConfig, er
 }
 
 func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg config.App) (Options, config.App, error) {
-	contextSessionID := runPromptWorkspaceContextSessionID(opts)
-	if contextSessionID == "" || opts.WorkspaceRootExplicit {
+	if opts.WorkspaceRootExplicit {
 		return opts, cfg, nil
 	}
+	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
+		return resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, sessionID)
+	}
+	contextSessionID := strings.TrimSpace(opts.WorkspaceContextSessionID)
+	if contextSessionID == "" {
+		return opts, cfg, nil
+	}
+	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, contextSessionID)
+	if err != nil {
+		return opts, cfg, nil
+	}
+	return resolvedOpts, resolvedCfg, nil
+}
+
+func resolveRunPromptWorkspaceContextSession(opts Options, workspaceRoot string, cfg config.App, sessionID string) (Options, config.App, error) {
 	bootstrapPlan, err := launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
 		WorkspaceRoot:         workspaceRoot,
 		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
-		SessionID:             contextSessionID,
+		SessionID:             sessionID,
 	})
 	if err != nil {
 		return Options{}, config.App{}, err
@@ -394,13 +408,6 @@ func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg co
 		return Options{}, config.App{}, err
 	}
 	return resolved, resolvedCfg, nil
-}
-
-func runPromptWorkspaceContextSessionID(opts Options) string {
-	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
-		return sessionID
-	}
-	return strings.TrimSpace(opts.WorkspaceContextSessionID)
 }
 
 func resolveRemoteWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (*serverapi.ProjectBinding, error) {

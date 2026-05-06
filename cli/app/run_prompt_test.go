@@ -92,6 +92,51 @@ func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *test
 	}
 }
 
+func TestLoadRemoteAttachConfigFallsBackWhenWorkspaceContextSessionIsStale(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace: %v", err)
+	}
+
+	got, err := loadRemoteAttachConfig(Options{
+		WorkspaceRoot:             workspace,
+		WorkspaceContextSessionID: "stale-env-session",
+	})
+	if err != nil {
+		t.Fatalf("loadRemoteAttachConfig: %v", err)
+	}
+	gotCanonical, err := config.CanonicalWorkspaceRoot(got.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical got workspace: %v", err)
+	}
+	wantCanonical, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical want workspace: %v", err)
+	}
+	if gotCanonical != wantCanonical {
+		t.Fatalf("workspace root = %q, want current workspace %q", got.WorkspaceRoot, cfg.WorkspaceRoot)
+	}
+}
+
+func TestLoadRemoteAttachConfigKeepsExplicitSessionLookupStrict(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+
+	_, err := loadRemoteAttachConfig(Options{
+		WorkspaceRoot: workspace,
+		SessionID:     "missing-explicit-session",
+	})
+	if err == nil {
+		t.Fatal("expected stale explicit session id to fail")
+	}
+}
+
 func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
