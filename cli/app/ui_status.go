@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/generated"
 	"builder/server/llm"
@@ -1023,7 +1022,6 @@ func (m *uiModel) openStatusOverlay() {
 
 func (m *uiModel) closeStatusOverlay() {
 	m.status.open = false
-	m.status.ownsTranscriptMode = false
 	m.status.scroll = 0
 	m.status.loading = false
 	m.status.pendingSections = nil
@@ -1079,31 +1077,11 @@ func (m *uiModel) statusCombinedWarnings() string {
 }
 
 func (m *uiModel) pushStatusOverlayIfNeeded() tea.Cmd {
-	if m.status.ownsTranscriptMode {
-		return nil
-	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
-	}
-	m.status.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceStatus)
 }
 
 func (m *uiModel) popStatusOverlayIfNeeded() tea.Cmd {
-	if !m.status.ownsTranscriptMode {
-		return nil
-	}
-	m.status.ownsTranscriptMode = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
-	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) moveStatusScroll(delta int) {

@@ -7,60 +7,98 @@ import (
 	"builder/server/session"
 )
 
-type preparedWorktreeReminder struct {
-	stepID  string
-	message llm.Message
-	state   session.WorktreeReminderState
+func (e *Engine) materializePendingWorktreeReminder(stepID string) error {
+	return e.materializePendingWorktreeReminderWithOptions(stepID, worktreeReminderMaterializationOptions{})
 }
 
-func (e *Engine) prepareWorktreeReminderRequestItems(stepID string) ([]llm.ResponseItem, *preparedWorktreeReminder, error) {
+func (e *Engine) materializePendingWorktreeReminderAfterCompaction(stepID string, previousCompactionCount int) error {
+	if e.compactionCountSnapshot() == previousCompactionCount {
+		return nil
+	}
+	return e.materializePendingWorktreeReminderWithOptions(stepID, worktreeReminderMaterializationOptions{ignoreChatEntryDedupe: true})
+}
+
+type worktreeReminderMaterializationOptions struct {
+	ignoreChatEntryDedupe bool
+}
+
+func (e *Engine) materializePendingWorktreeReminderWithOptions(stepID string, opts worktreeReminderMaterializationOptions) error {
 	state := cloneRuntimeWorktreeReminderState(e.store.Meta().WorktreeReminder)
-	if !shouldInjectWorktreeReminder(state, e.compactionCountSnapshot()) {
-		return nil, nil, nil
+	compactionCount := e.compactionCountSnapshot()
+	if !shouldInjectWorktreeReminder(state, compactionCount) {
+		return nil
 	}
 	message, ok := worktreeReminderMessage(*state)
 	if !ok {
-		return nil, nil, nil
+		return nil
 	}
-	items := llm.ItemsFromMessages([]llm.Message{message})
-	if strings.TrimSpace(stepID) == "" {
-		return items, nil, nil
+	if latestMaterializedWorktreeReminderMatches(e.snapshotItems(), message) || (!opts.ignoreChatEntryDedupe && latestMaterializedWorktreeReminderEntryMatches(e.ChatSnapshot().Entries, message)) {
+		state.HasIssuedInGeneration = true
+		state.IssuedCompactionCount = compactionCount
+		return e.store.SetWorktreeReminderState(state)
+	}
+	if err := e.appendMessage(stepID, message); err != nil {
+		return err
 	}
 	state.HasIssuedInGeneration = true
 	state.IssuedCompactionCount = e.compactionCountSnapshot()
-	return items, &preparedWorktreeReminder{
-		stepID:  stepID,
-		message: message,
-		state:   *state,
-	}, nil
-}
-
-func (e *Engine) commitPreparedWorktreeReminder(reminder *preparedWorktreeReminder) error {
-	if reminder == nil {
-		return nil
-	}
-	if err := e.appendMessage(reminder.stepID, reminder.message); err != nil {
-		return err
-	}
-	state := reminder.state
-	return e.store.SetWorktreeReminderState(&state)
+	return e.store.SetWorktreeReminderState(state)
 }
 
 func filterHistoricalWorktreeReminderItems(items []llm.ResponseItem) []llm.ResponseItem {
 	if len(items) == 0 {
 		return nil
 	}
+	latestReminder := -1
+	for idx, item := range items {
+		if isWorktreeReminderResponseItem(item) {
+			latestReminder = idx
+		}
+	}
 	filtered := make([]llm.ResponseItem, 0, len(items))
-	for _, item := range items {
-		if item.Type == llm.ResponseItemTypeMessage {
-			switch item.MessageType {
-			case llm.MessageTypeWorktreeMode, llm.MessageTypeWorktreeModeExit:
-				continue
-			}
+	for idx, item := range items {
+		if isWorktreeReminderResponseItem(item) && idx != latestReminder {
+			continue
 		}
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func isWorktreeReminderResponseItem(item llm.ResponseItem) bool {
+	if item.Type != llm.ResponseItemTypeMessage {
+		return false
+	}
+	return item.MessageType == llm.MessageTypeWorktreeMode || item.MessageType == llm.MessageTypeWorktreeModeExit
+}
+
+func latestMaterializedWorktreeReminderMatches(items []llm.ResponseItem, message llm.Message) bool {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		item := items[idx]
+		if !isWorktreeReminderResponseItem(item) {
+			continue
+		}
+		return item.Role == message.Role &&
+			item.MessageType == message.MessageType &&
+			strings.TrimSpace(item.Content) == strings.TrimSpace(message.Content) &&
+			strings.TrimSpace(item.CompactContent) == strings.TrimSpace(message.CompactContent) &&
+			strings.TrimSpace(item.SourcePath) == strings.TrimSpace(message.SourcePath)
+	}
+	return false
+}
+
+func latestMaterializedWorktreeReminderEntryMatches(entries []ChatEntry, message llm.Message) bool {
+	for idx := len(entries) - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if entry.MessageType != llm.MessageTypeWorktreeMode && entry.MessageType != llm.MessageTypeWorktreeModeExit {
+			continue
+		}
+		return entry.MessageType == message.MessageType &&
+			strings.TrimSpace(entry.Text) == strings.TrimSpace(message.Content) &&
+			strings.TrimSpace(entry.OngoingText) == strings.TrimSpace(message.CompactContent) &&
+			strings.TrimSpace(entry.SourcePath) == strings.TrimSpace(message.SourcePath)
+	}
+	return false
 }
 
 func shouldInjectWorktreeReminder(state *session.WorktreeReminderState, compactionCount int) bool {

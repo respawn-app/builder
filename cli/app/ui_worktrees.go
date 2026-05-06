@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"builder/cli/tui"
+	tuiinput "builder/cli/tui/input"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	"builder/shared/uiglyphs"
@@ -61,8 +61,8 @@ const (
 )
 
 type uiWorktreeCreateDialogState struct {
-	baseRef       uiSharedTextInput
-	branchTarget  uiSharedTextInput
+	baseRef       tuiinput.Editor
+	branchTarget  tuiinput.Editor
 	focus         uiWorktreeCreateField
 	action        uiWorktreeCreateAction
 	errorText     string
@@ -90,21 +90,21 @@ type uiWorktreeDeleteDialogState struct {
 }
 
 type uiWorktreeOverlayState struct {
-	open               bool
-	ownsTranscriptMode bool
-	loading            bool
-	phase              uiWorktreeOverlayPhase
-	selection          int
-	target             clientui.SessionExecutionTarget
-	entries            []serverapi.WorktreeView
-	errorText          string
-	refreshToken       uint64
-	mutationToken      uint64
-	switchPending      bool
-	selectedID         string
-	intent             uiWorktreeOpenIntent
-	create             uiWorktreeCreateDialogState
-	deleteConfirm      uiWorktreeDeleteDialogState
+	open          bool
+	loading       bool
+	phase         uiWorktreeOverlayPhase
+	selection     int
+	target        clientui.SessionExecutionTarget
+	entries       []serverapi.WorktreeView
+	errorText     string
+	refreshToken  uint64
+	mutationToken uint64
+	switchPending bool
+	selectedID    string
+	intent        uiWorktreeOpenIntent
+	create        uiWorktreeCreateDialogState
+	deleteConfirm uiWorktreeDeleteDialogState
+	inputCursor   uiInputFieldCursor
 }
 
 type worktreeListDoneMsg struct {
@@ -142,14 +142,14 @@ type worktreeCreateTargetResolveDoneMsg struct {
 	err   error
 }
 
-func newWorktreeDialogTextInput(value string) uiSharedTextInput {
-	return newUISharedTextInput(strings.TrimSpace(value))
+func newWorktreeDialogEditor(value string) tuiinput.Editor {
+	return newSingleLineEditor(strings.TrimSpace(value))
 }
 
 func newWorktreeCreateDialog(suggestedBranch string) uiWorktreeCreateDialogState {
 	dialog := uiWorktreeCreateDialogState{
-		baseRef:      newWorktreeDialogTextInput("HEAD"),
-		branchTarget: newWorktreeDialogTextInput(strings.TrimSpace(suggestedBranch)),
+		baseRef:      newWorktreeDialogEditor("HEAD"),
+		branchTarget: newWorktreeDialogEditor(strings.TrimSpace(suggestedBranch)),
 		focus:        uiWorktreeCreateFieldBranchTarget,
 		action:       uiWorktreeCreateActionCreate,
 	}
@@ -163,14 +163,6 @@ func (d *uiWorktreeCreateDialogState) syncFocus() {
 	}
 	if !d.usesBaseRef() && d.focus == uiWorktreeCreateFieldBaseRef {
 		d.focus = uiWorktreeCreateFieldBranchTarget
-	}
-	d.baseRef.Blur()
-	d.branchTarget.Blur()
-	switch d.focus {
-	case uiWorktreeCreateFieldBaseRef:
-		d.baseRef.Focus()
-	case uiWorktreeCreateFieldBranchTarget:
-		d.branchTarget.Focus()
 	}
 }
 
@@ -209,10 +201,10 @@ func (d *uiWorktreeCreateDialogState) moveFocus(delta int) {
 	d.focus = fields[index]
 	d.syncFocus()
 	if d.focus == uiWorktreeCreateFieldBranchTarget {
-		d.branchTarget.CursorEnd()
+		moveSingleLineEditorEnd(&d.branchTarget)
 	}
 	if d.focus == uiWorktreeCreateFieldBaseRef {
-		d.baseRef.CursorEnd()
+		moveSingleLineEditorEnd(&d.baseRef)
 	}
 }
 
@@ -231,16 +223,16 @@ func (d *uiWorktreeCreateDialogState) moveAction(delta int) {
 }
 
 func (d uiWorktreeCreateDialogState) request(kind serverapi.WorktreeCreateTargetResolutionKind) (serverapi.WorktreeCreateRequest, error) {
-	target := strings.TrimSpace(d.branchTarget.Value())
+	target := strings.TrimSpace(singleLineEditorValue(d.branchTarget))
 	if target == "" {
 		return serverapi.WorktreeCreateRequest{}, fmt.Errorf("Branch or ref is required")
 	}
 	if kind == serverapi.WorktreeCreateTargetResolutionKindExistingBranch || kind == serverapi.WorktreeCreateTargetResolutionKindDetachedRef {
 		return serverapi.WorktreeCreateRequest{BaseRef: target, CreateBranch: false}, nil
 	}
-	baseRef := strings.TrimSpace(d.baseRef.Value())
+	baseRef := strings.TrimSpace(singleLineEditorValue(d.baseRef))
 	if baseRef == "" {
-		baseRef = "HEAD"
+		return serverapi.WorktreeCreateRequest{}, fmt.Errorf("Base ref is required")
 	}
 	return serverapi.WorktreeCreateRequest{BaseRef: baseRef, CreateBranch: true, BranchName: target}, nil
 }
@@ -351,31 +343,11 @@ func (m *uiModel) closeWorktreeOverlay() {
 }
 
 func (m *uiModel) pushWorktreeOverlayIfNeeded() tea.Cmd {
-	if m.worktrees.ownsTranscriptMode {
-		return nil
-	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
-	}
-	m.worktrees.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceWorktree)
 }
 
 func (m *uiModel) popWorktreeOverlayIfNeeded() tea.Cmd {
-	if !m.worktrees.ownsTranscriptMode {
-		return nil
-	}
-	m.worktrees.ownsTranscriptMode = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
-	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) requestWorktreeListCmd() tea.Cmd {
@@ -428,7 +400,7 @@ func (m *uiModel) scheduleWorktreeCreateTargetResolution() tea.Cmd {
 		return nil
 	}
 	dialog := &m.worktrees.create
-	query := strings.TrimSpace(dialog.branchTarget.Value())
+	query := strings.TrimSpace(singleLineEditorValue(dialog.branchTarget))
 	dialog.errorText = ""
 	dialog.resolveToken++
 	token := dialog.resolveToken
@@ -913,7 +885,7 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 				m.closeWorktreeDialog()
 				return m, nil
 			}
-			query := strings.TrimSpace(dialog.branchTarget.Value())
+			query := strings.TrimSpace(singleLineEditorValue(dialog.branchTarget))
 			if query == "" {
 				dialog.errorText = "Branch or ref is required"
 				return m, nil
@@ -934,11 +906,11 @@ func (c uiInputController) handleWorktreeCreateDialogKey(msg tea.KeyMsg) (tea.Mo
 	var resolveCmd tea.Cmd
 	switch dialog.focus {
 	case uiWorktreeCreateFieldBaseRef:
-		cmd = dialog.baseRef.Update(msg)
+		cmd = updateSingleLineEditorWithAppKeys(&dialog.baseRef, msg)
 	case uiWorktreeCreateFieldBranchTarget:
-		before := dialog.branchTarget.Value()
-		cmd = dialog.branchTarget.Update(msg)
-		if dialog.branchTarget.Value() != before {
+		before := singleLineEditorValue(dialog.branchTarget)
+		cmd = updateSingleLineEditorWithAppKeys(&dialog.branchTarget, msg)
+		if singleLineEditorValue(dialog.branchTarget) != before {
 			resolveCmd = m.scheduleWorktreeCreateTargetResolution()
 		}
 	default:
@@ -985,6 +957,7 @@ func (c uiInputController) handleWorktreeDeleteDialogKey(msg tea.KeyMsg) (tea.Mo
 
 func (l uiViewLayout) renderWorktreeOverlay(width, height int, style uiStyles) []string {
 	m := l.model
+	m.worktrees.inputCursor = uiInputFieldCursor{}
 	if m.worktrees.phase == uiWorktreeOverlayPhaseCreate {
 		return l.renderWorktreeCreateDialog(width, height, style)
 	}
@@ -1195,6 +1168,8 @@ func (l uiViewLayout) renderWorktreeCreateDialog(width, height int, style uiStyl
 	body := make([]string, 0, 32)
 	focusedStart := 0
 	focusedEnd := -1
+	cursorBodyRow := -1
+	cursorCol := 0
 	addSection := func(field uiWorktreeCreateField, focusable bool, lines []string) {
 		if len(lines) == 0 {
 			return
@@ -1211,13 +1186,31 @@ func (l uiViewLayout) renderWorktreeCreateDialog(width, height int, style uiStyl
 		if focusable && dialog.focus == field {
 			focusedStart = start
 			focusedEnd = len(body) - 1
+			if field == uiWorktreeCreateFieldBranchTarget {
+				rendered := renderSingleLineEditor(max(1, width), 1, dialog.branchTarget, "› ", true, 0, "")
+				if rendered.Cursor.Visible {
+					cursorBodyRow = start + 3 + rendered.Cursor.Row
+					cursorCol = rendered.Cursor.Col
+				}
+			}
+			if field == uiWorktreeCreateFieldBaseRef {
+				rendered := renderSingleLineEditor(max(1, width), 1, dialog.baseRef, "› ", true, 0, "")
+				if rendered.Cursor.Visible {
+					helperRows := 0
+					if strings.TrimSpace("Used when creating a new branch.") != "" {
+						helperRows = 1
+					}
+					cursorBodyRow = start + 1 + helperRows + 1 + rendered.Cursor.Row
+					cursorCol = rendered.Cursor.Col
+				}
+			}
 		}
 	}
 	addSection(uiWorktreeCreateFieldBranchTarget, false, []string{
 		style.brand.Render(truncateQueuedMessageLine("New worktree", width)),
 	})
 	addSection(uiWorktreeCreateFieldBranchTarget, true, l.renderWorktreeCreateTargetField(width, dialog))
-	addSection(uiWorktreeCreateFieldBaseRef, false, l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef, dialog.focus == uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef()))
+	addSection(uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef(), l.renderWorktreeCreateField(width, style, "Base ref", "Used when creating a new branch.", dialog.baseRef, dialog.focus == uiWorktreeCreateFieldBaseRef, dialog.usesBaseRef()))
 	addSection(uiWorktreeCreateFieldActions, true, renderWorktreeCreateActionGroup(width, m.theme, dialog, dialog.focus == uiWorktreeCreateFieldActions))
 	footer := make([]string, 0, 3)
 	if dialog.submitting {
@@ -1242,6 +1235,9 @@ func (l uiViewLayout) renderWorktreeCreateDialog(width, height int, style uiStyl
 	visibleEnd := visibleStart + bodyHeight
 	if visibleEnd > len(body) {
 		visibleEnd = len(body)
+	}
+	if cursorBodyRow >= visibleStart && cursorBodyRow < visibleEnd {
+		m.worktrees.inputCursor = uiInputFieldCursor{Visible: true, Row: cursorBodyRow - visibleStart, Col: cursorCol, Absolute: true}
 	}
 	lines := append([]string{}, body[visibleStart:visibleEnd]...)
 	for len(lines) < bodyHeight {
@@ -1268,7 +1264,7 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	badgeStyle := rowStyle.Foreground(p.muted).Faint(true)
 	badgeText := ""
 	switch {
-	case strings.TrimSpace(dialog.branchTarget.Value()) == "":
+	case strings.TrimSpace(singleLineEditorValue(dialog.branchTarget)) == "":
 		badgeText = ""
 	case dialog.resolving:
 		badgeText = ""
@@ -1286,11 +1282,11 @@ func (l uiViewLayout) renderWorktreeCreateTargetField(width int, dialog uiWorktr
 	borderStyle := rowStyle.Foreground(p.muted).Faint(true)
 	lines := []string{labelStyle.Render(padANSIRight("Branch or ref", width))}
 	lines = append(lines, badgeStyle.Render(padANSIRight(truncateQueuedMessageLine(badgeText, width), width)))
-	lines = append(lines, dialog.branchTarget.renderFramedSoftCursorLines(max(1, width), 1, "› ", dialog.focus == uiWorktreeCreateFieldBranchTarget, lineStyle, borderStyle)...)
+	lines = append(lines, renderSingleLineEditorFramedSoftCursorLines(max(1, width), 1, dialog.branchTarget, "› ", dialog.focus == uiWorktreeCreateFieldBranchTarget && l.model.terminalCursor == nil, lineStyle, borderStyle, 0, "")...)
 	return lines
 }
 
-func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label string, helper string, input uiSharedTextInput, focused bool, enabled bool) []string {
+func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label string, helper string, input tuiinput.Editor, focused bool, enabled bool) []string {
 	p := uiPalette(l.model.theme)
 	rowStyle := lipgloss.NewStyle()
 	if focused {
@@ -1314,7 +1310,7 @@ func (l uiViewLayout) renderWorktreeCreateField(width int, style uiStyles, label
 		helperStyle := rowStyle.Foreground(p.muted).Faint(true)
 		lines = append(lines, helperStyle.Render(padANSIRight(truncateQueuedMessageLine(helper, contentWidth), contentWidth)))
 	}
-	lines = append(lines, input.renderFramedSoftCursorLines(contentWidth, 1, "› ", focused && enabled, lineStyle, borderStyle)...)
+	lines = append(lines, renderSingleLineEditorFramedSoftCursorLines(contentWidth, 1, input, "› ", focused && enabled && l.model.terminalCursor == nil, lineStyle, borderStyle, 0, "")...)
 	return lines
 }
 

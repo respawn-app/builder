@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"builder/cli/app/commands"
-	"builder/cli/tui"
 	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -214,31 +213,11 @@ func (m *uiModel) closeGoalOverlay() {
 }
 
 func (m *uiModel) pushGoalOverlayIfNeeded() tea.Cmd {
-	if m.goal.ownsTranscriptMode {
-		return nil
-	}
-	if m.view.Mode() != tui.ModeOngoing {
-		return nil
-	}
-	m.goal.ownsTranscriptMode = true
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.activateSurface(uiSurfaceGoal)
 }
 
 func (m *uiModel) popGoalOverlayIfNeeded() tea.Cmd {
-	if !m.goal.ownsTranscriptMode {
-		return nil
-	}
-	m.goal.ownsTranscriptMode = false
-	if m.view.Mode() != tui.ModeDetail {
-		return nil
-	}
-	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
-		return transitionCmd
-	}
-	return tea.ClearScreen
+	return m.restoreTranscriptSurface()
 }
 
 func (m *uiModel) moveGoalScroll(delta int) {

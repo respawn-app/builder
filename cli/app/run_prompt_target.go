@@ -14,12 +14,15 @@ import (
 	"sync"
 	"time"
 
+	"builder/server/launch"
 	"builder/server/serve"
+	"builder/server/session"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
@@ -59,12 +62,19 @@ type configuredProjectViewRemote interface {
 	Identity() protocol.ServerIdentity
 }
 
+type runPromptWorkspaceConfig struct {
+	Options Options
+	Config  config.App
+}
+
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
-	cfg, err := loadRemoteAttachConfig(opts)
+	workspaceConfig, err := resolveRunPromptWorkspaceConfig(opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	if remote, ok, err := tryDialConfiguredRunPromptRemote(ctx, opts); err != nil {
+	opts = workspaceConfig.Options
+	cfg := workspaceConfig.Config
+	if remote, ok, err := tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, opts, cfg, nil); err != nil {
 		return nil, nil, err
 	} else if ok {
 		if err := ensureRemoteAuthReady(ctx, remote, cfg.Settings, newHeadlessAuthInteractor()); err != nil {
@@ -106,10 +116,14 @@ func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*clien
 }
 
 func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
-	cfg, err := loadRemoteAttachConfig(opts)
+	workspaceConfig, err := resolveRunPromptWorkspaceConfig(opts)
 	if err != nil {
 		return nil, false, err
 	}
+	return tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, workspaceConfig.Options, workspaceConfig.Config, accept)
+}
+
+func tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx context.Context, opts Options, cfg config.App, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
 	projectViews, err := dialConfiguredProjectViewRemote(attachCtx, cfg)
@@ -286,10 +300,12 @@ func resolveCLIWorkspaceRoot(opts Options) (string, error) {
 }
 
 func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
-	cfg, err := loadRemoteAttachConfig(opts)
+	workspaceConfig, err := resolveRunPromptWorkspaceConfig(opts)
 	if err != nil {
 		return nil, nil, false, err
 	}
+	opts = workspaceConfig.Options
+	cfg := workspaceConfig.Config
 	execPath, ok := resolveDaemonExecutablePath()
 	if !ok {
 		return nil, nil, false, nil
@@ -312,7 +328,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok, err := tryDialMatchingConfiguredRunPromptRemote(ctx, opts, func(identity protocol.ServerIdentity) bool {
+		if remote, ok, err := tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, opts, cfg, func(identity protocol.ServerIdentity) bool {
 			return identity.PID == childPID
 		}); err != nil {
 			_ = failureClose()
@@ -337,15 +353,73 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 }
 
 func loadRemoteAttachConfig(opts Options) (config.App, error) {
+	workspaceConfig, err := resolveRunPromptWorkspaceConfig(opts)
+	return workspaceConfig.Config, err
+}
+
+func resolveRunPromptWorkspaceConfig(opts Options) (runPromptWorkspaceConfig, error) {
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
-		return config.App{}, err
+		return runPromptWorkspaceConfig{}, err
 	}
 	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
 	if err != nil {
-		return config.App{}, err
+		return runPromptWorkspaceConfig{}, err
 	}
-	return cfg, nil
+	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContext(opts, workspaceRoot, cfg)
+	if err != nil {
+		return runPromptWorkspaceConfig{}, err
+	}
+	return runPromptWorkspaceConfig{Options: resolvedOpts, Config: resolvedCfg}, nil
+}
+
+func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg config.App) (Options, config.App, error) {
+	if opts.WorkspaceRootExplicit {
+		return opts, cfg, nil
+	}
+	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
+		return resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, sessionID)
+	}
+	contextSessionID := strings.TrimSpace(opts.WorkspaceContextSessionID)
+	if contextSessionID == "" {
+		return opts, cfg, nil
+	}
+	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, contextSessionID)
+	if err != nil {
+		// BUILDER_SESSION_ID is an implicit routing contract for shell commands
+		// launched by Builder. If it is present but invalid, failing loudly is
+		// safer than silently running the prompt against an unrelated cwd.
+		return Options{}, config.App{}, workspaceContextSessionError(contextSessionID, err)
+	}
+	return resolvedOpts, resolvedCfg, nil
+}
+
+func workspaceContextSessionError(sessionID string, err error) error {
+	if errors.Is(err, session.ErrSessionNotFound) {
+		return fmt.Errorf("%s points to missing Builder session %q; unset %s or run from a live Builder shell: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), sessionenv.BuilderSessionID, err)
+	}
+	return fmt.Errorf("resolve %s workspace context %q: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), err)
+}
+
+func resolveRunPromptWorkspaceContextSession(opts Options, workspaceRoot string, cfg config.App, sessionID string) (Options, config.App, error) {
+	bootstrapPlan, err := launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
+		WorkspaceRoot:         workspaceRoot,
+		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+		SessionID:             sessionID,
+	})
+	if err != nil {
+		return Options{}, config.App{}, err
+	}
+	if strings.TrimSpace(bootstrapPlan.WorkspaceRoot) == "" || bootstrapPlan.WorkspaceRoot == workspaceRoot {
+		return opts, cfg, nil
+	}
+	resolved := opts
+	resolved.WorkspaceRoot = bootstrapPlan.WorkspaceRoot
+	resolvedCfg, err := config.Load(bootstrapPlan.WorkspaceRoot, config.LoadOptions{})
+	if err != nil {
+		return Options{}, config.App{}, err
+	}
+	return resolved, resolvedCfg, nil
 }
 
 func resolveRemoteWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (*serverapi.ProjectBinding, error) {

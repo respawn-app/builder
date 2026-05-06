@@ -309,6 +309,55 @@ func TestUserMessageFlushedAlreadyCoveredByAuthoritativeTailDoesNotDuplicateNati
 	}
 }
 
+func TestWorktreeReminderBeforeUserFlushRendersOnceInOngoing(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 120
+	m.termHeight = 24
+	m.windowSizeKnown = true
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         10,
+		CommittedEntryCount:        1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Visibility:  transcript.EntryVisibilityAll,
+			Role:        string(transcript.EntryRoleDeveloperContext),
+			Text:        "The user has moved this conversation into a git worktree.",
+			OngoingText: "Switched worktree to fixes-1.2-part-3: /tmp/fixes-1.2-part-3",
+			MessageType: string(llm.MessageTypeWorktreeMode),
+		}},
+	})
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "typed after switch",
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "typed after switch",
+		}},
+	})
+
+	if len(m.transcriptEntries) != 2 {
+		t.Fatalf("transcript entries = %+v, want worktree reminder then user", m.transcriptEntries)
+	}
+	if got := strings.TrimSpace(m.transcriptEntries[0].OngoingText); got != "Switched worktree to fixes-1.2-part-3: /tmp/fixes-1.2-part-3" {
+		t.Fatalf("worktree ongoing text = %q", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "typed after switch" {
+		t.Fatalf("user text = %q", got)
+	}
+	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if count := strings.Count(plain, "Switched worktree to fixes-1.2-part-3"); count != 1 {
+		t.Fatalf("worktree reminder count = %d, view=%q", count, plain)
+	}
+	if count := strings.Count(plain, "typed after switch"); count != 1 {
+		t.Fatalf("user message count = %d, view=%q", count, plain)
+	}
+}
+
 func TestProjectedUserMessageFlushedWithSameTextAndNewCommittedCountAppendsDistinctEntry(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100

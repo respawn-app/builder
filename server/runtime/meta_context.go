@@ -237,7 +237,7 @@ func worktreeModeMetaMessage(state session.WorktreeReminderState) (llm.Message, 
 	if strings.TrimSpace(content) == "" {
 		return llm.Message{}, false
 	}
-	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeMode, Content: content}, true
+	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeMode, Content: content, CompactContent: worktreeReminderOngoingText(state), SourcePath: strings.TrimSpace(state.EffectiveCwd)}, true
 }
 
 func worktreeModeExitMetaMessage(state session.WorktreeReminderState) (llm.Message, bool) {
@@ -245,7 +245,31 @@ func worktreeModeExitMetaMessage(state session.WorktreeReminderState) (llm.Messa
 	if strings.TrimSpace(content) == "" {
 		return llm.Message{}, false
 	}
-	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeModeExit, Content: content}, true
+	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeWorktreeModeExit, Content: content, CompactContent: worktreeReminderOngoingText(state), SourcePath: strings.TrimSpace(state.EffectiveCwd)}, true
+}
+
+func worktreeReminderOngoingText(state session.WorktreeReminderState) string {
+	effectiveCwd := strings.TrimSpace(state.EffectiveCwd)
+	if effectiveCwd == "" {
+		effectiveCwd = strings.TrimSpace(state.WorktreePath)
+	}
+	if state.Mode == session.WorktreeReminderModeExit {
+		if effectiveCwd == "" {
+			return "Switched worktree to main workspace"
+		}
+		return "Switched worktree to main workspace: " + effectiveCwd
+	}
+	name := strings.TrimSpace(state.Branch)
+	if name == "" {
+		name = strings.TrimSpace(filepath.Base(strings.TrimSpace(state.WorktreePath)))
+	}
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		name = "worktree"
+	}
+	if effectiveCwd == "" {
+		return "Switched worktree to " + name
+	}
+	return "Switched worktree to " + name + ": " + effectiveCwd
 }
 
 func skillDiscoveryWarningTexts(issues []skillDiscoveryIssue) []string {

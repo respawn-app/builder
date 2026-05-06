@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"builder/cli/tui"
+	tuiinput "builder/cli/tui/input"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 	tea "github.com/charmbracelet/bubbletea"
@@ -106,6 +107,14 @@ func (m *projectBindingPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = key.Height
 		}
 		m.ensureCursorVisible()
+		return m, nil
+	case tea.MouseMsg:
+		switch key.Button {
+		case tea.MouseButtonWheelUp:
+			m.moveCursor(-1)
+		case tea.MouseButtonWheelDown:
+			m.moveCursor(1)
+		}
 		return m, nil
 	case tea.KeyMsg:
 		switch key.Type {
@@ -411,7 +420,7 @@ func runServerProjectPicker(projects []clientui.ProjectSummary, theme string) (p
 
 func runConfiguredProjectPicker(projects []clientui.ProjectSummary, theme string, options projectPickerOptions) (projectBindingPickerResult, error) {
 	model := newProjectBindingPickerModel(projects, theme, options)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectBindingPickerResult{}, err
@@ -465,6 +474,14 @@ func (m *projectWorkspacePickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = key.Height
 		}
 		m.ensureCursorVisible()
+		return m, nil
+	case tea.MouseMsg:
+		switch key.Button {
+		case tea.MouseButtonWheelUp:
+			m.moveCursor(-1)
+		case tea.MouseButtonWheelDown:
+			m.moveCursor(1)
+		}
 		return m, nil
 	case tea.KeyMsg:
 		switch key.Type {
@@ -666,7 +683,7 @@ func (m *projectWorkspacePickerModel) hasPreview(index int) bool {
 
 func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, theme string) (projectWorkspacePickerResult, error) {
 	model := newProjectWorkspacePickerModel(workspaces, theme)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectWorkspacePickerResult{}, err
@@ -679,19 +696,19 @@ func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, th
 }
 
 type projectNamePromptModel struct {
-	width    int
-	height   int
-	theme    string
-	headerMD *glamour.TermRenderer
-	input    uiSharedTextInput
-	error    string
-	result   string
-	canceled bool
+	width          int
+	height         int
+	theme          string
+	headerMD       *glamour.TermRenderer
+	input          tuiinput.Editor
+	terminalCursor *uiTerminalCursorState
+	error          string
+	result         string
+	canceled       bool
 }
 
 func newProjectNamePromptModel(defaultName string, theme string) *projectNamePromptModel {
-	input := newUISharedTextInput(defaultName)
-	input.Focus()
+	input := newSingleLineEditor(defaultName)
 	return &projectNamePromptModel{
 		width:    defaultPickerWidth,
 		height:   defaultPickerHeight,
@@ -716,7 +733,7 @@ func (m *projectNamePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch typed.Type {
 		case tea.KeyEnter:
-			value := strings.TrimSpace(m.input.Value())
+			value := strings.TrimSpace(singleLineEditorValue(m.input))
 			if value == "" {
 				m.error = "project name is required"
 				return m, nil
@@ -728,7 +745,7 @@ func (m *projectNamePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	}
-	return m, m.input.Update(msg)
+	return m, updateSingleLineEditorWithAppKeys(&m.input, msg)
 }
 
 func (m *projectNamePromptModel) View() string {
@@ -737,12 +754,32 @@ func (m *projectNamePromptModel) View() string {
 	out.WriteString("\n\n")
 	out.WriteString(tui.ApplyThemeDefaultForeground("Enter a project name. Press Enter to create the project.", m.theme))
 	out.WriteString("\n\n")
-	out.WriteString(renderStartupSharedTextInput(m.width, m.height, m.theme, m.input, "› ", true))
+	out.WriteString(renderStartupEditorField(m.width, m.height, m.theme, m.input, "› ", m.terminalCursor == nil, 0, ""))
 	if trimmed := strings.TrimSpace(m.error); trimmed != "" {
 		out.WriteString("\n\n")
 		out.WriteString(lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(truncateQueuedMessageLine(trimmed, m.width)))
 	}
+	m.updateTerminalCursor()
 	return out.String()
+}
+
+func (m *projectNamePromptModel) updateTerminalCursor() {
+	if m.terminalCursor == nil {
+		return
+	}
+	headerLines := strings.Split(m.renderHeader(), "\n")
+	cursor := renderSingleLineEditor(max(1, m.width), inputContentLineLimit(m.height), m.input, "› ", true, 0, "").Cursor
+	if !cursor.Visible {
+		m.terminalCursor.Clear()
+		return
+	}
+	m.terminalCursor.Set(uiTerminalCursorPlacement{
+		Visible:   true,
+		CursorRow: len(headerLines) + 4 + cursor.Row,
+		CursorCol: cursor.Col,
+		AnchorRow: max(0, m.height-1),
+		AltScreen: true,
+	})
 }
 
 func (m *projectNamePromptModel) renderHeader() string {
@@ -757,7 +794,9 @@ func (m *projectNamePromptModel) renderHeader() string {
 
 func runProjectNamePrompt(defaultName string, theme string) (string, error) {
 	model := newProjectNamePromptModel(defaultName, theme)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	terminalCursor := newUITerminalCursorState()
+	model.terminalCursor = terminalCursor
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithOutput(newUITerminalCursorWriter(os.Stdout, terminalCursor)))
 	finalModel, err := program.Run()
 	if err != nil {
 		return "", err
@@ -923,12 +962,12 @@ func trimRenderedHeaderInset(rendered string) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderStartupSharedTextInput(width int, height int, theme string, input uiSharedTextInput, prefix string, renderCursor bool) string {
+func renderStartupEditorField(width int, height int, theme string, input tuiinput.Editor, prefix string, renderCursor bool, mask rune, placeholder string) string {
 	contentWidth := width
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 	lineStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
 	borderStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).primary)
-	return strings.Join(input.renderFramedSoftCursorLines(contentWidth, inputContentLineLimit(height), prefix, renderCursor, lineStyle, borderStyle), "\n")
+	return strings.Join(renderSingleLineEditorFramedSoftCursorLines(contentWidth, inputContentLineLimit(height), input, prefix, renderCursor, lineStyle, borderStyle, mask, placeholder), "\n")
 }

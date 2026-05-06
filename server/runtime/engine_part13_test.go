@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -392,6 +393,132 @@ func TestPrepareModelTurnSkipsAutoCompactionAfterPendingHandoffCompaction(t *tes
 	if len(client.calls) != 1 {
 		t.Fatalf("expected only pending handoff compaction call, got %d calls", len(client.calls))
 	}
+}
+
+func TestPrepareModelTurnMaterializesWorktreeReminderAfterPendingHandoffCompaction(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/handoff",
+		WorktreePath:  "/tmp/wt-handoff",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-handoff",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handoff summary"},
+			Usage:     llm.Usage{InputTokens: 1_900, WindowTokens: 2_000},
+		}},
+		inputTokenCount: 1_900,
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                 "gpt-5",
+		CompactionMode:        "local",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 1_900, WindowTokens: 2_000})
+	eng.queueHandoffRequest("keep runtime details", "")
+
+	executor := &defaultStepExecutor{engine: eng}
+	if err := executor.prepareModelTurn(context.Background(), "step-1"); err != nil {
+		t.Fatalf("prepare model turn: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	reminderCount := 0
+	for _, message := range messages {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeWorktreeMode {
+			reminderCount++
+			if !strings.Contains(message.Content, "feature/handoff") {
+				t.Fatalf("unexpected worktree reminder content: %q", message.Content)
+			}
+		}
+	}
+	if reminderCount != 1 {
+		t.Fatalf("expected one materialized worktree reminder after handoff compaction, got %d messages=%+v", reminderCount, messages)
+	}
+	state := store.Meta().WorktreeReminder
+	if state == nil || !state.HasIssuedInGeneration {
+		t.Fatalf("expected issued reminder state after handoff compaction, got %+v", state)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected only handoff compaction call, got %d calls", len(client.calls))
+	}
+}
+
+func TestPrepareModelTurnHandoffReminderPersistenceFailureRetriesWithoutDuplicate(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	observer := &failOnIssuedWorktreeReminderObservation{}
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir, session.WithPersistenceObserver(observer))
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/handoff-fail",
+		WorktreePath:  "/tmp/wt-handoff-fail",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-handoff-fail",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handoff summary"}, Usage: llm.Usage{InputTokens: 1_900, WindowTokens: 2_000}},
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handoff summary retry"}, Usage: llm.Usage{InputTokens: 1_900, WindowTokens: 2_000}},
+		},
+		inputTokenCount: 1_900,
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                 "gpt-5",
+		CompactionMode:        "local",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		EnabledTools:          []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 1_900, WindowTokens: 2_000})
+	eng.queueHandoffRequest("keep runtime details", "")
+	executor := &defaultStepExecutor{engine: eng}
+
+	if err := executor.prepareModelTurn(context.Background(), "step-1"); err == nil || !strings.Contains(err.Error(), "persist observer failed") {
+		t.Fatalf("prepare error = %v, want reminder state persistence failure", err)
+	}
+	assertWorktreeReminderEntryCount(t, eng.ChatSnapshot(), 1)
+
+	eng.queueHandoffRequest("keep runtime details", "")
+	if err := executor.prepareModelTurn(context.Background(), "step-2"); err != nil {
+		t.Fatalf("retry prepare model turn: %v", err)
+	}
+	assertWorktreeReminderEntryCount(t, eng.ChatSnapshot(), 1)
 }
 
 func TestPendingTriggerHandoffFailsToolCallsAndRetriesLocalSummary(t *testing.T) {

@@ -292,7 +292,7 @@ func normalizeCreateSpec(spec CreateSpec) (CreateSpec, error) {
 			return CreateSpec{}, fmt.Errorf("branch name is required when create_branch=true")
 		}
 		if baseRef == "" {
-			baseRef = "HEAD"
+			return CreateSpec{}, fmt.Errorf("base ref is required when create_branch=true")
 		}
 		return CreateSpec{BaseRef: baseRef, CreateBranch: true, BranchName: branchName}, nil
 	}

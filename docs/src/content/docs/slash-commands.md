@@ -21,7 +21,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/goal [pause&#124;resume&#124;clear&#124;&lt;objective&gt;]</code> | optional action or objective | Set or manage the current session goal. Empty input opens the goal page. |
 | <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
 | <code>/wt</code> | none | Open the Worktrees page. |
-| <code>/wt create</code> | none | Open the create-worktree dialog. |
+| <code>/wt create</code> | none | Open the create-worktree dialog; new branches require a non-empty base ref. |
 | <code>/wt switch &lt;target&gt;</code> | required selector | Switch directly to a worktree without opening the page first. |
 | <code>/wt delete [&lt;target&gt;]</code> | optional selector | Open delete confirmation in the Worktrees page. |
 | `/copy` | none | Copy the latest committed model final answer to the system clipboard. |

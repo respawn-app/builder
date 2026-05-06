@@ -435,6 +435,9 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 		if err := e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
 			return err
 		}
+		if err := e.materializePendingWorktreeReminder(stepID); err != nil {
+			return err
+		}
 		if !hasQueuedInjected {
 			if err := e.appendUserMessageWithoutConversationUpdate(stepID, text); err != nil {
 				return err

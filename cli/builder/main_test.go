@@ -538,7 +538,7 @@ func TestEffectiveSessionIDPrefersContinueAlias(t *testing.T) {
 	}
 }
 
-func TestRunSubcommandIgnoresBuilderSessionEnvByDefault(t *testing.T) {
+func TestRunSubcommandUsesBuilderSessionEnvAsWorkspaceContext(t *testing.T) {
 	original := runPromptApp
 	t.Cleanup(func() {
 		runPromptApp = original
@@ -574,6 +574,9 @@ func TestRunSubcommandIgnoresBuilderSessionEnvByDefault(t *testing.T) {
 	}
 	if gotOpts.SessionID != "" {
 		t.Fatalf("session id = %q, want empty", gotOpts.SessionID)
+	}
+	if gotOpts.WorkspaceContextSessionID != "session-from-env" {
+		t.Fatalf("workspace context session id = %q, want env session", gotOpts.WorkspaceContextSessionID)
 	}
 }
 

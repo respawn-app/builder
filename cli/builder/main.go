@@ -211,6 +211,12 @@ func runSubcommand(args []string) int {
 		emitRunUsageError(usageOutputMode, err.Error())
 		return 2
 	}
+	workspaceContextSessionID := ""
+	if sessionID == "" {
+		if envSessionID, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); ok {
+			workspaceContextSessionID = envSessionID
+		}
+	}
 	outputMode, err := parseRunOutputMode(*outputModeRaw)
 	if err != nil {
 		emitRunUsageError(usageOutputMode, err.Error())
@@ -248,18 +254,19 @@ func runSubcommand(args []string) int {
 	defer stop()
 
 	opts := app.Options{
-		WorkspaceRoot:         flags.WorkspaceRoot,
-		WorkspaceRootExplicit: flags.WorkspaceExplicit,
-		SessionID:             sessionID,
-		AgentRole:             agentRole,
-		Model:                 flags.Model,
-		ProviderOverride:      flags.ProviderOverride,
-		ThinkingLevel:         flags.ThinkingLevel,
-		Theme:                 flags.Theme,
-		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		Tools:                 flags.Tools,
-		OpenAIBaseURL:         flags.OpenAIBaseURL,
-		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
+		WorkspaceRoot:             flags.WorkspaceRoot,
+		WorkspaceRootExplicit:     flags.WorkspaceExplicit,
+		SessionID:                 sessionID,
+		WorkspaceContextSessionID: workspaceContextSessionID,
+		AgentRole:                 agentRole,
+		Model:                     flags.Model,
+		ProviderOverride:          flags.ProviderOverride,
+		ThinkingLevel:             flags.ThinkingLevel,
+		Theme:                     flags.Theme,
+		ModelTimeoutSeconds:       flags.ModelTimeoutSeconds,
+		Tools:                     flags.Tools,
+		OpenAIBaseURL:             flags.OpenAIBaseURL,
+		OpenAIBaseURLExplicit:     flags.OpenAIBaseURLExplicit,
 	}
 
 	var progress io.Writer

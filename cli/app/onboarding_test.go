@@ -618,7 +618,7 @@ func TestOnboardingSubmitCurrentScreenShowsValidationError(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{})
 	model.stepIndex = 2
 	model.syncScreen(true)
-	model.input.SetValue("")
+	setSingleLineEditorValue(&model.input, "")
 	next, _ := model.submitCurrentScreen()
 	updated := next.(*onboardingModel)
 	if updated.errorText == "" {

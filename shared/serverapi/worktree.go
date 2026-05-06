@@ -144,6 +144,9 @@ func (r WorktreeCreateRequest) Validate() error {
 		return err
 	}
 	if r.CreateBranch {
+		if strings.TrimSpace(r.BaseRef) == "" {
+			return errors.New("base_ref is required when create_branch=true")
+		}
 		if strings.TrimSpace(r.BranchName) == "" {
 			return errors.New("branch_name is required when create_branch=true")
 		}

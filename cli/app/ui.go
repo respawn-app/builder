@@ -894,6 +894,9 @@ func (m *uiModel) forwardToView(msg tea.Msg) {
 	if ok {
 		m.view = casted
 	}
+	if prevMode != m.view.Mode() && m.surface().isTranscript() {
+		m.activeSurface = surfaceForTranscriptMode(m.view.Mode())
+	}
 	if prevMode != m.view.Mode() && m.view.Mode() == tui.ModeDetail && m.hasRuntimeClient() {
 		m.primeDetailTranscriptFromCurrentTail()
 		page := m.detailTranscript.page()

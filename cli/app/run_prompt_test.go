@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"sync/atomic"
@@ -53,6 +54,145 @@ func saveReadyAppAuthState(t *testing.T, workspace string) {
 	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
 	if err := store.Save(context.Background(), readyMemoryAuthHandler().state); err != nil {
 		t.Fatalf("save auth state: %v", err)
+	}
+}
+
+func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace: %v", err)
+	}
+	store := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+
+	got, err := loadRemoteAttachConfig(Options{
+		WorkspaceRoot: worktree,
+		SessionID:     store.Meta().SessionID,
+	})
+	if err != nil {
+		t.Fatalf("loadRemoteAttachConfig: %v", err)
+	}
+	gotCanonical, err := config.CanonicalWorkspaceRoot(got.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical got workspace: %v", err)
+	}
+	wantCanonical, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical want workspace: %v", err)
+	}
+	if gotCanonical != wantCanonical {
+		t.Fatalf("workspace root = %q, want session workspace %q", got.WorkspaceRoot, cfg.WorkspaceRoot)
+	}
+}
+
+func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	if _, err := config.Load(workspace, config.LoadOptions{}); err != nil {
+		t.Fatalf("config.Load workspace: %v", err)
+	}
+
+	_, err := loadRemoteAttachConfig(Options{
+		WorkspaceRoot:             workspace,
+		WorkspaceContextSessionID: "stale-env-session",
+	})
+	if err == nil {
+		t.Fatal("expected stale workspace context session to fail")
+	}
+	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
+		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	}
+}
+
+func TestLoadRemoteAttachConfigKeepsExplicitSessionLookupStrict(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+
+	_, err := loadRemoteAttachConfig(Options{
+		WorkspaceRoot: workspace,
+		SessionID:     "missing-explicit-session",
+	})
+	if err == nil {
+		t.Fatal("expected stale explicit session id to fail")
+	}
+}
+
+func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	worktree := filepath.Join(home, ".builder", "worktrees", "project", "feature")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace: %v", err)
+	}
+	parent := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	saveReadyAppAuthState(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"worktree reply"})
+	defer fakeResponses.Close()
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:             worktree,
+		WorkspaceContextSessionID: parent.Meta().SessionID,
+		Model:                     "gpt-5",
+		OpenAIBaseURL:             fakeResponses.URL,
+		OpenAIBaseURLExplicit:     true,
+	}, "hello from worktree", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "worktree reply" {
+		t.Fatalf("result = %q, want worktree reply", result.Result)
+	}
+	if result.SessionID == parent.Meta().SessionID {
+		t.Fatal("expected worktree run to create a child run instead of continuing parent session")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one llm call, got %d", hits.Load())
+	}
+}
+
+func TestRunPromptRejectsStaleWorkspaceContextSession(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+	saveReadyAppAuthState(t, workspace)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"workspace reply"})
+	defer fakeResponses.Close()
+
+	_, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:             workspace,
+		WorkspaceContextSessionID: "stale-env-session",
+		Model:                     "gpt-5",
+		OpenAIBaseURL:             fakeResponses.URL,
+		OpenAIBaseURLExplicit:     true,
+	}, "hello from stale context", 0, nil)
+	if err == nil {
+		t.Fatal("expected stale workspace context session to fail")
+	}
+	if !strings.Contains(err.Error(), "BUILDER_SESSION_ID points to missing Builder session") {
+		t.Fatalf("error = %q, want BUILDER_SESSION_ID context", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("expected no llm calls, got %d", hits.Load())
 	}
 }
 

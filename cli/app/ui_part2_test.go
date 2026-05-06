@@ -236,8 +236,8 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 	if updated.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
 	}
-	if !testRollbackOwnsTranscriptMode(updated) {
-		t.Fatal("expected rollback overlay to be pushed in native mode")
+	if !testRollbackSelectionSurfaceActive(updated) {
+		t.Fatal("expected rollback selection surface in native mode")
 	}
 	if cmd == nil {
 		t.Fatal("expected native rollback entry to emit detail overlay transition command")
@@ -268,8 +268,8 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 	if updated.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected cancel to return to ongoing mode, got %q", updated.view.Mode())
 	}
-	if testRollbackOwnsTranscriptMode(updated) {
-		t.Fatal("expected rollback overlay state cleared after cancel")
+	if testRollbackSelectionSurfaceActive(updated) {
+		t.Fatal("expected rollback selection surface cleared after cancel")
 	}
 	if cmd == nil {
 		t.Fatal("expected native rollback cancel to emit detail overlay exit command")

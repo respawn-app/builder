@@ -106,14 +106,14 @@ func TestParseGitWorktreeListPorcelainRejectsUnsupportedKeys(t *testing.T) {
 	}
 }
 
-func TestGitInspectorAddCreatesBranchFromHeadByDefault(t *testing.T) {
+func TestGitInspectorAddCreatesBranchFromExplicitBaseRef(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	worktreeRoot := filepath.Join(t.TempDir(), "linked")
 	runner := &stubGitCommandRunner{outputs: map[string][]byte{
 		strings.Join([]string{"worktree", "add", "-b", "feature/new", canonicalTestPath(t, worktreeRoot), "HEAD"}, "\x00"): nil,
 	}}
 	inspector := NewGitInspector(runner)
-	created, err := inspector.Add(context.Background(), workspaceRoot, worktreeRoot, CreateSpec{CreateBranch: true, BranchName: "feature/new"})
+	created, err := inspector.Add(context.Background(), workspaceRoot, worktreeRoot, CreateSpec{BaseRef: "HEAD", CreateBranch: true, BranchName: "feature/new"})
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -125,6 +125,22 @@ func TestGitInspectorAddCreatesBranchFromHeadByDefault(t *testing.T) {
 	}
 	if got, want := runner.dir, canonicalTestPath(t, workspaceRoot); got != want {
 		t.Fatalf("git dir=%q want=%q", got, want)
+	}
+}
+
+func TestGitInspectorAddRejectsCreateBranchWithoutBaseRef(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	worktreeRoot := filepath.Join(t.TempDir(), "linked")
+	runner := &stubGitCommandRunner{}
+	inspector := NewGitInspector(runner)
+
+	_, err := inspector.Add(context.Background(), workspaceRoot, worktreeRoot, CreateSpec{CreateBranch: true, BranchName: "feature/new"})
+
+	if err == nil || !strings.Contains(err.Error(), "base ref is required when create_branch=true") {
+		t.Fatalf("error = %v, want base ref validation", err)
+	}
+	if runner.args != nil {
+		t.Fatalf("expected no git command, got %v", runner.args)
 	}
 }
 

@@ -4,8 +4,6 @@ import (
 	"runtime"
 	"strings"
 
-	"builder/cli/tui"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
@@ -42,7 +40,7 @@ func (m *uiModel) canToggleHelpWithQuestionMark() bool {
 }
 
 func (m *uiModel) statusHelpHint() string {
-	if m != nil && m.view.Mode() == tui.ModeDetail {
+	if m != nil && m.surface().wantsAltScreen() {
 		return "F1 for help"
 	}
 	if m != nil && m.canToggleHelpWithQuestionMark() {
@@ -52,7 +50,7 @@ func (m *uiModel) statusHelpHint() string {
 }
 
 func (m *uiModel) canShowHelp() bool {
-	return m.view.Mode() == tui.ModeOngoing
+	return m.surface() == uiSurfaceOngoingTranscript
 }
 
 func (m *uiModel) helpSections() []uiHelpSection {

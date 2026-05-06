@@ -20,7 +20,7 @@ func (l uiViewLayout) effectiveHeight() int {
 
 func (l uiViewLayout) calcChatLines() int {
 	height := l.effectiveHeight()
-	if l.model.view.Mode() == tui.ModeDetail {
+	if l.model.surface() != uiSurfaceOngoingTranscript {
 		chat := height - 1
 		if chat < 1 {
 			return 1

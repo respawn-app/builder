@@ -27,8 +27,11 @@ func TestGoalCommandOpensGoalOverlay(t *testing.T) {
 	if updated.inputMode() != uiInputModeGoal {
 		t.Fatalf("input mode = %q, want goal", updated.inputMode())
 	}
-	if updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("view mode = %q, want detail", updated.view.Mode())
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("view mode = %q, want ongoing", updated.view.Mode())
+	}
+	if updated.surface() != uiSurfaceGoal {
+		t.Fatalf("surface = %q, want goal", updated.surface())
 	}
 	if cmd == nil {
 		t.Fatal("expected /goal to emit overlay transition command")
