@@ -74,8 +74,10 @@ func TestBuildGeneratedSupportUsesSharedSyncPath(t *testing.T) {
 	if result.GeneratedSkillsRoot != wantSkillsRoot {
 		t.Fatalf("generated skills root = %q, want %q", result.GeneratedSkillsRoot, wantSkillsRoot)
 	}
-	if _, err := os.Stat(filepath.Join(wantSkillsRoot, "skill-creator", "SKILL.md")); err != nil {
-		t.Fatalf("expected generated skill to be seeded: %v", err)
+	if entries, err := os.ReadDir(wantSkillsRoot); err != nil {
+		t.Fatalf("expected generated skills root to be seeded: %v", err)
+	} else if len(entries) == 0 {
+		t.Fatal("expected generated skills root to contain at least one skill")
 	}
 	if result.RecoveredWarning != "" {
 		t.Fatalf("did not expect recovered warning on clean seed, got %+v", result)

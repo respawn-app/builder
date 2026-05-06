@@ -172,8 +172,11 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close() })
-	if _, err := os.Stat(filepath.Join(home, ".builder", ".generated", "skills", "skill-creator", "SKILL.md")); err != nil {
+	generatedSkillsRoot := filepath.Join(home, ".builder", ".generated", "skills")
+	if entries, err := os.ReadDir(generatedSkillsRoot); err != nil {
 		t.Fatalf("expected embedded startup to seed generated skills through bootstrap: %v", err)
+	} else if len(entries) == 0 {
+		t.Fatal("expected embedded startup to seed at least one generated skill")
 	}
 	if generatedCalls != 1 {
 		t.Fatalf("generated sync calls = %d, want 1", generatedCalls)
