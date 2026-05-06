@@ -37,10 +37,10 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		llm.MessageTypeSkills,
 		llm.MessageTypeEnvironment,
 		llm.MessageTypeHeadlessMode,
-		llm.MessageTypeHeadlessModeExit,
-		llm.MessageTypeWorktreeMode,
-		llm.MessageTypeWorktreeModeExit:
+		llm.MessageTypeHeadlessModeExit:
 		return developerContextEntry(msg, transcript.EntryVisibilityDetailOnly), true
+	case llm.MessageTypeWorktreeMode, llm.MessageTypeWorktreeModeExit:
+		return developerContextEntry(msg, transcript.EntryVisibilityAll), true
 	case llm.MessageTypeCompactionSummary:
 		return compactionSummaryChatEntry(msg), true
 	case llm.MessageTypeInterruption:
@@ -82,6 +82,7 @@ func developerContextEntry(msg llm.Message, visibility transcript.EntryVisibilit
 		Visibility:   visibility,
 		Role:         string(transcript.EntryRoleDeveloperContext),
 		Text:         msg.Content,
+		OngoingText:  strings.TrimSpace(msg.CompactContent),
 		MessageType:  msg.MessageType,
 		SourcePath:   strings.TrimSpace(msg.SourcePath),
 		CompactLabel: compactLabelForMessage(msg),

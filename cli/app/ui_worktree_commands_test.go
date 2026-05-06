@@ -755,6 +755,36 @@ func TestWorktreeCreateDialogBlankBranchNameValidationDoesNotSendRequest(t *test
 	}
 }
 
+func TestWorktreeCreateDialogBlankBaseRefValidationDoesNotSendRequest(t *testing.T) {
+	client := &worktreeCommandTestClient{listResp: testMainWorktreeListResponse()}
+	m := newWorktreeTestModel(t, client)
+	m.input = "/worktree create"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	setSingleLineEditorValue(&updated.worktrees.create.branchTarget, "feature/branch")
+	setSingleLineEditorValue(&updated.worktrees.create.baseRef, "")
+	updated.worktrees.create.focus = uiWorktreeCreateFieldActions
+	updated.worktrees.create.action = uiWorktreeCreateActionCreate
+	updated.worktrees.create.syncFocus()
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+
+	if len(client.createRequests) != 0 {
+		t.Fatalf("expected no create requests, got %+v", client.createRequests)
+	}
+	if updated.worktrees.create.errorText != "Base ref is required" {
+		t.Fatalf("error text = %q, want base ref validation", updated.worktrees.create.errorText)
+	}
+	if strings.TrimSpace(updated.transientStatus) != "" {
+		t.Fatalf("expected no status-line error mirror, got %q", updated.transientStatus)
+	}
+	if !updated.worktrees.isOpen() || updated.worktrees.phase != uiWorktreeOverlayPhaseCreate {
+		t.Fatalf("expected create dialog to remain open, open=%t phase=%q", updated.worktrees.isOpen(), updated.worktrees.phase)
+	}
+}
+
 func TestWorktreeCreateDialogMutationErrorRendersOnceLocallyAndClamps(t *testing.T) {
 	client := &worktreeCommandTestClient{
 		listResp:  testMainWorktreeListResponse(),

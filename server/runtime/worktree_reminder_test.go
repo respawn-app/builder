@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,20 @@ import (
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
+
+type failOnIssuedWorktreeReminderObservation struct {
+	failed bool
+	calls  int
+}
+
+func (o *failOnIssuedWorktreeReminderObservation) ObservePersistedStore(_ context.Context, snapshot session.PersistedStoreSnapshot) error {
+	o.calls++
+	if !o.failed && snapshot.Meta.WorktreeReminder != nil && snapshot.Meta.WorktreeReminder.HasIssuedInGeneration {
+		o.failed = true
+		return errors.New("persist observer failed")
+	}
+	return nil
+}
 
 func TestFirstMetaInjectionUsesPendingWorktreeCWD(t *testing.T) {
 	prevPrompt := prompts.WorktreeModePrompt
@@ -144,6 +159,137 @@ func TestSubmitUserMessageInjectsPendingWorktreeEnterReminder(t *testing.T) {
 	if state == nil || !state.HasIssuedInGeneration || state.IssuedCompactionCount != 0 {
 		t.Fatalf("unexpected persisted reminder state after submit: %+v", state)
 	}
+	var entry *ChatEntry
+	for idx := range eng.ChatSnapshot().Entries {
+		if eng.ChatSnapshot().Entries[idx].MessageType == llm.MessageTypeWorktreeMode {
+			entry = &eng.ChatSnapshot().Entries[idx]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatal("expected worktree reminder transcript entry")
+	}
+	if entry.Visibility != transcript.EntryVisibilityAll {
+		t.Fatalf("worktree reminder visibility = %q, want all", entry.Visibility)
+	}
+	if entry.OngoingText != "Switched worktree to feature/enter: /tmp/wt-enter/pkg" || entry.CompactLabel != entry.OngoingText {
+		t.Fatalf("ongoing=%q compact=%q, want branch-based switch label", entry.OngoingText, entry.CompactLabel)
+	}
+	if entry.SourcePath != "/tmp/wt-enter/pkg" {
+		t.Fatalf("source path = %q, want effective cwd", entry.SourcePath)
+	}
+}
+
+func TestRunStepLoopMaterializesPendingWorktreeReminder(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/direct",
+		WorktreePath:  "/tmp/wt-direct",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-direct",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant:   llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"}},
+		Usage:       llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.runStepLoop(context.Background(), "step-1"); err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+
+	messages := requestMessages(client.calls[0])
+	reminderCount := 0
+	for _, msg := range messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeWorktreeMode {
+			reminderCount++
+			if msg.CompactContent != "Switched worktree to feature/direct: /tmp/wt-direct" {
+				t.Fatalf("compact content = %q", msg.CompactContent)
+			}
+		}
+	}
+	if reminderCount != 1 {
+		t.Fatalf("expected one worktree reminder, got %d messages=%+v", reminderCount, messages)
+	}
+	state := store.Meta().WorktreeReminder
+	if state == nil || !state.HasIssuedInGeneration {
+		t.Fatalf("expected issued reminder state, got %+v", state)
+	}
+}
+
+func TestWorktreeReminderPersistFailureDoesNotDuplicateMaterializedReminder(t *testing.T) {
+	prevPrompt := prompts.WorktreeModePrompt
+	prompts.WorktreeModePrompt = "enter {{branch}}"
+	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
+
+	observer := &failOnIssuedWorktreeReminderObservation{}
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir, session.WithPersistenceObserver(observer))
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+		Mode:          session.WorktreeReminderModeEnter,
+		Branch:        "feature/fail",
+		WorktreePath:  "/tmp/wt-fail",
+		WorkspaceRoot: "/tmp/workspace",
+		EffectiveCwd:  "/tmp/wt-fail",
+	}); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant:   llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"}},
+		Usage:       llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "continue"); err == nil || !strings.Contains(err.Error(), "persist observer failed") {
+		t.Fatalf("submit error = %v, want reminder state persistence failure", err)
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("expected no model calls after materialization failure, got %d", len(client.calls))
+	}
+	assertWorktreeReminderEntryCount(t, eng.ChatSnapshot(), 1)
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "continue again"); err != nil {
+		t.Fatalf("retry submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call after retry, got %d", len(client.calls))
+	}
+	assertWorktreeReminderEntryCount(t, eng.ChatSnapshot(), 1)
+}
+
+func assertWorktreeReminderEntryCount(t *testing.T, snapshot ChatSnapshot, want int) {
+	t.Helper()
+	got := 0
+	for _, entry := range snapshot.Entries {
+		if entry.MessageType == llm.MessageTypeWorktreeMode || entry.MessageType == llm.MessageTypeWorktreeModeExit {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("worktree reminder entry count = %d, want %d entries=%+v", got, want, snapshot.Entries)
+	}
 }
 
 func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
@@ -199,7 +345,7 @@ func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
 	}
 }
 
-func TestSubmitUserMessageDoesNotConsumeWorktreeReminderAfterModelFailure(t *testing.T) {
+func TestSubmitUserMessageMaterializesWorktreeReminderBeforeModelFailure(t *testing.T) {
 	withGenerateRetryDelays(t, nil)
 
 	prevPrompt := prompts.WorktreeModePrompt
@@ -231,7 +377,7 @@ func TestSubmitUserMessageDoesNotConsumeWorktreeReminderAfterModelFailure(t *tes
 		t.Fatal("expected submit failure")
 	}
 	state := store.Meta().WorktreeReminder
-	if state == nil || state.HasIssuedInGeneration || state.IssuedCompactionCount != 0 {
+	if state == nil || !state.HasIssuedInGeneration || state.IssuedCompactionCount != 0 {
 		t.Fatalf("unexpected reminder state after failed submit: %+v", state)
 	}
 
@@ -260,7 +406,7 @@ func TestSubmitUserMessageDoesNotConsumeWorktreeReminderAfterModelFailure(t *tes
 		}
 	}
 	if reminderCount != 1 {
-		t.Fatalf("expected reminder reinjected after failed submit, got %d messages=%+v", reminderCount, requestMessages(successClient.calls[0]))
+		t.Fatalf("expected materialized reminder after failed submit, got %d messages=%+v", reminderCount, requestMessages(successClient.calls[0]))
 	}
 }
 
@@ -391,8 +537,8 @@ func TestSubmitUserMessageReinjectsWorktreeReminderAfterCompactionGenerationChan
 			secondCount++
 		}
 	}
-	if secondCount != 0 {
-		t.Fatalf("expected no historical worktree reminder in second request, got %d messages=%+v", secondCount, requestMessages(client.calls[1]))
+	if secondCount != 1 {
+		t.Fatalf("expected latest materialized worktree reminder in second request, got %d messages=%+v", secondCount, requestMessages(client.calls[1]))
 	}
 	state := store.Meta().WorktreeReminder
 	if state == nil || !state.HasIssuedInGeneration || state.IssuedCompactionCount != 1 {

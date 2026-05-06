@@ -287,7 +287,7 @@ func shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg llm.Message, pr
 	if currentCommittedCount <= previousCommittedCount {
 		return false
 	}
-	return msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeGoal
+	return msg.Role == llm.RoleDeveloper && (msg.MessageType == llm.MessageTypeGoal || msg.MessageType == llm.MessageTypeWorktreeMode || msg.MessageType == llm.MessageTypeWorktreeModeExit)
 }
 
 func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {

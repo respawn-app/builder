@@ -190,6 +190,7 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 		ClientRequestID:   "req-create",
 		SessionID:         env.session.Meta().SessionID,
 		ControllerLeaseID: env.leaseID,
+		BaseRef:           "HEAD",
 		CreateBranch:      true,
 		BranchName:        "feature/create-provenance",
 	})
@@ -252,8 +253,11 @@ func TestCreateWorktreeMarksProvenanceAndRunsSetupScriptWithProjectID(t *testing
 	if len(env.runtime.rebindCalls) != 1 || env.runtime.rebindCalls[0].root != resp.Worktree.CanonicalRoot {
 		t.Fatalf("expected create-time rebind to created worktree, got %+v", env.runtime.rebindCalls)
 	}
-	if notes := env.localNotes.snapshot(); len(notes) == 0 || !strings.Contains(notes[0], "Switched worktree to") {
-		t.Fatalf("expected create-time switch note, got %+v", notes)
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no synthetic create-time switch notes, got %+v", notes)
+	}
+	if len(env.runtime.reminderCalls) == 0 {
+		t.Fatal("expected create-time pending worktree reminder")
 	}
 	worktrees := mustListWorktrees(t, env)
 	created := findWorktreeByID(t, worktrees.Worktrees, resp.Worktree.WorktreeID)
@@ -450,7 +454,7 @@ func TestResolveRequestedWorktreeRootCreatesBaseDirAndAutoSuffixesCollisions(t *
 		t.Fatalf("CanonicalWorkspaceRoot collision root: %v", err)
 	}
 
-	resolvedRoot, err := service.resolveRequestedWorktreeRoot("", "workspace-1", CreateSpec{CreateBranch: true, BranchName: "feature/collision"})
+	resolvedRoot, err := service.resolveRequestedWorktreeRoot("", "workspace-1", CreateSpec{BaseRef: "HEAD", CreateBranch: true, BranchName: "feature/collision"})
 	if err != nil {
 		t.Fatalf("resolveRequestedWorktreeRoot: %v", err)
 	}
@@ -465,7 +469,7 @@ func TestResolveRequestedWorktreeRootCreatesBaseDirAndAutoSuffixesCollisions(t *
 	}
 }
 
-func TestSwitchWorktreeClampsCwdAndAppendsLocalNote(t *testing.T) {
+func TestSwitchWorktreeClampsCwdAndRecordsPendingReminder(t *testing.T) {
 	env := newServiceTestEnv(t)
 	created := mustCreateWorktree(t, env, "feature/switch-clamp")
 	if err := os.MkdirAll(filepath.Join(created.CanonicalRoot, "pkg"), 0o755); err != nil {
@@ -497,9 +501,15 @@ func TestSwitchWorktreeClampsCwdAndAppendsLocalNote(t *testing.T) {
 	if len(env.runtime.rebindCalls) == 0 || env.runtime.rebindCalls[len(env.runtime.rebindCalls)-1].root != env.workspaceRoot {
 		t.Fatalf("expected rebind to main workspace, got %+v", env.runtime.rebindCalls)
 	}
-	notes := env.localNotes.snapshot()
-	if len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "Switched worktree to main workspace") {
-		t.Fatalf("expected switch local note, got %+v", notes)
+	if notes := env.localNotes.snapshot(); len(notes) != 0 {
+		t.Fatalf("expected no synthetic switch local notes, got %+v", notes)
+	}
+	if len(env.runtime.reminderCalls) == 0 {
+		t.Fatal("expected pending worktree reminder")
+	}
+	reminder := env.runtime.reminderCalls[len(env.runtime.reminderCalls)-1]
+	if reminder.Mode != session.WorktreeReminderModeExit || reminder.EffectiveCwd != env.workspaceRoot {
+		t.Fatalf("unexpected reminder = %+v", reminder)
 	}
 	finalTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, env.session.Meta().SessionID)
 	if err != nil {
@@ -710,7 +720,7 @@ func TestSwitchWorktreeRollsBackExecutionTargetWhenRequestContextCancelsDuringRe
 
 func TestCreateWorktreeCleansUpCreatedStateWhenPostCreateSwitchFails(t *testing.T) {
 	env := newServiceTestEnv(t)
-	expectedRoot, err := env.service.resolveRequestedWorktreeRoot("", env.binding.WorkspaceID, CreateSpec{CreateBranch: true, BranchName: "feature/create-rollback"})
+	expectedRoot, err := env.service.resolveRequestedWorktreeRoot("", env.binding.WorkspaceID, CreateSpec{BaseRef: "HEAD", CreateBranch: true, BranchName: "feature/create-rollback"})
 	if err != nil {
 		t.Fatalf("resolveRequestedWorktreeRoot: %v", err)
 	}
@@ -720,6 +730,7 @@ func TestCreateWorktreeCleansUpCreatedStateWhenPostCreateSwitchFails(t *testing.
 		ClientRequestID:   "req-create-rollback",
 		SessionID:         env.session.Meta().SessionID,
 		ControllerLeaseID: env.leaseID,
+		BaseRef:           "HEAD",
 		CreateBranch:      true,
 		BranchName:        "feature/create-rollback",
 	})

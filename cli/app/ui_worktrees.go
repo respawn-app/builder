@@ -232,7 +232,7 @@ func (d uiWorktreeCreateDialogState) request(kind serverapi.WorktreeCreateTarget
 	}
 	baseRef := strings.TrimSpace(singleLineEditorValue(d.baseRef))
 	if baseRef == "" {
-		baseRef = "HEAD"
+		return serverapi.WorktreeCreateRequest{}, fmt.Errorf("Base ref is required")
 	}
 	return serverapi.WorktreeCreateRequest{BaseRef: baseRef, CreateBranch: true, BranchName: target}, nil
 }

@@ -17,8 +17,7 @@ import (
 )
 
 type requestBuildPlan struct {
-	Request                  llm.Request
-	PreparedWorktreeReminder *preparedWorktreeReminder
+	Request llm.Request
 }
 
 func (e *Engine) buildRequest(ctx context.Context, stepID string, allowTools bool) (llm.Request, error) {
@@ -55,13 +54,6 @@ func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID stri
 	}
 
 	items := filterHistoricalWorktreeReminderItems(e.snapshotItems())
-	worktreeReminderItems, preparedWorktreeReminder, err := e.prepareWorktreeReminderRequestItems(stepID)
-	if err != nil {
-		return requestBuildPlan{}, err
-	}
-	if len(worktreeReminderItems) > 0 {
-		items = append(items, llm.CloneResponseItems(worktreeReminderItems)...)
-	}
 	if len(extra) > 0 {
 		items = append(items, llm.CloneResponseItems(extra)...)
 	}
@@ -91,7 +83,7 @@ func (e *Engine) buildRequestPlanWithExtraItems(ctx context.Context, stepID stri
 		}
 		req.EnableNativeWebSearch = nativeWebSearch
 	}
-	return requestBuildPlan{Request: req, PreparedWorktreeReminder: preparedWorktreeReminder}, nil
+	return requestBuildPlan{Request: req}, nil
 }
 
 func (e *Engine) supportsPromptCacheKey(ctx context.Context) bool {

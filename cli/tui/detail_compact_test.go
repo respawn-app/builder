@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/server/llm"
 	"builder/shared/transcript"
 	"builder/shared/uiglyphs"
 	"fmt"
@@ -707,6 +708,37 @@ func TestCompactDetailCollapsesReviewerSuggestions(t *testing.T) {
 	expanded := xansi.Strip(m.View())
 	if !strings.Contains(expanded, "Add app-level coverage") || !strings.Contains(expanded, "Rebuild before final answer") {
 		t.Fatalf("expected expanded reviewer suggestions to show full text, got %q", expanded)
+	}
+}
+
+func TestWorktreeReminderUsesOngoingTextAndKeepsDetailText(t *testing.T) {
+	m := NewModel(WithCompactDetail(), WithPreviewLines(8))
+	fullText := "The user has moved this conversation into a git worktree.\n- Branch: feature/branch\n- New cwd / worktree path: /tmp/worktree/pkg"
+	ongoingText := "Switched worktree to feature/branch: /tmp/worktree/pkg"
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Visibility:   transcript.EntryVisibilityAll,
+		Role:         TranscriptRoleDeveloperContext,
+		Text:         fullText,
+		OngoingText:  ongoingText,
+		MessageType:  llm.MessageTypeWorktreeMode,
+		SourcePath:   "/tmp/worktree/pkg",
+		CompactLabel: ongoingText,
+	})
+
+	ongoing := xansi.Strip(m.OngoingSnapshot())
+	if !strings.Contains(ongoing, ongoingText) || strings.Contains(ongoing, "The user has moved this conversation") {
+		t.Fatalf("expected ongoing worktree compact text only, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	collapsed := xansi.Strip(m.View())
+	if !strings.Contains(collapsed, ongoingText) || strings.Contains(collapsed, "The user has moved this conversation") {
+		t.Fatalf("expected collapsed detail worktree label, got %q", collapsed)
+	}
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	expanded := xansi.Strip(m.View())
+	if !strings.Contains(expanded, "The user has moved this conversation") || !strings.Contains(expanded, "feature/branch") || !strings.Contains(expanded, "/tmp/worktree/pkg") {
+		t.Fatalf("expected expanded detail worktree reminder text, got %q", expanded)
 	}
 }
 

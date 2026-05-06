@@ -451,6 +451,7 @@ func mustCreateWorktree(t *testing.T, env *serviceTestEnv, branchName string) se
 		ClientRequestID:   "req-create-" + strings.ReplaceAll(branchName, "/", "-"),
 		SessionID:         env.session.Meta().SessionID,
 		ControllerLeaseID: env.leaseID,
+		BaseRef:           "HEAD",
 		CreateBranch:      true,
 		BranchName:        branchName,
 	})

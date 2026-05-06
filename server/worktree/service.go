@@ -230,7 +230,7 @@ func (s *Service) CreateWorktree(ctx context.Context, req serverapi.WorktreeCrea
 		return serverapi.WorktreeCreateResponse{}, err
 	}
 	previous := currentSyncedWorktree(synced, workspaceCtx.target)
-	nextTarget, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, previous, created, true)
+	nextTarget, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, previous, created)
 	if err != nil {
 		return serverapi.WorktreeCreateResponse{}, err
 	}
@@ -316,7 +316,7 @@ func (s *Service) SwitchWorktree(ctx context.Context, req serverapi.WorktreeSwit
 		return serverapi.WorktreeSwitchResponse{}, serverapi.ErrWorktreeNotFound
 	}
 	previous := currentSyncedWorktree(synced, workspaceCtx.target)
-	nextTarget, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, previous, targetWorktree, true)
+	nextTarget, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, previous, targetWorktree)
 	if err != nil {
 		return serverapi.WorktreeSwitchResponse{}, err
 	}
@@ -351,7 +351,7 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		if !mainFound {
 			return serverapi.WorktreeDeleteResponse{}, fmt.Errorf("main worktree not found for workspace %q", workspaceCtx.workspaceID)
 		}
-		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree, false); err != nil {
+		if _, err := s.switchSessionTarget(ctx, workspaceCtx, req.ControllerLeaseID, &targetWorktree, mainWorktree); err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
 		workspaceCtx, err = s.resolveSessionWorkspaceContext(ctx, workspaceCtx.sessionID)
@@ -656,7 +656,7 @@ func worktreeHasStableIdentity(entry GitWorktree) bool {
 	return strings.TrimSpace(entry.BranchRef) != "" || strings.TrimSpace(entry.HeadOID) != "" || entry.Detached || entry.IsMain || entry.Bare
 }
 
-func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionWorkspaceContext, leaseID string, previous *syncedWorktree, next syncedWorktree, emitNote bool) (clientui.SessionExecutionTarget, error) {
+func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionWorkspaceContext, leaseID string, previous *syncedWorktree, next syncedWorktree) (clientui.SessionExecutionTarget, error) {
 	nextWorktreeID := strings.TrimSpace(next.record.ID)
 	nextBaseRoot := strings.TrimSpace(next.record.CanonicalRoot)
 	if next.git.IsMain {
@@ -682,9 +682,6 @@ func (s *Service) switchSessionTarget(ctx context.Context, workspaceCtx sessionW
 			s.rollbackSessionTarget(ctx, workspaceCtx, leaseID, previousTarget)
 			return clientui.SessionExecutionTarget{}, err
 		}
-	}
-	if emitNote {
-		s.appendLocalNote(context.Background(), workspaceCtx.sessionID, leaseID, switchLocalNote(nextTarget))
 	}
 	return nextTarget, nil
 }
@@ -1046,17 +1043,6 @@ func currentSyncedWorktree(items []syncedWorktree, target clientui.SessionExecut
 		}
 	}
 	return nil
-}
-
-func switchLocalNote(target clientui.SessionExecutionTarget) string {
-	if strings.TrimSpace(target.WorktreeID) == "" {
-		return fmt.Sprintf("Switched worktree to main workspace: %s", target.EffectiveWorkdir)
-	}
-	name := strings.TrimSpace(target.WorktreeName)
-	if name == "" {
-		name = filepath.Base(strings.TrimSpace(target.WorktreeRoot))
-	}
-	return fmt.Sprintf("Switched worktree to %s: %s", name, target.EffectiveWorkdir)
 }
 
 func (s *Service) shouldAttemptBranchCleanup(target syncedWorktree, explicitDeleteBranch bool) bool {

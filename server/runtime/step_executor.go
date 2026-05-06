@@ -53,9 +53,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if err != nil {
 			return stepLoopResult{}, err
 		}
-		if err := e.commitPreparedWorktreeReminder(requestPlan.PreparedWorktreeReminder); err != nil {
-			return stepLoopResult{}, err
-		}
 		if err := e.recordLastUsage(resp.Usage); err != nil {
 			return stepLoopResult{}, err
 		}
@@ -293,9 +290,15 @@ func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID strin
 		return err
 	}
 	if handoffCompacted {
+		if err := e.materializePendingWorktreeReminder(stepID); err != nil {
+			return err
+		}
 		return e.maybeAppendCompactionSoonReminder(ctx, stepID)
 	}
 	if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+		return err
+	}
+	if err := e.materializePendingWorktreeReminder(stepID); err != nil {
 		return err
 	}
 	return e.maybeAppendCompactionSoonReminder(ctx, stepID)
