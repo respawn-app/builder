@@ -298,14 +298,14 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 		entry.markCompletionNoticeConsumed()
 	}
 	return ExecResult{
-		SessionID:         id,
-		WallTime:          time.Since(start),
-		Warning:           appendWarning(warning, processed.Warning),
-		Output:            display,
-		OutputPath:        snapshot.LogPath,
-		Running:           snapshot.Running,
-		Backgrounded:      snapshot.Backgrounded,
-		ExitCode:          cloneIntPtr(snapshot.ExitCode),
+		SessionID:    id,
+		WallTime:     time.Since(start),
+		Warning:      appendWarning(warning, processed.Warning),
+		Output:       display,
+		OutputPath:   snapshot.LogPath,
+		Running:      snapshot.Running,
+		Backgrounded: snapshot.Backgrounded,
+		ExitCode:     cloneIntPtr(snapshot.ExitCode),
 	}, nil
 }
 

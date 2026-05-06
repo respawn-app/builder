@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	skillsDirName             = "skills"
-	skillFileName             = "SKILL.md"
-	skillsAvailableHeader     = "Available skills:"
+	skillsDirName         = "skills"
+	skillFileName         = "SKILL.md"
+	skillsAvailableHeader = "Available skills:"
 )
 
 var skillsPrompt = strings.TrimSpace(prompts.SkillsPrompt)
