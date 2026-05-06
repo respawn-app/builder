@@ -30,6 +30,9 @@ irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.p
 
 Check the installed version with: `builder --version`
 
+Builder is unsandboxed by default.
+For container, VM, and remote-server isolation, see [Sandboxing](../sandboxing/).
+
 ## Optional: Install the Background Service
 
 Run this if you want one shared Builder server to start at login:

@@ -4,13 +4,14 @@ Please report security issues privately.
 
 Do not open a public GitHub issue for an unpatched vulnerability.
 
+For Builder's default tool trust model and container/VM isolation guidance, see the [Sandboxing and Security guide](https://opensource.respawn.pro/builder/sandboxing/).
+
 ## Reporting a Vulnerability
 
 Use one of these private channels:
 
 - `hello@respawn.pro`
-
-If GitHub private vulnerability reporting is enabled for this repository, you may use that as well.
+- GitHub private vulnerability reporting.
 
 If you are unsure whether something is security-sensitive, report it privately first.
 

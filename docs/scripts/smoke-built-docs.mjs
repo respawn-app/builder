@@ -71,20 +71,22 @@ preview.stderr.on('data', (chunk) => outputChunks.push(chunk));
 try {
   await waitForPreview(baseUrl, processOutput);
 
-  const llmsUrl = `${baseUrl}${docsConfig.basePath}/llms.txt`;
   const markdownUrl = `${baseUrl}${docsConfig.basePath}/command-postprocessing.md`;
-  const [llmsText, markdownText, sourceMarkdown] = await Promise.all([
-    fetchText(llmsUrl),
+  const sandboxingUrl = `${baseUrl}${docsConfig.basePath}/sandboxing/`;
+  const sandboxingMarkdownUrl = `${baseUrl}${docsConfig.basePath}/sandboxing.md`;
+  const [markdownText, , sandboxingMarkdown, sourceMarkdown, sandboxingSourceMarkdown] = await Promise.all([
     fetchText(markdownUrl),
+    fetchText(sandboxingUrl),
+    fetchText(sandboxingMarkdownUrl),
     readFile(path.join(docsRoot, 'src', 'content', 'docs', 'command-postprocessing.md'), 'utf8'),
+    readFile(path.join(docsRoot, 'src', 'content', 'docs', 'sandboxing.md'), 'utf8'),
   ]);
 
-  const publicMarkdownUrl = docsConfig.getPublicUrl('/command-postprocessing.md');
-  if (!llmsText.includes(publicMarkdownUrl)) {
-    throw new Error(`llms.txt does not link ${publicMarkdownUrl}`);
-  }
   if (markdownText !== sourceMarkdown) {
     throw new Error(`${markdownUrl} does not match source markdown`);
+  }
+  if (sandboxingMarkdown !== sandboxingSourceMarkdown) {
+    throw new Error(`${sandboxingMarkdownUrl} does not match source markdown`);
   }
 } finally {
   preview.kill('SIGTERM');

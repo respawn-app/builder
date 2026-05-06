@@ -54,6 +54,10 @@ export default defineConfig({
           link: '/headless/',
         },
         {
+          label: 'Sandboxing',
+          link: '/sandboxing/',
+        },
+        {
           label: 'Builder Server',
           link: '/server/',
         },

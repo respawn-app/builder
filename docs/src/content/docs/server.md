@@ -9,6 +9,8 @@ Frontends are clients: the terminal UI, headless runs, future apps, and other lo
 The server owns long-running work: sessions, project bindings, runtime orchestration, background shells, tool execution, and server-side storage under Builder's persistence root.
 Keeping one shared server running lets frontends stay lightweight and reconnect without taking ownership of in-flight work.
 
+The same boundary can isolate work on another machine, VM, or container. See [Sandboxing](../sandboxing/) for remote/container setup.
+
 ## Background Service
 
 `builder service` installs and manages a supervised background `builder serve` process.
