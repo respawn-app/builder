@@ -108,6 +108,14 @@ func (m *projectBindingPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureCursorVisible()
 		return m, nil
+	case tea.MouseMsg:
+		switch key.Button {
+		case tea.MouseButtonWheelUp:
+			m.moveCursor(-1)
+		case tea.MouseButtonWheelDown:
+			m.moveCursor(1)
+		}
+		return m, nil
 	case tea.KeyMsg:
 		switch key.Type {
 		case tea.KeyUp:
@@ -412,7 +420,7 @@ func runServerProjectPicker(projects []clientui.ProjectSummary, theme string) (p
 
 func runConfiguredProjectPicker(projects []clientui.ProjectSummary, theme string, options projectPickerOptions) (projectBindingPickerResult, error) {
 	model := newProjectBindingPickerModel(projects, theme, options)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectBindingPickerResult{}, err
@@ -466,6 +474,14 @@ func (m *projectWorkspacePickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = key.Height
 		}
 		m.ensureCursorVisible()
+		return m, nil
+	case tea.MouseMsg:
+		switch key.Button {
+		case tea.MouseButtonWheelUp:
+			m.moveCursor(-1)
+		case tea.MouseButtonWheelDown:
+			m.moveCursor(1)
+		}
 		return m, nil
 	case tea.KeyMsg:
 		switch key.Type {
@@ -667,7 +683,7 @@ func (m *projectWorkspacePickerModel) hasPreview(index int) bool {
 
 func runProjectWorkspacePicker(workspaces []clientui.ProjectWorkspaceSummary, theme string) (projectWorkspacePickerResult, error) {
 	model := newProjectWorkspacePickerModel(workspaces, theme)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := program.Run()
 	if err != nil {
 		return projectWorkspacePickerResult{}, err
