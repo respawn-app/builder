@@ -245,6 +245,65 @@ func TestOngoingOverlaySurfacesDoNotEnableAlternateScroll(t *testing.T) {
 	}
 }
 
+func TestDetailOverlaySurfacesPreserveAlternateScroll(t *testing.T) {
+	tests := []struct {
+		name    string
+		surface uiSurface
+	}{
+		{name: "status", surface: uiSurfaceStatus},
+		{name: "goal", surface: uiSurfaceGoal},
+		{name: "worktree", surface: uiSurfaceWorktree},
+		{name: "process", surface: uiSurfaceProcessList},
+	}
+
+	originalWriteTerminalSequence := writeTerminalSequence
+	defer func() { writeTerminalSequence = originalWriteTerminalSequence }()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sequenceLog := strings.Builder{}
+			writeTerminalSequence = func(sequence string) {
+				sequenceLog.WriteString(sequence)
+			}
+
+			m := newProjectedStaticUIModel()
+			m.windowSizeKnown = true
+			m.termWidth = 80
+			m.termHeight = 24
+			enterDetailCmd := m.toggleTranscriptModeWithNativeReplay(false)
+			if enterDetailCmd == nil {
+				t.Fatal("expected detail-mode open command")
+			}
+			_ = collectCmdMessages(t, enterDetailCmd)
+			if got := m.view.Mode(); got != tui.ModeDetail {
+				t.Fatalf("mode=%q want detail", got)
+			}
+			if !m.altScreenActive {
+				t.Fatal("expected alt-screen active after entering detail")
+			}
+
+			openCmd := m.activateSurface(tt.surface)
+			if openCmd != nil {
+				_ = collectCmdMessages(t, openCmd)
+			}
+			restoreCmd := m.restoreTranscriptSurface()
+			if restoreCmd != nil {
+				_ = collectCmdMessages(t, restoreCmd)
+			}
+
+			if got := sequenceLog.String(); strings.Count(got, "\x1b[?1007h") != 1 || strings.Contains(got, "\x1b[?1007l") {
+				t.Fatalf("detail overlay did not preserve alternate scroll, got sequences %q", got)
+			}
+			if got := m.view.Mode(); got != tui.ModeDetail {
+				t.Fatalf("mode=%q want detail", got)
+			}
+			if !m.altScreenActive {
+				t.Fatal("expected alt-screen active after restore")
+			}
+		})
+	}
+}
+
 func TestReturningFromFullscreenSurfaceReplaysNativeOngoingDelta(t *testing.T) {
 	tests := []struct {
 		name    string

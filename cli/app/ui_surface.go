@@ -52,8 +52,15 @@ func (surface uiSurface) wantsAltScreen() bool {
 	}
 }
 
-func (surface uiSurface) wantsAlternateScroll() bool {
-	return surface == uiSurfaceTranscriptDetail
+func (m *uiModel) surfaceWantsAlternateScroll(surface uiSurface) bool {
+	switch surface {
+	case uiSurfaceTranscriptDetail:
+		return true
+	case uiSurfaceStatus, uiSurfaceGoal, uiSurfaceWorktree, uiSurfaceProcessList:
+		return m.transcriptMode() == tui.ModeDetail
+	default:
+		return false
+	}
 }
 
 func (m *uiModel) restoreTranscriptSurface() tea.Cmd {
@@ -83,23 +90,25 @@ func (m *uiModel) altScreenCmdForSurfaceTransition(prev, next uiSurface) tea.Cmd
 	nextWantsAlt := next.wantsAltScreen()
 	if !prevWantsAlt && nextWantsAlt && !m.altScreenActive {
 		m.altScreenActive = true
-		if next.wantsAlternateScroll() {
+		if m.surfaceWantsAlternateScroll(next) {
 			return tea.Sequence(tea.EnterAltScreen, enableAlternateScrollCmd())
 		}
 		return tea.EnterAltScreen
 	}
 	if prevWantsAlt && !nextWantsAlt && m.altScreenActive {
 		m.altScreenActive = false
-		if prev.wantsAlternateScroll() {
+		if m.surfaceWantsAlternateScroll(prev) {
 			return tea.Sequence(disableAlternateScrollCmd(), tea.ExitAltScreen)
 		}
 		return tea.ExitAltScreen
 	}
 	if prevWantsAlt && nextWantsAlt && m.altScreenActive {
-		if prev.wantsAlternateScroll() == next.wantsAlternateScroll() {
+		prevWantsAlternateScroll := m.surfaceWantsAlternateScroll(prev)
+		nextWantsAlternateScroll := m.surfaceWantsAlternateScroll(next)
+		if prevWantsAlternateScroll == nextWantsAlternateScroll {
 			return nil
 		}
-		if next.wantsAlternateScroll() {
+		if nextWantsAlternateScroll {
 			return enableAlternateScrollCmd()
 		}
 		return disableAlternateScrollCmd()
