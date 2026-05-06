@@ -53,7 +53,7 @@ func (surface uiSurface) wantsAltScreen() bool {
 }
 
 func (surface uiSurface) wantsAlternateScroll() bool {
-	return surface != uiSurfaceRollbackSelection
+	return surface == uiSurfaceTranscriptDetail
 }
 
 func (m *uiModel) restoreTranscriptSurface() tea.Cmd {

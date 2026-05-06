@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
+func TestNativePSOverlayEscBalancesAltScreenWithoutAlternateScroll(t *testing.T) {
 	var terminalSequences []string
 	originalWriteTerminalSequence := writeTerminalSequence
 	writeTerminalSequence = func(sequence string) {
@@ -57,9 +57,6 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	waitForTestCondition(t, 2*time.Second, "/ps overlay to close", func() bool {
 		return !model.processList.isOpen() && model.surface() != uiSurfaceProcessList && model.view.Mode() == tui.ModeOngoing
 	})
-	waitForTestCondition(t, 2*time.Second, "/ps alternate scroll to disable", func() bool {
-		return strings.Count(strings.Join(terminalSequences, ""), "\x1b[?1007l") > 0
-	})
 	program.Quit()
 
 	select {
@@ -83,11 +80,8 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	sequenceLog := strings.Join(terminalSequences, "")
 	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
 	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
-	if enableAltScroll != disableAltScroll {
-		t.Fatalf("expected balanced /ps alternate-scroll enable/disable sequences, enable=%d disable=%d", enableAltScroll, disableAltScroll)
-	}
-	if enableAltScroll == 0 {
-		t.Fatal("expected /ps overlay in native mode to enable alternate scroll under auto policy")
+	if enableAltScroll != 0 || disableAltScroll != 0 {
+		t.Fatalf("did not expect /ps overlay in ongoing mode to use alternate-scroll, enable=%d disable=%d log=%q", enableAltScroll, disableAltScroll, sequenceLog)
 	}
 	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
 		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))
@@ -152,8 +146,8 @@ func TestNativePSOverlayUsesFixedAltScreen(t *testing.T) {
 	sequenceLog := strings.Join(terminalSequences, "")
 	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
 	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
-	if enableAltScroll == 0 || enableAltScroll != disableAltScroll {
-		t.Fatalf("expected balanced /ps alternate-scroll enable/disable sequences, enable=%d disable=%d log=%q", enableAltScroll, disableAltScroll, sequenceLog)
+	if enableAltScroll != 0 || disableAltScroll != 0 {
+		t.Fatalf("did not expect /ps overlay in ongoing mode to use alternate-scroll, enable=%d disable=%d log=%q", enableAltScroll, disableAltScroll, sequenceLog)
 	}
 	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
 		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))

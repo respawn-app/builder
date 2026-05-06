@@ -192,6 +192,59 @@ func TestFullscreenSurfaceOpenClosePolicy(t *testing.T) {
 	}
 }
 
+func TestOngoingOverlaySurfacesDoNotEnableAlternateScroll(t *testing.T) {
+	tests := []struct {
+		name    string
+		surface uiSurface
+	}{
+		{name: "status", surface: uiSurfaceStatus},
+		{name: "goal", surface: uiSurfaceGoal},
+		{name: "worktree", surface: uiSurfaceWorktree},
+		{name: "process", surface: uiSurfaceProcessList},
+	}
+
+	originalWriteTerminalSequence := writeTerminalSequence
+	defer func() { writeTerminalSequence = originalWriteTerminalSequence }()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sequenceLog := strings.Builder{}
+			writeTerminalSequence = func(sequence string) {
+				sequenceLog.WriteString(sequence)
+			}
+
+			m := newProjectedStaticUIModel()
+			m.windowSizeKnown = true
+			m.termWidth = 80
+			m.termHeight = 24
+			if got := m.view.Mode(); got != tui.ModeOngoing {
+				t.Fatalf("mode=%q want ongoing", got)
+			}
+
+			openCmd := m.activateSurface(tt.surface)
+			if openCmd == nil {
+				t.Fatal("expected open command")
+			}
+			_ = collectCmdMessages(t, openCmd)
+			closeCmd := m.restoreTranscriptSurface()
+			if closeCmd == nil {
+				t.Fatal("expected close command")
+			}
+			_ = collectCmdMessages(t, closeCmd)
+
+			if got := sequenceLog.String(); strings.Contains(got, "\x1b[?1007h") || strings.Contains(got, "\x1b[?1007l") {
+				t.Fatalf("ongoing overlay emitted alternate-scroll sequence: %q", got)
+			}
+			if got := m.view.Mode(); got != tui.ModeOngoing {
+				t.Fatalf("mode=%q want ongoing", got)
+			}
+			if m.altScreenActive {
+				t.Fatal("expected alt-screen inactive after restore")
+			}
+		})
+	}
+}
+
 func TestReturningFromFullscreenSurfaceReplaysNativeOngoingDelta(t *testing.T) {
 	tests := []struct {
 		name    string
