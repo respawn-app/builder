@@ -3,6 +3,7 @@ import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import starlightDocSearch from '@astrojs/starlight-docsearch';
 import remarkGfm from 'remark-gfm';
+import starlightLlmsTxt from 'starlight-llms-txt';
 
 import { resolveDocsConfig } from './scripts/site-config.mjs';
 
@@ -98,6 +99,11 @@ export default defineConfig({
           appId: docsConfig.docSearch.appId,
           apiKey: docsConfig.docSearch.apiKey,
           indexName: docsConfig.docSearch.indexName,
+        }),
+        starlightLlmsTxt({
+          projectName: docsConfig.siteTitle,
+          description: 'Builder terminal coding agent documentation.',
+          rawContent: true,
         }),
       ],
       head: [

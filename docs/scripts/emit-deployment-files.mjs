@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveDocsConfig } from './site-config.mjs';
+import { appendMarkdownDiscovery, emitMarkdownEndpoints } from './ai-readable-docs.mjs';
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const docsRoot = path.dirname(path.dirname(currentFilePath));
@@ -45,3 +46,17 @@ await writeFile(path.join(distRoot, 'robots.txt'), robotsLines.join('\n'), 'utf8
 if (docsConfig.customDomain) {
   await writeFile(path.join(distRoot, 'CNAME'), `${docsConfig.customDomain}\n`, 'utf8');
 }
+
+const markdownEntryIds = await emitMarkdownEndpoints({
+  sourceDirectories: [
+    path.join(docsRoot, 'src', 'content', 'docs'),
+    path.join(docsRoot, 'src', '.generated', 'content', 'docs'),
+  ],
+  outputDirectory: distRoot,
+});
+
+await appendMarkdownDiscovery({
+  llmsPath: path.join(distRoot, 'llms.txt'),
+  markdownEntryIds,
+  docsConfig,
+});
