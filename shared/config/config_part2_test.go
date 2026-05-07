@@ -597,6 +597,21 @@ func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 	}
 }
 
+func TestLoadRequestInputTokenCountCapabilityRequiresProviderID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "true")
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected validation error when request input token count capability override is set without provider_id")
+	}
+	if !strings.Contains(err.Error(), "provider_capabilities.provider_id") {
+		t.Fatalf("expected provider_id validation error, got %v", err)
+	}
+}
+
 func TestLoadPriorityRequestModeFromFile(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

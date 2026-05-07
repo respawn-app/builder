@@ -55,6 +55,12 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 	}
 }
 
+func TestAuthProviderForPolicyReturnsNilForNilManager(t *testing.T) {
+	if got := authProviderForPolicy("inherit", nil); got != nil {
+		t.Fatalf("auth provider = %T, want nil", got)
+	}
+}
+
 func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	workspace := t.TempDir()
 	outsideFile := filepath.Join(outsideNonTempDir(t), "doc.pdf")

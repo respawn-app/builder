@@ -239,7 +239,7 @@ func newRuntimeProviderClient(settings providerRuntimeSettings, mgr *auth.Manage
 }
 
 func authProviderForPolicy(policy string, mgr *auth.Manager) llm.AuthHeaderProvider {
-	if strings.EqualFold(strings.TrimSpace(policy), "none") {
+	if mgr == nil || strings.EqualFold(strings.TrimSpace(policy), "none") {
 		return nil
 	}
 	return mgr

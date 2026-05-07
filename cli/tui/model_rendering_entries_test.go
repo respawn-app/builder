@@ -100,8 +100,8 @@ func TestFlattenStyledMarkdownEntryKeepsPrefixedLinesWithinViewportAtPunctuation
 
 	lines := m.flattenEntry(RenderIntentAssistant, "**"+strings.Repeat("a", 10)+".**")
 
-	if rendered := strings.Join(lines, "\n"); !strings.Contains(rendered, "\x1b[") {
-		t.Fatalf("expected styled markdown render to contain ANSI styling, got %q", rendered)
+	if rendered := strings.Join(lines, "\n"); !strings.Contains(rendered, ";1m") {
+		t.Fatalf("expected bold markdown ANSI styling (;1m), got %q", rendered)
 	}
 	if got, want := len(lines), 2; got != want {
 		t.Fatalf("line count = %d, want %d: %#v", got, want, lines)
