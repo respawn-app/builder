@@ -439,7 +439,7 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 		ReloadConfig: func() (config.App, error) {
 			return s.configForWorkspace(projectCtx.projectRoot)
 		},
-	}, s.sessionStores)
+	}, s.sessionStores).WithAuthStateReader(s.oauthOpts.AuthManager)
 	client := client.NewLoopbackSessionLaunchClient(service)
 	s.sessionLaunchMap[scopeKey] = client
 	return client
