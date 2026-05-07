@@ -72,11 +72,18 @@ func (m Model) entryContinuationPrefix(role RenderIntent, symbolOverride string)
 }
 
 func (m Model) entryRenderWidth(role RenderIntent, symbolOverride string) int {
-	renderWidth := m.viewportWidth - m.entryPrefixWidth(role, symbolOverride)
+	renderWidth := m.viewportWidth - m.entryPrefixWidth(role, symbolOverride) - m.detailViewportRailWidth()
 	if renderWidth < 1 {
 		return 1
 	}
 	return renderWidth
+}
+
+func (m Model) detailViewportRailWidth() int {
+	if !m.compactDetail || m.mode != ModeDetail {
+		return 0
+	}
+	return max(lipgloss.Width(uiglyphs.SelectionRailBlank), lipgloss.Width(uiglyphs.SelectionRailGlyph))
 }
 
 func (m Model) flattenEntryWithMetaAndSymbol(role RenderIntent, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
