@@ -90,6 +90,10 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 
 		transition := extractUITransition(finalModel)
+		if transition.Exit {
+			runtimePlan.Close()
+			return nil
+		}
 		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), transition)
 		runtimePlan.Close()
 		if err != nil {
@@ -165,6 +169,9 @@ type resolvedSessionAction struct {
 }
 
 func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, sessionID string, controllerLeaseID string, transition UITransition) (resolvedSessionAction, error) {
+	if transition.Exit {
+		return resolvedSessionAction{}, nil
+	}
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return resolvedSessionAction{}, errors.New("session lifecycle client is required")
 	}
@@ -178,7 +185,7 @@ func resolveSessionAction(ctx context.Context, server embeddedServer, interactor
 		SessionID:         strings.TrimSpace(sessionID),
 		ControllerLeaseID: strings.TrimSpace(controllerLeaseID),
 		Transition: serverapi.SessionTransition{
-			Action:                   serverapi.SessionTransitionAction(transition.Action),
+			Action:                   transition.Action,
 			InitialPrompt:            transition.InitialPrompt,
 			InitialInput:             transition.InitialInput,
 			TargetSessionID:          transition.TargetSessionID,

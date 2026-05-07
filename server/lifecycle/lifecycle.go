@@ -7,20 +7,11 @@ import (
 	"strings"
 
 	"builder/server/session"
-)
-
-type Action string
-
-const (
-	ActionNone         Action = "none"
-	ActionNewSession   Action = "new_session"
-	ActionResume       Action = "resume"
-	ActionForkRollback Action = "fork_rollback"
-	ActionOpenSession  Action = "open_session"
+	"builder/shared/serverapi"
 )
 
 type Transition struct {
-	Action               Action
+	Action               serverapi.SessionTransitionAction
 	InitialPrompt        string
 	InitialInput         string
 	TargetSessionID      string
@@ -61,22 +52,22 @@ func PersistInputDraft(store *session.Store, input string) error {
 
 func Resolve(ctx context.Context, req ResolveRequest) (Resolved, error) {
 	switch req.Transition.Action {
-	case ActionNewSession:
+	case serverapi.SessionTransitionActionNewSession:
 		return Resolved{
 			InitialPrompt:   req.Transition.InitialPrompt,
 			ParentSessionID: req.Transition.ParentSessionID,
 			ForceNewSession: true,
 			ShouldContinue:  true,
 		}, nil
-	case ActionResume:
+	case serverapi.SessionTransitionActionResume:
 		return Resolved{ShouldContinue: true}, nil
-	case ActionOpenSession:
+	case serverapi.SessionTransitionActionOpenSession:
 		return Resolved{
 			NextSessionID:  strings.TrimSpace(req.Transition.TargetSessionID),
 			InitialInput:   req.Transition.InitialInput,
 			ShouldContinue: true,
 		}, nil
-	case ActionForkRollback:
+	case serverapi.SessionTransitionActionForkRollback:
 		return resolveForkRollback(req)
 	default:
 		return Resolved{}, nil

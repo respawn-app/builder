@@ -189,13 +189,11 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 			RequiresReauth: true,
 		}, nil
 	}
-	action := serverlifecycle.Action(req.Transition.Action)
-
 	var (
 		store *session.Store
 		err   error
 	)
-	if action == serverlifecycle.ActionForkRollback {
+	if req.Transition.Action == serverapi.SessionTransitionActionForkRollback {
 		store, err = s.openStore(req.SessionID)
 		if err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
@@ -209,7 +207,7 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 	resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
 		Store: store,
 		Transition: serverlifecycle.Transition{
-			Action:               action,
+			Action:               req.Transition.Action,
 			InitialPrompt:        req.Transition.InitialPrompt,
 			InitialInput:         req.Transition.InitialInput,
 			TargetSessionID:      req.Transition.TargetSessionID,
@@ -220,7 +218,7 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 	if err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
-	if action == serverlifecycle.ActionForkRollback {
+	if req.Transition.Action == serverapi.SessionTransitionActionForkRollback {
 		if err := s.preserveForkExecutionTarget(ctx, req.SessionID, resolved.NextSessionID); err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
 		}

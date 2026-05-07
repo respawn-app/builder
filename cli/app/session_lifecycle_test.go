@@ -609,6 +609,23 @@ func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 	}
 }
 
+func TestResolveSessionActionExitStaysClientLocal(t *testing.T) {
+	resolved, err := resolveSessionAction(
+		context.Background(),
+		nil,
+		nil,
+		"",
+		"",
+		UITransition{Exit: true},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if resolved.ShouldContinue {
+		t.Fatal("expected exit transition not to continue")
+	}
+}
+
 func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 	resolved, err := resolveSessionAction(
 		context.Background(),

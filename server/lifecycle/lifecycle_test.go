@@ -7,6 +7,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/shared/serverapi"
 )
 
 func TestInitialInputPrefersPersistedDraft(t *testing.T) {
@@ -53,7 +54,7 @@ func TestResolveForkRollbackCreatesForkedSession(t *testing.T) {
 	resolved, err := Resolve(context.Background(), ResolveRequest{
 		Store: store,
 		Transition: Transition{
-			Action:               ActionForkRollback,
+			Action:               serverapi.SessionTransitionActionForkRollback,
 			InitialPrompt:        "edited user message",
 			ForkUserMessageIndex: 2,
 		},

@@ -252,7 +252,7 @@ type uiLogger interface {
 
 type UIOption func(*uiModel)
 
-type UIAction string
+type UIAction = serverapi.SessionTransitionAction
 
 type UITranscriptEntry struct {
 	Role string
@@ -260,7 +260,8 @@ type UITranscriptEntry struct {
 }
 
 type UITransition struct {
-	Action                   UIAction
+	Action                   serverapi.SessionTransitionAction
+	Exit                     bool
 	InitialPrompt            string
 	InitialInput             string
 	TargetSessionID          string
@@ -270,13 +271,13 @@ type UITransition struct {
 }
 
 const (
-	UIActionNone         UIAction = "none"
+	UIActionNone         UIAction = serverapi.SessionTransitionActionNone
 	UIActionExit         UIAction = "exit"
-	UIActionNewSession   UIAction = "new_session"
-	UIActionResume       UIAction = "resume"
-	UIActionLogout       UIAction = "logout"
-	UIActionForkRollback UIAction = "fork_rollback"
-	UIActionOpenSession  UIAction = "open_session"
+	UIActionNewSession   UIAction = serverapi.SessionTransitionActionNewSession
+	UIActionResume       UIAction = serverapi.SessionTransitionActionResume
+	UIActionLogout       UIAction = serverapi.SessionTransitionActionLogout
+	UIActionForkRollback UIAction = serverapi.SessionTransitionActionForkRollback
+	UIActionOpenSession  UIAction = serverapi.SessionTransitionActionOpenSession
 )
 
 var nativeResizeReplayDebounce = time.Second
@@ -907,6 +908,12 @@ func (m *uiModel) Close() {
 }
 
 func (m *uiModel) Transition() UITransition {
+	if m.exitAction == UIActionExit {
+		return UITransition{
+			Action: serverapi.SessionTransitionActionNone,
+			Exit:   true,
+		}
+	}
 	return UITransition{
 		Action:                   m.exitAction,
 		InitialPrompt:            m.nextSessionInitialPrompt,
