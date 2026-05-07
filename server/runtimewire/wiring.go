@@ -174,8 +174,8 @@ func mainProviderRuntimeSettings(active config.Settings) providerRuntimeSettings
 
 func lockedModelCapabilitiesForConfig(model string, override config.ModelCapabilitiesOverride, sources map[string]string, reasoningKey string, visionKey string) session.LockedModelCapabilities {
 	locked := llm.LockedModelCapabilitiesForModel(model)
-	reasoningConfigured := modelCapabilitySourceConfigured(sources, reasoningKey)
-	visionConfigured := modelCapabilitySourceConfigured(sources, visionKey)
+	reasoningConfigured := inheritedModelCapabilitySourceConfigured(sources, reasoningKey)
+	visionConfigured := inheritedModelCapabilitySourceConfigured(sources, visionKey)
 	if reasoningConfigured {
 		locked.SupportsReasoningEffort = override.SupportsReasoningEffort
 	}
@@ -186,6 +186,20 @@ func lockedModelCapabilitiesForConfig(model string, override config.ModelCapabil
 		return locked
 	}
 	return llm.LockedModelCapabilitiesForConfig(model, override)
+}
+
+func inheritedModelCapabilitySourceConfigured(sources map[string]string, key string) bool {
+	if modelCapabilitySourceConfigured(sources, key) {
+		return true
+	}
+	switch key {
+	case "reviewer.model_capabilities.supports_reasoning_effort":
+		return modelCapabilitySourceConfigured(sources, "model_capabilities.supports_reasoning_effort")
+	case "reviewer.model_capabilities.supports_vision_inputs":
+		return modelCapabilitySourceConfigured(sources, "model_capabilities.supports_vision_inputs")
+	default:
+		return false
+	}
 }
 
 func modelCapabilitySourceConfigured(sources map[string]string, key string) bool {
