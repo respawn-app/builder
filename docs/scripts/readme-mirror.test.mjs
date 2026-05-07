@@ -48,7 +48,7 @@ test('mirrorReadme rewrites repository-relative URLs in raw HTML attributes', ()
     '<p align="center">',
     '  <img src="./docs/public/readme/builder-demo-hero.webp" alt="Builder demo" width="900">',
     '  <a href="./CONTRIBUTING.md#before-opening-a-pull-request">Contributing</a>',
-    '  <video poster="./docs/public/builder-social-preview.png"></video>',
+    '  <video poster="./docs/public/builder-social-preview.webp"></video>',
     '  <img src="https://example.com/external.webp" alt="External">',
     '  <a href="#features">Features</a>',
     '</p>',
@@ -62,14 +62,14 @@ test('mirrorReadme rewrites repository-relative URLs in raw HTML attributes', ()
   );
   assert.equal(output.includes('href="/contributing/#before-opening-a-pull-request"'), true);
   assert.equal(
-    output.includes('poster="https://raw.githubusercontent.com/respawn-app/builder/main/docs/public/builder-social-preview.png"'),
+    output.includes('poster="https://raw.githubusercontent.com/respawn-app/builder/main/docs/public/builder-social-preview.webp"'),
     true,
   );
   assert.equal(output.includes('src="https://example.com/external.webp"'), true);
   assert.equal(output.includes('href="#features"'), true);
   assert.equal(output.includes('src="./docs/public/readme/builder-demo-hero.webp"'), false);
   assert.equal(output.includes('href="./CONTRIBUTING.md#before-opening-a-pull-request"'), false);
-  assert.equal(output.includes('poster="./docs/public/builder-social-preview.png"'), false);
+  assert.equal(output.includes('poster="./docs/public/builder-social-preview.webp"'), false);
 });
 
 test('mirrorRepoMarkdownDocument removes the top-level heading and assigns custom metadata', () => {
