@@ -18,7 +18,7 @@ func validateSubagentRoleState(state settingsState, sources map[string]string) e
 		return nil
 	}
 	candidate := state
-	inheritReviewerDefaults(&candidate.Settings)
+	inheritReviewerDefaultsWithSources(&candidate.Settings, sources)
 
 	checks := []struct {
 		enabled bool
@@ -322,7 +322,7 @@ func validateCompactionMode(state settingsState, _ map[string]string) error {
 	}
 }
 
-func validateReviewer(state settingsState, _ map[string]string) error {
+func validateReviewer(state settingsState, sources map[string]string) error {
 	reviewer := state.Settings.Reviewer
 	switch strings.ToLower(strings.TrimSpace(reviewer.Frequency)) {
 	case "off", "all", "edits":
@@ -332,10 +332,58 @@ func validateReviewer(state settingsState, _ map[string]string) error {
 	if strings.TrimSpace(reviewer.Model) == "" {
 		return fmt.Errorf("reviewer.model must not be empty")
 	}
+	switch strings.ToLower(strings.TrimSpace(string(reviewer.ModelVerbosity))) {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("invalid reviewer.model_verbosity %q (expected low|medium|high)", reviewer.ModelVerbosity)
+	}
+	provider := normalizeProviderOverride(reviewer.ProviderOverride)
+	switch provider {
+	case "", "openai":
+	case "anthropic":
+		if hasConfiguredSource(sources, "reviewer.provider_override") {
+			return fmt.Errorf("reviewer.provider_override %q is not supported for reviewer models", reviewer.ProviderOverride)
+		}
+	default:
+		return fmt.Errorf("invalid reviewer.provider_override %q (expected openai)", reviewer.ProviderOverride)
+	}
+	if strings.TrimSpace(reviewer.OpenAIBaseURL) != "" && provider != "" && provider != "openai" {
+		return fmt.Errorf("reviewer.provider_override %q conflicts with reviewer.openai_base_url; reviewer.openai_base_url requires reviewer.provider_override=openai or unset", reviewer.ProviderOverride)
+	}
+	if err := validateReviewerProviderCapabilities(reviewer.ProviderCapabilities); err != nil {
+		return err
+	}
+	if reviewer.ModelContextWindow < 0 {
+		return fmt.Errorf("reviewer.model_context_window must be >= 0")
+	}
+	switch normalizeReviewerAuth(reviewer.Auth) {
+	case "inherit", "none":
+	default:
+		return fmt.Errorf("invalid reviewer.auth %q (expected inherit|none)", reviewer.Auth)
+	}
 	if reviewer.TimeoutSeconds <= 0 {
 		return fmt.Errorf("reviewer.timeout_seconds must be > 0")
 	}
 	return nil
+}
+
+func validateReviewerProviderCapabilities(capabilities ProviderCapabilitiesOverride) error {
+	if strings.TrimSpace(capabilities.ProviderID) != "" {
+		return nil
+	}
+	if capabilities.SupportsResponsesAPI || capabilities.SupportsResponsesCompact || capabilities.SupportsRequestInputTokenCount || capabilities.SupportsPromptCacheKey || capabilities.SupportsNativeWebSearch || capabilities.SupportsReasoningEncrypted || capabilities.SupportsServerSideContextEdit || capabilities.IsOpenAIFirstParty {
+		return fmt.Errorf("reviewer.provider_capabilities.provider_id must not be empty when reviewer provider capability overrides are set")
+	}
+	return nil
+}
+
+func hasConfiguredSource(sources map[string]string, key string) bool {
+	switch strings.TrimSpace(sources[key]) {
+	case "file", "env", "cli":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeCompactionMode(raw string) CompactionMode {
@@ -389,6 +437,17 @@ func normalizeModelVerbosity(raw string) ModelVerbosity {
 		return ModelVerbosityHigh
 	default:
 		return ModelVerbosity(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeReviewerAuth(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "inherit":
+		return "inherit"
+	case "none":
+		return "none"
+	default:
+		return strings.TrimSpace(raw)
 	}
 }
 
