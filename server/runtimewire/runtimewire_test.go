@@ -480,6 +480,23 @@ func TestReviewerProviderSettingsFallbacks(t *testing.T) {
 	}
 }
 
+func TestReviewerModelCapabilitiesHonorExplicitFalseSources(t *testing.T) {
+	locked := lockedModelCapabilitiesForConfig(
+		"gpt-5",
+		config.ModelCapabilitiesOverride{SupportsReasoningEffort: false},
+		map[string]string{"reviewer.model_capabilities.supports_reasoning_effort": "file"},
+		"reviewer.model_capabilities.supports_reasoning_effort",
+		"reviewer.model_capabilities.supports_vision_inputs",
+	)
+
+	if locked.SupportsReasoningEffort {
+		t.Fatalf("expected explicit reviewer reasoning false override to beat model contract, got %+v", locked)
+	}
+	if !locked.SupportsVisionInputs {
+		t.Fatalf("expected default reviewer vision capability to come from model contract, got %+v", locked)
+	}
+}
+
 func TestRuntimeProviderClientUsesProviderCapabilitiesOverride(t *testing.T) {
 	client, err := newRuntimeProviderClient(providerRuntimeSettings{
 		Model:            "local-reviewer",

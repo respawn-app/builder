@@ -36,6 +36,7 @@ type RuntimeWiringOptions struct {
 	OnEvent  func(evt runtime.Event)
 	Headless bool
 	FastMode *runtime.FastModeState
+	Sources  map[string]string
 }
 
 func NewRuntimeWiring(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
@@ -121,7 +122,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			Frequency:         active.Reviewer.Frequency,
 			Model:             active.Reviewer.Model,
 			ThinkingLevel:     active.Reviewer.ThinkingLevel,
-			ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Reviewer.Model, active.Reviewer.ModelCapabilities),
+			ModelCapabilities: lockedModelCapabilitiesForConfig(active.Reviewer.Model, active.Reviewer.ModelCapabilities, opts.Sources, "reviewer.model_capabilities.supports_reasoning_effort", "reviewer.model_capabilities.supports_vision_inputs"),
 			SystemPromptFile:  active.Reviewer.SystemPromptFile,
 			VerboseOutput:     active.Reviewer.VerboseOutput,
 			Client:            reviewerClient,
@@ -168,6 +169,31 @@ func mainProviderRuntimeSettings(active config.Settings) providerRuntimeSettings
 		ContextWindowTokens:          active.ModelContextWindow,
 		Auth:                         "inherit",
 		ProviderCapabilitiesOverride: providerCapabilitiesOverridePtr(active.ProviderCapabilities),
+	}
+}
+
+func lockedModelCapabilitiesForConfig(model string, override config.ModelCapabilitiesOverride, sources map[string]string, reasoningKey string, visionKey string) session.LockedModelCapabilities {
+	locked := llm.LockedModelCapabilitiesForModel(model)
+	reasoningConfigured := modelCapabilitySourceConfigured(sources, reasoningKey)
+	visionConfigured := modelCapabilitySourceConfigured(sources, visionKey)
+	if reasoningConfigured {
+		locked.SupportsReasoningEffort = override.SupportsReasoningEffort
+	}
+	if visionConfigured {
+		locked.SupportsVisionInputs = override.SupportsVisionInputs
+	}
+	if reasoningConfigured || visionConfigured {
+		return locked
+	}
+	return llm.LockedModelCapabilitiesForConfig(model, override)
+}
+
+func modelCapabilitySourceConfigured(sources map[string]string, key string) bool {
+	switch strings.TrimSpace(sources[key]) {
+	case "file", "env", "cli", "subagent":
+		return true
+	default:
+		return false
 	}
 }
 
