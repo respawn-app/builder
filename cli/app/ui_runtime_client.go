@@ -742,12 +742,6 @@ func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) error {
 		return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Role: role, Text: text})
 	})
 }
-func (c *sessionRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
-	resp, err := retryRuntimeUnavailableCall(ctx, c.recoverControllerLeaseSilently, func() (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
-		return c.controls.ShouldCompactBeforeUserMessage(ctx, serverapi.RuntimeShouldCompactBeforeUserMessageRequest{SessionID: c.sessionID, Text: text})
-	})
-	return resp.ShouldCompact, err
-}
 func (c *sessionRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
 	resp, err := retryRuntimeControlCall(ctx, c.controllerLeaseIDValue, c.recoverControllerLease, func(controllerLeaseID string) (serverapi.RuntimeSubmitUserTurnResponse, error) {
 		return c.controls.SubmitUserTurn(ctx, serverapi.RuntimeSubmitUserTurnRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Text: text})
@@ -762,11 +756,6 @@ func (c *sessionRuntimeClient) SubmitUserShellCommand(ctx context.Context, comma
 func (c *sessionRuntimeClient) CompactContext(ctx context.Context, args string) error {
 	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
 		return c.controls.CompactContext(ctx, serverapi.RuntimeCompactContextRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID, Args: args})
-	})
-}
-func (c *sessionRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
-	return c.retryControlCallNoResult(ctx, func(controllerLeaseID string) error {
-		return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{ClientRequestID: uuid.NewString(), SessionID: c.sessionID, ControllerLeaseID: controllerLeaseID})
 	})
 }
 func (c *sessionRuntimeClient) HasQueuedUserWork() (bool, error) {

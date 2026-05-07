@@ -687,8 +687,8 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	if updated.busy {
 		t.Fatal("expected submit completion to leave runtime-backed UI idle while waiting for hydration")
 	}
-	if client.shouldCompactText != "" {
-		t.Fatalf("did not expect queued follow-up to start before hydration settles, got %q", client.shouldCompactText)
+	if client.submitText != "" {
+		t.Fatalf("did not expect queued follow-up to start before hydration settles, got %q", client.submitText)
 	}
 	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
 		t.Fatalf("expected queued follow-up preserved until hydration finishes, got %+v", updated.queued)
@@ -705,8 +705,8 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	if updated.pendingQueuedDrainAfterHydration == false {
 		t.Fatal("expected deferred queued drain to remain armed until follow-up hydration completes")
 	}
-	if client.shouldCompactText != "" {
-		t.Fatalf("did not expect queued follow-up pre-submit check before final hydration settles, got %q", client.shouldCompactText)
+	if client.submitText != "" {
+		t.Fatalf("did not expect queued follow-up submit before final hydration settles, got %q", client.submitText)
 	}
 	if applyCmd == nil {
 		t.Fatal("expected follow-up hydration command after dirty in-flight refresh completes")
@@ -727,8 +727,8 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	if updated.pendingQueuedDrainAfterHydration {
 		t.Fatal("expected deferred queued drain flag cleared after hydration completion")
 	}
-	if updated.pendingPreSubmitText != "follow up" {
-		t.Fatalf("expected queued follow-up to enter runtime pre-submit flow after hydration, got %q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "follow up" {
+		t.Fatalf("expected queued follow-up to submit after hydration, got %q", updated.activeSubmit.text)
 	}
 	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
 		t.Fatalf("expected hydration to commit final answer before queued drain, got %q", got)
@@ -793,8 +793,8 @@ func TestStaleHydrateKeepsQueuedDrainReadyAfterCommittedGapUserFlush(t *testing.
 	if got := len(updated.deferredCommittedTail); got != 0 {
 		t.Fatalf("expected stale hydrate + queued drain path to keep deferred committed tail empty, got %d", got)
 	}
-	if updated.pendingPreSubmitText != "follow up" {
-		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got pending=%q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "follow up" {
+		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got active=%q", updated.activeSubmit.text)
 	}
 	if !updated.busy {
 		t.Fatal("expected queued drain to start the next submission after stale hydrate rejection")
@@ -831,15 +831,15 @@ func TestHydrationCompletionDoesNotRedrainQueuedTurnAfterManualDrainStarts(t *te
 	if !updated.busy {
 		t.Fatal("expected manual queued drain to start submission while hydration is still pending")
 	}
-	if updated.pendingPreSubmitText != "follow up" {
-		t.Fatalf("expected manual drain to own queued follow-up, got %q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "follow up" {
+		t.Fatalf("expected manual drain to own queued follow-up, got %q", updated.activeSubmit.text)
 	}
 	if drainCmd == nil {
-		t.Fatal("expected pre-submit check command from manual queued drain")
+		t.Fatal("expected submit command from manual queued drain")
 	}
 	_ = collectCmdMessages(t, drainCmd)
-	if client.shouldCompactCalls != 1 {
-		t.Fatalf("expected exactly one pre-submit check after manual drain starts, got %d", client.shouldCompactCalls)
+	if client.submitText != "follow up" {
+		t.Fatalf("expected submit after manual drain starts, got %q", client.submitText)
 	}
 
 	next, refreshCmd := updated.Update(runtimeTranscriptRefreshedMsg{token: 7, transcript: client.transcripts[0]})
@@ -861,12 +861,5 @@ func TestHydrationCompletionDoesNotRedrainQueuedTurnAfterManualDrainStarts(t *te
 		t.Fatal("expected final hydration completion to drop stale deferred drain once manual drain owns the queued turn")
 	}
 	msgs := collectCmdMessages(t, finalCmd)
-	for _, msg := range msgs {
-		if _, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			t.Fatalf("did not expect hydration completion to restart pre-submit checks, got %+v", msgs)
-		}
-	}
-	if client.shouldCompactCalls != 1 {
-		t.Fatalf("expected hydration completion to avoid a second pre-submit check, got %d", client.shouldCompactCalls)
-	}
+	_ = msgs
 }

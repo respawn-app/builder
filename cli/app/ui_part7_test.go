@@ -80,18 +80,18 @@ func TestHydrationCompletionKeepsDeferredQueuedDrainArmedUntilUnrelatedBusyState
 	if updated.pendingQueuedDrainAfterHydration {
 		t.Fatal("expected deferred queued drain cleared once unrelated busy state clears and auto-drain starts")
 	}
-	if updated.pendingPreSubmitText != "follow up" {
-		t.Fatalf("expected queued follow-up to enter runtime pre-submit flow after unrelated busy state clears, got %q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "follow up" {
+		t.Fatalf("expected queued follow-up to submit after unrelated busy state clears, got %q", updated.activeSubmit.text)
 	}
 	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
-		t.Fatalf("expected runtime pre-submit flow to own the queued follow-up after unrelated busy state clears, got %+v", updated.queued)
+		t.Fatalf("expected runtime submit flow to own the queued follow-up after unrelated busy state clears, got %+v", updated.queued)
 	}
 	if idleCmd == nil {
 		t.Fatal("expected queued follow-up command sequence after unrelated busy state clears")
 	}
 	_ = collectCmdMessages(t, idleCmd)
-	if client.shouldCompactCalls != 1 {
-		t.Fatalf("expected exactly one pre-submit check after unrelated busy state clears, got %d", client.shouldCompactCalls)
+	if client.submitText != "follow up" {
+		t.Fatalf("expected queued follow-up submit after unrelated busy state clears, got %q", client.submitText)
 	}
 }
 
@@ -237,11 +237,11 @@ func TestBusyQueuedReviewSlashCommandWaitsForHydrationBeforePromptSubmission(t *
 	if updated.busy {
 		t.Fatal("did not expect queued /review prompt submission before hydration settles")
 	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("did not expect queued /review to enter pre-submit before hydration, got %q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "" {
+		t.Fatalf("did not expect queued /review to submit before hydration, got %q", updated.activeSubmit.text)
 	}
-	if client.shouldCompactCalls != 0 {
-		t.Fatalf("did not expect queued /review pre-submit checks before hydration, calls=%d", client.shouldCompactCalls)
+	if client.submitText != "" {
+		t.Fatalf("did not expect queued /review submit before hydration, got %q", client.submitText)
 	}
 	msgs := collectCmdMessages(t, cmd)
 	var refresh runtimeTranscriptRefreshedMsg
@@ -267,21 +267,21 @@ func TestBusyQueuedReviewSlashCommandWaitsForHydrationBeforePromptSubmission(t *
 	if updated.pendingQueuedDrainAfterHydration {
 		t.Fatal("expected queued /review hydration deferral cleared once drained")
 	}
-	if updated.pendingPreSubmitText == "" {
-		t.Fatal("expected queued /review generated prompt to enter runtime pre-submit flow")
+	if updated.activeSubmit.text == "" {
+		t.Fatal("expected queued /review generated prompt to submit")
 	}
-	if strings.Contains(updated.pendingPreSubmitText, "/review cli/app") {
-		t.Fatalf("expected queued /review to submit generated prompt content, got %q", updated.pendingPreSubmitText)
+	if strings.Contains(updated.activeSubmit.text, "/review cli/app") {
+		t.Fatalf("expected queued /review to submit generated prompt content, got %q", updated.activeSubmit.text)
 	}
 	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
 		t.Fatalf("expected hydration to commit final answer before queued /review drains, got %q", got)
 	}
 	if drainCmd == nil {
-		t.Fatal("expected queued /review pre-submit command after hydration")
+		t.Fatal("expected queued /review submit command after hydration")
 	}
 	_ = collectCmdMessages(t, drainCmd)
-	if client.shouldCompactCalls != 1 {
-		t.Fatalf("expected exactly one queued /review pre-submit check after hydration, got %d", client.shouldCompactCalls)
+	if client.submitText == "" {
+		t.Fatal("expected queued /review submit after hydration")
 	}
 }
 

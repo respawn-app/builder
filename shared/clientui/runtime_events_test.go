@@ -83,9 +83,6 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 	if update.Transcript.Sync.IsSet() {
 		t.Fatal("did not expect started run to request transcript sync")
 	}
-	if update.PendingInput.PreSubmitCommand != RuntimePendingInputClearPreSubmit {
-		t.Fatal("expected started run to clear pending pre-submit text")
-	}
 }
 
 func TestReduceRuntimeEvent_GoalRunStateTracksOnlyBusyGoalTurns(t *testing.T) {

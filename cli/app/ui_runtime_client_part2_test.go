@@ -394,40 +394,8 @@ func TestRuntimeClientSubmitUserMessageRecoversRuntimeUnavailable(t *testing.T) 
 	}
 }
 
-func TestRuntimeClientPreSubmitRecoversRuntimeUnavailableWithoutWarning(t *testing.T) {
-	controls := &leaseRetryRuntimeControlClient{compactErr: serverapi.ErrRuntimeUnavailable}
-	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
-	leaseManager := newControllerLeaseManager("lease-old")
-	recoveryCalls := 0
-	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
-		recoveryCalls++
-		return "lease-new", nil
-	})
-	runtimeClient.SetControllerLeaseManager(leaseManager)
-
-	shouldCompact, err := runtimeClient.ShouldCompactBeforeUserMessage(context.Background(), "hello")
-	if err != nil {
-		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
-	}
-	if shouldCompact {
-		t.Fatal("ShouldCompactBeforeUserMessage = true, want false")
-	}
-	if recoveryCalls != 1 {
-		t.Fatalf("recovery call count = %d, want 1", recoveryCalls)
-	}
-	if got := runtimeClient.controllerLeaseIDValue(); got != "lease-new" {
-		t.Fatalf("controller lease id = %q, want lease-new", got)
-	}
-	if controls.compactCalls != 2 {
-		t.Fatalf("pre-submit call count = %d, want 2", controls.compactCalls)
-	}
-	if entries := controls.appendedLocalEntries(); len(entries) != 0 {
-		t.Fatalf("did not expect visible recovery warning during pre-submit, got %+v", entries)
-	}
-}
-
-func TestRuntimeClientPreSubmitRecoveryContinuesFirstPrompt(t *testing.T) {
-	controls := &leaseRetryRuntimeControlClient{compactErr: serverapi.ErrRuntimeUnavailable}
+func TestRuntimeClientSubmitTurnRecoveryContinuesFirstPrompt(t *testing.T) {
+	controls := &leaseRetryRuntimeControlClient{firstSubmitErr: serverapi.ErrRuntimeUnavailable}
 	runtimeClient := newUIRuntimeClientWithReads("session-1", &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
 	leaseManager := newControllerLeaseManager("lease-old")
 	leaseManager.SetRecoverFunc(func(context.Context) (string, error) {
@@ -437,24 +405,11 @@ func TestRuntimeClientPreSubmitRecoveryContinuesFirstPrompt(t *testing.T) {
 	model := newProjectedTestUIModel(runtimeClient, closedProjectedRuntimeEvents(), closedAskEvents())
 	model.startupCmds = nil
 
-	preSubmitCmd := model.inputController().startSubmissionWithPromptHistory("hello after restart")
-	preSubmitMsgs := collectCmdMessages(t, preSubmitCmd)
-	var preSubmit preSubmitCompactionCheckDoneMsg
-	foundPreSubmit := false
-	for _, msg := range preSubmitMsgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			preSubmit = typed
-			foundPreSubmit = true
-		}
+	submitCmd := model.inputController().startSubmissionWithPromptHistory("hello after restart")
+	if submitCmd == nil {
+		t.Fatal("expected submit command")
 	}
-	if !foundPreSubmit {
-		t.Fatalf("expected pre-submit result, got %+v", preSubmitMsgs)
-	}
-	if preSubmit.err != nil || preSubmit.shouldCompact {
-		t.Fatalf("pre-submit result = %+v, want recovered no-compaction", preSubmit)
-	}
-
-	next, submitCmd := model.Update(preSubmit)
+	next := tea.Model(model)
 	updated := next.(*uiModel)
 	submitMsgs := collectCmdMessages(t, submitCmd)
 	var done submitDoneMsg

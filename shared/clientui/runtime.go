@@ -134,11 +134,9 @@ type RuntimeClient interface {
 	ResumeGoal() (*RuntimeGoal, error)
 	ClearGoal() (*RuntimeGoal, error)
 	AppendLocalEntry(role, text string) error
-	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 	SubmitUserMessage(ctx context.Context, text string) (string, error)
 	SubmitUserShellCommand(ctx context.Context, command string) error
 	CompactContext(ctx context.Context, args string) error
-	CompactContextForPreSubmit(ctx context.Context) error
 	HasQueuedUserWork() (bool, error)
 	SubmitQueuedUserMessages(ctx context.Context) (string, error)
 	Interrupt() error

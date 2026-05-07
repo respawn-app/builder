@@ -170,8 +170,8 @@ func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
 	}
 }
 
-func TestPreSubmitCompactionKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *testing.T) {
-	client := &runtimeControlFakeClient{shouldCompactResult: true}
+func TestQueuedSubmitKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *testing.T) {
+	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
 	m.queued = []string{"first queued", "second queued", "third queued"}
@@ -179,61 +179,9 @@ func TestPreSubmitCompactionKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *te
 	next, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected first queued message to start pre-submit check")
+		t.Fatal("expected first queued message to start submission")
 	}
 	msgs := collectCmdMessages(t, cmd)
-	var preSubmit preSubmitCompactionCheckDoneMsg
-	foundPreSubmit := false
-	for _, msg := range msgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			preSubmit = typed
-			foundPreSubmit = true
-		}
-	}
-	if !foundPreSubmit {
-		t.Fatalf("expected pre-submit check completion, got %+v", msgs)
-	}
-	if preSubmit.text != "first queued" || !preSubmit.shouldCompact {
-		t.Fatalf("pre-submit check = (%q, %t), want first queued requiring compaction", preSubmit.text, preSubmit.shouldCompact)
-	}
-
-	next, cmd = updated.Update(preSubmit)
-	updated = next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected pre-submit compaction command")
-	}
-	_ = collectCmdMessages(t, cmd)
-	if updated.pendingPreSubmitText != "first queued" {
-		t.Fatalf("pending pre-submit text = %q, want first queued", updated.pendingPreSubmitText)
-	}
-
-	client.shouldCompactResult = false
-	next, cmd = updated.Update(compactDoneMsg{})
-	updated = next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected original queued message to resume pre-submit after compaction")
-	}
-	msgs = collectCmdMessages(t, cmd)
-	foundPreSubmit = false
-	for _, msg := range msgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			preSubmit = typed
-			foundPreSubmit = true
-		}
-	}
-	if !foundPreSubmit {
-		t.Fatalf("expected pre-submit completion for original queued message, got %+v", msgs)
-	}
-	if preSubmit.text != "first queued" || preSubmit.shouldCompact {
-		t.Fatalf("resumed pre-submit check = (%q, %t), want first queued without compaction", preSubmit.text, preSubmit.shouldCompact)
-	}
-
-	next, cmd = updated.Update(preSubmit)
-	updated = next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected original queued message to submit after resumed pre-submit")
-	}
-	msgs = collectCmdMessages(t, cmd)
 	var done submitDoneMsg
 	foundDone := false
 	for _, msg := range msgs {
@@ -248,6 +196,8 @@ func TestPreSubmitCompactionKeepsActiveQueuedMessageAheadOfLaterQueueItems(t *te
 	if done.submittedText != "first queued" || client.submitText != "first queued" {
 		t.Fatalf("submitted text = (%q, %q), want first queued before later queued items", done.submittedText, client.submitText)
 	}
+	next, _ = updated.Update(done)
+	updated = next.(*uiModel)
 	if len(updated.queued) != 2 || updated.queued[0] != "second queued" || updated.queued[1] != "third queued" {
 		t.Fatalf("expected later queued messages preserved in order, got %+v", updated.queued)
 	}
@@ -266,20 +216,20 @@ func TestDirectSubmitQueuesBehindExistingVisibleMessages(t *testing.T) {
 		t.Fatal("expected existing queued message to start before direct submit")
 	}
 	msgs := collectCmdMessages(t, cmd)
-	foundPreSubmit := false
+	foundSubmit := false
 	for _, msg := range msgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			foundPreSubmit = true
-			if typed.text != "first queued" {
-				t.Fatalf("pre-submit text = %q, want first queued", typed.text)
+		if typed, ok := msg.(submitDoneMsg); ok {
+			foundSubmit = true
+			if typed.submittedText != "first queued" {
+				t.Fatalf("submitted text = %q, want first queued", typed.submittedText)
 			}
 		}
 	}
-	if !foundPreSubmit {
-		t.Fatalf("expected pre-submit check for existing queued message, got %+v", msgs)
+	if !foundSubmit {
+		t.Fatalf("expected submit for existing queued message, got %+v", msgs)
 	}
-	if updated.pendingPreSubmitText != "first queued" {
-		t.Fatalf("pending pre-submit text = %q, want first queued", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "first queued" {
+		t.Fatalf("active submit text = %q, want first queued", updated.activeSubmit.text)
 	}
 	if len(updated.queued) != 2 || updated.queued[0] != "first queued" || updated.queued[1] != "direct submit" {
 		t.Fatalf("expected direct submit queued behind existing message, got %+v", updated.queued)
@@ -328,14 +278,14 @@ func TestRuntimeIdleEventResumesVisibleQueuedMessagesWithoutBlankEnter(t *testin
 	next, cmd = updated.Update(refresh)
 	updated = next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected queued message to enter pre-submit after hydration")
+		t.Fatal("expected queued message to submit after hydration")
 	}
 	_ = collectCmdMessages(t, cmd)
-	if updated.pendingPreSubmitText != "first queued" {
-		t.Fatalf("pending pre-submit text = %q, want first queued without blank Enter", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "first queued" {
+		t.Fatalf("active submit text = %q, want first queued without blank Enter", updated.activeSubmit.text)
 	}
 	if len(updated.queued) != 2 || updated.queued[0] != "first queued" || updated.queued[1] != "second queued" {
-		t.Fatalf("expected runtime pre-submit to own first queued while preserving visible queue order, got %+v", updated.queued)
+		t.Fatalf("expected runtime submit to own first queued while preserving visible queue order, got %+v", updated.queued)
 	}
 }
 
@@ -364,9 +314,6 @@ func TestRuntimeIdleEventDoesNotDuplicatePendingQueuedDrainHydration(t *testing.
 	for _, msg := range msgs {
 		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
 			t.Fatalf("did not expect duplicate queued drain transcript refresh, got %+v", msgs)
-		}
-		if _, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			t.Fatalf("did not expect duplicate queued drain pre-submit, got %+v", msgs)
 		}
 	}
 }
@@ -422,24 +369,6 @@ func TestRuntimeIdleQueuedDrainNotifiesTurnQueueHookOnce(t *testing.T) {
 	next, cmd = updated.Update(refresh)
 	updated = next.(*uiModel)
 	msgs = collectCmdMessages(t, cmd)
-	var preSubmit preSubmitCompactionCheckDoneMsg
-	foundPreSubmit := false
-	for _, msg := range msgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			preSubmit = typed
-			foundPreSubmit = true
-		}
-	}
-	if !foundPreSubmit {
-		t.Fatalf("expected queued follow-up pre-submit, got %+v", msgs)
-	}
-	if hook.drained != 0 || hook.aborted != 0 {
-		t.Fatalf("hook counts while queued turn is running: drained=%d aborted=%d", hook.drained, hook.aborted)
-	}
-
-	next, cmd = updated.Update(preSubmit)
-	updated = next.(*uiModel)
-	msgs = collectCmdMessages(t, cmd)
 	var done submitDoneMsg
 	foundDone := false
 	for _, msg := range msgs {
@@ -449,8 +378,12 @@ func TestRuntimeIdleQueuedDrainNotifiesTurnQueueHookOnce(t *testing.T) {
 		}
 	}
 	if !foundDone {
-		t.Fatalf("expected queued follow-up submit completion, got %+v", msgs)
+		t.Fatalf("expected queued follow-up submit, got %+v", msgs)
 	}
+	if hook.drained != 0 || hook.aborted != 0 {
+		t.Fatalf("hook counts while queued turn is running: drained=%d aborted=%d", hook.drained, hook.aborted)
+	}
+
 	next, _ = updated.Update(done)
 	updated = next.(*uiModel)
 	if hook.drained != 1 || hook.aborted != 0 {
@@ -958,45 +891,35 @@ func TestSubmitErrorRestoresPendingInjectedSubmittedAndQueuedInput(t *testing.T)
 	}
 }
 
-func TestPreSubmitCheckErrorRestoresQueuedDraftsIntoInput(t *testing.T) {
+func TestSubmitErrorRestoresQueuedDraftsIntoInput(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
-	m.preSubmitCheckToken = 1
-	m.pendingPreSubmitText = "submitted"
+	m.activeSubmit = activeSubmitState{token: 1, text: "submitted"}
 	m.queued = []string{"submitted", "queued later"}
 
-	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
-		token: 1,
-		text:  "submitted",
-		err:   errors.New("pre-submit failed"),
-	})
+	next, _ := m.Update(submitDoneMsg{token: 1, submittedText: "submitted", err: errors.New("submit failed")})
 	updated := next.(*uiModel)
 
 	if updated.input != "submitted\n\nqueued later" {
-		t.Fatalf("expected pre-submit rollback to restore current and queued drafts, got %q", updated.input)
+		t.Fatalf("expected submit rollback to restore current and queued drafts, got %q", updated.input)
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
 	}
 }
 
-func TestPreSubmitCheckCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
+func TestSubmitCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
-	m.preSubmitCheckToken = 1
+	m.activeSubmit = activeSubmitState{token: 1, text: "submitted"}
 	m.activity = uiActivityRunning
-	m.pendingPreSubmitText = "submitted"
 	m.queued = []string{"submitted", "queued later"}
 
-	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
-		token: 1,
-		text:  "submitted",
-		err:   context.Canceled,
-	})
+	next, _ := m.Update(submitDoneMsg{token: 1, submittedText: "submitted", err: context.Canceled})
 	updated := next.(*uiModel)
 
 	if updated.input != "submitted\n\nqueued later" {
-		t.Fatalf("expected pre-submit cancellation to restore current and queued drafts, got %q", updated.input)
+		t.Fatalf("expected submit cancellation to restore current and queued drafts, got %q", updated.input)
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
@@ -1013,13 +936,12 @@ func TestCompactFailureRestoresQueuedDraftsIntoInput(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.compacting = true
-	m.pendingPreSubmitText = "submitted"
-	m.queued = []string{"submitted", "queued later"}
+	m.queued = []string{"queued later"}
 
 	next, _ := m.Update(compactDoneMsg{err: errors.New("compact failed")})
 	updated := next.(*uiModel)
 
-	if updated.input != "submitted\n\nqueued later" {
+	if updated.input != "queued later" {
 		t.Fatalf("expected compaction rollback to restore current and queued drafts, got %q", updated.input)
 	}
 	if len(updated.queued) != 0 {
@@ -1032,13 +954,12 @@ func TestCompactCancellationRestoresQueuedDraftsWithoutErrorEntry(t *testing.T) 
 	m.busy = true
 	m.compacting = true
 	m.activity = uiActivityRunning
-	m.pendingPreSubmitText = "submitted"
-	m.queued = []string{"submitted", "queued later"}
+	m.queued = []string{"queued later"}
 
 	next, _ := m.Update(compactDoneMsg{err: context.Canceled})
 	updated := next.(*uiModel)
 
-	if updated.input != "submitted\n\nqueued later" {
+	if updated.input != "queued later" {
 		t.Fatalf("expected compaction cancellation to restore current and queued drafts, got %q", updated.input)
 	}
 	if len(updated.queued) != 0 {

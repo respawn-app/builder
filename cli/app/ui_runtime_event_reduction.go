@@ -57,10 +57,6 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeE
 	case clientui.RuntimePendingInputClearDraft:
 		m.clearInput()
 	}
-	switch reduction.PendingInput.PreSubmitCommand {
-	case clientui.RuntimePendingInputClearPreSubmit:
-		m.pendingPreSubmitText = ""
-	}
 	switch reduction.RunState.Activity {
 	case clientui.RuntimeActivityRunning:
 		m.activity = uiActivityRunning

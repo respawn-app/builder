@@ -39,13 +39,6 @@ func newSubmitDoneMsg(token uint64, message string, submittedText string, err er
 	}
 }
 
-type preSubmitCompactionCheckDoneMsg struct {
-	token         uint64
-	text          string
-	shouldCompact bool
-	err           error
-}
-
 type promptHistoryPersistErrMsg struct {
 	err error
 }

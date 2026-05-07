@@ -116,15 +116,6 @@ func (m *uiModel) appendRuntimeLocalEntry(role, text string) error {
 	return nil
 }
 
-func (m *uiModel) runtimeShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
-	if client := m.runtimeClient(); client != nil {
-		shouldCompact, err := client.ShouldCompactBeforeUserMessage(ctx, text)
-		m.observeRuntimeRequestResult(err)
-		return shouldCompact, err
-	}
-	return false, nil
-}
-
 func (m *uiModel) submitRuntimeUserMessage(ctx context.Context, text string) (string, error) {
 	if client := m.runtimeClient(); client != nil {
 		message, err := client.SubmitUserMessage(ctx, text)
@@ -146,15 +137,6 @@ func (m *uiModel) submitRuntimeUserShellCommand(ctx context.Context, command str
 func (m *uiModel) compactRuntimeContext(ctx context.Context, args string) error {
 	if client := m.runtimeClient(); client != nil {
 		err := client.CompactContext(ctx, args)
-		m.observeRuntimeRequestResult(err)
-		return err
-	}
-	return nil
-}
-
-func (m *uiModel) compactRuntimeContextForPreSubmit(ctx context.Context) error {
-	if client := m.runtimeClient(); client != nil {
-		err := client.CompactContextForPreSubmit(ctx)
 		m.observeRuntimeRequestResult(err)
 		return err
 	}

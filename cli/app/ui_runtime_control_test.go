@@ -264,10 +264,6 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 		t.Fatalf("clear runtime goal = (%+v, %v), want nil goal", goal, err)
 	}
 	m.appendRuntimeLocalEntry("system", "hello")
-	shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt")
-	if err != nil || !shouldCompact {
-		t.Fatalf("runtime should compact = (%t, %v), want (true, nil)", shouldCompact, err)
-	}
 	message, err := m.submitRuntimeUserMessage(context.Background(), "prompt")
 	if err != nil || message != "assistant" {
 		t.Fatalf("submit runtime user message = (%q, %v), want (assistant, nil)", message, err)
@@ -277,9 +273,6 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	}
 	if err := m.compactRuntimeContext(context.Background(), "--force"); err != nil {
 		t.Fatalf("compact runtime context: %v", err)
-	}
-	if err := m.compactRuntimeContextForPreSubmit(context.Background()); err != nil {
-		t.Fatalf("compact runtime context for presubmit: %v", err)
 	}
 	queuedWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil || !queuedWork {
@@ -312,10 +305,10 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if client.appendedRole != "system" || client.appendedText != "hello" {
 		t.Fatalf("unexpected appended local entry: role=%q text=%q", client.appendedRole, client.appendedText)
 	}
-	if client.shouldCompactText != "prompt" || client.submitText != "prompt" || client.submitShellCommand != "echo hi" {
-		t.Fatalf("unexpected submission args: compact=%q submit=%q shell=%q", client.shouldCompactText, client.submitText, client.submitShellCommand)
+	if client.submitText != "prompt" || client.submitShellCommand != "echo hi" {
+		t.Fatalf("unexpected submission args: submit=%q shell=%q", client.submitText, client.submitShellCommand)
 	}
-	if client.compactArgs != "__pre_submit__" {
+	if client.compactArgs != "--force" {
 		t.Fatalf("unexpected compact arg marker: %q", client.compactArgs)
 	}
 	if client.interruptCalls != 1 || client.queuedText != "queued text" || client.discardQueuedText != "queued text" || client.recordedPromptHistory != "prompt history" {
@@ -356,9 +349,6 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	if goal, err := m.clearRuntimeGoal(); goal != nil || err != nil {
 		t.Fatalf("clear runtime goal without client = (%+v, %v), want (nil, nil)", goal, err)
 	}
-	if shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt"); shouldCompact || err != nil {
-		t.Fatalf("runtime should compact without client = (%t, %v), want (false, nil)", shouldCompact, err)
-	}
 	if message, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); message != "" || err != nil {
 		t.Fatalf("submit runtime user message without client = (%q, %v), want (empty, nil)", message, err)
 	}
@@ -367,9 +357,6 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	}
 	if err := m.compactRuntimeContext(context.Background(), "--force"); err != nil {
 		t.Fatalf("compact runtime context without client: %v", err)
-	}
-	if err := m.compactRuntimeContextForPreSubmit(context.Background()); err != nil {
-		t.Fatalf("compact runtime context for presubmit without client: %v", err)
 	}
 	queuedWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
@@ -412,7 +399,7 @@ func TestSubmitErrorWithRuntimeClientAppendsActivePrimaryRunEntry(t *testing.T) 
 	}
 }
 
-func TestSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
+func TestActiveSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
 	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
 	m := newProjectedStaticUIModel()
 	m.engine = client
@@ -443,14 +430,14 @@ func TestSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testin
 	}
 }
 
-func TestPreSubmitCheckErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
+func TestSubmitErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t *testing.T) {
 	client := &runtimeControlFakeClient{appendErr: errors.New("append failed")}
 	m := newProjectedStaticUIModel()
 	m.engine = client
 	m.busy = true
-	m.preSubmitCheckToken = 1
+	m.activeSubmit = activeSubmitState{token: 1, text: "prompt"}
 
-	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{token: 1, text: "prompt", err: errors.New("pre-submit failed")})
+	next, _ := m.Update(submitDoneMsg{token: 1, submittedText: "prompt", err: errors.New("submit failed")})
 	updated := next.(*uiModel)
 
 	if updated.activity != uiActivityError {
@@ -460,7 +447,7 @@ func TestPreSubmitCheckErrorFallsBackToVisibleTranscriptWhenRuntimeAppendFails(t
 		t.Fatalf("expected one fallback transcript entry, got %+v", updated.transcriptEntries)
 	}
 	entry := updated.transcriptEntries[0]
-	if entry.Role != tui.TranscriptRoleDeveloperErrorFeedback || entry.Text != "pre-submit failed" {
+	if entry.Role != tui.TranscriptRoleDeveloperErrorFeedback || entry.Text != "submit failed" {
 		t.Fatalf("unexpected fallback transcript entry: %+v", entry)
 	}
 }
@@ -493,9 +480,6 @@ func TestRuntimeControlHelpersPropagateRuntimeErrors(t *testing.T) {
 	}
 	if _, _, err := m.setRuntimeReviewerEnabled(true); !errors.Is(err, boom) {
 		t.Fatalf("set runtime reviewer error = %v, want boom", err)
-	}
-	if _, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt"); !errors.Is(err, boom) {
-		t.Fatalf("runtime should compact error = %v, want boom", err)
 	}
 	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); !errors.Is(err, boom) {
 		t.Fatalf("submit runtime user message error = %v, want boom", err)

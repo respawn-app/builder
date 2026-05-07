@@ -51,9 +51,6 @@ func (s *stubRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
 }
 func (s *stubRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) { return nil, nil }
 func (s *stubRuntimeClient) AppendLocalEntry(string, string) error     { return nil }
-func (s *stubRuntimeClient) ShouldCompactBeforeUserMessage(context.Context, string) (bool, error) {
-	return false, nil
-}
 func (s *stubRuntimeClient) SubmitUserMessage(context.Context, string) (string, error) {
 	s.submitCalls++
 	return "ok", nil
@@ -62,9 +59,8 @@ func (s *stubRuntimeClient) SubmitUserShellCommand(context.Context, string) erro
 	s.submitShellCalls++
 	return nil
 }
-func (s *stubRuntimeClient) CompactContext(context.Context, string) error     { return nil }
-func (s *stubRuntimeClient) CompactContextForPreSubmit(context.Context) error { return nil }
-func (s *stubRuntimeClient) HasQueuedUserWork() (bool, error)                 { return false, nil }
+func (s *stubRuntimeClient) CompactContext(context.Context, string) error { return nil }
+func (s *stubRuntimeClient) HasQueuedUserWork() (bool, error)             { return false, nil }
 func (s *stubRuntimeClient) SubmitQueuedUserMessages(context.Context) (string, error) {
 	s.queuedSubmitCalls++
 	return "ok", nil

@@ -451,10 +451,6 @@ func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
 	return c.inner.AppendLocalEntry(role, text)
 }
 
-func (c *countingRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
-	return c.inner.ShouldCompactBeforeUserMessage(ctx, text)
-}
-
 func (c *countingRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
 	return c.inner.SubmitUserMessage(ctx, text)
 }
@@ -465,10 +461,6 @@ func (c *countingRuntimeClient) SubmitUserShellCommand(ctx context.Context, comm
 
 func (c *countingRuntimeClient) CompactContext(ctx context.Context, args string) error {
 	return c.inner.CompactContext(ctx, args)
-}
-
-func (c *countingRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
-	return c.inner.CompactContextForPreSubmit(ctx)
 }
 
 func (c *countingRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }

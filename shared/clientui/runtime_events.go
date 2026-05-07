@@ -95,13 +95,6 @@ const (
 	RuntimePendingInputClearDraft
 )
 
-type RuntimePreSubmitInputCommandKind uint8
-
-const (
-	RuntimePendingInputKeepPreSubmit RuntimePreSubmitInputCommandKind = iota
-	RuntimePendingInputClearPreSubmit
-)
-
 type RuntimePromptHistoryCommand struct {
 	Text string
 }
@@ -109,7 +102,6 @@ type RuntimePromptHistoryCommand struct {
 type RuntimePendingInputReduction struct {
 	State                PendingInputState
 	DraftCommand         RuntimeDraftInputCommandKind
-	PreSubmitCommand     RuntimePreSubmitInputCommandKind
 	PromptHistoryCommand *RuntimePromptHistoryCommand
 }
 
@@ -240,15 +232,10 @@ func ReduceRuntimeConversationEvent(state RuntimeConversationState, evt Event) R
 func ReduceRuntimePendingInputEvent(input PendingInputState, evt Event) RuntimePendingInputReduction {
 	next := clonePendingInputState(input)
 	reduction := RuntimePendingInputReduction{
-		State:            next,
-		DraftCommand:     RuntimePendingInputKeepDraft,
-		PreSubmitCommand: RuntimePendingInputKeepPreSubmit,
+		State:        next,
+		DraftCommand: RuntimePendingInputKeepDraft,
 	}
 	switch evt.Kind {
-	case EventRunStateChanged:
-		if evt.RunState != nil && evt.RunState.Busy {
-			reduction.PreSubmitCommand = RuntimePendingInputClearPreSubmit
-		}
 	case EventUserMessageFlushed:
 		batch := append([]string(nil), evt.UserMessageBatch...)
 		if len(batch) == 0 && strings.TrimSpace(evt.UserMessage) != "" {

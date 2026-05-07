@@ -62,10 +62,6 @@ func (c *gatedRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error)  { retur
 func (c *gatedRuntimeClient) AppendLocalEntry(role, text string) error {
 	return c.inner.AppendLocalEntry(role, text)
 }
-func (c *gatedRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
-	return c.inner.ShouldCompactBeforeUserMessage(ctx, text)
-}
-
 func (c *gatedRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
 	lease, err := c.gate.AcquirePrimaryRun(c.sessionID)
 	if err != nil {
@@ -86,10 +82,6 @@ func (c *gatedRuntimeClient) SubmitUserShellCommand(ctx context.Context, command
 
 func (c *gatedRuntimeClient) CompactContext(ctx context.Context, args string) error {
 	return c.inner.CompactContext(ctx, args)
-}
-
-func (c *gatedRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
-	return c.inner.CompactContextForPreSubmit(ctx)
 }
 
 func (c *gatedRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }

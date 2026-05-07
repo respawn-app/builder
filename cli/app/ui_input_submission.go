@@ -48,15 +48,12 @@ func (c uiInputController) startSubmissionWithPreSubmitQueuePosition(text string
 		return tea.Batch(c.submitUserShellCmd(text, command), m.ensureSpinnerTicking())
 	}
 	if m.hasRuntimeClient() {
-		m.preSubmitCheckToken++
-		token := m.preSubmitCheckToken
-		m.pendingPreSubmitText = text
 		if queuePosition == preSubmitQueueFront {
 			m.queued = append([]string{text}, m.queued...)
 		} else {
 			m.queued = append(m.queued, text)
 		}
-		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), m.ensureSpinnerTicking())
+		return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
 	}
 	return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
 }
@@ -79,17 +76,6 @@ func (c uiInputController) startSubmissionWithPromptHistoryAndQueuePosition(text
 		return c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition)
 	}
 	return sequenceCmds(m.recordPromptHistory(text), c.startSubmissionWithPreSubmitQueuePosition(text, queuePosition))
-}
-
-func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string) tea.Cmd {
-	m := c.model
-	return func() tea.Msg {
-		if !m.hasRuntimeClient() {
-			return preSubmitCompactionCheckDoneMsg{token: token, text: text}
-		}
-		shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), text)
-		return preSubmitCompactionCheckDoneMsg{token: token, text: text, shouldCompact: shouldCompact, err: err}
-	}
 }
 
 func (c uiInputController) submitCmd(text string) tea.Cmd {
@@ -186,7 +172,6 @@ const (
 	uiCompactionOriginNone uiCompactionOrigin = iota
 	uiCompactionOriginManual
 	uiCompactionOriginQueued
-	uiCompactionOriginPreSubmit
 )
 
 func (c uiInputController) startCompaction(args string) tea.Cmd {
@@ -206,15 +191,6 @@ func (c uiInputController) startCompactionWithOrigin(args string, origin uiCompa
 	return tea.Batch(c.compactCmd(args), m.ensureSpinnerTicking())
 }
 
-func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
-	m := c.model
-	c.startBusyActivity(true)
-	m.compactionOrigin = uiCompactionOriginPreSubmit
-	m.logf("compaction.pre_submit.start")
-	m.syncViewport()
-	return tea.Batch(c.preSubmitCompactCmd(), m.ensureSpinnerTicking())
-}
-
 func (c uiInputController) compactCmd(args string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
@@ -222,16 +198,6 @@ func (c uiInputController) compactCmd(args string) tea.Cmd {
 			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
 		return compactDoneMsg{err: m.compactRuntimeContext(context.Background(), args)}
-	}
-}
-
-func (c uiInputController) preSubmitCompactCmd() tea.Cmd {
-	m := c.model
-	return func() tea.Msg {
-		if !m.hasRuntimeClient() {
-			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
-		}
-		return compactDoneMsg{err: m.compactRuntimeContextForPreSubmit(context.Background())}
 	}
 }
 
@@ -281,7 +247,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	m.activeSubmit = activeSubmitState{}
 	c.finishBusyActivity(false)
-	m.pendingPreSubmitText = ""
+	m.discardQueuedText(msg.submittedText)
 	if msg.err != nil {
 		if m.turnQueueHook != nil {
 			m.turnQueueHook.OnTurnQueueAborted()
@@ -359,43 +325,6 @@ func (c uiInputController) queuedDrainRequiresHydration() bool {
 	return false
 }
 
-func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompactionCheckDoneMsg) (tea.Model, tea.Cmd) {
-	m := c.model
-	if msg.token != m.preSubmitCheckToken {
-		return m, nil
-	}
-	if msg.err != nil {
-		c.finishBusyActivity(false)
-		if m.turnQueueHook != nil {
-			m.turnQueueHook.OnTurnQueueAborted()
-		}
-		c.releaseLockedInjectedInput(true)
-		m.discardQueuedText(msg.text)
-		c.restorePendingInjectedIntoInput()
-		c.restorePendingPreSubmitTextIntoInput()
-		c.restoreQueuedMessagesIntoInput()
-		if isInterruptedRuntimeError(msg.err) {
-			m.activity = uiActivityInterrupted
-			m.logf("step.interrupted")
-			m.syncViewport()
-			return m, nil
-		}
-		detailErr := formatSubmissionError(msg.err)
-		m.activity = uiActivityError
-		appendCmd := m.appendOperatorErrorFeedback(detailErr)
-		m.logf("step.pre_submit_check.error err=%q", detailErr)
-		m.syncViewport()
-		return m, appendCmd
-	}
-	if !msg.shouldCompact {
-		m.discardQueuedText(msg.text)
-		m.logf("step.pre_submit_check.submit user_chars=%d", len(msg.text))
-		return m, sequenceCmds(m.recordPromptHistory(msg.text), c.submitCmd(msg.text))
-	}
-	m.logf("step.pre_submit_check.compact_then_submit user_chars=%d", len(msg.text))
-	return m, c.startPreSubmitCompaction()
-}
-
 func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	if msg.token == 0 || msg.token != m.spinnerTickToken {
@@ -429,9 +358,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	c.finishBusyActivity(true)
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
-		m.discardQueuedText(m.pendingPreSubmitText)
 		c.restorePendingInjectedIntoInput()
-		c.restorePendingPreSubmitTextIntoInput()
 		c.restoreQueuedMessagesIntoInput()
 		if isInterruptedRuntimeError(msg.err) {
 			m.activity = uiActivityInterrupted

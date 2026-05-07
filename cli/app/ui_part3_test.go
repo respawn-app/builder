@@ -536,87 +536,6 @@ func TestInterruptedQueuedPromptDoesNotEnterHistoryBeforeFlush(t *testing.T) {
 	}
 }
 
-func TestPreSubmitCompactionQueuesPromptUntilCompactionCompletes(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	client := &runtimeAdapterFakeClient{}
-	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
-		Model:                         "gpt-5",
-		PreSubmitCompactionLeadTokens: 50,
-	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	m := newProjectedEngineUIModel(eng)
-	m.input = "continue"
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated := next.(*uiModel)
-	if !updated.busy {
-		t.Fatal("expected busy while pre-submit compaction check is in flight")
-	}
-	if updated.pendingPreSubmitText != "continue" {
-		t.Fatalf("expected pending pre-submit text preserved, got %q", updated.pendingPreSubmitText)
-	}
-	if len(updated.queued) != 1 || updated.queued[0] != "continue" {
-		t.Fatalf("expected prompt queued before compaction decision, got %+v", updated.queued)
-	}
-
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token:         updated.preSubmitCheckToken,
-		text:          "continue",
-		shouldCompact: true,
-	})
-	updated = next.(*uiModel)
-	if !updated.compacting {
-		t.Fatal("expected compaction state after pre-submit compaction decision")
-	}
-	if updated.pendingPreSubmitText != "continue" {
-		t.Fatalf("expected pending pre-submit text kept while compaction runs, got %q", updated.pendingPreSubmitText)
-	}
-
-	next, _ = updated.Update(compactDoneMsg{})
-	updated = next.(*uiModel)
-	if !updated.busy {
-		t.Fatal("expected queued prompt to resume submission immediately after compaction")
-	}
-	if updated.pendingPreSubmitText != "continue" {
-		t.Fatalf("expected resumed queued prompt to become pending pre-submit text again, got %q", updated.pendingPreSubmitText)
-	}
-	if len(updated.queued) != 1 || updated.queued[0] != "continue" {
-		t.Fatalf("expected resumed queued prompt buffered for submission, got %+v", updated.queued)
-	}
-
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token:         updated.preSubmitCheckToken,
-		text:          "continue",
-		shouldCompact: false,
-	})
-	updated = next.(*uiModel)
-	if len(updated.queued) != 0 {
-		t.Fatalf("expected queued prompt consumed before final submit, got %+v", updated.queued)
-	}
-	if got := updated.promptHistory[len(updated.promptHistory)-1]; got != "continue" {
-		t.Fatalf("expected resumed queued prompt recorded when final submit begins, got %+v", updated.promptHistory)
-	}
-
-	next, _ = updated.Update(submitDoneMsg{})
-	updated = next.(*uiModel)
-	if updated.busy {
-		t.Fatal("expected idle state after resumed queued prompt submits")
-	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("expected pending pre-submit text cleared after submit, got %q", updated.pendingPreSubmitText)
-	}
-	if updated.compacting {
-		t.Fatal("expected compacting state cleared after resumed queued prompt submits")
-	}
-}
-
 func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -627,16 +546,9 @@ func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if updated.pendingPreSubmitText != "say hi" {
-		t.Fatalf("expected pending pre-submit text preserved, got %q", updated.pendingPreSubmitText)
+	if updated.activeSubmit.text != "say hi" {
+		t.Fatalf("expected active submit text preserved, got %q", updated.activeSubmit.text)
 	}
-
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token:         updated.preSubmitCheckToken,
-		text:          "say hi",
-		shouldCompact: false,
-	})
-	updated = next.(*uiModel)
 
 	cmd := updated.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
 		Kind:        runtime.EventUserMessageFlushed,
@@ -665,7 +577,7 @@ func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(
 	}
 }
 
-func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
+func TestSubmitDoneKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -684,11 +596,8 @@ func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
 	updated := next.(*uiModel)
 	updated.queued = append(updated.queued, "fix", "continue")
 
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token:         updated.preSubmitCheckToken,
-		text:          "continue",
-		shouldCompact: false,
-	})
+	done := submitDoneMsg{token: updated.activeSubmit.token, submittedText: "continue"}
+	next, _ = updated.Update(done)
 	updated = next.(*uiModel)
 	if len(updated.queued) != 2 {
 		t.Fatalf("expected two queued prompts to remain, got %+v", updated.queued)
@@ -698,7 +607,7 @@ func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
 	}
 }
 
-func TestCtrlCWhilePreSubmitCheckRestoresDraftAndIgnoresStaleDecision(t *testing.T) {
+func TestCtrlCWhileSubmitRestoresQueuedDraft(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -714,15 +623,11 @@ func TestCtrlCWhilePreSubmitCheckRestoresDraftAndIgnoresStaleDecision(t *testing
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	originalToken := updated.preSubmitCheckToken
-	if len(updated.promptHistory) != 0 {
-		t.Fatalf("expected no prompt history before pre-submit decision, got %+v", updated.promptHistory)
-	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	updated = next.(*uiModel)
 	if updated.busy {
-		t.Fatal("expected busy=false after ctrl+c during pre-submit check")
+		t.Fatal("expected busy=false after ctrl+c during submit")
 	}
 	if updated.activity != uiActivityInterrupted {
 		t.Fatalf("expected interrupted activity, got %v", updated.activity)
@@ -733,75 +638,9 @@ func TestCtrlCWhilePreSubmitCheckRestoresDraftAndIgnoresStaleDecision(t *testing
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued draft restored into input and cleared, got %+v", updated.queued)
 	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("expected pending pre-submit text cleared after ctrl+c, got %q", updated.pendingPreSubmitText)
-	}
-	if len(updated.promptHistory) != 0 {
-		t.Fatalf("expected ctrl+c before submit start to avoid prompt history persistence, got %+v", updated.promptHistory)
-	}
-
-	next, cmd := updated.Update(preSubmitCompactionCheckDoneMsg{token: originalToken, text: "continue", shouldCompact: true})
-	updated = next.(*uiModel)
-	if cmd != nil {
-		t.Fatal("expected stale pre-submit result to be ignored")
-	}
-	if updated.input != "continue" {
-		t.Fatalf("expected stale result to leave restored draft untouched, got %q", updated.input)
-	}
-	if updated.busy {
-		t.Fatal("expected stale result not to restart submission")
-	}
-	if len(updated.promptHistory) != 0 {
-		t.Fatalf("expected stale result not to record prompt history, got %+v", updated.promptHistory)
-	}
 }
 
-func TestPreSubmitCompactionFailureKeepsPromptOutOfHistory(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	m := newProjectedEngineUIModel(eng)
-	m.input = "continue"
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated := next.(*uiModel)
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token:         updated.preSubmitCheckToken,
-		text:          "continue",
-		shouldCompact: true,
-	})
-	updated = next.(*uiModel)
-
-	next, _ = updated.Update(compactDoneMsg{err: errors.New("compact failed")})
-	updated = next.(*uiModel)
-	if updated.busy {
-		t.Fatal("expected busy=false after compaction failure")
-	}
-	if updated.activity != uiActivityError {
-		t.Fatalf("expected error activity after compaction failure, got %v", updated.activity)
-	}
-	if len(updated.queued) != 0 {
-		t.Fatalf("expected failed pre-submit prompt removed from queue, got %+v", updated.queued)
-	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("expected pending pre-submit text cleared after compaction failure, got %q", updated.pendingPreSubmitText)
-	}
-	if updated.input != "continue" {
-		t.Fatalf("expected failed pre-submit prompt restored into input, got %q", updated.input)
-	}
-	if len(updated.promptHistory) != 0 {
-		t.Fatalf("expected compaction failure before submit start not to record prompt history, got %+v", updated.promptHistory)
-	}
-}
-
-func TestPreSubmitCheckErrorRestoresQueuedSteeringInput(t *testing.T) {
+func TestActiveSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -822,7 +661,7 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringInput(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
-		t.Fatal("did not expect follow-up enter during pre-submit check to lock input")
+		t.Fatal("did not expect follow-up enter during submit to lock input")
 	}
 	if updated.input != "" {
 		t.Fatalf("expected queued steering input cleared immediately, got %q", updated.input)
@@ -831,27 +670,20 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringInput(t *testing.T) {
 		t.Fatalf("expected pending injected follow-up recorded, got %+v", updated.pendingInjected)
 	}
 
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token: updated.preSubmitCheckToken,
-		text:  "continue",
-		err:   errors.New("pre-submit failed"),
-	})
+	next, _ = updated.Update(submitDoneMsg{token: updated.activeSubmit.token, submittedText: "continue", err: errors.New("submit failed")})
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
-		t.Fatal("did not expect pre-submit check error to leave input locked")
+		t.Fatal("did not expect submit error to leave input locked")
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected follow-up cleared, got %+v", updated.pendingInjected)
-	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("expected pending pre-submit text cleared after error, got %q", updated.pendingPreSubmitText)
 	}
 	if updated.input != "later\n\ncontinue" {
 		t.Fatalf("expected restored prompt and unlocked follow-up draft, got %q", updated.input)
 	}
 }
 
-func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+func TestActiveSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -874,15 +706,11 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *test
 	updated.input = "later"
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
-		token: updated.preSubmitCheckToken,
-		text:  "continue",
-		err:   errors.New("pre-submit failed"),
-	})
+	next, _ = updated.Update(submitDoneMsg{token: updated.activeSubmit.token, submittedText: "continue", err: errors.New("submit failed")})
 	updated = next.(*uiModel)
 
 	if updated.input != "later\n\ncontinue" {
-		t.Fatalf("expected restored steering and pre-submit text in input, got %q", updated.input)
+		t.Fatalf("expected restored steering and submit text in input, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)

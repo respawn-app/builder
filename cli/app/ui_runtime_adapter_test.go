@@ -234,7 +234,6 @@ func TestProjectRuntimeEventIncludesBackgroundSystemTranscriptEntry(t *testing.T
 
 func TestRuntimeAdapterRunStartAppliesPendingInputBeforeActivityEffect(t *testing.T) {
 	m := newProjectedStaticUIModel()
-	m.pendingPreSubmitText = "queued prompt"
 	m.activity = uiActivityIdle
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
@@ -242,9 +241,6 @@ func TestRuntimeAdapterRunStartAppliesPendingInputBeforeActivityEffect(t *testin
 		RunState: &clientui.RunState{Busy: true},
 	})
 
-	if m.pendingPreSubmitText != "" {
-		t.Fatalf("pending pre-submit text = %q, want cleared", m.pendingPreSubmitText)
-	}
 	if m.activity != uiActivityRunning {
 		t.Fatalf("activity = %v, want running", m.activity)
 	}

@@ -398,30 +398,9 @@ func TestRuntimeSubmitNoopFinalStaysSilent(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected pre-submit command batch")
-	}
-	msgs := collectCmdMessages(t, cmd)
-	var preSubmit preSubmitCompactionCheckDoneMsg
-	preSubmitFound := false
-	for _, msg := range msgs {
-		if typed, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
-			preSubmit = typed
-			preSubmitFound = true
-		}
-	}
-	if !preSubmitFound {
-		t.Fatalf("expected pre-submit completion message, got %+v", msgs)
-	}
-	if preSubmit.shouldCompact {
-		t.Fatal("did not expect pre-submit compaction")
-	}
-
-	next, cmd = updated.Update(preSubmit)
-	updated = next.(*uiModel)
-	if cmd == nil {
 		t.Fatal("expected submit command batch")
 	}
-	msgs = collectCmdMessages(t, cmd)
+	msgs := collectCmdMessages(t, cmd)
 	var done submitDoneMsg
 	doneFound := false
 	for _, msg := range msgs {

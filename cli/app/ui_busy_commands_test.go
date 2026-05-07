@@ -426,22 +426,10 @@ func TestBusyQueuedFastAppliesToNextRuntimeRequestAfterTurnDrains(t *testing.T) 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected pre-submit command for next prompt")
+		t.Fatal("expected submit command for next prompt")
 	}
 
-	var submitCmd tea.Cmd
 	for _, msg := range collectCmdMessages(t, cmd) {
-		preSubmit, ok := msg.(preSubmitCompactionCheckDoneMsg)
-		if !ok {
-			continue
-		}
-		next, submitCmd = updated.Update(preSubmit)
-		updated = next.(*uiModel)
-	}
-	if submitCmd == nil {
-		t.Fatal("expected submit command after pre-submit check")
-	}
-	for _, msg := range collectCmdMessages(t, submitCmd) {
 		done, ok := msg.(submitDoneMsg)
 		if !ok {
 			continue

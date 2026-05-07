@@ -87,22 +87,6 @@ func (c uiInputController) restoreQueuedMessagesIntoInput() {
 	m.replaceMainInput(newInput, -1)
 }
 
-func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
-	m := c.model
-	pending := strings.TrimSpace(m.pendingPreSubmitText)
-	if pending == "" {
-		return
-	}
-	m.pendingPreSubmitText = ""
-	newInput := pending
-	if strings.TrimSpace(m.input) == "" {
-		newInput = pending
-	} else {
-		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + pending
-	}
-	m.replaceMainInput(newInput, -1)
-}
-
 func (c uiInputController) restoreSubmittedTextIntoInput(text string) {
 	m := c.model
 	submitted := strings.TrimSpace(text)
