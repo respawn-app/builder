@@ -28,14 +28,10 @@ type HeadlessBootstrap struct {
 	Background      *shelltool.Manager
 	RuntimeRegistry interface {
 		primaryrun.Gate
-		Register(sessionID string, engine *runtime.Engine)
-		Unregister(sessionID string, engine *runtime.Engine)
+		runtimewire.RuntimeRegistry
 		PublishRuntimeEvent(sessionID string, evt runtime.Event)
 	}
-	BackgroundRouter interface {
-		SetActiveSession(sessionID string, engine *runtime.Engine)
-		ClearActiveSession(sessionID string)
-	}
+	BackgroundRouter runtimewire.BackgroundRouter
 }
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
@@ -75,10 +71,11 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req 
 }
 
 type headlessRuntimePlan struct {
-	logger      *RunLogger
-	engine      *runtime.Engine
-	eventBridge *runtimewire.EventBridge
-	close       func()
+	logger       *RunLogger
+	engine       *runtime.Engine
+	eventBridge  *runtimewire.EventBridge
+	registration runtimewire.RuntimeRegistration
+	close        func()
 }
 
 func (p *headlessRuntimePlan) Close() {
@@ -126,23 +123,22 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 	if wiring.AskBroker != nil {
 		wiring.AskBroker.SetAskHandler(RunPromptAskHandler)
 	}
+	var runtimeRegistry runtimewire.RuntimeRegistry
 	if l.boot.RuntimeRegistry != nil {
-		l.boot.RuntimeRegistry.Register(plan.Store.Meta().SessionID, wiring.Engine)
+		runtimeRegistry = l.boot.RuntimeRegistry
 	}
+	var backgroundRouter runtimewire.BackgroundRouter
 	if l.boot.BackgroundRouter != nil {
-		l.boot.BackgroundRouter.SetActiveSession(plan.Store.Meta().SessionID, wiring.Engine)
+		backgroundRouter = l.boot.BackgroundRouter
 	}
+	registration := runtimewire.RegisterSessionRuntime(plan.Store.Meta().SessionID, wiring.Engine, runtimeRegistry, backgroundRouter)
 	return &headlessRuntimePlan{
-		logger:      logger,
-		engine:      wiring.Engine,
-		eventBridge: wiring.EventBridge,
+		logger:       logger,
+		engine:       wiring.Engine,
+		eventBridge:  wiring.EventBridge,
+		registration: registration,
 		close: func() {
-			if l.boot.RuntimeRegistry != nil {
-				l.boot.RuntimeRegistry.Unregister(plan.Store.Meta().SessionID, wiring.Engine)
-			}
-			if l.boot.BackgroundRouter != nil {
-				l.boot.BackgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
-			}
+			registration.Close()
 			_ = wiring.Close()
 			_ = logger.Close()
 		},
