@@ -55,6 +55,79 @@ func TestApplyReviewerInheritanceDoesNotCopyMainProviderCapabilitiesForExplicitR
 	}
 }
 
+func TestApplyReviewerInheritanceMergesReviewerModelCapabilitiesPerField(t *testing.T) {
+	settings := config.Settings{
+		ModelCapabilities: config.ModelCapabilitiesOverride{
+			SupportsReasoningEffort: true,
+			SupportsVisionInputs:    true,
+		},
+		Reviewer: config.ReviewerSettings{
+			ModelCapabilities: config.ModelCapabilitiesOverride{
+				SupportsReasoningEffort: false,
+				SupportsVisionInputs:    false,
+			},
+		},
+	}
+	sources := reviewerInheritanceDefaultSources()
+	sources["reviewer.model_capabilities.supports_reasoning_effort"] = "subagent"
+
+	applyReviewerInheritance(&settings, sources)
+
+	if settings.Reviewer.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatalf("expected explicit reviewer reasoning capability override to stay false")
+	}
+	if !settings.Reviewer.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected default reviewer vision capability to inherit updated main true")
+	}
+}
+
+func TestApplyReviewerInheritanceMergesReviewerProviderCapabilitiesPerField(t *testing.T) {
+	settings := config.Settings{
+		ProviderCapabilities: config.ProviderCapabilitiesOverride{
+			ProviderID:                     "main-provider",
+			SupportsResponsesAPI:           true,
+			SupportsResponsesCompact:       true,
+			SupportsRequestInputTokenCount: true,
+			SupportsPromptCacheKey:         true,
+			SupportsNativeWebSearch:        true,
+			SupportsReasoningEncrypted:     true,
+			SupportsServerSideContextEdit:  true,
+			IsOpenAIFirstParty:             true,
+		},
+		Reviewer: config.ReviewerSettings{
+			ProviderCapabilities: config.ProviderCapabilitiesOverride{
+				ProviderID:             "reviewer-provider",
+				SupportsResponsesAPI:   false,
+				SupportsPromptCacheKey: false,
+			},
+		},
+	}
+	sources := reviewerInheritanceDefaultSources()
+	sources["reviewer.provider_capabilities.provider_id"] = "subagent"
+	sources["reviewer.provider_capabilities.supports_responses_api"] = "subagent"
+	sources["reviewer.provider_capabilities.supports_prompt_cache_key"] = "subagent"
+
+	applyReviewerInheritance(&settings, sources)
+
+	if settings.Reviewer.ProviderCapabilities.ProviderID != "reviewer-provider" {
+		t.Fatalf("expected explicit reviewer provider ID to remain, got %+v", settings.Reviewer.ProviderCapabilities)
+	}
+	if settings.Reviewer.ProviderCapabilities.SupportsResponsesAPI {
+		t.Fatalf("expected explicit reviewer responses API override to stay false")
+	}
+	if settings.Reviewer.ProviderCapabilities.SupportsPromptCacheKey {
+		t.Fatalf("expected explicit reviewer prompt cache override to stay false")
+	}
+	if !settings.Reviewer.ProviderCapabilities.SupportsResponsesCompact ||
+		!settings.Reviewer.ProviderCapabilities.SupportsRequestInputTokenCount ||
+		!settings.Reviewer.ProviderCapabilities.SupportsNativeWebSearch ||
+		!settings.Reviewer.ProviderCapabilities.SupportsReasoningEncrypted ||
+		!settings.Reviewer.ProviderCapabilities.SupportsServerSideContextEdit ||
+		!settings.Reviewer.ProviderCapabilities.IsOpenAIFirstParty {
+		t.Fatalf("expected default reviewer provider capabilities to inherit updated main true, got %+v", settings.Reviewer.ProviderCapabilities)
+	}
+}
+
 func reviewerInheritanceDefaultSources() map[string]string {
 	sources := map[string]string{
 		"reviewer.model":                                                    "default",

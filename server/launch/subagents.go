@@ -277,12 +277,53 @@ func applyReviewerInheritance(settings *config.Settings, sources map[string]stri
 	if strings.TrimSpace(sources["reviewer.auth"]) == "default" {
 		settings.Reviewer.Auth = "inherit"
 	}
-	if strings.TrimSpace(sources["reviewer.model_capabilities.supports_reasoning_effort"]) == "default" && strings.TrimSpace(sources["reviewer.model_capabilities.supports_vision_inputs"]) == "default" {
-		settings.Reviewer.ModelCapabilities = settings.ModelCapabilities
-	}
+	applyReviewerModelCapabilityInheritance(settings, sources)
 	reviewerProviderSelectionExplicit := !reviewerProviderSourceDefault || !reviewerBaseURLSourceDefault
-	if reviewerProviderCapabilitySourcesDefault(sources) && !reviewerProviderSelectionExplicit {
-		settings.Reviewer.ProviderCapabilities = settings.ProviderCapabilities
+	applyReviewerProviderCapabilityInheritance(settings, sources, reviewerProviderSelectionExplicit)
+}
+
+func applyReviewerModelCapabilityInheritance(settings *config.Settings, sources map[string]string) {
+	if settings == nil {
+		return
+	}
+	if strings.TrimSpace(sources["reviewer.model_capabilities.supports_reasoning_effort"]) == "default" {
+		settings.Reviewer.ModelCapabilities.SupportsReasoningEffort = settings.ModelCapabilities.SupportsReasoningEffort
+	}
+	if strings.TrimSpace(sources["reviewer.model_capabilities.supports_vision_inputs"]) == "default" {
+		settings.Reviewer.ModelCapabilities.SupportsVisionInputs = settings.ModelCapabilities.SupportsVisionInputs
+	}
+}
+
+func applyReviewerProviderCapabilityInheritance(settings *config.Settings, sources map[string]string, reviewerProviderSelectionExplicit bool) {
+	if settings == nil || reviewerProviderSelectionExplicit {
+		return
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.provider_id"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.ProviderID = settings.ProviderCapabilities.ProviderID
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_responses_api"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsResponsesAPI = settings.ProviderCapabilities.SupportsResponsesAPI
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_responses_compact"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsResponsesCompact = settings.ProviderCapabilities.SupportsResponsesCompact
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_request_input_token_count"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsRequestInputTokenCount = settings.ProviderCapabilities.SupportsRequestInputTokenCount
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_prompt_cache_key"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsPromptCacheKey = settings.ProviderCapabilities.SupportsPromptCacheKey
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_native_web_search"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsNativeWebSearch = settings.ProviderCapabilities.SupportsNativeWebSearch
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_reasoning_encrypted"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsReasoningEncrypted = settings.ProviderCapabilities.SupportsReasoningEncrypted
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.supports_server_side_context_edit"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.SupportsServerSideContextEdit = settings.ProviderCapabilities.SupportsServerSideContextEdit
+	}
+	if strings.TrimSpace(sources["reviewer.provider_capabilities.is_openai_first_party"]) == "default" {
+		settings.Reviewer.ProviderCapabilities.IsOpenAIFirstParty = settings.ProviderCapabilities.IsOpenAIFirstParty
 	}
 }
 
@@ -361,25 +402,6 @@ func applyReviewerRoleOverride(settings *config.Settings, role config.Settings, 
 		return false
 	}
 	apply(settings, role)
-	return true
-}
-
-func reviewerProviderCapabilitySourcesDefault(sources map[string]string) bool {
-	for _, key := range []string{
-		"reviewer.provider_capabilities.provider_id",
-		"reviewer.provider_capabilities.supports_responses_api",
-		"reviewer.provider_capabilities.supports_responses_compact",
-		"reviewer.provider_capabilities.supports_request_input_token_count",
-		"reviewer.provider_capabilities.supports_prompt_cache_key",
-		"reviewer.provider_capabilities.supports_native_web_search",
-		"reviewer.provider_capabilities.supports_reasoning_encrypted",
-		"reviewer.provider_capabilities.supports_server_side_context_edit",
-		"reviewer.provider_capabilities.is_openai_first_party",
-	} {
-		if strings.TrimSpace(sources[key]) != "default" {
-			return false
-		}
-	}
 	return true
 }
 
