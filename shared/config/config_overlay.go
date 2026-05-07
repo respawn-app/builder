@@ -77,19 +77,14 @@ func hasModelCapabilitiesOverride(override ModelCapabilitiesOverride) bool {
 	return override.SupportsReasoningEffort || override.SupportsVisionInputs
 }
 
-func shouldInheritReviewerModelCapabilities(override ModelCapabilitiesOverride, sources map[string]string) bool {
-	if sources == nil {
-		return !hasModelCapabilitiesOverride(override)
-	}
-	return !hasConfiguredSource(sources, "reviewer.model_capabilities.supports_reasoning_effort") &&
-		!hasConfiguredSource(sources, "reviewer.model_capabilities.supports_vision_inputs")
-}
-
 func inheritReviewerModelCapabilities(settings *Settings, sources map[string]string) {
 	if sources == nil {
 		if !hasModelCapabilitiesOverride(settings.Reviewer.ModelCapabilities) {
 			settings.Reviewer.ModelCapabilities = settings.ModelCapabilities
 		}
+		return
+	}
+	if !hasAnyConfiguredSource(sources, modelCapabilityKeys...) && !hasAnyConfiguredSource(sources, reviewerModelCapabilityKeys...) {
 		return
 	}
 	if !hasConfiguredSource(sources, "reviewer.model_capabilities.supports_reasoning_effort") {
@@ -117,6 +112,9 @@ func inheritReviewerProviderCapabilities(settings *Settings, sources map[string]
 		if !hasProviderCapabilitiesOverride(settings.Reviewer.ProviderCapabilities) && !reviewerProviderSelectionExplicit {
 			settings.Reviewer.ProviderCapabilities = settings.ProviderCapabilities
 		}
+		return
+	}
+	if !hasAnyConfiguredSource(sources, providerCapabilityKeys...) && !hasAnyConfiguredSource(sources, reviewerProviderCapabilityKeys...) {
 		return
 	}
 	if !hasAnyConfiguredSource(sources, reviewerProviderCapabilityKeys...) {
@@ -155,6 +153,28 @@ func inheritReviewerProviderCapabilities(settings *Settings, sources map[string]
 	if !hasConfiguredSource(sources, "reviewer.provider_capabilities.is_openai_first_party") {
 		settings.Reviewer.ProviderCapabilities.IsOpenAIFirstParty = settings.ProviderCapabilities.IsOpenAIFirstParty
 	}
+}
+
+var modelCapabilityKeys = []string{
+	"model_capabilities.supports_reasoning_effort",
+	"model_capabilities.supports_vision_inputs",
+}
+
+var reviewerModelCapabilityKeys = []string{
+	"reviewer.model_capabilities.supports_reasoning_effort",
+	"reviewer.model_capabilities.supports_vision_inputs",
+}
+
+var providerCapabilityKeys = []string{
+	"provider_capabilities.provider_id",
+	"provider_capabilities.supports_responses_api",
+	"provider_capabilities.supports_responses_compact",
+	"provider_capabilities.supports_request_input_token_count",
+	"provider_capabilities.supports_prompt_cache_key",
+	"provider_capabilities.supports_native_web_search",
+	"provider_capabilities.supports_reasoning_encrypted",
+	"provider_capabilities.supports_server_side_context_edit",
+	"provider_capabilities.is_openai_first_party",
 }
 
 var reviewerProviderCapabilityKeys = []string{

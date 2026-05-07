@@ -417,6 +417,33 @@ func TestNormalizeSettingsForPersistenceWithSourcesPreservesReviewerCapabilityFa
 	}
 }
 
+func TestNormalizeSettingsForPersistencePreservesReviewerCapabilityFalseWithoutSources(t *testing.T) {
+	settings := defaultSettings()
+	settings.ModelCapabilities.SupportsReasoningEffort = true
+	settings.ModelCapabilities.SupportsVisionInputs = true
+	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
+		ProviderID:             "main-provider",
+		SupportsResponsesAPI:   true,
+		SupportsPromptCacheKey: true,
+	}
+	settings.Reviewer.ModelCapabilities.SupportsReasoningEffort = false
+	settings.Reviewer.ModelCapabilities.SupportsVisionInputs = false
+	settings.Reviewer.ProviderCapabilities.ProviderID = "reviewer-provider"
+	settings.Reviewer.ProviderCapabilities.SupportsResponsesAPI = false
+	settings.Reviewer.ProviderCapabilities.SupportsPromptCacheKey = false
+
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		t.Fatalf("normalize settings for persistence: %v", err)
+	}
+	if normalized.Reviewer.ModelCapabilities.SupportsReasoningEffort || normalized.Reviewer.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected no-source explicit false reviewer model capabilities to persist, got %+v", normalized.Reviewer.ModelCapabilities)
+	}
+	if normalized.Reviewer.ProviderCapabilities.ProviderID != "reviewer-provider" || normalized.Reviewer.ProviderCapabilities.SupportsResponsesAPI || normalized.Reviewer.ProviderCapabilities.SupportsPromptCacheKey {
+		t.Fatalf("expected no-source explicit false reviewer provider capabilities to persist, got %+v", normalized.Reviewer.ProviderCapabilities)
+	}
+}
+
 func TestValidateSettingsWithSourcesTreatsSubagentReviewerOverridesAsConfigured(t *testing.T) {
 	settings := defaultSettings()
 	settings.Reviewer.Model = settings.Model
@@ -500,6 +527,30 @@ provider_override = "openai"
 		!cfg.Settings.Reviewer.ProviderCapabilities.SupportsResponsesAPI ||
 		!cfg.Settings.Reviewer.ProviderCapabilities.SupportsPromptCacheKey {
 		t.Fatalf("expected no-op reviewer provider override to inherit main provider capabilities, got %+v", cfg.Settings.Reviewer.ProviderCapabilities)
+	}
+}
+
+func TestLoadReviewerProviderRejectsInheritedAnthropicProvider(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "claude-test"
+provider_override = "anthropic"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected inherited anthropic reviewer provider to fail")
+	}
+	if !strings.Contains(err.Error(), "not supported for reviewer models") {
+		t.Fatalf("expected unsupported reviewer provider error, got %v", err)
 	}
 }
 
@@ -1301,8 +1352,8 @@ auth = "none"
 	if err == nil {
 		t.Fatal("expected reviewer.auth=none without compatible base URL to fail")
 	}
-	if !strings.Contains(err.Error(), "reviewer.auth") || !strings.Contains(err.Error(), "non-OpenAI") {
-		t.Fatalf("expected reviewer.auth non-OpenAI base URL error, got %v", err)
+	if !strings.Contains(err.Error(), "reviewer.auth") || !strings.Contains(err.Error(), "api.openai.com") {
+		t.Fatalf("expected reviewer.auth api.openai.com guard error, got %v", err)
 	}
 }
 
@@ -1326,8 +1377,8 @@ auth = "none"
 	if err == nil {
 		t.Fatal("expected reviewer.auth=none with first-party OpenAI base URL to fail")
 	}
-	if !strings.Contains(err.Error(), "reviewer.auth") || !strings.Contains(err.Error(), "non-OpenAI") {
-		t.Fatalf("expected reviewer.auth non-OpenAI base URL error, got %v", err)
+	if !strings.Contains(err.Error(), "reviewer.auth") || !strings.Contains(err.Error(), "api.openai.com") {
+		t.Fatalf("expected reviewer.auth api.openai.com guard error, got %v", err)
 	}
 }
 

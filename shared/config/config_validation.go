@@ -342,9 +342,7 @@ func validateReviewer(state settingsState, sources map[string]string) error {
 	switch provider {
 	case "", "openai":
 	case "anthropic":
-		if hasConfiguredSource(sources, "reviewer.provider_override") {
-			return fmt.Errorf("reviewer.provider_override %q is not supported for reviewer models", reviewer.ProviderOverride)
-		}
+		return fmt.Errorf("reviewer.provider_override %q is not supported for reviewer models", reviewer.ProviderOverride)
 	default:
 		return fmt.Errorf("invalid reviewer.provider_override %q (expected openai)", reviewer.ProviderOverride)
 	}
@@ -361,7 +359,7 @@ func validateReviewer(state settingsState, sources map[string]string) error {
 	case "inherit":
 	case "none":
 		if !reviewerAllowsAnonymousAuth(reviewer) {
-			return fmt.Errorf("reviewer.auth %q requires reviewer.openai_base_url or inherited openai_base_url to point at a non-OpenAI-compatible endpoint", reviewer.Auth)
+			return fmt.Errorf("reviewer.auth %q requires reviewer.openai_base_url or inherited openai_base_url to be set and not point at api.openai.com", reviewer.Auth)
 		}
 	default:
 		return fmt.Errorf("invalid reviewer.auth %q (expected inherit|none)", reviewer.Auth)
