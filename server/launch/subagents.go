@@ -248,10 +248,28 @@ func applyReviewerInheritance(settings *config.Settings, sources map[string]stri
 	if strings.TrimSpace(sources["reviewer.model_verbosity"]) == "default" {
 		settings.Reviewer.ModelVerbosity = settings.ModelVerbosity
 	}
-	if strings.TrimSpace(sources["reviewer.provider_override"]) == "default" && strings.TrimSpace(sources["reviewer.openai_base_url"]) == "default" {
+	reviewerProviderSourceDefault := strings.TrimSpace(sources["reviewer.provider_override"]) == "default"
+	reviewerBaseURLSourceDefault := strings.TrimSpace(sources["reviewer.openai_base_url"]) == "default"
+	if reviewerProviderSourceDefault || reviewerBaseURLSourceDefault {
+		originalProviderOverride := settings.Reviewer.ProviderOverride
+		originalOpenAIBaseURL := settings.Reviewer.OpenAIBaseURL
+		if reviewerProviderSourceDefault {
+			settings.Reviewer.ProviderOverride = ""
+		}
+		if reviewerBaseURLSourceDefault {
+			settings.Reviewer.OpenAIBaseURL = ""
+		}
 		reviewerProvider := config.ResolveReviewerProviderSettings(*settings)
-		settings.Reviewer.ProviderOverride = reviewerProvider.ProviderOverride
-		settings.Reviewer.OpenAIBaseURL = reviewerProvider.OpenAIBaseURL
+		if reviewerProviderSourceDefault {
+			settings.Reviewer.ProviderOverride = reviewerProvider.ProviderOverride
+		} else {
+			settings.Reviewer.ProviderOverride = originalProviderOverride
+		}
+		if reviewerBaseURLSourceDefault {
+			settings.Reviewer.OpenAIBaseURL = reviewerProvider.OpenAIBaseURL
+		} else {
+			settings.Reviewer.OpenAIBaseURL = originalOpenAIBaseURL
+		}
 	}
 	if strings.TrimSpace(sources["reviewer.model_context_window"]) == "default" {
 		settings.Reviewer.ModelContextWindow = settings.ModelContextWindow
@@ -262,7 +280,8 @@ func applyReviewerInheritance(settings *config.Settings, sources map[string]stri
 	if strings.TrimSpace(sources["reviewer.model_capabilities.supports_reasoning_effort"]) == "default" && strings.TrimSpace(sources["reviewer.model_capabilities.supports_vision_inputs"]) == "default" {
 		settings.Reviewer.ModelCapabilities = settings.ModelCapabilities
 	}
-	if reviewerProviderCapabilitySourcesDefault(sources) {
+	reviewerProviderSelectionExplicit := !reviewerProviderSourceDefault || !reviewerBaseURLSourceDefault
+	if reviewerProviderCapabilitySourcesDefault(sources) && !reviewerProviderSelectionExplicit {
 		settings.Reviewer.ProviderCapabilities = settings.ProviderCapabilities
 	}
 }
