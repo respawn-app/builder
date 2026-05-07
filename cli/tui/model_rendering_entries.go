@@ -756,5 +756,22 @@ func wrapTextForViewport(text string, width int) string {
 		width = 1
 	}
 	wrapped := xansi.Wordwrap(text, width, " ,.;-+|")
+	wrapped = hardWrapOverflowingRenderedLines(wrapped, width)
 	return strings.TrimRight(wrapped, "\n")
+}
+
+func hardWrapOverflowingRenderedLines(text string, width int) string {
+	if width < 1 || text == "" {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if lipgloss.Width(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		out = append(out, splitLines(xansi.Hardwrap(line, width, true))...)
+	}
+	return strings.Join(out, "\n")
 }
