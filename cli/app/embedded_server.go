@@ -372,7 +372,6 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	wiring := &runtimeWiring{
 		runtimeEvents:         runtimeEvents,
 		askEvents:             askEvents,
-		background:            nil,
 		turnQueueHook:         turnQueueHook,
 		terminalFocus:         terminalFocus,
 		runtimeClient:         runtimeClient,

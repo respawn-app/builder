@@ -674,11 +674,6 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		t.Fatalf("unexpected transition payload nextSessionID=%q initialPrompt=%q initialInput=%q", resolved.NextSessionID, resolved.InitialPrompt, resolved.InitialInput)
 	}
 
-	wiring := &runtimeWiring{background: manager}
-	if err := wiring.Close(); err != nil {
-		t.Fatalf("close wiring: %v", err)
-	}
-
 	testServer := &testEmbeddedServer{
 		cfg: config.App{
 			WorkspaceRoot:   workdir,

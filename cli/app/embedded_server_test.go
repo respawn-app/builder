@@ -497,7 +497,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 		Command:        "remote-process",
 	}}}}
 
-	processClient := newUIProcessClientWithReads(nil, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
+	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
 	got := processClient.ListProcesses()
 	if len(got) != 1 || got[0].ID != "remote-proc" || got[0].OwnerRunID != "remote-run" || got[0].OwnerStepID != "remote-step" {
 		t.Fatalf("expected shared process reads to win over local manager snapshot, got %+v", got)

@@ -7,10 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"builder/server/runtime"
-	"builder/server/runtimecontrol"
-	"builder/server/runtimeview"
-	"builder/server/sessionview"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -42,22 +38,6 @@ type sessionRuntimeClient struct {
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
 	return newUIRuntimeClientWithReads(sessionID, reads, controls)
-}
-
-func newUIRuntimeClientFromEngine(engine *runtime.Engine) clientui.RuntimeClient {
-	if engine == nil {
-		return nil
-	}
-	resolver := sessionview.NewStaticRuntimeResolver(engine)
-	reads := client.NewLoopbackSessionViewClient(sessionview.NewService(nil, resolver, nil))
-	controls := client.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(resolver, nil))
-	runtimeClient := newUIRuntimeClientWithReads(engine.SessionID(), reads, controls).(*sessionRuntimeClient)
-	runtimeClient.storeMainView(runtimeview.MainViewFromRuntime(engine))
-	return runtimeClient
-}
-
-func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
-	return newUIRuntimeClientFromEngine(engine)
 }
 
 func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {

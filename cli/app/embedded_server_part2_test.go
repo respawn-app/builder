@@ -157,7 +157,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 
 	controls := &stubEmbeddedProcessControlClient{inlineResp: serverapi.ProcessInlineOutputResponse{Output: "remote preview", LogPath: "/tmp/remote.log"}}
 	runtimePlan.Wiring.processControls = controls
-	processClient := newUIProcessClientWithReads(nil, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
+	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
 
 	preview, logPath, err := processClient.InlineOutput("proc-1", 12_000)
 	if err != nil {

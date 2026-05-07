@@ -9,6 +9,7 @@ import (
 
 	"builder/cli/app/commands"
 	"builder/cli/tui"
+	"builder/server/processview"
 	"builder/server/session"
 	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -230,10 +231,6 @@ type askEventMsg struct {
 	event askEvent
 }
 
-type askBridge struct {
-	ch chan askEvent
-}
-
 type uiStatusNoticeKind uint8
 
 const (
@@ -429,9 +426,14 @@ func WithUISessionID(sessionID string) UIOption {
 
 func WithUIBackgroundManager(manager *shelltool.Manager) UIOption {
 	return func(m *uiModel) {
-		if !m.processClientExplicit {
-			m.processClient = newUIProcessClient(manager)
+		if manager == nil || m.processClientExplicit {
+			return
 		}
+		processes := processview.NewService(manager)
+		m.processClient = newUIProcessClientWithReads(
+			client.NewLoopbackProcessViewClient(processes),
+			client.NewLoopbackProcessControlClient(processes),
+		)
 	}
 }
 
@@ -484,21 +486,6 @@ func WithUIClipboardTextCopier(copier uiClipboardTextCopier) UIOption {
 	return func(m *uiModel) {
 		m.clipboardTextCopier = copier
 	}
-}
-
-func newAskBridge() *askBridge {
-	return &askBridge{ch: make(chan askEvent, 64)}
-}
-
-func (b *askBridge) Events() <-chan askEvent {
-	return b.ch
-}
-
-func (b *askBridge) Handle(req askquestion.Request) (askquestion.Response, error) {
-	e := askEvent{req: req, reply: make(chan askReply, 1)}
-	b.ch <- e
-	resp := <-e.reply
-	return resp.response, resp.err
 }
 
 func (m *uiModel) isInputLocked() bool {
