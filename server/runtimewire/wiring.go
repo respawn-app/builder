@@ -1,6 +1,7 @@
 package runtimewire
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
@@ -65,33 +66,15 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	}
 	toolRegistry := localTools.Registry()
 
-	modelHTTPClient := llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second)
-	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
-		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-		Model:               active.Model,
-		Auth:                mgr,
-		HTTPClient:          modelHTTPClient,
-		OpenAIBaseURL:       active.OpenAIBaseURL,
-		ModelVerbosity:      string(active.ModelVerbosity),
-		Store:               active.Store,
-		ContextWindowTokens: active.ModelContextWindow,
-	})
+	mainProvider := mainProviderRuntimeSettings(active)
+	client, err := newRuntimeProviderClient(mainProvider, mgr, llm.NewHTTPClient(time.Duration(active.Timeouts.ModelRequestSeconds)*time.Second))
 	if err != nil {
 		return nil, err
 	}
 
+	reviewerProvider := reviewerProviderRuntimeSettings(active)
 	newReviewerClient := func() (llm.Client, error) {
-		reviewerHTTPClient := llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds) * time.Second)
-		return llm.NewProviderClient(llm.ProviderClientOptions{
-			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-			Model:               active.Reviewer.Model,
-			Auth:                mgr,
-			HTTPClient:          reviewerHTTPClient,
-			OpenAIBaseURL:       active.OpenAIBaseURL,
-			ModelVerbosity:      string(active.ModelVerbosity),
-			Store:               false,
-			ContextWindowTokens: active.ModelContextWindow,
-		})
+		return newRuntimeProviderClient(reviewerProvider, mgr, llm.NewHTTPClient(time.Duration(active.Reviewer.TimeoutSeconds)*time.Second))
 	}
 
 	var reviewerClient llm.Client
@@ -110,22 +93,16 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
 		}
 	})
-	providerCapsOverride, hasProviderCapsOverride := llm.ProviderCapabilitiesFromOverride(active.ProviderCapabilities)
 	eng, err = runtime.New(store, client, toolRegistry, runtime.Config{
-		Model:             active.Model,
-		Temperature:       1,
-		MaxTokens:         0,
-		ThinkingLevel:     active.ThinkingLevel,
-		ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Model, active.ModelCapabilities),
-		FastModeEnabled:   active.PriorityRequestMode,
-		FastModeState:     opts.FastMode,
-		WebSearchMode:     active.WebSearch,
-		ProviderCapabilitiesOverride: func() *llm.ProviderCapabilities {
-			if !hasProviderCapsOverride {
-				return nil
-			}
-			return &providerCapsOverride
-		}(),
+		Model:                         active.Model,
+		Temperature:                   1,
+		MaxTokens:                     0,
+		ThinkingLevel:                 active.ThinkingLevel,
+		ModelCapabilities:             llm.LockedModelCapabilitiesForConfig(active.Model, active.ModelCapabilities),
+		FastModeEnabled:               active.PriorityRequestMode,
+		FastModeState:                 opts.FastMode,
+		WebSearchMode:                 active.WebSearch,
+		ProviderCapabilitiesOverride:  mainProvider.ProviderCapabilitiesOverride,
 		EnabledTools:                  enabledTools,
 		DisabledSkills:                config.DisabledSkillToggles(active),
 		SystemPromptFiles:             active.SystemPromptFiles,
@@ -141,13 +118,14 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		ToolPreambles:                 active.ToolPreambles,
 		TranscriptWorkingDir:          workspaceRoot,
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:        active.Reviewer.Frequency,
-			Model:            active.Reviewer.Model,
-			ThinkingLevel:    active.Reviewer.ThinkingLevel,
-			SystemPromptFile: active.Reviewer.SystemPromptFile,
-			VerboseOutput:    active.Reviewer.VerboseOutput,
-			Client:           reviewerClient,
-			ClientFactory:    newReviewerClient,
+			Frequency:         active.Reviewer.Frequency,
+			Model:             active.Reviewer.Model,
+			ThinkingLevel:     active.Reviewer.ThinkingLevel,
+			ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Reviewer.Model, active.Reviewer.ModelCapabilities),
+			SystemPromptFile:  active.Reviewer.SystemPromptFile,
+			VerboseOutput:     active.Reviewer.VerboseOutput,
+			Client:            reviewerClient,
+			ClientFactory:     newReviewerClient,
 		},
 		OnEvent: func(evt runtime.Event) {
 			if opts.OnEvent != nil {
@@ -167,6 +145,78 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		LocalTools:    localTools,
 		PromptHistory: append([]string(nil), promptHistory...),
 	}, nil
+}
+
+type providerRuntimeSettings struct {
+	Model                        string
+	ProviderOverride             string
+	OpenAIBaseURL                string
+	ModelVerbosity               config.ModelVerbosity
+	Store                        bool
+	ContextWindowTokens          int
+	Auth                         string
+	ProviderCapabilitiesOverride *llm.ProviderCapabilities
+}
+
+func mainProviderRuntimeSettings(active config.Settings) providerRuntimeSettings {
+	return providerRuntimeSettings{
+		Model:                        active.Model,
+		ProviderOverride:             active.ProviderOverride,
+		OpenAIBaseURL:                active.OpenAIBaseURL,
+		ModelVerbosity:               active.ModelVerbosity,
+		Store:                        active.Store,
+		ContextWindowTokens:          active.ModelContextWindow,
+		Auth:                         "inherit",
+		ProviderCapabilitiesOverride: providerCapabilitiesOverridePtr(active.ProviderCapabilities),
+	}
+}
+
+func reviewerProviderRuntimeSettings(active config.Settings) providerRuntimeSettings {
+	reviewer := config.EffectiveReviewerSettings(active)
+	reviewerProvider := config.ResolveReviewerProviderSettings(config.Settings{
+		ProviderOverride: active.ProviderOverride,
+		OpenAIBaseURL:    active.OpenAIBaseURL,
+		Reviewer:         reviewer,
+	})
+	return providerRuntimeSettings{
+		Model:                        reviewer.Model,
+		ProviderOverride:             reviewerProvider.ProviderOverride,
+		OpenAIBaseURL:                reviewerProvider.OpenAIBaseURL,
+		ModelVerbosity:               reviewer.ModelVerbosity,
+		Store:                        false,
+		ContextWindowTokens:          reviewer.ModelContextWindow,
+		Auth:                         reviewer.Auth,
+		ProviderCapabilitiesOverride: providerCapabilitiesOverridePtr(reviewer.ProviderCapabilities),
+	}
+}
+
+func providerCapabilitiesOverridePtr(override config.ProviderCapabilitiesOverride) *llm.ProviderCapabilities {
+	caps, ok := llm.ProviderCapabilitiesFromOverride(override)
+	if !ok {
+		return nil
+	}
+	return &caps
+}
+
+func newRuntimeProviderClient(settings providerRuntimeSettings, mgr *auth.Manager, httpClient *http.Client) (llm.Client, error) {
+	return llm.NewProviderClient(llm.ProviderClientOptions{
+		Provider:                     llm.Provider(strings.TrimSpace(settings.ProviderOverride)),
+		Model:                        settings.Model,
+		Auth:                         authProviderForPolicy(settings.Auth, mgr),
+		HTTPClient:                   httpClient,
+		OpenAIBaseURL:                settings.OpenAIBaseURL,
+		ModelVerbosity:               string(settings.ModelVerbosity),
+		Store:                        settings.Store,
+		ContextWindowTokens:          settings.ContextWindowTokens,
+		ProviderCapabilitiesOverride: settings.ProviderCapabilitiesOverride,
+	})
+}
+
+func authProviderForPolicy(policy string, mgr *auth.Manager) llm.AuthHeaderProvider {
+	if strings.EqualFold(strings.TrimSpace(policy), "none") {
+		return nil
+	}
+	return mgr
 }
 
 func boolRef(v bool) *bool { return &v }
