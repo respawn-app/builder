@@ -235,8 +235,17 @@ func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient {
 			return client.NewLoopbackProjectViewClient(service)
 		}
 	}
-	service, err := projectview.NewService(s.ProjectID(), s.cfg.WorkspaceRoot, s.containerDir)
+	if strings.TrimSpace(s.cfg.PersistenceRoot) == "" {
+		return nil
+	}
+	store, err := metadata.Open(s.cfg.PersistenceRoot)
 	if err != nil {
+		return nil
+	}
+	s.metadataStore = store
+	service, err := projectview.NewMetadataService(store, "", s.containerDir)
+	if err != nil {
+		_ = store.Close()
 		return nil
 	}
 	return client.NewLoopbackProjectViewClient(service)
