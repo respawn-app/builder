@@ -5,7 +5,6 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
-	"builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"bytes"
 	"context"
@@ -910,7 +909,7 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *test
 func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Type answer"}, reply: reply}
+	event := askEvent{req: clientui.PendingPromptEvent{Question: "Type answer"}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -935,7 +934,7 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 func TestApprovalAskTabInCommentaryDoesNotReturnToPicker(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+	event := askEvent{req: clientui.PendingPromptEvent{Question: "Approve?", Approval: true, ApprovalOptions: []clientui.ApprovalOption{{Decision: clientui.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: clientui.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: clientui.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -969,7 +968,7 @@ func TestApprovalAskTabCommentaryUsesCurrentSelection(t *testing.T) {
 	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+	event := askEvent{req: clientui.PendingPromptEvent{Question: "Approve?", Approval: true, ApprovalOptions: []clientui.ApprovalOption{{Decision: clientui.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: clientui.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: clientui.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -986,7 +985,7 @@ func TestApprovalAskTabCommentaryUsesCurrentSelection(t *testing.T) {
 	if resp.response.Approval == nil {
 		t.Fatal("expected typed approval response")
 	}
-	if resp.response.Approval.Decision != askquestion.ApprovalDecisionAllowSession || resp.response.Approval.Commentary != "session only" {
+	if resp.response.Approval.Decision != clientui.ApprovalDecisionAllowSession || resp.response.Approval.Commentary != "session only" {
 		t.Fatalf("unexpected approval response: %+v", resp.response.Approval)
 	}
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "session only" {
@@ -997,7 +996,7 @@ func TestApprovalAskTabCommentaryUsesCurrentSelection(t *testing.T) {
 func TestApprovalAskPickerSubmitIgnoresPendingCommentaryDraft(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+	event := askEvent{req: clientui.PendingPromptEvent{Question: "Approve?", Approval: true, ApprovalOptions: []clientui.ApprovalOption{{Decision: clientui.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: clientui.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: clientui.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -1012,7 +1011,7 @@ func TestApprovalAskPickerSubmitIgnoresPendingCommentaryDraft(t *testing.T) {
 	if resp.response.Approval == nil {
 		t.Fatal("expected typed approval response")
 	}
-	if resp.response.Approval.Decision != askquestion.ApprovalDecisionAllowSession {
+	if resp.response.Approval.Decision != clientui.ApprovalDecisionAllowSession {
 		t.Fatalf("unexpected approval decision: %+v", resp.response.Approval)
 	}
 	if resp.response.Approval.Commentary != "" {

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	"builder/server/tools/askquestion"
 	"builder/shared/clientui"
 )
 
@@ -118,8 +117,8 @@ func TestBellHooksRingOnAskRequests(t *testing.T) {
 	ringer := &countRinger{}
 	hooks := newUnfocusedBellHooks(ringer)
 
-	hooks.OnAsk(askquestion.Request{Question: "question"})
-	hooks.OnAsk(askquestion.Request{Question: "approval", Approval: true})
+	hooks.OnAsk(clientui.PendingPromptEvent{Question: "question"})
+	hooks.OnAsk(clientui.PendingPromptEvent{Question: "approval", Approval: true})
 
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ring count = %d, want 2", got)
@@ -133,7 +132,7 @@ func TestBellHooksUseSessionNameAndQuestionTextForAskNotifications(t *testing.T)
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, func() string { return "incident triage" })
 
-	hooks.OnAsk(askquestion.Request{Question: "Which rollback strategy should I use?"})
+	hooks.OnAsk(clientui.PendingPromptEvent{Question: "Which rollback strategy should I use?"})
 
 	if got := ringer.Last(); got != "incident triage: Question: Which rollback strategy should I use?" {
 		t.Fatalf("last message = %q, want %q", got, "incident triage: Question: Which rollback strategy should I use?")
@@ -144,7 +143,7 @@ func TestBellHooksAskUsesBellOnlyWhileFocused(t *testing.T) {
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, nil, func() bool { return true })
 
-	hooks.OnAsk(askquestion.Request{Question: "question"})
+	hooks.OnAsk(clientui.PendingPromptEvent{Question: "question"})
 
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count while focused = %d, want 1", got)
@@ -158,7 +157,7 @@ func TestBellHooksAskUsesRawBellOnlyWithOSC9NotifierWhileFocused(t *testing.T) {
 	var out bytes.Buffer
 	hooks := newBellHooks(newOSC9TerminalNotifier(&out), nil, func() bool { return true })
 
-	hooks.OnAsk(askquestion.Request{Question: "question"})
+	hooks.OnAsk(clientui.PendingPromptEvent{Question: "question"})
 
 	if got := out.String(); got != terminalBell {
 		t.Fatalf("focused OSC9 ask output = %q, want raw bell", got)

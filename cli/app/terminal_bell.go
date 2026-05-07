@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"builder/server/tools/askquestion"
 	"builder/shared/clientui"
 )
 
@@ -180,7 +179,7 @@ func newBellHooks(notifier terminalNotifier, title func() string, focused ...fun
 	return &bellHooks{notifier: notifier, title: title, focused: focusedProvider}
 }
 
-func (h *bellHooks) OnAsk(req askquestion.Request) {
+func (h *bellHooks) OnAsk(req clientui.PendingPromptEvent) {
 	if h == nil {
 		return
 	}

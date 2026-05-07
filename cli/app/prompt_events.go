@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	askquestion "builder/server/tools/askquestion"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -65,14 +64,14 @@ func (e *promptEventEmitter) close() {
 	close(e.out)
 }
 
-func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, control client.PromptControlClient, leaseManager *controllerLeaseManager, notify ...func(askquestion.Request)) (<-chan askEvent, func()) {
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, control client.PromptControlClient, leaseManager *controllerLeaseManager, notify ...func(clientui.PendingPromptEvent)) (<-chan askEvent, func()) {
 	emitter := newPromptEventEmitter(16)
 	out := emitter.channel()
 	if sub == nil || subscribe == nil || control == nil {
 		emitter.close()
 		return out, func() {}
 	}
-	notifyPending := func(askquestion.Request) {}
+	notifyPending := func(clientui.PendingPromptEvent) {}
 	if len(notify) > 0 && notify[0] != nil {
 		notifyPending = notify[0]
 	}
@@ -243,19 +242,9 @@ func waitPromptActivityRetry(ctx context.Context) bool {
 }
 
 func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, leaseManager *controllerLeaseManager, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
-	req := askquestion.Request{
-		ID:                     item.PromptID,
-		Question:               item.Question,
-		Suggestions:            append([]string(nil), item.Suggestions...),
-		RecommendedOptionIndex: item.RecommendedOptionIndex,
-		Approval:               item.Approval,
-	}
-	if len(item.ApprovalOptions) > 0 {
-		req.ApprovalOptions = make([]askquestion.ApprovalOption, 0, len(item.ApprovalOptions))
-		for _, option := range item.ApprovalOptions {
-			req.ApprovalOptions = append(req.ApprovalOptions, askquestion.ApprovalOption{Decision: askquestion.ApprovalDecision(option.Decision), Label: option.Label})
-		}
-	}
+	req := item
+	req.Suggestions = append([]string(nil), item.Suggestions...)
+	req.ApprovalOptions = append([]clientui.ApprovalOption(nil), item.ApprovalOptions...)
 	reply := make(chan askReply, 1)
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	go func() {

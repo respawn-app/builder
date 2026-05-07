@@ -172,13 +172,13 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	first := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
 	second := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
 	for _, evt := range []askEvent{first, second} {
-		switch evt.req.ID {
+		switch evt.req.PromptID {
 		case "ask-remote-1":
-			evt.reply <- askReply{response: askquestion.Response{RequestID: evt.req.ID, Answer: "done"}}
+			evt.reply <- askReply{response: clientui.PromptAnswer{PromptID: evt.req.PromptID, Answer: "done"}}
 		case "approval-remote-1":
-			evt.reply <- askReply{response: askquestion.Response{RequestID: evt.req.ID, Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}}
+			evt.reply <- askReply{response: clientui.PromptAnswer{PromptID: evt.req.PromptID, Approval: &clientui.ApprovalPromptAnswer{Decision: clientui.ApprovalDecisionAllowOnce}}}
 		default:
-			t.Fatalf("unexpected prompt event id %q", evt.req.ID)
+			t.Fatalf("unexpected prompt event id %q", evt.req.PromptID)
 		}
 	}
 

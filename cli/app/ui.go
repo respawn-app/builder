@@ -11,7 +11,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/processview"
 	"builder/server/session"
-	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -199,7 +198,7 @@ type clipboardTextCopyDoneMsg struct {
 }
 
 type askEvent struct {
-	req              askquestion.Request
+	req              clientui.PendingPromptEvent
 	reply            chan askReply
 	cancel           func()
 	resolvedPromptID string
@@ -209,7 +208,7 @@ func (e askEvent) promptID() string {
 	if strings.TrimSpace(e.resolvedPromptID) != "" {
 		return strings.TrimSpace(e.resolvedPromptID)
 	}
-	return strings.TrimSpace(e.req.ID)
+	return strings.TrimSpace(e.req.PromptID)
 }
 
 func (e askEvent) isResolution() bool {
@@ -223,7 +222,7 @@ func (e askEvent) cancelPending() {
 }
 
 type askReply struct {
-	response askquestion.Response
+	response clientui.PromptAnswer
 	err      error
 }
 

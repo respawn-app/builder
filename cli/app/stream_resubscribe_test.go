@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
@@ -168,7 +167,7 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}, {err: serverapi.ErrStreamGap}}}
 	resubscribed := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}, {evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-2", SessionID: "session-1", Question: "Second?"}}}}
 	remaining := []serverapi.PromptActivitySubscription{resubscribed}
-	var notified []askquestion.Request
+	var notified []clientui.PendingPromptEvent
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context, uint64) (serverapi.PromptActivitySubscription, error) {
 		if len(remaining) == 0 {
@@ -177,21 +176,21 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"), func(req askquestion.Request) {
+	}, stubPromptControlClient{}, staticControllerLeaseManager("lease-test-controller"), func(req clientui.PendingPromptEvent) {
 		notified = append(notified, req)
 	})
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" || first.req.Question != "First?" {
+	if first.req.PromptID != "ask-1" || first.req.Question != "First?" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 
 	second := waitPromptEvent(t, events)
-	if second.req.ID != "ask-2" || second.req.Question != "Second?" {
+	if second.req.PromptID != "ask-2" || second.req.Question != "Second?" {
 		t.Fatalf("unexpected second prompt event: %+v", second.req)
 	}
-	if len(notified) != 2 || notified[0].ID != "ask-1" || notified[1].ID != "ask-2" {
+	if len(notified) != 2 || notified[0].PromptID != "ask-1" || notified[1].PromptID != "ask-2" {
 		t.Fatalf("unexpected prompt notifications after resubscribe: %+v", notified)
 	}
 
@@ -221,7 +220,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" {
+	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 	resolved := waitPromptEvent(t, events)
@@ -229,7 +228,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 		t.Fatalf("expected resolution event for ask-1 after resubscribe, got %+v", resolved)
 	}
 	second := waitPromptEvent(t, events)
-	if second.req.ID != "ask-2" || second.req.Question != "Second?" {
+	if second.req.PromptID != "ask-2" || second.req.Question != "Second?" {
 		t.Fatalf("unexpected second prompt event: %+v", second.req)
 	}
 }
@@ -259,7 +258,7 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotStreamFails(t *te
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" {
+	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 	resolved := waitPromptEventWithin(t, events, 2*time.Second)
@@ -267,7 +266,7 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotStreamFails(t *te
 		t.Fatalf("expected resolution event for ask-1 after successful retry, got %+v", resolved)
 	}
 	second := waitPromptEventWithin(t, events, 2*time.Second)
-	if second.req.ID != "ask-2" || second.req.Question != "Second?" {
+	if second.req.PromptID != "ask-2" || second.req.Question != "Second?" {
 		t.Fatalf("unexpected second prompt event: %+v", second.req)
 	}
 	if snapshotCalls != 2 {
@@ -288,13 +287,13 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" {
-		t.Fatalf("unexpected first prompt id: %q", first.req.ID)
+	if first.req.PromptID != "ask-1" {
+		t.Fatalf("unexpected first prompt id: %q", first.req.PromptID)
 	}
-	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
 	retried := waitPromptEvent(t, events)
-	if retried.req.ID != "ask-1" || retried.req.Question != "First?" {
+	if retried.req.PromptID != "ask-1" || retried.req.Question != "First?" {
 		t.Fatalf("unexpected retried prompt event: %+v", retried.req)
 	}
 	if got := control.askCallCount(); got != 1 {
@@ -331,7 +330,7 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 
 	first := waitPromptEvent(t, events)
 	stop()
-	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 	select {
 	case _, ok := <-events:
 		if ok {
@@ -357,7 +356,7 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" {
+	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
 	resolved := waitPromptEvent(t, events)
@@ -379,7 +378,7 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 	waitForPromptAskCallCount(t, control, 1)
 	select {
 	case retried := <-events:
@@ -407,10 +406,10 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	if first.req.ID != "ask-1" {
+	if first.req.PromptID != "ask-1" {
 		t.Fatalf("unexpected first prompt event: %+v", first.req)
 	}
-	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
 	resolved := waitPromptEvent(t, events)
 	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
@@ -444,7 +443,7 @@ func TestPendingPromptEventRetryUsesLatestControllerLease(t *testing.T) {
 	defer stop()
 
 	first := waitPromptEvent(t, events)
-	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	first.reply <- askReply{response: clientui.PromptAnswer{PromptID: first.req.PromptID, Answer: "handled"}}
 
 	waitForPromptAskCallCount(t, control, 2)
 	if leases := control.askLeaseIDs(); len(leases) != 2 || leases[0] != "lease-old" || leases[1] != "lease-new" {
