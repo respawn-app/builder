@@ -104,8 +104,12 @@ func TestAuthMethodPickerRendersBuilderBannerAboveHeader(t *testing.T) {
 	if !strings.HasPrefix(stripped, "  ███████") {
 		t.Fatalf("expected padded builder banner at top, got %q", stripped)
 	}
-	if strings.Index(stripped, "███████") > strings.Index(stripped, "Sign in to Builder") {
-		t.Fatalf("expected banner before sign-in header, got %q", stripped)
+	headerIdx := strings.Index(stripped, "Sign in to Builder")
+	if headerIdx < 0 {
+		t.Fatalf("expected sign-in header in view, got %q", stripped)
+	}
+	if bannerIdx := strings.Index(stripped, "███████"); bannerIdx > headerIdx {
+		t.Fatalf("expected banner before sign-in header (banner@%d header@%d), got %q", bannerIdx, headerIdx, stripped)
 	}
 	for _, line := range strings.Split(strings.TrimRight(builderStartupBannerANSI, "\n"), "\n") {
 		if !strings.Contains(view, strings.Repeat(" ", startupBannerHorizontalPadding)+line) {
@@ -125,8 +129,12 @@ func TestAuthFlowStartupPickerShowsBannerOnRequiredAuth(t *testing.T) {
 		if !strings.HasPrefix(view, "  ███████") {
 			t.Fatalf("expected auth startup picker banner at top, got %q", view)
 		}
-		if strings.Index(view, "███████") > strings.Index(view, "Sign in to Builder") {
-			t.Fatalf("expected banner before auth header, got %q", view)
+		headerIdx := strings.Index(view, "Sign in to Builder")
+		if headerIdx < 0 {
+			t.Fatalf("expected auth header in view, got %q", view)
+		}
+		if bannerIdx := strings.Index(view, "███████"); bannerIdx > headerIdx {
+			t.Fatalf("expected banner before auth header (banner@%d header@%d), got %q", bannerIdx, headerIdx, view)
 		}
 		return startupPickerResult{ChoiceID: string(authMethodChoiceEnvAPIKey)}, nil
 	}

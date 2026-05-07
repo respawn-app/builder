@@ -228,6 +228,75 @@ supports_responses_api = true
 	}
 }
 
+func TestEffectiveReviewerSettingsPreservesLoadedExplicitFalseCapabilities(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.5"
+
+[model_capabilities]
+supports_reasoning_effort = true
+supports_vision_inputs = true
+
+[provider_capabilities]
+provider_id = "main-provider"
+supports_responses_api = true
+supports_prompt_cache_key = true
+
+[reviewer.model_capabilities]
+supports_reasoning_effort = false
+supports_vision_inputs = false
+
+[reviewer.provider_capabilities]
+provider_id = "reviewer-provider"
+supports_responses_api = false
+supports_prompt_cache_key = false
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	reviewer := EffectiveReviewerSettings(cfg.Settings)
+	if reviewer.ModelCapabilities.SupportsReasoningEffort || reviewer.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected explicit false reviewer model capabilities to survive effective helper, got %+v", reviewer.ModelCapabilities)
+	}
+	if reviewer.ProviderCapabilities.ProviderID != "reviewer-provider" || reviewer.ProviderCapabilities.SupportsResponsesAPI || reviewer.ProviderCapabilities.SupportsPromptCacheKey {
+		t.Fatalf("expected explicit false reviewer provider capabilities to survive effective helper, got %+v", reviewer.ProviderCapabilities)
+	}
+}
+
+func TestLoadReviewerModelContextWindowRejectsNegative(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[reviewer]
+model_context_window = -1
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected negative reviewer.model_context_window to fail")
+	}
+	if !strings.Contains(err.Error(), "reviewer.model_context_window must be >= 0") {
+		t.Fatalf("expected reviewer.model_context_window validation error, got %v", err)
+	}
+}
+
 func TestLoadReviewerModelCapabilityFalseOverrideDoesNotInheritMainTrue(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

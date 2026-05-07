@@ -616,7 +616,8 @@ func TestBuildSkillTogglesCanDisableGeneratedSkillWithoutImport(t *testing.T) {
 		"generated:builder-dogfooding": true,
 		"generated:creating-skills":    false,
 	})
-	if len(toggles) != 1 || toggles["creating-skills"] {
+	disabled, ok := toggles["creating-skills"]
+	if len(toggles) != 1 || !ok || disabled {
 		t.Fatalf("expected disabled generated skill toggle, got %+v", toggles)
 	}
 }
@@ -670,12 +671,18 @@ func TestReviewSummaryIncludesGeneratedSkillSelectionWithoutImport(t *testing.T)
 			"generated:creating-skills":    false,
 		},
 	}
-	lines := strings.Join(reviewSummaryLines(state), "\n")
-	if !strings.Contains(lines, "- Enabled skills: `1 enabled, 1 disabled`") {
-		t.Fatalf("expected generated skill counts in review summary, got %q", lines)
+	lines := reviewSummaryLines(state)
+	hasEnabledLine := false
+	for _, line := range lines {
+		switch line {
+		case "- Enabled skills: `1 enabled, 1 disabled`":
+			hasEnabledLine = true
+		case "- Skills import:":
+			t.Fatalf("did not expect import summary when only generated skills were configured, got %q", lines)
+		}
 	}
-	if strings.Contains(lines, "Skills import") {
-		t.Fatalf("did not expect import summary when only generated skills were configured, got %q", lines)
+	if !hasEnabledLine {
+		t.Fatalf("expected generated skill counts in review summary, got %q", lines)
 	}
 }
 

@@ -13,9 +13,7 @@ func inheritReviewerDefaults(settings *Settings) {
 }
 
 func EffectiveReviewerSettings(settings Settings) ReviewerSettings {
-	normalized := settings
-	inheritReviewerDefaults(&normalized)
-	return normalized.Reviewer
+	return settings.Reviewer
 }
 
 func inheritReviewerDefaultsWithSources(settings *Settings, sources map[string]string) {
@@ -34,7 +32,7 @@ func inheritReviewerDefaultsWithSources(settings *Settings, sources map[string]s
 	settings.Reviewer.OpenAIBaseURL = reviewerProvider.OpenAIBaseURL
 	inheritReviewerModelCapabilities(settings, sources)
 	inheritReviewerProviderCapabilities(settings, sources, reviewerProviderSelectionExplicit)
-	if settings.Reviewer.ModelContextWindow <= 0 {
+	if settings.Reviewer.ModelContextWindow == 0 {
 		settings.Reviewer.ModelContextWindow = settings.ModelContextWindow
 	}
 }

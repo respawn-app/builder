@@ -574,9 +574,10 @@ func TestRuntimeUnavailableHydrationRecoveryResumesOngoingEventFence(t *testing.
 	if cmd == nil {
 		t.Fatal("expected hydration command")
 	}
-	msg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	rawMsg := cmd()
+	msg, ok := rawMsg.(runtimeTranscriptRefreshedMsg)
 	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", rawMsg)
 	}
 	if msg.err != nil {
 		t.Fatalf("hydration err = %v, want recovered nil", msg.err)
