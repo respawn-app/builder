@@ -60,6 +60,7 @@ type Core struct {
 	sessionStores    *registry.SessionStoreRegistry
 	sessionLaunchMu  sync.Mutex
 	sessionLaunchMap map[string]client.SessionLaunchClient
+	sessionServices  map[string]*sessionlaunch.Service
 	runPromptMu      sync.Mutex
 	runPromptMap     map[string]client.RunPromptClient
 	projectID        string
@@ -189,6 +190,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		sessionLaunchMap: make(map[string]client.SessionLaunchClient),
+		sessionServices:  make(map[string]*sessionlaunch.Service),
 		runPromptMap:     make(map[string]client.RunPromptClient),
 		projectViews:     projectViews,
 		authBootstrap:    client.NewLoopbackAuthBootstrapClient(authBootstrapService),
@@ -431,6 +433,26 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 	if cached := s.sessionLaunchMap[scopeKey]; cached != nil {
 		return cached
 	}
+	service := s.sessionLaunchServiceForProjectContextLocked(projectCtx)
+	client := client.NewLoopbackSessionLaunchClient(service)
+	s.sessionLaunchMap[scopeKey] = client
+	return client
+}
+
+func (s *Core) sessionLaunchServiceForProjectContext(projectCtx projectContext) *sessionlaunch.Service {
+	if s == nil {
+		return nil
+	}
+	s.sessionLaunchMu.Lock()
+	defer s.sessionLaunchMu.Unlock()
+	return s.sessionLaunchServiceForProjectContextLocked(projectCtx)
+}
+
+func (s *Core) sessionLaunchServiceForProjectContextLocked(projectCtx projectContext) *sessionlaunch.Service {
+	scopeKey := projectWorkspaceScopeKey(projectCtx)
+	if cached := s.sessionServices[scopeKey]; cached != nil {
+		return cached
+	}
 	service := sessionlaunch.NewService(launch.Planner{
 		Config:       projectCtx.config,
 		ContainerDir: projectCtx.projectSession,
@@ -440,9 +462,8 @@ func (s *Core) sessionLaunchClientForProjectContext(projectCtx projectContext) c
 			return s.configForWorkspace(projectCtx.projectRoot)
 		},
 	}, s.sessionStores).WithAuthStateReader(s.oauthOpts.AuthManager)
-	client := client.NewLoopbackSessionLaunchClient(service)
-	s.sessionLaunchMap[scopeKey] = client
-	return client
+	s.sessionServices[scopeKey] = service
+	return service
 }
 
 func (s *Core) runPromptClientForProjectContext(projectCtx projectContext) client.RunPromptClient {
@@ -456,9 +477,7 @@ func (s *Core) runPromptClientForProjectContext(projectCtx projectContext) clien
 		return cached
 	}
 	client := runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           projectCtx.config,
-		ContainerDir:     projectCtx.projectSession,
-		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
+		SessionLaunch:    s.sessionLaunchServiceForProjectContext(projectCtx),
 		AuthManager:      s.oauthOpts.AuthManager,
 		FastModeState:    s.fastModeState,
 		Background:       s.background,
