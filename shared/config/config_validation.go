@@ -379,7 +379,7 @@ func validateReviewerProviderCapabilities(capabilities ProviderCapabilitiesOverr
 
 func hasConfiguredSource(sources map[string]string, key string) bool {
 	switch strings.TrimSpace(sources[key]) {
-	case "file", "env", "cli":
+	case "file", "env", "cli", "subagent":
 		return true
 	default:
 		return false

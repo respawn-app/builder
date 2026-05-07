@@ -265,6 +265,25 @@ supports_vision_inputs = false
 	}
 }
 
+func TestSettingsTOMLPreservesReviewerModelCapabilityFalseOverride(t *testing.T) {
+	settings := defaultSettings()
+	settings.ModelCapabilities.SupportsReasoningEffort = true
+	settings.ModelCapabilities.SupportsVisionInputs = true
+	settings.Reviewer.ModelCapabilities.SupportsReasoningEffort = false
+	settings.Reviewer.ModelCapabilities.SupportsVisionInputs = false
+
+	rendered := settingsTOML(settings)
+	if !strings.Contains(rendered, "[reviewer.model_capabilities]") {
+		t.Fatalf("expected reviewer model capabilities section, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "supports_reasoning_effort = false") {
+		t.Fatalf("expected explicit reviewer reasoning false override, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "supports_vision_inputs = false") {
+		t.Fatalf("expected explicit reviewer vision false override, got:\n%s", rendered)
+	}
+}
+
 func TestNormalizeSettingsForPersistenceWithSourcesPreservesReviewerCapabilityFalse(t *testing.T) {
 	settings := defaultSettings()
 	settings.ModelCapabilities.SupportsReasoningEffort = true
@@ -296,6 +315,23 @@ func TestNormalizeSettingsForPersistenceWithSourcesPreservesReviewerCapabilityFa
 	}
 	if normalized.Reviewer.ProviderCapabilities.ProviderID != "reviewer-provider" || !normalized.Reviewer.ProviderCapabilities.SupportsResponsesAPI || normalized.Reviewer.ProviderCapabilities.SupportsPromptCacheKey {
 		t.Fatalf("expected explicit false reviewer provider capabilities to persist, got %+v", normalized.Reviewer.ProviderCapabilities)
+	}
+}
+
+func TestValidateSettingsWithSourcesTreatsSubagentReviewerOverridesAsConfigured(t *testing.T) {
+	settings := defaultSettings()
+	settings.Reviewer.Model = settings.Model
+	settings.Reviewer.ProviderOverride = "anthropic"
+
+	sources := configRegistry.defaultSourceMap()
+	sources["reviewer.provider_override"] = "subagent"
+
+	err := ValidateSettingsWithSources(settings, sources)
+	if err == nil {
+		t.Fatal("expected subagent reviewer.provider_override=anthropic to be rejected")
+	}
+	if !strings.Contains(err.Error(), "reviewer.provider_override") {
+		t.Fatalf("expected reviewer.provider_override error, got %v", err)
 	}
 }
 
