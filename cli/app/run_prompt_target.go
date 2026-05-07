@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"builder/server/launch"
+	serverbootstrap "builder/server/bootstrap"
 	"builder/server/serve"
 	"builder/server/session"
 	"builder/shared/client"
@@ -334,36 +334,29 @@ func resolveRunPromptWorkspaceConfig(opts Options) (runPromptWorkspaceConfig, er
 	if err != nil {
 		return runPromptWorkspaceConfig{}, err
 	}
-	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
-	if err != nil {
-		return runPromptWorkspaceConfig{}, err
-	}
-	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContext(opts, workspaceRoot, cfg)
-	if err != nil {
-		return runPromptWorkspaceConfig{}, err
-	}
-	return runPromptWorkspaceConfig{Options: resolvedOpts, Config: resolvedCfg}, nil
-}
-
-func resolveRunPromptWorkspaceContext(opts Options, workspaceRoot string, cfg config.App) (Options, config.App, error) {
-	if opts.WorkspaceRootExplicit {
-		return opts, cfg, nil
-	}
-	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
-		return resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, sessionID)
-	}
+	sessionID := strings.TrimSpace(opts.SessionID)
 	contextSessionID := strings.TrimSpace(opts.WorkspaceContextSessionID)
-	if contextSessionID == "" {
-		return opts, cfg, nil
+	if sessionID == "" && !opts.WorkspaceRootExplicit {
+		sessionID = contextSessionID
 	}
-	resolvedOpts, resolvedCfg, err := resolveRunPromptWorkspaceContextSession(opts, workspaceRoot, cfg, contextSessionID)
+	plan, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{
+		WorkspaceRoot:         workspaceRoot,
+		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+		SessionID:             sessionID,
+		OpenAIBaseURL:         opts.OpenAIBaseURL,
+		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+	})
 	if err != nil {
-		// BUILDER_SESSION_ID is an implicit routing contract for shell commands
-		// launched by Builder. If it is present but invalid, failing loudly is
-		// safer than silently running the prompt against an unrelated cwd.
-		return Options{}, config.App{}, workspaceContextSessionError(contextSessionID, err)
+		if sessionID != "" && sessionID == contextSessionID {
+			return runPromptWorkspaceConfig{}, workspaceContextSessionError(contextSessionID, err)
+		}
+		return runPromptWorkspaceConfig{}, err
 	}
-	return resolvedOpts, resolvedCfg, nil
+	resolvedOpts := opts
+	if strings.TrimSpace(plan.Config.WorkspaceRoot) != "" && plan.Config.WorkspaceRoot != workspaceRoot {
+		resolvedOpts.WorkspaceRoot = plan.Config.WorkspaceRoot
+	}
+	return runPromptWorkspaceConfig{Options: resolvedOpts, Config: plan.Config}, nil
 }
 
 func workspaceContextSessionError(sessionID string, err error) error {
@@ -371,27 +364,6 @@ func workspaceContextSessionError(sessionID string, err error) error {
 		return fmt.Errorf("%s points to missing Builder session %q; unset %s or run from a live Builder shell: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), sessionenv.BuilderSessionID, err)
 	}
 	return fmt.Errorf("resolve %s workspace context %q: %w", sessionenv.BuilderSessionID, strings.TrimSpace(sessionID), err)
-}
-
-func resolveRunPromptWorkspaceContextSession(opts Options, workspaceRoot string, cfg config.App, sessionID string) (Options, config.App, error) {
-	bootstrapPlan, err := launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
-		WorkspaceRoot:         workspaceRoot,
-		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
-		SessionID:             sessionID,
-	})
-	if err != nil {
-		return Options{}, config.App{}, err
-	}
-	if strings.TrimSpace(bootstrapPlan.WorkspaceRoot) == "" || bootstrapPlan.WorkspaceRoot == workspaceRoot {
-		return opts, cfg, nil
-	}
-	resolved := opts
-	resolved.WorkspaceRoot = bootstrapPlan.WorkspaceRoot
-	resolvedCfg, err := config.Load(bootstrapPlan.WorkspaceRoot, config.LoadOptions{})
-	if err != nil {
-		return Options{}, config.App{}, err
-	}
-	return resolved, resolvedCfg, nil
 }
 
 func resolveRemoteWorkspaceBinding(ctx context.Context, projectViews client.ProjectViewClient, workspaceRoot string) (*serverapi.ProjectBinding, error) {
