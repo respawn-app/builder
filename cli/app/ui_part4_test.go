@@ -262,6 +262,32 @@ func TestRuntimeClientDirectSubmitDoesNotRemainQueued(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientDirectSubmitInterruptRestoresInputWithoutQueueing(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.input = "direct submit"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.activeSubmit.text != "direct submit" {
+		t.Fatalf("active submit text = %q, want direct submit", updated.activeSubmit.text)
+	}
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+	updated = applyInterruptedRunStateForTest(t, updated)
+
+	if updated.input != "direct submit" {
+		t.Fatalf("expected interrupted direct submit restored into input, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("interrupted direct submit should not enter visible queue, got %+v", updated.queued)
+	}
+	if client.interruptCalls != 1 {
+		t.Fatalf("interrupt calls = %d, want 1", client.interruptCalls)
+	}
+}
+
 func TestRuntimeIdleEventResumesVisibleQueuedMessagesWithoutBlankEnter(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

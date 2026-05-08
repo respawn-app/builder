@@ -47,6 +47,8 @@ type compactDoneMsg struct {
 	err error
 }
 
+// Active submit is the in-flight turn only. uiModel.queued stores future work;
+// never mirror active submit there or it can run again after completion.
 type activeSubmitState struct {
 	token              uint64
 	stepID             string
