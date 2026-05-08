@@ -5,10 +5,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"builder/shared/rpccontract"
@@ -79,6 +81,28 @@ func TestRemoteClientRouteTypesMatchRPCContract(t *testing.T) {
 		}
 		if method.Type.NumOut() != 2 || method.Type.Out(0) != route.ResponseType {
 			t.Fatalf("remote method %s response type = %v, want %v for route %q", method.Name, method.Type, route.ResponseType, route.Method)
+		}
+	}
+}
+
+func TestLoopbackClientsExposeEveryRemoteRouteBinding(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime caller unavailable")
+	}
+	dir := filepath.Dir(filename)
+	interfaceMethods := clientInterfaceMethods(t, dir)
+	loopbackMethods := loopbackMethodNames(t, dir)
+	for _, route := range rpccontract.Routes() {
+		if route.Kind == rpccontract.KindNotification || route.Dependency == rpccontract.DependencyProtocol {
+			continue
+		}
+		call := remoteRouteCalls(t)[route.Method]
+		if _, ok := interfaceMethods[call.methodName]; !ok {
+			t.Fatalf("route %q remote method %q missing from client interfaces", route.Method, call.methodName)
+		}
+		if _, ok := loopbackMethods[call.methodName]; !ok {
+			t.Fatalf("route %q client method %q missing loopback binding", route.Method, call.methodName)
 		}
 	}
 }
@@ -160,6 +184,87 @@ func remoteRouteCalls(t *testing.T) map[string]remoteRouteCall {
 		}
 	}
 	return calls
+}
+
+func clientInterfaceMethods(t *testing.T, dir string) map[string]struct{} {
+	t.Helper()
+	methods := map[string]struct{}{}
+	for _, file := range clientSourceFiles(t, dir) {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || !strings.HasSuffix(typeSpec.Name.Name, "Client") {
+					continue
+				}
+				iface, ok := typeSpec.Type.(*ast.InterfaceType)
+				if !ok {
+					continue
+				}
+				for _, method := range iface.Methods.List {
+					if len(method.Names) != 1 {
+						continue
+					}
+					methods[method.Names[0].Name] = struct{}{}
+				}
+			}
+		}
+	}
+	return methods
+}
+
+func loopbackMethodNames(t *testing.T, dir string) map[string]struct{} {
+	t.Helper()
+	methods := map[string]struct{}{}
+	for _, file := range clientSourceFiles(t, dir) {
+		for _, decl := range file.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) != 1 {
+				continue
+			}
+			receiver := receiverTypeName(funcDecl.Recv.List[0].Type)
+			if !strings.HasPrefix(receiver, "loopback") {
+				continue
+			}
+			methods[funcDecl.Name.Name] = struct{}{}
+		}
+	}
+	return methods
+}
+
+func clientSourceFiles(t *testing.T, dir string) []*ast.File {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read client dir: %v", err)
+	}
+	files := make([]*ast.File, 0)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasSuffix(name, "_test.go") || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		files = append(files, file)
+	}
+	return files
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch typed := expr.(type) {
+	case *ast.Ident:
+		return typed.Name
+	case *ast.StarExpr:
+		return receiverTypeName(typed.X)
+	default:
+		return ""
+	}
 }
 
 func isRemoteMethod(decl *ast.FuncDecl) bool {
