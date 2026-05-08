@@ -25,17 +25,12 @@ type Gateway struct {
 	identity protocol.ServerIdentity
 }
 
-var gatewayAllowedPreAuthMethods = protocolAllowedPreAuthMethodSet()
 var gatewaySubscriptionMethods = protocolSubscriptionMethodSet()
-
-func protocolAllowedPreAuthMethodSet() map[string]struct{} {
-	allowed := rpccontract.AllowedPreAuthMethods()
-	set := make(map[string]struct{}, len(allowed))
-	for _, method := range allowed {
-		set[strings.TrimSpace(method)] = struct{}{}
-	}
-	return set
+var gatewayProgressHandlers = map[string]gatewayProgressHandler{
+	protocol.MethodRunPrompt: (*Gateway).serveRunPrompt,
 }
+
+type gatewayProgressHandler func(g *Gateway, conn rpcwire.Conn, ctx context.Context, state *connectionState, req protocol.Request) bool
 
 func protocolSubscriptionMethodSet() map[string]struct{} {
 	methods := rpccontract.SubscriptionMethods()
@@ -93,8 +88,8 @@ func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
 		if err != nil {
 			return
 		}
-		if req.Method == protocol.MethodRunPrompt {
-			if !g.serveRunPrompt(conn, connCtx, state, req) {
+		if handler, ok := gatewayProgressHandlers[req.Method]; ok {
+			if !handler(g, conn, connCtx, state, req) {
 				return
 			}
 			continue
@@ -1039,13 +1034,19 @@ func (g *Gateway) serverAuthReady(ctx context.Context) (bool, error) {
 
 func (g *Gateway) methodRequiresServerAuth(method string) bool {
 	trimmed := strings.TrimSpace(method)
-	if trimmed == "" || trimmed == protocol.MethodHandshake {
+	if trimmed == "" {
 		return false
 	}
-	if _, ok := gatewayAllowedPreAuthMethods[trimmed]; ok {
-		return false
+	route, ok := rpccontract.RouteByMethod(trimmed)
+	if !ok {
+		return true
 	}
-	return true
+	switch route.Auth {
+	case rpccontract.AuthNone, rpccontract.AuthPreServerAuth:
+		return false
+	default:
+		return true
+	}
 }
 
 func streamCompleteParams(err error) protocol.StreamCompleteParams {

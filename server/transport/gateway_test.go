@@ -358,6 +358,26 @@ func TestGatewaySubscriptionHandlersCoverRouteContract(t *testing.T) {
 	}
 }
 
+func TestGatewayProgressHandlersCoverRouteContract(t *testing.T) {
+	for _, route := range rpccontract.Routes() {
+		if route.Kind != rpccontract.KindProgress {
+			continue
+		}
+		if _, ok := gatewayProgressHandlers[route.Method]; !ok {
+			t.Fatalf("progress route %q missing gateway handler", route.Method)
+		}
+	}
+	for method := range gatewayProgressHandlers {
+		route, ok := rpccontract.RouteByMethod(method)
+		if !ok {
+			t.Fatalf("gateway progress handler %q missing route contract", method)
+		}
+		if route.Kind != rpccontract.KindProgress {
+			t.Fatalf("gateway progress handler %q route kind = %q, want progress", method, route.Kind)
+		}
+	}
+}
+
 func TestGatewayAuthBootstrapStatusAllowedBeforeAttach(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
