@@ -231,7 +231,15 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 			initial = append(initial, pendingPromptEventFromSnapshot(id, item, clientui.PendingPromptEventPending))
 		}
 		initial = append(initial, clientui.PendingPromptEvent{Type: clientui.PendingPromptEventSnapshot, SessionID: id})
+		sub, err := entry.promptHub.subscribe(initial, req.AfterSequence)
 		entry.pendingMu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		if sub == nil {
+			return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
+		}
+		return sub, nil
 	}
 	sub, err := entry.promptHub.subscribe(initial, req.AfterSequence)
 	if err != nil {

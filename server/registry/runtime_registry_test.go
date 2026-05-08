@@ -302,6 +302,57 @@ func TestRuntimeRegistrySubscribePromptActivityReplaysAllPendingPromptsBeyondBuf
 	}
 }
 
+func TestRuntimeRegistrySubscribePromptActivityKeepsSnapshotAtomicUntilSubscribed(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	registry.mu.RLock()
+	entry := registry.engines["session-1"]
+	registry.mu.RUnlock()
+	if entry == nil {
+		t.Fatal("registered runtime entry not found")
+	}
+
+	entry.promptHub.mu.Lock()
+	subscribeDone := make(chan error, 1)
+	go func() {
+		sub, err := registry.SubscribePromptActivityFrom(context.Background(), serverapi.PromptActivitySubscribeRequest{SessionID: "session-1"})
+		if sub != nil {
+			_ = sub.Close()
+		}
+		subscribeDone <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for entry.pendingMu.TryLock() {
+		entry.pendingMu.Unlock()
+		if time.Now().After(deadline) {
+			entry.promptHub.mu.Unlock()
+			t.Fatal("subscription did not start collecting the pending prompt snapshot")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	if entry.pendingMu.TryLock() {
+		entry.pendingMu.Unlock()
+		entry.promptHub.mu.Unlock()
+		t.Fatal("snapshot lock was released before prompt hub subscriber registration completed")
+	}
+
+	entry.promptHub.mu.Unlock()
+	select {
+	case err := <-subscribeDone:
+		if err != nil {
+			t.Fatalf("SubscribePromptActivityFrom: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscription did not complete after prompt hub registration was unblocked")
+	}
+}
+
 func TestRuntimeRegistrySubmitPromptResponseRemovesPendingPromptBeforeWaiterReturns(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	engine := &runtime.Engine{}
