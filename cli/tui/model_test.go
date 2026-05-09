@@ -264,12 +264,37 @@ func TestDetailScrollStaysStableOnIncomingMessages(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
 	m = updateModel(t, m, ToggleModeMsg{})
 	m.ensureDetailScrollResolved()
-	m = updateModel(t, m, ScrollOngoingMsg{Delta: 1})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.DetailScroll() == 0 {
+		t.Fatal("expected detail viewport to move before appending")
+	}
 
 	beforeScroll := m.DetailScroll()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
 	if got := m.DetailScroll(); got != beforeScroll {
 		t.Fatalf("detail scroll changed while new messages arrived, got %d want %d", got, beforeScroll)
+	}
+}
+
+func TestDetailLazyBottomAnchorFollowsIncomingMessages(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected detail entry to remain lazily bottom-anchored before live append")
+	}
+
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected live append to preserve lazy detail bottom anchor")
+	}
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "a3") {
+		t.Fatalf("expected lazy bottom-anchored detail view to follow live append, got %q", view)
 	}
 }
 

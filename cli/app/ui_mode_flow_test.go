@@ -248,6 +248,9 @@ func TestCtrlTDeferredDetailLoadSkippedKeepsDetailMetricsLazyEndToEnd(t *testing
 	detail := next.(*uiModel)
 	_ = collectCmdMessages(t, enterCmd)
 	beforeMetricsResolved := detail.view.DetailMetricsResolved()
+	if beforeMetricsResolved {
+		t.Fatal("expected duplicate-seeded detail entry to start with lazy metrics")
+	}
 
 	next, refreshCmd := detail.Update(detailTranscriptLoadMsg{})
 	updated := next.(*uiModel)
@@ -255,8 +258,8 @@ func TestCtrlTDeferredDetailLoadSkippedKeepsDetailMetricsLazyEndToEnd(t *testing
 		t.Fatalf("expected duplicate seeded detail load to be skipped, got %T", refreshCmd())
 	}
 	afterMetricsResolved := updated.view.DetailMetricsResolved()
-	if afterMetricsResolved != beforeMetricsResolved {
-		t.Fatalf("duplicate deferred detail refresh changed detail metric resolution %v -> %v", beforeMetricsResolved, afterMetricsResolved)
+	if afterMetricsResolved {
+		t.Fatal("expected duplicate deferred detail refresh to keep detail metrics lazy")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected detail mode to remain active, got %q", updated.view.Mode())

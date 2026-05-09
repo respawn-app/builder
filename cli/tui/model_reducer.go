@@ -562,7 +562,7 @@ func (m *Model) reduceCommitAssistantMsg(result *modelUpdateResult) {
 }
 
 func (m *Model) resolveDetailScrollBeforeLiveTranscriptChange() {
-	if m == nil || m.mode != ModeDetail {
+	if m == nil || m.mode != ModeDetail || m.detailBottomAnchor {
 		return
 	}
 	m.ensureDetailScrollResolved()
