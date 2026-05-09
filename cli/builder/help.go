@@ -151,13 +151,7 @@ func writeGoalStatusUsage(fs *flag.FlagSet, _ string) {
 }
 
 func writeGoalCompleteUsage(fs *flag.FlagSet) {
-	if fs == nil {
-		return
-	}
 	writeGoalUsage(fs)
-	writeHelpSection(fs.Output(), "Goal Complete:",
-		"  If the last goal is already complete, prints the no-active-goal message and exits 0 without mutating state.",
-	)
 }
 
 func writeGoalClearUsage(fs *flag.FlagSet) {
