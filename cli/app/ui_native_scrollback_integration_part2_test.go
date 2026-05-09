@@ -7,6 +7,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	sharedclient "builder/shared/client"
+	"builder/shared/clientui"
 	"bytes"
 	"context"
 	"errors"
@@ -738,100 +739,75 @@ func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailModeRoundTrip(t *te
 }
 
 func TestNativeDeferredFinalWithQueuedInjectionSurvivesDetailRoundTripBeforeCommit(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
+	client := &runtimeControlFakeClient{}
+	model := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	model = updateUIModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 32})
+	model.pendingInjected = queuedUserMessagesForTest("steer now")
+	model.input = "steer now"
+	model.lockedInjectText = "steer now"
+	model.lockedInjectID = "queue-test-0"
+	model.inputSubmitLocked = true
+
+	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		StepID:   "step-1",
+		RunState: &clientui.RunState{Busy: true},
+	})
+	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:           clientui.EventAssistantDelta,
+		StepID:         "step-1",
+		AssistantDelta: "foreground done",
+	})
+	if got := model.view.OngoingStreamingText(); !strings.Contains(got, "foreground done") {
+		t.Fatalf("expected live deferred final delta visible, got %q", got)
 	}
-	releaseFirst := make(chan struct{})
-	firstDelta := make(chan struct{})
-	releasedFirst := false
-	defer func() {
-		if !releasedFirst {
-			close(releaseFirst)
-		}
-	}()
-	var program *tea.Program
-	eng, err := runtime.New(
-		store,
-		&deferredFinalQueuedInjectionStreamClient{releaseFirst: releaseFirst, firstDelta: firstDelta},
-		tools.NewRegistry(),
-		runtime.Config{
-			Model: "gpt-5",
-			Reviewer: runtime.ReviewerConfig{
-				Frequency:     "all",
-				Model:         "gpt-5",
-				ThinkingLevel: "low",
-				Client:        reviewerNoSuggestionsClient{},
-			},
-			OnEvent: func(evt runtime.Event) {
-				if evt.Kind == runtime.EventAssistantDelta {
-					return
-				}
-				if program != nil {
-					program.Send(projectedRuntimeEventMsg(evt))
-				}
-			},
-		},
-	)
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
+
+	model = updateUIModel(t, model, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if model.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode active, got %q", model.view.Mode())
 	}
-	eng.QueueUserMessage("steer now")
+	model = updateUIModel(t, model, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if model.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode active before final commit, got %q", model.view.Mode())
+	}
 
-	out := newLockedBuffer()
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), closedProjectedRuntimeEvents(), closedAskEvents())
-	observed := newObservedUIModel(model)
-
-	program = tea.NewProgram(
-		observed,
-		tea.WithInput(strings.NewReader("")),
-		tea.WithOutput(out),
-		tea.WithoutSignals(),
-	)
-	done := make(chan error, 1)
-	go func() {
-		_, runErr := program.Run()
-		done <- runErr
-	}()
-
-	waitForSignal(t, nativeDeferredFinalRoundTripTimeout, "program startup output", out.Started())
-	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
-	submitDone := make(chan error, 1)
-	go func() {
-		_, err := eng.SubmitUserMessage(context.Background(), "run task")
-		submitDone <- err
-	}()
-
-	waitForSignal(t, nativeDeferredFinalRoundTripTimeout, "first deferred final delta", firstDelta)
-	program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"}))
-	observed.waitFor(t, nativeDeferredFinalRoundTripTimeout, "live deferred final delta visible", func(snapshot observedUISnapshot) bool {
-		return strings.Contains(snapshot.OngoingStreamingText, "foreground done")
+	_ = model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                         clientui.EventUserMessageFlushed,
+		StepID:                       "step-1",
+		CommittedTranscriptChanged:   true,
+		TranscriptRevision:           1,
+		CommittedEntryCount:          1,
+		UserMessage:                  "steer now",
+		UserMessageBatch:             []string{"steer now"},
+		UserMessageBatchQueueItemIDs: []string{"queue-test-0"},
+		TranscriptEntries:            []clientui.ChatEntry{{Role: "user", Text: "steer now"}},
 	})
-	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	observed.waitFor(t, nativeDeferredFinalRoundTripTimeout, "detail mode active", func(snapshot observedUISnapshot) bool {
-		return snapshot.Mode == tui.ModeDetail
+	assistantCommitCmd := model.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "foreground done", Phase: string(llm.MessagePhaseFinal)}},
 	})
-	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
-	observed.waitFor(t, nativeDeferredFinalRoundTripTimeout, "ongoing mode active before final commit", func(snapshot observedUISnapshot) bool {
-		return snapshot.Mode == tui.ModeOngoing
-	})
-	close(releaseFirst)
-	releasedFirst = true
-
-	waitForSubmitResult(t, nativeDeferredFinalRoundTripTimeout, submitDone)
-	observed.waitFor(t, nativeDeferredFinalRoundTripTimeout, "ongoing view keeps deferred final visible after early detail exit", func(snapshot observedUISnapshot) bool {
-		return strings.Contains(snapshot.OngoingSnapshot, "foreground done")
-	})
-
-	program.Quit()
-	select {
-	case runErr := <-done:
-		if runErr != nil {
-			t.Fatalf("program run failed: %v", runErr)
+	for _, msg := range collectCmdMessages(t, assistantCommitCmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect hydration after assistant caught up with deferred user flush, got %+v", msg)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("program did not terminate")
+	}
+	if got := len(model.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected deferred queued user flush merged by assistant commit, got %d", got)
+	}
+	if got := model.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected assistant commit to clear live stream, got %q", got)
+	}
+	if model.sawAssistantDelta {
+		t.Fatal("expected assistant commit to clear assistant delta flag")
+	}
+	if got := stripANSIAndTrimRight(model.view.OngoingSnapshot()); !strings.Contains(got, "foreground done") {
+		t.Fatalf("expected ongoing view to keep deferred final visible after early detail exit, got %q", got)
 	}
 }
 
