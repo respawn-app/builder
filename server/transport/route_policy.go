@@ -20,6 +20,17 @@ type routePolicyExecutor struct {
 }
 
 var errSessionOutsideActiveProject = errors.New("session outside active project")
+var errActiveProjectRequired = errors.New("active project required")
+
+type activeProjectRequiredError struct{}
+
+func (e activeProjectRequiredError) Error() string {
+	return "project attachment is required"
+}
+
+func (e activeProjectRequiredError) Is(target error) bool {
+	return target == errActiveProjectRequired
+}
 
 type sessionOutsideActiveProjectError struct {
 	sessionID string
@@ -336,7 +347,7 @@ func (g *Gateway) activeProjectID(ctx context.Context, state *connectionState) (
 	if trimmed := strings.TrimSpace(g.core.ProjectID()); trimmed != "" {
 		return trimmed, nil
 	}
-	return "", fmt.Errorf("project attachment is required")
+	return "", activeProjectRequiredError{}
 }
 
 func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *connectionState, sessionID string) error {
@@ -407,7 +418,7 @@ func (g *Gateway) filterProcessesForActiveProject(ctx context.Context, state *co
 			filtered = append(filtered, process)
 			continue
 		}
-		if !errors.Is(err, errSessionOutsideActiveProject) {
+		if !errors.Is(err, errSessionOutsideActiveProject) && !errors.Is(err, errActiveProjectRequired) {
 			return nil, err
 		}
 	}

@@ -303,16 +303,19 @@ func TestRoutePolicyAuthorizesProcessScopesWithoutWebSocket(t *testing.T) {
 	}
 }
 
-func TestFilterProcessesForActiveProjectPropagatesScopeErrors(t *testing.T) {
+func TestFilterProcessesForActiveProjectSkipsWhenActiveProjectUnset(t *testing.T) {
 	appCore, server := newUnboundGatewayTestServer(t)
 	server.Close()
 	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	_, err = gateway.filterProcessesForActiveProject(context.Background(), &connectionState{}, []clientui.BackgroundProcess{{ID: "proc-1", OwnerSessionID: "session-1"}})
-	if err == nil || err.Error() != "project attachment is required" {
-		t.Fatalf("filter error = %v, want project attachment is required", err)
+	filtered, err := gateway.filterProcessesForActiveProject(context.Background(), &connectionState{}, []clientui.BackgroundProcess{{ID: "proc-1", OwnerSessionID: "session-1"}})
+	if err != nil {
+		t.Fatalf("filter error = %v, want nil", err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("filtered processes = %+v, want empty without active project", filtered)
 	}
 }
 
