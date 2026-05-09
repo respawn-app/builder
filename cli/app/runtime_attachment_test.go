@@ -20,35 +20,15 @@ type runtimeAttachmentTestServer struct {
 	runtimeControl client.RuntimeControlClient
 }
 
-func (s runtimeAttachmentTestServer) SessionRuntimeClient() client.SessionRuntimeClient {
-	return s.runtime
+func (s runtimeAttachmentTestServer) RuntimeAttachmentClients() runtimeAttachmentClients {
+	return runtimeAttachmentClients{
+		PromptActivity:  s.promptEvents,
+		RuntimeControls: s.runtimeControl,
+		SessionActivity: s.sessionEvents,
+		SessionRuntime:  s.runtime,
+		SessionViews:    s.sessionViews,
+	}
 }
-
-func (s runtimeAttachmentTestServer) SessionActivityClient() client.SessionActivityClient {
-	return s.sessionEvents
-}
-
-func (s runtimeAttachmentTestServer) PromptActivityClient() client.PromptActivityClient {
-	return s.promptEvents
-}
-
-func (s runtimeAttachmentTestServer) SessionViewClient() client.SessionViewClient {
-	return s.sessionViews
-}
-
-func (s runtimeAttachmentTestServer) RuntimeControlClient() client.RuntimeControlClient {
-	return s.runtimeControl
-}
-
-func (runtimeAttachmentTestServer) PromptControlClient() client.PromptControlClient { return nil }
-func (runtimeAttachmentTestServer) ApprovalViewClient() client.ApprovalViewClient   { return nil }
-func (runtimeAttachmentTestServer) AskViewClient() client.AskViewClient             { return nil }
-func (runtimeAttachmentTestServer) ProcessControlClient() client.ProcessControlClient {
-	return nil
-}
-func (runtimeAttachmentTestServer) ProcessOutputClient() client.ProcessOutputClient { return nil }
-func (runtimeAttachmentTestServer) ProcessViewClient() client.ProcessViewClient     { return nil }
-func (runtimeAttachmentTestServer) WorktreeClient() client.WorktreeClient           { return nil }
 
 func TestRuntimeAttachmentSubscribeFailureReleasesRuntime(t *testing.T) {
 	for _, tc := range []struct {
@@ -182,7 +162,7 @@ func TestRuntimeAttachmentLeaseRecoveryUsesActivation(t *testing.T) {
 			},
 		},
 	}
-	lease, manager, err := activateSharedRuntime(context.Background(), server, sessionLaunchPlan{
+	lease, manager, err := activateSharedRuntime(context.Background(), server.RuntimeAttachmentClients(), sessionLaunchPlan{
 		SessionID:      "session-recover",
 		ActiveSettings: config.Settings{Model: "gpt-test"},
 	})

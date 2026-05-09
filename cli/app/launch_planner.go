@@ -92,12 +92,23 @@ type launchPlannerServer interface {
 	OwnsServer() bool
 	Config() config.App
 	ProjectID() string
-	AuthStateResolver() statuscollect.AuthStateResolver
-	AuthStatePath() string
 	AuthStatusClient() client.AuthStatusClient
 	ProjectViewClient() client.ProjectViewClient
 	SessionLaunchClient() client.SessionLaunchClient
 	SessionViewClient() client.SessionViewClient
+}
+
+type launchPlannerAuthStateProvider interface {
+	AuthStateResolver() statuscollect.AuthStateResolver
+	AuthStatePath() string
+}
+
+type launchPlannerAuthStateMetadata struct {
+	Resolver statuscollect.AuthStateResolver
+	Path     string
+}
+
+type launchPlannerRuntimePreparer interface {
 	PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 }
 
@@ -134,8 +145,7 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 		}
 	}
 	cfg := p.server.Config()
-	authStatePath := p.server.AuthStatePath()
-	authManager := p.server.AuthStateResolver()
+	authState := launchPlannerAuthState(p.server)
 	selectedSessionWorkspaceRoot := ""
 	selectedSessionWorkspaceLookupFailed := false
 	if resolved.selectedViaPicker {
@@ -164,14 +174,25 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 			SessionViews:    p.server.SessionViewClient(),
 			Settings:        resp.Plan.ActiveSettings,
 			Source:          resp.Plan.Source,
-			AuthManager:     statuscollect.NormalizeAuthStateResolver(authManager),
+			AuthManager:     statuscollect.NormalizeAuthStateResolver(authState.Resolver),
 			AuthStatus:      p.server.AuthStatusClient(),
-			AuthStatePath:   authStatePath,
+			AuthStatePath:   authState.Path,
 			OwnsServer:      p.server.OwnsServer(),
 		},
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,
 		Source:        resp.Plan.Source,
 	}, nil
+}
+
+func launchPlannerAuthState(server launchPlannerServer) launchPlannerAuthStateMetadata {
+	authProvider, ok := server.(launchPlannerAuthStateProvider)
+	if !ok {
+		return launchPlannerAuthStateMetadata{}
+	}
+	return launchPlannerAuthStateMetadata{
+		Resolver: authProvider.AuthStateResolver(),
+		Path:     strings.TrimSpace(authProvider.AuthStatePath()),
+	}
 }
 
 func loadSelectedSessionWorkspaceRoot(ctx context.Context, sessionViews sessionViewReader, sessionID string) (string, error) {
@@ -189,7 +210,14 @@ func (p *launchPlanner) PrepareRuntime(ctx context.Context, plan sessionLaunchPl
 	if p == nil || p.server == nil {
 		return nil, io.ErrClosedPipe
 	}
-	return p.server.PrepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
+	if preparer, ok := p.server.(launchPlannerRuntimePreparer); ok {
+		return preparer.PrepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
+	}
+	runtimeServer, ok := p.server.(runtimeAttachmentSource)
+	if !ok {
+		return nil, errors.New("runtime attachment server is required")
+	}
+	return prepareSharedRuntime(ctx, runtimeServer, plan, diagnosticWriter, startLogLine)
 }
 
 func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunchRequest) (resolvedSessionPlanRequest, error) {

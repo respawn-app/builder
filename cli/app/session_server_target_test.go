@@ -408,9 +408,11 @@ func TestRemoteInteractiveRuntimeAskAnswersRequireControllerLeaseAcrossWorkspace
 	if askEvtA.req.PromptID != "ask-race-1" || askEvtA.req.Question != "Who answers first?" || askEvtA.req.Approval {
 		t.Fatalf("unexpected ask event: %+v", askEvtA.req)
 	}
-	waitForPendingAskResources(t, fixture.serverB.AskViewClient(), fixture.planA.SessionID, 1)
+	runtimeClientsA := fixture.serverA.RuntimeAttachmentClients()
+	runtimeClientsB := fixture.serverB.RuntimeAttachmentClients()
+	waitForPendingAskResources(t, runtimeClientsB.AskViews, fixture.planA.SessionID, 1)
 
-	if err := fixture.serverB.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+	if err := runtimeClientsB.PromptControl.AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
 		ClientRequestID:   uuid.NewString(),
 		SessionID:         fixture.planA.SessionID,
 		ControllerLeaseID: "invalid-lease",
@@ -419,7 +421,7 @@ func TestRemoteInteractiveRuntimeAskAnswersRequireControllerLeaseAcrossWorkspace
 	}); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
 		t.Fatalf("expected invalid controller lease for read-only client, got %v", err)
 	}
-	if err := fixture.serverA.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+	if err := runtimeClientsA.PromptControl.AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
 		ClientRequestID:   uuid.NewString(),
 		SessionID:         fixture.planA.SessionID,
 		ControllerLeaseID: fixture.runtimePlanA.ControllerLeaseID,
@@ -440,8 +442,8 @@ func TestRemoteInteractiveRuntimeAskAnswersRequireControllerLeaseAcrossWorkspace
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for ask response")
 	}
-	waitForPendingAskResources(t, fixture.serverA.AskViewClient(), fixture.planA.SessionID, 0)
-	waitForPendingAskResources(t, fixture.serverB.AskViewClient(), fixture.planA.SessionID, 0)
+	waitForPendingAskResources(t, runtimeClientsA.AskViews, fixture.planA.SessionID, 0)
+	waitForPendingAskResources(t, runtimeClientsB.AskViews, fixture.planA.SessionID, 0)
 }
 
 func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWorkspaces(t *testing.T) {
@@ -468,9 +470,11 @@ func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWork
 	if approvalEvtA.req.PromptID != "approval-race-1" || approvalEvtA.req.Question != "Allow the command?" || !approvalEvtA.req.Approval {
 		t.Fatalf("unexpected approval event: %+v", approvalEvtA.req)
 	}
-	waitForPendingApprovalResources(t, fixture.serverB.ApprovalViewClient(), fixture.planA.SessionID, 1)
+	runtimeClientsA := fixture.serverA.RuntimeAttachmentClients()
+	runtimeClientsB := fixture.serverB.RuntimeAttachmentClients()
+	waitForPendingApprovalResources(t, runtimeClientsB.ApprovalViews, fixture.planA.SessionID, 1)
 
-	if err := fixture.serverB.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+	if err := runtimeClientsB.PromptControl.AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
 		ClientRequestID:   uuid.NewString(),
 		SessionID:         fixture.planA.SessionID,
 		ControllerLeaseID: "invalid-lease",
@@ -480,7 +484,7 @@ func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWork
 	}); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
 		t.Fatalf("expected invalid controller lease for read-only client, got %v", err)
 	}
-	if err := fixture.serverA.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+	if err := runtimeClientsA.PromptControl.AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
 		ClientRequestID:   uuid.NewString(),
 		SessionID:         fixture.planA.SessionID,
 		ControllerLeaseID: fixture.runtimePlanA.ControllerLeaseID,
@@ -505,8 +509,8 @@ func TestRemoteInteractiveRuntimeApprovalAnswersRequireControllerLeaseAcrossWork
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for approval response")
 	}
-	waitForPendingApprovalResources(t, fixture.serverA.ApprovalViewClient(), fixture.planA.SessionID, 0)
-	waitForPendingApprovalResources(t, fixture.serverB.ApprovalViewClient(), fixture.planA.SessionID, 0)
+	waitForPendingApprovalResources(t, runtimeClientsA.ApprovalViews, fixture.planA.SessionID, 0)
+	waitForPendingApprovalResources(t, runtimeClientsB.ApprovalViews, fixture.planA.SessionID, 0)
 }
 
 func TestRemoteSessionActivityLaggingSubscriberHydratesAndResubscribesAcrossWorkspaces(t *testing.T) {
@@ -522,7 +526,8 @@ func TestRemoteSessionActivityLaggingSubscriberHydratesAndResubscribesAcrossWork
 		t.Fatalf("assistant message before gap = %q, want %q", message, "reply before remote gap")
 	}
 
-	if _, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{
+	runtimeClientsB := fixture.serverB.RuntimeAttachmentClients()
+	if _, err := runtimeClientsB.SessionActivity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{
 		SessionID:     fixture.planA.SessionID,
 		AfterSequence: ^uint64(0),
 	}); !errors.Is(err, serverapi.ErrStreamGap) {
@@ -539,7 +544,7 @@ func TestRemoteSessionActivityLaggingSubscriberHydratesAndResubscribesAcrossWork
 		t.Fatalf("expected authoritative transcript hydrate to converge after stream gap, a=%+v b=%+v", pageA, pageB)
 	}
 
-	recoveredSub, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: fixture.planA.SessionID})
+	recoveredSub, err := runtimeClientsB.SessionActivity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: fixture.planA.SessionID})
 	if err != nil {
 		t.Fatalf("SubscribeSessionActivity recovered client: %v", err)
 	}
@@ -596,10 +601,7 @@ type remoteMultiClientRuntimeFixture struct {
 
 type remoteMultiClientServer interface {
 	interactiveSessionServer
-	AskViewClient() client.AskViewClient
-	ApprovalViewClient() client.ApprovalViewClient
-	PromptControlClient() client.PromptControlClient
-	SessionActivityClient() client.SessionActivityClient
+	RuntimeAttachmentClients() runtimeAttachmentClients
 }
 
 type promptAnswerResult struct {

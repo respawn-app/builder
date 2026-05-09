@@ -3,11 +3,9 @@ package app
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 
 	"builder/cli/app/internal/remotebinding"
-	"builder/cli/app/internal/statuscollect"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -84,9 +82,6 @@ func (s *remoteAppServer) BindProjectWorkspace(ctx context.Context, projectID st
 	return newRemoteAppServerWithAuth(bound.Remote, s.cfg, bound.CloseFn), nil
 }
 
-func (s *remoteAppServer) AuthStateResolver() statuscollect.AuthStateResolver { return nil }
-func (s *remoteAppServer) AuthStatePath() string                              { return "" }
-
 func (s *remoteAppServer) AuthStatusClient() client.AuthStatusClient {
 	if s == nil {
 		return nil
@@ -101,77 +96,27 @@ func (s *remoteAppServer) ProjectID() string {
 	return strings.TrimSpace(s.projectID)
 }
 
-func (s *remoteAppServer) AskViewClient() client.AskViewClient {
+func (s *remoteAppServer) RuntimeAttachmentClients() runtimeAttachmentClients {
 	if s == nil {
-		return nil
+		return runtimeAttachmentClients{}
 	}
-	return s.remote
-}
-
-func (s *remoteAppServer) ApprovalViewClient() client.ApprovalViewClient {
-	if s == nil {
-		return nil
+	return runtimeAttachmentClients{
+		ApprovalViews:   s.remote,
+		AskViews:        s.remote,
+		ProcessControls: s.remote,
+		ProcessOutput:   s.remote,
+		ProcessViews:    s.remote,
+		PromptActivity:  s.remote,
+		PromptControl:   s.remote,
+		RuntimeControls: s.remote,
+		SessionActivity: s.remote,
+		SessionRuntime:  s.remote,
+		SessionViews:    s.remote,
+		Worktrees:       s.remote,
 	}
-	return s.remote
-}
-
-func (s *remoteAppServer) PromptControlClient() client.PromptControlClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) PromptActivityClient() client.PromptActivityClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
 }
 
 func (s *remoteAppServer) ProjectViewClient() client.ProjectViewClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) RunPromptClient() client.RunPromptClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) ProcessControlClient() client.ProcessControlClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) ProcessOutputClient() client.ProcessOutputClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) ProcessViewClient() client.ProcessViewClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) RuntimeControlClient() client.RuntimeControlClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) SessionActivityClient() client.SessionActivityClient {
 	if s == nil {
 		return nil
 	}
@@ -192,32 +137,11 @@ func (s *remoteAppServer) SessionLifecycleClient() client.SessionLifecycleClient
 	return s.remote
 }
 
-func (s *remoteAppServer) SessionRuntimeClient() client.SessionRuntimeClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
 func (s *remoteAppServer) SessionViewClient() client.SessionViewClient {
 	if s == nil {
 		return nil
 	}
 	return s.remote
-}
-
-func (s *remoteAppServer) WorktreeClient() client.WorktreeClient {
-	if s == nil {
-		return nil
-	}
-	return s.remote
-}
-
-func (s *remoteAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
-	if s == nil || s.remote == nil {
-		return nil, errors.New("remote server is required")
-	}
-	return prepareSharedRuntime(ctx, s, plan, diagnosticWriter, startLogLine)
 }
 
 func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {

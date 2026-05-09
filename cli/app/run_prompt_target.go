@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -66,7 +67,11 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 			if err != nil {
 				return targetstartup.Target[runprompttarget.Target]{}, err
 			}
-			return runprompttarget.Embedded(server.RunPromptClient(), server.ProjectID, server.Close), nil
+			runPrompt, err := runPromptClientForEmbeddedServer(server)
+			if err != nil {
+				return targetstartup.Target[runprompttarget.Target]{}, err
+			}
+			return runprompttarget.Embedded(runPrompt, server.ProjectID, server.Close), nil
 		},
 		Validate: func(ctx context.Context, _ targetstartup.Source, target runprompttarget.Target) error {
 			return runprompttarget.Validate(ctx, runprompttarget.ValidateRequest{
@@ -82,6 +87,13 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 		return nil, nil, err
 	}
 	return target.Value.Client, target.Close, nil
+}
+
+func runPromptClientForEmbeddedServer(server *embeddedAppServer) (client.RunPromptClient, error) {
+	if server == nil || server.inner == nil {
+		return nil, errors.New("embedded server is required")
+	}
+	return server.inner.RunPromptClient(), nil
 }
 
 func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {

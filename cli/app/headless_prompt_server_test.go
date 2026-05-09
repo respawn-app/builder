@@ -12,10 +12,12 @@ import (
 	"builder/shared/serverapi"
 )
 
-func newHeadlessRunPromptClient(server interface {
-	RunPromptClient() client.RunPromptClient
-}) client.RunPromptClient {
-	return server.RunPromptClient()
+func newHeadlessRunPromptClient(server *embeddedAppServer) client.RunPromptClient {
+	runPrompt, err := runPromptClientForEmbeddedServer(server)
+	if err != nil {
+		panic(err)
+	}
+	return runPrompt
 }
 
 func ensureSubagentSessionName(store *session.Store) error {

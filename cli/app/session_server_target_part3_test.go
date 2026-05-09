@@ -630,9 +630,25 @@ func requirePromptViewServer(t *testing.T, server any) promptViewTestServer {
 	t.Helper()
 	promptViews, ok := server.(promptViewTestServer)
 	if !ok {
-		t.Fatalf("server %T does not expose prompt view clients", server)
+		runtimeSource, runtimeOK := server.(runtimeAttachmentSource)
+		if !runtimeOK {
+			t.Fatalf("server %T does not expose prompt view clients", server)
+		}
+		return runtimePromptViewTestServer{clients: runtimeSource.RuntimeAttachmentClients()}
 	}
 	return promptViews
+}
+
+type runtimePromptViewTestServer struct {
+	clients runtimeAttachmentClients
+}
+
+func (s runtimePromptViewTestServer) AskViewClient() client.AskViewClient {
+	return s.clients.AskViews
+}
+
+func (s runtimePromptViewTestServer) ApprovalViewClient() client.ApprovalViewClient {
+	return s.clients.ApprovalViews
 }
 
 type processTestServer interface {
@@ -645,9 +661,29 @@ func requireProcessServer(t *testing.T, server any) processTestServer {
 	t.Helper()
 	processes, ok := server.(processTestServer)
 	if !ok {
-		t.Fatalf("server %T does not expose process clients", server)
+		runtimeSource, runtimeOK := server.(runtimeAttachmentSource)
+		if !runtimeOK {
+			t.Fatalf("server %T does not expose process clients", server)
+		}
+		return runtimeProcessTestServer{clients: runtimeSource.RuntimeAttachmentClients()}
 	}
 	return processes
+}
+
+type runtimeProcessTestServer struct {
+	clients runtimeAttachmentClients
+}
+
+func (s runtimeProcessTestServer) ProcessControlClient() client.ProcessControlClient {
+	return s.clients.ProcessControls
+}
+
+func (s runtimeProcessTestServer) ProcessOutputClient() client.ProcessOutputClient {
+	return s.clients.ProcessOutput
+}
+
+func (s runtimeProcessTestServer) ProcessViewClient() client.ProcessViewClient {
+	return s.clients.ProcessViews
 }
 
 func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {

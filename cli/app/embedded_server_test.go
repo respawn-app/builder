@@ -374,6 +374,23 @@ func (s *testEmbeddedServer) WorktreeClient() client.WorktreeClient {
 	return nil
 }
 
+func (s *testEmbeddedServer) RuntimeAttachmentClients() runtimeAttachmentClients {
+	return runtimeAttachmentClients{
+		ApprovalViews:   s.approvalViewClient,
+		AskViews:        s.askViewClient,
+		ProcessControls: s.processControlClient,
+		ProcessOutput:   s.processOutputClient,
+		ProcessViews:    s.processViewClient,
+		PromptActivity:  s.promptActivityClient,
+		PromptControl:   s.promptControlClient,
+		RuntimeControls: s.RuntimeControlClient(),
+		SessionActivity: s.sessionActivity,
+		SessionRuntime:  s.sessionRuntime,
+		SessionViews:    s.sessionViewClient,
+		Worktrees:       s.WorktreeClient(),
+	}
+}
+
 func (s *testEmbeddedServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s.prepareRuntime != nil {
 		return s.prepareRuntime(ctx, plan, diagnosticWriter, startLogLine)

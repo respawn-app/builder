@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 
 	"builder/cli/app/internal/embeddedbinding"
@@ -23,7 +22,6 @@ type embeddedAppServer struct {
 	inner              *embeddedstartup.Server
 	boundProjectID     string
 	boundSessionLaunch client.SessionLaunchClient
-	boundRunPrompt     client.RunPromptClient
 }
 
 func newEmbeddedAppServer(inner *embeddedstartup.Server) *embeddedAppServer {
@@ -68,7 +66,6 @@ func (s *embeddedAppServer) BindProjectWorkspace(ctx context.Context, projectID 
 		inner:              s.inner,
 		boundProjectID:     bound.ProjectID,
 		boundSessionLaunch: bound.SessionLaunch,
-		boundRunPrompt:     bound.RunPrompt,
 	}, nil
 }
 
@@ -113,45 +110,24 @@ func (s *embeddedAppServer) ProjectViewClient() client.ProjectViewClient {
 	return s.inner.ProjectViewClient()
 }
 
-func (s *embeddedAppServer) AskViewClient() client.AskViewClient {
+func (s *embeddedAppServer) RuntimeAttachmentClients() runtimeAttachmentClients {
 	if s == nil || s.inner == nil {
-		return nil
+		return runtimeAttachmentClients{}
 	}
-	return s.inner.AskViewClient()
-}
-
-func (s *embeddedAppServer) ApprovalViewClient() client.ApprovalViewClient {
-	if s == nil || s.inner == nil {
-		return nil
+	return runtimeAttachmentClients{
+		ApprovalViews:   s.inner.ApprovalViewClient(),
+		AskViews:        s.inner.AskViewClient(),
+		ProcessControls: s.inner.ProcessControlClient(),
+		ProcessOutput:   s.inner.ProcessOutputClient(),
+		ProcessViews:    s.inner.ProcessViewClient(),
+		PromptActivity:  s.inner.PromptActivityClient(),
+		PromptControl:   s.inner.PromptControlClient(),
+		RuntimeControls: s.inner.RuntimeControlClient(),
+		SessionActivity: s.inner.SessionActivityClient(),
+		SessionRuntime:  s.inner.SessionRuntimeClient(),
+		SessionViews:    s.inner.SessionViewClient(),
+		Worktrees:       s.inner.WorktreeClient(),
 	}
-	return s.inner.ApprovalViewClient()
-}
-
-func (s *embeddedAppServer) PromptControlClient() client.PromptControlClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.PromptControlClient()
-}
-
-func (s *embeddedAppServer) PromptActivityClient() client.PromptActivityClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.PromptActivityClient()
-}
-
-func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
-	if s == nil {
-		return nil
-	}
-	if s.boundRunPrompt != nil {
-		return s.boundRunPrompt
-	}
-	if s.inner == nil {
-		return nil
-	}
-	return s.inner.RunPromptClient()
 }
 
 func (s *embeddedAppServer) SessionLaunchClient() client.SessionLaunchClient {
@@ -174,74 +150,11 @@ func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
 	return s.inner.SessionViewClient()
 }
 
-func (s *embeddedAppServer) WorktreeClient() client.WorktreeClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.WorktreeClient()
-}
-
-func (s *embeddedAppServer) SessionActivityClient() client.SessionActivityClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.SessionActivityClient()
-}
-
-func (s *embeddedAppServer) SessionRuntimeClient() client.SessionRuntimeClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.SessionRuntimeClient()
-}
-
 func (s *embeddedAppServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s == nil || s.inner == nil {
 		return nil
 	}
 	return s.inner.SessionLifecycleClient()
-}
-
-func (s *embeddedAppServer) ProcessViewClient() client.ProcessViewClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.ProcessViewClient()
-}
-
-func (s *embeddedAppServer) ProcessControlClient() client.ProcessControlClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.ProcessControlClient()
-}
-
-func (s *embeddedAppServer) ProcessOutputClient() client.ProcessOutputClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.ProcessOutputClient()
-}
-
-func (s *embeddedAppServer) RuntimeControlClient() client.RuntimeControlClient {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.RuntimeControlClient()
-}
-
-func (s *embeddedAppServer) ContainerDir() string {
-	if s == nil || s.inner == nil {
-		return ""
-	}
-	return s.inner.ContainerDir()
-}
-
-func (s *embeddedAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
-	if s == nil || s.inner == nil {
-		return nil, errors.New("embedded server is required")
-	}
-	return prepareSharedRuntime(ctx, s, plan, diagnosticWriter, startLogLine)
 }
 
 func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {

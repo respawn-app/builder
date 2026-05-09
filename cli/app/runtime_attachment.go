@@ -14,60 +14,42 @@ import (
 
 const runtimeReleaseTimeout = runtimeattach.ReleaseTimeout
 
-type runtimeAttachmentServer interface {
-	runtimeActivityServer
-	runtimeEventServer
-	runtimeWiringServer
+type runtimeAttachmentSource interface {
+	RuntimeAttachmentClients() runtimeAttachmentClients
 }
 
-type runtimeActivityServer interface {
-	PromptActivityClient() client.PromptActivityClient
-	SessionActivityClient() client.SessionActivityClient
-	SessionRuntimeClient() client.SessionRuntimeClient
+type runtimeAttachmentClients struct {
+	ApprovalViews   client.ApprovalViewClient
+	AskViews        client.AskViewClient
+	ProcessControls client.ProcessControlClient
+	ProcessOutput   client.ProcessOutputClient
+	ProcessViews    client.ProcessViewClient
+	PromptActivity  client.PromptActivityClient
+	PromptControl   client.PromptControlClient
+	RuntimeControls client.RuntimeControlClient
+	SessionActivity client.SessionActivityClient
+	SessionRuntime  client.SessionRuntimeClient
+	SessionViews    client.SessionViewClient
+	Worktrees       client.WorktreeClient
 }
 
-type runtimeEventServer interface {
-	PromptActivityClient() client.PromptActivityClient
-	PromptControlClient() client.PromptControlClient
-	SessionActivityClient() client.SessionActivityClient
-	SessionViewClient() client.SessionViewClient
-	RuntimeControlClient() client.RuntimeControlClient
-}
-
-type runtimeWiringServer interface {
-	ApprovalViewClient() client.ApprovalViewClient
-	AskViewClient() client.AskViewClient
-	ProcessControlClient() client.ProcessControlClient
-	ProcessOutputClient() client.ProcessOutputClient
-	ProcessViewClient() client.ProcessViewClient
-	PromptControlClient() client.PromptControlClient
-	RuntimeControlClient() client.RuntimeControlClient
-	SessionActivityClient() client.SessionActivityClient
-	SessionViewClient() client.SessionViewClient
-	WorktreeClient() client.WorktreeClient
-}
-
-type runtimeEventWiringServer interface {
-	runtimeEventServer
-	runtimeWiringServer
-}
-
-func prepareSharedRuntime(ctx context.Context, server runtimeAttachmentServer, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
-	if server == nil {
+func prepareSharedRuntime(ctx context.Context, source runtimeAttachmentSource, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+	if source == nil {
 		return nil, errors.New("server is required")
 	}
-	lease, leaseManager, err := activateSharedRuntime(ctx, server, plan)
+	clients := source.RuntimeAttachmentClients()
+	lease, leaseManager, err := activateSharedRuntime(ctx, clients, plan)
 	if err != nil {
 		return nil, err
 	}
-	activities, err := subscribeSharedRuntimeActivities(ctx, server, plan.SessionID, lease.ID)
+	activities, err := subscribeSharedRuntimeActivities(ctx, clients, plan.SessionID, lease.ID)
 	if err != nil {
 		return nil, err
 	}
 	logger := &runLogger{}
 	_ = diagnosticWriter
 	logger.Logf("%s", startLogLine)
-	wiring, stopRuntimeEvents, stopAskEvents := prepareSharedRuntimeWiring(ctx, server, plan, activities, leaseManager, logger)
+	wiring, stopRuntimeEvents, stopAskEvents := prepareSharedRuntimeWiring(ctx, clients, plan, activities, leaseManager, logger)
 	return &runtimeLaunchPlan{
 		Logger:            logger,
 		Wiring:            wiring,
@@ -76,13 +58,13 @@ func prepareSharedRuntime(ctx context.Context, server runtimeAttachmentServer, p
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()
-			runtimeattach.Release(server.SessionRuntimeClient(), plan.SessionID, leaseManager.Value())
+			runtimeattach.Release(clients.SessionRuntime, plan.SessionID, leaseManager.Value())
 		},
 	}, nil
 }
 
-func activateSharedRuntime(ctx context.Context, server runtimeActivityServer, plan sessionLaunchPlan) (runtimeattach.Lease, *controllerLeaseManager, error) {
-	lease, err := runtimeattach.Activate(ctx, server.SessionRuntimeClient(), runtimeattach.Request{
+func activateSharedRuntime(ctx context.Context, clients runtimeAttachmentClients, plan sessionLaunchPlan) (runtimeattach.Lease, *controllerLeaseManager, error) {
+	lease, err := runtimeattach.Activate(ctx, clients.SessionRuntime, runtimeattach.Request{
 		SessionID:      plan.SessionID,
 		ActiveSettings: plan.ActiveSettings,
 		EnabledTools:   plan.EnabledTools,
@@ -96,22 +78,22 @@ func activateSharedRuntime(ctx context.Context, server runtimeActivityServer, pl
 	return lease, leaseManager, nil
 }
 
-func subscribeSharedRuntimeActivities(ctx context.Context, server runtimeActivityServer, sessionID string, leaseID string) (runtimeattach.Activities, error) {
+func subscribeSharedRuntimeActivities(ctx context.Context, clients runtimeAttachmentClients, sessionID string, leaseID string) (runtimeattach.Activities, error) {
 	return runtimeattach.SubscribeActivities(ctx, runtimeattach.ActivityRequest{
 		SessionID:       sessionID,
-		Runtime:         server.SessionRuntimeClient(),
+		Runtime:         clients.SessionRuntime,
 		LeaseID:         leaseID,
-		SessionActivity: server.SessionActivityClient(),
-		PromptActivity:  server.PromptActivityClient(),
+		SessionActivity: clients.SessionActivity,
+		PromptActivity:  clients.PromptActivity,
 	})
 }
 
-func prepareSharedRuntimeWiring(ctx context.Context, server runtimeEventWiringServer, plan sessionLaunchPlan, activities runtimeattach.Activities, leaseManager *controllerLeaseManager, logger *runLogger) (*runtimeWiring, func(), func()) {
-	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()).(*sessionRuntimeClient)
+func prepareSharedRuntimeWiring(ctx context.Context, clients runtimeAttachmentClients, plan sessionLaunchPlan, activities runtimeattach.Activities, leaseManager *controllerLeaseManager, logger *runLogger) (*runtimeWiring, func(), func()) {
+	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, clients.SessionViews, clients.RuntimeControls).(*sessionRuntimeClient)
 	runtimeClient.SetControllerLeaseManager(leaseManager)
 	runtimeClient.SetTranscriptDiagnosticsEnabled(transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug))
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, activities.Session, func(ctx context.Context, afterSequence uint64) (serverapi.SessionActivitySubscription, error) {
-		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID, AfterSequence: afterSequence})
+		return clients.SessionActivity.SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID, AfterSequence: afterSequence})
 	}, runtimeClient.transcriptDiagnosticsEnabled, func(line string) {
 		logger.Logf("%s", line)
 	})
@@ -125,24 +107,24 @@ func prepareSharedRuntimeWiring(ctx context.Context, server runtimeEventWiringSe
 		return strings.TrimSpace(plan.SessionName)
 	}, terminalFocus.FocusedForAttention)
 	askEvents, stopAskEvents := startPendingPromptEvents(ctx, activities.Prompt, func(ctx context.Context, afterSequence uint64) (serverapi.PromptActivitySubscription, error) {
-		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID, AfterSequence: afterSequence})
-	}, server.PromptControlClient(), leaseManager, turnQueueHook.OnAsk)
+		return clients.PromptActivity.SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID, AfterSequence: afterSequence})
+	}, clients.PromptControl, leaseManager, turnQueueHook.OnAsk)
 	wiring := &runtimeWiring{
 		runtimeEvents:         runtimeEvents,
 		askEvents:             askEvents,
 		turnQueueHook:         turnQueueHook,
 		terminalFocus:         terminalFocus,
 		runtimeClient:         runtimeClient,
-		promptControl:         server.PromptControlClient(),
-		runtimeControls:       server.RuntimeControlClient(),
-		worktrees:             server.WorktreeClient(),
-		processControls:       server.ProcessControlClient(),
-		processOutput:         server.ProcessOutputClient(),
-		processViews:          server.ProcessViewClient(),
-		approvalViews:         server.ApprovalViewClient(),
-		askViews:              server.AskViewClient(),
-		sessionActivity:       server.SessionActivityClient(),
-		sessionViews:          server.SessionViewClient(),
+		promptControl:         clients.PromptControl,
+		runtimeControls:       clients.RuntimeControls,
+		worktrees:             clients.Worktrees,
+		processControls:       clients.ProcessControls,
+		processOutput:         clients.ProcessOutput,
+		processViews:          clients.ProcessViews,
+		approvalViews:         clients.ApprovalViews,
+		askViews:              clients.AskViews,
+		sessionActivity:       clients.SessionActivity,
+		sessionViews:          clients.SessionViews,
 		hasOtherSessions:      plan.HasOtherSessions,
 		hasOtherSessionsKnown: plan.HasOtherSessionsKnown,
 	}

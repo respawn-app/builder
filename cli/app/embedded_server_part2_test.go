@@ -240,7 +240,8 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 			err  error
 		}{resp: resp, err: err}
 	}()
-	waitForPendingAskResources(t, server.AskViewClient(), plan.SessionID, 1)
+	runtimeClients := server.RuntimeAttachmentClients()
+	waitForPendingAskResources(t, runtimeClients.AskViews, plan.SessionID, 1)
 	askEvt := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
 	if askEvt.req.PromptID != "ask-embedded-1" || askEvt.req.Question != "Pick one" {
 		t.Fatalf("unexpected ask event: %+v", askEvt.req)
@@ -257,7 +258,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for embedded ask response")
 	}
-	waitForPendingAskResources(t, server.AskViewClient(), plan.SessionID, 0)
+	waitForPendingAskResources(t, runtimeClients.AskViews, plan.SessionID, 0)
 
 	approvalDone := make(chan struct {
 		resp askquestion.Response
@@ -275,7 +276,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 			err  error
 		}{resp: resp, err: err}
 	}()
-	waitForPendingApprovalResources(t, server.ApprovalViewClient(), plan.SessionID, 1)
+	waitForPendingApprovalResources(t, runtimeClients.ApprovalViews, plan.SessionID, 1)
 	approvalEvt := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
 	if !approvalEvt.req.Approval || approvalEvt.req.PromptID != "approval-embedded-1" {
 		t.Fatalf("unexpected approval event: %+v", approvalEvt.req)
@@ -292,7 +293,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for embedded approval response")
 	}
-	waitForPendingApprovalResources(t, server.ApprovalViewClient(), plan.SessionID, 0)
+	waitForPendingApprovalResources(t, runtimeClients.ApprovalViews, plan.SessionID, 0)
 }
 
 func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
@@ -332,12 +333,13 @@ func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 		t.Fatal("expected backgrounded process")
 	}
 
-	proc := waitForRemoteProcess(t, server.ProcessViewClient(), plan.SessionID, result.SessionID)
+	runtimeClients := server.RuntimeAttachmentClients()
+	proc := waitForRemoteProcess(t, runtimeClients.ProcessViews, plan.SessionID, result.SessionID)
 	if proc.OwnerSessionID != plan.SessionID {
 		t.Fatalf("unexpected process owner: %+v", proc)
 	}
 
-	outputSub, err := server.ProcessOutputClient().SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID, OffsetBytes: 0})
+	outputSub, err := runtimeClients.ProcessOutput.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID, OffsetBytes: 0})
 	if err != nil {
 		t.Fatalf("SubscribeProcessOutput: %v", err)
 	}
@@ -350,15 +352,15 @@ func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 		t.Fatalf("unexpected process output chunk: %+v", chunk)
 	}
 
-	inlineResp := waitForRemoteInlineOutput(t, server.ProcessControlClient(), result.SessionID)
+	inlineResp := waitForRemoteInlineOutput(t, runtimeClients.ProcessControls, result.SessionID)
 	if !strings.Contains(inlineResp.Output, "embedded process output") {
 		t.Fatalf("unexpected inline output: %q", inlineResp.Output)
 	}
 
-	if _, err := server.ProcessControlClient().KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: uuid.NewString(), ProcessID: result.SessionID}); err != nil {
+	if _, err := runtimeClients.ProcessControls.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: uuid.NewString(), ProcessID: result.SessionID}); err != nil {
 		t.Fatalf("KillProcess: %v", err)
 	}
-	waitForRemoteProcessExit(t, server.ProcessViewClient(), result.SessionID)
+	waitForRemoteProcessExit(t, runtimeClients.ProcessViews, result.SessionID)
 }
 
 func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *testing.T) {

@@ -34,6 +34,8 @@ Current baseline from this worktree after the onboarding provider/generated-skil
 - `cli/app/runtime_attachment.go` owns the app-root runtime attachment/wiring seam: runtime attachment server interfaces, shared runtime activation/activity subscription orchestration, UI runtime event wiring, and `runtimeReleaseTimeout`. `cli/app/embedded_server.go` is now 253 LoC and keeps embedded wrapper/project/auth/client forwarding only.
 - `cli/app/runtime_attachment_test.go` owns focused regressions for the runtime attachment seam: session/prompt subscribe-failure release cleanup, release-on-close, and lease recovery through runtime activation.
 - `cli/app/auth_oauth_presenter.go` owns interactive OAuth terminal presentation, OAuth prompt styling/input, and auth section formatting. `cli/app/auth_gate.go` is now 282 LoC and keeps auth-interaction orchestration plus auth-state mutations.
+- Runtime preparation, run-prompt client lookup, remote auth-state lookup, and container directory lookup no longer appear on concrete `embeddedAppServer`/`remoteAppServer` wrappers. `launchPlanner.PrepareRuntime` now delegates directly to the runtime attachment seam, headless embedded fallback resolves its run-prompt client at the startup edge, and local auth-state metadata is an optional embedded-only launch planner provider.
+- Runtime attachment client forwarding is collapsed behind `RuntimeAttachmentClients()`. Concrete remote/embedded wrappers no longer expose individual runtime-only client methods for ask/approval/prompt/process/runtime/session activity/session runtime/worktree clients.
 - `go list -json builder/cli/app/internal/status` reports no direct `builder/server/*` imports. The package owns status request/snapshot DTOs, cache-key helpers, the memory status repository, and bounded git status collection.
 - `go list -json builder/cli/app/internal/statuscollect` reports 5 production Go files and 4 direct `builder/server/*` imports: `server/auth`, `server/generated`, `server/llm`, and `server/runtime`. This is the status collection adapter package; it is guarded against Bubble Tea/app imports and `uiModel` references.
 - Production `cli/app/ui*.go` files now have zero direct `builder/server/*` imports; `TestCLIAppUIFilesDoNotAddServerImports` has no remaining allowlist entries.
@@ -156,9 +158,14 @@ Current baseline from this worktree after the onboarding provider/generated-skil
 77. Extracted `cli/app/internal/onboardingimportproviders` for provider catalog IDs, labels, capability filters, display order, and provider sorting. Focused tests cover catalog order/capabilities, lookup/labels, and sort fallback behavior.
 78. Extracted `cli/app/internal/onboardingimportgenerated` for embedded generated-skill discovery and frontmatter parsing. Focused tests cover frontmatter name parsing, fallback-to-directory-name behavior, missing-description/frontmatter rejection, and generated catalog discovery. `onboarding_imports.go` dropped to 485 LoC.
 79. Split interactive OAuth terminal presentation and prompt input from `auth_gate.go` into `auth_oauth_presenter.go`. Focused tests cover browser manual fallback rendering, device-code rendering, and prompt label/trimming behavior. `auth_gate.go` dropped to 282 LoC, and `auth_oauth_presenter.go` is explicitly guarded against server imports.
-80. Continue startup/attachment extraction by reducing broad concrete app-server wrappers.
-81. Extract remaining worktree editor/state services only where a narrower non-Bubble-Tea contract is clear.
-82. Shrink `cli/app` package by moving extracted code into subpackages only after public seams are clear and tests cover behavior.
+80. Removed the concrete `PrepareRuntime` methods from remote/embedded app-server wrappers. `launchPlanner.PrepareRuntime` now calls `prepareSharedRuntime` through the runtime attachment seam, while tests can still inject a narrow planner runtime preparer.
+81. Removed `RunPromptClient` from concrete app-server wrappers. Headless remote targets use `client.Remote` directly, and headless embedded fallback resolves the embedded startup run-prompt client at the startup edge instead of keeping a wrapper method.
+82. Removed the test-only production `ContainerDir` forwarding method from `embeddedAppServer`; the bootstrap regression now checks the resolved workspace container path from config.
+83. Removed the nil-only remote `AuthStateResolver` and `AuthStatePath` wrapper methods. Launch planner now treats local auth-state metadata as an optional provider, so only embedded startup exposes local auth-state status inputs.
+84. Collapsed runtime-only client forwarding behind `RuntimeAttachmentClients()`. Remote/embedded app-server wrappers no longer expose individual ask/approval/prompt/process/runtime/session-activity/session-runtime/worktree client methods; runtime attachment receives a typed client bundle instead.
+85. Continue startup/attachment extraction by reducing broad concrete app-server wrappers.
+86. Extract remaining worktree editor/state services only where a narrower non-Bubble-Tea contract is clear.
+87. Shrink `cli/app` package by moving extracted code into subpackages only after public seams are clear and tests cover behavior.
 
 ## Regression Policy
 

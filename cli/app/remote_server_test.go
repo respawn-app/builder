@@ -67,13 +67,6 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 	}
 }
 
-func TestRemoteAppServerHasNoLocalAuthStatePath(t *testing.T) {
-	server := newRemoteAppServer(&client.Remote{}, config.App{})
-	if server.AuthStatePath() != "" {
-		t.Fatalf("expected remote app server auth state path to remain empty, got %q", server.AuthStatePath())
-	}
-}
-
 func TestRemoteAppServerCloseUsesOwnedCloser(t *testing.T) {
 	called := false
 	server := newRemoteAppServerWithClose(&client.Remote{}, config.App{}, func() error {
