@@ -133,6 +133,7 @@ func writeGoalUsage(fs *flag.FlagSet) {
 	writeHelpSection(out, "What This Does:",
 		"  Manage the live runtime goal for a session.",
 		"  Inside Builder shell commands, BUILDER_SESSION_ID targets the caller session automatically.",
+		"  Agent shell commands may set the first goal, but cannot overwrite or otherwise mutate an existing goal.",
 		"  Outside Builder shell commands, pass --session <id>.",
 	)
 }
@@ -150,7 +151,13 @@ func writeGoalStatusUsage(fs *flag.FlagSet, _ string) {
 }
 
 func writeGoalCompleteUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
 	writeGoalUsage(fs)
+	writeHelpSection(fs.Output(), "Goal Complete:",
+		"  If the last goal is already complete, prints the no-active-goal message and exits 0 without mutating state.",
+	)
 }
 
 func writeGoalClearUsage(fs *flag.FlagSet) {

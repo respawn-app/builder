@@ -134,10 +134,6 @@ func goalSetSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if agent {
-		fmt.Fprintln(stderr, prompts.GoalAgentCommandDeniedPrompt)
-		return 1
-	}
 	objective := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if objective == "" {
 		fmt.Fprintln(stderr, "goal set requires an objective")
@@ -151,7 +147,11 @@ func goalSetSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	defer func() { _ = remote.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), goalCommandTimeout)
 	defer cancel()
-	resp, err := remote.SetGoal(ctx, serverapi.RuntimeGoalSetRequest{ClientRequestID: uuid.NewString(), SessionID: target, Objective: objective, Actor: "user"})
+	actor := "user"
+	if agent {
+		actor = "agent"
+	}
+	resp, err := remote.SetGoal(ctx, serverapi.RuntimeGoalSetRequest{ClientRequestID: uuid.NewString(), SessionID: target, Objective: objective, Actor: actor})
 	if err != nil {
 		fmt.Fprintln(stderr, formatGoalCommandError(err))
 		return 1
@@ -228,10 +228,6 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if agent && !*confirmed {
-		fmt.Fprintln(stderr, prompts.GoalCompleteConfirmRequiredPrompt)
-		return 1
-	}
 	remote, err := goalCommandRemoteOpener(context.Background())
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -240,6 +236,19 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	defer func() { _ = remote.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), goalCommandTimeout)
 	defer cancel()
+	current, err := remote.ShowGoal(ctx, serverapi.RuntimeGoalShowRequest{SessionID: target})
+	if err != nil {
+		fmt.Fprintln(stderr, formatGoalCommandError(err))
+		return 1
+	}
+	if goalAlreadyComplete(current.Goal) {
+		fmt.Fprintln(stdout, prompts.RenderGoalAlreadyCompletePrompt(current.Goal.Objective))
+		return 0
+	}
+	if agent && !*confirmed {
+		fmt.Fprintln(stderr, prompts.GoalCompleteConfirmRequiredPrompt)
+		return 1
+	}
 	actor := "user"
 	if agent {
 		actor = "agent"
@@ -251,6 +260,10 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	writeGoalShowText(stdout, resp.Goal)
 	return 0
+}
+
+func goalAlreadyComplete(goal *serverapi.RuntimeGoal) bool {
+	return goal != nil && strings.TrimSpace(goal.Status) == "complete"
 }
 
 func goalClearSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
