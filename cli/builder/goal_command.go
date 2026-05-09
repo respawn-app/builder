@@ -234,9 +234,9 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 		return 1
 	}
 	defer func() { _ = remote.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), goalCommandTimeout)
-	defer cancel()
-	current, err := remote.ShowGoal(ctx, serverapi.RuntimeGoalShowRequest{SessionID: target})
+	showCtx, showCancel := context.WithTimeout(context.Background(), goalCommandTimeout)
+	current, err := remote.ShowGoal(showCtx, serverapi.RuntimeGoalShowRequest{SessionID: target})
+	showCancel()
 	if err != nil {
 		fmt.Fprintln(stderr, formatGoalCommandError(err))
 		return 1
@@ -253,7 +253,9 @@ func goalCompleteSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	if agent {
 		actor = "agent"
 	}
-	resp, err := remote.CompleteGoal(ctx, serverapi.RuntimeGoalStatusRequest{ClientRequestID: uuid.NewString(), SessionID: target, Actor: actor})
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), goalCommandTimeout)
+	defer completeCancel()
+	resp, err := remote.CompleteGoal(completeCtx, serverapi.RuntimeGoalStatusRequest{ClientRequestID: uuid.NewString(), SessionID: target, Actor: actor})
 	if err != nil {
 		fmt.Fprintln(stderr, formatGoalCommandError(err))
 		return 1
