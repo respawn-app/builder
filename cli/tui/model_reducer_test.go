@@ -63,6 +63,25 @@ func TestReduceCommitAssistantMsgAdvancesTotalEntriesFromTailWindow(t *testing.T
 	}
 }
 
+func TestReduceSetConversationMsgKeepsEntriesRevisionStableForLiveOnlyChanges(t *testing.T) {
+	m := NewModel()
+	entries := []TranscriptEntry{{Role: "assistant", Text: "existing"}}
+	var result modelUpdateResult
+	m.reduceSetConversationMsg(SetConversationMsg{Entries: entries, TotalEntries: 1}, &result)
+	entriesRevision := m.transcriptInput.EntriesRevision
+	projectionRevision := m.transcriptInput.Revision
+
+	result = modelUpdateResult{}
+	m.reduceSetConversationMsg(SetConversationMsg{Entries: entries, TotalEntries: 1, Ongoing: "stream"}, &result)
+
+	if got := m.transcriptInput.EntriesRevision; got != entriesRevision {
+		t.Fatalf("entries revision changed for live-only update: got %d want %d", got, entriesRevision)
+	}
+	if got, want := m.transcriptInput.Revision, projectionRevision+1; got != want {
+		t.Fatalf("projection revision = %d, want %d", got, want)
+	}
+}
+
 func TestReduceSetConversationMsgNormalizesEntriesAndClearsInvalidSelection(t *testing.T) {
 	m := NewModel()
 	m.selectedTranscriptEntry = 5

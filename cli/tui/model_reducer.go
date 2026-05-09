@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/shared/transcript"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -212,7 +213,9 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUpdateResult) {
 	anchorEntry, anchorOffset, preserveAnchor := m.detailViewportAnchor()
 	previousBaseOffset := m.transcriptInput.BaseOffset
+	previousTotalEntries := m.transcriptInput.TotalEntries
 	previousEntries := append([]TranscriptEntry(nil), m.transcriptInput.Entries...)
+	previousOngoing := m.transcriptInput.Ongoing
 	entries := make([]TranscriptEntry, len(msg.Entries))
 	copy(entries, msg.Entries)
 	for i := range entries {
@@ -224,16 +227,24 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 		entries[i].ToolResultSummary = strings.TrimSpace(entries[i].ToolResultSummary)
 		entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 	}
-	m.transcriptInput.Entries = entries
-	m.advanceTranscriptEntriesRevision()
 	if msg.BaseOffset < 0 {
 		msg.BaseOffset = 0
 	}
-	m.transcriptInput.BaseOffset = msg.BaseOffset
 	totalEntries := msg.TotalEntries
-	if totalEntries < m.transcriptInput.BaseOffset+len(entries) {
-		totalEntries = m.transcriptInput.BaseOffset + len(entries)
+	if totalEntries < msg.BaseOffset+len(entries) {
+		totalEntries = msg.BaseOffset + len(entries)
 	}
+	entriesChanged := !transcriptEntriesEqual(previousEntries, entries)
+	projectionChanged := previousBaseOffset != msg.BaseOffset ||
+		previousTotalEntries != totalEntries ||
+		previousOngoing != msg.Ongoing
+	m.transcriptInput.Entries = entries
+	if entriesChanged {
+		m.advanceTranscriptEntriesRevision()
+	} else if projectionChanged {
+		m.advanceTranscriptProjectionRevision()
+	}
+	m.transcriptInput.BaseOffset = msg.BaseOffset
 	m.transcriptInput.TotalEntries = totalEntries
 	m.transcriptInput.Ongoing = msg.Ongoing
 	m.ongoingError = strings.TrimSpace(msg.OngoingError)
@@ -288,6 +299,7 @@ func transcriptLocalIndex(baseOffset int, entryCount int, entryIndex int) (int, 
 
 func detailExpansionEntryMatches(left TranscriptEntry, right TranscriptEntry) bool {
 	return left.Visibility == right.Visibility &&
+		left.RollbackTargetID == right.RollbackTargetID &&
 		left.Transient == right.Transient &&
 		left.Committed == right.Committed &&
 		left.Role == right.Role &&
@@ -298,7 +310,53 @@ func detailExpansionEntryMatches(left TranscriptEntry, right TranscriptEntry) bo
 		left.SourcePath == right.SourcePath &&
 		left.CompactLabel == right.CompactLabel &&
 		left.ToolResultSummary == right.ToolResultSummary &&
-		left.ToolCallID == right.ToolCallID
+		left.ToolCallID == right.ToolCallID &&
+		toolCallMetaRenderEqual(left.ToolCall, right.ToolCall)
+}
+
+func transcriptEntriesEqual(left []TranscriptEntry, right []TranscriptEntry) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if !detailExpansionEntryMatches(left[idx], right[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
+func toolCallMetaRenderEqual(left *transcript.ToolCallMeta, right *transcript.ToolCallMeta) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.ToolName == right.ToolName &&
+		left.Presentation == right.Presentation &&
+		left.RenderBehavior == right.RenderBehavior &&
+		left.IsShell == right.IsShell &&
+		left.UserInitiated == right.UserInitiated &&
+		left.Command == right.Command &&
+		left.CompactText == right.CompactText &&
+		left.InlineMeta == right.InlineMeta &&
+		left.TimeoutLabel == right.TimeoutLabel &&
+		left.PatchSummary == right.PatchSummary &&
+		left.PatchDetail == right.PatchDetail &&
+		left.PatchRender == right.PatchRender &&
+		toolRenderHintEqual(left.RenderHint, right.RenderHint) &&
+		left.Question == right.Question &&
+		slices.Equal(left.Suggestions, right.Suggestions) &&
+		left.RecommendedOptionIndex == right.RecommendedOptionIndex &&
+		left.OmitSuccessfulResult == right.OmitSuccessfulResult
+}
+
+func toolRenderHintEqual(left *transcript.ToolRenderHint, right *transcript.ToolRenderHint) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Kind == right.Kind &&
+		left.Path == right.Path &&
+		left.ResultOnly == right.ResultOnly &&
+		left.ShellDialect == right.ShellDialect
 }
 
 func (m *Model) moveDetailSelection(delta int) {
