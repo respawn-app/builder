@@ -403,6 +403,30 @@ func TestProjectTranscriptViewsDerivesOngoingAndDetailFromSameCanonicalEntries(t
 	}
 }
 
+func TestDetailProjectionEmptySeparatorsRemainContentLines(t *testing.T) {
+	projection := ProjectTranscriptViews(TranscriptProjectionInput{
+		Entries: []TranscriptEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "assistant", Text: "answer"},
+		},
+	}, TranscriptProjectionViewState{
+		ViewportWidth: 80,
+		ViewportLines: 20,
+		Theme:         "dark",
+	})
+
+	if len(projection.DetailLines) < 3 {
+		t.Fatalf("expected detail projection to include blank separator, got %#v", projection.DetailLines)
+	}
+	separator := projection.DetailLines[1]
+	if separator.Text != "" {
+		t.Fatalf("expected empty detail separator text, got %q in %#v", separator.Text, projection.DetailLines)
+	}
+	if separator.Kind != VisibleLineContent {
+		t.Fatalf("expected empty detail separator to remain content, got %v", separator.Kind)
+	}
+}
+
 func TestProjectTranscriptViewsMapsSelectionEntryToDetailLines(t *testing.T) {
 	entries := []TranscriptEntry{
 		{Role: "user", Text: "first"},

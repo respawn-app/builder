@@ -244,7 +244,11 @@ func (p TranscriptProjection) Lines(dividerText string) []TranscriptProjectionLi
 	lines := make([]TranscriptProjectionLine, 0, len(p.Blocks)*2)
 	for idx, block := range p.Blocks {
 		if idx > 0 && p.Blocks[idx-1].DividerGroup != block.DividerGroup {
-			lines = append(lines, TranscriptProjectionLine{Kind: VisibleLineDivider, Text: dividerText})
+			kind := VisibleLineDivider
+			if dividerText == "" {
+				kind = VisibleLineContent
+			}
+			lines = append(lines, TranscriptProjectionLine{Kind: kind, Text: dividerText})
 		}
 		for _, line := range block.Lines {
 			lines = append(lines, TranscriptProjectionLine{Kind: VisibleLineContent, Text: line})
