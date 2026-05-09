@@ -13,11 +13,14 @@ type TranscriptProjection struct {
 // committed ongoing transcript projection. Revision must advance when transcript
 // content changes; revisionless keys intentionally skip projection caching.
 type CommittedOngoingProjectionKey struct {
-	Revision   int64
-	Width      int
-	Theme      string
-	BaseOffset int
-	EntryCount int
+	Revision              int64
+	Width                 int
+	Theme                 string
+	BaseOffset            int
+	EntryCount            int
+	CompactDetail         bool
+	SelectedEntry         int
+	SelectedEntryIsActive bool
 }
 
 // CommittedOngoingProjector reuses the ongoing transcript renderer and caches
@@ -523,20 +526,24 @@ func ProjectTranscriptViews(input TranscriptProjectionInput, state TranscriptPro
 
 func (p *TranscriptViewProjector) CommittedOngoingLines(input TranscriptProjectionInput, state TranscriptProjectionViewState) ([]TranscriptProjectionLine, string) {
 	key := CommittedOngoingProjectionKey{
-		Revision:   input.EntriesRevision,
-		Width:      state.ViewportWidth,
-		Theme:      state.Theme,
-		BaseOffset: input.BaseOffset,
-		EntryCount: len(input.Entries),
+		Revision:              input.EntriesRevision,
+		Width:                 state.ViewportWidth,
+		Theme:                 state.Theme,
+		BaseOffset:            input.BaseOffset,
+		EntryCount:            len(input.Entries),
+		CompactDetail:         state.CompactDetail,
+		SelectedEntry:         state.SelectedEntry,
+		SelectedEntryIsActive: state.SelectedEntryIsActive,
 	}
 	key = normalizeCommittedOngoingProjectionKey(key, len(input.Entries))
 	if key.Revision > 0 && p != nil && p.ongoingSet && p.ongoingKey == key {
 		return p.ongoingLines, p.ongoingGroup
 	}
-	projection := projectCommittedOngoingTranscriptWithRenderer(
-		committedOngoingProjectionRenderer(key.Theme, key.Width, key.BaseOffset),
-		input.Entries,
-	)
+	renderer := committedOngoingProjectionRenderer(key.Theme, key.Width, key.BaseOffset)
+	renderer.compactDetail = key.CompactDetail
+	renderer.selectedTranscriptEntry = key.SelectedEntry
+	renderer.selectedTranscriptActive = key.SelectedEntryIsActive
+	projection := projectCommittedOngoingTranscriptWithRenderer(renderer, input.Entries)
 	lines := projection.Lines(detailDivider())
 	lastGroup := ""
 	if blockCount := len(projection.Blocks); blockCount > 0 {

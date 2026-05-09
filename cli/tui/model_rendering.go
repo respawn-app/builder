@@ -92,6 +92,7 @@ func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
 	return m.buildTranscriptBlocks(transcriptBlockOptions{
 		mode:             transcriptBlockModeOngoing,
 		includeStreaming: includeStreaming,
+		applySelection:   true,
 	})
 }
 

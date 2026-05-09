@@ -427,6 +427,26 @@ func TestDetailProjectionEmptySeparatorsRemainContentLines(t *testing.T) {
 	}
 }
 
+func TestCommittedOngoingProjectionCacheTracksSelectedUserState(t *testing.T) {
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "assistant", Text: "answer"},
+	}})
+	unselected := m.OngoingSnapshot()
+
+	m = updateModel(t, m, SetSelectedTranscriptEntryMsg{EntryIndex: 0, Active: true})
+	selected := m.OngoingSnapshot()
+
+	if selected == unselected {
+		t.Fatal("expected selected user entry to invalidate cached ongoing projection styling")
+	}
+	if !strings.Contains(selected, "48;2;") {
+		t.Fatalf("expected selected ongoing snapshot to include selection background, got %q", selected)
+	}
+}
+
 func TestProjectTranscriptViewsMapsSelectionEntryToDetailLines(t *testing.T) {
 	entries := []TranscriptEntry{
 		{Role: "user", Text: "first"},
