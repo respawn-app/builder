@@ -2,7 +2,6 @@ package tui
 
 import (
 	"builder/shared/transcript"
-	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -327,36 +326,7 @@ func transcriptEntriesEqual(left []TranscriptEntry, right []TranscriptEntry) boo
 }
 
 func toolCallMetaRenderEqual(left *transcript.ToolCallMeta, right *transcript.ToolCallMeta) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-	return left.ToolName == right.ToolName &&
-		left.Presentation == right.Presentation &&
-		left.RenderBehavior == right.RenderBehavior &&
-		left.IsShell == right.IsShell &&
-		left.UserInitiated == right.UserInitiated &&
-		left.Command == right.Command &&
-		left.CompactText == right.CompactText &&
-		left.InlineMeta == right.InlineMeta &&
-		left.TimeoutLabel == right.TimeoutLabel &&
-		left.PatchSummary == right.PatchSummary &&
-		left.PatchDetail == right.PatchDetail &&
-		left.PatchRender == right.PatchRender &&
-		toolRenderHintEqual(left.RenderHint, right.RenderHint) &&
-		left.Question == right.Question &&
-		slices.Equal(left.Suggestions, right.Suggestions) &&
-		left.RecommendedOptionIndex == right.RecommendedOptionIndex &&
-		left.OmitSuccessfulResult == right.OmitSuccessfulResult
-}
-
-func toolRenderHintEqual(left *transcript.ToolRenderHint, right *transcript.ToolRenderHint) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-	return left.Kind == right.Kind &&
-		left.Path == right.Path &&
-		left.ResultOnly == right.ResultOnly &&
-		left.ShellDialect == right.ShellDialect
+	return transcript.ToolCallMetaEqual(left, right)
 }
 
 func (m *Model) moveDetailSelection(delta int) {

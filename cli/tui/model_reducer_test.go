@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 func TestReduceAppendTranscriptMsgReportsMutationFlagsAndNormalizesEntry(t *testing.T) {
@@ -104,6 +105,54 @@ func TestReduceSetConversationMsgKeepsEntriesRevisionStableForWindowOnlyChanges(
 	}
 	if got := m.transcriptInput.TotalEntries; got != 21 {
 		t.Fatalf("total entries = %d, want 21", got)
+	}
+}
+
+func TestReduceSetConversationMsgKeepsEntriesRevisionStableForClonedPatchRender(t *testing.T) {
+	m := NewModel()
+	firstPatch := &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
+		{Kind: patchformat.RenderedLineKindDiff, Text: "+first"},
+	}}
+	secondPatch := &patchformat.RenderedPatch{DetailLines: []patchformat.RenderedLine{
+		{Kind: patchformat.RenderedLineKindDiff, Text: "+first"},
+	}}
+	firstEntries := []TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       "apply patch",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			PatchRender: firstPatch,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	}}
+	secondEntries := []TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       "apply patch",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			PatchRender: secondPatch,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	}}
+	var result modelUpdateResult
+	m.reduceSetConversationMsg(SetConversationMsg{Entries: firstEntries, TotalEntries: 1}, &result)
+	m.detailExpandedEntries = map[int]struct{}{0: {}}
+	entriesRevision := m.transcriptInput.EntriesRevision
+	projectionRevision := m.transcriptInput.Revision
+
+	result = modelUpdateResult{}
+	m.reduceSetConversationMsg(SetConversationMsg{Entries: secondEntries, TotalEntries: 1}, &result)
+
+	if got := m.transcriptInput.EntriesRevision; got != entriesRevision {
+		t.Fatalf("entries revision changed for cloned patch render: got %d want %d", got, entriesRevision)
+	}
+	if got := m.transcriptInput.Revision; got != projectionRevision {
+		t.Fatalf("projection revision changed for cloned patch render: got %d want %d", got, projectionRevision)
+	}
+	if _, ok := m.detailExpandedEntries[0]; !ok {
+		t.Fatal("expected cloned patch render to preserve expanded detail entry")
 	}
 }
 
