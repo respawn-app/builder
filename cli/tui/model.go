@@ -333,6 +333,47 @@ type detailBlockSpec struct {
 	render     func(Model, string) []string
 }
 
+type detailProjectionLookup struct {
+	projection             TranscriptViewProjection
+	blocks                 []TranscriptProjectionBlock
+	selectableBlockIndexes map[int]int
+}
+
+func newDetailProjectionLookup(projection TranscriptViewProjection) detailProjectionLookup {
+	blocks := projection.Detail.Blocks
+	indexes := make(map[int]int, len(blocks))
+	for idx, block := range blocks {
+		if !block.Selectable || block.EntryIndex < 0 {
+			continue
+		}
+		if _, ok := indexes[block.EntryIndex]; !ok {
+			indexes[block.EntryIndex] = idx
+		}
+	}
+	return detailProjectionLookup{
+		projection:             projection,
+		blocks:                 blocks,
+		selectableBlockIndexes: indexes,
+	}
+}
+
+func (l detailProjectionLookup) blockIndexForEntry(entryIndex int) int {
+	if entryIndex < 0 {
+		return -1
+	}
+	if idx, ok := l.selectableBlockIndexes[entryIndex]; ok {
+		return idx
+	}
+	return -1
+}
+
+func (l detailProjectionLookup) ownsSelectableEntry(lineIndex int, owners []int) bool {
+	if lineIndex < 0 || lineIndex >= len(owners) {
+		return false
+	}
+	return l.blockIndexForEntry(owners[lineIndex]) >= 0
+}
+
 type ongoingLineParts struct {
 	base             []TranscriptProjectionLine
 	streaming        []TranscriptProjectionLine
@@ -544,10 +585,11 @@ func (m *Model) ensureDetailSelection() {
 	if m == nil {
 		return
 	}
-	if m.detailSelectedActive && m.detailBlockIndexForEntry(m.detailSelectedEntry) >= 0 {
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	if m.detailSelectedActive && lookup.blockIndexForEntry(m.detailSelectedEntry) >= 0 {
 		return
 	}
-	blocks := m.detailProjectionBlocks()
+	blocks := lookup.blocks
 	for idx := len(blocks) - 1; idx >= 0; idx-- {
 		if !blocks[idx].Selectable {
 			continue
@@ -572,7 +614,8 @@ func (m *Model) focusVisibleDetailEntry(anchor int) {
 	if m == nil || !m.compactDetail {
 		return
 	}
-	owners := m.currentDetailViewport().Owners
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	owners := lookup.projection.DetailViewport(m.currentDetailViewportState()).Owners
 	if len(owners) == 0 {
 		m.ensureDetailSelection()
 		return
@@ -587,7 +630,7 @@ func (m *Model) focusVisibleDetailEntry(anchor int) {
 	bestEntry := -1
 	bestDistance := len(owners) + 1
 	for lineIndex, entryIndex := range owners {
-		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+		if lookup.blockIndexForEntry(entryIndex) < 0 {
 			continue
 		}
 		distance := detailLineDistance(lineIndex, anchor)
@@ -678,10 +721,11 @@ func (m *Model) selectVisibleDetailEntryInLineDirection(startLine int, delta int
 	if m == nil || delta == 0 {
 		return false
 	}
-	owners := m.currentDetailViewport().Owners
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	owners := lookup.projection.DetailViewport(m.currentDetailViewportState()).Owners
 	for lineIndex := startLine; lineIndex >= 0 && lineIndex < len(owners); lineIndex += delta {
 		entryIndex := owners[lineIndex]
-		if entryIndex < 0 || entryIndex == m.detailSelectedEntry || m.detailBlockIndexForEntry(entryIndex) < 0 {
+		if entryIndex == m.detailSelectedEntry || lookup.blockIndexForEntry(entryIndex) < 0 {
 			continue
 		}
 		return m.selectVisibleDetailEntry(entryIndex)
@@ -711,11 +755,12 @@ func (m *Model) visibleSelectableDetailEntries() []int {
 	if m == nil {
 		return nil
 	}
-	owners := m.currentDetailViewport().Owners
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	owners := lookup.projection.DetailViewport(m.currentDetailViewportState()).Owners
 	entries := make([]int, 0, len(owners))
 	seen := make(map[int]struct{}, len(owners))
 	for _, entryIndex := range owners {
-		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+		if lookup.blockIndexForEntry(entryIndex) < 0 {
 			continue
 		}
 		if _, ok := seen[entryIndex]; ok {
@@ -731,7 +776,8 @@ func (m *Model) centerVisibleSelectableDetailEntry() int {
 	if m == nil {
 		return -1
 	}
-	owners := m.currentDetailViewport().Owners
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	owners := lookup.projection.DetailViewport(m.currentDetailViewportState()).Owners
 	if len(owners) == 0 {
 		return -1
 	}
@@ -745,7 +791,7 @@ func (m *Model) centerVisibleSelectableDetailEntry() int {
 	bestEntry := -1
 	bestDistance := len(owners) + 1
 	for lineIndex, entryIndex := range owners {
-		if entryIndex < 0 || m.detailBlockIndexForEntry(entryIndex) < 0 {
+		if lookup.blockIndexForEntry(entryIndex) < 0 {
 			continue
 		}
 		distance := detailLineDistance(lineIndex, anchor)
@@ -776,12 +822,7 @@ func detailVisibleEntryIndex(entries []int, entryIndex int) int {
 }
 
 func (m Model) detailBlockIndexForEntry(entryIndex int) int {
-	for idx, block := range m.detailProjectionBlocks() {
-		if block.Selectable && block.EntryIndex == entryIndex {
-			return idx
-		}
-	}
-	return -1
+	return newDetailProjectionLookup(m.detailViewProjection()).blockIndexForEntry(entryIndex)
 }
 
 func (m Model) detailProjectionBlocks() []TranscriptProjectionBlock {
@@ -843,12 +884,16 @@ func (m Model) transcriptViewProjection() TranscriptViewProjection {
 }
 
 func (m Model) currentDetailViewport() ProjectionViewport {
-	return m.detailViewProjection().DetailViewport(ProjectionViewportState{
+	return m.detailViewProjection().DetailViewport(m.currentDetailViewportState())
+}
+
+func (m Model) currentDetailViewportState() ProjectionViewportState {
+	return ProjectionViewportState{
 		ViewportLines: m.viewportLines,
 		Scroll:        m.detailScroll,
 		BottomAnchor:  m.detailBottomAnchor,
 		BottomOffset:  m.detailBottomOffset,
-	})
+	}
 }
 
 func (m Model) detailViewProjection() TranscriptViewProjection {
@@ -1008,7 +1053,8 @@ func (m Model) visibleOngoingLineKinds() []VisibleLineKind {
 }
 
 func (m Model) renderDetailSnapshot() string {
-	viewport := m.currentDetailViewport()
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	viewport := lookup.projection.DetailViewport(m.currentDetailViewportState())
 	lines := viewport.Lines
 	if len(lines) == 0 {
 		lines = []string{""}
@@ -1032,16 +1078,16 @@ func (m Model) renderDetailSnapshot() string {
 	}
 	for i, line := range lines {
 		selected := highlightSelected && i < len(owners) && owners[i] == selectedEntry
-		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerBefore(i, firstSelectedLine, owners) {
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerBefore(i, firstSelectedLine, owners, lookup) {
 			out = append(out, m.renderDetailSelectionSpacerLine())
 		}
-		if m.compactDetail && highlightSelected && m.shouldRenderDetailSelectionSpacer(i, firstSelectedLine, lastSelectedLine, owners) {
+		if m.compactDetail && highlightSelected && m.shouldRenderDetailSelectionSpacer(i, firstSelectedLine, lastSelectedLine, owners, lookup) {
 			out = append(out, m.renderDetailSelectionSpacerLine())
 			continue
 		}
 		line = m.renderDetailViewportLine(line, selected)
 		out = append(out, line)
-		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerAfter(i, lastSelectedLine, owners) {
+		if m.compactDetail && highlightSelected && m.shouldInsertDetailSelectionSpacerAfter(i, lastSelectedLine, owners, lookup) {
 			out = append(out, m.renderDetailSelectionSpacerLine())
 		}
 	}
@@ -1054,25 +1100,25 @@ func (m Model) renderDetailSnapshot() string {
 	return strings.Join(out, "\n")
 }
 
-func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLine int, lastSelectedLine int, owners []int) bool {
+func (m Model) shouldRenderDetailSelectionSpacer(lineIndex int, firstSelectedLine int, lastSelectedLine int, owners []int, lookup detailProjectionLookup) bool {
 	if firstSelectedLine < 0 || lastSelectedLine < 0 {
 		return false
 	}
 	if lineIndex == firstSelectedLine-1 {
-		return !m.shouldInsertDetailSelectionSpacerBefore(firstSelectedLine, firstSelectedLine, owners)
+		return !m.shouldInsertDetailSelectionSpacerBefore(firstSelectedLine, firstSelectedLine, owners, lookup)
 	}
 	if lineIndex == lastSelectedLine+1 {
-		return !m.shouldInsertDetailSelectionSpacerAfter(lastSelectedLine, lastSelectedLine, owners)
+		return !m.shouldInsertDetailSelectionSpacerAfter(lastSelectedLine, lastSelectedLine, owners, lookup)
 	}
 	return false
 }
 
-func (m Model) shouldInsertDetailSelectionSpacerBefore(lineIndex int, firstSelectedLine int, owners []int) bool {
-	return lineIndex == firstSelectedLine && m.detailAtTopEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(firstSelectedLine-1, owners)
+func (m Model) shouldInsertDetailSelectionSpacerBefore(lineIndex int, firstSelectedLine int, owners []int, lookup detailProjectionLookup) bool {
+	return lineIndex == firstSelectedLine && m.detailAtTopEdgeForSelectionSpacer() && lookup.ownsSelectableEntry(firstSelectedLine-1, owners)
 }
 
-func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelectedLine int, owners []int) bool {
-	return lineIndex == lastSelectedLine && m.detailAtBottomEdgeForSelectionSpacer() && m.detailViewportLineOwnsSelectableEntry(lastSelectedLine+1, owners)
+func (m Model) shouldInsertDetailSelectionSpacerAfter(lineIndex int, lastSelectedLine int, owners []int, lookup detailProjectionLookup) bool {
+	return lineIndex == lastSelectedLine && m.detailAtBottomEdgeForSelectionSpacer() && lookup.ownsSelectableEntry(lastSelectedLine+1, owners)
 }
 
 func (m Model) detailAtTopEdgeForSelectionSpacer() bool {
@@ -1090,10 +1136,7 @@ func (m Model) detailAtBottomEdgeForSelectionSpacer() bool {
 }
 
 func (m Model) detailViewportLineOwnsSelectableEntry(lineIndex int, owners []int) bool {
-	if lineIndex < 0 || lineIndex >= len(owners) {
-		return false
-	}
-	return m.detailBlockIndexForEntry(owners[lineIndex]) >= 0
+	return newDetailProjectionLookup(m.detailViewProjection()).ownsSelectableEntry(lineIndex, owners)
 }
 
 type detailExpansionSymbolState struct {
@@ -1109,8 +1152,9 @@ func (m Model) detailSelectedExpansionState() (detailExpansionSymbolState, bool)
 	if !ok {
 		return detailExpansionSymbolState{}, false
 	}
-	blockIndex := m.detailBlockIndexForEntry(selectedEntry)
-	blocks := m.detailProjectionBlocks()
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	blockIndex := lookup.blockIndexForEntry(selectedEntry)
+	blocks := lookup.blocks
 	if blockIndex < 0 || blockIndex >= len(blocks) {
 		return detailExpansionSymbolState{}, false
 	}

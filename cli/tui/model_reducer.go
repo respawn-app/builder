@@ -309,13 +309,15 @@ func (m *Model) moveDetailSelection(delta int) {
 	if !m.detailSelectedActive {
 		return
 	}
-	blocks := m.detailProjectionBlocks()
-	current := m.detailBlockIndexForEntry(m.detailSelectedEntry)
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	blocks := lookup.blocks
+	current := lookup.blockIndexForEntry(m.detailSelectedEntry)
 	if current < 0 {
 		m.detailSelectedActive = false
 		m.ensureDetailSelection()
-		blocks = m.detailProjectionBlocks()
-		current = m.detailBlockIndexForEntry(m.detailSelectedEntry)
+		lookup = newDetailProjectionLookup(m.detailViewProjection())
+		blocks = lookup.blocks
+		current = lookup.blockIndexForEntry(m.detailSelectedEntry)
 	}
 	if current < 0 {
 		return
@@ -359,8 +361,9 @@ func (m *Model) toggleSelectedDetailExpansion() {
 	if !m.detailSelectedActive {
 		return
 	}
-	blockIndex := m.detailBlockIndexForEntry(m.detailSelectedEntry)
-	blocks := m.detailProjectionBlocks()
+	lookup := newDetailProjectionLookup(m.detailViewProjection())
+	blockIndex := lookup.blockIndexForEntry(m.detailSelectedEntry)
+	blocks := lookup.blocks
 	if blockIndex < 0 || blockIndex >= len(blocks) || !blocks[blockIndex].Expandable {
 		return
 	}
