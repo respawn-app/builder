@@ -100,13 +100,23 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 		e.mu.Unlock()
 		return err
 	}
-	if e.goalLoopLifecycle.IsRunning() {
+	switch e.goalLoopLifecycle {
+	case goalLoopLifecycleRunning, goalLoopLifecycleRestartPending:
+		e.mu.Unlock()
+		return nil
+	case goalLoopLifecycleSuspending:
+		e.goalLoopLifecycle = goalLoopLifecycleRestartPending
 		e.mu.Unlock()
 		return nil
 	}
 	e.goalLoopLifecycle = goalLoopLifecycleRunning
 	e.mu.Unlock()
 
+	e.launchGoalLoopTask(firstTurnAlreadyPrompted)
+	return nil
+}
+
+func (e *Engine) launchGoalLoopTask(firstTurnAlreadyPrompted bool) {
 	launched := e.launchLifecycleTask(func(ctx context.Context) {
 		defer e.finishGoalLoop()
 		e.runGoalLoop(ctx, firstTurnAlreadyPrompted)
@@ -114,15 +124,28 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 	if !launched {
 		e.finishGoalLoop()
 	}
-	return nil
 }
 
 func (e *Engine) finishGoalLoop() {
+	restart := false
 	e.mu.Lock()
-	if e.goalLoopLifecycle.IsRunning() {
+	switch e.goalLoopLifecycle {
+	case goalLoopLifecycleRestartPending:
+		if e.goalActiveLocked() {
+			e.goalLoopLifecycle = goalLoopLifecycleRunning
+			restart = true
+		} else {
+			e.goalLoopLifecycle = goalLoopLifecycleIdle
+		}
+	case goalLoopLifecycleSuspending:
+		e.goalLoopLifecycle = goalLoopLifecycleSuspended
+	case goalLoopLifecycleRunning:
 		e.goalLoopLifecycle = goalLoopLifecycleIdle
 	}
 	e.mu.Unlock()
+	if restart {
+		e.launchGoalLoopTask(true)
+	}
 }
 
 func (e *Engine) runGoalLoop(ctx context.Context, firstTurnAlreadyPrompted bool) {

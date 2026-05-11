@@ -406,7 +406,11 @@ func (e *Engine) Interrupt() error {
 	e.ensureOrchestrationCollaborators()
 	e.mu.Lock()
 	if e.goalActiveLocked() {
-		e.goalLoopLifecycle = goalLoopLifecycleSuspended
+		if e.goalLoopLifecycle == goalLoopLifecycleRunning || e.goalLoopLifecycle == goalLoopLifecycleRestartPending {
+			e.goalLoopLifecycle = goalLoopLifecycleSuspending
+		} else {
+			e.goalLoopLifecycle = goalLoopLifecycleSuspended
+		}
 	}
 	e.mu.Unlock()
 	return e.stepLifecycle.Interrupt()
