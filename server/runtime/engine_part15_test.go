@@ -443,6 +443,50 @@ func TestReplaceHistoryDoesNotMutateRuntimeStateWhenEventAppendFails(t *testing.
 	}
 }
 
+type failOnCompactionReminderResetObservation struct {
+	failed bool
+}
+
+func (o *failOnCompactionReminderResetObservation) ObservePersistedStore(_ context.Context, snapshot session.PersistedStoreSnapshot) error {
+	if !o.failed && snapshot.Meta.LastSequence >= 2 && !snapshot.Meta.CompactionSoonReminderIssued {
+		o.failed = true
+		return errors.New("persist observer failed")
+	}
+	return nil
+}
+
+func TestReplaceHistoryUpdatesRuntimeStateWhenMetadataPersistFailsAfterEventAppend(t *testing.T) {
+	dir := t.TempDir()
+	observer := &failOnCompactionReminderResetObservation{}
+	store, err := session.Create(dir, "ws", dir, session.WithPersistenceObserver(observer))
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleUser, Content: "pre-compaction"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := store.SetCompactionSoonReminderIssued(true); err != nil {
+		t.Fatalf("persist seed reminder state: %v", err)
+	}
+	eng.setCompactionSoonReminderIssued(true)
+
+	err = eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}))
+	if err == nil {
+		t.Fatal("expected replaceHistory metadata persistence failure")
+	}
+	messages := eng.snapshotMessages()
+	if len(messages) != 1 || messages[0].Content != "summary" {
+		t.Fatalf("runtime transcript not updated after durable history replacement: %+v", messages)
+	}
+	if eng.compactionRuntimeState().SoonReminderIssued() {
+		t.Fatal("reminder state not reset after durable history replacement")
+	}
+}
+
 func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

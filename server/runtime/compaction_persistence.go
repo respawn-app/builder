@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,19 +33,16 @@ func (p compactionPersistence) replaceHistory(stepID, engine string, mode compac
 	if _, err := e.store.AppendEvent(stepID, "history_replaced", payload); err != nil {
 		return err
 	}
-	if err := e.store.SetCompactionSoonReminderIssued(reminderIssued); err != nil {
-		return err
-	}
-	if err := e.store.SetUsageState(nil); err != nil {
-		return err
-	}
 	e.resetCurrentPreciseInputTracking()
 	e.resetLocalDiagnostics()
 	e.transcriptPersistence().ReplaceHistory(payload.Items)
 	e.setCompactionSoonReminderIssued(false)
 	p.emitProjectedHistoryReplacementEntries(stepID, projectedStart, projectedEntries)
 	e.emitConversationUpdated(stepID)
-	return nil
+	return errors.Join(
+		e.store.SetCompactionSoonReminderIssued(reminderIssued),
+		e.store.SetUsageState(nil),
+	)
 }
 
 func (p compactionPersistence) emitProjectedHistoryReplacementEntries(stepID string, start int, entries []ChatEntry) {
