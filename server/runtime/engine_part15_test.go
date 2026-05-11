@@ -314,7 +314,7 @@ func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 		t.Fatalf("auto compact failed: %v", err)
 	}
 	if eng.shouldAutoCompact() {
-		t.Fatalf("expected auto compact threshold to be cleared after replacement, usage=%+v", eng.lastUsage)
+		t.Fatalf("expected auto compact threshold to be cleared after replacement, usage=%+v", eng.lastUsageSnapshot())
 	}
 }
 
@@ -405,6 +405,41 @@ func TestEmitCompactionStatusStillPublishesFailureEventWhenErrorPersistenceFails
 	}
 	if terminalEvents != 1 {
 		t.Fatalf("expected one compaction failed event despite error persistence failure, got %+v", events)
+	}
+}
+
+func TestReplaceHistoryDoesNotMutateRuntimeStateWhenEventAppendFails(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleUser, Content: "pre-compaction"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setCompactionSoonReminderIssued(true)
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	if err := os.Chmod(eventsPath, 0o444); err != nil {
+		t.Fatalf("chmod events read-only: %v", err)
+	}
+	defer func() {
+		_ = os.Chmod(eventsPath, 0o644)
+	}()
+
+	err = eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}))
+	if err == nil {
+		t.Fatal("expected replaceHistory persistence failure")
+	}
+	if messages := eng.snapshotMessages(); len(messages) != 1 || messages[0].Content != "pre-compaction" {
+		t.Fatalf("runtime transcript mutated despite persistence failure: %+v", messages)
+	}
+	if !eng.compactionRuntimeState().SoonReminderIssued() {
+		t.Fatal("reminder state mutated despite persistence failure")
 	}
 }
 
