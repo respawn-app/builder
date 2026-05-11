@@ -19,10 +19,10 @@ require (
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/sahilm/fuzzy v0.1.1
-	golang.org/x/net v0.53.0
+	golang.org/x/net v0.54.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sys v0.43.0
-	golang.org/x/term v0.42.0
+	golang.org/x/sys v0.44.0
+	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
 	mvdan.cc/sh/v3 v3.13.1
@@ -66,8 +66,7 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
-	golang.org/x/tools v0.44.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	modernc.org/ccgo/v4 v4.34.0 // indirect
 	modernc.org/libc v1.72.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
