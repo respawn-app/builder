@@ -5,9 +5,9 @@ import (
 
 	"builder/cli/app/internal/daemonlaunch"
 	"builder/cli/app/internal/remoteattach"
+	"builder/cli/app/internal/serverattach"
 	"builder/cli/app/internal/sessiontarget"
 	"builder/cli/app/internal/startupconfig"
-	"builder/cli/app/internal/targetstartup"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -15,48 +15,44 @@ import (
 
 var launchSessionServerDaemon = startLocalInteractiveSessionDaemon
 var startInteractiveEmbeddedSessionServer = startEmbeddedServer
-var dialInteractiveRemoteSessionServer = tryDialConfiguredRemoteServer
 
 func startSessionServer(ctx context.Context, opts Options, interactor authInteractor) (interactiveSessionServer, error) {
-	target, err := targetstartup.Resolve[interactiveSessionServer, *client.Remote](ctx, targetstartup.Request[interactiveSessionServer, *client.Remote]{
+	cfg, err := loadSessionServerConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	target, err := serverattach.Resolve[interactiveSessionServer](ctx, serverattach.Request[interactiveSessionServer]{
+		Mode:   serverattach.ModeInteractive,
+		Remote: serverAttachRemotePolicy(cfg, remoteattach.SupportsInteractiveSession, false),
 		BypassRemote: func(context.Context) (bool, error) {
-			return shouldBypassRemoteStartupForInteractiveOnboarding(opts, interactor)
+			return shouldBypassRemoteStartupForInteractiveOnboardingWithConfig(cfg, interactor), nil
 		},
-		DialRemote: func(ctx context.Context) (targetstartup.Target[interactiveSessionServer], bool, error) {
-			remote, ok, err := dialInteractiveRemoteSessionServer(ctx, opts, interactor)
-			if err != nil || !ok {
-				return targetstartup.Target[interactiveSessionServer]{}, ok, err
-			}
-			return interactiveRemoteSessionTarget(remote), true, nil
-		},
-		LaunchDaemon: func(ctx context.Context) (targetstartup.DaemonTarget[*client.Remote], bool, error) {
+		LaunchDaemon: func(ctx context.Context, _ serverattach.LaunchedRemoteDialer) (serverattach.DaemonTarget[*client.Remote], bool, error) {
 			remote, closeFn, ok, err := launchSessionServerDaemon(ctx, opts)
 			if err != nil || !ok {
-				return targetstartup.DaemonTarget[*client.Remote]{}, ok, err
+				return serverattach.DaemonTarget[*client.Remote]{}, ok, err
 			}
-			return targetstartup.DaemonTarget[*client.Remote]{Value: remote, Close: closeFn}, true, nil
+			return serverattach.DaemonTarget[*client.Remote]{Value: remote, Close: closeFn}, true, nil
 		},
-		WrapDaemon: func(_ context.Context, daemon targetstartup.DaemonTarget[*client.Remote]) (targetstartup.Target[interactiveSessionServer], error) {
-			return sessiontarget.WrapDaemon(daemon, sessiontarget.WrapDaemonRequest[interactiveSessionServer, *client.Remote]{
-				LoadConfig: func() (config.App, error) {
-					return loadSessionServerConfig(opts)
-				},
-				NewRemote: func(remote *client.Remote, cfg config.App, closeFn func() error) interactiveSessionServer {
-					return newRemoteAppServerWithAuth(remote, cfg, closeFn)
-				},
-			})
+		WrapRemote: func(remote *client.Remote, cfg config.App, closeFn func() error) (serverattach.Target[interactiveSessionServer], error) {
+			server := newRemoteAppServerWithAuth(remote, cfg, closeFn)
+			return serverattach.Target[interactiveSessionServer]{Value: server, Close: server.Close}, nil
 		},
-		StartEmbedded: func(ctx context.Context) (targetstartup.Target[interactiveSessionServer], error) {
+		StartEmbedded: func(ctx context.Context) (serverattach.Target[interactiveSessionServer], error) {
 			server, err := startInteractiveEmbeddedSessionServer(ctx, opts, interactor)
 			if err != nil {
-				return targetstartup.Target[interactiveSessionServer]{}, err
+				return serverattach.Target[interactiveSessionServer]{}, err
 			}
-			return targetstartup.Target[interactiveSessionServer]{Value: server, Close: server.Close}, nil
+			return serverattach.Target[interactiveSessionServer]{Value: server, Close: server.Close}, nil
 		},
-		Validate: func(ctx context.Context, source targetstartup.Source, target interactiveSessionServer) error {
-			return sessiontarget.Validate(ctx, source, target, func(ctx context.Context, server interactiveSessionServer) error {
-				return server.Reauthenticate(ctx, interactor)
-			})
+		Validate: func(ctx context.Context, resolution serverattach.Resolution[interactiveSessionServer]) (serverattach.AuthReadiness, error) {
+			if resolution.Source == serverattach.SourceEmbeddedFallback {
+				return serverattach.AuthReadinessUnchecked, nil
+			}
+			if err := resolution.Value.Reauthenticate(ctx, interactor); err != nil {
+				return serverattach.AuthReadinessUnchecked, err
+			}
+			return serverattach.AuthReadinessValidated, nil
 		},
 	})
 	if err != nil {
@@ -65,32 +61,19 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 	return target.Value, nil
 }
 
-func interactiveRemoteSessionTarget(server interactiveSessionServer) targetstartup.Target[interactiveSessionServer] {
-	return sessiontarget.Remote(server)
-}
-
 func shouldBypassRemoteStartupForInteractiveOnboarding(opts Options, interactor authInteractor) (bool, error) {
-	if interactor == nil || !interactor.Interactive() {
-		return false, nil
-	}
 	cfg, err := loadSessionServerConfig(opts)
 	if err != nil {
 		return false, err
 	}
-	return sessiontarget.ShouldBypassRemoteForFirstRun(interactor.Interactive(), cfg.Source.SettingsFileExists), nil
+	return shouldBypassRemoteStartupForInteractiveOnboardingWithConfig(cfg, interactor), nil
 }
 
-func tryDialConfiguredRemoteServer(ctx context.Context, opts Options, _ authInteractor) (*remoteAppServer, bool, error) {
-	remote, ok := tryDialMatchingConfiguredRemoteAllowUnregistered(ctx, opts, remoteattach.SupportsInteractiveSession, nil)
-	if !ok {
-		return nil, false, nil
+func shouldBypassRemoteStartupForInteractiveOnboardingWithConfig(cfg config.App, interactor authInteractor) bool {
+	if interactor == nil || !interactor.Interactive() {
+		return false
 	}
-	cfg, err := loadSessionServerConfig(opts)
-	if err != nil {
-		_ = remote.Close()
-		return nil, false, err
-	}
-	return newRemoteAppServerWithAuth(remote, cfg, nil), true, nil
+	return sessiontarget.ShouldBypassRemoteForFirstRun(interactor.Interactive(), cfg.Source.SettingsFileExists)
 }
 
 func startLocalInteractiveSessionDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {

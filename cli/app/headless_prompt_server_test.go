@@ -13,11 +13,11 @@ import (
 )
 
 func newHeadlessRunPromptClient(server *embeddedAppServer) client.RunPromptClient {
-	runPrompt, err := runPromptClientForEmbeddedServer(server)
+	target, err := runPromptTargetForEmbeddedAttachment(server)
 	if err != nil {
 		panic(err)
 	}
-	return runPrompt
+	return target.Value.Client
 }
 
 func ensureSubagentSessionName(store *session.Store) error {
