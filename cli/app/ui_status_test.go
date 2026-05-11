@@ -178,7 +178,7 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Session ID: session-123", "Parent session: incident-root <parent-456>", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Auth", "Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Session ID: session-123", "Parent session: incident-root <parent-456>", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
@@ -268,11 +268,27 @@ func TestStatusOverlaySectionOrderPrioritizesSessionGitContext(t *testing.T) {
 	session := statusLineIndex(t, lines, "Session")
 	git := statusLineIndex(t, lines, "Git")
 	context := statusLineIndex(t, lines, "Context")
-	subscription := statusLineIndex(t, lines, "Subscription")
+	auth := statusLineIndex(t, lines, "Auth")
 	config := statusLineIndex(t, lines, "Config")
 	skills := statusLineIndex(t, lines, "1 skills")
-	if !(session < git && git < context && context < subscription && subscription < config && config < skills) {
-		t.Fatalf("unexpected status section order: session=%d git=%d context=%d subscription=%d config=%d skills=%d\n%s", session, git, context, subscription, config, skills, lines)
+	if !(session < git && git < context && context < auth && auth < config && config < skills) {
+		t.Fatalf("unexpected status section order: session=%d git=%d context=%d auth=%d config=%d skills=%d\n%s", session, git, context, auth, config, skills, lines)
+	}
+}
+
+func TestStatusOverlayAuthSectionShowsNoAuthAndAPIKey(t *testing.T) {
+	noAuth := newProjectedStaticUIModel()
+	noAuth.status.snapshot = uiStatusSnapshot{Auth: uiStatusAuthInfo{Summary: "No Auth", Visible: true}}
+	noAuthLines := stripANSIAndTrimRight(strings.Join(noAuth.layout().statusOverlayContentLines(100), "\n"))
+	if !strings.Contains(noAuthLines, "Auth\nNo Auth") {
+		t.Fatalf("expected no-auth status section, got %q", noAuthLines)
+	}
+
+	apiKey := newProjectedStaticUIModel()
+	apiKey.status.snapshot = uiStatusSnapshot{Auth: uiStatusAuthInfo{Summary: "API Key ...1234", Visible: true}}
+	apiKeyLines := stripANSIAndTrimRight(strings.Join(apiKey.layout().statusOverlayContentLines(100), "\n"))
+	if !strings.Contains(apiKeyLines, "Auth\nAPI Key ...1234") {
+		t.Fatalf("expected api-key status section, got %q", apiKeyLines)
 	}
 }
 

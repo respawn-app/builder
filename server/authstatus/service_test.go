@@ -63,8 +63,8 @@ func TestServiceUsesServerSettingsForAPIKeyProviderLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAuthStatus: %v", err)
 	}
-	if resp.Auth.Summary != "API key" {
-		t.Fatalf("auth summary = %q, want API key", resp.Auth.Summary)
+	if resp.Auth.Summary != "API Key ...test" {
+		t.Fatalf("auth summary = %q, want masked API key", resp.Auth.Summary)
 	}
 	if len(resp.Auth.Details) != 1 || resp.Auth.Details[0] != "internal-openai" {
 		t.Fatalf("auth details = %+v, want server provider override", resp.Auth.Details)

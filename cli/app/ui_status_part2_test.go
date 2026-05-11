@@ -186,7 +186,7 @@ func TestStatusVisibleAuthSummarySuppressesGenericSubscriptionWhenPlanPresent(t 
 	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "user@example.com", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "user@example.com" {
 		t.Fatalf("visible auth summary = %q", got)
 	}
-	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "Not configured"}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "" {
+	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "No Auth", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "No Auth" {
 		t.Fatalf("visible auth summary = %q", got)
 	}
 }

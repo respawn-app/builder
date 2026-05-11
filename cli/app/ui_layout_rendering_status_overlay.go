@@ -141,11 +141,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	hasSubscriptionRows := len(snapshot.Subscription.Windows) > 0
 	showAccountSection := authSummary != "" || subscriptionSummary != "" || hasSubscriptionRows || l.statusSectionLoading(uiStatusSectionAuth)
 	if showAccountSection {
-		if subscriptionSummary != "" || hasSubscriptionRows {
-			appendSectionTitle("Subscription")
-		} else {
-			appendSectionTitle("Account")
-		}
+		appendSectionTitle("Auth")
 		if authSummary != "" {
 			appendWrapped(authSummary, boldStyle)
 		} else if subscriptionSummary == "" && !hasSubscriptionRows && l.statusSectionLoading(uiStatusSectionAuth) {
