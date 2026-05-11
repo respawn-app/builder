@@ -415,6 +415,33 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	}
 }
 
+func TestRestoreMessagesPreservesStoredLocalEntryNoticeID(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+		Role:     "system",
+		Text:     "Mirrored notice",
+		NoticeID: "notice-1",
+	}); err != nil {
+		t.Fatalf("append local entry: %v", err)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	snapshot := restored.ChatSnapshot()
+	if len(snapshot.Entries) != 1 {
+		t.Fatalf("expected 1 restored entry, got %+v", snapshot.Entries)
+	}
+	if snapshot.Entries[0].NoticeID != "notice-1" {
+		t.Fatalf("notice id = %q, want notice-1", snapshot.Entries[0].NoticeID)
+	}
+}
+
 func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *testing.T) {
 	localEntryErr := errors.New("injected local entry persistence failure")
 	dir := t.TempDir()
