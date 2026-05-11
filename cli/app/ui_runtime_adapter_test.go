@@ -238,13 +238,13 @@ func TestRuntimeAdapterRunStartAppliesPendingInputBeforeActivityEffect(t *testin
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
 		Kind:     clientui.EventRunStateChanged,
-		RunState: &clientui.RunState{Busy: true},
+		RunState: &clientui.RunState{Lifecycle: clientui.RunningRunLifecycle(clientui.RunModeTurn)},
 	})
 
 	if m.activity != uiActivityRunning {
 		t.Fatalf("activity = %v, want running", m.activity)
 	}
-	if !m.busy {
+	if !m.isBusy() {
 		t.Fatal("expected busy state set")
 	}
 }
@@ -256,7 +256,7 @@ func TestRuntimeAdapterUserMessageFlushRecordsHistoryAndClearsDraft(t *testing.T
 	m.pendingInjected = queuedUserMessagesForTest("steered message", "follow-up")
 	m.lockedInjectText = "steered message"
 	m.lockedInjectID = "queue-test-0"
-	m.inputSubmitLocked = true
+	m.setInputSubmitLocked(true)
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
 		Kind:                         clientui.EventUserMessageFlushed,
@@ -267,7 +267,7 @@ func TestRuntimeAdapterUserMessageFlushRecordsHistoryAndClearsDraft(t *testing.T
 	if m.input != "" {
 		t.Fatalf("input = %q, want cleared", m.input)
 	}
-	if m.inputSubmitLocked {
+	if m.isInputSubmitLocked() {
 		t.Fatal("expected input submit lock cleared")
 	}
 	if m.lockedInjectText != "" {
@@ -539,7 +539,7 @@ func TestRuntimeEventBatchCoalescesCommittedNativeFlushAndPreservesOrder(t *test
 
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	firstBatch := []clientui.Event{
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Lifecycle: runtime.RunningRunLifecycle(runtime.RunModeTurn)}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),

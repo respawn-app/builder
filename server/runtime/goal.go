@@ -33,7 +33,7 @@ func (e *Engine) GoalLoopSuspended() bool {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.goalLoopSuspended && e.goalActiveLocked()
+	return e.goalLoopLifecycle.IsSuspended() && e.goalActiveLocked()
 }
 
 func (e *Engine) SetGoal(objective string, actor session.GoalActor) (session.GoalState, error) {
@@ -95,17 +95,16 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 	}
 	if err := e.requireAskQuestionForGoalLoopStart(); err != nil {
 		if errors.Is(err, ErrGoalRequiresAskQuestion) {
-			e.goalLoopSuspended = true
+			e.goalLoopLifecycle = goalLoopLifecycleSuspended
 		}
 		e.mu.Unlock()
 		return err
 	}
-	e.goalLoopSuspended = false
-	if e.goalLoopRunning {
+	if e.goalLoopLifecycle.IsRunning() {
 		e.mu.Unlock()
 		return nil
 	}
-	e.goalLoopRunning = true
+	e.goalLoopLifecycle = goalLoopLifecycleRunning
 	e.mu.Unlock()
 
 	launched := e.launchLifecycleTask(func(ctx context.Context) {
@@ -120,7 +119,9 @@ func (e *Engine) startGoalLoop(firstTurnAlreadyPrompted bool) error {
 
 func (e *Engine) finishGoalLoop() {
 	e.mu.Lock()
-	e.goalLoopRunning = false
+	if e.goalLoopLifecycle.IsRunning() {
+		e.goalLoopLifecycle = goalLoopLifecycleIdle
+	}
 	e.mu.Unlock()
 }
 
@@ -201,7 +202,7 @@ func (e *Engine) shouldContinueGoalLoop() bool {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return !e.goalLoopSuspended && e.goalActiveLocked()
+	return !e.goalLoopLifecycle.IsSuspended() && e.goalActiveLocked()
 }
 
 func (e *Engine) goalActiveLocked() bool {

@@ -9,17 +9,21 @@ func shouldRefreshDeferredCommittedTailOnRunEnd(m *uiModel, evt clientui.Event) 
 	if evt.Kind != clientui.EventRunStateChanged || evt.RunState == nil {
 		return false
 	}
-	return !evt.RunState.Busy
+	return !evt.RunState.Lifecycle.IsRunning()
 }
 
 func (a uiRuntimeAdapter) runtimeRunState() clientui.RuntimeRunState {
 	m := a.model
+	if err := m.runtimeLifecycle.Run.Validate(); err != nil {
+		panic(err)
+	}
+	if err := m.runtimeLifecycle.Reviewer.Validate(); err != nil {
+		panic(err)
+	}
 	return clientui.RuntimeRunState{
-		Busy:             m.busy,
-		Compacting:       m.compacting,
-		ReviewerRunning:  m.reviewerRunning,
-		ReviewerBlocking: m.reviewerBlocking,
-		GoalLoop:         m.goalRun,
+		Run:        m.runtimeLifecycle.Run,
+		Compaction: m.runtimeLifecycle.Compaction,
+		Reviewer:   m.runtimeLifecycle.Reviewer,
 	}
 }
 
@@ -34,27 +38,35 @@ func (a uiRuntimeAdapter) runtimeReasoningState() clientui.RuntimeReasoningState
 func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
 	m := a.model
 	return clientui.PendingInputState{
-		Input:             m.input,
-		PendingInjected:   m.pendingInjected,
-		LockedInjectText:  m.lockedInjectText,
-		LockedInjectID:    m.lockedInjectID,
-		InputSubmitLocked: m.inputSubmitLocked,
+		Input:            m.input,
+		PendingInjected:  m.pendingInjected,
+		LockedInjectText: m.lockedInjectText,
+		LockedInjectID:   m.lockedInjectID,
+		Submission:       clientui.NewInputSubmissionLifecycle(m.isInputSubmitLocked()),
 	}
 }
 
 func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) {
 	m := a.model
-	m.busy = reduction.RunState.State.Busy
-	m.goalRun = reduction.RunState.State.GoalLoop
-	m.compacting = reduction.RunState.State.Compacting
-	m.reviewerRunning = reduction.RunState.State.ReviewerRunning
-	m.reviewerBlocking = reduction.RunState.State.ReviewerBlocking
+	if reduction.RunState.Err != nil {
+		m.activity = uiActivityError
+		_ = m.setTransientStatusWithKind("invalid runtime lifecycle: "+reduction.RunState.Err.Error(), uiStatusNoticeError)
+		return
+	}
+	if err := m.setRunLifecycle(reduction.RunState.State.Run); err != nil {
+		m.activity = uiActivityError
+		_ = m.setTransientStatusWithKind("invalid runtime lifecycle: "+err.Error(), uiStatusNoticeError)
+		return
+	}
+	m.setCompacting(reduction.RunState.State.Compaction.IsRunning())
+	m.setReviewerRunning(reduction.RunState.State.Reviewer.IsRunning())
+	m.setReviewerBlocking(reduction.RunState.State.Reviewer.IsBlocking())
 	m.conversationFreshness = reduction.Conversation.State.Freshness
 	m.reasoningStatusHeader = reduction.Reasoning.State.StatusHeader
 	m.pendingInjected = reduction.PendingInput.State.PendingInjected
 	m.lockedInjectText = reduction.PendingInput.State.LockedInjectText
 	m.lockedInjectID = reduction.PendingInput.State.LockedInjectID
-	m.inputSubmitLocked = reduction.PendingInput.State.InputSubmitLocked
+	m.setInputSubmitLocked(reduction.PendingInput.State.Submission.IsLocked())
 	switch reduction.PendingInput.DraftCommand {
 	case clientui.RuntimePendingInputClearDraft:
 		m.clearInput()
@@ -73,14 +85,14 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeE
 
 func (a uiRuntimeAdapter) reconcileInterruptFromRunState(evt clientui.Event) {
 	m := a.model
-	if m == nil || evt.Kind != clientui.EventRunStateChanged || evt.RunState == nil || evt.RunState.Busy {
+	if m == nil || evt.Kind != clientui.EventRunStateChanged || evt.RunState == nil || evt.RunState.Lifecycle.IsRunning() {
 		return
 	}
 	if evt.RunState.Status != clientui.RunStatusInterrupted {
-		m.pendingInterrupt = false
+		m.setPendingInterrupt(false)
 		return
 	}
-	if m.pendingInterrupt {
+	if m.hasPendingInterrupt() {
 		if m.activeSubmit.restoreOnInterrupt && !m.activeSubmit.flushed {
 			c := uiInputController{model: m}
 			c.restoreSubmittedTextIntoInput(m.activeSubmit.text)
@@ -90,7 +102,7 @@ func (a uiRuntimeAdapter) reconcileInterruptFromRunState(evt clientui.Event) {
 		c.releaseLockedInjectedInput(true)
 		c.restorePendingInjectedIntoInput()
 		c.restoreQueuedMessagesIntoInput()
-		m.pendingInterrupt = false
+		m.setPendingInterrupt(false)
 	}
 	m.activity = uiActivityInterrupted
 	m.clearReviewerState()
