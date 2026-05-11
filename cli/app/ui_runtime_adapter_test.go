@@ -19,6 +19,59 @@ import (
 	"time"
 )
 
+func TestApplyRuntimeEventReductionInvalidLifecycleKeepsSideEffectsAndReturnsStatusCommand(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.conversationFreshness = clientui.ConversationFreshnessFresh
+	reviewer, err := clientui.NewReviewerLifecycle(true, true)
+	if err != nil {
+		t.Fatalf("reviewer lifecycle: %v", err)
+	}
+
+	cmd := m.runtimeAdapter().applyRuntimeEventReduction(clientui.RuntimeEventReduction{
+		RunState: clientui.RuntimeRunStateReduction{
+			State: clientui.RuntimeRunState{
+				Run:        m.runtimeLifecycle.Run,
+				Compaction: clientui.NewCompactionLifecycle(true),
+				Reviewer:   reviewer,
+			},
+			Err: errors.New("bad lifecycle"),
+		},
+		Conversation: clientui.RuntimeConversationReduction{State: clientui.RuntimeConversationState{Freshness: clientui.ConversationFreshnessEstablished}},
+		PendingInput: clientui.RuntimePendingInputReduction{
+			State: clientui.PendingInputState{
+				Input:      "draft",
+				Submission: clientui.InputSubmissionLocked,
+			},
+		},
+		Reasoning: clientui.RuntimeReasoningReduction{State: clientui.RuntimeReasoningState{StatusHeader: "thinking"}},
+	})
+
+	if cmd == nil {
+		t.Fatal("expected invalid lifecycle to return transient status timer command")
+	}
+	if msgs := collectCmdMessages(t, cmd); len(msgs) == 0 {
+		t.Fatal("expected transient status command to produce a timer message")
+	}
+	if m.activity != uiActivityError {
+		t.Fatalf("activity = %v, want error", m.activity)
+	}
+	if !strings.Contains(m.transientStatus, "invalid runtime lifecycle") {
+		t.Fatalf("transient status = %q, want invalid lifecycle error", m.transientStatus)
+	}
+	if !m.isCompacting() || !m.isReviewerRunning() || !m.isReviewerBlocking() {
+		t.Fatalf("expected non-run lifecycle side effects to apply, compacting=%t reviewer=%t blocking=%t", m.isCompacting(), m.isReviewerRunning(), m.isReviewerBlocking())
+	}
+	if m.conversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", m.conversationFreshness)
+	}
+	if !m.isInputSubmitLocked() {
+		t.Fatal("expected pending input submission side effect to apply")
+	}
+	if m.reasoningStatusHeader != "thinking" {
+		t.Fatalf("reasoning header = %q, want thinking", m.reasoningStatusHeader)
+	}
+}
+
 type runtimeAdapterFakeClient struct {
 	responses []llm.Response
 	index     int
