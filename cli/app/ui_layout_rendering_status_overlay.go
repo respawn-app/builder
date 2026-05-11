@@ -119,10 +119,10 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
 		appendWrapped(sessionName, boldStyle)
 	}
+	appendWrapped("Session ID: "+statusValueOrFallback(snapshot.SessionID, "session unknown"), lipgloss.Style{})
 	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
-		appendWrapped(parentSummary, lipgloss.Style{})
+		appendWrapped(parentSummary, subtleStyle)
 	}
-	appendWrapped(statusValueOrFallback(snapshot.SessionID, "session unknown"), subtleStyle)
 
 	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
 		appendSectionTitle("Git")

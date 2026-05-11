@@ -176,10 +176,13 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Session ID: session-123", "Parent session: incident-root <parent-456>", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
+	}
+	if !strings.Contains(plain, "incident\nSession ID: session-123\nParent session: incident-root <parent-456>") {
+		t.Fatalf("expected session id before parent session id, got %q", plain)
 	}
 	for _, want := range []string{"4 skills", "/Users/test/.builder/skills", "apiresult (0k)", "local helper disabled", "! broken (missing SKILL.md)", "/Users/test/.builder/.generated/skills", "skill-creator (0k) generated"} {
 		if !strings.Contains(plain, want) {
