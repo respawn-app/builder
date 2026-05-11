@@ -215,6 +215,38 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	}
 }
 
+func TestStatusOverlaySessionSectionLabelsSessionIDBeforeMutedParent(t *testing.T) {
+	snapshot := uiStatusSnapshot{
+		Workdir:           "/tmp/workdir",
+		SessionName:       "incident",
+		SessionID:         "session-123",
+		ParentSessionID:   "parent-456",
+		ParentSessionName: "incident-root",
+		Model:             uiStatusModelInfo{Summary: "gpt-5 high"},
+	}
+	sessionLines := statusOverlaySessionLines(snapshot)
+	if len(sessionLines) != 3 {
+		t.Fatalf("session lines = %+v, want 3 lines", sessionLines)
+	}
+	if sessionLines[0].Text != "incident" || sessionLines[0].Style != statusOverlayLineStyleBold {
+		t.Fatalf("session name line = %+v, want bold incident", sessionLines[0])
+	}
+	if sessionLines[1].Text != "Session ID: session-123" || sessionLines[1].Style != statusOverlayLineStyleNormal {
+		t.Fatalf("session id line = %+v, want full-color labeled session id", sessionLines[1])
+	}
+	if sessionLines[2].Text != "Parent session: incident-root <parent-456>" || sessionLines[2].Style != statusOverlayLineStyleSubtle {
+		t.Fatalf("parent session line = %+v, want muted parent session", sessionLines[2])
+	}
+
+	m := newProjectedStaticUIModel()
+	m.status.snapshot = snapshot
+	lines := m.layout().statusOverlayContentLines(100)
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "incident\nSession ID: session-123\nParent session: incident-root <parent-456>") {
+		t.Fatalf("expected session id before parent session in focused status section, got %q", plain)
+	}
+}
+
 func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
 	collector := &stubProgressiveStatusCollector{
 		base: uiStatusSnapshot{

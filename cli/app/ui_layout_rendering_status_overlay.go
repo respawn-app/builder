@@ -31,6 +31,31 @@ func (l uiViewLayout) renderStatusOverlay(width, height int, _ uiStyles) []strin
 	return visible
 }
 
+type statusOverlayLineStyle uint8
+
+const (
+	statusOverlayLineStyleNormal statusOverlayLineStyle = iota
+	statusOverlayLineStyleBold
+	statusOverlayLineStyleSubtle
+)
+
+type statusOverlayLine struct {
+	Text  string
+	Style statusOverlayLineStyle
+}
+
+func statusOverlaySessionLines(snapshot uiStatusSnapshot) []statusOverlayLine {
+	lines := make([]statusOverlayLine, 0, 3)
+	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
+		lines = append(lines, statusOverlayLine{Text: sessionName, Style: statusOverlayLineStyleBold})
+	}
+	lines = append(lines, statusOverlayLine{Text: "Session ID: " + statusValueOrFallback(snapshot.SessionID, "session unknown"), Style: statusOverlayLineStyleNormal})
+	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
+		lines = append(lines, statusOverlayLine{Text: parentSummary, Style: statusOverlayLineStyleSubtle})
+	}
+	return lines
+}
+
 func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	m := l.model
 	palette := uiPalette(m.theme)
@@ -116,12 +141,15 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	if updateLine := l.renderStatusUpdateLine(width, snapshot.Update); updateLine != "" {
 		appendANSI(updateLine)
 	}
-	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
-		appendWrapped(sessionName, boldStyle)
-	}
-	appendWrapped("Session ID: "+statusValueOrFallback(snapshot.SessionID, "session unknown"), lipgloss.Style{})
-	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
-		appendWrapped(parentSummary, subtleStyle)
+	for _, line := range statusOverlaySessionLines(snapshot) {
+		switch line.Style {
+		case statusOverlayLineStyleBold:
+			appendWrapped(line.Text, boldStyle)
+		case statusOverlayLineStyleSubtle:
+			appendWrapped(line.Text, subtleStyle)
+		default:
+			appendWrapped(line.Text, lipgloss.Style{})
+		}
 	}
 
 	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
