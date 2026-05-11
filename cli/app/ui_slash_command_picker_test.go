@@ -11,6 +11,7 @@ import (
 	"builder/server/auth"
 	"builder/server/llm"
 	"builder/shared/clientui"
+	"builder/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -31,6 +32,65 @@ func TestSlashCommandEnterIgnoresWhitespaceImmediatelyAfterSlash(t *testing.T) {
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after slash command execution, got %q", updated.input)
 	}
+}
+
+func TestSlashCommandPickerHighlightTracksSelectionAfterViewportScroll(t *testing.T) {
+	withTrueColor(t)
+	r := commands.NewRegistry()
+	registerSlashPickerTestCommand := func(name string) {
+		r.Register(name, "test command "+name, func(string) commands.Result {
+			return commands.Result{Handled: true}
+		})
+	}
+	for _, name := range []string{"aa00", "aa01", "aa02", "aa03", "aa04", "aa05", "aa06", "aa07", "aa08", "goal"} {
+		registerSlashPickerTestCommand(name)
+	}
+	m := newProjectedStaticUIModel(WithUICommandRegistry(r))
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+
+	targetIndex := slashPickerCommandIndex(m.slashCommandPicker(), "goal")
+	if targetIndex <= slashCommandPickerLines/2 {
+		t.Fatalf("test setup expected /goal past centered viewport threshold, got index %d", targetIndex)
+	}
+	for step := 0; step < targetIndex; step++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*uiModel)
+	}
+
+	state := m.slashCommandPicker()
+	if state.start == 0 {
+		t.Fatalf("expected slash picker viewport to scroll for /goal, got %+v", state)
+	}
+	if m.input != "/goal" {
+		t.Fatalf("expected logical slash selection to update input to /goal, got %q", m.input)
+	}
+	selectedLine := selectedSlashPickerRenderLine(t, m, 80)
+	if !strings.Contains(stripANSIAndTrimRight(selectedLine), "/goal") {
+		t.Fatalf("expected highlighted slash picker row to be /goal, got %q in %q", selectedLine, strings.Join(m.layout().renderActivePicker(80), "\n"))
+	}
+}
+
+func slashPickerCommandIndex(state slashCommandPickerState, name string) int {
+	for idx, command := range state.matches {
+		if command.Name == name {
+			return idx
+		}
+	}
+	return -1
+}
+
+func selectedSlashPickerRenderLine(t *testing.T, m *uiModel, width int) string {
+	t.Helper()
+	primary := foregroundTrueColorEscape(theme.ResolvePalette(m.theme).App.Primary.TrueColor)
+	primaryFragment := strings.TrimSuffix(strings.TrimPrefix(primary, "\x1b["), "m")
+	for _, line := range m.layout().renderActivePicker(width) {
+		if strings.Contains(line, primaryFragment) {
+			return line
+		}
+	}
+	t.Fatalf("expected selected slash picker row with primary color fragment %q in %q", primaryFragment, strings.Join(m.layout().renderActivePicker(width), "\n"))
+	return ""
 }
 
 func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t *testing.T) {
