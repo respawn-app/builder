@@ -47,7 +47,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
 			e.restoreLocalDiagnostic(entry.DiagnosticKey)
-			e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
+			e.chat.appendLocalEntryRecord(*localEntryChatEntry(entry))
 		case sessionEventCacheWarning:
 			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload, e.cfg.CacheWarningMode); err != nil {
 				return err

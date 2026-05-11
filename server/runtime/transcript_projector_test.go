@@ -85,6 +85,21 @@ func TestTranscriptProjectorPreservesErrorLocalEntries(t *testing.T) {
 	}
 }
 
+func TestTranscriptProjectorPreservesPersistedLocalEntryNoticeID(t *testing.T) {
+	projector := NewTranscriptProjector()
+	if err := projector.ApplyPersistedEvent(mustPersistedEvent(t, "local_entry", storedLocalEntry{Role: "system", Text: "Mirrored notice", NoticeID: "notice-1"})); err != nil {
+		t.Fatalf("ApplyPersistedEvent(local_entry notice): %v", err)
+	}
+
+	snapshot := projector.ChatSnapshot()
+	if len(snapshot.Entries) != 1 {
+		t.Fatalf("entry count = %d, want 1", len(snapshot.Entries))
+	}
+	if got := snapshot.Entries[0].NoticeID; got != "notice-1" {
+		t.Fatalf("notice id = %q, want notice-1", got)
+	}
+}
+
 func mustPersistedEvent(t *testing.T, kind string, payload any) session.Event {
 	t.Helper()
 	body, err := json.Marshal(payload)
