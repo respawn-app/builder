@@ -10,6 +10,8 @@ import (
 	"builder/shared/config"
 	"context"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -445,53 +447,105 @@ func TestStatusSkillLineMarksGeneratedAndShadowed(t *testing.T) {
 	}
 }
 
-func TestStatusSkillLineRendersGeneratedLabelWithInjectedMutedStyle(t *testing.T) {
+func TestStatusSkillLineRendersGeneratedLabelWithMutedStyle(t *testing.T) {
+	withTrueColor(t)
 	line := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
 		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
 		Loaded:     true,
 		SourceKind: "generated",
-	}, nil, func(label string) string {
-		return "<muted>" + label + "</muted>"
-	})
-	if !strings.Contains(line, "skill-creator (0k) <muted>generated</muted>") {
-		t.Fatalf("expected generated label to use injected muted style, got %q", line)
+	}, nil, generatedSkillTestStyle())
+	if !strings.Contains(stripANSIAndTrimRight(line), "skill-creator (0k) generated") || !strings.Contains(line, "\x1b[") {
+		t.Fatalf("expected generated label to use muted ANSI style, got %q", line)
 	}
 }
 
 func TestStatusSkillLinePreservesTokenCountForActiveGeneratedSkill(t *testing.T) {
 	path := "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md"
-	active := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	withTrueColor(t)
+	activeRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	active := stripANSIAndTrimRight(activeRaw)
 	for _, want := range []string{"skill-creator", "(1.2k)", "generated"} {
 		if !strings.Contains(active, want) {
 			t.Fatalf("expected active generated line to contain %q, got %q", want, active)
 		}
 	}
-	disabled := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	assertGeneratedLabelStyled(t, activeRaw)
+	disabledRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "disabled-skill",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
 		Disabled:   true,
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	disabled := stripANSIAndTrimRight(disabledRaw)
 	if !strings.Contains(disabled, "generated") || !strings.Contains(disabled, "disabled") || strings.Contains(disabled, "(1.2k)") {
 		t.Fatalf("expected disabled generated line to be label-only, got %q", disabled)
 	}
-	shadowed := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	assertGeneratedLabelStyled(t, disabledRaw)
+	shadowedRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "shadowed-skill",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
 		Shadowed:   true,
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	shadowed := stripANSIAndTrimRight(shadowedRaw)
 	if !strings.Contains(shadowed, "generated") || !strings.Contains(shadowed, "shadowed") || strings.Contains(shadowed, "(1.2k)") {
 		t.Fatalf("expected shadowed generated line to be label-only, got %q", shadowed)
 	}
+	assertGeneratedLabelStyled(t, shadowedRaw)
+}
+
+func TestStatusOverlayGeneratedSkillLabelRendersMuted(t *testing.T) {
+	withTrueColor(t)
+	m := newProjectedStaticUIModel()
+	m.status.snapshot = uiStatusSnapshot{
+		Workdir: "/tmp/workdir",
+		Skills: []uiStatusSkillInspection{{
+			Name:       "skill-creator",
+			Path:       "/tmp/workdir/.builder/.generated/skills/skill-creator/SKILL.md",
+			Loaded:     true,
+			SourceKind: "generated",
+		}},
+	}
+	lines := m.layout().statusOverlayContentLines(100)
+	raw := findRawStatusOverlayLine(t, lines, "skill-creator (0k) generated")
+	assertGeneratedLabelStyled(t, raw)
+}
+
+func withTrueColor(t *testing.T) {
+	t.Helper()
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+}
+
+func generatedSkillTestStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(uiPalette("dark").muted).Faint(true)
+}
+
+func assertGeneratedLabelStyled(t *testing.T, rawLine string) {
+	t.Helper()
+	if !strings.Contains(stripANSIAndTrimRight(rawLine), "generated") || !strings.Contains(rawLine, "\x1b[") {
+		t.Fatalf("expected generated label to be styled in %q", rawLine)
+	}
+}
+
+func findRawStatusOverlayLine(t *testing.T, lines []string, want string) string {
+	t.Helper()
+	for _, line := range lines {
+		if strings.Contains(stripANSIAndTrimRight(line), want) {
+			return line
+		}
+	}
+	t.Fatalf("status overlay line %q not found in %q", want, stripANSIAndTrimRight(strings.Join(lines, "\n")))
+	return ""
 }
 
 func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {
