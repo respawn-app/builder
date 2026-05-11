@@ -560,11 +560,11 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 
 	called := false
 	originalLaunch := launchSessionServerDaemon
-	originalDial := dialInteractiveRemoteSessionServer
+	originalDial := dialConfiguredProjectViewRemote
 	t.Cleanup(func() { launchSessionServerDaemon = originalLaunch })
-	t.Cleanup(func() { dialInteractiveRemoteSessionServer = originalDial })
-	dialInteractiveRemoteSessionServer = func(context.Context, Options, authInteractor) (*remoteAppServer, bool, error) {
-		return nil, false, nil
+	t.Cleanup(func() { dialConfiguredProjectViewRemote = originalDial })
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
+		return nil, errors.New("configured remote unavailable")
 	}
 	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
 		remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(loadCfg))

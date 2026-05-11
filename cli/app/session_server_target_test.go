@@ -788,11 +788,11 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
 
-	originalDial := dialInteractiveRemoteSessionServer
+	originalDial := dialConfiguredProjectViewRemote
 	originalLaunch := launchSessionServerDaemon
 	originalEmbedded := startInteractiveEmbeddedSessionServer
 	defer func() {
-		dialInteractiveRemoteSessionServer = originalDial
+		dialConfiguredProjectViewRemote = originalDial
 		launchSessionServerDaemon = originalLaunch
 		startInteractiveEmbeddedSessionServer = originalEmbedded
 	}()
@@ -804,9 +804,9 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 		embeddedCalled = true
 		return &embeddedAppServer{}, nil
 	}
-	dialInteractiveRemoteSessionServer = func(context.Context, Options, authInteractor) (*remoteAppServer, bool, error) {
+	dialConfiguredProjectViewRemote = func(context.Context, config.App) (configuredProjectViewRemote, error) {
 		remoteCalled = true
-		return nil, false, nil
+		return nil, errors.New("configured remote should be skipped")
 	}
 	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
 		daemonCalled = true

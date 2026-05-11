@@ -10,8 +10,8 @@ import (
 	"builder/cli/app/internal/remoteattach"
 	"builder/cli/app/internal/runprompttarget"
 	"builder/cli/app/internal/servecommand"
+	"builder/cli/app/internal/serverattach"
 	"builder/cli/app/internal/startupconfig"
-	"builder/cli/app/internal/targetstartup"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -44,43 +44,41 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	}
 	opts = workspaceConfig.Options
 	cfg := workspaceConfig.Config
-	target, err := targetstartup.Resolve[runprompttarget.Target, *client.Remote](ctx, targetstartup.Request[runprompttarget.Target, *client.Remote]{
-		DialRemote: func(ctx context.Context) (targetstartup.Target[runprompttarget.Target], bool, error) {
-			remote, ok, err := tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx, opts, cfg, nil)
-			if err != nil || !ok {
-				return targetstartup.Target[runprompttarget.Target]{}, ok, err
-			}
-			return runprompttarget.Remote(remote, cfg), true, nil
-		},
-		LaunchDaemon: func(ctx context.Context) (targetstartup.DaemonTarget[*client.Remote], bool, error) {
+	target, err := serverattach.Resolve[runprompttarget.Target](ctx, serverattach.Request[runprompttarget.Target]{
+		Mode:   serverattach.ModeHeadless,
+		Remote: serverAttachRemotePolicy(cfg, remoteattach.SupportsRunPrompt, true),
+		LaunchDaemon: func(ctx context.Context, _ serverattach.LaunchedRemoteDialer) (serverattach.DaemonTarget[*client.Remote], bool, error) {
 			remote, closeFn, ok, err := launchRunPromptDaemon(ctx, opts)
 			if err != nil || !ok {
-				return targetstartup.DaemonTarget[*client.Remote]{}, ok, err
+				return serverattach.DaemonTarget[*client.Remote]{}, ok, err
 			}
-			return targetstartup.DaemonTarget[*client.Remote]{Value: remote, Close: closeFn}, true, nil
+			return serverattach.DaemonTarget[*client.Remote]{Value: remote, Close: closeFn}, true, nil
 		},
-		WrapDaemon: func(_ context.Context, daemon targetstartup.DaemonTarget[*client.Remote]) (targetstartup.Target[runprompttarget.Target], error) {
-			return runprompttarget.RemoteWithClose(daemon.Value, cfg, daemon.Close), nil
+		WrapRemote: func(remote *client.Remote, cfg config.App, closeFn func() error) (serverattach.Target[runprompttarget.Target], error) {
+			target := runprompttarget.RemoteWithClose(remote, cfg, closeFn)
+			return serverattach.Target[runprompttarget.Target]{Value: target.Value, Close: target.Close}, nil
 		},
-		StartEmbedded: func(ctx context.Context) (targetstartup.Target[runprompttarget.Target], error) {
+		StartEmbedded: func(ctx context.Context) (serverattach.Target[runprompttarget.Target], error) {
 			server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
 			if err != nil {
-				return targetstartup.Target[runprompttarget.Target]{}, err
+				return serverattach.Target[runprompttarget.Target]{}, err
 			}
-			runPrompt, err := runPromptClientForEmbeddedServer(server)
-			if err != nil {
-				return targetstartup.Target[runprompttarget.Target]{}, err
-			}
-			return runprompttarget.Embedded(runPrompt, server.ProjectID, server.Close), nil
+			return runPromptTargetForEmbeddedAttachment(server)
 		},
-		Validate: func(ctx context.Context, _ targetstartup.Source, target runprompttarget.Target) error {
-			return runprompttarget.Validate(ctx, runprompttarget.ValidateRequest{
-				Target: target,
+		Validate: func(ctx context.Context, resolution serverattach.Resolution[runprompttarget.Target]) (serverattach.AuthReadiness, error) {
+			if err := runprompttarget.Validate(ctx, runprompttarget.ValidateRequest{
+				Target: resolution.Value,
 				Config: cfg,
 				EnsureAuthReady: func(ctx context.Context, auth client.AuthBootstrapClient) error {
 					return ensureRemoteAuthReady(ctx, auth, cfg.Settings, newHeadlessAuthInteractor())
 				},
-			})
+			}); err != nil {
+				return serverattach.AuthReadinessUnchecked, err
+			}
+			if resolution.Value.Auth == nil {
+				return serverattach.AuthReadinessUnchecked, nil
+			}
+			return serverattach.AuthReadinessValidated, nil
 		},
 	})
 	if err != nil {
@@ -89,11 +87,22 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	return target.Value.Client, target.Close, nil
 }
 
-func runPromptClientForEmbeddedServer(server *embeddedAppServer) (client.RunPromptClient, error) {
-	if server == nil || server.inner == nil {
-		return nil, errors.New("embedded server is required")
+type embeddedRunPromptAttachment interface {
+	RunPromptClient() client.RunPromptClient
+	ProjectID() string
+	Close() error
+}
+
+func runPromptTargetForEmbeddedAttachment(server embeddedRunPromptAttachment) (serverattach.Target[runprompttarget.Target], error) {
+	if server == nil {
+		return serverattach.Target[runprompttarget.Target]{}, errors.New("embedded run prompt attachment is required")
 	}
-	return server.inner.RunPromptClient(), nil
+	runPrompt := server.RunPromptClient()
+	if runPrompt == nil {
+		return serverattach.Target[runprompttarget.Target]{}, errors.New("embedded run prompt client is required")
+	}
+	target := runprompttarget.Embedded(runPrompt, server.ProjectID, server.Close)
+	return serverattach.Target[runprompttarget.Target]{Value: target.Value, Close: target.Close}, nil
 }
 
 func tryDialConfiguredRunPromptRemote(ctx context.Context, opts Options) (*client.Remote, bool, error) {
@@ -109,15 +118,7 @@ func tryDialMatchingConfiguredRunPromptRemote(ctx context.Context, opts Options,
 }
 
 func tryDialMatchingConfiguredRunPromptRemoteWithConfig(ctx context.Context, _ Options, cfg config.App, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool, error) {
-	return remoteattach.DialHeadless(ctx, remoteattach.HeadlessRequest{
-		Config:           cfg,
-		AttachTimeout:    configuredRemoteAttachTimeout,
-		DiscoveryTimeout: configuredRemoteWorkspaceDiscoveryTimeout,
-		DialProjectView:  dialConfiguredProjectViewRemote,
-		DialWorkspace:    dialConfiguredRemote,
-		Accept:           accept,
-		Supports:         remoteattach.SupportsRunPrompt,
-	})
+	return serverattach.DialRemote(ctx, serverattach.ModeHeadless, serverAttachRemotePolicy(cfg, remoteattach.SupportsRunPrompt, true), accept)
 }
 
 func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
@@ -137,15 +138,11 @@ func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Op
 	if err != nil {
 		return nil, false
 	}
-	return remoteattach.DialInteractive(ctx, remoteattach.InteractiveRequest{
-		Config:          cfg,
-		AttachTimeout:   configuredRemoteAttachTimeout,
-		DialProjectView: dialConfiguredProjectViewRemote,
-		DialWorkspace:   dialConfiguredRemote,
-		Accept:          accept,
-		Supports:        supports,
-		RequireBound:    requireRegistered,
-	})
+	remote, ok, err := serverattach.DialRemote(ctx, serverattach.ModeInteractive, serverAttachRemotePolicy(cfg, supports, requireRegistered), accept)
+	if err != nil {
+		return nil, false
+	}
+	return remote, ok
 }
 
 func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
@@ -211,5 +208,17 @@ func startupConfigRequest(opts Options) startupconfig.Request {
 			ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
 			Tools:               opts.Tools,
 		},
+	}
+}
+
+func serverAttachRemotePolicy(cfg config.App, supports remoteattach.Supports, requireBound bool) serverattach.RemotePolicy {
+	return serverattach.RemotePolicy{
+		Config:           cfg,
+		AttachTimeout:    configuredRemoteAttachTimeout,
+		DiscoveryTimeout: configuredRemoteWorkspaceDiscoveryTimeout,
+		DialProjectView:  dialConfiguredProjectViewRemote,
+		DialWorkspace:    dialConfiguredRemote,
+		Supports:         supports,
+		RequireBound:     requireBound,
 	}
 }

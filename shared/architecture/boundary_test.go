@@ -108,6 +108,57 @@ func TestCLIAppUIFilesDoNotAddServerImports(t *testing.T) {
 	}
 }
 
+func TestCLIUIFilesDoNotBypassServerAttachService(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	violations := make([]string, 0)
+	for _, root := range []string{
+		filepath.Join(repoRoot, "cli", "app"),
+		filepath.Join(repoRoot, "cli", "tui"),
+	} {
+		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if path != root && root == filepath.Join(repoRoot, "cli", "app") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			base := filepath.Base(path)
+			isAppUI := root == filepath.Join(repoRoot, "cli", "app") && strings.HasPrefix(base, "ui")
+			isTUI := strings.Contains(filepath.ToSlash(path), "/cli/tui/")
+			if !isAppUI && !isTUI {
+				return nil
+			}
+			fileSet := token.NewFileSet()
+			file, parseErr := parser.ParseFile(fileSet, path, nil, parser.ImportsOnly)
+			if parseErr != nil {
+				return parseErr
+			}
+			relPath, relErr := filepath.Rel(repoRoot, path)
+			if relErr != nil {
+				relPath = path
+			}
+			for _, spec := range file.Imports {
+				importPath := strings.Trim(spec.Path.Value, "\"")
+				if importPath == "builder/cli/app/internal/serverattach" || importPath == "builder/cli/app/internal/remoteattach" {
+					violations = append(violations, relPath+": UI files must not import startup attachment package "+importPath)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("scan UI sources under %s: %v", root, err)
+		}
+	}
+	if len(violations) > 0 {
+		t.Fatalf("cli UI server attach bypass violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
 func TestCLIAppRootFilesDoNotImportServerPackages(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	violations := make([]string, 0)
@@ -138,6 +189,86 @@ func TestCLIAppDoesNotReintroduceEmbeddedServerServiceLocator(t *testing.T) {
 	})
 	if len(violations) > 0 {
 		t.Fatalf("cli app embeddedServer service-locator violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func TestCLIAppStartupEntrypointsUseServerAttach(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	for _, relPath := range []string{
+		filepath.Join("cli", "app", "session_server_target.go"),
+		filepath.Join("cli", "app", "run_prompt_target.go"),
+	} {
+		path := filepath.Join(repoRoot, relPath)
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", relPath, err)
+		}
+		importsServerAttach := false
+		violations := make([]string, 0)
+		for _, spec := range file.Imports {
+			importPath := strings.Trim(spec.Path.Value, "\"")
+			switch importPath {
+			case "builder/cli/app/internal/serverattach":
+				importsServerAttach = true
+			case "builder/cli/app/internal/targetstartup", "builder/cli/app/internal/targetresolve":
+				violations = append(violations, relPath+": startup entrypoint must use serverattach instead of "+importPath)
+			}
+		}
+		if !importsServerAttach {
+			violations = append(violations, relPath+": startup entrypoint must import serverattach")
+		}
+		usesResolve := false
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if ident.Name == "serverattach" && selector.Sel.Name == "Resolve" {
+				usesResolve = true
+			}
+			if ident.Name == "remoteattach" && (selector.Sel.Name == "DialHeadless" || selector.Sel.Name == "DialInteractive") {
+				violations = append(violations, relPath+": startup entrypoint must not call remoteattach."+selector.Sel.Name+" directly")
+			}
+			return true
+		})
+		if !usesResolve {
+			violations = append(violations, relPath+": startup entrypoint must resolve targets through serverattach.Resolve")
+		}
+		if len(violations) > 0 {
+			t.Fatalf("startup server attach boundary violations:\n%s", strings.Join(violations, "\n"))
+		}
+	}
+}
+
+func TestCLIAppStartupFilesDoNotReachIntoEmbeddedInternals(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	for _, relPath := range []string{
+		filepath.Join("cli", "app", "session_server_target.go"),
+		filepath.Join("cli", "app", "run_prompt_target.go"),
+		filepath.Join("cli", "app", "session_lifecycle.go"),
+	} {
+		path := filepath.Join(repoRoot, relPath)
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", relPath, err)
+		}
+		violations := make([]string, 0)
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "inner" {
+				violations = append(violations, relPath+": startup files must use narrow embedded attachments instead of embeddedAppServer.inner")
+			}
+			return true
+		})
+		if len(violations) > 0 {
+			t.Fatalf("embedded startup boundary violations:\n%s", strings.Join(violations, "\n"))
+		}
 	}
 }
 
@@ -928,6 +1059,58 @@ func TestCLIAppInternalTargetStartupBoundary(t *testing.T) {
 	}
 	if len(violations) > 0 {
 		t.Fatalf("cli app internal target startup boundary violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func TestCLIAppInternalServerAttachBoundary(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	root := filepath.Join(repoRoot, "cli", "app", "internal", "serverattach")
+	violations := make([]string, 0)
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		relPath, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			relPath = path
+		}
+		for _, spec := range file.Imports {
+			importPath := strings.Trim(spec.Path.Value, "\"")
+			switch {
+			case strings.HasPrefix(importPath, "builder/server/"):
+				violations = append(violations, relPath+": server attach package must not import server package "+importPath)
+			case importPath == "github.com/charmbracelet/bubbletea":
+				violations = append(violations, relPath+": server attach package must not import Bubble Tea")
+			case importPath == "builder/cli/app/commands":
+				violations = append(violations, relPath+": server attach package must not import app commands")
+			case importPath == "builder/cli/app":
+				violations = append(violations, relPath+": server attach package must not import app package")
+			}
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			ident, ok := node.(*ast.Ident)
+			if ok && ident.Name == "uiModel" {
+				violations = append(violations, relPath+": server attach package must not reference uiModel")
+			}
+			return true
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("scan cli app internal server attach sources: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("cli app internal server attach boundary violations:\n%s", strings.Join(violations, "\n"))
 	}
 }
 

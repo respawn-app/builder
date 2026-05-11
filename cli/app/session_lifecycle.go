@@ -169,7 +169,7 @@ func shouldCloseReboundServer(original appServerCore, rebound appServerCore) boo
 	originalEmbedded, originalOK := original.(*embeddedAppServer)
 	reboundEmbedded, reboundOK := rebound.(*embeddedAppServer)
 	if originalOK && reboundOK {
-		return originalEmbedded.inner != reboundEmbedded.inner
+		return !originalEmbedded.SharesProcessWith(reboundEmbedded)
 	}
 	return true
 }

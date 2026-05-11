@@ -90,6 +90,17 @@ func (s *embeddedAppServer) AuthStatusClient() client.AuthStatusClient {
 	return s.inner.AuthStatusClient()
 }
 
+func (s *embeddedAppServer) AuthBootstrapClient() client.AuthBootstrapClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.AuthBootstrapClient()
+}
+
+func (s *embeddedAppServer) SharesProcessWith(other *embeddedAppServer) bool {
+	return s != nil && other != nil && s.inner == other.inner
+}
+
 func (s *embeddedAppServer) ProjectID() string {
 	if s == nil {
 		return ""
@@ -157,10 +168,17 @@ func (s *embeddedAppServer) SessionLifecycleClient() client.SessionLifecycleClie
 	return s.inner.SessionLifecycleClient()
 }
 
+func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.RunPromptClient()
+}
+
 func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
 	if s == nil || s.inner == nil {
 		return errors.New("embedded server is required")
 	}
 	cfg := s.inner.Config()
-	return ensureRemoteAuthReady(ctx, s.inner.AuthBootstrapClient(), cfg.Settings, interactor)
+	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor)
 }
