@@ -40,6 +40,7 @@ type Request struct {
 	Runtime               clientui.RuntimeClient
 	WorkspaceRoot         string
 	PersistenceRoot       string
+	ExecutionTarget       clientui.SessionExecutionTarget
 	SessionViews          client.SessionViewClient
 	Settings              config.Settings
 	Source                config.SourceReport
@@ -318,6 +319,9 @@ func EnvironmentCacheKey(req Request) string {
 }
 
 func ExecutionTarget(req Request) clientui.SessionExecutionTarget {
+	if !clientui.SessionExecutionTargetIsZero(req.ExecutionTarget) {
+		return req.ExecutionTarget
+	}
 	if req.Runtime == nil {
 		return clientui.SessionExecutionTarget{}
 	}

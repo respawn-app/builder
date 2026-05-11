@@ -218,6 +218,12 @@ func truncateRenderedLineToWidthWithEllipsis(line string, width int, forceEllips
 }
 
 func (m Model) renderEntryContentStage(role RenderIntent, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) transcriptRenderContent {
+	_ = text
+	if isPatchToolBlock(role, toolMeta) {
+		if content, ok := m.renderPatchSummaryContent(toolMeta); ok {
+			return content
+		}
+	}
 	if !muteText {
 		if diffLines, ok := m.renderDiffToolLines(text, width, toolMeta); ok {
 			return transcriptRenderContent{Lines: diffLines, WrapMode: transcriptRenderWrapModePreserved}
@@ -277,7 +283,7 @@ func (m Model) layoutEntryContentStage(role RenderIntent, content transcriptRend
 	continuationPrefix := m.entryContinuationPrefix(role, symbolOverride)
 	out := make([]transcriptLayoutLine, 0, len(content.Lines))
 	for idx, line := range content.Lines {
-		layoutLine := transcriptLayoutLine{Text: line.Text, Intents: line.Intents}
+		layoutLine := transcriptLayoutLine{Text: line.Text, Intents: line.Intents, PatchSummary: line.PatchSummary}
 		if idx == 0 {
 			layoutLine.ShowRoleSymbol = hasRoleSymbol
 		} else {
@@ -337,7 +343,11 @@ func (m Model) decorateEntryLayoutBodyStage(role RenderIntent, lines []transcrip
 			if idx == 0 {
 				display = m.renderToolHeadline(display, renderWidth)
 			}
-			display = m.styleToolLine(display, isPatchBlock)
+			if line.PatchSummary != nil {
+				display = m.renderPatchSummaryLine(*line.PatchSummary)
+			} else {
+				display = m.styleToolLine(display)
+			}
 		}
 		if !strings.Contains(display, "\x1b[") {
 			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), line.Intents)

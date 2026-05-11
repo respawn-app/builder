@@ -43,6 +43,7 @@ func cloneStatusTokenMap(input map[string]int) map[string]int {
 type uiStatusConfig struct {
 	WorkspaceRoot   string
 	PersistenceRoot string
+	ExecutionTarget clientui.SessionExecutionTarget
 	SessionViews    client.SessionViewClient
 	Settings        config.Settings
 	Source          config.SourceReport
@@ -158,6 +159,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 		Runtime:               m.engine,
 		WorkspaceRoot:         strings.TrimSpace(m.statusConfig.WorkspaceRoot),
 		PersistenceRoot:       strings.TrimSpace(m.statusConfig.PersistenceRoot),
+		ExecutionTarget:       m.statusConfig.ExecutionTarget,
 		SessionViews:          m.statusConfig.SessionViews,
 		Settings:              m.statusConfig.Settings,
 		Source:                m.statusConfig.Source,
@@ -417,6 +419,10 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 }
 
 func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
+	return m.statusLineGitRefreshCmd()
+}
+
+func (m *uiModel) statusLineGitRefreshCmd() tea.Cmd {
 	request := m.newStatusRequest(time.Now())
 	token := m.status.refreshToken
 	request.CurrentTime = time.Now()
@@ -436,6 +442,7 @@ func (m *uiModel) statusLineGitStartupCmd() tea.Cmd {
 		return nil
 	}
 	cacheKey := statusGitCacheKey(gitRoot)
+	m.statusGitBackgroundInFlight = true
 	return m.statusGitRefreshCmd(token, cacheKey, request, progressive, base, true)
 }
 
