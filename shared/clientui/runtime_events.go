@@ -271,9 +271,14 @@ func ReduceRuntimeReasoningEvent(state RuntimeReasoningState, evt Event) Runtime
 	case EventReasoningDeltaReset:
 		reduction.Stream = append(reduction.Stream, RuntimeReasoningStreamCommand{Kind: RuntimeReasoningStreamClear})
 	case EventRunStateChanged:
-		if evt.RunState != nil && !evt.RunState.Lifecycle.IsRunning() {
-			reduction.State.StatusHeader = ""
-			reduction.Stream = append(reduction.Stream, RuntimeReasoningStreamCommand{Kind: RuntimeReasoningStreamClear})
+		if evt.RunState != nil {
+			if err := evt.RunState.Lifecycle.Validate(); err != nil {
+				break
+			}
+			if !evt.RunState.Lifecycle.IsRunning() {
+				reduction.State.StatusHeader = ""
+				reduction.Stream = append(reduction.Stream, RuntimeReasoningStreamCommand{Kind: RuntimeReasoningStreamClear})
+			}
 		}
 	}
 	return reduction

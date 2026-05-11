@@ -1,6 +1,10 @@
 package app
 
-import "builder/shared/clientui"
+import (
+	"builder/shared/clientui"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func shouldRefreshDeferredCommittedTailOnRunEnd(m *uiModel, evt clientui.Event) bool {
 	if m == nil || !m.hasRuntimeClient() || len(m.deferredCommittedTail) == 0 {
@@ -46,17 +50,15 @@ func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
 	}
 }
 
-func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) {
+func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) tea.Cmd {
 	m := a.model
+	var cmd tea.Cmd
 	if reduction.RunState.Err != nil {
 		m.activity = uiActivityError
-		_ = m.setTransientStatusWithKind("invalid runtime lifecycle: "+reduction.RunState.Err.Error(), uiStatusNoticeError)
-		return
-	}
-	if err := m.setRunLifecycle(reduction.RunState.State.Run); err != nil {
+		cmd = m.setTransientStatusWithKind("invalid runtime lifecycle: "+reduction.RunState.Err.Error(), uiStatusNoticeError)
+	} else if err := m.setRunLifecycle(reduction.RunState.State.Run); err != nil {
 		m.activity = uiActivityError
-		_ = m.setTransientStatusWithKind("invalid runtime lifecycle: "+err.Error(), uiStatusNoticeError)
-		return
+		cmd = m.setTransientStatusWithKind("invalid runtime lifecycle: "+err.Error(), uiStatusNoticeError)
 	}
 	m.setCompacting(reduction.RunState.State.Compaction.IsRunning())
 	m.setReviewerRunning(reduction.RunState.State.Reviewer.IsRunning())
@@ -81,6 +83,7 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeE
 	case clientui.RuntimeBackgroundProcessRefresh:
 		m.refreshProcessEntriesIfOpen()
 	}
+	return cmd
 }
 
 func (a uiRuntimeAdapter) reconcileInterruptFromRunState(evt clientui.Event) {
