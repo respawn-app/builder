@@ -316,7 +316,11 @@ func TestGatewayHandshakeRejectsProtocolVersionMismatch(t *testing.T) {
 	if err := websocket.JSON.Receive(conn, &resp); err != nil {
 		t.Fatalf("receive handshake: %v", err)
 	}
-	if resp.Error == nil || resp.Error.Code != protocol.ErrCodeInvalidRequest || !strings.Contains(resp.Error.Message, "unsupported protocol version") {
+	if resp.Error == nil ||
+		resp.Error.Code != protocol.ErrCodeInvalidRequest ||
+		!strings.Contains(resp.Error.Message, "unsupported protocol version") ||
+		!strings.Contains(resp.Error.Message, "server requires "+strconv.Quote(protocol.Version)) ||
+		!strings.Contains(resp.Error.Message, "upgrade the older Builder process") {
 		t.Fatalf("expected unsupported protocol version error, got %+v", resp.Error)
 	}
 }
