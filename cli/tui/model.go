@@ -4,7 +4,6 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 	"fmt"
-	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,8 +19,6 @@ const (
 	TranscriptDivider   = "────────────────────────"
 	detailItemSeparator = ""
 )
-
-var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
 	Visibility        transcript.EntryVisibility

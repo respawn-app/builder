@@ -152,6 +152,30 @@ func TestWorktreeSwitchCommandRemainsDirectShortcut(t *testing.T) {
 	}
 }
 
+func TestWorktreeSwitchCommandRefreshesStatusLineBranchAfterRuntimeTargetRefresh(t *testing.T) {
+	mainRoot := initStatusLineGitRepo(t, "main-branch")
+	featureRoot := initStatusLineGitRepo(t, "feature-branch")
+	client := &worktreeCommandTestClient{
+		listResp: worktreeListResponseForRoots(mainRoot, featureRoot),
+		switchResp: serverapi.WorktreeSwitchResponse{
+			Target:   clientui.SessionExecutionTarget{WorkspaceRoot: mainRoot, WorktreeRoot: featureRoot, EffectiveWorkdir: featureRoot},
+			Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature", CanonicalRoot: featureRoot, BranchName: "feature-branch"},
+		},
+	}
+	m := newWorktreeTestModel(t, client, WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: mainRoot}))
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "main-branch"}
+	m.input = "/worktree switch feature"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
+	updated = applyRuntimeTargetRefreshAndDrainStatus(t, updated, client.switchResp.Target)
+
+	status := worktreeStatusLine(updated)
+	if !strings.Contains(status, "feature-branch") || strings.Contains(status, "main-branch") {
+		t.Fatalf("status line = %q, want refreshed feature branch without stale main branch", status)
+	}
+}
+
 func TestProjectedSessionMetadataAppliesExecutionTarget(t *testing.T) {
 	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, nil, nil, WithUISessionID("session-1"))
 	m.statusConfig.WorkspaceRoot = "/repo"
@@ -372,15 +396,18 @@ func TestWorktreeOverlayEnterSwitchesSelectedItemAndCloses(t *testing.T) {
 }
 
 func TestWorktreeCreateDialogSubmitsAndClosesOnSuccess(t *testing.T) {
+	mainRoot := initStatusLineGitRepo(t, "main-branch")
+	featureRoot := initStatusLineGitRepo(t, "created-branch")
 	client := &worktreeCommandTestClient{
-		listResp: testMainWorktreeListResponse(),
+		listResp: worktreeListResponseForRoots(mainRoot, ""),
 		createResp: serverapi.WorktreeCreateResponse{
-			Target:        clientui.SessionExecutionTarget{EffectiveWorkdir: "/wt/feature-branch"},
-			Worktree:      serverapi.WorktreeView{WorktreeID: "wt-new", DisplayName: "feature-branch", CanonicalRoot: "/wt/feature-branch", BranchName: "feature/branch"},
+			Target:        clientui.SessionExecutionTarget{WorkspaceRoot: mainRoot, WorktreeRoot: featureRoot, EffectiveWorkdir: featureRoot},
+			Worktree:      serverapi.WorktreeView{WorktreeID: "wt-new", DisplayName: "feature-branch", CanonicalRoot: featureRoot, BranchName: "feature/branch"},
 			CreatedBranch: true,
 		},
 	}
-	m := newWorktreeTestModel(t, client)
+	m := newWorktreeTestModel(t, client, WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: mainRoot}))
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "main-branch"}
 	m.input = "/wt create"
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
@@ -405,6 +432,11 @@ func TestWorktreeCreateDialogSubmitsAndClosesOnSuccess(t *testing.T) {
 	}
 	if got := client.createRequests[0]; got.BaseRef != "HEAD" || !got.CreateBranch || got.BranchName != "feature/branch" || got.RootPath != "" {
 		t.Fatalf("unexpected create request: %+v", got)
+	}
+	updated = applyRuntimeTargetRefreshAndDrainStatus(t, updated, client.createResp.Target)
+	status := worktreeStatusLine(updated)
+	if !strings.Contains(status, "created-branch") || strings.Contains(status, "main-branch") {
+		t.Fatalf("status line = %q, want refreshed created branch without stale main branch", status)
 	}
 }
 
@@ -436,15 +468,18 @@ func TestWorktreeCreateDialogDetachedRefResolutionCreatesWithoutBranch(t *testin
 }
 
 func TestWorktreeDeleteDialogStaysOpenAfterSuccess(t *testing.T) {
+	mainRoot := initStatusLineGitRepo(t, "main-branch")
+	featureRoot := initStatusLineGitRepo(t, "feature-branch")
 	client := &worktreeCommandTestClient{
-		listResp:   testLinkedWorktreeListResponse(),
-		deleteResp: serverapi.WorktreeDeleteResponse{Target: clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"}, Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature-a", CanonicalRoot: "/wt/feature-a"}},
+		listResp:   worktreeListResponseForRoots(mainRoot, featureRoot),
+		deleteResp: serverapi.WorktreeDeleteResponse{Target: clientui.SessionExecutionTarget{WorkspaceRoot: mainRoot, EffectiveWorkdir: mainRoot}, Worktree: serverapi.WorktreeView{WorktreeID: "wt-feature", DisplayName: "feature", CanonicalRoot: featureRoot}},
 	}
-	m := newWorktreeTestModel(t, client)
+	m := newWorktreeTestModel(t, client, WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: featureRoot}))
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "feature-branch"}
 	m.input = "/wt delete"
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
-	client.listResp = testMainWorktreeListResponse()
+	client.listResp = worktreeListResponseForRoots(mainRoot, "")
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = applyWorktreeCmdMessages(t, next.(*uiModel), cmd)
@@ -457,6 +492,11 @@ func TestWorktreeDeleteDialogStaysOpenAfterSuccess(t *testing.T) {
 	}
 	if len(client.deleteRequests) != 1 || client.deleteRequests[0].DeleteBranch {
 		t.Fatalf("unexpected delete request: %+v", client.deleteRequests)
+	}
+	updated = applyRuntimeTargetRefreshAndDrainStatus(t, updated, client.deleteResp.Target)
+	status := worktreeStatusLine(updated)
+	if !strings.Contains(status, "main-branch") || strings.Contains(status, "feature-branch") {
+		t.Fatalf("status line = %q, want refreshed main branch without stale feature branch", status)
 	}
 }
 

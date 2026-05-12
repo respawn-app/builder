@@ -10,6 +10,8 @@ import (
 	"builder/shared/config"
 	"context"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,10 +178,13 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Auth", "Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "Update: available 1.2.3", "incident", "Session ID: session-123", "Parent session: incident-root <parent-456>", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
+	}
+	if !strings.Contains(plain, "incident\nSession ID: session-123\nParent session: incident-root <parent-456>") {
+		t.Fatalf("expected session id before parent session id, got %q", plain)
 	}
 	for _, want := range []string{"4 skills", "/Users/test/.builder/skills", "apiresult (0k)", "local helper disabled", "! broken (missing SKILL.md)", "/Users/test/.builder/.generated/skills", "skill-creator (0k) generated"} {
 		if !strings.Contains(plain, want) {
@@ -210,6 +215,97 @@ func TestStatusCommandOpensStatusSurfaceInNativeMode(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected /status close to emit a screen transition command")
 	}
+}
+
+func TestStatusOverlaySessionSectionLabelsSessionIDBeforeMutedParent(t *testing.T) {
+	snapshot := uiStatusSnapshot{
+		Workdir:           "/tmp/workdir",
+		SessionName:       "incident",
+		SessionID:         "session-123",
+		ParentSessionID:   "parent-456",
+		ParentSessionName: "incident-root",
+		Model:             uiStatusModelInfo{Summary: "gpt-5 high"},
+	}
+	sessionLines := statusOverlaySessionLines(snapshot)
+	if len(sessionLines) != 3 {
+		t.Fatalf("session lines = %+v, want 3 lines", sessionLines)
+	}
+	if sessionLines[0].Text != "incident" || sessionLines[0].Style != statusOverlayLineStyleBold {
+		t.Fatalf("session name line = %+v, want bold incident", sessionLines[0])
+	}
+	if sessionLines[1].Text != "Session ID: session-123" || sessionLines[1].Style != statusOverlayLineStyleNormal {
+		t.Fatalf("session id line = %+v, want full-color labeled session id", sessionLines[1])
+	}
+	if sessionLines[2].Text != "Parent session: incident-root <parent-456>" || sessionLines[2].Style != statusOverlayLineStyleSubtle {
+		t.Fatalf("parent session line = %+v, want muted parent session", sessionLines[2])
+	}
+
+	m := newProjectedStaticUIModel()
+	m.status.snapshot = snapshot
+	lines := m.layout().statusOverlayContentLines(100)
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "incident\nSession ID: session-123\nParent session: incident-root <parent-456>") {
+		t.Fatalf("expected session id before parent session in focused status section, got %q", plain)
+	}
+}
+
+func TestStatusOverlaySectionOrderPrioritizesSessionGitContext(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.status.snapshot = uiStatusSnapshot{
+		Workdir:   "/tmp/workdir",
+		SessionID: "session-123",
+		Git:       uiStatusGitInfo{Visible: true, Branch: "main"},
+		Context:   uiStatusContextInfo{AvailableTokens: 100, ThresholdTokens: 50},
+		Config:    uiStatusConfigInfo{SettingsPath: "/tmp/workdir/.builder/config.toml", Supervisor: "edits"},
+		Subscription: uiStatusSubscriptionInfo{
+			Applicable: true,
+			Summary:    "Pro subscription",
+		},
+		Skills: []uiStatusSkillInspection{{Name: "apiresult", Path: "/tmp/workdir/.builder/skills/apiresult/SKILL.md", Loaded: true}},
+	}
+	lines := stripANSIAndTrimRight(strings.Join(m.layout().statusOverlayContentLines(100), "\n"))
+
+	session := statusLineIndex(t, lines, "Session")
+	git := statusLineIndex(t, lines, "Git")
+	context := statusLineIndex(t, lines, "Context")
+	auth := statusLineIndex(t, lines, "Auth")
+	config := statusLineIndex(t, lines, "Config")
+	skills := statusLineIndex(t, lines, "1 skills")
+	if !(session < git && git < context && context < auth && auth < config && config < skills) {
+		t.Fatalf("unexpected status section order: session=%d git=%d context=%d auth=%d config=%d skills=%d\n%s", session, git, context, auth, config, skills, lines)
+	}
+}
+
+func TestStatusOverlayAuthSectionShowsNoAuthAndAPIKey(t *testing.T) {
+	withTrueColor(t)
+	noAuth := newProjectedStaticUIModel()
+	noAuth.status.snapshot = uiStatusSnapshot{Auth: uiStatusAuthInfo{Summary: "No Auth", Visible: true}}
+	noAuthRawLines := noAuth.layout().statusOverlayContentLines(100)
+	noAuthLines := stripANSIAndTrimRight(strings.Join(noAuthRawLines, "\n"))
+	if !strings.Contains(noAuthLines, "Auth\nNo Auth") {
+		t.Fatalf("expected no-auth status section, got %q", noAuthLines)
+	}
+	assertStatusOverlayPrimaryLine(t, findRawStatusOverlayLine(t, noAuthRawLines, "No Auth"), "No Auth")
+
+	apiKey := newProjectedStaticUIModel()
+	apiKey.status.snapshot = uiStatusSnapshot{Auth: uiStatusAuthInfo{Summary: "API Key ...1234", Visible: true}}
+	apiKeyRawLines := apiKey.layout().statusOverlayContentLines(100)
+	apiKeyLines := stripANSIAndTrimRight(strings.Join(apiKeyRawLines, "\n"))
+	if !strings.Contains(apiKeyLines, "Auth\nAPI Key ...1234") {
+		t.Fatalf("expected api-key status section, got %q", apiKeyLines)
+	}
+	assertStatusOverlayPrimaryLine(t, findRawStatusOverlayLine(t, apiKeyRawLines, "API Key ...1234"), "API Key ...1234")
+}
+
+func statusLineIndex(t *testing.T, lines string, want string) int {
+	t.Helper()
+	for idx, line := range strings.Split(lines, "\n") {
+		if strings.TrimSpace(line) == want {
+			return idx
+		}
+	}
+	t.Fatalf("status line %q not found in %q", want, lines)
+	return -1
 }
 
 func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
@@ -372,39 +468,112 @@ func TestStatusSkillLineMarksGeneratedAndShadowed(t *testing.T) {
 	}
 }
 
+func TestStatusSkillLineRendersGeneratedLabelWithMutedStyle(t *testing.T) {
+	withTrueColor(t)
+	line := statusSkillLineStyled(uiStatusSkillInspection{
+		Name:       "skill-creator",
+		Path:       "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md",
+		Loaded:     true,
+		SourceKind: "generated",
+	}, nil, generatedSkillTestStyle())
+	if !strings.Contains(stripANSIAndTrimRight(line), "skill-creator (0k) generated") || !strings.Contains(line, "\x1b[") {
+		t.Fatalf("expected generated label to use muted ANSI style, got %q", line)
+	}
+}
+
 func TestStatusSkillLinePreservesTokenCountForActiveGeneratedSkill(t *testing.T) {
 	path := "/Users/test/.builder/.generated/skills/skill-creator/SKILL.md"
-	active := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	withTrueColor(t)
+	activeRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "skill-creator",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	active := stripANSIAndTrimRight(activeRaw)
 	for _, want := range []string{"skill-creator", "(1.2k)", "generated"} {
 		if !strings.Contains(active, want) {
 			t.Fatalf("expected active generated line to contain %q, got %q", want, active)
 		}
 	}
-	disabled := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	assertGeneratedLabelStyled(t, activeRaw)
+	disabledRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "disabled-skill",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
 		Disabled:   true,
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	disabled := stripANSIAndTrimRight(disabledRaw)
 	if !strings.Contains(disabled, "generated") || !strings.Contains(disabled, "disabled") || strings.Contains(disabled, "(1.2k)") {
 		t.Fatalf("expected disabled generated line to be label-only, got %q", disabled)
 	}
-	shadowed := stripANSIAndTrimRight(statusSkillLine(uiStatusSkillInspection{
+	assertGeneratedLabelStyled(t, disabledRaw)
+	shadowedRaw := statusSkillLineStyled(uiStatusSkillInspection{
 		Name:       "shadowed-skill",
 		Path:       path,
 		Loaded:     true,
 		SourceKind: "generated",
 		Shadowed:   true,
-	}, map[string]int{path: 1234}))
+	}, map[string]int{path: 1234}, generatedSkillTestStyle())
+	shadowed := stripANSIAndTrimRight(shadowedRaw)
 	if !strings.Contains(shadowed, "generated") || !strings.Contains(shadowed, "shadowed") || strings.Contains(shadowed, "(1.2k)") {
 		t.Fatalf("expected shadowed generated line to be label-only, got %q", shadowed)
 	}
+	assertGeneratedLabelStyled(t, shadowedRaw)
+}
+
+func TestStatusOverlayGeneratedSkillLabelRendersMuted(t *testing.T) {
+	withTrueColor(t)
+	m := newProjectedStaticUIModel()
+	m.status.snapshot = uiStatusSnapshot{
+		Workdir: "/tmp/workdir",
+		Skills: []uiStatusSkillInspection{{
+			Name:       "skill-creator",
+			Path:       "/tmp/workdir/.builder/.generated/skills/skill-creator/SKILL.md",
+			Loaded:     true,
+			SourceKind: "generated",
+		}},
+	}
+	lines := m.layout().statusOverlayContentLines(100)
+	raw := findRawStatusOverlayLine(t, lines, "skill-creator (0k) generated")
+	assertGeneratedLabelStyled(t, raw)
+}
+
+func withTrueColor(t *testing.T) {
+	t.Helper()
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+}
+
+func generatedSkillTestStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(uiPalette("dark").muted).Faint(true)
+}
+
+func assertGeneratedLabelStyled(t *testing.T, rawLine string) {
+	t.Helper()
+	if !strings.Contains(stripANSIAndTrimRight(rawLine), "generated") || !strings.Contains(rawLine, "\x1b[") {
+		t.Fatalf("expected generated label to be styled in %q", rawLine)
+	}
+}
+
+func assertStatusOverlayPrimaryLine(t *testing.T, rawLine string, want string) {
+	t.Helper()
+	if strings.TrimSpace(stripANSIAndTrimRight(rawLine)) != want || !strings.Contains(rawLine, "\x1b[") {
+		t.Fatalf("expected primary styled status line %q, got %q", want, rawLine)
+	}
+}
+
+func findRawStatusOverlayLine(t *testing.T, lines []string, want string) string {
+	t.Helper()
+	for _, line := range lines {
+		if strings.Contains(stripANSIAndTrimRight(line), want) {
+			return line
+		}
+	}
+	t.Fatalf("status overlay line %q not found in %q", want, stripANSIAndTrimRight(strings.Join(lines, "\n")))
+	return ""
 }
 
 func TestStatusEnvironmentWarnsWhenRecoveredGeneratedFilesExist(t *testing.T) {

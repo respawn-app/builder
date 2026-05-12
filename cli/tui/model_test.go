@@ -796,6 +796,67 @@ func TestOngoingMultilineToolBlocksRenderTreeGuides(t *testing.T) {
 	}
 }
 
+func TestOngoingPatchSummaryRendersPathAsPlainContiguousText(t *testing.T) {
+	path := "./.builder/plans/td-006-runtime-state-ownership.md"
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Patch",
+		ToolCallID: "call_patch",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			Command:      path + " +63",
+			CompactText:  path + " +63",
+			PatchSummary: path + " +63",
+			PatchRender: &patchformat.RenderedPatch{
+				Files:        []patchformat.RenderedFile{{RelPath: path, Added: 63}},
+				SummaryLines: []patchformat.RenderedLine{{Kind: patchformat.RenderedLineKindFile, Text: path + " +63", FileIndex: 0, Path: path}},
+			},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_patch"})
+
+	raw := m.View()
+	if !strings.Contains(raw, path) {
+		t.Fatalf("expected raw transcript to contain clickable plain path %q, got %q", path, raw)
+	}
+	if strings.Contains(raw, "td\x1b") || strings.Contains(raw, "\x1b[31m-006") || strings.Contains(raw, "\x1b[38;2;255;") {
+		t.Fatalf("expected path to remain unstyled, got raw %q", raw)
+	}
+	plain := plainTranscript(raw)
+	if !strings.Contains(plain, path+" +63") {
+		t.Fatalf("expected patch summary count after plain path, got %q", plain)
+	}
+}
+
+func TestPatchSummaryRenderingUsesStructuredPathRemovedAddedParts(t *testing.T) {
+	path := "./.builder/plans/td-006+runtime-state-ownership.md"
+	model := NewModel(WithPreviewLines(20))
+	content, ok := model.renderPatchSummaryContent(&transcript.ToolCallMeta{
+		PatchRender: &patchformat.RenderedPatch{
+			Files:        []patchformat.RenderedFile{{RelPath: path, Added: 5, Removed: 2}},
+			SummaryLines: []patchformat.RenderedLine{{Kind: patchformat.RenderedLineKindFile, Text: "ignored serialized text", FileIndex: 0, Path: path}},
+		},
+	})
+	if !ok || len(content.Lines) != 1 {
+		t.Fatalf("expected one structured patch summary line, got ok=%t content=%+v", ok, content)
+	}
+	line := content.Lines[0]
+	if line.Text != path+" -2 +5" {
+		t.Fatalf("plain summary line = %q, want path removed added", line.Text)
+	}
+	if line.PatchSummary == nil || line.PatchSummary.Path != path || line.PatchSummary.Removed != 2 || line.PatchSummary.Added != 5 {
+		t.Fatalf("structured summary = %+v", line.PatchSummary)
+	}
+	rendered := model.renderPatchSummaryLine(*line.PatchSummary)
+	if !strings.Contains(rendered, path) {
+		t.Fatalf("rendered summary path is not contiguous/plain: %q", rendered)
+	}
+	if plainTranscript(rendered) != path+" -2 +5" {
+		t.Fatalf("rendered summary = %q, want path removed added", plainTranscript(rendered))
+	}
+}
+
 func TestOngoingEditResultUsesPatchSummaryHeadline(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{

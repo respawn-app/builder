@@ -11,6 +11,7 @@ import (
 	"builder/server/auth"
 	"builder/server/llm"
 	"builder/shared/clientui"
+	"builder/shared/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -31,6 +32,184 @@ func TestSlashCommandEnterIgnoresWhitespaceImmediatelyAfterSlash(t *testing.T) {
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after slash command execution, got %q", updated.input)
 	}
+}
+
+func TestSlashCommandPickerHighlightTracksSelectionAfterViewportScroll(t *testing.T) {
+	withTrueColor(t)
+	m := newSlashPickerScrollTestModel()
+
+	targetIndex := slashPickerCommandIndex(m.slashCommandPicker(), "goal")
+	if targetIndex <= slashCommandPickerLines/2 {
+		t.Fatalf("test setup expected /goal past centered viewport threshold, got index %d", targetIndex)
+	}
+	for step := 0; step < targetIndex; step++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*uiModel)
+	}
+
+	state := m.slashCommandPicker()
+	if state.start == 0 {
+		t.Fatalf("expected slash picker viewport to scroll for /goal, got %+v", state)
+	}
+	if m.input != "/goal" {
+		t.Fatalf("expected logical slash selection to update input to /goal, got %q", m.input)
+	}
+	assertActivePickerHighlightedSelection(t, m, 80)
+}
+
+func TestSlashCommandPickerHighlightTracksSelectionWhenViewportShiftsBothDirections(t *testing.T) {
+	withTrueColor(t)
+	m := newSlashPickerScrollTestModel()
+	assertActivePickerHighlightedSelection(t, m, 80)
+
+	state := m.slashCommandPicker()
+	for step := 1; step < len(state.matches); step++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*uiModel)
+		assertActivePickerHighlightedSelection(t, m, 80)
+	}
+	for step := len(state.matches) - 2; step >= 0; step-- {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m = next.(*uiModel)
+		assertActivePickerHighlightedSelection(t, m, 80)
+	}
+}
+
+func TestSlashCommandPickerHighlightTracksFilteredVisibleCommands(t *testing.T) {
+	withTrueColor(t)
+	oauthManager := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				TokenType:   "Bearer",
+			},
+		},
+	}), nil, nil)
+	cases := []struct {
+		name    string
+		opts    []UIOption
+		visible []string
+		hidden  []string
+	}{
+		{
+			name:    "no auth hides logout fast resume",
+			visible: []string{"login"},
+			hidden:  []string{"logout", "fast", "resume"},
+		},
+		{
+			name:    "oauth hides login fast resume",
+			opts:    []UIOption{WithUIStatusConfig(uiStatusConfig{AuthManager: oauthManager})},
+			visible: []string{"logout"},
+			hidden:  []string{"login", "fast", "resume"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := append([]UIOption{WithUIHasOtherSessions(true, false)}, tc.opts...)
+			m := newProjectedStaticUIModel(opts...)
+			m.input = "/"
+			m.refreshSlashCommandFilterFromInput()
+
+			state := m.slashCommandPicker()
+			for _, hidden := range tc.hidden {
+				if slashPickerContainsCommand(state, hidden) {
+					t.Fatalf("did not expect gated /%s in slash picker, got %+v", hidden, slashPickerCommandNames(state))
+				}
+			}
+			for _, visible := range tc.visible {
+				if !slashPickerContainsCommand(state, visible) {
+					t.Fatalf("expected visible /%s in slash picker, got %+v", visible, slashPickerCommandNames(state))
+				}
+			}
+
+			assertActivePickerHighlightAcrossVisibleMatches(t, m, 80)
+		})
+	}
+}
+
+func newSlashPickerScrollTestModel() *uiModel {
+	r := commands.NewRegistry()
+	registerSlashPickerTestCommand := func(name string) {
+		r.Register(name, "test command "+name, func(string) commands.Result {
+			return commands.Result{Handled: true}
+		})
+	}
+	for _, name := range []string{"aa00", "aa01", "aa02", "aa03", "aa04", "aa05", "aa06", "aa07", "aa08", "goal"} {
+		registerSlashPickerTestCommand(name)
+	}
+	m := newProjectedStaticUIModel(WithUICommandRegistry(r))
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+	return m
+}
+
+func assertActivePickerHighlightAcrossVisibleMatches(t *testing.T, m *uiModel, width int) {
+	t.Helper()
+	state := m.activePickerPresentation()
+	if !state.visible || len(state.rows) == 0 {
+		t.Fatalf("expected visible picker with rows, got %+v", state)
+	}
+	assertActivePickerHighlightedSelection(t, m, width)
+	for step := 1; step < len(state.rows); step++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(*uiModel)
+		assertActivePickerHighlightedSelection(t, m, width)
+	}
+}
+
+func slashPickerCommandIndex(state slashCommandPickerState, name string) int {
+	for idx, command := range state.matches {
+		if command.Name == name {
+			return idx
+		}
+	}
+	return -1
+}
+
+func assertActivePickerHighlightedSelection(t *testing.T, m *uiModel, width int) {
+	t.Helper()
+	state := m.activePickerPresentation()
+	if !state.visible || len(state.rows) == 0 {
+		t.Fatalf("expected visible picker with rows, got %+v", state)
+	}
+	expectedRow := state.selection - state.start
+	if expectedRow < 0 || expectedRow >= state.lineCount {
+		t.Fatalf("expected visible selected row, got state %+v", state)
+	}
+	if state.selection < 0 || state.selection >= len(state.rows) {
+		t.Fatalf("selected row index out of range for state %+v", state)
+	}
+	selectedRow, selectedLine := selectedActivePickerRenderLine(t, m, width)
+	if selectedRow != expectedRow {
+		t.Fatalf("highlight row = %d, want %d for state %+v in %q", selectedRow, expectedRow, state, strings.Join(m.layout().renderActivePicker(width), "\n"))
+	}
+	expectedPrimary := state.rows[state.selection].primary
+	if !strings.Contains(stripANSIAndTrimRight(selectedLine), expectedPrimary) {
+		t.Fatalf("expected highlighted picker row to be %s, got %q in %q", expectedPrimary, selectedLine, strings.Join(m.layout().renderActivePicker(width), "\n"))
+	}
+}
+
+func selectedActivePickerRenderLine(t *testing.T, m *uiModel, width int) (int, string) {
+	t.Helper()
+	primary := foregroundTrueColorEscape(theme.ResolvePalette(m.theme).App.Primary.TrueColor)
+	primaryFragment := strings.TrimSuffix(strings.TrimPrefix(primary, "\x1b["), "m")
+	selectedRow := -1
+	selectedLine := ""
+	for row, line := range m.layout().renderActivePicker(width) {
+		if strings.Contains(line, primaryFragment) {
+			if selectedRow >= 0 {
+				t.Fatalf("expected one selected picker row, got rows %d and %d in %q", selectedRow, row, strings.Join(m.layout().renderActivePicker(width), "\n"))
+			}
+			selectedRow = row
+			selectedLine = line
+		}
+	}
+	if selectedRow < 0 {
+		t.Fatalf("expected selected picker row with primary color fragment %q in %q", primaryFragment, strings.Join(m.layout().renderActivePicker(width), "\n"))
+	}
+	return selectedRow, selectedLine
 }
 
 func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t *testing.T) {

@@ -79,6 +79,19 @@ func TestCollectorUsesRefreshedOAuthStateForUsageFetch(t *testing.T) {
 	}
 }
 
+func TestAuthInfoSummarizesNoAuthAndAPIKey(t *testing.T) {
+	noAuth := AuthInfo(auth.State{}, config.Settings{}, nil)
+	if noAuth.Summary != "No Auth" || !noAuth.Visible {
+		t.Fatalf("no-auth summary = %+v, want visible No Auth", noAuth)
+	}
+	apiKey := AuthInfo(auth.State{
+		Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-test-1234"}},
+	}, config.Settings{}, nil)
+	if apiKey.Summary != "API Key ...1234" || !apiKey.Visible {
+		t.Fatalf("api-key summary = %+v, want masked API key", apiKey)
+	}
+}
+
 func TestCollectorPreservesStoredAuthStateWhenRefreshFails(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 10, 0, 0, 0, time.UTC)
 	store := auth.NewMemoryStore(auth.State{

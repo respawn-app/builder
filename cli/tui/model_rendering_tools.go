@@ -4,6 +4,7 @@ import (
 	"builder/shared/textutil"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -305,6 +306,61 @@ func splitToolInlineMeta(line string) (string, string) {
 	return transcript.SplitInlineMeta(line)
 }
 
+func (m Model) renderPatchSummaryContent(meta *transcript.ToolCallMeta) (transcriptRenderContent, bool) {
+	if meta == nil || meta.PatchRender == nil {
+		return transcriptRenderContent{}, false
+	}
+	lines := make([]transcriptRenderLine, 0, len(meta.PatchRender.SummaryLines))
+	for _, summary := range meta.PatchRender.SummaryLines {
+		if summary.Kind != "file" || summary.FileIndex < 0 || summary.FileIndex >= len(meta.PatchRender.Files) {
+			continue
+		}
+		file := meta.PatchRender.Files[summary.FileIndex]
+		path := strings.TrimSpace(file.RelPath)
+		if path == "" {
+			path = strings.TrimSpace(file.AbsPath)
+		}
+		if path == "" {
+			continue
+		}
+		plain := patchSummaryPlainLine(path, file.Added, file.Removed)
+		lines = append(lines, transcriptRenderLine{
+			Text: plain,
+			PatchSummary: &transcriptPatchSummaryLine{
+				Path:    path,
+				Added:   file.Added,
+				Removed: file.Removed,
+			},
+		})
+	}
+	if len(lines) == 0 {
+		return transcriptRenderContent{}, false
+	}
+	return transcriptRenderContent{Lines: lines, WrapMode: transcriptRenderWrapModePreserved}, true
+}
+
+func patchSummaryPlainLine(path string, added int, removed int) string {
+	parts := []string{path}
+	if removed > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", removed))
+	}
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", added))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m Model) renderPatchSummaryLine(line transcriptPatchSummaryLine) string {
+	parts := []string{line.Path}
+	if line.Removed > 0 {
+		parts = append(parts, m.palette().toolError.Render(fmt.Sprintf("-%d", line.Removed)))
+	}
+	if line.Added > 0 {
+		parts = append(parts, m.palette().toolSuccess.Render(fmt.Sprintf("+%d", line.Added)))
+	}
+	return strings.Join(parts, " ")
+}
+
 func (m Model) renderToolHeadline(line string, width int) string {
 	command, meta := splitToolInlineMeta(line)
 	if meta == "" {
@@ -346,7 +402,7 @@ func (m Model) diffLineBackgroundEscapes() (string, string) {
 	return bgEscape(p.diffAddBackground), bgEscape(p.diffRemoveBackground)
 }
 
-func (m Model) styleToolLine(line string, isPatchBlock bool) string {
+func (m Model) styleToolLine(line string) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return line
@@ -357,29 +413,5 @@ func (m Model) styleToolLine(line string, isPatchBlock bool) string {
 	if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
 		return m.palette().toolError.Render("-") + line[1:]
 	}
-	successCountStyle := m.palette().toolSuccess
-	errorCountStyle := m.palette().toolError
-	if isPatchBlock {
-		return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
-			if strings.HasPrefix(token, "+") {
-				return successCountStyle.Render(token)
-			}
-			if strings.HasPrefix(token, "-") {
-				return errorCountStyle.Render(token)
-			}
-			return token
-		})
-	}
-	if !strings.HasPrefix(trimmed, "./") {
-		return line
-	}
-	return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
-		if strings.HasPrefix(token, "+") {
-			return successCountStyle.Render(token)
-		}
-		if strings.HasPrefix(token, "-") {
-			return errorCountStyle.Render(token)
-		}
-		return token
-	})
+	return line
 }

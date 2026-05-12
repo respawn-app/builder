@@ -248,6 +248,33 @@ func TestPathReferenceUpDownNavigatesSelectionWithoutRewritingInput(t *testing.T
 	}
 }
 
+func TestPathReferencePickerHighlightTracksAbsoluteSelectionAfterViewportScroll(t *testing.T) {
+	withTrueColor(t)
+	m := newProjectedStaticUIModel()
+	m.pathReference.tracked = uiPathReferenceQuery{Active: true, Start: 0, End: 3, RawQuery: "ab", NormalizedQuery: "ab"}
+	m.pathReference.matches = []uiPathReferenceCandidate{
+		{Path: "match-00.go"},
+		{Path: "match-01.go"},
+		{Path: "match-02.go"},
+		{Path: "match-03.go"},
+		{Path: "match-04.go"},
+		{Path: "match-05.go"},
+		{Path: "match-06.go"},
+		{Path: "match-07.go"},
+		{Path: "match-08.go"},
+	}
+	m.pathReference.selection = 7
+
+	state := m.pathReferencePicker()
+	if state.start == 0 {
+		t.Fatalf("expected path picker viewport to scroll, got %+v", state)
+	}
+	if len(state.rows) != len(m.pathReference.matches) {
+		t.Fatalf("expected path picker rows to keep full absolute row list, got %d rows for %d matches", len(state.rows), len(m.pathReference.matches))
+	}
+	assertActivePickerHighlightedSelection(t, m, 80)
+}
+
 func TestPathReferencePickerSanitizesControlCharactersForDisplay(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.pathReference.tracked = uiPathReferenceQuery{Active: true, Start: 0, End: 3, RawQuery: "ab", NormalizedQuery: "ab"}

@@ -91,7 +91,7 @@ func authInfo(state auth.State, settings config.Settings, statusErr error) serve
 		}
 		return serverapi.AuthStatusInfo{Summary: summary, Details: details, Visible: true}
 	case auth.MethodAPIKey:
-		summary := "API key"
+		summary := auth.MaskedAPIKeySummary(state.Method.APIKey)
 		if provider := providerLabel(state, settings); provider != "" {
 			details = append(details, provider)
 		}
@@ -106,7 +106,7 @@ func authInfo(state auth.State, settings config.Settings, statusErr error) serve
 		if statusErr != nil {
 			return serverapi.AuthStatusInfo{Summary: "Auth unavailable", Details: []string{statusErr.Error()}, Visible: true}
 		}
-		return serverapi.AuthStatusInfo{}
+		return serverapi.AuthStatusInfo{Summary: "No Auth", Visible: true}
 	}
 }
 
