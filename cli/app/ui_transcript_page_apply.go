@@ -24,7 +24,7 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 
 func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
 	transcript := transcriptPageFromSessionView(view)
-	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, transcript, clientui.TranscriptRecoveryCauseNone))
+	return batchCmds(a.applyProjectedSessionMetadata(view), a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, transcript, clientui.TranscriptRecoveryCauseNone))
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSessionView) tea.Cmd {
@@ -44,34 +44,49 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 	m.sessionID = strings.TrimSpace(view.SessionID)
 	m.sessionName = strings.TrimSpace(view.SessionName)
 	m.conversationFreshness = view.ConversationFreshness
-	a.applyProjectedExecutionTarget(view.ExecutionTarget)
+	targetCmd := a.applyProjectedExecutionTarget(view.ExecutionTarget)
 	if view.Transcript.Revision > m.transcriptRevision {
 		m.transcriptRevision = view.Transcript.Revision
 	}
+	titleCmd := tea.Cmd(nil)
 	if previousWindowTitle != m.windowTitle() {
-		return tea.SetWindowTitle(m.windowTitle())
+		titleCmd = tea.SetWindowTitle(m.windowTitle())
 	}
-	return nil
+	return sequenceCmds(titleCmd, targetCmd)
 }
 
-func (a uiRuntimeAdapter) applyProjectedExecutionTarget(target clientui.SessionExecutionTarget) {
+func (a uiRuntimeAdapter) applyProjectedExecutionTarget(target clientui.SessionExecutionTarget) tea.Cmd {
 	m := a.model
 	if m == nil {
-		return
+		return nil
 	}
 	workdir := strings.TrimSpace(target.EffectiveWorkdir)
 	if workdir == "" {
 		workdir = strings.TrimSpace(target.WorkspaceRoot)
 	}
-	if workdir == "" || strings.TrimSpace(m.statusConfig.WorkspaceRoot) == workdir {
-		return
+	previousWorkdir := strings.TrimSpace(m.statusConfig.WorkspaceRoot)
+	previousTarget := m.statusConfig.ExecutionTarget
+	if workdir == "" {
+		if !clientui.SessionExecutionTargetsEqual(previousTarget, target) {
+			m.statusConfig.ExecutionTarget = target
+		}
+		return nil
 	}
+	targetChanged := !clientui.SessionExecutionTargetsEqual(previousTarget, target)
+	workdirChanged := previousWorkdir != workdir
 	m.statusConfig.WorkspaceRoot = workdir
-	m.statusRepository = newMemoryUIStatusRepository()
-	m.clearPathReferenceState()
-	if m.pathReferenceSearch != nil {
+	m.statusConfig.ExecutionTarget = target
+	if !workdirChanged && !targetChanged {
+		return nil
+	}
+	if workdirChanged {
+		m.statusRepository = newMemoryUIStatusRepository()
+		m.clearPathReferenceState()
+	}
+	if workdirChanged && m.pathReferenceSearch != nil {
 		m.pathReferenceSearch.StartPrewarm(workdir)
 	}
+	return m.statusLineGitRefreshCmd()
 }
 
 func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptPage) tea.Cmd {

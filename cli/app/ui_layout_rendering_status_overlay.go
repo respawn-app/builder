@@ -31,6 +31,31 @@ func (l uiViewLayout) renderStatusOverlay(width, height int, _ uiStyles) []strin
 	return visible
 }
 
+type statusOverlayLineStyle uint8
+
+const (
+	statusOverlayLineStyleNormal statusOverlayLineStyle = iota
+	statusOverlayLineStyleBold
+	statusOverlayLineStyleSubtle
+)
+
+type statusOverlayLine struct {
+	Text  string
+	Style statusOverlayLineStyle
+}
+
+func statusOverlaySessionLines(snapshot uiStatusSnapshot) []statusOverlayLine {
+	lines := make([]statusOverlayLine, 0, 3)
+	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
+		lines = append(lines, statusOverlayLine{Text: sessionName, Style: statusOverlayLineStyleBold})
+	}
+	lines = append(lines, statusOverlayLine{Text: "Session ID: " + statusValueOrFallback(snapshot.SessionID, "session unknown"), Style: statusOverlayLineStyleNormal})
+	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
+		lines = append(lines, statusOverlayLine{Text: parentSummary, Style: statusOverlayLineStyleSubtle})
+	}
+	return lines
+}
+
 func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	m := l.model
 	palette := uiPalette(m.theme)
@@ -72,16 +97,51 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 
 	snapshot := m.status.snapshot
 
+	appendSectionTitle("Session")
+	if snapshot.OwnsServer {
+		appendWrapped("Server: owned by this CLI", lipgloss.Style{})
+	}
+	appendWrapped("CWD: "+statusValueOrFallback(snapshot.Workdir, "<unknown>"), boldStyle)
+	appendANSI(l.renderStatusModelLine(width, snapshot.Model.Summary))
+	if updateLine := l.renderStatusUpdateLine(width, snapshot.Update); updateLine != "" {
+		appendANSI(updateLine)
+	}
+	for _, line := range statusOverlaySessionLines(snapshot) {
+		switch line.Style {
+		case statusOverlayLineStyleBold:
+			appendWrapped(line.Text, boldStyle)
+		case statusOverlayLineStyleSubtle:
+			appendWrapped(line.Text, subtleStyle)
+		default:
+			appendWrapped(line.Text, lipgloss.Style{})
+		}
+	}
+
+	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
+		appendSectionTitle("Git")
+		if errorText := strings.TrimSpace(snapshot.Git.Error); errorText != "" {
+			appendWrapped(errorText, warningStyle)
+		} else if snapshot.Git.Visible {
+			appendWrapped(snapshot.Git.Branch, boldStyle)
+			appendANSI(l.renderStatusGitSummaryLine(width, snapshot.Git))
+		} else {
+			appendWrapped("Loading git...", subtleStyle)
+		}
+	}
+
+	appendSectionTitle("Context")
+	appendWrapped(statusContextRemainingSummary(snapshot.Context), boldStyle)
+	appendWrapped(statusContextCompactionSummary(snapshot.Context), lipgloss.Style{})
+	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
+	appendWrapped("debug "+statusOnOff(snapshot.Config.Debug), lipgloss.Style{})
+	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
+
 	authSummary := statusVisibleAuthSummary(snapshot.Auth, snapshot.Subscription)
 	subscriptionSummary := strings.TrimSpace(snapshot.Subscription.Summary)
 	hasSubscriptionRows := len(snapshot.Subscription.Windows) > 0
 	showAccountSection := authSummary != "" || subscriptionSummary != "" || hasSubscriptionRows || l.statusSectionLoading(uiStatusSectionAuth)
 	if showAccountSection {
-		if subscriptionSummary != "" || hasSubscriptionRows {
-			appendSectionTitle("Subscription")
-		} else {
-			appendSectionTitle("Account")
-		}
+		appendSectionTitle("Auth")
 		if authSummary != "" {
 			appendWrapped(authSummary, boldStyle)
 		} else if subscriptionSummary == "" && !hasSubscriptionRows && l.statusSectionLoading(uiStatusSectionAuth) {
@@ -107,41 +167,12 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 		}
 	}
 
-	appendSectionTitle("Session")
-	if snapshot.OwnsServer {
-		appendWrapped("Server: owned by this CLI", lipgloss.Style{})
+	appendSectionTitle("Config")
+	appendWrapped(statusDisplayPath(snapshot.Config.SettingsPath, snapshot.Workdir), subtleStyle)
+	if len(snapshot.Config.OverrideSources) > 0 {
+		appendWrapped("overrides: "+strings.Join(snapshot.Config.OverrideSources, ", "), lipgloss.Style{})
 	}
-	appendWrapped("CWD: "+statusValueOrFallback(snapshot.Workdir, "<unknown>"), boldStyle)
-	appendANSI(l.renderStatusModelLine(width, snapshot.Model.Summary))
-	if updateLine := l.renderStatusUpdateLine(width, snapshot.Update); updateLine != "" {
-		appendANSI(updateLine)
-	}
-	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
-		appendWrapped(sessionName, boldStyle)
-	}
-	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
-		appendWrapped(parentSummary, lipgloss.Style{})
-	}
-	appendWrapped(statusValueOrFallback(snapshot.SessionID, "session unknown"), subtleStyle)
-
-	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
-		appendSectionTitle("Git")
-		if errorText := strings.TrimSpace(snapshot.Git.Error); errorText != "" {
-			appendWrapped(errorText, warningStyle)
-		} else if snapshot.Git.Visible {
-			appendWrapped(snapshot.Git.Branch, boldStyle)
-			appendANSI(l.renderStatusGitSummaryLine(width, snapshot.Git))
-		} else {
-			appendWrapped("Loading git...", subtleStyle)
-		}
-	}
-
-	appendSectionTitle("Context")
-	appendWrapped(statusContextRemainingSummary(snapshot.Context), boldStyle)
-	appendWrapped(statusContextCompactionSummary(snapshot.Context), lipgloss.Style{})
-	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
-	appendWrapped("debug "+statusOnOff(snapshot.Config.Debug), lipgloss.Style{})
-	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
+	appendWrapped("supervisor "+snapshot.Config.Supervisor, lipgloss.Style{})
 
 	loadedSkills, failedSkills := statusPartitionSkills(snapshot.Skills)
 	subheaderStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
@@ -163,7 +194,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 				}
 				line := treeStyle.Render(branch + " ")
 				if skill.Loaded {
-					line += statusSkillLine(skill, snapshot.SkillTokenCounts)
+					line += statusSkillLineStyled(skill, snapshot.SkillTokenCounts, subtleStyle)
 				} else {
 					line += errorStyle.Render("! ") + statusSkillFailureLine(skill)
 				}
@@ -181,13 +212,6 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 			appendWrapped(statusAgentTokenLine(path, snapshot.AgentTokenCounts, snapshot.Workdir), lipgloss.Style{})
 		}
 	}
-
-	appendSectionTitle("Config")
-	appendWrapped(statusDisplayPath(snapshot.Config.SettingsPath, snapshot.Workdir), subtleStyle)
-	if len(snapshot.Config.OverrideSources) > 0 {
-		appendWrapped("overrides: "+strings.Join(snapshot.Config.OverrideSources, ", "), lipgloss.Style{})
-	}
-	appendWrapped("supervisor "+snapshot.Config.Supervisor, lipgloss.Style{})
 
 	if warning := strings.TrimSpace(snapshot.CollectorWarning); warning != "" {
 		appendSectionTitle("Warnings")

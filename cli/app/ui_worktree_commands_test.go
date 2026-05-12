@@ -128,6 +128,18 @@ func worktreeStatusLine(model *uiModel) string {
 	return stripANSIAndTrimRight(model.renderStatusLine(120, uiThemeStyles("dark")))
 }
 
+func applyRuntimeTargetRefreshAndDrainStatus(t *testing.T, model *uiModel, target clientui.SessionExecutionTarget) *uiModel {
+	t.Helper()
+	next, cmd := model.Update(runtimeMainViewRefreshedMsg{
+		token: model.runtimeMainViewToken,
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID:       "session-1",
+			ExecutionTarget: target,
+		}},
+	})
+	return drainStatusLineStartupCommands(t, next.(*uiModel), cmd)
+}
+
 func assertWorktreeOverlayLocalErrorOnly(t *testing.T, model *uiModel, expectedVisible []string, unexpectedVisible []string) {
 	t.Helper()
 	status := worktreeStatusLine(model)
@@ -160,6 +172,41 @@ func testMainWorktreeListResponse() serverapi.WorktreeListResponse {
 			IsCurrent:     true,
 		}},
 	}
+}
+
+func worktreeListResponseForRoots(mainRoot string, featureRoot string) serverapi.WorktreeListResponse {
+	resp := serverapi.WorktreeListResponse{
+		Target: clientui.SessionExecutionTarget{
+			WorkspaceID:      "workspace-1",
+			WorkspaceRoot:    mainRoot,
+			EffectiveWorkdir: mainRoot,
+		},
+		Worktrees: []serverapi.WorktreeView{{
+			WorktreeID:    "wt-main",
+			DisplayName:   "main",
+			CanonicalRoot: mainRoot,
+			BranchName:    "main",
+			IsMain:        true,
+			IsCurrent:     featureRoot == "",
+		}},
+	}
+	if strings.TrimSpace(featureRoot) != "" {
+		resp.Target.WorktreeID = "wt-feature"
+		resp.Target.WorktreeRoot = featureRoot
+		resp.Target.EffectiveWorkdir = featureRoot
+		resp.Worktrees[0].IsCurrent = false
+		resp.Worktrees = append(resp.Worktrees, serverapi.WorktreeView{
+			WorktreeID:      "wt-feature",
+			DisplayName:     "feature",
+			CanonicalRoot:   featureRoot,
+			BranchName:      "feature",
+			IsCurrent:       true,
+			BuilderManaged:  true,
+			CreatedBranch:   true,
+			OriginSessionID: "session-1",
+		})
+	}
+	return resp
 }
 
 func testLinkedWorktreeListResponse() serverapi.WorktreeListResponse {

@@ -68,6 +68,34 @@ func TestStatusLineGitStartupUsesRuntimeWorktreeRootBranch(t *testing.T) {
 	}
 }
 
+func TestStatusLineGitRefreshesAfterExecutionTargetChange(t *testing.T) {
+	workspaceRoot := initStatusLineGitRepo(t, "workspace-branch")
+	worktreeRoot := initStatusLineGitRepo(t, "worktree-branch")
+	m := newProjectedStaticUIModel(WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: workspaceRoot}))
+	m.status.snapshot.Git = uiStatusGitInfo{Visible: true, Branch: "workspace-branch"}
+
+	next, cmd := m.Update(runtimeMainViewRefreshedMsg{
+		token: m.runtimeMainViewToken,
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			ExecutionTarget: clientui.SessionExecutionTarget{
+				WorkspaceRoot:    workspaceRoot,
+				WorktreeRoot:     worktreeRoot,
+				EffectiveWorkdir: worktreeRoot,
+			},
+		}},
+	})
+	updated := drainStatusLineStartupCommands(t, next.(*uiModel), cmd)
+
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "worktree-branch") {
+		t.Fatalf("expected refreshed worktree git branch in status line, got %q", status)
+	}
+	if strings.Contains(status, "workspace-branch") {
+		t.Fatalf("did not expect stale workspace branch in status line, got %q", status)
+	}
+}
+
 func initStatusLineGitRepo(t *testing.T, branch string) string {
 	t.Helper()
 	repoRoot := t.TempDir()
@@ -158,7 +186,7 @@ func TestStatusVisibleAuthSummarySuppressesGenericSubscriptionWhenPlanPresent(t 
 	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "user@example.com", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "user@example.com" {
 		t.Fatalf("visible auth summary = %q", got)
 	}
-	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "Not configured"}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "" {
+	if got := statusVisibleAuthSummary(uiStatusAuthInfo{Summary: "No Auth", Visible: true}, uiStatusSubscriptionInfo{Summary: "Pro subscription"}); got != "No Auth" {
 		t.Fatalf("visible auth summary = %q", got)
 	}
 }

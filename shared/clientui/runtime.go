@@ -2,6 +2,7 @@ package clientui
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -108,6 +109,29 @@ type SessionExecutionTarget struct {
 	WorktreeAvailability  string
 	CwdRelpath            string
 	EffectiveWorkdir      string
+}
+
+func NormalizeSessionExecutionTarget(target SessionExecutionTarget) SessionExecutionTarget {
+	return SessionExecutionTarget{
+		WorkspaceID:           strings.TrimSpace(target.WorkspaceID),
+		WorkspaceName:         strings.TrimSpace(target.WorkspaceName),
+		WorkspaceRoot:         strings.TrimSpace(target.WorkspaceRoot),
+		WorkspaceAvailability: strings.TrimSpace(target.WorkspaceAvailability),
+		WorktreeID:            strings.TrimSpace(target.WorktreeID),
+		WorktreeName:          strings.TrimSpace(target.WorktreeName),
+		WorktreeRoot:          strings.TrimSpace(target.WorktreeRoot),
+		WorktreeAvailability:  strings.TrimSpace(target.WorktreeAvailability),
+		CwdRelpath:            strings.TrimSpace(target.CwdRelpath),
+		EffectiveWorkdir:      strings.TrimSpace(target.EffectiveWorkdir),
+	}
+}
+
+func SessionExecutionTargetIsZero(target SessionExecutionTarget) bool {
+	return NormalizeSessionExecutionTarget(target) == SessionExecutionTarget{}
+}
+
+func SessionExecutionTargetsEqual(a SessionExecutionTarget, b SessionExecutionTarget) bool {
+	return NormalizeSessionExecutionTarget(a) == NormalizeSessionExecutionTarget(b)
 }
 
 type RuntimeSessionView struct {

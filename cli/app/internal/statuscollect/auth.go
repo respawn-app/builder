@@ -70,7 +70,7 @@ func AuthInfo(state auth.State, settings config.Settings, statusErr error) appst
 		}
 		return appstatus.AuthInfo{Summary: summary, Details: details, Visible: true}
 	case auth.MethodAPIKey:
-		summary := "API key"
+		summary := auth.MaskedAPIKeySummary(state.Method.APIKey)
 		if provider := ProviderLabel(state, settings); provider != "" {
 			details = append(details, provider)
 		}
@@ -85,7 +85,7 @@ func AuthInfo(state auth.State, settings config.Settings, statusErr error) appst
 		if statusErr != nil {
 			return appstatus.AuthInfo{Summary: "Auth unavailable", Details: []string{statusErr.Error()}, Visible: true}
 		}
-		return appstatus.AuthInfo{}
+		return appstatus.AuthInfo{Summary: "No Auth", Visible: true}
 	}
 }
 

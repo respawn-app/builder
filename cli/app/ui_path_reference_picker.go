@@ -295,31 +295,25 @@ func (m *uiModel) slashCommandPresentation() uiPickerPresentation {
 	if !state.visible {
 		return uiPickerPresentation{}
 	}
-	rows := make([]uiPickerRow, 0, slashCommandPickerLines)
-	for row := 0; row < slashCommandPickerLines; row++ {
-		idx := state.start + row
-		if idx < len(state.matches) {
-			rows = append(rows, uiPickerRow{
-				primary:     "/" + state.matches[idx].Name,
-				secondary:   strings.TrimSpace(state.matches[idx].Description),
-				boldPrimary: true,
-				selectable:  true,
-			})
-			continue
-		}
-		if len(state.matches) == 0 && row == 0 {
-			rows = append(rows, uiPickerRow{primary: "No matching commands", muted: true})
-			continue
-		}
-		rows = append(rows, uiPickerRow{})
+	rows := make([]uiPickerRow, 0, max(1, len(state.matches)))
+	for idx := range state.matches {
+		rows = append(rows, uiPickerRow{
+			primary:     "/" + state.matches[idx].Name,
+			secondary:   strings.TrimSpace(state.matches[idx].Description),
+			boldPrimary: true,
+			selectable:  true,
+		})
+	}
+	if len(state.matches) == 0 {
+		rows = append(rows, uiPickerRow{primary: "No matching commands", muted: true})
 	}
 	return uiPickerPresentation{
 		kind:      uiPickerKindSlashCommand,
 		visible:   true,
 		rows:      rows,
 		selection: state.selection,
-		start:     0,
-		lineCount: len(rows),
+		start:     state.start,
+		lineCount: slashCommandPickerLines,
 	}
 }
 

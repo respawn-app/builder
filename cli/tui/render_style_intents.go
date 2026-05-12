@@ -33,14 +33,22 @@ type transcriptRenderContent struct {
 }
 
 type transcriptRenderLine struct {
-	Text    string
-	Intents StyleIntent
+	Text         string
+	Intents      StyleIntent
+	PatchSummary *transcriptPatchSummaryLine
+}
+
+type transcriptPatchSummaryLine struct {
+	Path    string
+	Added   int
+	Removed int
 }
 
 type transcriptLayoutLine struct {
 	Prefix         string
 	Text           string
 	Intents        StyleIntent
+	PatchSummary   *transcriptPatchSummaryLine
 	ShowRoleSymbol bool
 }
 
