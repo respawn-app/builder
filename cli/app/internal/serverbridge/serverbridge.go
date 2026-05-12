@@ -129,19 +129,19 @@ func RecoveredWarning() string {
 	return generated.RecoveredWarning()
 }
 
-func ResolveConfig(req serverbootstrap.Request) (serverbootstrap.ConfigPlan, error) {
+func ResolveConfig(req BootstrapRequest) (BootstrapConfigPlan, error) {
 	return serverbootstrap.ResolveConfig(req)
 }
 
-func StartEmbedded(ctx context.Context, req serverstartup.Request, authHandler serverstartup.AuthHandler, onboardingHandler serverstartup.OnboardingHandler) (*serverembedded.Server, error) {
+func StartEmbedded(ctx context.Context, req StartupRequest, authHandler StartupAuthHandler, onboardingHandler StartupOnboardingHandler) (*Server, error) {
 	return serverstartup.Start(ctx, req, authHandler, onboardingHandler)
 }
 
-func NewHeadlessHandlers(lookupEnv func(string) string) (serverstartup.AuthHandler, serverstartup.OnboardingHandler) {
+func NewHeadlessHandlers(lookupEnv func(string) string) (StartupAuthHandler, StartupOnboardingHandler) {
 	return serverstartup.NewHeadlessHandlers(lookupEnv)
 }
 
-func StartServe(ctx context.Context, req serverstartup.Request, authHandler serverstartup.AuthHandler, onboardingHandler serverstartup.OnboardingHandler) (*serve.Server, error) {
+func StartServe(ctx context.Context, req StartupRequest, authHandler StartupAuthHandler, onboardingHandler StartupOnboardingHandler) (*ServeServer, error) {
 	return serve.Start(ctx, req, authHandler, onboardingHandler)
 }
 
