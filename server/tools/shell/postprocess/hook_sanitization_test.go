@@ -8,13 +8,14 @@ import (
 	"builder/shared/toolspec"
 )
 
-func TestRunnerUserHookReceivesSanitizedOutput(t *testing.T) {
+func TestRunnerUserHookReceivesSanitizedCurrentAndRawOriginalOutput(t *testing.T) {
 	hookPath := writeHookScript(t, `#!/bin/sh
 payload=$(cat)
-case "$payload" in
-  *'\u001b'*) printf '{"processed":true,"replaced_output":"RAW"}' ;;
-  *) printf '{"processed":true,"replaced_output":"SANITIZED"}' ;;
-esac
+if printf '%s' "$payload" | grep -Fq '"current_output":"color"' && printf '%s' "$payload" | grep -Fq '"original_output":"\u001b[31mcolor\u001b[0m"'; then
+  printf '{"processed":true,"replaced_output":"SANITIZED_CURRENT_RAW_ORIGINAL"}'
+else
+  printf '{"processed":true,"replaced_output":"UNEXPECTED_PAYLOAD"}'
+fi
 `)
 	runner := NewRunner(Settings{Mode: config.ShellPostprocessingModeUser, HookPath: hookPath})
 	result, err := runner.Apply(context.Background(), Request{
@@ -25,7 +26,7 @@ esac
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if result.Output != "SANITIZED" {
-		t.Fatalf("output = %q, want SANITIZED", result.Output)
+	if result.Output != "SANITIZED_CURRENT_RAW_ORIGINAL" {
+		t.Fatalf("output = %q, want SANITIZED_CURRENT_RAW_ORIGINAL", result.Output)
 	}
 }
