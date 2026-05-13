@@ -157,3 +157,10 @@ func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInt
 	}
 	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor)
 }
+
+func (s *remoteAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+	if s == nil || s.remote == nil {
+		return errors.New("remote server is required")
+	}
+	return ensureRemoteAuthReady(ctx, s.remote, s.cfg.Settings, interactor)
+}

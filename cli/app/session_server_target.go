@@ -49,7 +49,7 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 			if resolution.Source == serverattach.SourceEmbeddedFallback {
 				return serverattach.AuthReadinessUnchecked, nil
 			}
-			if err := resolution.Value.Reauthenticate(ctx, interactor); err != nil {
+			if err := validateInteractiveSessionServerAuth(ctx, resolution.Value, interactor); err != nil {
 				return serverattach.AuthReadinessUnchecked, err
 			}
 			return serverattach.AuthReadinessValidated, nil
@@ -59,6 +59,17 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 		return nil, err
 	}
 	return target.Value, nil
+}
+
+type authReadinessServer interface {
+	EnsureAuthReady(ctx context.Context, interactor authInteractor) error
+}
+
+func validateInteractiveSessionServerAuth(ctx context.Context, server interactiveSessionServer, interactor authInteractor) error {
+	if readiness, ok := server.(authReadinessServer); ok {
+		return readiness.EnsureAuthReady(ctx, interactor)
+	}
+	return server.Reauthenticate(ctx, interactor)
 }
 
 func shouldBypassRemoteStartupForInteractiveOnboarding(opts Options, interactor authInteractor) (bool, error) {

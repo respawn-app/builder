@@ -190,3 +190,11 @@ func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authI
 	}
 	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor)
 }
+
+func (s *embeddedAppServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+	if s == nil || s.inner == nil {
+		return errors.New("embedded server is required")
+	}
+	cfg := s.inner.Config()
+	return ensureRemoteAuthReady(ctx, s.AuthBootstrapClient(), cfg.Settings, interactor)
+}

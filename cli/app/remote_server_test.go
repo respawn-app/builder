@@ -140,6 +140,68 @@ func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testi
 	}
 }
 
+func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "ready-key"},
+		},
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(serveCtx) }()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
+	if err != nil {
+		t.Fatalf("DialRemoteURL: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			t.Fatal("startup auth readiness validation must not open auth picker when server auth is ready")
+			return authMethodPickerResult{}, nil
+		},
+	}
+
+	server := newRemoteAppServer(remote, cfg)
+	if err := server.EnsureAuthReady(context.Background(), interactor); err != nil {
+		t.Fatalf("EnsureAuthReady: %v", err)
+	}
+
+	state, err := srv.AuthManager().StoredState(context.Background())
+	if err != nil {
+		t.Fatalf("StoredState: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "ready-key" {
+		t.Fatalf("expected startup validation to preserve ready auth, got %+v", state.Method)
+	}
+}
+
 func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
