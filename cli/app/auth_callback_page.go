@@ -277,9 +277,11 @@ var runAuthCallbackPage = func(ctx context.Context, data authCallbackPageData, w
 	model.ctx = ctx
 	model.complete = complete
 	program := tea.NewProgram(model, tea.WithAltScreen())
+	waitCtx, cancelWait := context.WithCancel(ctx)
+	defer cancelWait()
 	if waitCallback != nil {
 		go func() {
-			callback, err := waitCallback(ctx)
+			callback, err := waitCallback(waitCtx)
 			program.Send(authCallbackPageBrowserDoneMsg{callback: callback, err: err})
 		}()
 	}
@@ -323,7 +325,7 @@ func (i *interactiveAuthInteractor) runAuthBrowserHybridPage(
 		return oauthadapter.Method{}, err
 	}
 	if result.Canceled {
-		return oauthadapter.Method{}, errors.New("auth canceled by user")
+		return oauthadapter.Method{}, ErrAuthCanceledByUser
 	}
 	if result.Err != nil {
 		return oauthadapter.Method{}, result.Err

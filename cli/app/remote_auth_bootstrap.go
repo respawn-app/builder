@@ -12,6 +12,11 @@ import (
 	"builder/shared/serverapi"
 )
 
+var (
+	ErrAuthCanceledByUser = errors.New("auth canceled by user")
+	ErrOAuthStateMismatch = errors.New("oauth state mismatch")
+)
+
 func ensureRemoteAuthReady(ctx context.Context, remote client.AuthBootstrapClient, settings config.Settings, interactor authInteractor) error {
 	if remote == nil {
 		return errors.New("auth bootstrap client is required")
@@ -144,8 +149,9 @@ func (i *interactiveAuthInteractor) collectRemoteBrowserAuto(ctx context.Context
 			return oauthadapter.Method{}, err
 		}
 		sessionState := strings.TrimSpace(session.State)
-		if sessionState != "" && strings.TrimSpace(parsed.State) != sessionState {
-			return oauthadapter.Method{}, errors.New("oauth state mismatch")
+		parsedState := strings.TrimSpace(parsed.State)
+		if sessionState != "" && parsedState != "" && parsedState != sessionState {
+			return oauthadapter.Method{}, ErrOAuthStateMismatch
 		}
 		if strings.TrimSpace(parsed.Code) == "" {
 			return oauthadapter.Method{}, errors.New("oauth callback is missing code")
@@ -156,7 +162,7 @@ func (i *interactiveAuthInteractor) collectRemoteBrowserAuto(ctx context.Context
 		return serverapi.AuthCompleteBootstrapRequest{}, err
 	}
 	if result.Canceled {
-		return serverapi.AuthCompleteBootstrapRequest{}, errors.New("auth canceled by user")
+		return serverapi.AuthCompleteBootstrapRequest{}, ErrAuthCanceledByUser
 	}
 	if result.Err != nil {
 		return serverapi.AuthCompleteBootstrapRequest{}, result.Err

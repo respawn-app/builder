@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 
 	"builder/cli/app/internal/oauthadapter"
@@ -111,7 +111,7 @@ func TestRemoteAuthBootstrapHybridBrowserCancelClosesListener(t *testing.T) {
 	}
 
 	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor)
-	if err == nil || err.Error() != "auth canceled by user" {
+	if err == nil || !errors.Is(err, ErrAuthCanceledByUser) {
 		t.Fatalf("expected auth cancel, got %v", err)
 	}
 	if listener.closed == 0 {
@@ -119,7 +119,7 @@ func TestRemoteAuthBootstrapHybridBrowserCancelClosesListener(t *testing.T) {
 	}
 }
 
-func TestRemoteAuthBootstrapRejectsMissingOAuthState(t *testing.T) {
+func TestRemoteAuthBootstrapRejectsMismatchedOAuthState(t *testing.T) {
 	listener := &stubOAuthCallbackListener{}
 	remote := &stubAuthBootstrapClient{status: serverapi.AuthGetBootstrapStatusResponse{
 		AuthReady:    false,
@@ -142,16 +142,17 @@ func TestRemoteAuthBootstrapRejectsMissingOAuthState(t *testing.T) {
 		startCallbackListener: func() (oauthCallbackListener, error) { return listener, nil },
 		openBrowser:           func(string) error { return nil },
 		runCallbackPage: func(ctx context.Context, _ authCallbackPageData, _ func(context.Context) (oauthadapter.BrowserCallback, error), complete func(context.Context, string) (oauthadapter.Method, error)) (authCallbackPageResult, error) {
-			method, err := complete(ctx, "http://localhost/callback?code=pasted")
-			return authCallbackPageResult{Method: method, CallbackInput: "http://localhost/callback?code=pasted"}, err
+			input := "http://localhost/callback?code=pasted&state=wrong"
+			method, err := complete(ctx, input)
+			return authCallbackPageResult{Method: method, CallbackInput: input}, err
 		},
 	}
 
 	err := ensureRemoteAuthReady(context.Background(), remote, config.Settings{}, interactor)
-	if err == nil || err.Error() != "auth canceled by user" {
+	if err == nil || !errors.Is(err, ErrAuthCanceledByUser) {
 		t.Fatalf("expected auth cancel, got %v", err)
 	}
-	if flowErr == nil || !strings.Contains(flowErr.Error(), "oauth state mismatch") {
+	if flowErr == nil || !errors.Is(flowErr, ErrOAuthStateMismatch) {
 		t.Fatalf("flow error = %v, want oauth state mismatch", flowErr)
 	}
 }

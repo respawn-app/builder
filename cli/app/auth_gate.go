@@ -229,7 +229,7 @@ func (i *interactiveAuthInteractor) chooseMethod(req authInteraction) (authMetho
 		return "", err
 	}
 	if picked.Canceled {
-		return "", errors.New("auth canceled by user")
+		return "", ErrAuthCanceledByUser
 	}
 	return picked.Choice, nil
 }
