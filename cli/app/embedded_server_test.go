@@ -403,7 +403,15 @@ func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor auth
 		return s.reauthenticate(ctx, interactor)
 	}
 	service := authbootstrap.NewService(s.authManager, s.oauthOpts, s.cfg.Settings, rpccontract.AllowedPreAuthMethods())
-	return ensureRemoteAuthReady(ctx, client.NewLoopbackAuthBootstrapClient(service), s.cfg.Settings, interactor)
+	remote := client.NewLoopbackAuthBootstrapClient(service)
+	status, err := remote.GetAuthBootstrapStatus(ctx, serverapi.AuthGetBootstrapStatusRequest{})
+	if err != nil {
+		return err
+	}
+	if interactive, ok := interactor.(*interactiveAuthInteractor); ok {
+		return interactive.completeRemoteAuthBootstrap(ctx, remote, s.cfg.Settings, status, true)
+	}
+	return ensureRemoteAuthReady(ctx, remote, s.cfg.Settings, interactor)
 }
 
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {

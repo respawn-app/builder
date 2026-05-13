@@ -186,7 +186,8 @@ func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
 			_, _ = w.Write([]byte("Missing code in callback"))
 			return
 		}
-		_, _ = w.Write([]byte("Authorization received. Return to terminal."))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(authCompleteHTML()))
 		select {
 		case resultCh <- result:
 		default:
@@ -204,6 +205,61 @@ func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
 		server:      srv,
 		listener:    ln,
 	}, nil
+}
+
+func authCompleteHTML() string {
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth complete</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0f14;
+  --fg: #d6deeb;
+  --muted: #7d8590;
+  --primary: #7dd3fc;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+main { text-align: center; padding: 32px; }
+h1 {
+  margin: 0 0 24px;
+  color: var(--primary);
+  font-size: clamp(42px, 8vw, 82px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+</style>
+</head>
+<body>
+<main>
+<h1>Auth complete</h1>
+<button type="button" onclick="window.close()">Close this tab</button>
+</main>
+</body>
+</html>`
 }
 
 func (l *OAuthCallbackListener) RedirectURI() string {

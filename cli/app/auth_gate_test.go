@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/cli/app/internal/oauthadapter"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/session"
@@ -198,6 +199,172 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 	}
 }
 
+func TestResolveSessionActionLogoutCancelPreservesStoredAuth(t *testing.T) {
+	ctx := context.Background()
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+		EnvAPIKeyPreference: auth.EnvAPIKeyPreferencePreferSaved,
+	}), nil, time.Now)
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Canceled: true}, nil
+		},
+	}
+
+	_, err := resolveSessionAction(
+		ctx,
+		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
+		interactor,
+		"",
+		"",
+		UITransition{Action: UIActionLogout},
+	)
+	if err == nil || err.Error() != "auth canceled by user" {
+		t.Fatalf("expected auth cancel, got %v", err)
+	}
+	state, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-before" {
+		t.Fatalf("expected canceled auth selection to preserve saved auth, got %+v", state.Method)
+	}
+	if state.EnvAPIKeyPreference != auth.EnvAPIKeyPreferencePreferSaved {
+		t.Fatalf("expected canceled auth selection to preserve preference, got %q", state.EnvAPIKeyPreference)
+	}
+}
+
+func TestResolveSessionActionLogoutRetryPreservesStoredAuthUntilSuccess(t *testing.T) {
+	ctx := context.Background()
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	pickCalls := 0
+	interactor := &interactiveAuthInteractor{
+		lookupEnv: func(key string) string {
+			if key == "OPENAI_API_KEY" {
+				return "sk-after"
+			}
+			return ""
+		},
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			pickCalls++
+			if pickCalls == 1 {
+				return authMethodPickerResult{Choice: authMethodChoiceBrowserAuto}, nil
+			}
+			return authMethodPickerResult{Choice: authMethodChoiceEnvAPIKey}, nil
+		},
+		startCallbackListener: func() (oauthCallbackListener, error) {
+			return &stubOAuthCallbackListener{}, nil
+		},
+		openBrowser: func(string) error { return nil },
+		runCallbackPage: func(context.Context, authCallbackPageData, func(context.Context) (oauthadapter.BrowserCallback, error), func(context.Context, string) (oauthadapter.Method, error)) (authCallbackPageResult, error) {
+			if pickCalls != 1 {
+				t.Fatalf("did not expect callback page after retry, pickCalls=%d", pickCalls)
+			}
+			state, err := mgr.StoredState(ctx)
+			if err != nil {
+				t.Fatalf("load stored state: %v", err)
+			}
+			if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-before" {
+				t.Fatalf("expected saved auth to remain before retry, got %+v", state.Method)
+			}
+			return authCallbackPageResult{}, errors.New("transient browser failure")
+		},
+		showSuccess: func(authSuccessScreenData) error {
+			if pickCalls != 2 {
+				t.Fatalf("expected success after retry, pickCalls=%d", pickCalls)
+			}
+			state, err := mgr.StoredState(ctx)
+			if err != nil {
+				t.Fatalf("load stored state: %v", err)
+			}
+			if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-after" {
+				t.Fatalf("expected saved auth replaced only after successful retry, got %+v", state.Method)
+			}
+			return nil
+		},
+	}
+
+	resolved, err := resolveSessionAction(
+		ctx,
+		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
+		interactor,
+		"",
+		"",
+		UITransition{Action: UIActionLogout},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if !resolved.ShouldContinue {
+		t.Fatal("expected successful retry to continue session")
+	}
+	if pickCalls != 2 {
+		t.Fatalf("expected one retry, got %d picker calls", pickCalls)
+	}
+	state, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-after" {
+		t.Fatalf("expected env auth after retry, got %+v", state.Method)
+	}
+}
+
+func TestResolveSessionActionLogoutPickerFailurePreservesStoredAuth(t *testing.T) {
+	ctx := context.Background()
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			{
+				state, err := mgr.StoredState(ctx)
+				if err != nil {
+					t.Fatalf("load stored state: %v", err)
+				}
+				if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-before" {
+					t.Fatalf("expected saved auth to remain before retry, got %+v", state.Method)
+				}
+				return authMethodPickerResult{}, errors.New("transient picker failure")
+			}
+		},
+		showSuccess: func(authSuccessScreenData) error { return nil },
+	}
+
+	_, err := resolveSessionAction(
+		ctx,
+		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
+		interactor,
+		"",
+		"",
+		UITransition{Action: UIActionLogout},
+	)
+	if err == nil || err.Error() != "transient picker failure" {
+		t.Fatalf("expected picker failure, got %v", err)
+	}
+	state, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-before" {
+		t.Fatalf("expected failed retry to preserve saved auth, got %+v", state.Method)
+	}
+}
+
 func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -335,7 +502,7 @@ func TestInteractiveAuthSkipRejectsRequiredAuth(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected required-auth skip to be rejected")
 	}
-	if err.Error() != "builder auth is required for this configuration" {
+	if err.Error() != "auth is required for this configuration" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

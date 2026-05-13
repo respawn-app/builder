@@ -64,16 +64,16 @@ func (s *Service) CompleteBootstrap(ctx context.Context, req serverapi.AuthCompl
 		return serverapi.AuthCompleteBootstrapResponse{}, err
 	}
 	if req.Mode == serverapi.AuthBootstrapModeNone {
-		if s.authRequired {
-			return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
-		}
 		state, err = s.manager.ClearMethod(ctx, true)
 		if err != nil {
 			return serverapi.AuthCompleteBootstrapResponse{}, err
 		}
+		if s.authRequired {
+			return serverapi.AuthCompleteBootstrapResponse{}, serverapi.ErrServerAuthRequired
+		}
 		return s.bootstrapResponseFromState(state), nil
 	}
-	if auth.EvaluateStartupGate(state).Ready {
+	if auth.EvaluateStartupGate(state).Ready && !req.Force {
 		return s.bootstrapResponseFromState(state), nil
 	}
 	var (
