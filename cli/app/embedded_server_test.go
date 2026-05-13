@@ -414,6 +414,11 @@ func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor auth
 	return ensureRemoteAuthReady(ctx, remote, s.cfg.Settings, interactor)
 }
 
+func (s *testEmbeddedServer) EnsureAuthReady(ctx context.Context, interactor authInteractor) error {
+	service := authbootstrap.NewService(s.authManager, s.oauthOpts, s.cfg.Settings, rpccontract.AllowedPreAuthMethods())
+	return ensureRemoteAuthReady(ctx, client.NewLoopbackAuthBootstrapClient(service), s.cfg.Settings, interactor)
+}
+
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
 	if s.err != nil {
 		return serverapi.ProcessListResponse{}, s.err
