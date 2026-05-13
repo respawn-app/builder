@@ -67,6 +67,78 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 	}
 }
 
+func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "reauthed-key")
+	registerAppWorkspace(t, workspace)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "old-key"},
+		},
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(serveCtx) }()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForConfiguredRemoteIdentity(t, workspace)
+
+	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
+	if err != nil {
+		t.Fatalf("DialRemoteURL: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	pickerCalls := 0
+	interactor := &interactiveAuthInteractor{
+		lookupEnv: func(key string) string {
+			if key == "OPENAI_API_KEY" {
+				return "reauthed-key"
+			}
+			return ""
+		},
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			pickerCalls++
+			return authMethodPickerResult{Choice: authMethodChoiceEnvAPIKey}, nil
+		},
+	}
+
+	server := newRemoteAppServer(remote, cfg)
+	if err := server.Reauthenticate(context.Background(), interactor); err != nil {
+		t.Fatalf("Reauthenticate: %v", err)
+	}
+	if pickerCalls != 1 {
+		t.Fatalf("expected remote /login to open auth picker once, got %d", pickerCalls)
+	}
+	state, err := srv.AuthManager().StoredState(context.Background())
+	if err != nil {
+		t.Fatalf("StoredState: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "reauthed-key" {
+		t.Fatalf("expected forced remote reauth to replace auth, got %+v", state.Method)
+	}
+}
+
 func TestRemoteAppServerCloseUsesOwnedCloser(t *testing.T) {
 	called := false
 	server := newRemoteAppServerWithClose(&client.Remote{}, config.App{}, func() error {
