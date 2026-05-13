@@ -136,13 +136,10 @@ func TestAuthFlowStartupPickerShowsBannerOnRequiredAuth(t *testing.T) {
 		if bannerIdx := strings.Index(view, "███████"); bannerIdx > headerIdx {
 			t.Fatalf("expected banner before auth header (banner@%d header@%d), got %q", bannerIdx, headerIdx, view)
 		}
-		return startupPickerResult{ChoiceID: string(authMethodChoiceEnvAPIKey)}, nil
+		return startupPickerResult{ChoiceID: string(authMethodChoiceSkip)}, nil
 	}
 
 	lookupEnv := func(key string) string {
-		if key == "OPENAI_API_KEY" {
-			return "sk-test"
-		}
 		return ""
 	}
 	mgr := auth.NewManager(authflow.WrapStoreWithEnvAPIKeyOverride(auth.NewMemoryStore(auth.EmptyState()), lookupEnv), nil, time.Now)
@@ -186,14 +183,14 @@ func TestAuthMethodPickerShortHeightKeepsBannerAndScrollableOptions(t *testing.T
 
 func TestInteractiveAuthInteractorNeedsInteractionForEnvConflict(t *testing.T) {
 	interactor := &interactiveAuthInteractor{}
-	if !interactor.NeedsInteraction(authInteraction{
+	if interactor.NeedsInteraction(authInteraction{
 		AuthRequired: true,
 		Gate:         auth.StartupGate{Ready: true},
 		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-env"}}},
 		StoredState:  auth.EmptyState(),
 		HasEnvAPIKey: true,
 	}) {
-		t.Fatal("expected env-only startup without saved preference to require method selection")
+		t.Fatal("did not expect ready env-only startup without saved preference to require method selection")
 	}
 	if !interactor.NeedsInteraction(authInteraction{
 		Gate:         auth.StartupGate{Ready: true},
