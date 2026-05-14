@@ -59,7 +59,7 @@ Goal: pure workflow domain package with domain types and graph validation. No DB
 - [ ] Add test: exactly one start node required.
 - [ ] Add test: missing start node rejected.
 - [ ] Add test: multiple start nodes rejected.
-- [ ] Add test: start node must be non-executable, have no subagent role, have no prompt, and have no output/payload requirements.
+- [ ] Add test: start node must be non-executable, have no subagent role, have no prompt, and have no output requirements.
 - [ ] Add test: start node incoming edges are rejected unless spec is explicitly changed.
 - [ ] Add test: terminal node cannot have outgoing edges.
 - [ ] Add test: terminal node must be non-executable and have no subagent role/prompt.
@@ -79,7 +79,7 @@ Goal: pure workflow domain package with domain types and graph validation. No DB
 - [ ] Add test: edge target node must exist.
 - [ ] Add test: workflow-scoped references cannot cross workflow definitions.
 - [ ] Add test: output schema field names reject empty/duplicate/invalid identifiers.
-- [ ] Add test: payload requirements must reference known source node output fields.
+- [ ] Add test: output requirements must reference known source node output fields.
 - [ ] Add test: context mode must be one of `new_session`, `continue_session`, `compact_and_continue_session`.
 - [ ] Add test: agent node requires valid subagent role.
 - [ ] Add test: missing subagent role returns stable validation code.
@@ -112,7 +112,7 @@ Initial validation error code names:
 - [ ] `workflow.validation.cross_workflow_reference`
 - [ ] `workflow.validation.invalid_output_field`
 - [ ] `workflow.validation.duplicate_output_field`
-- [ ] `workflow.validation.unknown_payload_requirement`
+- [ ] `workflow.validation.unknown_output_requirement`
 - [ ] `workflow.validation.invalid_context_mode`
 - [ ] `workflow.validation.agent_role_required`
 - [ ] `workflow.validation.agent_role_missing`
@@ -124,7 +124,7 @@ Initial validation error code names:
 - [ ] Define node kinds: start, agent, join, terminal.
 - [ ] Define context-preservation modes.
 - [ ] Define node output schema field type with string-only fields.
-- [ ] Define payload requirement type.
+- [ ] Define output requirement type.
 - [ ] Define workflow definition aggregate.
 - [ ] Define project-context validation input with role resolver interface.
 - [ ] Define validation error code type.
@@ -142,7 +142,7 @@ Initial validation error code names:
 - [ ] Validate graph reachability from start.
 - [ ] Validate terminal reachability from every non-terminal node.
 - [ ] Validate cycles/self-loops do not fail by themselves.
-- [ ] Validate payload requirement references.
+- [ ] Validate output requirement references.
 - [ ] Validate context mode values.
 - [ ] Validate agent role references through injected resolver.
 - [ ] Return structured validation errors with stable codes.
@@ -454,21 +454,40 @@ Goal: task-managed worktree creation/registering without interactive session/con
 - [ ] Run `./scripts/build.sh --output ./bin/builder`.
 - [ ] Commit slice with message like `feat: add task worktree primitive`.
 
-## Slice 6: Durable Queue, Claims, And Recovery
+## Slice 5.5: Full Non-Agent E2E Smoke Check
 
-Goal: SQLite-backed runnable workflow queue with CAS claims, fencing, global concurrency, and startup reconciliation.
+Goal: dedicated no-LLM manual smoke through real CLI/API/backend state before runtime/agent loop work.
+
+- [ ] Run smoke against a temp persistent root and embedded-local server wiring, not Nikita's real daemon/root.
+- [ ] Create or bind a test project/workspace.
+- [ ] Create a real workflow graph with start, agent, and terminal nodes.
+- [ ] Link workflow to project as default.
+- [ ] Validate workflow.
+- [ ] Create multiple tasks with title/body.
+- [ ] Inspect board view.
+- [ ] Inspect task detail view.
+- [ ] Add, replace, and soft-delete task comments.
+- [ ] Verify short IDs and stable row IDs needed by future commands.
+- [ ] Ensure task-owned worktree creation works from the temp root.
+- [ ] Verify unsupported manual move/approval commands still fail loudly if Slice 11 is not implemented yet.
+- [ ] Capture exact smoke commands and results in implementation notes or this checklist.
+- [ ] Confirm no provider calls happened.
+
+## Slice 6: Scheduler, Runnable Derivation, And Recovery
+
+Goal: scheduler rebuilds runnable workflow work from durable placement/run intent, while queued/running stay in live scheduler/runtime state.
 
 ### 6.1 Red Tests
 
 - [ ] Add config schema/default test for workflow global concurrency defaulting to `5`.
 - [ ] Add config validation test for invalid workflow concurrency values.
-- [ ] Add test for selecting oldest queued run.
+- [ ] Add test for selecting oldest runnable run from automation request time.
 - [ ] Add test for global concurrency cap.
-- [ ] Add concurrent claim race test proving one claim wins.
-- [ ] Add test for claim metadata persisted.
-- [ ] Add stale claim completion rejected by generation/fence.
-- [ ] Add test for queued state retained on startup.
-- [ ] Add test for running state becoming interrupted on startup.
+- [ ] Add concurrent scheduler race test proving one live runtime starts per runnable run.
+- [ ] Add test proving no durable `queued`/`running` run state is written.
+- [ ] Add stale runtime completion rejected by generation/fence.
+- [ ] Add test for runnable work rebuilt on startup.
+- [ ] Add test for orphaned started run becoming interrupted on startup.
 - [ ] Add test for waiting-for-question retained when ask can rehydrate.
 - [ ] Add test for waiting-for-question becoming interrupted when ask cannot rehydrate.
 - [ ] Add test for pending approval retained on startup.
@@ -477,22 +496,23 @@ Goal: SQLite-backed runnable workflow queue with CAS claims, fencing, global con
 
 ### 6.2 Implementation
 
-- [ ] Add queue service under pure workflow package or separate cohesive scheduler package according to Slice 1 package-boundary decision.
+- [ ] Add scheduler service under pure workflow package or separate cohesive scheduler package according to Slice 1 package-boundary decision.
 - [ ] Add config field/read for global workflow concurrency default 5.
 - [ ] Add config validation for invalid values.
-- [ ] Implement transactional claim from `queued` to `running`.
-- [ ] Store `claim_id`, `claimed_by`, `claimed_at_unix_ms`, and `state_generation`.
-- [ ] Implement completion path requiring matching claim/generation.
+- [ ] Implement runnable work derivation from active placements, automation intent, and terminal outcomes.
+- [ ] Keep queued/running ordering and ownership in memory.
+- [ ] Store and check run generation/fence for stale runtime callbacks.
+- [ ] Implement completion path requiring matching run generation.
 - [ ] Implement startup reconciliation.
 - [ ] Implement atomic transition application transaction.
-- [ ] Add structured logs for claim/recovery/transition outcomes.
+- [ ] Add structured logs for scheduler selection/recovery/transition outcomes.
 
 ### 6.3 Verification
 
-- [ ] Run queue tests with race-sensitive cases repeatedly.
+- [ ] Run scheduler tests with race-sensitive cases repeatedly.
 - [ ] Run `./scripts/test.sh ./server/workflow/... ./server/metadata/...`.
 - [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow queue`.
+- [ ] Commit slice with message like `feat: add workflow scheduler`.
 
 ## Runtime Test Adapter Boundary
 
@@ -502,12 +522,12 @@ Define this boundary before Slice 7 implementation, then reuse it in Slice 8. Fa
 - [ ] Adapter must simulate model output and tool calls without provider network calls.
 - [ ] Adapter must expose deterministic scripted steps: final answer, tool-call batch, `ask_question`, runtime error, and cancellation where needed by tests.
 - [ ] Adapter must record session/run/worktree inputs so tests can assert prompt/context/worktree behavior.
-- [ ] At least one Slice 8 vertical integration path must feed fake model output through the real runtime step loop and real `complete_node` tool handling.
+- [ ] At least one Slice 8 vertical integration path must feed fake model output through the real runtime step loop and real workflow completion handling.
 - [ ] Real-provider smoke must remain outside automated tests and behind Nikita approval.
 
-## Slice 7: Runtime Completion Hook And `complete_node`
+## Slice 7: Workflow Prompting And Completion Runtime
 
-Goal: runtime can identify workflow run context, expose static `complete_node`, validate completion, and stop node run cleanly.
+Goal: runtime can identify workflow run context, inject workflow-mode instructions, expose structured-output or dynamic tool completion, validate completion, and stop node run cleanly.
 
 ### 7.1 Recon
 
@@ -516,31 +536,42 @@ Goal: runtime can identify workflow run context, expose static `complete_node`, 
 - [ ] Inspect `server/runtime/tool_executor.go`.
 - [ ] Inspect `server/runtime/step_executor.go`.
 - [ ] Inspect `server/runtimewire` workflow-relevant runtime construction.
+- [ ] Inspect `server/runprompt` headless launch/wiring/progress patterns for reusable workflow runtime pieces.
+- [ ] Inspect `prompts/headless_mode_prompt.md` and headless prompt injection path before designing workflow mode prompt.
 - [ ] Inspect `server/sessionruntime` and `server/runtimecontrol` activation/control boundaries.
 - [ ] Inspect runtime tests for tool call execution and final answer handling.
 - [ ] Identify where tool-call batch preflight belongs.
+- [ ] Inspect `server/llm` structured output request support and reviewer structured-output usage.
 
 ### 7.2 Red Tests
 
-- [ ] Add tool definition test for static `complete_node` schema.
+- [ ] Add prompt test for `prompts/workflow_mode_prompt.md` content and injection.
+- [ ] Add config test for temporary global completion mode `auto|structured_output|tool`.
+- [ ] Add schema generation test for structured output with top-level custom fields and descriptions.
+- [ ] Add schema generation test for dynamic `complete_node` tool with top-level custom fields and descriptions.
 - [ ] Add runtime test: `complete_node` outside workflow returns not-in-workflow error.
 - [ ] Add runtime test: `complete_node` available despite subagent role tool config.
 - [ ] Add runtime test: mixed `complete_node` plus another tool is rejected before side effects.
+- [ ] Add runtime test: structured output completion accepted when configured/supported.
+- [ ] Add runtime test: `auto` falls back to tool mode when structured output is unsupported.
 - [ ] Add runtime test: missing transition ID accepted when one outgoing transition group.
 - [ ] Add runtime test: missing transition ID rejected when multiple groups.
 - [ ] Add runtime test: invalid transition ID rejected.
-- [ ] Add runtime test: unknown payload field rejected.
-- [ ] Add runtime test: missing edge-required payload rejected after transition selection.
-- [ ] Add runtime test: valid completion persists tool result and stops without another model turn.
+- [ ] Add runtime test: unknown output field rejected.
+- [ ] Add runtime test: missing edge-required output rejected after transition selection.
+- [ ] Add runtime test: valid completion persists structured/tool completion result and stops without another model turn.
 - [ ] Add runtime test: normal final answer in workflow run gets developer nudge and continues.
 - [ ] Add regression test: non-workflow tool execution unchanged.
 
 ### 7.3 Implementation
 
-- [ ] Add `complete_node` tool definition and schema.
-- [ ] Add workflow run context carrier into runtime/tool execution.
+- [ ] Add workflow-mode prompt source and runtime injection.
+- [ ] Add temporary global workflow completion mode config.
+- [ ] Add structured-output schema generator.
+- [ ] Add dynamic `complete_node` tool schema generator.
+- [ ] Add workflow run context carrier into runtime structured-output/tool execution.
 - [ ] Add tool-call preflight for mixed `complete_node`.
-- [ ] Add completion validation hook into workflow service.
+- [ ] Add completion validation hook into workflow service for both modes.
 - [ ] Add terminal signal from tool execution to step loop.
 - [ ] Add final-answer invalid-output nudge for workflow runs.
 - [ ] Keep prompt/tool definitions centralized.
@@ -553,35 +584,36 @@ Goal: runtime can identify workflow run context, expose static `complete_node`, 
 
 ## Slice 8: Single-Agent `new_session` Vertical Slice
 
-Goal: one executable workflow node can run asynchronously through queue/session/worktree/runtime with fake model completion.
+Goal: one executable workflow node can run asynchronously through scheduler/session/worktree/runtime with fake model completion.
 
 ### 8.1 Red Tests
 
 - [ ] Add integration test for `backlog(start) -> agent -> done(terminal)`.
-- [ ] Add test task creation then explicit start/schedule action queues first executable run without relying on full manual-move semantics.
+- [ ] Add test task creation then explicit start/schedule action marks first executable run runnable without relying on full manual-move semantics.
 - [ ] Add test scheduling executable node ensures task worktree.
-- [ ] Add test run claim creates new Builder session.
-- [ ] Add test node prompt includes task title/body and bound transition payload.
-- [ ] Add fake provider/model flow that drives real runtime step loop and real `complete_node` handling.
+- [ ] Add test scheduler start creates new Builder session.
+- [ ] Add test workflow-mode prompt includes task title/body, node identity, completion mode, and bound transition output values.
+- [ ] Add fake provider/model flow that drives real runtime step loop and structured-output completion.
+- [ ] Add fake provider/model flow that drives real runtime step loop and dynamic `complete_node` completion.
 - [ ] Add test transition application moves task to done terminal node.
-- [ ] Add test commentary and payload stored in transition log.
+- [ ] Add test commentary and output values stored in transition log.
 - [ ] Add test no full `events.jsonl` read occurs.
 - [ ] Add CLI-backed integration/smoke test if practical.
-- [ ] Add test executable run is not queued/started if role disappeared after workflow validation.
+- [ ] Add test executable run is not started if role disappeared after workflow validation.
 - [ ] Add test role-drift blocker surfaces stable validation code.
 - [ ] Add test worker starts and stops with server core lifecycle.
 - [ ] Add test shutdown cancels in-flight fake run and preserves interrupted state.
-- [ ] Add test two workers do not double-claim same run.
+- [ ] Add test two workers do not double-start same run.
 
 ### 8.2 Implementation
 
 - [ ] Add workflow worker loop owned by server core lifecycle.
-- [ ] Add server-owned runtime activation/resume path; do not fake frontend controller lease.
+- [ ] Add server-owned runtime activation/resume path, reusing suitable `builder run`/headless launch and runtime wiring pieces; do not fake frontend controller lease.
 - [ ] Add new-session creation path for workflow run.
 - [ ] Inject workflow node prompt/developer guidance.
 - [ ] Ensure task worktree before workspace-requiring executable run.
-- [ ] Connect queue claim to runtime start.
-- [ ] Connect valid `complete_node` to transition application.
+- [ ] Connect runnable scheduler selection to runtime start.
+- [ ] Connect valid structured-output and dynamic-tool completion to transition application.
 - [ ] Mark source run/placement completed.
 - [ ] Create terminal placement on done node.
 - [ ] Surface run state in board/task read models.
@@ -610,7 +642,7 @@ Goal: workflow runs can use existing `ask_question` source of truth or force an 
 - [ ] Add test workflow run calls `ask_question`.
 - [ ] Add test run state becomes `waiting_for_question`.
 - [ ] Add test answer resumes same run/session.
-- [ ] Add test resumed run completes with `complete_node`.
+- [ ] Add test resumed run completes with workflow completion.
 - [ ] Add restart/reconciliation test with pending ask.
 - [ ] Add failure test for missing/unrehydratable pending ask becoming interrupted.
 
@@ -637,7 +669,7 @@ Goal: edge context modes work and enforce role/session contract constraints.
 
 - [ ] Add test `new_session` creates separate session.
 - [ ] Add test same-role `continue_session` appends/continues source session.
-- [ ] Add test cross-role `continue_session` rejected before queueing.
+- [ ] Add test cross-role `continue_session` rejected before scheduler start.
 - [ ] Add test `compact_and_continue_session` creates compacted continuation input.
 - [ ] Add test compact mode can cross roles.
 - [ ] Add test prior transcript history remains immutable.
@@ -665,14 +697,14 @@ Goal: edge approval and manual override transitions are durable, validated, and 
 ### 11.1 Red Tests
 
 - [ ] Add test edge requiring approval creates pending transition after source completion.
-- [ ] Add test approval by task transition row ID queues stored target edge snapshot.
+- [ ] Add test approval by task transition row ID starts stored target edge snapshot.
 - [ ] Add test graph edit after pending approval does not alter approved behavior.
 - [ ] Add test rejection path marks pending transition rejected.
-- [ ] Add test forward manual move validates supplied payload.
-- [ ] Add test backward manual move reuses stored payload when valid.
-- [ ] Add test missing required payload rejected.
+- [ ] Add test forward manual move validates supplied output values.
+- [ ] Add test backward manual move reuses stored output values when valid.
+- [ ] Add test missing required output rejected.
 - [ ] Add test continuation-required manual move rejected without valid source session.
-- [ ] Add test executable manual target pauses before queue and requires explicit approval.
+- [ ] Add test executable manual target pauses before automation and requires explicit approval.
 
 ### 11.2 Implementation
 
@@ -680,8 +712,8 @@ Goal: edge approval and manual override transitions are durable, validated, and 
 - [ ] Add approval service method by task transition row ID.
 - [ ] Add rejection/cancel service method if needed by UI/CLI.
 - [ ] Implement manual move validation against edge/equivalent metadata.
-- [ ] Implement payload reuse for backward moves.
-- [ ] Implement explicit approve-before-queue for executable manual target.
+- [ ] Implement output value reuse for backward moves.
+- [ ] Implement explicit approve-before-automation for executable manual target.
 - [ ] Update CLI/API/read models for pending approvals.
 - [ ] Replace Slice 4 unsupported `builder task move` placeholder with working manual move command.
 - [ ] Replace Slice 4 unsupported `builder task approve` placeholder with working approval command.
@@ -734,14 +766,14 @@ Goal: operationally usable workflow backend ready for GUI-driven QA.
 
 ### 13.1 Red Tests
 
-- [ ] Add restart test for queued run.
-- [ ] Add restart test for running run becoming interrupted.
+- [ ] Add restart test for runnable work rebuild.
+- [ ] Add restart test for orphaned started run becoming interrupted.
 - [ ] Add restart test for interrupted run staying interrupted.
 - [ ] Add restart test for waiting-for-question.
 - [ ] Add restart test for pending approval.
 - [ ] Add test resume interrupted run continues same session/run/worktree.
-- [ ] Add test cancel run/task path.
-- [ ] Add test fail state with actionable error.
+- [ ] Add test user cancel records interrupted outcome with cancel reason.
+- [ ] Add test runtime error records interrupted outcome with error reason.
 - [ ] Add test role drift at scheduling time.
 - [ ] Add test role drift at resume time.
 - [ ] Add test CLI/API surfaces stable error code.
@@ -749,15 +781,15 @@ Goal: operationally usable workflow backend ready for GUI-driven QA.
 ### 13.2 Implementation
 
 - [ ] Implement resume service and CLI.
-- [ ] Implement cancel service and CLI.
-- [ ] Implement fail/error state transitions.
-- [ ] Add structured logs around scheduler claims.
+- [ ] Implement cancel-as-interrupted service and CLI.
+- [ ] Implement runtime-error interruption transitions.
+- [ ] Add structured logs around scheduler runnable selection.
 - [ ] Add structured logs around run completion.
 - [ ] Add structured logs around transition application.
 - [ ] Add structured logs around validation blockers.
 - [ ] Add structured logs around workflow runtime errors.
 - [ ] Add role-drift validation at scheduling and resume.
-- [ ] Update read models for interrupted/failed/canceled states.
+- [ ] Update read models for interrupted states and interruption reasons.
 - [ ] Update docs/dev decisions if new locked decisions emerged.
 
 ### 13.3 Verification

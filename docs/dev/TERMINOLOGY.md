@@ -67,13 +67,13 @@ An edge configures:
 - routing condition or decision mapping;
 - join/aggregation requirements when multiple inbound branches must complete.
 
-### Transition Payload
+### Transition Output
 
-Structured data produced by a node run for a selected transition group. A transition payload includes the selected transition ID and node output fields carried into edge validation, transition logs, and the next node's input.
+Structured data produced by a node run for a selected transition group. Transition output includes the selected transition ID, optional commentary, and top-level node output fields carried into edge validation, transition logs, and the next node's input.
 
-### Payload Requirements
+### Output Requirements
 
-Edge-owned requirements for transition payload fields. Payload requirements define which source-node output fields must be present before a node transition can continue.
+Edge-owned requirements for transition output fields. Output requirements define which source-node output fields must be present before a node transition can continue.
 
 ### Transition ID
 
@@ -97,11 +97,11 @@ One durable execution attempt for a node on a task. A run may create or continue
 
 ### Interrupted Run
 
-A run whose execution stopped before producing a valid transition payload. Its session and worktree state remain available so execution can continue from the interruption point.
+A run whose execution stopped before producing valid transition output. Its session and worktree state remain available so execution can continue from the interruption point.
 
 ### Node Output Schema
 
-A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, UI display, transition payloads, and the next node's input bindings.
+A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, UI display, transition output, and the next node's input bindings.
 
 ### Session
 
@@ -133,11 +133,11 @@ An agent node whose prompt asks it to coordinate work. Orchestration may use sub
 
 ### Operational Stop State
 
-A workflow/task state where auto-execution stops because the task is done, canceled, failed, blocked, or awaiting manual/user action.
+A workflow/task state where auto-execution stops because the task is done, interrupted, blocked, or awaiting manual/user action.
 
-### Execution Queue
+### Scheduler
 
-Durable scheduling state for runnable workflow work. The execution queue decides when runs may start or resume; runtime leases remain separate execution-control state.
+Server-owned automation scheduler for runnable workflow work. Runnable work is derived from durable task/run state, while queued/running ordering and ownership are live scheduler/runtime state.
 
 ### Task Comment
 
