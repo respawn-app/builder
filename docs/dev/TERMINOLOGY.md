@@ -28,18 +28,19 @@ A durable directed graph that describes how tasks move through work. A workflow 
 
 A project association with a reusable workflow definition. The link lets a project use a workflow without copying the workflow graph.
 
+### Assignee
+
+The subagent role associated with an executable node. UI surfaces may present the role as the node's assignee.
+
 ### Node
 
 A visible workflow state and Kanban column/status. Node identity is execution identity: when a task is in a node, that node determines which run behavior applies.
-
-A node may have an assignee.
 
 Executable nodes configure agent-run behavior:
 
 - subagent role reference and validation policy;
 - node prompt/template;
-- model/provider/auth/settings overrides where supported;
-- enabled tools/tool policy;
+- output schema;
 - timeout, turn limit, retry policy, and stop conditions;
 - worktree/session execution policy that applies while this node runs.
 
