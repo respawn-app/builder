@@ -268,18 +268,18 @@ Goal: add DB shape and generated query surface before high-level store behavior.
 
 ### 2A.3 SQLC
 
-- [ ] Add sqlc queries for workflow CRUD.
-- [ ] Add sqlc queries for graph revision increments on graph-affecting edits.
-- [ ] Add sqlc queries for nodes/groups/edges CRUD.
-- [ ] Add sqlc queries for project workflow links.
-- [ ] Add sqlc queries for project workflow unlink/default semantics.
+- [x] Add sqlc queries for workflow CRUD.
+- [x] Add sqlc queries for graph revision increments on graph-affecting edits.
+- [x] Add sqlc queries for nodes/groups/edges CRUD.
+- [x] Add sqlc queries for project workflow links.
+- [x] Add sqlc queries for project workflow unlink/default semantics.
 - [x] Add sqlc queries for project key/task sequence allocation.
-- [ ] Add sqlc queries for task create/read/list.
-- [ ] Add sqlc queries for task start and task cancellation.
-- [ ] Add sqlc queries for placement create/update/read.
-- [ ] Add sqlc queries for run create/update/read.
-- [ ] Add sqlc queries for transition log and transition edge snapshots.
-- [ ] Add sqlc queries for task comments.
+- [x] Add sqlc queries for task create/read/list.
+- [x] Add sqlc queries for task start and task cancellation.
+- [x] Add sqlc queries for placement create/update/read.
+- [x] Add sqlc queries for run create/update/read.
+- [x] Add sqlc queries for transition log and transition edge snapshots.
+- [x] Add sqlc queries for task comments.
 - [x] Regenerate sqlc output using existing repo command/pattern.
 
 ### 2B: Workflow, Link, And Task Store
@@ -288,37 +288,37 @@ Goal: typed transactional store methods for workflows, project links, tasks, pla
 
 ### 2B.1 Red Store Tests
 
-- [ ] Add test for workflow create/update/read/list.
-- [ ] Add test for workflow creation auto-creating editable `backlog` start node and `done` terminal node.
-- [ ] Add test for node/transition group/edge persistence.
-- [ ] Add test for project-workflow link create/list/delete.
-- [ ] Add test project workflow unlink rejects when non-terminal tasks reference link.
+- [x] Add test for workflow create/update/read/list.
+- [x] Add test for workflow creation auto-creating editable `backlog` start node and `done` terminal node.
+- [x] Add test for node/transition group/edge persistence.
+- [x] Add test for project-workflow link create/list/delete.
+- [x] Add test project workflow unlink rejects when non-terminal tasks reference link.
 - [ ] Add test project workflow unlink soft-disables link and preserves terminal task history.
-- [ ] Add test unlinking current default requires replacement default when other active links remain.
-- [ ] Add test for exactly one default workflow link per project.
-- [ ] Add test invalid workflow can be linked/defaulted but task creation rejects with accumulated validation errors.
-- [ ] Add test for task create selecting default workflow.
-- [ ] Add test for task create with explicit workflow.
-- [ ] Add test for task create creates exactly one start node placement.
-- [ ] Add test for same task short sequence allowed in different projects but short ID uniqueness enforced within one project.
-- [ ] Add test that task creation rejects workflow not linked to task project.
-- [ ] Add test task creation rejects invalid linked/default workflow.
-- [ ] Add test `task start` applies start node's single outgoing transition group.
+- [x] Add test unlinking current default requires replacement default when other active links remain.
+- [x] Add test for exactly one default workflow link per project.
+- [x] Add test invalid workflow can be linked/defaulted but task creation rejects with accumulated validation errors.
+- [x] Add test for task create selecting default workflow.
+- [x] Add test for task create with explicit workflow.
+- [x] Add test for task create creates exactly one start node placement.
+- [x] Add test for same task short sequence allowed in different projects but short ID uniqueness enforced within one project.
+- [x] Add test that task creation rejects workflow not linked to task project.
+- [x] Add test task creation rejects invalid linked/default workflow.
+- [x] Add test `task start` applies start node's single outgoing transition group.
 - [ ] Add test `task start` rejects stale/invalid workflow with accumulated validation errors.
-- [ ] Add test for placement state transitions.
-- [ ] Add test for run create/update state fields.
+- [x] Add test for placement state transitions.
+- [x] Add test for run create/update state fields.
 - [ ] Add test terminal placement remains active and read models infer done.
-- [ ] Add test task cancellation records task metadata, interrupts active runs, and suppresses scheduler.
+- [x] Add test task cancellation records task metadata, interrupts active runs, and suppresses scheduler.
 
 ### 2B.2 Store Implementation
 
-- [ ] Add store methods wrapping workflow create/default-node creation in one transaction.
-- [ ] Add store methods for project workflow links and default link changes.
-- [ ] Add store methods for workflow unlink semantics.
-- [ ] Add store methods for atomic task sequence allocation and task creation.
-- [ ] Add store methods for task start and task cancellation.
-- [ ] Add store methods for placement and run state updates.
-- [ ] Keep store methods typed; avoid passing raw JSON strings across domain boundaries where avoidable.
+- [x] Add store methods wrapping workflow create/default-node creation in one transaction.
+- [x] Add store methods for project workflow links and default link changes.
+- [x] Add store methods for workflow unlink semantics.
+- [x] Add store methods for atomic task sequence allocation and task creation.
+- [x] Add store methods for task start and task cancellation.
+- [x] Add store methods for placement and run state updates.
+- [x] Keep store methods typed; avoid passing raw JSON strings across domain boundaries where avoidable.
 
 ### 2C: Transitions, Comments, And Guards
 
@@ -326,16 +326,16 @@ Goal: transition/comment history and guarded graph mutation behavior.
 
 ### 2C.1 Red Store Tests
 
-- [ ] Add test for transition log create/read ordering.
-- [ ] Add test for transition edge snapshot persistence.
+- [x] Add test for transition log create/read ordering.
+- [x] Add test for transition edge snapshot persistence.
 - [ ] Add test transition snapshot stores graph revision plus source node, transition, target node, and effective edge config snapshots.
 - [ ] Add test every applied transition stores transition-edge snapshots, not only approvals.
 - [ ] Add test for pending approval snapshot not changing after graph edit.
-- [ ] Add test for comment add.
-- [ ] Add test for comment body size limit.
-- [ ] Add test for comment full-text replace.
-- [ ] Add test for comment soft-delete.
-- [ ] Add test for deleted comments hidden by default.
+- [x] Add test for comment add.
+- [x] Add test for comment body size limit.
+- [x] Add test for comment full-text replace.
+- [x] Add test for comment soft-delete.
+- [x] Add test for deleted comments hidden by default.
 - [ ] Add test for guarded graph delete rejected when non-terminal tasks reference graph element.
 - [ ] Add test physical graph row delete is rejected while any task history references the graph element.
 - [ ] Add test terminal-only graph references allow archive/hide semantics but not physical row deletion.
@@ -343,10 +343,10 @@ Goal: transition/comment history and guarded graph mutation behavior.
 
 ### 2C.2 Store Implementation
 
-- [ ] Add store methods for transition log and edge snapshots.
-- [ ] Add store methods for task comments.
+- [x] Add store methods for transition log and edge snapshots.
+- [x] Add store methods for task comments.
 - [ ] Add guarded graph-delete checks.
-- [ ] Add transactional helpers for multi-row transition/comment operations.
+- [x] Add transactional helpers for multi-row transition/comment operations.
 
 ### 2.5 Slice Verification
 

@@ -95,6 +95,20 @@ func (s *Store) PersistenceRoot() string {
 	return s.persistenceRoot
 }
 
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
+func (s *Store) Queries() *sqlitegen.Queries {
+	if s == nil {
+		return nil
+	}
+	return s.queries
+}
+
 var registerWorkspaceBindingAfterLookupMissHook func()
 var insertWorkspaceBindingAfterProjectUpsertHook func()
 var rebindWorkspaceBeforeUpdateHook func()
