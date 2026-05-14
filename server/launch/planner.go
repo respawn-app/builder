@@ -144,7 +144,9 @@ func applyPersistedSubagentRoleSettings(base config.Settings, source config.Sour
 		return base, source
 	}
 	resolved := cloneSettings(base)
-	_ = applyBuiltInRoleHeuristics(&resolved, normalizedRole, persistedRoleProviderID(base), allowModelOverride)
+	providerSettings := cloneSettings(base)
+	applySubagentProviderOverrides(&providerSettings, role)
+	_ = applyBuiltInRoleHeuristics(&resolved, normalizedRole, persistedRoleProviderID(providerSettings), allowModelOverride)
 	applySubagentRoleOverrides(&resolved, role, allowModelOverride)
 	effectiveSource := sourceReportWithSubagentRoleSources(source, base, normalizedRole, allowModelOverride)
 	effectiveSources := cloneStringMap(effectiveSource.Sources)
@@ -169,6 +171,9 @@ func shouldApplyPersistedContinuationBaseURL(base config.Settings, roleName stri
 func persistedRoleProviderID(settings config.Settings) string {
 	if providerID := strings.TrimSpace(settings.ProviderCapabilities.ProviderID); providerID != "" {
 		return providerID
+	}
+	if providerOverride := strings.TrimSpace(settings.ProviderOverride); providerOverride != "" {
+		return providerOverride
 	}
 	provider, err := llm.InferProviderFromModel(settings.Model)
 	if err != nil {

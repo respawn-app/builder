@@ -51,13 +51,20 @@ func (c *sessionRuntimeClient) ensureWritable() error {
 	if c == nil {
 		return errReadOnlyRuntime
 	}
-	c.mu.RLock()
-	readOnly := c.readOnly
-	c.mu.RUnlock()
-	if readOnly {
+	if c.isReadOnly() {
 		return errReadOnlyRuntime
 	}
 	return nil
+}
+
+func (c *sessionRuntimeClient) isReadOnly() bool {
+	if c == nil {
+		return true
+	}
+	c.mu.RLock()
+	readOnly := c.readOnly
+	c.mu.RUnlock()
+	return readOnly
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {

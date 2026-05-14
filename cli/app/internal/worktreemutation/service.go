@@ -17,12 +17,14 @@ const defaultResolveTimeout = 3 * time.Second
 var (
 	ErrClientUnavailable          = errors.New("worktree client is unavailable")
 	ErrControllerLeaseUnavailable = errors.New("controller lease is unavailable")
+	ErrReadOnlyRuntime            = errors.New("runtime is read-only")
 )
 
 type RuntimeControl struct {
 	Context        func() (context.Context, context.CancelFunc)
 	CurrentLeaseID func() string
 	RecoverLease   func(context.Context, error) error
+	ReadOnly       func() bool
 }
 
 type Service struct {
@@ -116,6 +118,9 @@ func (s Service) controlContextWithLease() (context.Context, context.CancelFunc,
 	}
 	if s.Runtime.Context == nil || s.Runtime.CurrentLeaseID == nil || s.Runtime.RecoverLease == nil {
 		return nil, nil, "", ErrControllerLeaseUnavailable
+	}
+	if s.Runtime.ReadOnly != nil && s.Runtime.ReadOnly() {
+		return nil, nil, "", ErrReadOnlyRuntime
 	}
 	ctx, cancel := s.Runtime.Context()
 	if ctx == nil || cancel == nil {

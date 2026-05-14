@@ -1708,6 +1708,56 @@ func TestApplyRunPromptOverridesFastRoleUsesCLIProviderOverrideForHeuristic(t *t
 	}
 }
 
+func TestPlannerResumeFastRoleUsesProviderOverrideForHeuristic(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"model = \"my-team-alias\"",
+		"provider_override = \"openai\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetContinuationContext(session.ContinuationContext{AgentRole: config.BuiltInSubagentRoleFast}); err != nil {
+		t.Fatalf("SetContinuationContext: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   workspace,
+			PersistenceRoot: root,
+			Settings:        loaded.Settings,
+			Source:          loaded.Source,
+		},
+		ContainerDir: containerDir,
+	}
+
+	plan, err := planner.PlanSession(context.Background(), SessionRequest{Mode: ModeInteractive, SelectedSessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	if plan.ActiveSettings.Model != "gpt-5.4-mini" {
+		t.Fatalf("model = %q, want fast heuristic model", plan.ActiveSettings.Model)
+	}
+	if !plan.ActiveSettings.PriorityRequestMode {
+		t.Fatal("expected fast heuristic priority mode")
+	}
+}
+
 func TestApplyRunPromptOverridesFailedConfigOverrideDoesNotPersistContinuation(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

@@ -50,6 +50,7 @@ type runtimeHandle struct {
 	controllerRequestID string
 	controllerLeaseID   string
 	activationErr       error
+	closing             bool
 	takeover            *runtimeTakeover
 	ready               chan struct{}
 	rebind              func(string) error
@@ -320,7 +321,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 		s.mu.Unlock()
 		return serverapi.SessionRuntimeReleaseResponse{}, invalidControllerLeaseError(sessionID)
 	}
-	delete(s.handles, sessionID)
+	current.closing = true
 	closeFn := current.close
 	takeover := current.takeover
 	s.mu.Unlock()
@@ -328,6 +329,11 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	if closeFn != nil {
 		closeFn()
 	}
+	s.mu.Lock()
+	if s.handles[sessionID] == current {
+		delete(s.handles, sessionID)
+	}
+	s.mu.Unlock()
 	return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 }
 
@@ -342,7 +348,7 @@ func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHa
 		s.mu.Unlock()
 		return
 	}
-	delete(s.handles, trimmedSessionID)
+	current.closing = true
 	closeFn := current.close
 	takeover := current.takeover
 	s.mu.Unlock()
@@ -350,6 +356,11 @@ func (s *Service) closeReleasedRuntimeHandle(sessionID string, handle *runtimeHa
 	if closeFn != nil {
 		closeFn()
 	}
+	s.mu.Lock()
+	if s.handles[trimmedSessionID] == current {
+		delete(s.handles, trimmedSessionID)
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
@@ -579,6 +590,9 @@ func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeH
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
+		if current.closing {
+			return nil, nil, activationClaimOwner, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is closing its active controller", sessionID))
+		}
 		if current.controllerRequestID == requestID {
 			return current, nil, activationClaimReuse, nil
 		}
