@@ -40,6 +40,10 @@ An edge configures:
 - routing condition or decision mapping;
 - join/aggregation requirements when multiple inbound branches must complete.
 
+### Transition ID
+
+A stable identifier for an edge leaving a node. Agent nodes choose a transition ID when their output can follow more than one edge. The transition ID selects the edge; the edge selects the target node and transition behavior.
+
 ### Context-Preservation Mode
 
 Per-edge transition policy that decides how the next node receives execution context:
@@ -51,6 +55,10 @@ Per-edge transition policy that decides how the next node receives execution con
 ### Run
 
 One durable execution attempt for a node on a task. A run may create or continue a Builder session, call tools, ask questions, produce structured node output, and terminate with a structured outcome.
+
+### Node Output Schema
+
+A node-owned schema for the structured output that completes a run. The schema defines fields the agent must provide when it completes the node. Workflow orchestration uses these fields for edge decisions, task metadata updates, UI display, and the next node's input bindings.
 
 ### Session
 

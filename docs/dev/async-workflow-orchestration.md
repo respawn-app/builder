@@ -40,7 +40,6 @@ Source: https://www.anthropic.com/engineering/building-effective-agents
 - What CLI surface is enough to test v1 without building frontend?
 - How flexible should per-node inputs/outputs be without exposing arbitrary JSON schema building?
 - How should user questions pause/resume tasks across many concurrent agents?
-- How should worktrees, branches, commits, PRs, and cleanup attach to tasks?
 - How should queueing, retries, cancellations, and resource cleanup behave?
 - What is the migration path from current sessions/goals/subagents into workflow runs?
 
@@ -59,6 +58,22 @@ Decisions will be recorded here during the planning interview.
 - V1 should keep node identity equal to visible Kanban column/status identity. Multiple executable nodes sharing one column creates ambiguous manual moves and unclear debugging. Later UI can add display grouping if needed.
 - Parallel joins always wait for all required inputs in v1. Racing/first-success semantics are out of scope.
 - Orchestrator-workers should not dynamically create workflow nodes or Kanban columns in v1. An orchestrator is an ordinary agent node that may use existing subagent/session infrastructure inside its run or feed statically defined graph branches.
+- Agent nodes complete by calling a node-specific completion tool, not by returning natural language. The completion payload chooses a user-defined outgoing transition when the node has more than one outgoing edge and supplies node output fields. Runtime failure, cancellation, and unanswered questions are orchestration states, not model-selected terminal statuses.
+- User questions use `ask_question` interception. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered.
+- Node output schemas are user-authored but intentionally flat. Fields are strings; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
+- Edge approval is a boolean edge property. When approval is required, the source run finishes and the node transition waits before scheduling the target run.
+- A task owns one managed worktree by default. Implementation and review nodes reuse it unless later node/edge configuration adds an explicit override.
+- Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work.
+
+## Schema Direction
+
+The completion tool should be generated from node config:
+
+- `transition_id`: required when a node has more than one outgoing edge; value should be an enum of valid outgoing edge IDs.
+- `output` or `commentary`: optional catch-all string field available by convention unless the node config disables it.
+- user-defined fields: flat string fields such as `review_findings`, `verification`, `architecture_notes`, or `merge_notes`.
+
+Prefer `transition_id` over `next_node` because the edge owns approval, context preservation, input/output bindings, and routing semantics. The target node is derived from the selected edge.
 
 ## Domain Vocabulary
 
