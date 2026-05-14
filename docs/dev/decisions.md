@@ -20,6 +20,17 @@
 - Source layout is a single Go module organized under top-level `cli/`, `server/`, and `shared/` roots: CLI/frontend-owned packages live under `cli/`, authoritative runtime/persistence/tool/auth packages live under `server/`, and boundary-safe shared contracts/helpers live under `shared/`.
 - Working name is `builder` and must stay easy to rename.
 
+## Async Workflow Orchestration
+
+- Async workflow orchestration planning is backend/domain/persistence/runtime first. Frontend implementation is deferred except for backend read models and API shapes needed by a parallel POC GUI.
+- Workflow CLI is an internal backend-testing and agent-control surface, not the primary user manual QA surface.
+- Nikita-led manual QA for async workflows should wait until a usable GUI/POC exists on top of workflow APIs.
+- Workflow API/read-model shapes do not need public compatibility stability before Builder 2.0 and may change while the workflow implementation evolves.
+- A parallel POC GUI should consume workflow APIs through a thin adapter layer so pre-2.0 backend DTO/read-model churn does not spread through UI code.
+- First implementation milestone is workflow domain validation, metadata persistence, API/read models, and minimal CLI through internal no-LLM coding-agent smoke checks. Real runtime/LLM orchestration follows after that foundation.
+- Automated workflow runtime tests should use fake model/runtime adapters until real-provider smoke testing is explicitly approved.
+- Real-agent workflow QA requires explicit approval because it spends provider credits and can fail for model/provider reasons unrelated to orchestration correctness.
+
 ## Client/Server Lifecycle Boundary
 
 - Server owns durable lifecycle state, lifecycle mutations, and canonical lifecycle event streams.

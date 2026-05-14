@@ -100,6 +100,7 @@ Decisions will be recorded here during the planning interview.
 - Task lifecycle state should derive from node placement/run state rather than a separate task status enum. The task's node placement is the workflow/Kanban state; blocked/running/interrupted/done conditions come from runs and terminal nodes.
 - CLI is an internal backend-testing and agent-control surface, not the primary manual QA surface for users. User manual QA should wait until there is a usable GUI/POC backed by the workflow APIs.
 - Workflow API/read-model shapes do not need public stability before Builder 2.0. A parallel POC GUI can consume them, but it should expect breaking changes while workflow orchestration is under active development.
+- The POC GUI should sit behind a thin workflow API adapter layer so backend DTO/read-model churn does not spread through UI code.
 
 ## Completion Control Schema
 
@@ -531,6 +532,7 @@ Completion criteria:
 - Contract tests cover request validation, project default workflow resolution, stable board ordering by workflow node order, task detail with active placements/runs, transition history ordering, and deleted comments hidden by default.
 - Loopback client and remote route tests exercise same service methods.
 - UI/POC GUI can obtain board and task detail views without reading session transcripts or `events.jsonl`.
+- POC GUI integration goes through a thin adapter layer because backend workflow DTOs/read models can break before Builder 2.0.
 
 ### Slice 4: Minimal Workflow And Task CLI
 
@@ -546,7 +548,7 @@ Completion criteria:
 
 - CLI tests or command-level tests create a workflow, link it to a project, create a task, list/show board/task views, add/replace/delete comments, validate graph errors, and create a manual pending transition without queueing automation.
 - CLI output includes enough IDs for humans and agents to continue from terminal logs.
-- A no-LLM manual QA pass can be run by a coding agent against a temporary persistence root: create a real workflow graph, create tasks, inspect board/task views, move a task manually, and verify comments plus IDs behave as expected.
+- A no-LLM coding-agent smoke check can be run against a temporary persistence root: create a real workflow graph, create tasks, inspect board/task views, move a task manually, and verify comments plus IDs behave as expected.
 
 ### Slice 5: Task-Owned Worktree Primitive
 
@@ -695,7 +697,7 @@ Completion criteria:
 First implementation milestone should end after Slice 4:
 
 - It gives durable workflow/task CRUD, validation, board/task read models, and comments without runtime risk.
-- Builder can perform first internal no-LLM QA at this point by creating a real graph/task through CLI/API and validating status movement, comments, IDs, and read models.
+- Builder can perform first internal no-LLM smoke check at this point by creating a real graph/task through CLI/API and validating status movement, comments, IDs, and read models.
 - This milestone needs no real LLM calls.
 - Nikita-led manual QA should be deferred until a usable GUI/POC exists on top of these APIs.
 
