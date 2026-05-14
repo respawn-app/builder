@@ -504,8 +504,9 @@ func emitWarnings(w io.Writer, warnings []string) {
 }
 
 func effectiveRunAgentRole(raw string, fast bool) (string, error) {
-	normalized := config.NormalizeSubagentRole(raw)
-	if strings.TrimSpace(raw) != "" && normalized == "" {
+	trimmed := strings.TrimSpace(raw)
+	normalized := config.NormalizeSubagentSelector(trimmed)
+	if trimmed != "" && normalized == "" && !config.IsReservedSubagentRoleName(trimmed) {
 		return "", fmt.Errorf("invalid --agent value %q", raw)
 	}
 	if fast {

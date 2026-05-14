@@ -595,6 +595,77 @@ func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan
 	}
 }
 
+func TestSubagentRoleMetadataSurvivesCloneAndSourceReport(t *testing.T) {
+	settings := config.Settings{
+		Subagents: map[string]config.SubagentRole{
+			"worker": {
+				Settings:         config.Settings{Model: "gpt-5.4-mini"},
+				Sources:          map[string]string{"model": "file"},
+				Description:      "Worker role",
+				AgentCallable:    false,
+				AgentCallableSet: true,
+			},
+		},
+	}
+
+	cloned := cloneSettings(settings)
+	copiedRole := cloned.Subagents["worker"]
+	copiedRole.Description = "changed"
+	copiedRole.Sources["model"] = "changed"
+	cloned.Subagents["worker"] = copiedRole
+	if settings.Subagents["worker"].Description != "Worker role" {
+		t.Fatalf("clone mutated source description: %+v", settings.Subagents["worker"])
+	}
+	if settings.Subagents["worker"].Sources["model"] != "file" {
+		t.Fatalf("clone mutated source map: %+v", settings.Subagents["worker"].Sources)
+	}
+	if !cloned.Subagents["worker"].AgentCallableSet || cloned.Subagents["worker"].AgentCallable {
+		t.Fatalf("metadata did not survive clone: %+v", cloned.Subagents["worker"])
+	}
+
+	report := sourceReportWithSubagentRoleSources(config.SourceReport{Sources: map[string]string{"model": "file"}}, settings, "worker")
+	if report.Sources["model"] != "subagent" {
+		t.Fatalf("source report model source = %q, want subagent", report.Sources["model"])
+	}
+}
+
+func TestResolveSubagentSettingsPreservesSubagentCatalogMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := config.Load(t.TempDir(), config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	base := cfg.Settings
+	workerSettings := base
+	workerSettings.ThinkingLevel = "high"
+	blockedSettings := base
+	blockedSettings.Model = "gpt-5.4-mini"
+	base.Subagents = map[string]config.SubagentRole{
+		"worker": {
+			Settings:    workerSettings,
+			Sources:     map[string]string{"thinking_level": "file"},
+			Description: "Worker role",
+		},
+		"blocked": {
+			Settings:         blockedSettings,
+			Sources:          map[string]string{"model": "file"},
+			AgentCallable:    false,
+			AgentCallableSet: true,
+		},
+	}
+
+	resolved, _, err := resolveSubagentSettings(base, base, cfg.Source.Sources, "worker", auth.EmptyState(), true)
+	if err != nil {
+		t.Fatalf("resolveSubagentSettings: %v", err)
+	}
+	if resolved.Subagents["worker"].Description != "Worker role" {
+		t.Fatalf("worker metadata lost after resolve: %+v", resolved.Subagents["worker"])
+	}
+	if !resolved.Subagents["blocked"].AgentCallableSet || resolved.Subagents["blocked"].AgentCallable {
+		t.Fatalf("blocked metadata lost after resolve: %+v", resolved.Subagents["blocked"])
+	}
+}
+
 func TestApplyRunPromptOverridesRejectsInvalidAgentRole(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
@@ -1235,8 +1306,8 @@ func TestApplyRunPromptOverridesRoleOnlyOverridePersistsContinuation(t *testing.
 		t.Fatalf("openai base url = %q, want worker override", updated.ActiveSettings.OpenAIBaseURL)
 	}
 	got := store.Meta().Continuation
-	if got == nil || got.OpenAIBaseURL != "https://worker.example/v1" {
-		t.Fatalf("continuation = %+v, want worker base url", got)
+	if got == nil || got.OpenAIBaseURL != "https://worker.example/v1" || got.AgentRole != "worker" {
+		t.Fatalf("continuation = %+v, want worker base url and agent role", got)
 	}
 }
 

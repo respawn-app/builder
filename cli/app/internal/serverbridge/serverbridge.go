@@ -137,6 +137,10 @@ func ResolveConfig(req BootstrapRequest) (BootstrapConfigPlan, error) {
 	return serverbootstrap.ResolveConfig(req)
 }
 
+func ResolveSessionAgentRole(persistenceRoot string, sessionID string) (string, error) {
+	return serverbootstrap.ResolveSessionAgentRole(persistenceRoot, sessionID)
+}
+
 func StartEmbedded(ctx context.Context, req StartupRequest, authHandler StartupAuthHandler, onboardingHandler StartupOnboardingHandler) (*Server, error) {
 	return serverstartup.Start(ctx, req, authHandler, onboardingHandler)
 }

@@ -23,6 +23,18 @@ type BootstrapPlan struct {
 	UseOpenAIBaseURL bool
 }
 
+func ResolveSessionAgentRole(persistenceRoot string, sessionID string) (string, error) {
+	store, err := openSessionByID(persistenceRoot, sessionID)
+	if err != nil {
+		return "", err
+	}
+	meta := store.Meta()
+	if meta.Continuation == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(meta.Continuation.AgentRole), nil
+}
+
 func ResolveBootstrapPlan(persistenceRoot string, req BootstrapRequest) (BootstrapPlan, error) {
 	plan := BootstrapPlan{
 		WorkspaceRoot:    strings.TrimSpace(req.WorkspaceRoot),
@@ -35,19 +47,7 @@ func ResolveBootstrapPlan(persistenceRoot string, req BootstrapRequest) (Bootstr
 	if strings.TrimSpace(persistenceRoot) == "" {
 		return BootstrapPlan{}, errors.New("launch planner persistence root is required")
 	}
-	store, err := session.OpenByID(persistenceRoot, req.SessionID)
-	if err != nil {
-		primaryErr := err
-		metadataStore, metadataErr := metadata.Open(persistenceRoot)
-		if metadataErr != nil {
-			return BootstrapPlan{}, fmt.Errorf("%w; metadata.Open fallback failed: %v", primaryErr, metadataErr)
-		}
-		defer func() { _ = metadataStore.Close() }()
-		store, err = session.OpenByID(persistenceRoot, req.SessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
-		if err != nil {
-			return BootstrapPlan{}, fmt.Errorf("%w; session.OpenByID fallback failed: %v", primaryErr, err)
-		}
-	}
+	store, err := openSessionByID(persistenceRoot, req.SessionID)
 	if err != nil {
 		return BootstrapPlan{}, err
 	}
@@ -63,4 +63,22 @@ func ResolveBootstrapPlan(persistenceRoot string, req BootstrapRequest) (Bootstr
 		plan.UseOpenAIBaseURL = true
 	}
 	return plan, nil
+}
+
+func openSessionByID(persistenceRoot string, sessionID string) (*session.Store, error) {
+	store, err := session.OpenByID(persistenceRoot, sessionID)
+	if err == nil {
+		return store, nil
+	}
+	primaryErr := err
+	metadataStore, metadataErr := metadata.Open(persistenceRoot)
+	if metadataErr != nil {
+		return nil, fmt.Errorf("%w; metadata.Open fallback failed: %v", primaryErr, metadataErr)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	store, err = session.OpenByID(persistenceRoot, sessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		return nil, fmt.Errorf("%w; session.OpenByID fallback failed: %v", primaryErr, err)
+	}
+	return store, nil
 }

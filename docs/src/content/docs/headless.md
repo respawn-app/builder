@@ -29,6 +29,7 @@ Roles are needed to create specialized subagent types for different tasks. Treat
 model = "gpt-5.5"
 thinking_level = "xhigh"
 system_prompt_file = "research-agent.md"
+description = "Finds source and documentation context for implementation planning."
 priority_request_mode = true
 
 [subagents.research.tools]
@@ -40,12 +41,16 @@ patch = false
 
 - The built-in `fast` role exists even without config. On exact OpenAI first-party setups, Builder heuristically switches it to a smaller/faster model profile.
 - Subagent roles inherit the main config and then override only the keys you set in that role table.
+- Agents see callable custom roles when their current session can run shell commands. Roles with no behavioral difference from the default agent are not listed, even if they have a description.
+- `agent_callable = false` hides a role from agent-facing role context and rejects Builder-session calls to it. Humans can run the role from ordinary shells.
+- `--agent default`, `--agent none`, and `--agent self` are accepted as aliases for omitting `--agent`.
 
 Useful role-specific keys include:
 
 - `model`, `provider_override`, `openai_base_url`
 - `thinking_level`, `model_verbosity`, `priority_request_mode`
 - `system_prompt_file`
+- `description`, `agent_callable`
 - `[subagents.<role>.tools]`
 - `[subagents.<role>.skills]`
 - `shell_output_max_chars`, `bg_shells_output`

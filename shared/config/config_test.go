@@ -396,6 +396,148 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 	}
 }
 
+func TestLoadSubagentRoleMetadataFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"[subagents.research]",
+		"description = \"  Deep    repo\\nresearch  \"",
+		"agent_callable = false",
+		"thinking_level = \"high\"",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	role := cfg.Settings.Subagents["research"]
+	if role.Description != "Deep repo research" {
+		t.Fatalf("description = %q, want normalized description", role.Description)
+	}
+	if role.AgentCallable || !role.AgentCallableSet {
+		t.Fatalf("agent callable metadata = (%t, %t), want false set", role.AgentCallable, role.AgentCallableSet)
+	}
+	if _, exists := role.Sources["description"]; exists {
+		t.Fatalf("description should not be runtime source, got %+v", role.Sources)
+	}
+	if _, exists := role.Sources["agent_callable"]; exists {
+		t.Fatalf("agent_callable should not be runtime source, got %+v", role.Sources)
+	}
+}
+
+func TestLoadSubagentRoleRejectsReservedNames(t *testing.T) {
+	for _, reserved := range []string{"default", "none", "self"} {
+		t.Run(reserved, func(t *testing.T) {
+			home := t.TempDir()
+			workspace := t.TempDir()
+			t.Setenv("HOME", home)
+			configPath := filepath.Join(home, ".builder", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(configPath, []byte("[subagents."+reserved+"]\nmodel = \"gpt-5.5\"\n"), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := Load(workspace, LoadOptions{})
+			if err == nil {
+				t.Fatal("expected reserved role to fail")
+			}
+			if !strings.Contains(err.Error(), "invalid subagents key") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadSubagentRoleRejectsInvalidMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{name: "description type", body: "[subagents.worker]\ndescription = 123\n", wantErr: "expected string"},
+		{name: "agent callable type", body: "[subagents.worker]\nagent_callable = \"no\"\n", wantErr: "expected boolean"},
+		{name: "description length", body: "[subagents.worker]\ndescription = \"" + strings.Repeat("x", MaxSubagentDescriptionChars+1) + "\"\n", wantErr: "description must be <="},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			workspace := t.TempDir()
+			t.Setenv("HOME", home)
+			configPath := filepath.Join(home, ".builder", "config.toml")
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(configPath, []byte(tt.body), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := Load(workspace, LoadOptions{})
+			if err == nil {
+				t.Fatal("expected metadata error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSubagentRoleHasMeaningfulDiffComparesProviderReviewerAndTimeoutValues(t *testing.T) {
+	base := Settings{
+		Timeouts: Timeouts{ModelRequestSeconds: 100},
+		ProviderCapabilities: ProviderCapabilitiesOverride{
+			ProviderID:           "openai",
+			SupportsResponsesAPI: true,
+		},
+		Reviewer: ReviewerSettings{
+			Model:          "gpt-5.5",
+			TimeoutSeconds: 60,
+		},
+	}
+
+	same := SubagentRole{
+		Settings: base,
+		Sources: map[string]string{
+			"timeouts.model_request_seconds":                        "file",
+			"provider_capabilities.supports_responses_api":          "file",
+			"reviewer.model":                                        "file",
+			"reviewer.provider_capabilities.supports_responses_api": "file",
+		},
+	}
+	if SubagentRoleHasMeaningfulDiff(base, same) {
+		t.Fatal("expected equal provider/reviewer/timeout values to be no-op")
+	}
+
+	changedTimeout := same
+	changedTimeout.Settings = base
+	changedTimeout.Settings.Timeouts.ModelRequestSeconds = 200
+	if !SubagentRoleHasMeaningfulDiff(base, changedTimeout) {
+		t.Fatal("expected timeout change to be meaningful")
+	}
+
+	changedProvider := same
+	changedProvider.Settings = base
+	changedProvider.Settings.ProviderCapabilities.SupportsResponsesAPI = false
+	if !SubagentRoleHasMeaningfulDiff(base, changedProvider) {
+		t.Fatal("expected provider capability change to be meaningful")
+	}
+
+	changedReviewer := same
+	changedReviewer.Settings = base
+	changedReviewer.Settings.Reviewer.Model = "gpt-5.4-mini"
+	if !SubagentRoleHasMeaningfulDiff(base, changedReviewer) {
+		t.Fatal("expected reviewer change to be meaningful")
+	}
+}
+
 func TestAppendSystemPromptFileFromConfigResolvesConfigRelativePath(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".builder", "config.toml")
 	state := configRegistry.defaultState()

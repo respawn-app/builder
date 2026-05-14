@@ -580,6 +580,44 @@ func TestRunSubcommandUsesBuilderSessionEnvAsWorkspaceContext(t *testing.T) {
 	}
 }
 
+func TestRunSubcommandDefaultAgentWithFastUsesFastRole(t *testing.T) {
+	original := runPromptApp
+	t.Cleanup(func() {
+		runPromptApp = original
+	})
+	var gotOpts app.Options
+	runPromptApp = func(ctx context.Context, opts app.Options, prompt string, timeout time.Duration, progress io.Writer) (app.RunPromptResult, error) {
+		gotOpts = opts
+		return app.RunPromptResult{Result: "done"}, nil
+	}
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create stdout temp file: %v", err)
+	}
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr temp file: %v", err)
+	}
+	os.Stdout = stdoutFile
+	os.Stderr = stderrFile
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
+	})
+
+	if code := rootCommand([]string{"run", "--agent=default", "--fast", "hello"}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if gotOpts.AgentRole != config.BuiltInSubagentRoleFast {
+		t.Fatalf("agent role = %q, want fast", gotOpts.AgentRole)
+	}
+}
+
 func TestSessionIDSubcommandPrintsBuilderSessionEnv(t *testing.T) {
 	t.Setenv(sessionenv.BuilderSessionID, " session-from-env ")
 	var stdout bytes.Buffer
@@ -627,6 +665,27 @@ func TestEffectiveRunAgentRoleRejectsConflictingFastFlag(t *testing.T) {
 	role, err := effectiveRunAgentRole("fast", true)
 	if err != nil {
 		t.Fatalf("effectiveRunAgentRole: %v", err)
+	}
+	if role != config.BuiltInSubagentRoleFast {
+		t.Fatalf("role = %q, want fast", role)
+	}
+}
+
+func TestEffectiveRunAgentRoleAliasesDefaultSelectors(t *testing.T) {
+	for _, alias := range []string{"default", "none", "self"} {
+		t.Run(alias, func(t *testing.T) {
+			role, err := effectiveRunAgentRole(alias, false)
+			if err != nil {
+				t.Fatalf("effectiveRunAgentRole: %v", err)
+			}
+			if role != "" {
+				t.Fatalf("role = %q, want empty", role)
+			}
+		})
+	}
+	role, err := effectiveRunAgentRole("default", true)
+	if err != nil {
+		t.Fatalf("effectiveRunAgentRole default+fast: %v", err)
 	}
 	if role != config.BuiltInSubagentRoleFast {
 		t.Fatalf("role = %q, want fast", role)

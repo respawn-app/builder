@@ -43,6 +43,7 @@ type LockedProviderCapabilities struct {
 
 type ContinuationContext struct {
 	OpenAIBaseURL string `json:"openai_base_url,omitempty"`
+	AgentRole     string `json:"agent_role,omitempty"`
 }
 
 type UsageState struct {

@@ -989,10 +989,11 @@ func (s *Store) observePersistence(observation *persistenceObservation) error {
 
 func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext {
 	openAIBaseURL := strings.TrimSpace(ctx.OpenAIBaseURL)
-	if openAIBaseURL == "" {
+	agentRole := strings.TrimSpace(ctx.AgentRole)
+	if openAIBaseURL == "" && agentRole == "" {
 		return nil
 	}
-	return &ContinuationContext{OpenAIBaseURL: openAIBaseURL}
+	return &ContinuationContext{OpenAIBaseURL: openAIBaseURL, AgentRole: agentRole}
 }
 
 func normalizeUsageState(state *UsageState) *UsageState {

@@ -89,6 +89,8 @@ verbose_output = false # show in ongoing transcript
 
 # custom subagent roles config, fast is the default one, always provided
 [subagents.fast]
+# agent_callable = true
+# description = ""
 # model = "gpt-5.4-mini"
 # priority_request_mode = true
 ```
@@ -238,6 +240,7 @@ Notes:
 
 Subagent roles inherit the main config and then override only the keys set in that role table.
 Set `system_prompt_file` inside a subagent role to use a role-specific main system prompt for `builder run --agent <role>`.
+Set `description` to describe a behaviorally distinct role to other agents. Set `agent_callable = false` for roles that humans may run explicitly but agents should not call from Builder sessions.
 
 More info on the [Subagents page](../headless.md).
 

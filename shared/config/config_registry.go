@@ -1078,6 +1078,8 @@ func registerSubagentFileKeys(tree *fileKeyTree, settings []registrySetting) {
 		return
 	}
 	template := newFileKeyTree()
+	template.allowPath([]string{"description"})
+	template.allowPath([]string{"agent_callable"})
 	for _, setting := range settings {
 		if _, ok := setting.(subagentsSetting); ok {
 			continue
@@ -1085,7 +1087,7 @@ func registerSubagentFileKeys(tree *fileKeyTree, settings []registrySetting) {
 		setting.registerFileKeys(template)
 	}
 	tree.allowDynamicChildren([]string{"subagents"}, func(key string) bool {
-		return normalizeSubagentRoleKey(key) != ""
+		return IsSubagentRoleNameShape(key)
 	}, template)
 }
 
@@ -1095,6 +1097,14 @@ func parseSubagentRole(raw settingsFile, settingsPath string, roleKey string) (S
 	}
 	if err := validateSettingsFileKeys(raw, subagentRoleKeyTree(configRegistry.settings)); err != nil {
 		return SubagentRole{}, err
+	}
+	description, err := parseSubagentDescription(raw)
+	if err != nil {
+		return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
+	}
+	agentCallable, agentCallableSet, err := parseSubagentAgentCallable(raw)
+	if err != nil {
+		return SubagentRole{}, fmt.Errorf("invalid subagents.%s: %w", roleKey, err)
 	}
 	roleState := configRegistry.defaultState()
 	roleSources := configRegistry.defaultSourceMap()
@@ -1134,11 +1144,19 @@ func parseSubagentRole(raw settingsFile, settingsPath string, roleKey string) (S
 		}
 	}
 	roleState.Settings.Subagents = nil
-	return SubagentRole{Settings: roleState.Settings, Sources: explicitSources}, nil
+	return SubagentRole{
+		Settings:         roleState.Settings,
+		Sources:          explicitSources,
+		Description:      description,
+		AgentCallable:    agentCallable,
+		AgentCallableSet: agentCallableSet,
+	}, nil
 }
 
 func subagentRoleKeyTree(settings []registrySetting) *fileKeyTree {
 	tree := newFileKeyTree()
+	tree.allowPath([]string{"description"})
+	tree.allowPath([]string{"agent_callable"})
 	for _, setting := range settings {
 		if _, ok := setting.(subagentsSetting); ok {
 			continue
@@ -1146,6 +1164,33 @@ func subagentRoleKeyTree(settings []registrySetting) *fileKeyTree {
 		setting.registerFileKeys(tree)
 	}
 	return tree
+}
+
+func parseSubagentDescription(raw settingsFile) (string, error) {
+	value, ok, err := lookupFileValue(raw, []string{"description"})
+	if err != nil || !ok {
+		return "", err
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", invalidSettingsTypeError([]string{"description"}, "string")
+	}
+	description := SanitizeSubagentDescription(text)
+	if len([]rune(description)) > MaxSubagentDescriptionChars {
+		return "", fmt.Errorf("description must be <= %d characters after whitespace normalization", MaxSubagentDescriptionChars)
+	}
+	return description, nil
+}
+
+func parseSubagentAgentCallable(raw settingsFile) (bool, bool, error) {
+	value, ok, err := lookupFileBool(raw, []string{"agent_callable"})
+	if err != nil {
+		return false, false, err
+	}
+	if !ok {
+		return true, false, nil
+	}
+	return value, true, nil
 }
 
 func newFileKeyTree() *fileKeyTree {

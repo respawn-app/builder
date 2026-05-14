@@ -160,6 +160,7 @@
 - In server-browsing mode, the client may open existing server projects/workspaces only; it must not offer "bind this workspace" or "create a project for this client path".
 - First setup for server-browsing mode is server-admin only for now. Remote filesystem traversal/browsing is out of scope for this slice.
 - Headless startup in an unregistered workspace fails fast; it must not auto-create hidden project/workspace state.
+- Subagent roles may be configured as not callable by other agents via `agent_callable=false`; future frontend/status surfaces should mark non-callable roles distinctly rather than hiding the distinction.
 - To support agent recovery in that fail-fast model, Builder will expose explicit workspace-binding CLI commands: `builder project [path]` to inspect the project bound to a path, `builder attach [path]` to bind a workspace to the project already bound to `cwd`, and `builder attach --project <project-id> [path]` as the explicit project-id override. All forms default `path` to `cwd`.
 - The minimum server-admin setup command surface is `builder project list`, `builder project create --path <server-path> --name <project-name>`, and `builder attach --project <project-id> <server-path>`.
 - Those server-admin commands must prefer RPC to the configured running daemon when one exists; they must not require shutting the server down or taking local ownership of the persistence root.

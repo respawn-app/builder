@@ -76,6 +76,7 @@ func buildReviewerRequestMessagesWithNow(messages []llm.Message, workspaceRoot s
 
 func buildReviewerRequestMessagesWithBuilder(messages []llm.Message, builder metaContextBuilder, headless bool) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitMetaContextMessages(messages)
+	metaMessages = filterReviewerMetaMessages(metaMessages)
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		ExistingMessages:          metaMessages,
 		IncludeAgents:             true,
@@ -338,6 +339,7 @@ func reviewerPromptCacheKey(sessionID string, compactionCount int) string {
 
 func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
 	metaMessages, transcript := splitMetaContextMessages(messages)
+	metaMessages = filterReviewerMetaMessages(metaMessages)
 	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, time.Now())
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		ExistingMessages:          metaMessages,
@@ -352,4 +354,18 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 	}
 	out := append(metaResult.OrderedMetaMessages(), transcript...)
 	return out, nil
+}
+
+func filterReviewerMetaMessages(messages []llm.Message) []llm.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeSubagents {
+			continue
+		}
+		out = append(out, message)
+	}
+	return out
 }
