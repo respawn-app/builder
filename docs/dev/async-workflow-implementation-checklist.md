@@ -561,7 +561,7 @@ Goal: task-managed worktree creation/registering without interactive session/con
 
 - [x] Run `./scripts/test.sh ./server/worktree/... ./server/metadata/... ./server/workflow/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add task worktree primitive`.
+- [x] Commit slice with message like `feat: add task worktree primitive`.
 
 ## Slice 5.5: Full Non-Agent E2E Smoke Check
 
