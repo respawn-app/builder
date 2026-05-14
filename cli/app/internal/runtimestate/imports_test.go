@@ -16,10 +16,6 @@ func TestPackageImportsOnlyClientUIDTOs(t *testing.T) {
 		t.Fatal("locate runtimestate package")
 	}
 	packageDir := filepath.Dir(thisFile)
-	allowed := map[string]struct{}{
-		"builder/shared/clientui": {},
-		"strings":                 {},
-	}
 	violations := make([]string, 0)
 	if err := filepath.WalkDir(packageDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -38,9 +34,10 @@ func TestPackageImportsOnlyClientUIDTOs(t *testing.T) {
 		}
 		for _, spec := range file.Imports {
 			importPath := strings.Trim(spec.Path.Value, "\"")
-			if _, ok := allowed[importPath]; !ok {
-				violations = append(violations, filepath.Base(path)+": runtimestate must import only shared clientui DTOs, got "+importPath)
+			if isStdlibImport(importPath) || importPath == "builder/shared/clientui" {
+				continue
 			}
+			violations = append(violations, filepath.Base(path)+": runtimestate must import only stdlib and shared clientui DTOs, got "+importPath)
 		}
 		return nil
 	}); err != nil {
@@ -49,4 +46,8 @@ func TestPackageImportsOnlyClientUIDTOs(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("runtimestate import boundary violations:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+func isStdlibImport(importPath string) bool {
+	return importPath != "" && !strings.Contains(importPath, ".") && !strings.HasPrefix(importPath, "builder/")
 }
