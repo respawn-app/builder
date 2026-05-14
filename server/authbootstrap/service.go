@@ -8,6 +8,7 @@ import (
 	"builder/server/authpolicy"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type Service struct {
@@ -135,4 +136,4 @@ func (s *Service) bootstrapResponseFromState(state auth.State) serverapi.AuthCom
 	}
 }
 
-var _ serverapi.AuthBootstrapService = (*Service)(nil)
+var _ servicecontract.AuthBootstrapService = (*Service)(nil)

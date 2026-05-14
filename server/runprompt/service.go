@@ -6,6 +6,7 @@ import (
 
 	"builder/server/requestmemo"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type runPromptMemoRequest struct {
@@ -16,11 +17,11 @@ type runPromptMemoRequest struct {
 }
 
 type memoizingPromptService struct {
-	inner serverapi.RunPromptService
+	inner servicecontract.RunPromptService
 	runs  *requestmemo.Memo[runPromptMemoRequest, serverapi.RunPromptResponse]
 }
 
-func newMemoizingPromptService(inner serverapi.RunPromptService) serverapi.RunPromptService {
+func newMemoizingPromptService(inner servicecontract.RunPromptService) servicecontract.RunPromptService {
 	if inner == nil {
 		return nil
 	}
@@ -49,4 +50,4 @@ func sameRunPromptMemoRequest(a runPromptMemoRequest, b runPromptMemoRequest) bo
 		a.Overrides == b.Overrides
 }
 
-var _ serverapi.RunPromptService = (*memoizingPromptService)(nil)
+var _ servicecontract.RunPromptService = (*memoizingPromptService)(nil)

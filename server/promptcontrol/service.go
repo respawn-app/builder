@@ -8,6 +8,7 @@ import (
 	askquestion "builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type PendingPromptResponder interface {
@@ -146,4 +147,4 @@ func sameApprovalAnswerMemoRequest(a approvalAnswerMemoRequest, b approvalAnswer
 		a.Commentary == b.Commentary
 }
 
-var _ serverapi.PromptControlService = (*Service)(nil)
+var _ servicecontract.PromptControlService = (*Service)(nil)

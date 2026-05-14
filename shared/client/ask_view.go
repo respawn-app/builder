@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type AskViewClient interface {
@@ -12,10 +13,10 @@ type AskViewClient interface {
 }
 
 type loopbackAskViewClient struct {
-	service serverapi.AskViewService
+	service servicecontract.AskViewService
 }
 
-func NewLoopbackAskViewClient(service serverapi.AskViewService) AskViewClient {
+func NewLoopbackAskViewClient(service servicecontract.AskViewService) AskViewClient {
 	return &loopbackAskViewClient{service: service}
 }
 

@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -38,10 +37,6 @@ type SessionPlan struct {
 type SessionPlanResponse struct {
 	Plan     SessionPlan `json:"plan"`
 	Warnings []string    `json:"warnings,omitempty"`
-}
-
-type SessionLaunchService interface {
-	PlanSession(ctx context.Context, req SessionPlanRequest) (SessionPlanResponse, error)
 }
 
 func (r SessionPlanRequest) Validate() error {

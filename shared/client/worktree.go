@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type WorktreeClient interface {
@@ -16,10 +17,10 @@ type WorktreeClient interface {
 }
 
 type loopbackWorktreeClient struct {
-	service serverapi.WorktreeService
+	service servicecontract.WorktreeService
 }
 
-func NewLoopbackWorktreeClient(service serverapi.WorktreeService) WorktreeClient {
+func NewLoopbackWorktreeClient(service servicecontract.WorktreeService) WorktreeClient {
 	return &loopbackWorktreeClient{service: service}
 }
 

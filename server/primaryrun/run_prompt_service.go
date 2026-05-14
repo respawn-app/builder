@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type guardingPromptService struct {
-	inner serverapi.RunPromptService
+	inner servicecontract.RunPromptService
 	gate  Gate
 }
 
-func NewGuardingPromptService(gate Gate, inner serverapi.RunPromptService) serverapi.RunPromptService {
+func NewGuardingPromptService(gate Gate, inner servicecontract.RunPromptService) servicecontract.RunPromptService {
 	if inner == nil {
 		return nil
 	}
@@ -35,4 +36,4 @@ func (s *guardingPromptService) RunPrompt(ctx context.Context, req serverapi.Run
 	return s.inner.RunPrompt(ctx, req, progress)
 }
 
-var _ serverapi.RunPromptService = (*guardingPromptService)(nil)
+var _ servicecontract.RunPromptService = (*guardingPromptService)(nil)

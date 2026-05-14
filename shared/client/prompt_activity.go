@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type PromptActivityClient interface {
@@ -12,10 +13,10 @@ type PromptActivityClient interface {
 }
 
 type loopbackPromptActivityClient struct {
-	service serverapi.PromptActivityService
+	service servicecontract.PromptActivityService
 }
 
-func NewLoopbackPromptActivityClient(service serverapi.PromptActivityService) PromptActivityClient {
+func NewLoopbackPromptActivityClient(service servicecontract.PromptActivityService) PromptActivityClient {
 	if service == nil {
 		return nil
 	}

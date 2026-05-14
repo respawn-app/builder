@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -40,16 +39,6 @@ type ProcessInlineOutputRequest struct {
 type ProcessInlineOutputResponse struct {
 	Output  string
 	LogPath string
-}
-
-type ProcessViewService interface {
-	ListProcesses(ctx context.Context, req ProcessListRequest) (ProcessListResponse, error)
-	GetProcess(ctx context.Context, req ProcessGetRequest) (ProcessGetResponse, error)
-}
-
-type ProcessControlService interface {
-	KillProcess(ctx context.Context, req ProcessKillRequest) (ProcessKillResponse, error)
-	GetInlineOutput(ctx context.Context, req ProcessInlineOutputRequest) (ProcessInlineOutputResponse, error)
 }
 
 func (r ProcessGetRequest) Validate() error {

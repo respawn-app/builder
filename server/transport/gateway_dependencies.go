@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 func (g *Gateway) resolveAttachedProjectWorkspace(ctx context.Context, projectID string, workspaceID string, workspaceRoot string) (string, string, error) {
@@ -49,7 +50,7 @@ func (g *Gateway) resolveAttachedProjectWorkspace(ctx context.Context, projectID
 	return strings.TrimSpace(resolved.Binding.WorkspaceID), strings.TrimSpace(resolved.Binding.CanonicalRoot), nil
 }
 
-func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (service serverapi.SessionLaunchService, _ error) {
+func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (service servicecontract.SessionLaunchService, _ error) {
 	projectID, err := g.activeProjectID(ctx, state)
 	if err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connec
 	return loopback, nil
 }
 
-func (g *Gateway) runPromptClientForState(ctx context.Context, state *connectionState) (serverapi.RunPromptService, error) {
+func (g *Gateway) runPromptClientForState(ctx context.Context, state *connectionState) (servicecontract.RunPromptService, error) {
 	projectID, err := g.activeProjectID(ctx, state)
 	if err != nil {
 		return nil, err

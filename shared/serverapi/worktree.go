@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -106,14 +105,6 @@ type WorktreeDeleteResponse struct {
 	Worktree             WorktreeView                    `json:"worktree"`
 	BranchDeleted        bool                            `json:"branch_deleted,omitempty"`
 	BranchCleanupMessage string                          `json:"branch_cleanup_message,omitempty"`
-}
-
-type WorktreeService interface {
-	ListWorktrees(ctx context.Context, req WorktreeListRequest) (WorktreeListResponse, error)
-	ResolveWorktreeCreateTarget(ctx context.Context, req WorktreeCreateTargetResolveRequest) (WorktreeCreateTargetResolveResponse, error)
-	CreateWorktree(ctx context.Context, req WorktreeCreateRequest) (WorktreeCreateResponse, error)
-	SwitchWorktree(ctx context.Context, req WorktreeSwitchRequest) (WorktreeSwitchResponse, error)
-	DeleteWorktree(ctx context.Context, req WorktreeDeleteRequest) (WorktreeDeleteResponse, error)
 }
 
 func (r WorktreeListRequest) Validate() error {

@@ -1,4 +1,4 @@
-package serverapi
+package runprompt
 
 import (
 	"context"
@@ -7,12 +7,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"builder/shared/serverapi"
 )
 
 func TestPromptServiceRejectsEmptyPrompt(t *testing.T) {
 	service := NewPromptService(&stubHeadlessPromptLauncher{})
 
-	_, err := service.RunPrompt(context.Background(), RunPromptRequest{ClientRequestID: "req-1", Prompt: " \n\t "}, nil)
+	_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-1", Prompt: " \n\t "}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -24,7 +26,7 @@ func TestPromptServiceRejectsEmptyPrompt(t *testing.T) {
 func TestPromptServiceRejectsMissingClientRequestID(t *testing.T) {
 	service := NewPromptService(&stubHeadlessPromptLauncher{})
 
-	_, err := service.RunPrompt(context.Background(), RunPromptRequest{Prompt: "hello"}, nil)
+	_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{Prompt: "hello"}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -43,13 +45,13 @@ func TestPromptServiceRunsPromptThroughPreparedRuntime(t *testing.T) {
 		},
 	}
 	service := NewPromptService(launcher)
-	progresses := make([]RunPromptProgress, 0, 1)
+	progresses := make([]serverapi.RunPromptProgress, 0, 1)
 
-	result, err := service.RunPrompt(context.Background(), RunPromptRequest{
+	result, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{
 		ClientRequestID:   "  req-123  ",
 		SelectedSessionID: "  abc-123  ",
 		Prompt:            "  hello world  ",
-	}, RunPromptProgressFunc(func(progress RunPromptProgress) {
+	}, serverapi.RunPromptProgressFunc(func(progress serverapi.RunPromptProgress) {
 		progresses = append(progresses, progress)
 	}))
 	if err != nil {
@@ -73,7 +75,7 @@ func TestPromptServiceRunsPromptThroughPreparedRuntime(t *testing.T) {
 	if len(result.Warnings) != 1 || result.Warnings[0] != "warning one" {
 		t.Fatalf("unexpected warnings: %+v", result.Warnings)
 	}
-	if len(progresses) != 1 || progresses[0].Kind != RunPromptProgressKindStatus {
+	if len(progresses) != 1 || progresses[0].Kind != serverapi.RunPromptProgressKindStatus {
 		t.Fatalf("unexpected progress events: %+v", progresses)
 	}
 	if launcher.runtime.logs[len(launcher.runtime.logs)-1] != "app.run_prompt.exit ok" {
@@ -94,7 +96,7 @@ func TestPromptServiceReturnsPartialResultOnRunError(t *testing.T) {
 	}
 	service := NewPromptService(launcher)
 
-	result, err := service.RunPrompt(context.Background(), RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello"}, nil)
+	result, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello"}, nil)
 	if !errors.Is(err, runErr) {
 		t.Fatalf("RunPrompt error = %v, want %v", err, runErr)
 	}
@@ -127,7 +129,7 @@ func TestPromptServiceAppliesTimeoutToSubmittedRun(t *testing.T) {
 	}
 	service := NewPromptService(launcher)
 
-	_, err := service.RunPrompt(context.Background(), RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello", Timeout: 5 * time.Second}, nil)
+	_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello", Timeout: 5 * time.Second}, nil)
 	if err != nil {
 		t.Fatalf("RunPrompt: %v", err)
 	}
@@ -135,13 +137,13 @@ func TestPromptServiceAppliesTimeoutToSubmittedRun(t *testing.T) {
 
 type stubHeadlessPromptLauncher struct {
 	runtime     *stubPromptSessionRuntime
-	lastRequest RunPromptRequest
+	lastRequest serverapi.RunPromptRequest
 }
 
-func (s *stubHeadlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req RunPromptRequest, progress RunPromptProgressSink) (PromptSessionRuntime, error) {
+func (s *stubHeadlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (PromptSessionRuntime, error) {
 	s.lastRequest = req
 	if progress != nil {
-		progress.PublishRunPromptProgress(RunPromptProgress{Kind: RunPromptProgressKindStatus, Message: "Prepared run context"})
+		progress.PublishRunPromptProgress(serverapi.RunPromptProgress{Kind: serverapi.RunPromptProgressKindStatus, Message: "Prepared run context"})
 	}
 	if s.runtime == nil {
 		s.runtime = &stubPromptSessionRuntime{}

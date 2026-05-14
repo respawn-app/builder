@@ -8,6 +8,7 @@ import (
 	"builder/server/registry"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type PendingPromptSource interface {
@@ -47,4 +48,4 @@ func (s *Service) ListPendingAsksBySession(_ context.Context, req serverapi.AskL
 	return serverapi.AskListPendingBySessionResponse{Asks: asks}, nil
 }
 
-var _ serverapi.AskViewService = (*Service)(nil)
+var _ servicecontract.AskViewService = (*Service)(nil)

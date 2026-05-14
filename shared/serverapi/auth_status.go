@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"time"
 
 	"builder/shared/auth"
@@ -36,8 +35,4 @@ type AuthSubscriptionWindow struct {
 	Qualifier   string    `json:"qualifier,omitempty"`
 	UsedPercent float64   `json:"used_percent,omitempty"`
 	ResetAt     time.Time `json:"reset_at,omitzero"`
-}
-
-type AuthStatusService interface {
-	GetAuthStatus(ctx context.Context, req AuthStatusRequest) (AuthStatusResponse, error)
 }

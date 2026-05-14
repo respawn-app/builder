@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type AuthStatusClient interface {
@@ -12,10 +13,10 @@ type AuthStatusClient interface {
 }
 
 type loopbackAuthStatusClient struct {
-	service serverapi.AuthStatusService
+	service servicecontract.AuthStatusService
 }
 
-func NewLoopbackAuthStatusClient(service serverapi.AuthStatusService) AuthStatusClient {
+func NewLoopbackAuthStatusClient(service servicecontract.AuthStatusService) AuthStatusClient {
 	return &loopbackAuthStatusClient{service: service}
 }
 

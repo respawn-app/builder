@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type PromptControlClient interface {
@@ -13,10 +14,10 @@ type PromptControlClient interface {
 }
 
 type loopbackPromptControlClient struct {
-	service serverapi.PromptControlService
+	service servicecontract.PromptControlService
 }
 
-func NewLoopbackPromptControlClient(service serverapi.PromptControlService) PromptControlClient {
+func NewLoopbackPromptControlClient(service servicecontract.PromptControlService) PromptControlClient {
 	return &loopbackPromptControlClient{service: service}
 }
 

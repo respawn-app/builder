@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type Subscriber interface {
@@ -29,4 +30,4 @@ func (s *Service) SubscribePromptActivity(ctx context.Context, req serverapi.Pro
 	return s.subscriber.SubscribePromptActivityFrom(ctx, req)
 }
 
-var _ serverapi.PromptActivityService = (*Service)(nil)
+var _ servicecontract.PromptActivityService = (*Service)(nil)

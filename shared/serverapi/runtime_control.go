@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"time"
@@ -211,33 +210,6 @@ type RuntimeGoalClearRequest struct {
 	SessionID         string `json:"session_id"`
 	ControllerLeaseID string `json:"controller_lease_id,omitempty"`
 	Actor             string `json:"actor"`
-}
-
-type RuntimeControlService interface {
-	SetSessionName(ctx context.Context, req RuntimeSetSessionNameRequest) error
-	SetThinkingLevel(ctx context.Context, req RuntimeSetThinkingLevelRequest) error
-	SetFastModeEnabled(ctx context.Context, req RuntimeSetFastModeEnabledRequest) (RuntimeSetFastModeEnabledResponse, error)
-	SetReviewerEnabled(ctx context.Context, req RuntimeSetReviewerEnabledRequest) (RuntimeSetReviewerEnabledResponse, error)
-	SetAutoCompactionEnabled(ctx context.Context, req RuntimeSetAutoCompactionEnabledRequest) (RuntimeSetAutoCompactionEnabledResponse, error)
-	AppendLocalEntry(ctx context.Context, req RuntimeAppendLocalEntryRequest) error
-	ShouldCompactBeforeUserMessage(ctx context.Context, req RuntimeShouldCompactBeforeUserMessageRequest) (RuntimeShouldCompactBeforeUserMessageResponse, error)
-	SubmitUserMessage(ctx context.Context, req RuntimeSubmitUserMessageRequest) (RuntimeSubmitUserMessageResponse, error)
-	SubmitUserTurn(ctx context.Context, req RuntimeSubmitUserTurnRequest) (RuntimeSubmitUserTurnResponse, error)
-	SubmitUserShellCommand(ctx context.Context, req RuntimeSubmitUserShellCommandRequest) error
-	CompactContext(ctx context.Context, req RuntimeCompactContextRequest) error
-	CompactContextForPreSubmit(ctx context.Context, req RuntimeCompactContextForPreSubmitRequest) error
-	HasQueuedUserWork(ctx context.Context, req RuntimeHasQueuedUserWorkRequest) (RuntimeHasQueuedUserWorkResponse, error)
-	SubmitQueuedUserMessages(ctx context.Context, req RuntimeSubmitQueuedUserMessagesRequest) (RuntimeSubmitQueuedUserMessagesResponse, error)
-	Interrupt(ctx context.Context, req RuntimeInterruptRequest) error
-	QueueUserMessage(ctx context.Context, req RuntimeQueueUserMessageRequest) (RuntimeQueueUserMessageResponse, error)
-	DiscardQueuedUserMessage(ctx context.Context, req RuntimeDiscardQueuedUserMessageRequest) (RuntimeDiscardQueuedUserMessageResponse, error)
-	RecordPromptHistory(ctx context.Context, req RuntimeRecordPromptHistoryRequest) error
-	ShowGoal(ctx context.Context, req RuntimeGoalShowRequest) (RuntimeGoalShowResponse, error)
-	SetGoal(ctx context.Context, req RuntimeGoalSetRequest) (RuntimeGoalShowResponse, error)
-	PauseGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
-	ResumeGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
-	CompleteGoal(ctx context.Context, req RuntimeGoalStatusRequest) (RuntimeGoalShowResponse, error)
-	ClearGoal(ctx context.Context, req RuntimeGoalClearRequest) (RuntimeGoalShowResponse, error)
 }
 
 func validateRuntimeSessionID(sessionID string) error {

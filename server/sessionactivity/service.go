@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type Subscriber interface {
@@ -39,4 +40,4 @@ func (s *Service) SubscribeSessionActivity(ctx context.Context, req serverapi.Se
 	return s.subscriber.SubscribeSessionActivity(ctx, req.SessionID)
 }
 
-var _ serverapi.SessionActivityService = (*Service)(nil)
+var _ servicecontract.SessionActivityService = (*Service)(nil)

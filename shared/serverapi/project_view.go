@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -110,17 +109,6 @@ type SessionListByProjectRequest struct {
 
 type SessionListByProjectResponse struct {
 	Sessions []clientui.SessionSummary
-}
-
-type ProjectViewService interface {
-	ListProjects(ctx context.Context, req ProjectListRequest) (ProjectListResponse, error)
-	ResolveProjectPath(ctx context.Context, req ProjectResolvePathRequest) (ProjectResolvePathResponse, error)
-	PlanWorkspaceBinding(ctx context.Context, req ProjectBindingPlanRequest) (ProjectBindingPlanResponse, error)
-	CreateProject(ctx context.Context, req ProjectCreateRequest) (ProjectCreateResponse, error)
-	AttachWorkspaceToProject(ctx context.Context, req ProjectAttachWorkspaceRequest) (ProjectAttachWorkspaceResponse, error)
-	RebindWorkspace(ctx context.Context, req ProjectRebindWorkspaceRequest) (ProjectRebindWorkspaceResponse, error)
-	GetProjectOverview(ctx context.Context, req ProjectGetOverviewRequest) (ProjectGetOverviewResponse, error)
-	ListSessionsByProject(ctx context.Context, req SessionListByProjectRequest) (SessionListByProjectResponse, error)
 }
 
 func (r ProjectResolvePathRequest) Validate() error {

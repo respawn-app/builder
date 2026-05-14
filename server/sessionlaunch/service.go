@@ -9,6 +9,7 @@ import (
 	"builder/server/requestmemo"
 	"builder/server/session"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type sessionStoreRegistrar interface {
@@ -124,4 +125,4 @@ func sameSessionPlanMemoRequest(a sessionPlanMemoRequest, b sessionPlanMemoReque
 		a.Overrides == b.Overrides
 }
 
-var _ serverapi.SessionLaunchService = (*Service)(nil)
+var _ servicecontract.SessionLaunchService = (*Service)(nil)

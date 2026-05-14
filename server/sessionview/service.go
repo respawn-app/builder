@@ -13,6 +13,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type SessionStoreResolver interface {
@@ -219,4 +220,4 @@ func (s *Service) resolveSnapshot(ctx context.Context, sessionID string) (Sessio
 	return s.snapshots.ResolveSessionSnapshot(ctx, sessionID)
 }
 
-var _ serverapi.SessionViewService = (*Service)(nil)
+var _ servicecontract.SessionViewService = (*Service)(nil)

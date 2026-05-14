@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type ProcessControlClient interface {
@@ -13,10 +14,10 @@ type ProcessControlClient interface {
 }
 
 type loopbackProcessControlClient struct {
-	service serverapi.ProcessControlService
+	service servicecontract.ProcessControlService
 }
 
-func NewLoopbackProcessControlClient(service serverapi.ProcessControlService) ProcessControlClient {
+func NewLoopbackProcessControlClient(service servicecontract.ProcessControlService) ProcessControlClient {
 	return &loopbackProcessControlClient{service: service}
 }
 
