@@ -115,6 +115,10 @@ A task movement from one node to another through an edge. A node transition eval
 
 An occurrence of a task in a node. A task can have multiple active node placements when a workflow explicitly runs parallel branches.
 
+### Parallel Batch
+
+The set of branch node placements created by one fan-out transition group for one task. A parallel batch gives join nodes a correlation identity for deciding which branch results belong together.
+
 ### Join
 
 An edge or node transition point that waits for required inbound branch outputs before continuing.

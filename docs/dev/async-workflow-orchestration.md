@@ -212,10 +212,12 @@ Edge approvals persist as pending transition logs. Approval means: approve a sel
 
 Transition groups model fan-out. A selected transition group can contain multiple edges. Each edge creates a target node placement and, for executable nodes, a queued run. These are still one task, not subtasks.
 
+Fan-out creates a parallel batch. The accepted source transition log is the batch identity; each branch placement records the fan-out edge that created that branch and carries that branch identity until the branch reaches a join or terminal node.
+
 Join nodes are non-agent fan-in points:
 
-- They wait for all active branch placements created by the selected transition group that target the join's inbound set.
-- They aggregate inbound payloads into deterministic results collection.
+- They wait for all branch identities in the parallel batch that reach the join.
+- They aggregate inbound payloads into a deterministic results collection keyed by branch identity and source node.
 - They then follow their outgoing transition group.
 - Agent synthesis belongs in a normal agent node after the join.
 
@@ -368,6 +370,8 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - `node_id TEXT NOT NULL REFERENCES workflow_nodes(id) ON DELETE RESTRICT`
 - `state TEXT NOT NULL` (`active|waiting_approval|completed|superseded`)
 - `created_by_transition_id TEXT REFERENCES task_transitions(id) ON DELETE SET NULL`
+- `parallel_batch_transition_id TEXT REFERENCES task_transitions(id) ON DELETE SET NULL`
+- `parallel_branch_edge_id TEXT REFERENCES workflow_edges(id) ON DELETE SET NULL`
 - `created_at_unix_ms INTEGER NOT NULL`
 - `updated_at_unix_ms INTEGER NOT NULL`
 
@@ -448,7 +452,7 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - Move task manually: validate graph/input/continuation, create transition log, create pending approval state before queue.
 - Claim next run: count running runs globally, select queued run ordered by queued time, atomically mark running.
 - Complete run: persist transition payload, validate transition group/edges, create target placements/runs or pending approvals, mark source placement completed.
-- Join check: query active placements/runs created by same transition group/inbound set; aggregate once all complete.
+- Join check: use `parallel_batch_transition_id` and `parallel_branch_edge_id` to aggregate one completed branch result per expected fan-out edge.
 - Resume interrupted run: validate session/worktree still available, mark queued/running through scheduler, continue existing session.
 
 ## Implementation Plan
