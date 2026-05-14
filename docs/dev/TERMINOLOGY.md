@@ -46,9 +46,17 @@ Executable nodes configure agent-run behavior:
 
 Completing a node means its configured run reached a structured terminal outcome, not that an assistant wrote a natural-language final answer.
 
+### Start Node
+
+The node where new tasks enter a workflow. A start node is non-executable and has no input requirements.
+
+### Terminal Node
+
+A sink node where workflow automation stops.
+
 ### Edge
 
-A directed transition from one completed node to a next node. Edges configure transition behavior, not the agent run itself.
+A directed graph connection from a source node to a target node. Edges configure transition behavior, not the agent run itself.
 
 An edge configures:
 
@@ -61,7 +69,7 @@ An edge configures:
 
 ### Transition Payload
 
-Structured data produced by a node run for a selected edge. A transition payload includes the selected transition ID and node output fields carried into edge validation, task metadata updates, and the next node's input.
+Structured data produced by a node run for a selected transition group. A transition payload includes the selected transition ID and node output fields carried into edge validation, task metadata updates, and the next node's input.
 
 ### Payload Requirements
 
@@ -69,7 +77,11 @@ Edge-owned requirements for transition payload fields. Payload requirements defi
 
 ### Transition ID
 
-A stable identifier for an edge leaving a node. Agent nodes choose a transition ID when their output can follow more than one edge. The transition ID selects the edge; the edge selects the target node and transition behavior.
+A stable identifier for a transition group leaving a node. Agent nodes choose a transition ID when their output can follow more than one transition group.
+
+### Transition Group
+
+One or more outgoing edges selected together by a transition ID. A transition group with one edge performs a normal single-node transition. A transition group with multiple edges fans out into parallel target nodes.
 
 ### Context-Preservation Mode
 

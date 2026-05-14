@@ -62,9 +62,13 @@ Decisions will be recorded here during the planning interview.
 - V1 should keep node identity equal to visible Kanban column/status identity. Multiple executable nodes sharing one column creates ambiguous manual moves and unclear debugging. Later UI can add display grouping if needed.
 - Workflows can contain executable agent nodes, terminal nodes, and join nodes. Approval remains an edge property, not a separate manual-node requirement.
 - Workflow creation should auto-create default `backlog` and `done` nodes as ordinary editable nodes. This avoids hardcoded unmapped statuses while keeping setup ergonomic.
+- V1 workflows have exactly one start node. The start node is non-executable and has no inputs. Multiple start nodes are expected later and should not be made architecturally difficult.
+- Terminal nodes are strict sinks. Manual reopen/rework is a user override execution, not a durable graph transition or graph mutation.
+- Workflow validation should reject detached graph islands. Every node must be reachable from the start node, every non-terminal node must be able to reach a terminal node, self-loops/cycles are allowed, and terminal nodes cannot auto-run.
 - Parallel joins always wait for all required inputs in v1. Racing/first-success semantics are out of scope.
 - Join nodes are non-agent fan-in points. They aggregate inbound transition payloads into a deterministic results collection and then follow their outgoing edge. If synthesis is needed, put an agent node after the join.
 - Parallel branches are ordinary workflow nodes that happen to run concurrently. They are not subtasks and do not require a separate child-task model. A task may have multiple active node placements/runs while explicit fan-out is active.
+- Fan-out uses transition groups. `transition_id` selects a transition group; a transition group can contain one edge or multiple edges. Multiple edges in the group create parallel node placements/runs that later converge at a join.
 - Orchestrator-workers should not dynamically create workflow nodes or Kanban columns in v1. An orchestrator is an ordinary agent node that may use existing subagent/session infrastructure inside its run or feed statically defined graph branches.
 - Agent nodes complete by calling a node-specific completion tool, not by returning natural language. The completion payload chooses a user-defined outgoing transition when the node has more than one outgoing edge and supplies node output fields. Runtime failure, cancellation, and unanswered questions are orchestration states, not model-selected terminal statuses.
 - Workflow runs should treat a normal assistant final answer as invalid output. Runtime should append a nudge and continue until the model calls the completion tool, calls `ask_question`, is canceled, or hits a runtime error.
@@ -72,7 +76,7 @@ Decisions will be recorded here during the planning interview.
 - `complete_node` is workflow control infrastructure and is available in every workflow run regardless of subagent role tool config.
 - User questions use existing `ask_question` tool-call/session infrastructure. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered. V1 should not introduce a separate durable task-question source of truth unless existing session transcript/resume semantics prove insufficient.
 - Node output schemas are user-authored but intentionally flat. Fields are strings; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
-- Completion tools expose only `transition_id`, never `next_node`. The selected edge derives the target node and transition behavior.
+- Completion tools expose only `transition_id`, never `next_node`. The selected transition group derives target nodes and transition behavior.
 - Every completion tool includes optional `commentary` as a visible, pass-along string escape hatch for content not captured by configured fields.
 - Custom completion fields are optional in the generated tool schema. The selected edge may impose payload requirements after `transition_id` is known; if required fields are missing, runtime returns a structured tool error/developer nudge and keeps the same run going.
 - Edge approval is a boolean edge property. When approval is required, the source run finishes and the node transition waits before scheduling the target run.
@@ -89,8 +93,9 @@ Decisions will be recorded here during the planning interview.
 - A task may have multiple active node placements/runs only when the workflow graph explicitly fans out into parallel branches; otherwise task execution is single-active-run.
 - Task required fields are title, short ID, and body. Task metadata should be designed for future import/export and may include a source URL for imported external work.
 - Task short IDs are project-scoped sequential keys with a project key prefix, e.g. `BLD-123`. Project creation should choose the key explicitly; default suggestion can use the first three letters of the project name.
+- Existing projects without a project key should get one from the default project-name logic when task support is initialized, with collision handling.
 - If a workflow references a subagent role that no longer exists in effective config, the node transition blocks with a validation error before scheduling the run. Same-name subagent setting changes are accepted.
-- Agents may add, replace, and soft-delete task comments through CLI/API task management, not model-callable comment tools. A skill or reminder should teach workflow agents the CLI. Comments should record author/source agent when available and stay in Builder persistence, not files in the worktree.
+- Agents may add, replace, and soft-delete task comments through CLI/API task management, not model-callable comment tools. A skill or reminder should teach workflow agents the CLI. Comments should record author/source agent when available and stay in Builder persistence, not files in the worktree. Task comments are not injected automatically into agent context; agents read them through CLI when needed.
 - `RunPromptService` should not back workflow nodes. It is a one-shot final-string API, while workflow nodes need durable runs, structured completion, interruption, and resume.
 - Existing user goal state should not be reused as workflow autonomy state. Workflow needs a goal-like loop shape, but task/node/run identity must own completion, interruption, and resume semantics.
 - Task lifecycle state should derive from node placement/run state rather than a separate task status enum. The task's node placement is the workflow/Kanban state; blocked/running/interrupted/done conditions come from runs and terminal nodes.
@@ -99,11 +104,11 @@ Decisions will be recorded here during the planning interview.
 
 The static `complete_node` tool should have a stable schema:
 
-- `transition_id`: optional string. Runtime requires it when a node has more than one outgoing edge and validates it against valid outgoing edge IDs.
+- `transition_id`: optional string. Runtime requires it when a node has more than one outgoing transition group and validates it against valid transition IDs.
 - `commentary`: optional catch-all string field; visible to the user and passed along to the next node by default.
 - `payload`: optional flat string map for user-defined fields such as `review_findings`, `verification`, `architecture_notes`, or `merge_notes`.
 
-Prefer `transition_id` over `next_node` because the edge owns approval, context preservation, input/output bindings, and routing semantics. The target node is derived from the selected edge.
+Prefer `transition_id` over `next_node` because transition groups and edges own approval, context preservation, input bindings, fan-out, and routing semantics. Target nodes are derived from the selected transition group.
 
 Node-specific field guidance belongs in developer prompts, not in the tool schema. Selected-edge validation checks payload requirements. Example: a review node can define `review_findings` as an available output field, while only the `changes_requested` edge requires it.
 
