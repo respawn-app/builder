@@ -64,6 +64,10 @@ Per-edge transition policy that decides how the next node receives execution con
 
 One durable execution attempt for a node on a task. A run may create or continue a Builder session, call tools, ask questions, produce structured node output, and terminate with a structured outcome.
 
+### Interrupted Run
+
+A run whose execution stopped before producing a valid transition payload. Its session and worktree state remain available so execution can continue from the interruption point.
+
 ### Node Output Schema
 
 A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, task metadata updates, UI display, transition payloads, and the next node's input bindings.
@@ -91,3 +95,7 @@ An agent node whose prompt asks it to coordinate work. Orchestration may use sub
 ### Terminal State
 
 A workflow/task state where auto-execution stops because the task is done, canceled, failed, blocked, or awaiting manual/user action.
+
+### Execution Queue
+
+Durable scheduling state for runnable workflow work. The execution queue decides when runs may start or resume; runtime leases remain separate execution-control state.

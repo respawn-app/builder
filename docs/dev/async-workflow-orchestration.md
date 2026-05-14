@@ -39,7 +39,6 @@ Source: https://www.anthropic.com/engineering/building-effective-agents
 
 - What CLI surface is enough to test v1 without building frontend?
 - How should user questions pause/resume tasks across many concurrent agents?
-- How should queueing, retries, cancellations, and resource cleanup behave?
 - What is the migration path from current sessions/goals/subagents into workflow runs?
 
 ## Product Decisions
@@ -66,6 +65,12 @@ Decisions will be recorded here during the planning interview.
 - Edge approval is a boolean edge property. When approval is required, the source run finishes and the node transition waits before scheduling the target run.
 - A task owns one managed worktree by default. Implementation and review nodes reuse it unless later node/edge configuration adds an explicit override.
 - Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work.
+- The execution queue is durable in SQLite. Startup reconciliation should inspect runnable/running/interrupted state and requeue safe work.
+- The queue does not own runtime leases. Runtime leases remain execution-control state, similar to current client/frontend leases, not durable queue authority.
+- If execution stops mid-node, mark the run `interrupted`, preserve session transcript and dirty worktree state, and require human resume. Resume continues the interrupted session/run instead of rerunning the whole node from scratch.
+- V1 has no automatic retry. Failures, cancellations, crashes, and model/runtime interruptions converge on an interrupted state with explicit human resume.
+- Concurrency limit is global only and configured in `config.toml`.
+- A task may have multiple active runs only when the workflow graph explicitly fans out into parallel branches; otherwise task execution is single-active-run.
 
 ## Schema Direction
 
