@@ -40,6 +40,14 @@ An edge configures:
 - routing condition or decision mapping;
 - join/aggregation requirements when multiple inbound branches must complete.
 
+### Transition Payload
+
+Structured data produced by a node run for a selected edge. A transition payload includes the selected transition ID and node output fields carried into edge validation, task metadata updates, and the next node's input.
+
+### Payload Requirements
+
+Edge-owned requirements for transition payload fields. Payload requirements define which source-node output fields must be present before a node transition can continue.
+
 ### Transition ID
 
 A stable identifier for an edge leaving a node. Agent nodes choose a transition ID when their output can follow more than one edge. The transition ID selects the edge; the edge selects the target node and transition behavior.
@@ -58,7 +66,7 @@ One durable execution attempt for a node on a task. A run may create or continue
 
 ### Node Output Schema
 
-A node-owned schema for the structured output that completes a run. The schema defines fields the agent must provide when it completes the node. Workflow orchestration uses these fields for edge decisions, task metadata updates, UI display, and the next node's input bindings.
+A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, task metadata updates, UI display, transition payloads, and the next node's input bindings.
 
 ### Session
 

@@ -38,7 +38,6 @@ Source: https://www.anthropic.com/engineering/building-effective-agents
 ## Open Questions
 
 - What CLI surface is enough to test v1 without building frontend?
-- How flexible should per-node inputs/outputs be without exposing arbitrary JSON schema building?
 - How should user questions pause/resume tasks across many concurrent agents?
 - How should queueing, retries, cancellations, and resource cleanup behave?
 - What is the migration path from current sessions/goals/subagents into workflow runs?
@@ -61,6 +60,9 @@ Decisions will be recorded here during the planning interview.
 - Agent nodes complete by calling a node-specific completion tool, not by returning natural language. The completion payload chooses a user-defined outgoing transition when the node has more than one outgoing edge and supplies node output fields. Runtime failure, cancellation, and unanswered questions are orchestration states, not model-selected terminal statuses.
 - User questions use `ask_question` interception. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered.
 - Node output schemas are user-authored but intentionally flat. Fields are strings; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
+- Completion tools expose only `transition_id`, never `next_node`. The selected edge derives the target node and transition behavior.
+- Every completion tool includes optional `commentary` as a visible, pass-along string escape hatch for content not captured by configured fields.
+- Custom completion fields are optional in the generated tool schema. The selected edge may impose payload requirements after `transition_id` is known; if required fields are missing, runtime returns a structured tool error/developer nudge and keeps the same run going.
 - Edge approval is a boolean edge property. When approval is required, the source run finishes and the node transition waits before scheduling the target run.
 - A task owns one managed worktree by default. Implementation and review nodes reuse it unless later node/edge configuration adds an explicit override.
 - Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work.
@@ -70,10 +72,12 @@ Decisions will be recorded here during the planning interview.
 The completion tool should be generated from node config:
 
 - `transition_id`: required when a node has more than one outgoing edge; value should be an enum of valid outgoing edge IDs.
-- `output` or `commentary`: optional catch-all string field available by convention unless the node config disables it.
+- `commentary`: optional catch-all string field; visible to the user and passed along to the next node by default.
 - user-defined fields: flat string fields such as `review_findings`, `verification`, `architecture_notes`, or `merge_notes`.
 
 Prefer `transition_id` over `next_node` because the edge owns approval, context preservation, input/output bindings, and routing semantics. The target node is derived from the selected edge.
+
+Selected-edge validation then checks payload requirements. Example: a review node can define `review_findings` as an available output field, while only the `changes_requested` edge requires it.
 
 ## Domain Vocabulary
 
