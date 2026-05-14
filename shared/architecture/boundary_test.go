@@ -52,46 +52,93 @@ func TestArchitectureBoundaries(t *testing.T) {
 func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	clientUIRoot := filepath.Join(repoRoot, "shared", "clientui")
-	allowedStateTypes := map[string]struct{}{
-		"RunState": {},
+	allowedTypes := map[string]struct{}{
+		"ApprovalDecision":                 {},
+		"ApprovalOption":                   {},
+		"ApprovalPromptAnswer":             {},
+		"BackgroundProcess":                {},
+		"BackgroundShellEvent":             {},
+		"ChatEntry":                        {},
+		"ChatSnapshot":                     {},
+		"CommittedTranscriptSuffix":        {},
+		"CommittedTranscriptSuffixRequest": {},
+		"CompactionLifecycle":              {},
+		"CompactionStatus":                 {},
+		"ConversationFreshness":            {},
+		"EntryVisibility":                  {},
+		"Event":                            {},
+		"EventKind":                        {},
+		"MessagePhase":                     {},
+		"MessageType":                      {},
+		"PendingApproval":                  {},
+		"PendingAsk":                       {},
+		"PendingPromptEvent":               {},
+		"PendingPromptEventType":           {},
+		"ProcessClient":                    {},
+		"ProcessOutputChunk":               {},
+		"ProjectAvailability":              {},
+		"ProjectOverview":                  {},
+		"ProjectSummary":                   {},
+		"ProjectWorkspaceSummary":          {},
+		"PromptAnswer":                     {},
+		"QueuedUserMessage":                {},
+		"ReasoningDelta":                   {},
+		"ReviewerLifecycle":                {},
+		"RunLifecycle":                     {},
+		"RunLifecyclePhase":                {},
+		"RunMode":                          {},
+		"RunState":                         {},
+		"RunStatus":                        {},
+		"RunView":                          {},
+		"RuntimeClient":                    {},
+		"RuntimeConnectionLifecycle":       {},
+		"RuntimeContextUsage":              {},
+		"RuntimeGoal":                      {},
+		"RuntimeGoalStatus":                {},
+		"RuntimeMainView":                  {},
+		"RuntimeSessionView":               {},
+		"RuntimeStatus":                    {},
+		"SessionExecutionTarget":           {},
+		"SessionSummary":                   {},
+		"ToolCallMeta":                     {},
+		"ToolCallRenderBehavior":           {},
+		"ToolPresentationKind":             {},
+		"ToolRenderHint":                   {},
+		"ToolRenderKind":                   {},
+		"ToolShellDialect":                 {},
+		"TranscriptMetadata":               {},
+		"TranscriptPage":                   {},
+		"TranscriptPageRequest":            {},
+		"TranscriptRecoveryCause":          {},
+		"TranscriptWindow":                 {},
+		"UpdateStatus":                     {},
 	}
-	bannedTypeNames := map[string]struct{}{
-		"RuntimeRunState":                     {},
-		"RuntimeConversationState":            {},
-		"RuntimeReasoningState":               {},
-		"PendingInputState":                   {},
-		"InputSubmissionLifecycle":            {},
-		"BackgroundNotice":                    {},
-		"RuntimeTranscriptReduction":          {},
-		"RuntimeRunStateReduction":            {},
-		"RuntimePendingInputReduction":        {},
-		"RuntimeReasoningReduction":           {},
-		"RuntimeBackgroundProcessReduction":   {},
-		"RuntimeConversationReduction":        {},
-		"RuntimeNoticeReduction":              {},
-		"RuntimeEventReduction":               {},
-		"RuntimeTranscriptSyncCommand":        {},
-		"RuntimeAssistantStreamCommand":       {},
-		"RuntimePendingInputDraftCommand":     {},
-		"RuntimePromptHistoryCommand":         {},
-		"RuntimeReasoningStreamCommand":       {},
-		"RuntimeBackgroundProcessCommand":     {},
-		"RuntimeAssistantStreamCommandKind":   {},
-		"RuntimeReasoningStreamCommandKind":   {},
-		"RuntimeDraftInputCommandKind":        {},
-		"RuntimeBackgroundProcessCommandKind": {},
-		"RuntimeActivityCommand":              {},
-	}
-	bannedFuncTerms := []string{
-		"Reduce",
-		"Reducer",
-		"Transition",
-		"Apply",
-		"PendingInput",
-		"PromptHistory",
-		"ReasoningStream",
-		"BackgroundNotice",
-		"Activity",
+	allowedFuncs := map[string]struct{}{
+		"CompactionLifecycle.IsRunning":             {},
+		"ConversationFreshness.IsFresh":             {},
+		"FinishedRunLifecycle":                      {},
+		"IdleRunLifecycle":                          {},
+		"MustRunLifecycle":                          {},
+		"NewCompactionLifecycle":                    {},
+		"NewReviewerLifecycle":                      {},
+		"NewRunLifecycle":                           {},
+		"NewRuntimeConnectionLifecycle":             {},
+		"NormalizeCommittedTranscriptSuffixRequest": {},
+		"NormalizeMessagePhase":                     {},
+		"NormalizeSessionExecutionTarget":           {},
+		"NormalizeThinkingLevel":                    {},
+		"PendingPromptEvent.IsZero":                 {},
+		"ReviewerLifecycle.IsBlocking":              {},
+		"ReviewerLifecycle.IsRunning":               {},
+		"ReviewerLifecycle.Validate":                {},
+		"RunLifecycle.IsFinished":                   {},
+		"RunLifecycle.IsGoalLoopRunning":            {},
+		"RunLifecycle.IsRunning":                    {},
+		"RunLifecycle.Validate":                     {},
+		"RunningRunLifecycle":                       {},
+		"RuntimeConnectionLifecycle.IsDisconnected": {},
+		"SessionExecutionTargetIsZero":              {},
+		"SessionExecutionTargetsEqual":              {},
 	}
 	violations := make([]string, 0)
 	if err := filepath.WalkDir(clientUIRoot, func(path string, d os.DirEntry, err error) error {
@@ -116,15 +163,15 @@ func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
 		for _, decl := range file.Decls {
 			switch typedDecl := decl.(type) {
 			case *ast.FuncDecl:
-				name := typedDecl.Name.Name
-				for _, term := range bannedFuncTerms {
-					if strings.Contains(name, term) {
-						violations = append(violations, relPath+": DTO-only package must not define frontend state helper "+name)
-					}
+				name := funcDeclBoundaryName(typedDecl)
+				if _, allowed := allowedFuncs[name]; allowed {
+					continue
 				}
-				if funcUsesRuntimeEventPolicyType(typedDecl.Type) && !strings.HasPrefix(name, "Normalize") {
+				if funcUsesRuntimeEventPolicyType(typedDecl.Type) {
 					violations = append(violations, relPath+": DTO-only package must not define runtime-event policy helper "+name)
+					continue
 				}
+				violations = append(violations, relPath+": DTO-only package added function "+name+" without DTO-boundary review")
 			case *ast.GenDecl:
 				if typedDecl.Tok != token.TYPE {
 					continue
@@ -135,19 +182,8 @@ func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
 						continue
 					}
 					name := typeSpec.Name.Name
-					if _, banned := bannedTypeNames[name]; banned {
-						violations = append(violations, relPath+": DTO-only package must not define frontend state/presentation type "+name)
-					}
-					if strings.HasSuffix(name, "Reduction") {
-						violations = append(violations, relPath+": DTO-only package must not define reducer result type "+name)
-					}
-					if strings.HasSuffix(name, "Command") {
-						violations = append(violations, relPath+": DTO-only package must not define presentation command type "+name)
-					}
-					if strings.HasSuffix(name, "State") {
-						if _, allowed := allowedStateTypes[name]; !allowed {
-							violations = append(violations, relPath+": DTO-only package must not define mutable UI state holder "+name)
-						}
+					if _, allowed := allowedTypes[name]; !allowed {
+						violations = append(violations, relPath+": DTO-only package added type "+name+" without DTO-boundary review")
 					}
 				}
 			}
@@ -158,6 +194,27 @@ func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
 	}
 	if len(violations) > 0 {
 		t.Fatalf("shared/clientui DTO boundary violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func funcDeclBoundaryName(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		if fn == nil {
+			return ""
+		}
+		return fn.Name.Name
+	}
+	return receiverTypeName(fn.Recv.List[0].Type) + "." + fn.Name.Name
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch typedExpr := expr.(type) {
+	case *ast.Ident:
+		return typedExpr.Name
+	case *ast.StarExpr:
+		return receiverTypeName(typedExpr.X)
+	default:
+		return ""
 	}
 }
 
