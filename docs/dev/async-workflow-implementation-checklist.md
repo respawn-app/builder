@@ -475,7 +475,7 @@ Goal: dedicated no-LLM manual smoke through real CLI/API/backend state before ru
 
 ## Slice 6: Scheduler, Runnable Derivation, And Recovery
 
-Goal: scheduler rebuilds runnable workflow work from durable placement/run intent, while queued/running stay in live scheduler/runtime state.
+Goal: scheduler rebuilds runnable workflow work from durable placement/run intent, while pending-work ordering and active runtime ownership stay in live scheduler/runtime state.
 
 ### 6.1 Red Tests
 
@@ -484,7 +484,7 @@ Goal: scheduler rebuilds runnable workflow work from durable placement/run inten
 - [ ] Add test for selecting oldest runnable run from automation request time.
 - [ ] Add test for global concurrency cap.
 - [ ] Add concurrent scheduler race test proving one live runtime starts per runnable run.
-- [ ] Add test proving no durable `queued`/`running` run state is written.
+- [ ] Add test proving no durable state is written for pending scheduler work or active runtime ownership.
 - [ ] Add stale runtime completion rejected by generation/fence.
 - [ ] Add test for runnable work rebuilt on startup.
 - [ ] Add test for orphaned started run becoming interrupted on startup.
@@ -492,7 +492,7 @@ Goal: scheduler rebuilds runnable workflow work from durable placement/run inten
 - [ ] Add test for waiting-for-question becoming interrupted when ask cannot rehydrate.
 - [ ] Add test for pending approval retained on startup.
 - [ ] Add test that interrupted runs are never auto-retried.
-- [ ] Add transaction rollback test for failed transition application.
+- [ ] Add transaction rollback test for unsuccessful transition application.
 
 ### 6.2 Implementation
 
@@ -500,7 +500,7 @@ Goal: scheduler rebuilds runnable workflow work from durable placement/run inten
 - [ ] Add config field/read for global workflow concurrency default 5.
 - [ ] Add config validation for invalid values.
 - [ ] Implement runnable work derivation from active placements, automation intent, and terminal outcomes.
-- [ ] Keep queued/running ordering and ownership in memory.
+- [ ] Keep pending-work ordering and active runtime ownership in memory.
 - [ ] Store and check run generation/fence for stale runtime callbacks.
 - [ ] Implement completion path requiring matching run generation.
 - [ ] Implement startup reconciliation.
@@ -546,7 +546,11 @@ Goal: runtime can identify workflow run context, inject workflow-mode instructio
 ### 7.2 Red Tests
 
 - [ ] Add prompt test for `prompts/workflow_mode_prompt.md` content and injection.
-- [ ] Add config test for temporary global completion mode `auto|structured_output|tool`.
+- [ ] Add prompt test that workflow mode prompt is injected through the workflowruntime/headless runtime preparation path before the node prompt, not assembled by scheduler/CLI.
+- [ ] Add config test for temporary global completion mode `auto|structured_output|tool` with no workflow/node override.
+- [ ] Add test that `auto` selects structured output when provider capabilities support it and dynamic tool mode otherwise.
+- [ ] Add test that forced `structured_output` fails fast with actionable error when unsupported.
+- [ ] Add test that forced `tool` always uses dynamic tool mode.
 - [ ] Add schema generation test for structured output with top-level custom fields and descriptions.
 - [ ] Add schema generation test for dynamic `complete_node` tool with top-level custom fields and descriptions.
 - [ ] Add runtime test: `complete_node` outside workflow returns not-in-workflow error.
@@ -567,6 +571,7 @@ Goal: runtime can identify workflow run context, inject workflow-mode instructio
 
 - [ ] Add workflow-mode prompt source and runtime injection.
 - [ ] Add temporary global workflow completion mode config.
+- [ ] Implement completion mode precedence: global config only, `auto` provider-capability check, forced structured-output error on unsupported provider, forced tool mode bypassing structured output.
 - [ ] Add structured-output schema generator.
 - [ ] Add dynamic `complete_node` tool schema generator.
 - [ ] Add workflow run context carrier into runtime structured-output/tool execution.

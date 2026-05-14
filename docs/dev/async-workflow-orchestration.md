@@ -70,12 +70,12 @@ Decisions will be recorded here during the planning interview.
 - Fan-out uses transition groups. `transition_id` selects a transition group; a transition group can contain one edge or multiple edges. Multiple edges in the group create parallel node placements/runs that later converge at a join.
 - Orchestrator-workers should not dynamically create workflow nodes or Kanban columns in v1. An orchestrator is an ordinary agent node that may use existing subagent/session infrastructure inside its run or feed statically defined graph branches.
 - Agent nodes complete by producing a structured workflow completion, not by returning natural language. The completion chooses a user-defined outgoing transition when the node has more than one outgoing transition group and supplies node output fields. Runtime failure, cancellation, and unanswered questions are orchestration outcomes, not model-selected terminal statuses.
-- Workflow nodes support two model-facing completion modes: structured output and dynamic `complete_node` tool. A temporary global config setting selects `auto`, `structured_output`, or `tool`; `auto` may choose structured output when provider support is available and tool mode otherwise.
+- Workflow nodes support two model-facing completion modes: structured output and dynamic `complete_node` tool. A temporary global config setting selects `auto`, `structured_output`, or `tool`; there is no workflow/node override. `auto` chooses structured output when provider capabilities support it and dynamic tool mode otherwise. Forced `structured_output` fails fast with an actionable error when unsupported. Forced `tool` always uses dynamic tool mode.
 - Workflow runs should treat a normal assistant final answer as invalid output. Runtime should append a nudge and continue until the model produces valid workflow completion output, calls `ask_question`, is interrupted, or hits a runtime error.
 - `complete_node` is workflow control infrastructure and is available in tool completion mode regardless of subagent role tool config.
 - User questions use existing `ask_question` tool-call/session infrastructure. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered. V1 should not introduce a separate task-question projection. If existing ask infrastructure cannot reliably resume workflow asks, upgrade ask persistence as the source of truth instead of adding a shadow task-question table.
 - Node output schemas are user-authored but intentionally flat. Fields have stable names, user-facing descriptions, and string values; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
-- Model-facing completion schemas expose `transition_id`, optional `commentary`, and custom node output fields as top-level properties. They do not hide user fields inside a generic `payload` object.
+- Model-facing completion schemas expose `transition_id`, optional `commentary`, and custom node output fields as top-level properties. They do not hide user fields inside a generic nested object.
 - Completion schemas expose only `transition_id`, never `next_node`. The selected transition group derives target nodes and transition behavior.
 - Every completion schema includes optional `commentary` as a visible, pass-along string escape hatch for content not captured by configured fields.
 - Custom completion fields are optional in the generated schema. The selected edge may impose output requirements after `transition_id` is known; if required fields are missing, runtime returns a structured validation nudge and keeps the same run going.
@@ -85,7 +85,7 @@ Decisions will be recorded here during the planning interview.
 - Task worktree branch creation should reuse existing worktree logic. The branch name is the task short ID.
 - `continue_session` requires the same subagent role/session contract across source and target nodes. Direct continuation across roles is invalid because it cannot apply the target role contract and invalidates cache assumptions. `new_session` and `compact_and_continue_session` may cross roles because they use a fresh context boundary; compact mode carries a handoff document rather than preserving direct prompt-cache continuity.
 - Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work. Repeated invalid workflow-protocol failures, such as repeated final answers or invalid workflow completion output, may be capped if the guard is cheap to implement.
-- The scheduler is durable enough to rebuild from SQLite but should not store `queued` or `running` as durable run states. Runnable work is derived from active executable placements with approved automation intent and no terminal run outcome. Running work is derived from live runtime/scheduler state.
+- The scheduler is durable enough to rebuild from SQLite but should not store durable run states for pending scheduler work or active runtime ownership. Runnable work is derived from active executable placements with approved automation intent and no terminal run outcome. Active execution is derived from live runtime/scheduler state.
 - The scheduler does not own runtime leases. Runtime leases remain execution-control state, similar to current client/frontend leases, not durable scheduling authority.
 - If execution stops mid-node, mark the run `interrupted`, preserve session transcript and dirty worktree state, and require human resume. Resume continues the interrupted session/run instead of rerunning the whole node from scratch.
 - V1 has no automatic retry. Failures, cancellations, crashes, and model/runtime interruptions converge on an interrupted outcome with reason metadata and explicit human resume.
@@ -98,7 +98,7 @@ Decisions will be recorded here during the planning interview.
 - Agents may add, replace, and soft-delete task comments through CLI/API task management, not model-callable comment tools. A skill or reminder should teach workflow agents the CLI. Comments should record author/source agent when available and stay in Builder persistence, not files in the worktree. Task comments are not injected automatically into agent context; agents read them through CLI when needed.
 - Workflow runtime should reuse headless/`builder run` infrastructure where it fits: session launch planning, runtime wiring, logging, progress/event publication, subagent role handling, and mode prompts. `RunPromptService.RunPrompt` itself should not be workflow completion authority because it is a one-shot final-string API, while workflow nodes need durable run identity, structured completion, interruption, and resume.
 - Existing user goal state should not be reused as workflow autonomy state. Workflow needs a goal-like loop shape, but task/node/run identity must own completion, interruption, and resume semantics.
-- Task lifecycle state should derive from node placement/run state rather than a separate task status enum. The task's node placement is the workflow/Kanban state; blocked/running/interrupted/done conditions come from runs and terminal nodes.
+- Task lifecycle state should derive from node placement/run state rather than a separate task status enum. The task's node placement is the workflow/Kanban state; blocked/active/interrupted/done conditions come from runs and terminal nodes.
 - CLI is an internal backend-testing and agent-control surface, not the primary manual QA surface for users. User manual QA should wait until there is a usable GUI/POC backed by the workflow APIs.
 - Workflow API/read-model shapes do not need public stability before Builder 2.0. A parallel POC GUI can consume them, but it should expect breaking changes while workflow orchestration is under active development.
 - The POC GUI should sit behind a thin workflow API adapter layer so backend DTO/read-model churn does not spread through UI code.
@@ -136,6 +136,8 @@ Dynamic structured-output and dynamic tool schemas can affect prompt-cache conti
 ### Workflow Mode Prompting
 
 Workflow node runs need dedicated developer instructions, similar to headless/subagent mode prompts. Add a prompt source such as `prompts/workflow_mode_prompt.md` and inject it only for workflow runs.
+
+Injection point: `server/workflowruntime` should use the same session launch/runtime wiring path extracted from `builder run`/headless mode. Inject `workflow_mode_prompt.md` as a developer-role mode prompt during runtime preparation, after the generic headless/subagent mode context is established and before the workflow node prompt is submitted. Scheduler and CLI code must not assemble duplicate workflow-mode prompts.
 
 The prompt must explain:
 
@@ -208,7 +210,7 @@ Do not reuse user goal state as workflow state. Workflow autonomy uses a goal-li
 
 1. Prepare workflow-mode developer instructions and node prompt from task, node config, edge input bindings, comments accessible through CLI, and any transition output values.
 2. Start or resume a session according to context-preservation mode.
-3. Select completion mode from temporary global config: `auto`, `structured_output`, or `tool`.
+3. Select completion mode from temporary global config: `auto`, `structured_output`, or `tool`. There is no workflow/node override; `auto` chooses structured output when provider capabilities support it and dynamic tool mode otherwise.
 4. Run model turns until one of: valid structured output, valid `complete_node`, `ask_question`, interruption, or runtime error.
 5. Treat normal assistant final answers as invalid output and append a developer nudge.
 6. On accepted workflow completion, persist transition output values and stop the node run without sending another model turn.
@@ -270,7 +272,7 @@ Join nodes are non-agent fan-in points:
 
 ### Scheduler And Recovery
 
-The workflow scheduler has durable inputs in SQLite, but `queued` and `running` are not durable run states.
+The workflow scheduler has durable inputs in SQLite, but pending scheduler work and active runtime ownership are not durable run states.
 
 Durable state:
 
@@ -279,12 +281,12 @@ Durable state:
 - A run with `interrupted_at_unix_ms` is interrupted and requires explicit resume.
 - A run linked to a pending ask is waiting for user input; task views derive this from ask/run associations.
 - Pending approval transitions remain durable transition rows.
-- User cancellations and runtime failures become interrupted outcomes with reason metadata, not separate `canceled` or `failed` states.
+- User cancellations and runtime errors become interrupted outcomes with reason metadata, not separate durable states.
 
 Live state:
 
-- Queued work is the scheduler's in-memory ordering of runnable placements/runs.
-- Running work is derived from the live runtime registry/scheduler ownership.
+- Pending work ordering is scheduler memory derived from runnable placements/runs.
+- Active execution is derived from the live runtime registry/scheduler ownership.
 - Concurrency is one global config value, defaulting to five automated runs.
 
 Startup reconciliation:
@@ -524,7 +526,7 @@ Schema/domain validation must ensure workflow-scoped references do not cross wor
 - Create task: allocate project sequence atomically, create task, create start-node placement.
 - Move task manually: validate graph/input/continuation, create transition log, create pending approval state before automation can start.
 - Rebuild runnable work: find active executable placements with approved automation intent and no terminal run outcome, ordered by automation request time.
-- Start next run: count live running workflow runtimes globally, select next runnable run in memory, and start runtime work.
+- Start next run: count live active workflow runtimes globally, select next runnable run in memory, and start runtime work.
 - Complete run: persist transition output values, validate transition group/edges, create target placements/runs or pending approvals, mark source placement completed.
 - Join check: use `parallel_batch_transition_id` and `parallel_branch_edge_id` to aggregate one completed branch result per expected fan-out edge.
 - Resume interrupted run: validate session/worktree still available, clear interruption by creating or advancing a run generation, and let scheduler continue existing session.
@@ -630,8 +632,8 @@ Implement scheduling state and recovery without real model execution first.
 Scope:
 
 - Add scheduler service that rebuilds runnable work from durable active placements, automation intent, pending asks, interrupted/completed outcomes, and pending approvals.
-- Keep queued/running as in-memory scheduler/runtime state, not durable run states.
-- Add startup reconciliation for runnable, live-running-derived, waiting-for-question, interrupted, completed, and pending approval work.
+- Keep pending-work ordering and active-runtime ownership in memory, not durable run states.
+- Add startup reconciliation for runnable, active-runtime-derived, waiting-for-question, interrupted, completed, and pending approval work.
 - Make completion/transition application one transaction so source run, source placement, transition log, target placements, and target automation intent commit atomically.
 
 Completion criteria:
@@ -639,7 +641,7 @@ Completion criteria:
 - Scheduler tests prove one live runtime starts per runnable run and global concurrency is respected.
 - Fencing tests prove stale runtime completion cannot mutate a run after a newer generation.
 - Recovery tests prove runnable work is rebuilt, orphaned started runs become interrupted, pending approvals stay pending, and interrupted runs are never auto-retried.
-- Transaction tests prove failed transition application leaves no half-created target placements/runs or automation intent.
+- Transaction tests prove unsuccessful transition application leaves no half-created target placements/runs or automation intent.
 
 ### Slice 7: Workflow Prompting And Completion Runtime
 
@@ -648,7 +650,7 @@ Add workflow-aware runtime control before running full workflow nodes.
 Scope:
 
 - Add workflow-mode developer prompt source and injection.
-- Add temporary global workflow completion mode config: `auto|structured_output|tool`.
+- Add temporary global workflow completion mode config: `auto|structured_output|tool`, with no workflow/node override.
 - Generate structured-output schema or dynamic `complete_node` schema with top-level node output fields.
 - Carry active workflow run context into structured-output and tool execution.
 - Add preflight that rejects assistant responses where `complete_node` is mixed with any other tool call.

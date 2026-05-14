@@ -32,12 +32,12 @@
 - First implementation milestone is workflow domain validation, metadata persistence, API/read models, and minimal CLI through internal no-LLM coding-agent smoke checks. Real runtime/LLM orchestration follows after that foundation.
 - Automated workflow runtime tests should use fake provider/model adapters until real-provider smoke testing is explicitly approved; vertical integration tests must still exercise real workflow runtime/tool handling where that behavior is under test.
 - Real-agent workflow QA requires explicit approval because it spends provider credits and can fail for model/provider reasons unrelated to orchestration correctness.
-- Workflow node completion supports both structured output and dynamic tool modes. A temporary global config setting selects `auto`, `structured_output`, or `tool`; `auto` may choose structured output when supported and tool mode otherwise.
-- Workflow node output fields are modeled as named top-level string fields with user-authored descriptions. Runtime schemas must not expose user fields only through a generic `payload` object.
+- Workflow node completion supports both structured output and dynamic tool modes. A temporary global config setting selects `auto`, `structured_output`, or `tool`; there is no workflow/node override. `auto` chooses structured output when provider capabilities support it and dynamic tool mode otherwise. Forced `structured_output` fails fast with an actionable error when unsupported. Forced `tool` always uses dynamic tool mode.
+- Workflow node output fields are modeled as named top-level string fields with user-authored descriptions. Runtime schemas must not hide user fields inside a generic nested object.
 - Tool completion mode may use a dynamic per-node schema so model-facing fields match structured output mode. Schema/tool changes can invalidate prompt cache if workflow config changes mid-run; that is acceptable because mid-run workflow config edits are rare.
 - Workflow runs need a dedicated workflow-mode developer instruction/prompt section explaining task identity, node role, allowed completion behavior, question behavior, handoff/transition mechanics, task comments, and why ordinary final answers are invalid.
 - Workflow runtime should build on reusable `builder run`/headless infrastructure for session launch, runtime wiring, logging, progress, subagent role handling, and mode prompts. It must not use one-shot `RunPromptService.RunPrompt` final text as workflow completion authority.
-- Workflow persistence must not store `queued` or `running` as durable run states. Runnable and running conditions are derived from durable automation intent plus live runtime/scheduler state. User cancelation and runtime failures collapse into interrupted outcomes with reason metadata.
+- Workflow persistence must not store durable run states for pending scheduler work or active runtime ownership. Runnable and active-execution conditions are derived from durable automation intent plus live runtime/scheduler state. User cancelation and runtime failures collapse into interrupted outcomes with reason metadata.
 
 ## Client/Server Lifecycle Boundary
 

@@ -137,7 +137,7 @@ A workflow/task state where auto-execution stops because the task is done, inter
 
 ### Scheduler
 
-Server-owned automation scheduler for runnable workflow work. Runnable work is derived from durable task/run state, while queued/running ordering and ownership are live scheduler/runtime state.
+Server-owned automation scheduler for runnable workflow work. Runnable work is derived from durable task/run state, while pending-work ordering and active runtime ownership are live scheduler/runtime state.
 
 ### Task Comment
 
