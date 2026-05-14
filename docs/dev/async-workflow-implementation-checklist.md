@@ -523,7 +523,7 @@ Goal: internal CLI harness and agent-control surface for workflow/task CRUD, com
 - [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowview/... ./server/metadata/... ./shared/serverapi/... ./shared/client/... ./server/transport/... ./cli/builder/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
 - [x] Confirm no real LLM/provider calls happened.
-- [ ] Commit slice with message like `feat: add workflow task cli`.
+- [x] Commit slice with message like `feat: add workflow task cli`.
 - [ ] Stop for implementation review before runtime internals if needed.
 
 ## Slice 5: Task-Owned Worktree Primitive
