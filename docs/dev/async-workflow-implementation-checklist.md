@@ -434,95 +434,95 @@ Goal: internal CLI harness and agent-control surface for workflow/task CRUD, com
 
 ### 4.1 Recon
 
-- [ ] Inspect command structure in `cli/builder/main.go`.
-- [ ] Inspect existing command files for flag parsing and client setup.
-- [ ] Inspect embedded/remote serverbridge usage for non-interactive commands.
-- [ ] Decide output format conventions for IDs and errors.
-- [ ] Plan dedicated workflow/task command files; keep `cli/builder/main.go` dispatch thin.
+- [x] Inspect command structure in `cli/builder/main.go`.
+- [x] Inspect existing command files for flag parsing and client setup.
+- [x] Inspect embedded/remote serverbridge usage for non-interactive commands.
+- [x] Decide output format conventions for IDs and errors.
+- [x] Plan dedicated workflow/task command files; keep `cli/builder/main.go` dispatch thin.
 
 ### 4.2 Command Parser/Handler Tests
 
-- [ ] Add command test for `builder workflow create`.
-- [ ] Add command test for `builder workflow list`.
-- [ ] Add command test that `builder workflow create` auto-creates `backlog` and `done`.
-- [ ] Add command test for `builder workflow node add` adding extra agent/join nodes.
-- [ ] Add command test for `builder workflow edge add`.
-- [ ] Add command test for `builder workflow link`.
-- [ ] Add command test for `builder workflow unlink`.
-- [ ] Add command test for `builder workflow default`.
-- [ ] Add command test for `builder workflow validate`.
-- [ ] Add command test for `builder workflow inspect`.
-- [ ] Add command test for `builder task create`.
-- [ ] Add command test that `builder task start` fails loudly/nonzero until task-start service slice if not implemented in Slice 4.
-- [ ] Add command test for `builder task list`.
-- [ ] Add command test for `builder task show`.
-- [ ] Add command test that `builder task move` fails loudly/nonzero until Slice 11.
-- [ ] Add command test that `builder task approve` fails loudly/nonzero until Slice 11.
-- [ ] Add command test that `builder task resume` fails loudly/nonzero until runtime/resume slices.
-- [ ] Add command test that `builder task cancel` fails loudly/nonzero until cancellation slice if not implemented yet.
-- [ ] Add command test for `builder task comment add`.
-- [ ] Add command test for `builder task comment list`.
-- [ ] Add command test for `builder task comment replace`.
-- [ ] Add command test for `builder task comment delete`.
-- [ ] Add command test that CLI output includes IDs required by next commands.
-- [ ] Add command test confirming no `--json` contract is required in first CLI milestone unless later decision changes.
-- [ ] Add command test for actionable validation error output.
+- [x] Add command test for `builder workflow create`.
+- [x] Add command test for `builder workflow list`.
+- [x] Add command test that `builder workflow create` auto-creates `backlog` and `done`.
+- [x] Add command test for `builder workflow node add` adding extra agent/join nodes.
+- [x] Add command test for `builder workflow edge add`.
+- [x] Add command test for `builder workflow link`.
+- [x] Add command test for `builder workflow unlink`.
+- [x] Add command test for `builder workflow default`.
+- [x] Add command test for `builder workflow validate`.
+- [x] Add command test for `builder workflow inspect`.
+- [x] Add command test for `builder task create`.
+- [x] Add command test for `builder task start`.
+- [x] Add command test for `builder task list`.
+- [x] Add command test for `builder task show`.
+- [x] Add command test that `builder task move` fails loudly/nonzero until Slice 11.
+- [x] Add command test that `builder task approve` fails loudly/nonzero until Slice 11.
+- [x] Add command test that `builder task resume` fails loudly/nonzero until runtime/resume slices.
+- [x] Add command test for `builder task cancel`.
+- [x] Add command test for `builder task comment add`.
+- [x] Add command test for `builder task comment list`.
+- [x] Add command test for `builder task comment replace`.
+- [x] Add command test for `builder task comment delete`.
+- [x] Add command test that CLI output includes IDs required by next commands.
+- [x] Add command test confirming no `--json` contract is required in first CLI milestone unless later decision changes.
+- [x] Add command test for actionable validation error output.
 
 ### 4.3 CLI Implementation
 
-- [ ] Implement `builder workflow create <name>`.
-- [ ] Implement `builder workflow list`.
-- [ ] Implement `builder workflow node add <workflow> --key <node-key> --kind start|agent|join|terminal --prompt <text> --agent <role>`.
-- [ ] Implement `builder workflow edge add <workflow> --from <source-node-key> --transition <transition-id> --edge-key <edge-key> --to <target-node-key> --context <mode>`.
-- [ ] Implement `builder workflow link <project> <workflow> [--default]`.
-- [ ] Implement `builder workflow unlink <project> <workflow>`.
-- [ ] Implement `builder workflow default <project> <workflow>`.
-- [ ] Implement `builder workflow validate <workflow> [--project <project>]`.
-- [ ] Implement `builder workflow inspect <workflow>`.
-- [ ] Implement `builder task create --title <title> --body <body> [--workflow <workflow>]`.
-- [ ] Add `builder task start <short-id>` as explicit unsupported command until task-start service slice, if not implemented in Slice 4.
-- [ ] Implement `builder task list [--project <project>]`.
-- [ ] Implement `builder task show <short-id>`.
-- [ ] Add `builder task move ...` as explicit unsupported command until Slice 11, if reserving command shape is useful.
-- [ ] Add `builder task approve ...` as explicit unsupported command until Slice 11, if reserving command shape is useful.
-- [ ] Implement `builder task resume <short-id>` as placeholder or explicit unsupported command until runtime slice.
-- [ ] Implement `builder task cancel <short-id>` as placeholder or explicit unsupported command until cancellation slice.
-- [ ] Implement `builder task comment add <short-id>`.
-- [ ] Implement `builder task comment list <short-id>`.
-- [ ] Implement `builder task comment replace <comment-id> --body <text>`.
-- [ ] Implement `builder task comment delete <comment-id>`.
-- [ ] Ensure command errors return nonzero exit and stable message.
-- [ ] Ensure CLI does not bypass service/store invariants.
-- [ ] Put workflow/task command handlers in dedicated files or package-local command structs; keep `main.go` dispatch thin.
+- [x] Implement `builder workflow create <name>`.
+- [x] Implement `builder workflow list`.
+- [x] Implement `builder workflow node add <workflow> --key <node-key> --kind start|agent|join|terminal --prompt <text> --agent <role>`.
+- [x] Implement `builder workflow edge add <workflow> --from <source-node-key> --transition <transition-id> --edge-key <edge-key> --to <target-node-key> --context <mode>`.
+- [x] Implement `builder workflow link <project> <workflow> [--default]`.
+- [x] Implement `builder workflow unlink <project> <workflow>`.
+- [x] Implement `builder workflow default <project> <workflow>`.
+- [x] Implement `builder workflow validate <workflow> [--project <project>]`.
+- [x] Implement `builder workflow inspect <workflow>`.
+- [x] Implement `builder task create --title <title> --body <body> [--workflow <workflow>]`.
+- [x] Implement `builder task start <short-id>`.
+- [x] Implement `builder task list [--project <project>]`.
+- [x] Implement `builder task show <short-id>`.
+- [x] Add `builder task move ...` as explicit unsupported command until Slice 11, if reserving command shape is useful.
+- [x] Add `builder task approve ...` as explicit unsupported command until Slice 11, if reserving command shape is useful.
+- [x] Implement `builder task resume <short-id>` as placeholder or explicit unsupported command until runtime slice.
+- [x] Implement `builder task cancel <short-id>`.
+- [x] Implement `builder task comment add <short-id>`.
+- [x] Implement `builder task comment list <short-id>`.
+- [x] Implement `builder task comment replace <comment-id> --body <text>`.
+- [x] Implement `builder task comment delete <comment-id>`.
+- [x] Ensure command errors return nonzero exit and stable message.
+- [x] Ensure CLI does not bypass service/store invariants.
+- [x] Put workflow/task command handlers in dedicated files or package-local command structs; keep `main.go` dispatch thin.
 
 ### 4.4 Internal Smoke Check
 
-- [ ] Run smoke against a temp persistent root and embedded-local server wiring, not the user's real daemon/root.
-- [ ] Create temporary persistence root.
-- [ ] Write temp Builder config/workspace config defining role `workflow-test` for contextual workflow validation.
-- [ ] Create or bind a test project/workspace through existing setup commands.
-- [ ] Create workflow.
-- [ ] Confirm workflow has auto-created editable `backlog` start node and `done` terminal node.
-- [ ] Add agent node referencing temp role `workflow-test`.
-- [ ] Add start-to-agent edge.
-- [ ] Add agent-to-done edge.
-- [ ] Link workflow to project as default.
-- [ ] Validate workflow.
-- [ ] Create task with title/body.
-- [ ] Confirm task creation against an invalid workflow fails with accumulated errors.
-- [ ] List tasks and confirm short ID.
-- [ ] Show task and confirm start placement.
-- [ ] Add task comment.
-- [ ] Replace task comment.
-- [ ] Delete task comment.
-- [ ] Confirm `task start`, `task move`, `task approve`, and `task cancel` are unavailable or unsupported until their implementation slices if still unsupported.
-- [ ] Capture exact smoke commands in PR/commit notes or checklist update if useful.
+- [x] Run smoke against a temp persistent root and embedded-local server wiring, not the user's real daemon/root.
+- [x] Create temporary persistence root.
+- [x] Write temp Builder config/workspace config defining role `workflow-test` for contextual workflow validation.
+- [x] Create or bind a test project/workspace through existing setup commands.
+- [x] Create workflow.
+- [x] Confirm workflow has auto-created editable `backlog` start node and `done` terminal node.
+- [x] Add agent node referencing temp role `workflow-test`.
+- [x] Add start-to-agent edge.
+- [x] Add agent-to-done edge.
+- [x] Link workflow to project as default.
+- [x] Validate workflow.
+- [x] Create task with title/body.
+- [x] Confirm task creation against an invalid workflow fails with accumulated errors.
+- [x] List tasks and confirm short ID.
+- [x] Show task and confirm start placement.
+- [x] Add task comment.
+- [x] Replace task comment.
+- [x] Delete task comment.
+- [x] Confirm `task move`, `task approve`, and `task resume` are unsupported; `task start` and `task cancel` are implemented in Slice 4.
+- [x] Capture exact smoke commands in PR/commit notes or checklist update if useful.
 
 ### 4.5 Milestone Verification
 
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowview/... ./server/metadata/... ./shared/serverapi/... ./shared/client/... ./server/transport/... ./cli/builder/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Confirm no real LLM/provider calls happened.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowview/... ./server/metadata/... ./shared/serverapi/... ./shared/client/... ./server/transport/... ./cli/builder/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Confirm no real LLM/provider calls happened.
 - [ ] Commit slice with message like `feat: add workflow task cli`.
 - [ ] Stop for implementation review before runtime internals if needed.
 

@@ -180,6 +180,23 @@ type WorkflowLinkProjectResponse struct {
 	Link ProjectWorkflowLink `json:"link"`
 }
 
+type WorkflowListProjectLinksRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type WorkflowListProjectLinksResponse struct {
+	Links []ProjectWorkflowLink `json:"links"`
+}
+
+type WorkflowSetDefaultProjectLinkRequest struct {
+	ProjectID  string `json:"project_id"`
+	WorkflowID string `json:"workflow_id"`
+}
+
+type WorkflowSetDefaultProjectLinkResponse struct {
+	Link ProjectWorkflowLink `json:"link"`
+}
+
 type ProjectWorkflowLink struct {
 	ID               string `json:"id"`
 	ProjectID        string `json:"project_id"`
@@ -446,6 +463,17 @@ func (r WorkflowEdgeAddRequest) Validate() error {
 }
 
 func (r WorkflowLinkProjectRequest) Validate() error {
+	if err := validateRequired("project_id", r.ProjectID); err != nil {
+		return err
+	}
+	return validateRequired("workflow_id", r.WorkflowID)
+}
+
+func (r WorkflowListProjectLinksRequest) Validate() error {
+	return validateRequired("project_id", r.ProjectID)
+}
+
+func (r WorkflowSetDefaultProjectLinkRequest) Validate() error {
 	if err := validateRequired("project_id", r.ProjectID); err != nil {
 		return err
 	}

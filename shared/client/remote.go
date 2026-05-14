@@ -201,6 +201,16 @@ func (c *Remote) LinkWorkflowToProject(ctx context.Context, req serverapi.Workfl
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowLinkProject, req, &resp)
 }
 
+func (c *Remote) ListProjectWorkflowLinks(ctx context.Context, req serverapi.WorkflowListProjectLinksRequest) (serverapi.WorkflowListProjectLinksResponse, error) {
+	var resp serverapi.WorkflowListProjectLinksResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowListProjectLinks, req, &resp)
+}
+
+func (c *Remote) SetDefaultProjectWorkflowLink(ctx context.Context, req serverapi.WorkflowSetDefaultProjectLinkRequest) (serverapi.WorkflowSetDefaultProjectLinkResponse, error) {
+	var resp serverapi.WorkflowSetDefaultProjectLinkResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowSetDefaultProjectLink, req, &resp)
+}
+
 func (c *Remote) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error {
 	return c.callUnscoped(ctx, protocol.MethodWorkflowUnlinkProject, req, &struct{}{})
 }

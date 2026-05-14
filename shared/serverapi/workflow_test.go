@@ -74,3 +74,18 @@ func TestWorkflowValidateRequestValidation(t *testing.T) {
 		t.Fatalf("invalid mode error = %v", err)
 	}
 }
+
+func TestWorkflowProjectLinkRequestValidation(t *testing.T) {
+	if err := (WorkflowLinkProjectRequest{ProjectID: "project-1", WorkflowID: "workflow-1"}).Validate(); err != nil {
+		t.Fatalf("valid link request rejected: %v", err)
+	}
+	if err := (WorkflowListProjectLinksRequest{ProjectID: "project-1"}).Validate(); err != nil {
+		t.Fatalf("valid list links request rejected: %v", err)
+	}
+	if err := (WorkflowSetDefaultProjectLinkRequest{ProjectID: "project-1", WorkflowID: "workflow-1"}).Validate(); err != nil {
+		t.Fatalf("valid set default request rejected: %v", err)
+	}
+	if err := (WorkflowSetDefaultProjectLinkRequest{ProjectID: "", WorkflowID: "workflow-1"}).Validate(); err == nil || !strings.Contains(err.Error(), "project_id") {
+		t.Fatalf("empty project id error = %v", err)
+	}
+}

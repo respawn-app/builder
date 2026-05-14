@@ -30,6 +30,8 @@ const (
 	MethodWorkflowAddTransitionGroup            = "workflow.addTransitionGroup"
 	MethodWorkflowAddEdge                       = "workflow.addEdge"
 	MethodWorkflowLinkProject                   = "workflow.linkProject"
+	MethodWorkflowListProjectLinks              = "workflow.listProjectLinks"
+	MethodWorkflowSetDefaultProjectLink         = "workflow.setDefaultProjectLink"
 	MethodWorkflowUnlinkProject                 = "workflow.unlinkProject"
 	MethodWorkflowValidate                      = "workflow.validate"
 	MethodWorkflowTaskCreate                    = "workflow.task.create"

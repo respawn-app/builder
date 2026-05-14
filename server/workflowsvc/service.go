@@ -114,6 +114,32 @@ func (s *Service) LinkWorkflowToProject(ctx context.Context, req serverapi.Workf
 	return serverapi.WorkflowLinkProjectResponse{Link: projectWorkflowLink(link)}, nil
 }
 
+func (s *Service) ListProjectWorkflowLinks(ctx context.Context, req serverapi.WorkflowListProjectLinksRequest) (serverapi.WorkflowListProjectLinksResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowListProjectLinksResponse{}, err
+	}
+	links, err := s.store.ListProjectWorkflowLinks(ctx, req.ProjectID)
+	if err != nil {
+		return serverapi.WorkflowListProjectLinksResponse{}, err
+	}
+	out := make([]serverapi.ProjectWorkflowLink, 0, len(links))
+	for _, link := range links {
+		out = append(out, projectWorkflowLink(link))
+	}
+	return serverapi.WorkflowListProjectLinksResponse{Links: out}, nil
+}
+
+func (s *Service) SetDefaultProjectWorkflowLink(ctx context.Context, req serverapi.WorkflowSetDefaultProjectLinkRequest) (serverapi.WorkflowSetDefaultProjectLinkResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowSetDefaultProjectLinkResponse{}, err
+	}
+	link, err := s.store.SetDefaultProjectWorkflowLink(ctx, req.ProjectID, workflow.WorkflowID(req.WorkflowID))
+	if err != nil {
+		return serverapi.WorkflowSetDefaultProjectLinkResponse{}, err
+	}
+	return serverapi.WorkflowSetDefaultProjectLinkResponse{Link: projectWorkflowLink(link)}, nil
+}
+
 func (s *Service) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error {
 	if err := req.Validate(); err != nil {
 		return err

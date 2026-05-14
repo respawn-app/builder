@@ -109,6 +109,38 @@ func (s *Store) ListProjectWorkflowLinks(ctx context.Context, projectID string) 
 	return out, nil
 }
 
+func (s *Store) SetDefaultProjectWorkflowLink(ctx context.Context, projectID string, workflowID workflow.WorkflowID) (ProjectWorkflowLinkRecord, error) {
+	now := s.now().UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	link, err := q.GetActiveProjectWorkflowLinkByWorkflow(ctx, sqlitegen.GetActiveProjectWorkflowLinkByWorkflowParams{ProjectID: projectID, WorkflowID: string(workflowID)})
+	if err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	if err := q.ClearProjectDefaultWorkflowLinks(ctx, sqlitegen.ClearProjectDefaultWorkflowLinksParams{ProjectID: projectID, UpdatedAtUnixMs: now}); err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	updated, err := tx.ExecContext(ctx, `UPDATE project_workflow_links SET is_default = 1, updated_at_unix_ms = ? WHERE id = ? AND project_id = ? AND unlinked_at_unix_ms = 0`, now, link.ID, projectID)
+	if err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	if count, err := updated.RowsAffected(); err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	} else if count != 1 {
+		return ProjectWorkflowLinkRecord{}, sql.ErrNoRows
+	}
+	if err := tx.Commit(); err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	link.IsDefault = 1
+	link.UpdatedAtUnixMs = now
+	return linkRecordFromRow(link), nil
+}
+
 func (s *Store) UnlinkProjectWorkflow(ctx context.Context, linkID string, replacementDefaultLinkID string) error {
 	link, err := s.queries.GetProjectWorkflowLink(ctx, linkID)
 	if err != nil {
