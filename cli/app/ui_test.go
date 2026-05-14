@@ -757,6 +757,33 @@ func TestAskQuestionPromptQuestionLinesEllipsizeInsteadOfWrapping(t *testing.T) 
 	}
 }
 
+func TestAskQuestionFreeformPromptQuestionLinesWrapInsteadOfEllipsizing(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 40
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.syncViewport()
+	testSetActiveAsk(m, &askEvent{req: clientui.PendingPromptEvent{
+		Question: "This question is intentionally far too long to fit in the live ask input area on one line.",
+	}, reply: make(chan askReply, 1)})
+
+	wrapped, _ := m.layout().wrappedAskPromptLines(32)
+	questionLines := 0
+	plain := make([]string, 0, len(wrapped))
+	for _, line := range wrapped {
+		if line.Line.Kind == askPromptLineKindQuestion {
+			questionLines++
+			plain = append(plain, ansi.Strip(line.Text))
+			if strings.HasSuffix(ansi.Strip(line.Text), "…") {
+				t.Fatalf("expected freeform question line to wrap, not ellipsize: %+v", line)
+			}
+		}
+	}
+	if questionLines < 2 {
+		t.Fatalf("expected long freeform question to wrap across multiple lines, got %d in %q", questionLines, strings.Join(plain, "\n"))
+	}
+}
+
 func TestAskQuestionMarkdownPromptCursorTracksInputAfterExpandedQuestion(t *testing.T) {
 	question := strings.Join([]string{
 		"Review **this plan** before answer:",

@@ -876,6 +876,9 @@ func TestOngoingAskQuestionQuestionTextIsFaintAndNotTruncated(t *testing.T) {
 	if !containsInOrder(plain, "Review the generated", "tail-marker visible?", "└ yes") {
 		t.Fatalf("expected wrapped question content preserved, got %q", plain)
 	}
+	if strings.Contains(plain, "…") {
+		t.Fatalf("expected committed ongoing question text to wrap without ellipsis, got %q", plain)
+	}
 	for _, line := range strings.Split(rendered, "\n") {
 		if width := lipgloss.Width(line); width > 36 {
 			t.Fatalf("expected question line width <= viewport, got %d for %q in %q", width, line, rendered)
