@@ -36,6 +36,10 @@ type Service struct {
 }
 
 func (s Service) List(includeDirtyCount bool) (serverapi.WorktreeListResponse, error) {
+	if s.Runtime.ReadOnly != nil && s.Runtime.ReadOnly() {
+		// Server-side listing syncs workspace metadata under the controller lease.
+		return serverapi.WorktreeListResponse{}, ErrReadOnlyRuntime
+	}
 	ctx, cancel, leaseID, err := s.controlContextWithLease()
 	if err != nil {
 		return serverapi.WorktreeListResponse{}, err

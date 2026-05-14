@@ -188,20 +188,16 @@ func TestReadOnlyRuntimeControlRejectsMutationsBeforeRPC(t *testing.T) {
 	}
 }
 
-func TestReadOnlyRuntimeControlAllowsList(t *testing.T) {
-	client := &testWorktreeClient{listResp: serverapi.WorktreeListResponse{Target: clientui.SessionExecutionTarget{EffectiveWorkdir: "/repo"}}}
+func TestReadOnlyRuntimeControlRejectsListBeforeRPC(t *testing.T) {
+	client := &testWorktreeClient{}
 	service := newTestService(client)
 	service.Runtime.ReadOnly = func() bool { return true }
 
-	resp, err := service.List(false)
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	if _, err := service.List(false); !errors.Is(err, ErrReadOnlyRuntime) {
+		t.Fatalf("List error = %v, want ErrReadOnlyRuntime", err)
 	}
-	if resp.Target.EffectiveWorkdir != "/repo" {
-		t.Fatalf("target = %+v, want /repo", resp.Target)
-	}
-	if len(client.listRequests) != 1 {
-		t.Fatalf("list requests = %+v, want one", client.listRequests)
+	if len(client.listRequests) != 0 {
+		t.Fatalf("list requests = %d, want none", len(client.listRequests))
 	}
 }
 
