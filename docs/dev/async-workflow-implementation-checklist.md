@@ -17,7 +17,22 @@ Do not treat this as a replacement for the spec. If spec and checklist conflict,
 - [ ] Keep POC GUI integration behind a thin adapter layer.
 - [ ] Never load full `events.jsonl` in workflow code or tests.
 - [ ] Update `docs/dev/decisions.md` when a new locked product/architecture decision is made.
+- [ ] When a slice changes a locked decision, update `docs/dev/decisions.md` first, then this checklist/spec.
 - [ ] Avoid staging unrelated user changes; inspect `git status --short` before every commit.
+- [ ] Use this checklist as the handoff contract during implementation; do not invent parallel task trackers.
+- [ ] Mark checklist items incrementally while implementing so handoffs resume from exact state.
+
+## Repo Path Assumptions
+
+Checked before implementation in this worktree:
+
+- `server/workflow` does not exist yet and is the intended pure domain package for Slice 1.
+- `server/workflowview` and `server/workflowruntime` do not exist yet and are intended package additions in later slices.
+- Existing metadata paths are `server/metadata/migrations`, `server/metadata/queries.sql`, `server/metadata/store.go`, and `server/metadata/sqlitegen`.
+- Existing shared boundary paths are `shared/serverapi`, `shared/servicecontract`, and `shared/client`.
+- Existing transport path is `server/transport`.
+- Existing CLI command path is `cli/builder`.
+- If these paths change before a later slice starts, update this section before coding that slice.
 
 ## Slice 1: Workflow Domain And Graph Validation
 
@@ -33,6 +48,7 @@ Goal: pure `server/workflow` package with domain types and graph validation. No 
 ### 1.2 Red Tests
 
 - [ ] Add `server/workflow` package test file for graph validation.
+- [ ] Define exact validation error code names before implementation and assert them in tests.
 - [ ] Add valid fixture helper for default workflow: `start/backlog -> agent -> done`.
 - [ ] Add test: valid default workflow passes.
 - [ ] Add test: exactly one start node required.
@@ -57,6 +73,34 @@ Goal: pure `server/workflow` package with domain types and graph validation. No 
 - [ ] Add test: agent node requires valid subagent role.
 - [ ] Add test: missing subagent role returns stable validation code.
 - [ ] Add test: validation returns all relevant structured errors where safe, not first string-only failure.
+
+Initial validation error code names:
+
+- [ ] `workflow.validation.missing_workflow_id`
+- [ ] `workflow.validation.missing_node_id`
+- [ ] `workflow.validation.duplicate_node_key`
+- [ ] `workflow.validation.missing_start_node`
+- [ ] `workflow.validation.multiple_start_nodes`
+- [ ] `workflow.validation.invalid_start_node`
+- [ ] `workflow.validation.terminal_has_outgoing_edge`
+- [ ] `workflow.validation.terminal_is_executable`
+- [ ] `workflow.validation.node_unreachable_from_start`
+- [ ] `workflow.validation.non_terminal_cannot_reach_terminal`
+- [ ] `workflow.validation.missing_transition_group_id`
+- [ ] `workflow.validation.duplicate_transition_id`
+- [ ] `workflow.validation.transition_group_source_mismatch`
+- [ ] `workflow.validation.missing_edge_id`
+- [ ] `workflow.validation.duplicate_edge_key`
+- [ ] `workflow.validation.edge_source_mismatch`
+- [ ] `workflow.validation.edge_target_missing`
+- [ ] `workflow.validation.cross_workflow_reference`
+- [ ] `workflow.validation.invalid_output_field`
+- [ ] `workflow.validation.duplicate_output_field`
+- [ ] `workflow.validation.unknown_payload_requirement`
+- [ ] `workflow.validation.invalid_context_mode`
+- [ ] `workflow.validation.agent_role_required`
+- [ ] `workflow.validation.agent_role_missing`
+- [ ] `workflow.validation.invalid_node_kind`
 
 ### 1.3 Implement Domain Types
 
@@ -270,6 +314,7 @@ Goal: internal CLI harness and agent-control surface for workflow/task CRUD, com
 
 ### 4.4 Internal Smoke Check
 
+- [ ] Run smoke against a temp persistent root and embedded-local server wiring, not the user's real daemon/root.
 - [ ] Create temporary persistence root.
 - [ ] Create or bind a test project/workspace through existing setup commands.
 - [ ] Create workflow.
@@ -418,6 +463,15 @@ Goal: runtime can identify workflow run context, expose static `complete_node`, 
 ## Slice 8: Single-Agent `new_session` Vertical Slice
 
 Goal: one executable workflow node can run asynchronously through queue/session/worktree/runtime with fake model completion.
+
+### 8.0 Fake Runtime Boundary
+
+- [ ] Define fake workflow runtime/model adapter interface before writing Slice 8 tests.
+- [ ] Adapter must simulate model output and tool calls without provider network calls.
+- [ ] Adapter must expose deterministic scripted steps: final answer, tool-call batch, `ask_question`, runtime error, and cancellation where needed by tests.
+- [ ] Adapter must record session/run/worktree inputs so tests can assert prompt/context/worktree behavior.
+- [ ] Adapter must not share code path with real provider transport except through the same workflowruntime boundary used by production.
+- [ ] Real-provider smoke must remain outside automated tests and behind Nikita approval.
 
 ### 8.1 Red Tests
 
