@@ -634,7 +634,7 @@ func TestResolveReadOnlySessionActionHandlesPureNavigationLocally(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveReadOnlySessionAction(tt.in)
+			got, err := resolveReadOnlySessionAction(context.Background(), nil, nil, "session-1", tt.in)
 			if err != nil {
 				t.Fatalf("resolveReadOnlySessionAction: %v", err)
 			}
@@ -646,9 +646,34 @@ func TestResolveReadOnlySessionActionHandlesPureNavigationLocally(t *testing.T) 
 }
 
 func TestResolveReadOnlySessionActionRejectsRollbackFork(t *testing.T) {
-	_, err := resolveReadOnlySessionAction(UITransition{Action: UIActionForkRollback})
+	_, err := resolveReadOnlySessionAction(context.Background(), nil, nil, "session-1", UITransition{Action: UIActionForkRollback})
 	if !errors.Is(err, errReadOnlyRuntime) {
 		t.Fatalf("error = %v, want read-only runtime", err)
+	}
+}
+
+func TestResolveReadOnlySessionActionLogoutReauthenticatesWithoutLease(t *testing.T) {
+	reauthCalls := 0
+	resolved, err := resolveReadOnlySessionAction(
+		context.Background(),
+		narrowSessionLifecycleServer{
+			reauthenticate: func(context.Context, authInteractor) error {
+				reauthCalls++
+				return nil
+			},
+		},
+		nil,
+		"session-1",
+		UITransition{Action: UIActionLogout},
+	)
+	if err != nil {
+		t.Fatalf("resolveReadOnlySessionAction logout: %v", err)
+	}
+	if reauthCalls != 1 {
+		t.Fatalf("reauth calls = %d, want 1", reauthCalls)
+	}
+	if !resolved.ShouldContinue || resolved.NextSessionID != "session-1" {
+		t.Fatalf("resolved = %+v, want continue same session", resolved)
 	}
 }
 

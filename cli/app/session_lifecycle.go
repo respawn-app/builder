@@ -145,7 +145,7 @@ func runSessionLifecycle(ctx context.Context, server interactiveSessionServer, i
 		}
 		var resolved resolvedSessionAction
 		if runtimePlan.ReadOnly {
-			resolved, err = resolveReadOnlySessionAction(transition)
+			resolved, err = resolveReadOnlySessionAction(ctx, server, interactor, plan.SessionID, transition)
 		} else {
 			resolved, err = resolveSessionAction(ctx, server, interactor, plan.SessionID, runtimePlan.CurrentControllerLeaseID(), transition)
 		}
@@ -225,7 +225,7 @@ type resolvedSessionAction struct {
 	ShouldContinue  bool
 }
 
-func resolveReadOnlySessionAction(transition UITransition) (resolvedSessionAction, error) {
+func resolveReadOnlySessionAction(ctx context.Context, server sessionTransitionServer, interactor authInteractor, sessionID string, transition UITransition) (resolvedSessionAction, error) {
 	switch transition.Action {
 	case UIActionNewSession:
 		return resolvedSessionAction{
@@ -242,6 +242,14 @@ func resolveReadOnlySessionAction(transition UITransition) (resolvedSessionActio
 			InitialInput:   transition.InitialInput,
 			ShouldContinue: true,
 		}, nil
+	case UIActionLogout:
+		if server == nil {
+			return resolvedSessionAction{}, errors.New("session lifecycle client is required")
+		}
+		if err := server.Reauthenticate(ctx, interactor); err != nil {
+			return resolvedSessionAction{}, err
+		}
+		return resolvedSessionAction{NextSessionID: strings.TrimSpace(sessionID), ShouldContinue: true}, nil
 	case UIActionExit, "":
 		return resolvedSessionAction{}, nil
 	default:
