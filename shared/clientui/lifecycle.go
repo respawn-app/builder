@@ -145,24 +145,6 @@ func (s ReviewerLifecycle) IsBlocking() bool {
 	return s == ReviewerLifecycleRunningBlocking
 }
 
-type InputSubmissionLifecycle string
-
-const (
-	InputSubmissionUnlocked InputSubmissionLifecycle = "unlocked"
-	InputSubmissionLocked   InputSubmissionLifecycle = "locked"
-)
-
-func NewInputSubmissionLifecycle(locked bool) InputSubmissionLifecycle {
-	if locked {
-		return InputSubmissionLocked
-	}
-	return InputSubmissionUnlocked
-}
-
-func (s InputSubmissionLifecycle) IsLocked() bool {
-	return s == InputSubmissionLocked
-}
-
 type RuntimeConnectionLifecycle string
 
 const (

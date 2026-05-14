@@ -1,6 +1,9 @@
 package app
 
-import "builder/shared/clientui"
+import (
+	"builder/cli/app/internal/runtimestate"
+	"builder/shared/clientui"
+)
 
 type uiInterruptLifecycle string
 
@@ -107,7 +110,7 @@ func (m *uiModel) setInputSubmitLocked(locked bool) {
 	if m == nil {
 		return
 	}
-	m.inputSubmission = clientui.NewInputSubmissionLifecycle(locked)
+	m.inputSubmission = runtimestate.NewInputSubmissionLifecycle(locked)
 }
 
 func (m *uiModel) hasPendingInterrupt() bool {

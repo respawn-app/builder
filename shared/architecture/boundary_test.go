@@ -49,6 +49,212 @@ func TestArchitectureBoundaries(t *testing.T) {
 	}
 }
 
+func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	clientUIRoot := filepath.Join(repoRoot, "shared", "clientui")
+	allowedTypes := map[string]struct{}{
+		"ApprovalDecision":                 {},
+		"ApprovalOption":                   {},
+		"ApprovalPromptAnswer":             {},
+		"BackgroundProcess":                {},
+		"BackgroundShellEvent":             {},
+		"ChatEntry":                        {},
+		"ChatSnapshot":                     {},
+		"CommittedTranscriptSuffix":        {},
+		"CommittedTranscriptSuffixRequest": {},
+		"CompactionLifecycle":              {},
+		"CompactionStatus":                 {},
+		"ConversationFreshness":            {},
+		"EntryVisibility":                  {},
+		"Event":                            {},
+		"EventKind":                        {},
+		"MessagePhase":                     {},
+		"MessageType":                      {},
+		"PendingApproval":                  {},
+		"PendingAsk":                       {},
+		"PendingPromptEvent":               {},
+		"PendingPromptEventType":           {},
+		"ProcessClient":                    {},
+		"ProcessOutputChunk":               {},
+		"ProjectAvailability":              {},
+		"ProjectOverview":                  {},
+		"ProjectSummary":                   {},
+		"ProjectWorkspaceSummary":          {},
+		"PromptAnswer":                     {},
+		"QueuedUserMessage":                {},
+		"ReasoningDelta":                   {},
+		"ReviewerLifecycle":                {},
+		"RunLifecycle":                     {},
+		"RunLifecyclePhase":                {},
+		"RunMode":                          {},
+		"RunState":                         {},
+		"RunStatus":                        {},
+		"RunView":                          {},
+		"RuntimeClient":                    {},
+		"RuntimeConnectionLifecycle":       {},
+		"RuntimeContextUsage":              {},
+		"RuntimeGoal":                      {},
+		"RuntimeGoalStatus":                {},
+		"RuntimeMainView":                  {},
+		"RuntimeSessionView":               {},
+		"RuntimeStatus":                    {},
+		"SessionExecutionTarget":           {},
+		"SessionSummary":                   {},
+		"ToolCallMeta":                     {},
+		"ToolCallRenderBehavior":           {},
+		"ToolPresentationKind":             {},
+		"ToolRenderHint":                   {},
+		"ToolRenderKind":                   {},
+		"ToolShellDialect":                 {},
+		"TranscriptMetadata":               {},
+		"TranscriptPage":                   {},
+		"TranscriptPageRequest":            {},
+		"TranscriptRecoveryCause":          {},
+		"TranscriptWindow":                 {},
+		"UpdateStatus":                     {},
+	}
+	allowedFuncs := map[string]struct{}{
+		"CompactionLifecycle.IsRunning":             {},
+		"ConversationFreshness.IsFresh":             {},
+		"FinishedRunLifecycle":                      {},
+		"IdleRunLifecycle":                          {},
+		"MustRunLifecycle":                          {},
+		"NewCompactionLifecycle":                    {},
+		"NewReviewerLifecycle":                      {},
+		"NewRunLifecycle":                           {},
+		"NewRuntimeConnectionLifecycle":             {},
+		"NormalizeCommittedTranscriptSuffixRequest": {},
+		"NormalizeMessagePhase":                     {},
+		"NormalizeSessionExecutionTarget":           {},
+		"NormalizeThinkingLevel":                    {},
+		"PendingPromptEvent.IsZero":                 {},
+		"ReviewerLifecycle.IsBlocking":              {},
+		"ReviewerLifecycle.IsRunning":               {},
+		"ReviewerLifecycle.Validate":                {},
+		"RunLifecycle.IsFinished":                   {},
+		"RunLifecycle.IsGoalLoopRunning":            {},
+		"RunLifecycle.IsRunning":                    {},
+		"RunLifecycle.Validate":                     {},
+		"RunningRunLifecycle":                       {},
+		"RuntimeConnectionLifecycle.IsDisconnected": {},
+		"SessionExecutionTargetIsZero":              {},
+		"SessionExecutionTargetsEqual":              {},
+	}
+	violations := make([]string, 0)
+	if err := filepath.WalkDir(clientUIRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		relPath, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			relPath = path
+		}
+		for _, decl := range file.Decls {
+			switch typedDecl := decl.(type) {
+			case *ast.FuncDecl:
+				name := funcDeclBoundaryName(typedDecl)
+				if _, allowed := allowedFuncs[name]; allowed {
+					continue
+				}
+				if funcUsesRuntimeEventPolicyType(typedDecl.Type) {
+					violations = append(violations, relPath+": DTO-only package must not define runtime-event policy helper "+name)
+					continue
+				}
+				violations = append(violations, relPath+": DTO-only package added function "+name+" without DTO-boundary review")
+			case *ast.GenDecl:
+				if typedDecl.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range typedDecl.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					name := typeSpec.Name.Name
+					if _, allowed := allowedTypes[name]; !allowed {
+						violations = append(violations, relPath+": DTO-only package added type "+name+" without DTO-boundary review")
+					}
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("scan shared clientui DTO boundaries: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("shared/clientui DTO boundary violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func funcDeclBoundaryName(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		if fn == nil {
+			return ""
+		}
+		return fn.Name.Name
+	}
+	return receiverTypeName(fn.Recv.List[0].Type) + "." + fn.Name.Name
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch typedExpr := expr.(type) {
+	case *ast.Ident:
+		return typedExpr.Name
+	case *ast.StarExpr:
+		return receiverTypeName(typedExpr.X)
+	default:
+		return ""
+	}
+}
+
+func funcUsesRuntimeEventPolicyType(funcType *ast.FuncType) bool {
+	if funcType == nil {
+		return false
+	}
+	for _, fields := range []*ast.FieldList{funcType.Params, funcType.Results} {
+		if fields == nil {
+			continue
+		}
+		for _, field := range fields.List {
+			if exprUsesRuntimeEventPolicyType(field.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprUsesRuntimeEventPolicyType(expr ast.Expr) bool {
+	switch typedExpr := expr.(type) {
+	case *ast.Ident:
+		switch typedExpr.Name {
+		case "Event", "ReasoningDelta", "BackgroundShellEvent":
+			return true
+		default:
+			return false
+		}
+	case *ast.StarExpr:
+		return exprUsesRuntimeEventPolicyType(typedExpr.X)
+	case *ast.ArrayType:
+		return exprUsesRuntimeEventPolicyType(typedExpr.Elt)
+	case *ast.MapType:
+		return exprUsesRuntimeEventPolicyType(typedExpr.Key) || exprUsesRuntimeEventPolicyType(typedExpr.Value)
+	default:
+		return false
+	}
+}
+
 func TestCLIPackagesDoNotImportServerOutsideCompositionBridges(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	// Keep CLI -> server imports concentrated in documented local composition

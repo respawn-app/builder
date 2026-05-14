@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/app/internal/runtimestate"
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
@@ -27,23 +28,23 @@ func TestApplyRuntimeEventReductionInvalidLifecycleKeepsSideEffectsAndReturnsSta
 		t.Fatalf("reviewer lifecycle: %v", err)
 	}
 
-	cmd := m.runtimeAdapter().applyRuntimeEventReduction(clientui.RuntimeEventReduction{
-		RunState: clientui.RuntimeRunStateReduction{
-			State: clientui.RuntimeRunState{
+	cmd := m.runtimeAdapter().applyRuntimeEventReduction(runtimestate.RuntimeEventReduction{
+		RunState: runtimestate.RuntimeRunStateReduction{
+			State: runtimestate.RuntimeRunState{
 				Run:        m.runtimeLifecycle.Run,
 				Compaction: clientui.NewCompactionLifecycle(true),
 				Reviewer:   reviewer,
 			},
 			Err: errors.New("bad lifecycle"),
 		},
-		Conversation: clientui.RuntimeConversationReduction{State: clientui.RuntimeConversationState{Freshness: clientui.ConversationFreshnessEstablished}},
-		PendingInput: clientui.RuntimePendingInputReduction{
-			State: clientui.PendingInputState{
+		Conversation: runtimestate.RuntimeConversationReduction{State: runtimestate.RuntimeConversationState{Freshness: clientui.ConversationFreshnessEstablished}},
+		PendingInput: runtimestate.RuntimePendingInputReduction{
+			State: runtimestate.PendingInputState{
 				Input:      "draft",
-				Submission: clientui.InputSubmissionLocked,
+				Submission: runtimestate.InputSubmissionLocked,
 			},
 		},
-		Reasoning: clientui.RuntimeReasoningReduction{State: clientui.RuntimeReasoningState{StatusHeader: "thinking"}},
+		Reasoning: runtimestate.RuntimeReasoningReduction{State: runtimestate.RuntimeReasoningState{StatusHeader: "thinking"}},
 	})
 
 	if cmd == nil {

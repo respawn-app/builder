@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/app/internal/runtimestate"
 	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,7 +17,7 @@ func shouldRefreshDeferredCommittedTailOnRunEnd(m *uiModel, evt clientui.Event) 
 	return !evt.RunState.Lifecycle.IsRunning()
 }
 
-func (a uiRuntimeAdapter) runtimeRunState() clientui.RuntimeRunState {
+func (a uiRuntimeAdapter) runtimeRunState() runtimestate.RuntimeRunState {
 	m := a.model
 	if err := m.runtimeLifecycle.Run.Validate(); err != nil {
 		panic(err)
@@ -24,33 +25,33 @@ func (a uiRuntimeAdapter) runtimeRunState() clientui.RuntimeRunState {
 	if err := m.runtimeLifecycle.Reviewer.Validate(); err != nil {
 		panic(err)
 	}
-	return clientui.RuntimeRunState{
+	return runtimestate.RuntimeRunState{
 		Run:        m.runtimeLifecycle.Run,
 		Compaction: m.runtimeLifecycle.Compaction,
 		Reviewer:   m.runtimeLifecycle.Reviewer,
 	}
 }
 
-func (a uiRuntimeAdapter) runtimeConversationState() clientui.RuntimeConversationState {
-	return clientui.RuntimeConversationState{Freshness: a.model.conversationFreshness}
+func (a uiRuntimeAdapter) runtimeConversationState() runtimestate.RuntimeConversationState {
+	return runtimestate.RuntimeConversationState{Freshness: a.model.conversationFreshness}
 }
 
-func (a uiRuntimeAdapter) runtimeReasoningState() clientui.RuntimeReasoningState {
-	return clientui.RuntimeReasoningState{StatusHeader: a.model.reasoningStatusHeader}
+func (a uiRuntimeAdapter) runtimeReasoningState() runtimestate.RuntimeReasoningState {
+	return runtimestate.RuntimeReasoningState{StatusHeader: a.model.reasoningStatusHeader}
 }
 
-func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
+func (a uiRuntimeAdapter) pendingInputState() runtimestate.PendingInputState {
 	m := a.model
-	return clientui.PendingInputState{
+	return runtimestate.PendingInputState{
 		Input:            m.input,
 		PendingInjected:  m.pendingInjected,
 		LockedInjectText: m.lockedInjectText,
 		LockedInjectID:   m.lockedInjectID,
-		Submission:       clientui.NewInputSubmissionLifecycle(m.isInputSubmitLocked()),
+		Submission:       runtimestate.NewInputSubmissionLifecycle(m.isInputSubmitLocked()),
 	}
 }
 
-func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeEventReduction) tea.Cmd {
+func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction runtimestate.RuntimeEventReduction) tea.Cmd {
 	m := a.model
 	var cmd tea.Cmd
 	if reduction.RunState.Err != nil {
@@ -70,17 +71,17 @@ func (a uiRuntimeAdapter) applyRuntimeEventReduction(reduction clientui.RuntimeE
 	m.lockedInjectID = reduction.PendingInput.State.LockedInjectID
 	m.setInputSubmitLocked(reduction.PendingInput.State.Submission.IsLocked())
 	switch reduction.PendingInput.DraftCommand {
-	case clientui.RuntimePendingInputClearDraft:
+	case runtimestate.RuntimePendingInputClearDraft:
 		m.clearInput()
 	}
 	switch reduction.RunState.Activity {
-	case clientui.RuntimeActivityRunning:
+	case runtimestate.RuntimeActivityRunning:
 		m.activity = uiActivityRunning
-	case clientui.RuntimeActivityIdle:
+	case runtimestate.RuntimeActivityIdle:
 		m.activity = uiActivityIdle
 	}
 	switch reduction.BackgroundProcesses.Command {
-	case clientui.RuntimeBackgroundProcessRefresh:
+	case runtimestate.RuntimeBackgroundProcessRefresh:
 		m.refreshProcessEntriesIfOpen()
 	}
 	return cmd
@@ -111,15 +112,15 @@ func (a uiRuntimeAdapter) reconcileInterruptFromRunState(evt clientui.Event) {
 	m.clearReviewerState()
 }
 
-func (a uiRuntimeAdapter) effectiveRuntimeTranscriptSync(evt clientui.Event, proposed clientui.RuntimeTranscriptSyncCommand) clientui.RuntimeTranscriptSyncCommand {
+func (a uiRuntimeAdapter) effectiveRuntimeTranscriptSync(evt clientui.Event, proposed runtimestate.RuntimeTranscriptSyncCommand) runtimestate.RuntimeTranscriptSyncCommand {
 	if evt.Kind != clientui.EventConversationUpdated {
 		return proposed
 	}
 	if !shouldRecoverCommittedTranscriptFromConversationUpdate(a.model, evt) {
-		return clientui.RuntimeTranscriptSyncCommand{}
+		return runtimestate.RuntimeTranscriptSyncCommand{}
 	}
 	if proposed.IsSet() {
 		return proposed
 	}
-	return clientui.RuntimeTranscriptSyncCommand{Reason: clientui.RuntimeTranscriptSyncCommittedAdvance}
+	return runtimestate.RuntimeTranscriptSyncCommand{Reason: runtimestate.RuntimeTranscriptSyncCommittedAdvance}
 }

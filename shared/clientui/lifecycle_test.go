@@ -69,15 +69,6 @@ func TestRuntimeSubLifecycleTransitionTables(t *testing.T) {
 		t.Fatalf("reviewer complete = %q, want idle", reviewer)
 	}
 
-	input := NewInputSubmissionLifecycle(true)
-	if !input.IsLocked() {
-		t.Fatal("expected queued input drain to lock submission")
-	}
-	input = NewInputSubmissionLifecycle(false)
-	if input.IsLocked() {
-		t.Fatal("expected flushed queued input to unlock submission")
-	}
-
 	connection := NewRuntimeConnectionLifecycle(true)
 	if !connection.IsDisconnected() {
 		t.Fatal("expected controller reconnect loss to mark disconnected")
@@ -85,20 +76,5 @@ func TestRuntimeSubLifecycleTransitionTables(t *testing.T) {
 	connection = NewRuntimeConnectionLifecycle(false)
 	if connection.IsDisconnected() {
 		t.Fatal("expected hydration/reconnect recovery to mark connected")
-	}
-}
-
-func TestRunStateDTORejectsInvalidLifecycleAtReducerBoundary(t *testing.T) {
-	initial := RuntimeRunState{Run: RunningRunLifecycle(RunModeTurn)}
-	reduction := ReduceRuntimeRunStateEvent(
-		initial,
-		true,
-		Event{Kind: EventRunStateChanged, RunState: &RunState{Lifecycle: RunLifecycle{Phase: RunLifecycleIdle, Mode: RunModeGoalLoop}}},
-	)
-	if reduction.State.Run != initial.Run {
-		t.Fatalf("invalid run transition changed state: %+v", reduction.State)
-	}
-	if reduction.Err == nil {
-		t.Fatal("expected invalid run transition to surface an error")
 	}
 }

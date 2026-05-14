@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"builder/cli/app/commands"
+	"builder/cli/app/internal/runtimestate"
 	"builder/cli/tui"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -54,7 +55,7 @@ type uiInputFeatureState struct {
 	promptHistoryDraft       string
 	promptHistoryDraftCursor int
 	activity                 uiActivity
-	runtimeLifecycle         clientui.RuntimeRunState
+	runtimeLifecycle         runtimestate.RuntimeRunState
 	reviewerEnabled          bool
 	reviewerMode             string
 	autoCompactionEnabled    bool
@@ -71,7 +72,7 @@ type uiInputFeatureState struct {
 	pendingInjected    []clientui.QueuedUserMessage
 	lockedInjectText   string
 	lockedInjectID     string
-	inputSubmission    clientui.InputSubmissionLifecycle
+	inputSubmission    runtimestate.InputSubmissionLifecycle
 	interruptLifecycle uiInterruptLifecycle
 
 	modelName             string

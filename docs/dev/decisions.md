@@ -24,6 +24,7 @@
 
 - Server owns durable lifecycle state, lifecycle mutations, and canonical lifecycle event streams.
 - CLI/TUI consumes client-facing DTOs and shared service clients; it does not own alternate durable/runtime lifecycle flows for embedded-local mode.
+- `shared/clientui` is a DTO/read-model boundary only. CLI runtime-event state transitions, pending-input policy, reasoning-stream presentation, activity transitions, transcript-sync commands, background notices, and prompt-history commands are owned by `cli/app/internal/runtimestate`, which depends only on `shared/clientui`.
 - Embedded-local mode adapts through the same loopback service/client boundary as remote/shared server mode. Direct in-process engine, broker, process, auth, or project objects may exist only behind server-owned adapters.
 - `shared/serverapi` is a wire-contract package only: serializable request/response DTOs, validation helpers, typed wire errors, stream/progress DTOs, and route-facing value contracts. It must not define server-owned service interfaces, concrete service implementations, runtime handles, headless launchers, logging/timeout policy, lifecycle orchestration, or close/drop semantics.
 - In-process route service interfaces live in `shared/servicecontract`. That package is the narrow loopback boundary for shared clients and server adapters, may depend only on `context` and `shared/serverapi`, and must contain route-shaped interfaces with no execution policy or concrete behavior.
