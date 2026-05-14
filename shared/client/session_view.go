@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type SessionViewClient interface {
@@ -18,10 +19,10 @@ type SessionCommittedTranscriptSuffixClient interface {
 }
 
 type loopbackSessionViewClient struct {
-	service serverapi.SessionViewService
+	service servicecontract.SessionViewService
 }
 
-func NewLoopbackSessionViewClient(service serverapi.SessionViewService) SessionViewClient {
+func NewLoopbackSessionViewClient(service servicecontract.SessionViewService) SessionViewClient {
 	return &loopbackSessionViewClient{service: service}
 }
 

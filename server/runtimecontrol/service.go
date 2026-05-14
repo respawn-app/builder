@@ -12,6 +12,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 	"builder/shared/transcript"
 )
 
@@ -690,4 +691,4 @@ func sameGoalClearMemoRequest(a goalClearMemoRequest, b goalClearMemoRequest) bo
 	return a.SessionID == b.SessionID && a.Actor == b.Actor
 }
 
-var _ serverapi.RuntimeControlService = (*Service)(nil)
+var _ servicecontract.RuntimeControlService = (*Service)(nil)

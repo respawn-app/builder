@@ -21,6 +21,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
@@ -820,4 +821,4 @@ func NewActivateRequest(clientRequestID string, sessionID string, settings confi
 	}
 }
 
-var _ serverapi.SessionRuntimeService = (*Service)(nil)
+var _ servicecontract.SessionRuntimeService = (*Service)(nil)

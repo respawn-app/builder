@@ -93,6 +93,7 @@ func TestLoopbackClientsExposeEveryRemoteRouteBinding(t *testing.T) {
 	dir := filepath.Dir(filename)
 	interfaceMethods := clientInterfaceMethods(t, dir)
 	loopbackMethods := loopbackMethodNames(t, dir)
+	loopbackServiceMethods := loopbackMethodServiceContractTypes(t, dir)
 	for _, route := range rpccontract.Routes() {
 		if route.Kind == rpccontract.KindNotification || route.Dependency == rpccontract.DependencyProtocol {
 			continue
@@ -104,6 +105,56 @@ func TestLoopbackClientsExposeEveryRemoteRouteBinding(t *testing.T) {
 		if _, ok := loopbackMethods[call.methodName]; !ok {
 			t.Fatalf("route %q client method %q missing loopback binding", route.Method, call.methodName)
 		}
+		serviceType, ok := loopbackServiceMethods[call.methodName]
+		if !ok {
+			t.Fatalf("route %q client method %q loopback binding is not backed by shared/servicecontract", route.Method, call.methodName)
+		}
+		if want := expectedLoopbackServiceContractType(route.Dependency); serviceType != want {
+			t.Fatalf("route %q client method %q loopback service = %q, want %q", route.Method, call.methodName, serviceType, want)
+		}
+	}
+}
+
+func expectedLoopbackServiceContractType(dependency rpccontract.Dependency) string {
+	switch dependency {
+	case rpccontract.DependencyApprovalView:
+		return "ApprovalViewService"
+	case rpccontract.DependencyAskView:
+		return "AskViewService"
+	case rpccontract.DependencyAuthBootstrap:
+		return "AuthBootstrapService"
+	case rpccontract.DependencyAuthStatus:
+		return "AuthStatusService"
+	case rpccontract.DependencyProcessControl:
+		return "ProcessControlService"
+	case rpccontract.DependencyProcessOutput:
+		return "ProcessOutputService"
+	case rpccontract.DependencyProcessView:
+		return "ProcessViewService"
+	case rpccontract.DependencyProjectView:
+		return "ProjectViewService"
+	case rpccontract.DependencyPromptActivity:
+		return "PromptActivityService"
+	case rpccontract.DependencyPromptControl:
+		return "PromptControlService"
+	case rpccontract.DependencyRunPrompt:
+		return "RunPromptService"
+	case rpccontract.DependencyRuntimeControl:
+		return "RuntimeControlService"
+	case rpccontract.DependencySessionActivity:
+		return "SessionActivityService"
+	case rpccontract.DependencySessionLaunch:
+		return "SessionLaunchService"
+	case rpccontract.DependencySessionLifecycle:
+		return "SessionLifecycleService"
+	case rpccontract.DependencySessionRuntime:
+		return "SessionRuntimeService"
+	case rpccontract.DependencySessionView:
+		return "SessionViewService"
+	case rpccontract.DependencyWorktree:
+		return "WorktreeService"
+	default:
+		return ""
 	}
 }
 
@@ -230,6 +281,59 @@ func loopbackMethodNames(t *testing.T, dir string) map[string]struct{} {
 				continue
 			}
 			methods[funcDecl.Name.Name] = struct{}{}
+		}
+	}
+	return methods
+}
+
+func loopbackMethodServiceContractTypes(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	serviceTypesByReceiver := map[string]string{}
+	for _, file := range clientSourceFiles(t, dir) {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || !strings.HasPrefix(typeSpec.Name.Name, "loopback") {
+					continue
+				}
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, field := range structType.Fields.List {
+					if len(field.Names) != 1 || field.Names[0].Name != "service" {
+						continue
+					}
+					selector, ok := field.Type.(*ast.SelectorExpr)
+					if !ok {
+						continue
+					}
+					pkg, ok := selector.X.(*ast.Ident)
+					if !ok || pkg.Name != "servicecontract" {
+						continue
+					}
+					serviceTypesByReceiver[typeSpec.Name.Name] = selector.Sel.Name
+				}
+			}
+		}
+	}
+	methods := map[string]string{}
+	for _, file := range clientSourceFiles(t, dir) {
+		for _, decl := range file.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) != 1 {
+				continue
+			}
+			receiver := receiverTypeName(funcDecl.Recv.List[0].Type)
+			serviceType, ok := serviceTypesByReceiver[receiver]
+			if !ok {
+				continue
+			}
+			methods[funcDecl.Name.Name] = serviceType
 		}
 	}
 	return methods

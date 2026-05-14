@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -27,11 +26,6 @@ type ApprovalAnswerRequest struct {
 	ErrorMessage      string                    `json:"error_message,omitempty"`
 	Decision          clientui.ApprovalDecision `json:"decision"`
 	Commentary        string                    `json:"commentary,omitempty"`
-}
-
-type PromptControlService interface {
-	AnswerAsk(ctx context.Context, req AskAnswerRequest) error
-	AnswerApproval(ctx context.Context, req ApprovalAnswerRequest) error
 }
 
 func (r AskAnswerRequest) Validate() error {

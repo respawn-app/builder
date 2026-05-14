@@ -36,7 +36,7 @@ type HeadlessBootstrap struct {
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := newMemoizingPromptService(primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
+	service := newMemoizingPromptService(primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, NewPromptService(launcher)))
 	return client.NewLoopbackRunPromptClient(service)
 }
 
@@ -44,7 +44,7 @@ type headlessPromptLauncher struct {
 	boot HeadlessBootstrap
 }
 
-func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
+func (l *headlessPromptLauncher) PrepareHeadlessPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (PromptSessionRuntime, error) {
 	if l.boot.SessionLaunch == nil {
 		return nil, errors.New("headless session launch service is required")
 	}
@@ -148,9 +148,9 @@ type headlessPromptRuntime struct {
 	warnings []string
 }
 
-func (r *headlessPromptRuntime) SubmitUserMessage(ctx context.Context, prompt string) (serverapi.PromptAssistantMessage, error) {
+func (r *headlessPromptRuntime) SubmitUserMessage(ctx context.Context, prompt string) (PromptAssistantMessage, error) {
 	assistant, err := r.plan.engine.SubmitUserMessage(ctx, prompt)
-	return serverapi.PromptAssistantMessage{Content: assistant.Content}, err
+	return PromptAssistantMessage{Content: assistant.Content}, err
 }
 
 func (r *headlessPromptRuntime) SessionID() string   { return r.plan.engine.SessionID() }

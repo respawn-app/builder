@@ -16,10 +16,6 @@ type SessionActivitySubscription interface {
 	Close() error
 }
 
-type SessionActivityService interface {
-	SubscribeSessionActivity(ctx context.Context, req SessionActivitySubscribeRequest) (SessionActivitySubscription, error)
-}
-
 func (r SessionActivitySubscribeRequest) Validate() error {
 	return validateRequiredSessionID(r.SessionID)
 }

@@ -8,6 +8,7 @@ import (
 
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 	"builder/shared/toolspec"
 	"github.com/google/uuid"
 )
@@ -29,7 +30,7 @@ type Lease struct {
 	Recover func(context.Context) (string, error)
 }
 
-func Activate(ctx context.Context, service serverapi.SessionRuntimeService, req Request) (Lease, error) {
+func Activate(ctx context.Context, service servicecontract.SessionRuntimeService, req Request) (Lease, error) {
 	if service == nil {
 		return Lease{}, errors.New("session runtime service is required")
 	}
@@ -53,7 +54,7 @@ func Activate(ctx context.Context, service serverapi.SessionRuntimeService, req 
 	}, nil
 }
 
-func Release(service serverapi.SessionRuntimeService, sessionID string, leaseID string) {
+func Release(service servicecontract.SessionRuntimeService, sessionID string, leaseID string) {
 	if service == nil {
 		return
 	}

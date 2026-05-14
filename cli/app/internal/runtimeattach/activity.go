@@ -5,14 +5,15 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type ActivityRequest struct {
 	SessionID       string
-	Runtime         serverapi.SessionRuntimeService
+	Runtime         servicecontract.SessionRuntimeService
 	LeaseID         string
-	SessionActivity serverapi.SessionActivityService
-	PromptActivity  serverapi.PromptActivityService
+	SessionActivity servicecontract.SessionActivityService
+	PromptActivity  servicecontract.PromptActivityService
 }
 
 type Activities struct {

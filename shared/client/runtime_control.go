@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type RuntimeControlClient interface {
@@ -35,10 +36,10 @@ type RuntimeControlClient interface {
 }
 
 type loopbackRuntimeControlClient struct {
-	service serverapi.RuntimeControlService
+	service servicecontract.RuntimeControlService
 }
 
-func NewLoopbackRuntimeControlClient(service serverapi.RuntimeControlService) RuntimeControlClient {
+func NewLoopbackRuntimeControlClient(service servicecontract.RuntimeControlService) RuntimeControlClient {
 	return &loopbackRuntimeControlClient{service: service}
 }
 

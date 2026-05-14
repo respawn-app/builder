@@ -8,6 +8,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type Subscriber interface {
@@ -97,4 +98,4 @@ func (s *subscription) Close() error {
 	return s.inner.Close()
 }
 
-var _ serverapi.ProcessOutputService = (*Service)(nil)
+var _ servicecontract.ProcessOutputService = (*Service)(nil)

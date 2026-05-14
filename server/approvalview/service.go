@@ -9,6 +9,7 @@ import (
 	askquestion "builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type PendingPromptSource interface {
@@ -61,4 +62,4 @@ func approvalOptionsFromRequest(options []askquestion.ApprovalOption) []clientui
 	return out
 }
 
-var _ serverapi.ApprovalViewService = (*Service)(nil)
+var _ servicecontract.ApprovalViewService = (*Service)(nil)

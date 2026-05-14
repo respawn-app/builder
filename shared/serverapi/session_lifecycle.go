@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 )
@@ -69,13 +68,6 @@ type SessionResolveTransitionResponse struct {
 	ForceNewSession bool   `json:"force_new_session,omitempty"`
 	ShouldContinue  bool   `json:"should_continue,omitempty"`
 	RequiresReauth  bool   `json:"requires_reauth,omitempty"`
-}
-
-type SessionLifecycleService interface {
-	GetInitialInput(ctx context.Context, req SessionInitialInputRequest) (SessionInitialInputResponse, error)
-	PersistInputDraft(ctx context.Context, req SessionPersistInputDraftRequest) (SessionPersistInputDraftResponse, error)
-	RetargetSessionWorkspace(ctx context.Context, req SessionRetargetWorkspaceRequest) (SessionRetargetWorkspaceResponse, error)
-	ResolveTransition(ctx context.Context, req SessionResolveTransitionRequest) (SessionResolveTransitionResponse, error)
 }
 
 func (r SessionPersistInputDraftRequest) Validate() error {

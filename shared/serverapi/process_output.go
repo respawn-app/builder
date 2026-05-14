@@ -18,10 +18,6 @@ type ProcessOutputSubscription interface {
 	Close() error
 }
 
-type ProcessOutputService interface {
-	SubscribeProcessOutput(ctx context.Context, req ProcessOutputSubscribeRequest) (ProcessOutputSubscription, error)
-}
-
 func (r ProcessOutputSubscribeRequest) Validate() error {
 	if strings.TrimSpace(r.ProcessID) == "" {
 		return errors.New("process_id is required")

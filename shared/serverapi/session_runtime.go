@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -27,11 +26,6 @@ type SessionRuntimeReleaseRequest struct {
 }
 
 type SessionRuntimeReleaseResponse struct{}
-
-type SessionRuntimeService interface {
-	ActivateSessionRuntime(ctx context.Context, req SessionRuntimeActivateRequest) (SessionRuntimeActivateResponse, error)
-	ReleaseSessionRuntime(ctx context.Context, req SessionRuntimeReleaseRequest) (SessionRuntimeReleaseResponse, error)
-}
 
 func (r SessionRuntimeActivateRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {

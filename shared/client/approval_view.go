@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type ApprovalViewClient interface {
@@ -12,10 +13,10 @@ type ApprovalViewClient interface {
 }
 
 type loopbackApprovalViewClient struct {
-	service serverapi.ApprovalViewService
+	service servicecontract.ApprovalViewService
 }
 
-func NewLoopbackApprovalViewClient(service serverapi.ApprovalViewService) ApprovalViewClient {
+func NewLoopbackApprovalViewClient(service servicecontract.ApprovalViewService) ApprovalViewClient {
 	return &loopbackApprovalViewClient{service: service}
 }
 

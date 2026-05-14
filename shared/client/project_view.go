@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type ProjectViewClient interface {
@@ -19,10 +20,10 @@ type ProjectViewClient interface {
 }
 
 type loopbackProjectViewClient struct {
-	service serverapi.ProjectViewService
+	service servicecontract.ProjectViewService
 }
 
-func NewLoopbackProjectViewClient(service serverapi.ProjectViewService) ProjectViewClient {
+func NewLoopbackProjectViewClient(service servicecontract.ProjectViewService) ProjectViewClient {
 	return &loopbackProjectViewClient{service: service}
 }
 

@@ -14,6 +14,7 @@ import (
 	"builder/server/auth"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 const usageBaseURL = "https://chatgpt.com/backend-api"
@@ -358,4 +359,4 @@ func limitDuration(windowMinutes int) string {
 	return "annual"
 }
 
-var _ serverapi.AuthStatusService = (*Service)(nil)
+var _ servicecontract.AuthStatusService = (*Service)(nil)

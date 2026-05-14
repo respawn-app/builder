@@ -11,6 +11,7 @@ import (
 	"builder/server/metadata"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type Service struct {
@@ -280,4 +281,4 @@ func (s *Service) syncMetadata(ctx context.Context) error {
 	return s.syncErr
 }
 
-var _ serverapi.ProjectViewService = (*Service)(nil)
+var _ servicecontract.ProjectViewService = (*Service)(nil)

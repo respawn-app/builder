@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type SessionLaunchClient interface {
@@ -12,10 +13,10 @@ type SessionLaunchClient interface {
 }
 
 type loopbackSessionLaunchClient struct {
-	service serverapi.SessionLaunchService
+	service servicecontract.SessionLaunchService
 }
 
-func NewLoopbackSessionLaunchClient(service serverapi.SessionLaunchService) SessionLaunchClient {
+func NewLoopbackSessionLaunchClient(service servicecontract.SessionLaunchService) SessionLaunchClient {
 	return &loopbackSessionLaunchClient{service: service}
 }
 

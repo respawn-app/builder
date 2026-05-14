@@ -16,10 +16,6 @@ type PromptActivitySubscription interface {
 	Close() error
 }
 
-type PromptActivityService interface {
-	SubscribePromptActivity(ctx context.Context, req PromptActivitySubscribeRequest) (PromptActivitySubscription, error)
-}
-
 func (r PromptActivitySubscribeRequest) Validate() error {
 	return validateRequiredSessionID(r.SessionID)
 }

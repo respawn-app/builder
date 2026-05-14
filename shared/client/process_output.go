@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type ProcessOutputClient interface {
@@ -12,10 +13,10 @@ type ProcessOutputClient interface {
 }
 
 type loopbackProcessOutputClient struct {
-	service serverapi.ProcessOutputService
+	service servicecontract.ProcessOutputService
 }
 
-func NewLoopbackProcessOutputClient(service serverapi.ProcessOutputService) ProcessOutputClient {
+func NewLoopbackProcessOutputClient(service servicecontract.ProcessOutputService) ProcessOutputClient {
 	return &loopbackProcessOutputClient{service: service}
 }
 

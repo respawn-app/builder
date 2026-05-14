@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"builder/shared/serverapi"
+	"builder/shared/servicecontract"
 )
 
 type RunPromptClient interface {
@@ -12,10 +13,10 @@ type RunPromptClient interface {
 }
 
 type loopbackRunPromptClient struct {
-	service serverapi.RunPromptService
+	service servicecontract.RunPromptService
 }
 
-func NewLoopbackRunPromptClient(service serverapi.RunPromptService) RunPromptClient {
+func NewLoopbackRunPromptClient(service servicecontract.RunPromptService) RunPromptClient {
 	return &loopbackRunPromptClient{service: service}
 }
 

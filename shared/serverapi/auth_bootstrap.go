@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,11 +51,6 @@ type AuthCompleteBootstrapResponse struct {
 	MethodType string `json:"method_type,omitempty"`
 	AccountID  string `json:"account_id,omitempty"`
 	Email      string `json:"email,omitempty"`
-}
-
-type AuthBootstrapService interface {
-	GetBootstrapStatus(ctx context.Context, req AuthGetBootstrapStatusRequest) (AuthGetBootstrapStatusResponse, error)
-	CompleteBootstrap(ctx context.Context, req AuthCompleteBootstrapRequest) (AuthCompleteBootstrapResponse, error)
 }
 
 func (r AuthCompleteBootstrapRequest) Validate() error {

@@ -1,7 +1,6 @@
 package serverapi
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -48,13 +47,6 @@ type RunGetRequest struct {
 
 type RunGetResponse struct {
 	Run *clientui.RunView
-}
-
-type SessionViewService interface {
-	GetSessionMainView(ctx context.Context, req SessionMainViewRequest) (SessionMainViewResponse, error)
-	GetSessionTranscriptPage(ctx context.Context, req SessionTranscriptPageRequest) (SessionTranscriptPageResponse, error)
-	GetSessionCommittedTranscriptSuffix(ctx context.Context, req SessionCommittedTranscriptSuffixRequest) (SessionCommittedTranscriptSuffixResponse, error)
-	GetRun(ctx context.Context, req RunGetRequest) (RunGetResponse, error)
 }
 
 func (r SessionMainViewRequest) Validate() error {
