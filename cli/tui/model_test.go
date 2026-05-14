@@ -6,6 +6,7 @@ import (
 	patchformat "builder/shared/transcript/patchformat"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
 )
@@ -773,6 +774,204 @@ func TestOngoingAskQuestionRendersSelectedOptionText(t *testing.T) {
 	}
 	if strings.Contains(plain, "option #2") || strings.Contains(plain, "flat scan") {
 		t.Fatalf("expected ongoing answer to omit numeric summary and unchosen suggestions, got %q", plain)
+	}
+}
+
+func TestOngoingAskQuestionPreservesLiteralUserAnsweredPrefix(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "What should we do?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "ask_question",
+			Question: "What should we do?",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "User answered: keep going",
+		OngoingText: "User answered: keep going",
+	})
+
+	plain := plainTranscript(m.View())
+	if !containsInOrder(plain, "? What should we do?", "└ User answered: keep going") {
+		t.Fatalf("expected ongoing freeform answer to preserve literal prefix, got %q", plain)
+	}
+	if strings.Contains(plain, "└ keep going") {
+		t.Fatalf("expected ongoing answer not to strip literal prefix, got %q", plain)
+	}
+}
+
+func TestOngoingAskQuestionsKeepModelOrderAndSeparateToolGroup(t *testing.T) {
+	entries := []TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "First question?",
+			ToolCallID: "call_first",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "ask_question",
+				Question: "First question?",
+			},
+		},
+		{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call_shell",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "exec_command",
+				IsShell:  true,
+				Command:  "pwd",
+			},
+		},
+		{
+			Role:       "tool_call",
+			Text:       "Second question?",
+			ToolCallID: "call_second",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "ask_question",
+				Question: "Second question?",
+			},
+		},
+		{Role: "tool_result_ok", ToolCallID: "call_second", Text: "second answer", OngoingText: "second answer"},
+		{Role: "tool_result_ok", ToolCallID: "call_shell", Text: "/tmp", OngoingText: "/tmp"},
+		{Role: "tool_result_ok", ToolCallID: "call_first", Text: "first answer", OngoingText: "first answer"},
+	}
+
+	rendered := ProjectCommittedOngoingTranscript(entries, "dark", 80).Render(TranscriptDivider)
+	plain := plainTranscript(rendered)
+	if !containsInOrder(plain, "? First question?", "└ first answer", "$ pwd", "? Second question?", "└ second answer") {
+		t.Fatalf("expected questions emitted in model tool-call order, got %q", plain)
+	}
+	if got := strings.Count(plain, TranscriptDivider); got != 2 {
+		t.Fatalf("expected question/tool/question grouping to place two dividers around tool block, got %d in %q", got, plain)
+	}
+}
+
+func TestOngoingAskQuestionQuestionTextWrapsWithoutEllipsis(t *testing.T) {
+	m := NewModel(WithPreviewLines(20), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 36})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "Review the generated transcript projection question text and keep tail-marker visible?",
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "ask_question",
+			Question: "Review the generated transcript projection question text and keep tail-marker visible?",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "yes",
+		OngoingText: "yes",
+	})
+
+	rendered := m.View()
+	plain := plainTranscript(rendered)
+	if !containsInOrder(plain, "Review the generated", "tail-marker visible?", "└ yes") {
+		t.Fatalf("expected wrapped question content preserved, got %q", plain)
+	}
+	if strings.Contains(rendered, "\x1b[2m") {
+		t.Fatalf("did not expect faint ANSI styling on committed question text, got %q", rendered)
+	}
+	if strings.Contains(plain, "…") {
+		t.Fatalf("expected committed ongoing question text to wrap without ellipsis, got %q", plain)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if width := lipgloss.Width(line); width > 36 {
+			t.Fatalf("expected question line width <= viewport, got %d for %q in %q", width, line, rendered)
+		}
+	}
+}
+
+func TestOngoingAskQuestionMarkdownWrapsWithinViewport(t *testing.T) {
+	question := strings.Join([]string{
+		"Review **generated plan** and the [design note](https://example.com/really/long/path).",
+		"",
+		"```go",
+		"fmt.Println(\"tail-marker\")",
+		"```",
+	}, "\n")
+	m := NewModel(WithPreviewLines(20), WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 42})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       question,
+		ToolCallID: "call_ask",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "ask_question",
+			Question: question,
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "tool_result_ok",
+		ToolCallID:  "call_ask",
+		Text:        "approved",
+		OngoingText: "approved",
+	})
+
+	rendered := m.View()
+	plain := plainTranscript(rendered)
+	if strings.Contains(plain, "**generated plan**") || strings.Contains(plain, "```") {
+		t.Fatalf("expected ongoing markdown question rendered without source markers, got %q", plain)
+	}
+	if !containsInOrder(plain, "Review generated plan", "design", "note", "https://example.com/really/long/path.", "fmt.Println(\"tail-marker\")", "└ approved") {
+		t.Fatalf("expected ongoing markdown question content preserved, got %q", plain)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if width := lipgloss.Width(line); width > 42 {
+			t.Fatalf("expected markdown question line width <= viewport, got %d for %q in %q", width, line, rendered)
+		}
+	}
+}
+
+func TestPendingOngoingAskQuestionsUseQuestionGroupAndEllipsizeQuestionText(t *testing.T) {
+	entries := []TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "First pending question keeps going until tail-marker should not fit?",
+			ToolCallID: "call_first",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "ask_question",
+				Question: "First pending question keeps going until tail-marker should not fit?",
+			},
+		},
+		{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call_shell",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "exec_command",
+				IsShell:  true,
+				Command:  "pwd",
+			},
+		},
+		{
+			Role:       "tool_call",
+			Text:       "Second pending question?",
+			ToolCallID: "call_second",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "ask_question",
+				Question: "Second pending question?",
+			},
+		},
+	}
+
+	rendered := RenderPendingOngoingSnapshot(entries, "dark", 42, "*")
+	plain := plainTranscript(rendered)
+	if !containsInOrder(plain, "* First pending question", "* pwd", "* Second pending question?") {
+		t.Fatalf("expected pending questions and tool in model order, got %q", plain)
+	}
+	if got := strings.Count(plain, TranscriptDivider); got != 2 {
+		t.Fatalf("expected pending question/tool/question grouping to place two dividers, got %d in %q", got, plain)
+	}
+	if !strings.Contains(plain, "…") || strings.Contains(plain, "tail-marker") {
+		t.Fatalf("expected pending live question text to ellipsize, got %q", plain)
+	}
+	if strings.Contains(rendered, "\x1b[2m") {
+		t.Fatalf("did not expect faint ANSI styling on pending question text, got %q", rendered)
 	}
 }
 

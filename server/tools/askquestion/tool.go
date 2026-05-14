@@ -313,7 +313,7 @@ func freeformToolOutputSummary(freeform string) string {
 func buildOngoingToolOutputText(req Request, resp Response) string {
 	freeform := normalizedFreeformAnswer(resp)
 	if resp.SelectedOptionNumber <= 0 {
-		return freeformToolOutputSummary(freeform)
+		return freeform
 	}
 	suggestions := normalizedSuggestions(req.Suggestions)
 	optionIndex := resp.SelectedOptionNumber - 1

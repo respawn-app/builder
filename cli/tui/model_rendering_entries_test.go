@@ -34,6 +34,25 @@ func TestResolveToolRenderHintPreservesShellDialectOnShellPreviewFallback(t *tes
 	}
 }
 
+func TestRenderInlineAskQuestionMarkdownLinesRendersMarkdownWithoutWrapping(t *testing.T) {
+	question := strings.Join([]string{
+		"Review **bold plan** and the [design note](https://example.com/really/long/path).",
+		"",
+		"```go",
+		"fmt.Println(\"tail-marker\")",
+		"```",
+	}, "\n")
+
+	lines := RenderInlineAskQuestionMarkdownLines(question, "dark", 24)
+	plain := xansi.Strip(strings.Join(lines, "\n"))
+	if strings.Contains(plain, "**bold plan**") || strings.Contains(plain, "```") {
+		t.Fatalf("expected inline ask question markdown rendered, got %q", plain)
+	}
+	if !strings.Contains(plain, "Review bold plan") || !strings.Contains(plain, "fmt.Println(\"tail-marker\")") {
+		t.Fatalf("expected inline ask question markdown content preserved, got %q", plain)
+	}
+}
+
 func TestWrapTextForViewportDoesNotOverflowWhenPunctuationFollowsFullLine(t *testing.T) {
 	for _, punctuation := range []string{".", ",", ";", "+", "-", "|"} {
 		t.Run(punctuation, func(t *testing.T) {

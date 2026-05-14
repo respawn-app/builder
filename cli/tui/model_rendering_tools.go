@@ -16,6 +16,9 @@ func detailDivider() string {
 
 func ongoingDividerGroup(role RenderIntent) string {
 	normalized := normalizeOngoingDividerRole(role)
+	if normalized == RenderIntentToolQuestion || normalized == RenderIntentToolQuestionError {
+		return "question"
+	}
 	if normalized.IsToolHeadline() {
 		return "tool"
 	}
@@ -101,6 +104,47 @@ func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []s
 		question = "ask_question"
 	}
 	return question, suggestions, recommendedOptionIndex
+}
+
+// RenderAskQuestionMarkdownLines renders question markdown for committed
+// ask_question transcript entries using theme and width, returning wrapped
+// display lines.
+func RenderAskQuestionMarkdownLines(question string, theme string, width int) []string {
+	renderer := transcriptProjectionRenderer(theme, width, 0)
+	return renderer.renderAskQuestionMarkdownLines(RenderIntentToolQuestion, question, width)
+}
+
+// RenderInlineAskQuestionMarkdownLines renders question markdown for compact
+// inline previews using theme and width, returning display lines without
+// transcript wrapping. It clamps width and falls back to raw line splitting.
+func RenderInlineAskQuestionMarkdownLines(question string, theme string, width int) []string {
+	renderer := transcriptProjectionRenderer(theme, width, 0)
+	if width < 1 {
+		width = 1
+	}
+	if renderer.md != nil {
+		if rendered, err := renderer.md.render(RenderIntentToolQuestion, question, width); err == nil {
+			lines := trimZeroWidthEdgeLines(splitLines(rendered))
+			if len(lines) > 0 {
+				return lines
+			}
+		}
+	}
+	lines := splitLines(question)
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func trimZeroWidthEdgeLines(lines []string) []string {
+	for len(lines) > 0 && lipgloss.Width(lines[0]) == 0 {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && lipgloss.Width(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func normalizeAskQuestionQuestion(question string) string {
@@ -212,8 +256,8 @@ func (m Model) renderAskQuestionMarkdownLines(role RenderIntent, question string
 		renderWidth = 1
 	}
 	if m.md != nil {
-		if rendered, err := m.md.render(role, question, renderWidth); err == nil {
-			lines := splitLines(rendered)
+		if rendered, err := m.md.renderWrapped(role, question, renderWidth); err == nil {
+			lines := splitLines(hardWrapOverflowingRenderedLines(rendered, renderWidth))
 			if len(lines) > 0 {
 				return lines
 			}

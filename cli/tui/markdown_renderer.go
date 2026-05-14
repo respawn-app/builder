@@ -17,6 +17,7 @@ type markdownRenderer struct {
 	theme               string
 	styles              rendererStyleAdapter
 	renderers           map[int]*glamour.TermRenderer
+	wrappedRenderers    map[int]*glamour.TermRenderer
 	cache               map[string]string
 	reportErr           markdownRendererErrorReporter
 	newTermRenderer     func(...glamour.TermRendererOption) (*glamour.TermRenderer, error)
@@ -25,16 +26,25 @@ type markdownRenderer struct {
 
 func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) *markdownRenderer {
 	return &markdownRenderer{
-		theme:           theme,
-		styles:          newRendererStyleAdapter(theme),
-		renderers:       make(map[int]*glamour.TermRenderer, 8),
-		cache:           make(map[string]string, 128),
-		reportErr:       reportErr,
-		newTermRenderer: glamour.NewTermRenderer,
+		theme:            theme,
+		styles:           newRendererStyleAdapter(theme),
+		renderers:        make(map[int]*glamour.TermRenderer, 8),
+		wrappedRenderers: make(map[int]*glamour.TermRenderer, 8),
+		cache:            make(map[string]string, 128),
+		reportErr:        reportErr,
+		newTermRenderer:  glamour.NewTermRenderer,
 	}
 }
 
 func (r *markdownRenderer) render(role RenderIntent, text string, width int) (string, error) {
+	return r.renderWithRenderer(role, text, width, "plain", r.getRenderer)
+}
+
+func (r *markdownRenderer) renderWrapped(role RenderIntent, text string, width int) (string, error) {
+	return r.renderWithRenderer(role, text, width, "wrapped", r.getWrappedRenderer)
+}
+
+func (r *markdownRenderer) renderWithRenderer(role RenderIntent, text string, width int, variant string, rendererForWidth func(int) (*glamour.TermRenderer, error)) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", nil
 	}
@@ -45,12 +55,12 @@ func (r *markdownRenderer) render(role RenderIntent, text string, width int) (st
 		width = 1
 	}
 
-	key := fmt.Sprintf("%s|%s|%d|%x", r.theme, role, width, hashString(text))
+	key := fmt.Sprintf("%s|%s|%s|%d|%x", r.theme, role, variant, width, hashString(text))
 	if cached, ok := r.cache[key]; ok {
 		return cached, nil
 	}
 
-	renderer, err := r.getRenderer(width)
+	renderer, err := rendererForWidth(width)
 	if err != nil {
 		if !r.reportedInitFailure && r.reportErr != nil {
 			r.reportedInitFailure = true
@@ -88,6 +98,21 @@ func (r *markdownRenderer) getRenderer(width int) (*glamour.TermRenderer, error)
 		return nil, err
 	}
 	r.renderers[width] = termRenderer
+	return termRenderer, nil
+}
+
+func (r *markdownRenderer) getWrappedRenderer(width int) (*glamour.TermRenderer, error) {
+	if existing, ok := r.wrappedRenderers[width]; ok {
+		return existing, nil
+	}
+	termRenderer, err := r.newTermRenderer(
+		glamour.WithWordWrap(width),
+		glamour.WithStyles(r.styleConfig()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.wrappedRenderers[width] = termRenderer
 	return termRenderer, nil
 }
 
