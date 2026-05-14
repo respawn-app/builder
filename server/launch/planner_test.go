@@ -1306,8 +1306,8 @@ func TestApplyRunPromptOverridesRoleOnlyOverridePersistsContinuation(t *testing.
 		t.Fatalf("openai base url = %q, want worker override", updated.ActiveSettings.OpenAIBaseURL)
 	}
 	got := store.Meta().Continuation
-	if got == nil || got.OpenAIBaseURL != "https://worker.example/v1" {
-		t.Fatalf("continuation = %+v, want worker base url", got)
+	if got == nil || got.OpenAIBaseURL != "https://worker.example/v1" || got.AgentRole != "worker" {
+		t.Fatalf("continuation = %+v, want worker base url and agent role", got)
 	}
 }
 

@@ -93,7 +93,11 @@ func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPl
 			active.OpenAIBaseURL = baseURL
 		}
 	}
-	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
+	continuation := session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}
+	if meta.Continuation != nil {
+		continuation.AgentRole = strings.TrimSpace(meta.Continuation.AgentRole)
+	}
+	if err := store.SetContinuationContext(continuation); err != nil {
 		return SessionPlan{}, err
 	}
 	enabledTools, err := ActiveToolIDsForPlan(active, p.Config.Source, meta.Locked)
@@ -119,8 +123,15 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	var warnings []string
 	next := plan
 	shouldPersistContinuation := false
+	continuationAgentRole := ""
+	if plan.Store.Meta().Continuation != nil {
+		continuationAgentRole = strings.TrimSpace(plan.Store.Meta().Continuation.AgentRole)
+	}
 	persistContinuation := func() error {
-		return next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL})
+		return next.Store.SetContinuationContext(session.ContinuationContext{
+			OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL,
+			AgentRole:     continuationAgentRole,
+		})
 	}
 	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentSelector(trimmedRole) == "" && !config.IsReservedSubagentRoleName(trimmedRole) {
 		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
@@ -128,6 +139,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	roleName := config.NormalizeSubagentSelector(overrides.AgentRole)
 	if roleName != "" {
 		shouldPersistContinuation = true
+		continuationAgentRole = roleName
 		providerBase := cloneSettings(plan.ActiveSettings)
 		if value := strings.TrimSpace(overrides.ProviderOverride); value != "" {
 			providerBase.ProviderOverride = value

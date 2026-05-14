@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/server/session"
 	"builder/shared/config"
 )
 
@@ -15,14 +16,14 @@ func TestValidateRunPromptAgentRoleBlocksNonCallableRoleForBuilderSession(t *tes
 		"worker": {AgentCallable: false, AgentCallableSet: true, Sources: map[string]string{"model": "file"}},
 	}}
 
-	err := validateRunPromptAgentRole(settings, "worker", true)
+	err := validateRunPromptAgentRole(settings, "worker", true, "")
 	if err == nil {
 		t.Fatal("expected non-callable role to fail for Builder session")
 	}
 	if err.Error() != nonCallableSubagentRoleMessage {
 		t.Fatalf("error = %q, want non-callable message", err.Error())
 	}
-	if err := validateRunPromptAgentRole(settings, "worker", false); err != nil {
+	if err := validateRunPromptAgentRole(settings, "worker", false, ""); err != nil {
 		t.Fatalf("human/no-session role validation failed: %v", err)
 	}
 }
@@ -37,7 +38,7 @@ func TestValidateRunPromptAgentRoleUnknownRoleListsCallableRolesForBuilderSessio
 		},
 	}
 
-	err := validateRunPromptAgentRole(settings, "missing", true)
+	err := validateRunPromptAgentRole(settings, "missing", true, "")
 	if err == nil {
 		t.Fatal("expected unknown role to fail")
 	}
@@ -87,13 +88,73 @@ func TestStartRunPromptClientUnknownRoleBuilderSessionErrorUsesCallableAvailable
 	}
 }
 
+func TestStartRunPromptClientDefaultAliasBlocksNonCallableContextRole(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	contents := strings.Join([]string{
+		"[subagents.blocked]",
+		"model = \"gpt-5.4-mini\"",
+		"agent_callable = false",
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	registerAppWorkspace(t, cfg.WorkspaceRoot)
+	parent := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err := parent.SetContinuationContext(session.ContinuationContext{AgentRole: "blocked"}); err != nil {
+		t.Fatalf("SetContinuationContext: %v", err)
+	}
+
+	_, _, err = startRunPromptClient(context.Background(), Options{
+		WorkspaceRoot:             cfg.WorkspaceRoot,
+		WorkspaceRootExplicit:     true,
+		WorkspaceContextSessionID: parent.Meta().SessionID,
+		AgentRole:                 "default",
+	})
+	if err == nil {
+		t.Fatal("expected default alias to fail from non-callable context role")
+	}
+	if err.Error() != nonCallableSubagentRoleMessage {
+		t.Fatalf("error = %q, want non-callable message", err.Error())
+	}
+}
+
 func TestValidateRunPromptAgentRoleAliasesDefaultSelectors(t *testing.T) {
 	settings := config.Settings{Subagents: map[string]config.SubagentRole{}}
 	for _, alias := range []string{"default", "none", "self"} {
 		t.Run(alias, func(t *testing.T) {
-			if err := validateRunPromptAgentRole(settings, alias, true); err != nil {
+			if err := validateRunPromptAgentRole(settings, alias, true, ""); err != nil {
 				t.Fatalf("validateRunPromptAgentRole(%q): %v", alias, err)
 			}
 		})
+	}
+}
+
+func TestValidateRunPromptAgentRoleBlocksDefaultAliasFromNonCallableContextRole(t *testing.T) {
+	settings := config.Settings{Subagents: map[string]config.SubagentRole{
+		"blocked": {AgentCallable: false, AgentCallableSet: true, Sources: map[string]string{"model": "file"}},
+	}}
+	for _, rawRole := range []string{"", "default", "none", "self"} {
+		t.Run(rawRole, func(t *testing.T) {
+			err := validateRunPromptAgentRole(settings, rawRole, true, "blocked")
+			if err == nil {
+				t.Fatal("expected non-callable context role to block default invocation")
+			}
+			if err.Error() != nonCallableSubagentRoleMessage {
+				t.Fatalf("error = %q, want non-callable message", err.Error())
+			}
+		})
+	}
+	if err := validateRunPromptAgentRole(settings, "default", false, "blocked"); err != nil {
+		t.Fatalf("human/no-session default alias should not enforce context role: %v", err)
 	}
 }

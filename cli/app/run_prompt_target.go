@@ -34,8 +34,9 @@ var configuredRemoteWorkspaceDiscoveryTimeout = 5 * time.Second
 type configuredProjectViewRemote = remoteattach.ProjectViewRemote
 
 type runPromptWorkspaceConfig struct {
-	Options Options
-	Config  config.App
+	Options          Options
+	Config           config.App
+	ContextAgentRole string
 }
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
@@ -45,7 +46,9 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	}
 	opts = workspaceConfig.Options
 	cfg := workspaceConfig.Config
-	if err := validateRunPromptAgentRole(cfg.Settings, opts.AgentRole, strings.TrimSpace(opts.WorkspaceContextSessionID) != ""); err != nil {
+	builderSessionCaller := strings.TrimSpace(opts.WorkspaceContextSessionID) != ""
+	contextAgentRole := strings.TrimSpace(workspaceConfig.ContextAgentRole)
+	if err := validateRunPromptAgentRole(cfg.Settings, opts.AgentRole, builderSessionCaller, contextAgentRole); err != nil {
 		return nil, nil, err
 	}
 	target, err := serverattach.Resolve[runprompttarget.Target](ctx, serverattach.Request[runprompttarget.Target]{
@@ -93,11 +96,16 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 
 const nonCallableSubagentRoleMessage = "User has disallowed calling this agent by other agents like you. Do not try to circumvent this, pick another suitable agent or do the work manually and let the user know your desire to use the subagent at the end of the task"
 
-func validateRunPromptAgentRole(settings config.Settings, rawRole string, builderSessionCaller bool) error {
+func validateRunPromptAgentRole(settings config.Settings, rawRole string, builderSessionCaller bool, contextAgentRole string) error {
 	roleName := config.NormalizeSubagentSelector(rawRole)
 	if roleName == "" {
 		if strings.TrimSpace(rawRole) != "" && !config.IsReservedSubagentRoleName(rawRole) {
 			return errors.New("invalid agent role " + strconv.Quote(rawRole))
+		}
+		if builderSessionCaller {
+			if err := validateContextAgentRoleCallable(settings, contextAgentRole); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -106,6 +114,21 @@ func validateRunPromptAgentRole(settings config.Settings, rawRole string, builde
 		return unrecognizedRunPromptRoleError(roleName, config.AvailableSubagentRoleNames(settings, builderSessionCaller))
 	}
 	if builderSessionCaller && !config.SubagentRoleCallable(role) {
+		return errors.New(nonCallableSubagentRoleMessage)
+	}
+	return nil
+}
+
+func validateContextAgentRoleCallable(settings config.Settings, rawRole string) error {
+	roleName := config.NormalizeSubagentSelector(rawRole)
+	if roleName == "" {
+		return nil
+	}
+	role, exists := settings.Subagents[roleName]
+	if !exists && roleName != config.BuiltInSubagentRoleFast {
+		return unrecognizedRunPromptRoleError(roleName, config.AvailableSubagentRoleNames(settings, true))
+	}
+	if !config.SubagentRoleCallable(role) {
 		return errors.New(nonCallableSubagentRoleMessage)
 	}
 	return nil
@@ -217,7 +240,7 @@ func resolveRunPromptWorkspaceConfig(opts Options) (runPromptWorkspaceConfig, er
 	if strings.TrimSpace(result.ResolvedWorkspaceRoot) != "" && result.ResolvedWorkspaceRoot != opts.WorkspaceRoot {
 		resolvedOpts.WorkspaceRoot = result.ResolvedWorkspaceRoot
 	}
-	return runPromptWorkspaceConfig{Options: resolvedOpts, Config: result.Config}, nil
+	return runPromptWorkspaceConfig{Options: resolvedOpts, Config: result.Config, ContextAgentRole: result.ContextAgentRole}, nil
 }
 
 func startupConfigRequest(opts Options) startupconfig.Request {

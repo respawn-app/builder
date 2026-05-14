@@ -35,6 +35,10 @@ type ConfigPlan struct {
 	ContainerDir string
 }
 
+func ResolveSessionAgentRole(persistenceRoot string, sessionID string) (string, error) {
+	return launch.ResolveSessionAgentRole(persistenceRoot, sessionID)
+}
+
 type AuthSupport struct {
 	OAuthOptions auth.OpenAIOAuthOptions
 	AuthManager  *auth.Manager

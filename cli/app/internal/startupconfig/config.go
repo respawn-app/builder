@@ -26,6 +26,7 @@ type Request struct {
 type RunPromptResult struct {
 	Config                config.App
 	ResolvedWorkspaceRoot string
+	ContextAgentRole      string
 }
 
 func ResolveSessionConfig(req Request) (config.App, error) {
@@ -70,11 +71,17 @@ func ResolveRunPromptConfig(req Request) (RunPromptResult, error) {
 		}
 		return RunPromptResult{}, err
 	}
+	contextAgentRole := ""
+	if contextSessionID != "" {
+		if agentRole, err := serverbridge.ResolveSessionAgentRole(plan.Config.PersistenceRoot, contextSessionID); err == nil {
+			contextAgentRole = agentRole
+		}
+	}
 	resolvedRoot := workspaceRoot
 	if strings.TrimSpace(plan.Config.WorkspaceRoot) != "" && plan.Config.WorkspaceRoot != workspaceRoot {
 		resolvedRoot = plan.Config.WorkspaceRoot
 	}
-	return RunPromptResult{Config: plan.Config, ResolvedWorkspaceRoot: resolvedRoot}, nil
+	return RunPromptResult{Config: plan.Config, ResolvedWorkspaceRoot: resolvedRoot, ContextAgentRole: contextAgentRole}, nil
 }
 
 func ResolveWorkspaceRoot(workspaceRoot string) (string, error) {

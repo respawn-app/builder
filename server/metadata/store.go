@@ -1132,7 +1132,7 @@ func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Me
 	if err := unmarshalStoredJSON(row.ContinuationJson, continuation); err != nil {
 		return session.Meta{}, fmt.Errorf("decode continuation json: %w", err)
 	}
-	if strings.TrimSpace(continuation.OpenAIBaseURL) == "" {
+	if strings.TrimSpace(continuation.OpenAIBaseURL) == "" && strings.TrimSpace(continuation.AgentRole) == "" {
 		continuation = nil
 	}
 	locked := &session.LockedContract{}
