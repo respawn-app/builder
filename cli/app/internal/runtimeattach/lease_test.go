@@ -97,6 +97,20 @@ func TestActivateRejectsEmptyLease(t *testing.T) {
 	}
 }
 
+func TestActivateAcceptsReadOnlyWithoutLease(t *testing.T) {
+	service := &fakeRuntimeService{activateResponses: []serverapi.SessionRuntimeActivateResponse{{ReadOnly: true}}}
+	lease, err := Activate(context.Background(), service, Request{NewClientRequestID: fixedIDs("request-1")})
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if !lease.ReadOnly {
+		t.Fatal("expected read-only lease")
+	}
+	if lease.ID != "" {
+		t.Fatalf("lease id = %q, want empty", lease.ID)
+	}
+}
+
 func TestReleaseSkipsNilOrEmptyLeaseAndIgnoresReleaseError(t *testing.T) {
 	Release(nil, "session-1", "lease-1")
 	service := &fakeRuntimeService{releaseErr: errors.New("release failed")}

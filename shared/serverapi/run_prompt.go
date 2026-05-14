@@ -15,6 +15,7 @@ type RunPromptRequest struct {
 
 type RunPromptOverrides struct {
 	AgentRole           string
+	AgentRoleSet        bool
 	Model               string
 	ProviderOverride    string
 	ThinkingLevel       string
@@ -25,7 +26,8 @@ type RunPromptOverrides struct {
 }
 
 func (o RunPromptOverrides) HasAny() bool {
-	return strings.TrimSpace(o.AgentRole) != "" ||
+	return o.AgentRoleSet ||
+		strings.TrimSpace(o.AgentRole) != "" ||
 		strings.TrimSpace(o.Model) != "" ||
 		strings.TrimSpace(o.ProviderOverride) != "" ||
 		strings.TrimSpace(o.ThinkingLevel) != "" ||

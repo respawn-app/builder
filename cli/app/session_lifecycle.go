@@ -197,6 +197,9 @@ func persistSessionDraftToServer(ctx context.Context, server sessionDraftPersist
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
+	if strings.TrimSpace(controllerLeaseID) == "" {
+		return nil
+	}
 	ui, ok := model.(*uiModel)
 	if !ok || ui == nil {
 		return nil

@@ -147,6 +147,9 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
+	if s.externalSessionRuntimeActive(sessionID) {
+		return serverapi.SessionRuntimeActivateResponse{ReadOnly: true}, nil
+	}
 	handle, takeover, claim, err := s.claimActivation(sessionID, requestID)
 	if err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
@@ -263,6 +266,15 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	s.completeActivation(handle, leaseID, cleanup)
 	cleanup = nil
 	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
+}
+
+func (s *Service) externalSessionRuntimeActive(sessionID string) bool {
+	if s == nil || s.runtimes == nil || !s.runtimes.IsSessionRuntimeActive(sessionID) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handles[strings.TrimSpace(sessionID)] == nil
 }
 
 func runtimeRebindFunc(localRebind func(string) error, engine *runtime.Engine) func(string) error {

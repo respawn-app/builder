@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/llm"
 	"builder/server/metadata"
 	"builder/server/session"
 	"builder/server/sessionpath"
@@ -61,12 +62,14 @@ type SessionRequest struct {
 type SessionPlan struct {
 	Store               *session.Store
 	ActiveSettings      config.Settings
+	BaseSettings        config.Settings
 	EnabledTools        []toolspec.ID
 	ConfiguredModelName string
 	SessionName         string
 	ModelContractLocked bool
 	WorkspaceRoot       string
 	Source              config.SourceReport
+	BaseSource          config.SourceReport
 }
 
 func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPlan, error) {
@@ -87,11 +90,16 @@ func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPl
 		}
 	}
 	meta := store.Meta()
-	active := EffectiveSettings(p.Config.Settings, meta.Locked)
+	baseActive := EffectiveSettings(p.Config.Settings, meta.Locked)
+	baseSource := p.Config.Source
 	if meta.Continuation != nil {
 		if baseURL := strings.TrimSpace(meta.Continuation.OpenAIBaseURL); baseURL != "" {
-			active.OpenAIBaseURL = baseURL
+			baseActive.OpenAIBaseURL = baseURL
 		}
+	}
+	active, source := baseActive, baseSource
+	if meta.Continuation != nil {
+		active, source = applyPersistedSubagentRoleSettings(baseActive, baseSource, meta.Continuation.AgentRole, meta.Locked == nil)
 	}
 	continuation := session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}
 	if meta.Continuation != nil {
@@ -100,20 +108,59 @@ func (p Planner) PlanSession(ctx context.Context, req SessionRequest) (SessionPl
 	if err := store.SetContinuationContext(continuation); err != nil {
 		return SessionPlan{}, err
 	}
-	enabledTools, err := ActiveToolIDsForPlan(active, p.Config.Source, meta.Locked)
+	enabledTools, err := ActiveToolIDsForPlan(active, source, meta.Locked)
 	if err != nil {
 		return SessionPlan{}, err
+	}
+	configuredModelName := p.Config.Settings.Model
+	if meta.Locked == nil {
+		configuredModelName = active.Model
 	}
 	return SessionPlan{
 		Store:               store,
 		ActiveSettings:      active,
+		BaseSettings:        baseActive,
 		EnabledTools:        enabledTools,
-		ConfiguredModelName: p.Config.Settings.Model,
+		ConfiguredModelName: configuredModelName,
 		SessionName:         meta.Name,
 		ModelContractLocked: meta.Locked != nil,
 		WorkspaceRoot:       p.Config.WorkspaceRoot,
-		Source:              p.Config.Source,
+		Source:              source,
+		BaseSource:          baseSource,
 	}, nil
+}
+
+func applyPersistedSubagentRoleSettings(base config.Settings, source config.SourceReport, roleName string, allowModelOverride bool) (config.Settings, config.SourceReport) {
+	normalizedRole := config.NormalizeSubagentSelector(roleName)
+	if normalizedRole == "" {
+		return base, source
+	}
+	role, hasRole := base.Subagents[normalizedRole]
+	if !hasRole && normalizedRole != config.BuiltInSubagentRoleFast {
+		return base, source
+	}
+	resolved := cloneSettings(base)
+	_ = applyBuiltInRoleHeuristics(&resolved, normalizedRole, persistedRoleProviderID(base), allowModelOverride)
+	applySubagentRoleOverrides(&resolved, role, allowModelOverride)
+	effectiveSource := sourceReportWithSubagentRoleSources(source, base, normalizedRole)
+	effectiveSources := cloneStringMap(effectiveSource.Sources)
+	for key := range role.Sources {
+		effectiveSources[key] = "subagent"
+	}
+	applyReviewerInheritance(&resolved, effectiveSources)
+	effectiveSource.Sources = effectiveSources
+	return resolved, effectiveSource
+}
+
+func persistedRoleProviderID(settings config.Settings) string {
+	if providerID := strings.TrimSpace(settings.ProviderCapabilities.ProviderID); providerID != "" {
+		return providerID
+	}
+	provider, err := llm.InferProviderFromModel(settings.Model)
+	if err != nil {
+		return ""
+	}
+	return string(provider)
 }
 
 func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides, authState auth.State) (SessionPlan, []string, error) {
@@ -122,6 +169,14 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	var warnings []string
 	next := plan
+	baseSettings := plan.BaseSettings
+	if strings.TrimSpace(baseSettings.Model) == "" {
+		baseSettings = plan.ActiveSettings
+	}
+	baseSource := plan.BaseSource
+	if baseSource.Sources == nil {
+		baseSource = plan.Source
+	}
 	shouldPersistContinuation := false
 	continuationAgentRole := ""
 	if plan.Store.Meta().Continuation != nil {
@@ -137,17 +192,31 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
 	}
 	roleName := config.NormalizeSubagentSelector(overrides.AgentRole)
-	if roleName != "" {
+	if overrides.AgentRoleSet || roleName != "" {
 		shouldPersistContinuation = true
 		continuationAgentRole = roleName
-		providerBase := cloneSettings(plan.ActiveSettings)
+		next.ActiveSettings = cloneSettings(baseSettings)
+		next.Source = baseSource
+		if !plan.ModelContractLocked {
+			next.ConfiguredModelName = next.ActiveSettings.Model
+		}
+		if roleName == "" {
+			enabledTools, err := ActiveToolIDsForPlan(next.ActiveSettings, next.Source, plan.Store.Meta().Locked)
+			if err != nil {
+				return SessionPlan{}, nil, err
+			}
+			next.EnabledTools = enabledTools
+		}
+	}
+	if roleName != "" {
+		providerBase := cloneSettings(baseSettings)
 		if value := strings.TrimSpace(overrides.ProviderOverride); value != "" {
 			providerBase.ProviderOverride = value
 		}
 		if value := strings.TrimSpace(overrides.OpenAIBaseURL); value != "" {
 			providerBase.OpenAIBaseURL = value
 		}
-		resolved, warning, err := resolveSubagentSettings(plan.ActiveSettings, providerBase, plan.Source.Sources, roleName, authState, !plan.ModelContractLocked)
+		resolved, warning, err := resolveSubagentSettings(baseSettings, providerBase, baseSource.Sources, roleName, authState, !plan.ModelContractLocked)
 		if err != nil {
 			return SessionPlan{}, nil, err
 		}
@@ -155,7 +224,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 		if !plan.ModelContractLocked {
 			next.ConfiguredModelName = resolved.Model
 		}
-		roleSource := sourceReportWithSubagentRoleSources(next.Source, plan.ActiveSettings, roleName)
+		roleSource := sourceReportWithSubagentRoleSources(baseSource, baseSettings, roleName)
 		enabledTools, err := ActiveToolIDsForPlan(next.ActiveSettings, roleSource, plan.Store.Meta().Locked)
 		if err != nil {
 			return SessionPlan{}, nil, err
