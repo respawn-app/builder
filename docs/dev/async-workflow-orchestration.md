@@ -52,6 +52,8 @@ Decisions will be recorded here during the planning interview.
 - Builder should support the major agentic workflow patterns from the Anthropic article in some form: prompt chaining, routing, parallelization with aggregation, orchestrator-workers, evaluator-optimizer loops, and open-ended autonomous agents.
 - Per-edge context preservation must be configurable in v1 with at least three modes: `new_session`, `continue_session`, and `compact_and_continue_session`.
 - V1 workflow definitions are SQLite-authoritative and created/edited through backend API plus a minimal CLI. No stable graph file format is required in v1.
+- Workflow definitions should be globally reusable. Projects link to workflow definitions rather than copying graph definitions. Workflow validation is project-contextual because subagent roles and workspace config may differ by project.
+- V1 does not snapshot/version workflow definitions for existing tasks. Tasks use the current linked workflow definition; workflow-version edge cases are deferred.
 - Node config and edge config are distinct. Nodes configure agent runs: subagent role, prompt, limits, model/auth/settings/tool policy, and run stop conditions. Edges configure transitions: next node, human approval/manual interaction, context preservation, input/output bindings, routing, and join/aggregation behavior.
 - V1 should keep node identity equal to visible Kanban column/status identity. Multiple executable nodes sharing one column creates ambiguous manual moves and unclear debugging. Later UI can add display grouping if needed.
 - Workflows can contain executable agent nodes, terminal nodes, and join nodes. Approval remains an edge property, not a separate manual-node requirement.
@@ -76,8 +78,10 @@ Decisions will be recorded here during the planning interview.
 - Concurrency limit is global only and configured in `config.toml`.
 - A task may have multiple active runs only when the workflow graph explicitly fans out into parallel branches; otherwise task execution is single-active-run.
 - Task required fields are title, short ID, and body. Task metadata should be designed for future import/export and may include a source URL for imported external work.
+- Task short IDs are project-scoped sequential keys with a project key prefix, e.g. `BLD-123`. Project creation should choose the key explicitly; default suggestion can use the first three letters of the project name.
 - Assignee belongs to nodes/statuses rather than tasks.
-- Agents may add task comments as a semi-durable task-local worklog. Comments should record author/source agent when available and stay in Builder persistence, not files in the worktree.
+- If a workflow references a subagent role that no longer exists in effective config, the node transition blocks with a validation error before scheduling the run. Same-name subagent setting changes are accepted.
+- Agents may add, replace, and soft-delete task comments as a semi-durable task-local worklog. Comments should record author/source agent when available and stay in Builder persistence, not files in the worktree.
 
 ## Schema Direction
 

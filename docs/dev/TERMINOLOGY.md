@@ -8,13 +8,31 @@ This document defines Builder product and domain language. Use these terms consi
 
 A durable user-facing unit of work. A task owns workflow state, task metadata, node history, edge-transition history, questions, and execution artifacts. Builder sessions are artifacts under a task, not the task itself.
 
+### Task Short ID
+
+A human-facing project-scoped task identifier. A task short ID combines a project key with a project-local sequence number.
+
+### Project Key
+
+A short human-facing prefix used in task short IDs.
+
+### Task Body
+
+The primary task description. A task has a title, task short ID, and body.
+
 ### Workflow
 
 A durable directed graph that describes how tasks move through work. A workflow contains nodes and edges.
 
+### Project Workflow Link
+
+A project association with a reusable workflow definition. The link lets a project use a workflow without copying the workflow graph.
+
 ### Node
 
 A visible workflow state and Kanban column/status. Node identity is execution identity: when a task is in a node, that node determines which run behavior applies.
+
+A node may have an assignee.
 
 Executable nodes configure agent-run behavior:
 
@@ -102,4 +120,4 @@ Durable scheduling state for runnable workflow work. The execution queue decides
 
 ### Task Comment
 
-A durable note attached to a task. Task comments capture user or agent observations, review notes, worklogs, and other task-local information that should not be committed into a worktree.
+A durable note attached to a task. Task comments capture user or agent observations, review notes, worklogs, and other task-local information that should not be committed into a worktree. A task comment can be added, replaced as a whole, or soft-deleted.
