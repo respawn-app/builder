@@ -42,7 +42,7 @@ An edge configures:
 
 ### Context-Preservation Mode
 
-Per-edge handoff policy that decides how the next node receives execution context:
+Per-edge transition policy that decides how the next node receives execution context:
 
 - `new_session`: start a blank Builder session and inject previous node output plus task metadata.
 - `continue_session`: continue the previous Builder session with a new prompt/goal and bound metadata.
@@ -56,9 +56,9 @@ One durable execution attempt for a node on a task. A run may create or continue
 
 Builder transcript/runtime artifact used by a run. A task may have many sessions due to loops, branches, retries, or context-preservation choices.
 
-### Handoff
+### Node Transition
 
-Construction of the next run's execution context from prior run output, task metadata, edge input/output bindings, and edge context-preservation mode.
+A task movement from one node to another through an edge. A node transition evaluates edge conditions, applies edge input/output bindings, applies the edge context-preservation mode, and schedules or blocks the next run.
 
 ### Join
 
