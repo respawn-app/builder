@@ -39,6 +39,42 @@ FROM workspaces
 WHERE id = sqlc.arg(id)
 LIMIT 1;
 
+-- name: ListProjectKeyRows :many
+SELECT
+    id,
+    display_name,
+    project_key
+FROM projects
+ORDER BY created_at_unix_ms ASC, rowid ASC;
+
+-- name: GetProjectKeyState :one
+SELECT
+    p.id,
+    p.display_name,
+    p.project_key,
+    p.next_task_seq,
+    CAST(COALESCE(COUNT(t.id), 0) AS INTEGER) AS task_count
+FROM projects p
+LEFT JOIN tasks t ON t.project_id = p.id
+WHERE p.id = sqlc.arg(project_id)
+GROUP BY p.id, p.display_name, p.project_key, p.next_task_seq
+LIMIT 1;
+
+-- name: SetProjectKey :execrows
+UPDATE projects
+SET
+    project_key = sqlc.arg(project_key),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(project_id);
+
+-- name: AllocateProjectTaskSequence :one
+UPDATE projects
+SET
+    next_task_seq = next_task_seq + 1,
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(project_id)
+RETURNING project_key, next_task_seq;
+
 -- name: GetWorkspaceBindingByID :one
 SELECT
     p.id AS project_id,

@@ -203,11 +203,13 @@ Goal: persist workflow definitions, project links, tasks, placements, runs, tran
 
 ### 2.1 Recon
 
-- [ ] Inspect current migration numbering in `server/metadata/migrations`.
-- [ ] Inspect `server/metadata/queries.sql` style and sqlc generated package shape.
-- [ ] Inspect existing store test helpers and fixture DB setup.
-- [ ] Inspect project/workspace/worktree/session table schemas.
-- [ ] Decide whether project task counter lives on `projects` or separate counter table; update spec/checklist if changed.
+- [x] Inspect current migration numbering in `server/metadata/migrations`.
+- [x] Inspect `server/metadata/queries.sql` style and sqlc generated package shape.
+- [x] Inspect existing store test helpers and fixture DB setup.
+- [x] Inspect project/workspace/worktree/session table schemas.
+- [x] Decide whether project task counter lives on `projects` or separate counter table; update spec/checklist if changed.
+
+Recon notes: next migration is `00005`. SQLC uses `sqlc.yaml` with `server/metadata/queries.sql` and generated package `server/metadata/sqlitegen`; `sqlc` exists at `/opt/homebrew/bin/sqlc`. Metadata tests use `Open`, `OpenAtPath`, `openDatabaseAtVersionForTest`, `openDatabaseAtPathWithoutMigrationsForTest`, and `newMetadataTestStore`. Project task counter will live on `projects.next_task_seq` with `projects.project_key`, matching the spec's preferred column path and keeping atomic sequence allocation in one project row.
 
 ### 2A: Schema, Migrations, And SQLC
 
@@ -215,54 +217,54 @@ Goal: add DB shape and generated query surface before high-level store behavior.
 
 ### 2A.1 Red Migration/SQL Tests
 
-- [ ] Add migration test for empty DB.
-- [ ] Add migration test for existing metadata DB fixture.
-- [ ] Add test that SQLite foreign-key enforcement is enabled in metadata DB setup.
-- [ ] Add test for project key backfill using default project-name logic.
-- [ ] Add test for explicit project key storage and validation against `^[A-Z][A-Z0-9]{1,7}$`.
-- [ ] Add test for project key collision handling.
-- [ ] Add test that project key changes are rejected after tasks exist.
-- [ ] Add tests that invalid enum, boolean, timestamp, revision, and protocol counter values fail DB/store validation.
-- [ ] Add test for invalid JSON rejection or canonicalization for JSON columns.
-- [ ] Add test that `workflows.start_node_id` does not exist and start node is enforced by partial unique index on node kind.
-- [ ] Add test that `workflow_edges.source_node_id` does not exist and source is derived from transition group.
+- [x] Add migration test for empty DB.
+- [x] Add migration test for existing metadata DB fixture.
+- [x] Add test that SQLite foreign-key enforcement is enabled in metadata DB setup.
+- [x] Add test for project key backfill using default project-name logic.
+- [x] Add test for explicit project key storage and validation against `^[A-Z][A-Z0-9]{1,7}$`.
+- [x] Add test for project key collision handling.
+- [x] Add test that project key changes are rejected after tasks exist.
+- [x] Add tests that invalid enum, boolean, timestamp, revision, and protocol counter values fail DB/store validation.
+- [x] Add test for invalid JSON rejection or canonicalization for JSON columns.
+- [x] Add test that `workflows.start_node_id` does not exist and start node is enforced by partial unique index on node kind.
+- [x] Add test that `workflow_edges.source_node_id` does not exist and source is derived from transition group.
 - [ ] Add test that graph-affecting workflow edits increment `graph_revision`.
 - [ ] Add test graph revision does not bump on workflow name/description edits unless those values become model-facing.
 - [ ] Add test running node completion validates against run-start snapshot after workflow graph changes.
-- [ ] Add test that circular transition/placement references can be inserted with SQLite constraints, or choose nullable/domain-validated references and test that path.
-- [ ] Add test for atomic task sequence allocation under concurrent creates.
-- [ ] Add test for task short ID format and uniqueness per project.
-- [ ] Add test that non-empty project keys are globally unique in the persistence root.
-- [ ] Add test for task comment size limit.
+- [x] Add test that circular transition/placement references can be inserted with SQLite constraints, or choose nullable/domain-validated references and test that path.
+- [x] Add test for atomic task sequence allocation under concurrent creates.
+- [x] Add test for task short ID format and uniqueness per project.
+- [x] Add test that non-empty project keys are globally unique in the persistence root.
+- [x] Add test for task comment size limit.
 
 ### 2A.2 Migrations
 
-- [ ] Add project key column and task sequence storage.
-- [ ] Add unique index/constraint for non-empty `projects.project_key`.
-- [ ] Add `workflows`.
-- [ ] Add `workflow_nodes`.
-- [ ] Add `workflow_transition_groups`.
-- [ ] Add `workflow_edges`.
-- [ ] Add `project_workflow_links`.
-- [ ] Add `tasks`.
-- [ ] Add `task_node_placements`.
-- [ ] Add `task_runs`.
-- [ ] Add `task_transitions`.
-- [ ] Add `task_transition_edges`.
-- [ ] Add `task_comments`.
-- [ ] Add indexes listed in spec.
-- [ ] Add CHECK constraints listed in spec.
-- [ ] Add `graph_revision` on workflows and observed revision fields on tasks/runs/transitions/snapshots.
-- [ ] Add run-start effective node contract snapshot storage for completion validation.
-- [ ] Add task cancellation metadata fields.
-- [ ] Add protocol violation counters on runs.
-- [ ] Add run-start snapshot JSON column on runs and validate/canonicalize it with other JSON columns.
-- [ ] Add project workflow link `unlinked_at_unix_ms` and default partial unique index scoped to linked rows.
-- [ ] Use a partial unique active link index for `(project_id, workflow_id)` where `unlinked_at_unix_ms = 0`, so terminal-history links can remain while a workflow is later relinked.
-- [ ] Add partial unique default index on `(project_id)` where `is_default = 1 AND unlinked_at_unix_ms = 0`.
-- [ ] Add composite foreign keys where practical for workflow-scoped references.
+- [x] Add project key column and task sequence storage.
+- [x] Add unique index/constraint for non-empty `projects.project_key`.
+- [x] Add `workflows`.
+- [x] Add `workflow_nodes`.
+- [x] Add `workflow_transition_groups`.
+- [x] Add `workflow_edges`.
+- [x] Add `project_workflow_links`.
+- [x] Add `tasks`.
+- [x] Add `task_node_placements`.
+- [x] Add `task_runs`.
+- [x] Add `task_transitions`.
+- [x] Add `task_transition_edges`.
+- [x] Add `task_comments`.
+- [x] Add indexes listed in spec.
+- [x] Add CHECK constraints listed in spec.
+- [x] Add `graph_revision` on workflows and observed revision fields on tasks/runs/transitions/snapshots.
+- [x] Add run-start effective node contract snapshot storage for completion validation.
+- [x] Add task cancellation metadata fields.
+- [x] Add protocol violation counters on runs.
+- [x] Add run-start snapshot JSON column on runs and validate/canonicalize it with other JSON columns.
+- [x] Add project workflow link `unlinked_at_unix_ms` and default partial unique index scoped to linked rows.
+- [x] Use a partial unique active link index for `(project_id, workflow_id)` where `unlinked_at_unix_ms = 0`, so terminal-history links can remain while a workflow is later relinked.
+- [x] Add partial unique default index on `(project_id)` where `is_default = 1 AND unlinked_at_unix_ms = 0`.
+- [x] Add composite foreign keys where practical for workflow-scoped references.
 - [ ] Add domain/store validation where SQLite cannot enforce scope cleanly.
-- [ ] Resolve transition/placement circular-reference insertion explicitly; do not leave it as accidental SQLite behavior.
+- [x] Resolve transition/placement circular-reference insertion explicitly; do not leave it as accidental SQLite behavior.
 
 ### 2A.3 SQLC
 
@@ -271,14 +273,14 @@ Goal: add DB shape and generated query surface before high-level store behavior.
 - [ ] Add sqlc queries for nodes/groups/edges CRUD.
 - [ ] Add sqlc queries for project workflow links.
 - [ ] Add sqlc queries for project workflow unlink/default semantics.
-- [ ] Add sqlc queries for project key/task sequence allocation.
+- [x] Add sqlc queries for project key/task sequence allocation.
 - [ ] Add sqlc queries for task create/read/list.
 - [ ] Add sqlc queries for task start and task cancellation.
 - [ ] Add sqlc queries for placement create/update/read.
 - [ ] Add sqlc queries for run create/update/read.
 - [ ] Add sqlc queries for transition log and transition edge snapshots.
 - [ ] Add sqlc queries for task comments.
-- [ ] Regenerate sqlc output using existing repo command/pattern.
+- [x] Regenerate sqlc output using existing repo command/pattern.
 
 ### 2B: Workflow, Link, And Task Store
 
