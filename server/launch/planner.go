@@ -175,9 +175,15 @@ func persistedRoleProviderID(settings config.Settings) string {
 	if providerOverride := strings.TrimSpace(settings.ProviderOverride); providerOverride != "" {
 		return providerOverride
 	}
+	if baseURL := strings.TrimSpace(settings.OpenAIBaseURL); baseURL != "" {
+		if llm.IsOpenAIFirstPartyBaseURL(baseURL) {
+			return "openai"
+		}
+		return "openai-compatible"
+	}
 	provider, err := llm.InferProviderFromModel(settings.Model)
 	if err != nil {
-		return ""
+		return "openai"
 	}
 	return string(provider)
 }
