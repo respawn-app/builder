@@ -709,26 +709,84 @@ func TestAskQuestionLargeMarkdownPromptPreservesLogicalLines(t *testing.T) {
 		if strings.Contains(line.Text, "\n") {
 			t.Fatalf("ask prompt line contains embedded newline: %+v", line)
 		}
-		gotLines = append(gotLines, strings.TrimRight(line.Text, " "))
+		gotLines = append(gotLines, strings.TrimRight(ansi.Strip(line.Text), " "))
 	}
 	got := strings.Join(gotLines, "\n")
-	want := strings.Join([]string{
-		"    val preserved = true",
+	if strings.Contains(got, "```") || strings.Contains(got, "- Keep") || strings.Contains(got, "**") {
+		t.Fatalf("expected inline ask question markdown rendered, got %q", got)
+	}
+	for _, want := range []string{
+		"val preserved = true",
 		"Please review this plan before I continue:",
-		"",
-		"```kotlin",
 		"fun main() {",
 		"    println(\"hi\")",
 		"}",
-		"```",
-		"",
-		"- Keep the four leading spaces in the code block.",
-		"- Do not collapse blank lines.",
+		"• Keep the four leading spaces in the code block.",
+		"• Do not collapse blank lines.",
 		"›",
 		"Enter to submit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ask prompt markdown missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestAskQuestionPromptQuestionLinesEllipsizeInsteadOfWrapping(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 40
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.syncViewport()
+	testSetActiveAsk(m, &askEvent{req: clientui.PendingPromptEvent{
+		Question: "This question is intentionally far too long to fit in the live ask input area on one line.",
+		Suggestions: []string{
+			"Proceed",
+		},
+	}, reply: make(chan askReply, 1)})
+
+	wrapped, _ := m.layout().wrappedAskPromptLines(32)
+	if len(wrapped) == 0 {
+		t.Fatal("expected ask prompt lines")
+	}
+	if got := wrapped[0].Text; !strings.HasSuffix(ansi.Strip(got), "…") || lipgloss.Width(got) > 32 {
+		t.Fatalf("expected long live question line ellipsized to width, got %q width=%d", got, lipgloss.Width(got))
+	}
+	if len(wrapped) > 1 && wrapped[1].Line.Kind == askPromptLineKindQuestion {
+		t.Fatalf("expected long question to stay on one ellipsized live line, got next question line %+v", wrapped[1])
+	}
+}
+
+func TestAskQuestionMarkdownPromptCursorTracksInputAfterExpandedQuestion(t *testing.T) {
+	question := strings.Join([]string{
+		"Review **this plan** before answer:",
+		"",
+		"- First item",
+		"- Second item",
 	}, "\n")
-	if got != want {
-		t.Fatalf("ask prompt snapshot mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	m := newProjectedStaticUIModel()
+	m.termWidth = 72
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.syncViewport()
+	testSetActiveAsk(m, &askEvent{req: clientui.PendingPromptEvent{Question: question}, reply: make(chan askReply, 1)})
+	m.ask.input = "typed"
+	m.ask.inputCursor = len([]rune(m.ask.input))
+
+	wrapped, cursorLine := m.layout().wrappedAskPromptLines(64)
+	if cursorLine < 0 || cursorLine >= len(wrapped) {
+		t.Fatalf("expected cursor line in wrapped prompt, got %d of %d", cursorLine, len(wrapped))
+	}
+	if wrapped[cursorLine].Line.Kind != askPromptLineKindInput {
+		t.Fatalf("expected cursor to land on input after markdown-expanded question, got line %+v", wrapped[cursorLine])
+	}
+
+	visible, visibleCursor := m.layout().visibleAskPromptLinesWithCursor(64)
+	if visibleCursor < 0 || visibleCursor >= len(visible) {
+		t.Fatalf("expected cursor line in visible prompt, got %d of %d", visibleCursor, len(visible))
+	}
+	if visible[visibleCursor].Line.Kind != askPromptLineKindInput {
+		t.Fatalf("expected visible cursor to land on input after markdown-expanded question, got line %+v", visible[visibleCursor])
 	}
 }
 

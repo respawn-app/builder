@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/cli/tui"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -139,12 +140,16 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 	if len(promptLines) == 0 {
 		promptLines = []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
 	}
+	promptLines = renderMarkdownAskQuestionPromptLines(promptLines, l.model.theme, width)
 	out := make([]wrappedAskPromptLine, 0, len(promptLines)*2)
 	cursorLineIndex := -1
 	for _, line := range promptLines {
 		parts := wrapLine(line.Text, width)
 		lineCursor := -1
 		lineCursorCol := 0
+		if line.Kind == askPromptLineKindQuestion {
+			parts = []string{truncateANSIRight(line.Text, width)}
+		}
 		if line.Kind == askPromptLineKindInput {
 			spec := uiEditableInputRenderSpec{Prefix: line.InputPrefix, Text: line.InputText, CursorIndex: line.InputCursor, RenderCursor: line.ShowsCursor}
 			renderedInput := renderEditableInputField(width, 0, spec)
@@ -176,6 +181,36 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 		return []wrappedAskPromptLine{{Text: "", Line: askPromptLine{Kind: askPromptLineKindQuestion}}}, -1
 	}
 	return out, cursorLineIndex
+}
+
+func renderMarkdownAskQuestionPromptLines(lines []askPromptLine, theme string, width int) []askPromptLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]askPromptLine, 0, len(lines))
+	for idx := 0; idx < len(lines); {
+		line := lines[idx]
+		if line.Kind != askPromptLineKindQuestion {
+			out = append(out, line)
+			idx++
+			continue
+		}
+		start := idx
+		parts := make([]string, 0, 4)
+		for idx < len(lines) && lines[idx].Kind == askPromptLineKindQuestion {
+			parts = append(parts, lines[idx].Text)
+			idx++
+		}
+		rendered := tui.RenderInlineAskQuestionMarkdownLines(strings.Join(parts, "\n"), theme, width)
+		if len(rendered) == 0 {
+			out = append(out, lines[start:idx]...)
+			continue
+		}
+		for _, text := range rendered {
+			out = append(out, askPromptLine{Text: text, Kind: askPromptLineKindQuestion})
+		}
+	}
+	return out
 }
 
 func (l uiViewLayout) visibleAskPromptLines(width int) []wrappedAskPromptLine {

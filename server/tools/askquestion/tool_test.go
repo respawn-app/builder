@@ -644,6 +644,39 @@ func TestToolCallSerializesPureFreeformAsPlainText(t *testing.T) {
 	if payload == "" {
 		t.Fatal("expected non-empty plain-text summary")
 	}
+	if result.OngoingText != "need extra context" {
+		t.Fatalf("expected ongoing freeform answer without model prefix, got %q", result.OngoingText)
+	}
+}
+
+func TestToolCallOngoingTextPreservesLiteralUserAnsweredFreeformPrefix(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, FreeformAnswer: "User answered: keep going"}, nil
+	})
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:    "call-freeform-literal-prefix",
+		Name:  toolspec.ToolAskQuestion,
+		Input: json.RawMessage(`{"question":"What else?"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
+	}
+	if result.OngoingText != "User answered: keep going" {
+		t.Fatalf("expected ongoing freeform answer to preserve literal prefix, got %q", result.OngoingText)
+	}
+	var payload string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	if payload != "User answered: User answered: keep going" {
+		t.Fatalf("expected model-facing payload to keep summary prefix, got %q", payload)
+	}
 }
 
 func TestToolCallAllowsFreeformOnlyWithoutRecommendedOptionIndex(t *testing.T) {

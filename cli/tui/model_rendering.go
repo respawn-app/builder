@@ -285,6 +285,7 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 	blockRole := RenderIntentToolQuestion
 	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
+	entryEnd := entryIndex
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcriptInput.Entries, entryIndex, consumed); resultIdx >= 0 {
 		resultEntry := m.transcriptInput.Entries[resultIdx]
 		nextRole := roleFromEntry(resultEntry)
@@ -295,6 +296,7 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 			}
 			blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 			consumed[resultIdx] = struct{}{}
+			entryEnd = resultIdx
 		}
 	}
 	lines := m.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, opts.mode == transcriptBlockModeDetail)
@@ -305,7 +307,7 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 		role:       blockRole,
 		lines:      lines,
 		entryIndex: m.absoluteTranscriptIndex(entryIndex),
-		entryEnd:   m.absoluteTranscriptIndex(entryIndex),
+		entryEnd:   m.absoluteTranscriptIndex(entryEnd),
 	}
 }
 
