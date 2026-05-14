@@ -44,155 +44,158 @@ Goal: pure workflow domain package with domain types and graph validation. No DB
 
 ### 1.1 Recon
 
-- [ ] Inspect existing Go package naming and error conventions near `server/metadata`, `server/projectview`, and `shared/serverapi`.
-- [ ] Confirm no existing workflow package or graph validator exists.
-- [ ] Identify subagent role/config lookup abstraction currently used by runtime/subagents.
-- [ ] Confirm locked package boundary still has no concrete naming conflict: `server/workflow` pure, with sibling `server/workflowstore`, `server/workflowsvc`, `server/workflowscheduler`, `server/workflowruntime`, and `server/workflowview`.
-- [ ] Record any discovered naming conflicts in this checklist before coding.
+- [x] Inspect existing Go package naming and error conventions near `server/metadata`, `server/projectview`, and `shared/serverapi`.
+- [x] Confirm no existing workflow package or graph validator exists.
+- [x] Identify subagent role/config lookup abstraction currently used by runtime/subagents.
+- [x] Confirm locked package boundary still has no concrete naming conflict: `server/workflow` pure, with sibling `server/workflowstore`, `server/workflowsvc`, `server/workflowscheduler`, `server/workflowruntime`, and `server/workflowview`.
+- [x] Record any discovered naming conflicts in this checklist before coding.
+
+Recon notes: existing packages use package-local services/stores and plain Go errors at the server boundary; shared DTOs validate with `Validate() error`. No workflow package or validator exists. Runtime subagent roles resolve through `shared/config` plus `server/launch`; Slice 1 keeps a pure `workflow.RoleResolver` interface and lets later service/runtime adapters bridge to config. No locked package-name conflicts found.
 
 ### 1.2 Red Tests
 
-- [ ] Add `server/workflow` package test file for graph validation.
-- [ ] Define exact validation error code names before implementation and assert them in tests.
-- [ ] Add valid fixture helper for default workflow: `backlog(start) -> agent -> done(terminal)`.
-- [ ] Add test: invalid draft workflow can be represented and returns accumulated semantic validation errors without blocking save when hard storage invariants still hold.
-- [ ] Add test: task-creation/execution validation mode rejects invalid graph with accumulated errors.
-- [ ] Add test: valid default workflow passes.
-- [ ] Add test: exactly one start node required.
-- [ ] Add test: missing start node rejected.
-- [ ] Add test: multiple start nodes rejected.
-- [ ] Add test: start node must be non-executable, have no subagent role, have no prompt, and have no output requirements.
-- [ ] Add test: start node incoming edges are rejected unless spec is explicitly changed.
-- [ ] Add test: task-creation/execution validation requires start node to have exactly one outgoing transition group.
-- [ ] Add test: task-creation/execution validation rejects start transition groups with more than one edge.
-- [ ] Add test: task-creation/execution validation rejects start transition target that is not an agent node.
-- [ ] Add test: draft workflows may save semantic validation errors but still require hard storage invariants such as one start node, valid identifiers, valid references, and unique keys.
-- [ ] Add test: terminal node cannot have outgoing edges.
-- [ ] Add test: terminal node must be non-executable and have no subagent role/prompt.
-- [ ] Add test: join node must be non-executable and have no subagent role/prompt.
-- [ ] Add test: join node cannot also be terminal/start.
-- [ ] Add test: join node outgoing shape is valid for v1, with exactly one transition group unless routing is explicitly added.
-- [ ] Add test: every node reachable from start.
-- [ ] Add test: every non-terminal node can reach terminal.
-- [ ] Add test: detached island rejected.
-- [ ] Add test: cycles are allowed when terminal remains reachable.
-- [ ] Add test: self-loop is allowed when terminal remains reachable.
-- [ ] Add test: edge belongs to an existing transition group in the same workflow, with source derived from the group.
-- [ ] Add test: duplicate node IDs are rejected.
-- [ ] Add test: duplicate edge IDs are rejected.
-- [ ] Add test: missing/invalid node key is rejected; valid keys match `^[a-z][a-z0-9_]{0,63}$`.
-- [ ] Add test: missing/invalid transition ID is rejected; valid transition IDs match `^[a-z][a-z0-9_]{0,63}$`.
-- [ ] Add test: missing/invalid edge key is rejected; valid edge keys match `^[a-z][a-z0-9_]{0,63}$`.
-- [ ] Add test: transition group ID unique workflow-wide.
-- [ ] Add test: transition IDs unique per source node.
-- [ ] Add test: transition group must contain at least one edge.
-- [ ] Add test: edge keys unique per transition group.
-- [ ] Add test: edge target node must exist.
-- [ ] Add test: workflow-scoped references cannot cross workflow definitions.
-- [ ] Add test: output schema field names reject empty/duplicate/invalid identifiers.
-- [ ] Add test: output schema field descriptions are required and size-limited.
-- [ ] Add test: output field names are capped at 64 chars and descriptions at 1000 chars.
-- [ ] Add test: output requirements must reference known source node output fields.
-- [ ] Add test: input bindings validate source field/task metadata references.
-- [ ] Add test: prompt/template placeholders validate against bound input names.
-- [ ] Add test: context mode must be one of `new_session`, `continue_session`, `compact_and_continue_session`.
-- [ ] Add test: multi-edge fan-out has exactly one unambiguous nearest common join.
-- [ ] Add test: fan-out branch terminal before join is rejected.
-- [ ] Add test: nested fan-out before derived join is rejected.
-- [ ] Add test: cycle before derived join is rejected.
-- [ ] Add test: agent node requires valid subagent role.
-- [ ] Add test: missing subagent role returns stable validation code.
-- [ ] Add test: validation returns all relevant structured errors where safe, not first string-only failure.
+- [x] Add `server/workflow` package test file for graph validation.
+- [x] Define exact validation error code names before implementation and assert them in tests.
+- [x] Add valid fixture helper for default workflow: `backlog(start) -> agent -> done(terminal)`.
+- [x] Add test: invalid draft workflow can be represented and returns accumulated semantic validation errors without blocking save when hard storage invariants still hold.
+- [x] Add test: task-creation/execution validation mode rejects invalid graph with accumulated errors.
+- [x] Add test: valid default workflow passes.
+- [x] Add test: exactly one start node required.
+- [x] Add test: missing start node rejected.
+- [x] Add test: multiple start nodes rejected.
+- [x] Add test: start node must be non-executable, have no subagent role, have no prompt, and have no output requirements.
+- [x] Add test: start node incoming edges are rejected unless spec is explicitly changed.
+- [x] Add test: task-creation/execution validation requires start node to have exactly one outgoing transition group.
+- [x] Add test: task-creation/execution validation rejects start transition groups with more than one edge.
+- [x] Add test: task-creation/execution validation rejects start transition target that is not an agent node.
+- [x] Add test: draft workflows may save semantic validation errors but still require hard storage invariants such as one start node, valid identifiers, valid references, and unique keys.
+- [x] Add test: terminal node cannot have outgoing edges.
+- [x] Add test: terminal node must be non-executable and have no subagent role/prompt.
+- [x] Add test: join node must be non-executable and have no subagent role/prompt.
+- [x] Add test: join node cannot also be terminal/start.
+- [x] Add test: join node outgoing shape is valid for v1, with exactly one transition group unless routing is explicitly added.
+- [x] Add test: every node reachable from start.
+- [x] Add test: every non-terminal node can reach terminal.
+- [x] Add test: detached island rejected.
+- [x] Add test: cycles are allowed when terminal remains reachable.
+- [x] Add test: self-loop is allowed when terminal remains reachable.
+- [x] Add test: edge belongs to an existing transition group in the same workflow, with source derived from the group.
+- [x] Add test: duplicate node IDs are rejected.
+- [x] Add test: duplicate edge IDs are rejected.
+- [x] Add test: missing/invalid node key is rejected; valid keys match `^[a-z][a-z0-9_]{0,63}$`.
+- [x] Add test: missing/invalid transition ID is rejected; valid transition IDs match `^[a-z][a-z0-9_]{0,63}$`.
+- [x] Add test: missing/invalid edge key is rejected; valid edge keys match `^[a-z][a-z0-9_]{0,63}$`.
+- [x] Add test: transition group ID unique workflow-wide.
+- [x] Add test: transition IDs unique per source node.
+- [x] Add test: transition group must contain at least one edge.
+- [x] Add test: edge keys unique per transition group.
+- [x] Add test: edge target node must exist.
+- [x] Add test: workflow-scoped references cannot cross workflow definitions.
+- [x] Add test: output schema field names reject empty/duplicate/invalid identifiers.
+- [x] Add test: output schema field descriptions are required and size-limited.
+- [x] Add test: output field names are capped at 64 chars and descriptions at 1000 chars.
+- [x] Add test: output requirements must reference known source node output fields.
+- [x] Add test: input bindings validate source field/task metadata references.
+- [x] Add test: prompt/template placeholders validate against bound input names.
+- [x] Add test: context mode must be one of `new_session`, `continue_session`, `compact_and_continue_session`.
+- [x] Add test: multi-edge fan-out has exactly one unambiguous nearest common join.
+- [x] Add test: fan-out branch terminal before join is rejected.
+- [x] Add test: nested fan-out before derived join is rejected.
+- [x] Add test: cycle before derived join is rejected.
+- [x] Add test: agent node requires valid subagent role.
+- [x] Add test: missing subagent role returns stable validation code.
+- [x] Add test: validation returns all relevant structured errors where safe, not first string-only failure.
 
 Initial validation error code names:
 
-- [ ] `workflow.validation.missing_workflow_id`
-- [ ] `workflow.validation.missing_node_id`
-- [ ] `workflow.validation.duplicate_node_id`
-- [ ] `workflow.validation.missing_node_key`
-- [ ] `workflow.validation.invalid_node_key`
-- [ ] `workflow.validation.duplicate_node_key`
-- [ ] `workflow.validation.missing_start_node`
-- [ ] `workflow.validation.multiple_start_nodes`
-- [ ] `workflow.validation.invalid_start_node`
-- [ ] `workflow.validation.invalid_start_outgoing_shape`
-- [ ] `workflow.validation.terminal_has_outgoing_edge`
-- [ ] `workflow.validation.terminal_is_executable`
-- [ ] `workflow.validation.join_is_executable`
-- [ ] `workflow.validation.invalid_join_node`
-- [ ] `workflow.validation.invalid_join_outgoing_shape`
-- [ ] `workflow.validation.node_unreachable_from_start`
-- [ ] `workflow.validation.non_terminal_cannot_reach_terminal`
-- [ ] `workflow.validation.missing_transition_group_id`
-- [ ] `workflow.validation.duplicate_transition_group_id`
-- [ ] `workflow.validation.empty_transition_group`
-- [ ] `workflow.validation.missing_transition_id`
-- [ ] `workflow.validation.invalid_transition_id`
-- [ ] `workflow.validation.duplicate_transition_id`
-- [ ] `workflow.validation.edge_transition_group_missing`
-- [ ] `workflow.validation.missing_edge_id`
-- [ ] `workflow.validation.duplicate_edge_id`
-- [ ] `workflow.validation.missing_edge_key`
-- [ ] `workflow.validation.invalid_edge_key`
-- [ ] `workflow.validation.duplicate_edge_key`
-- [ ] `workflow.validation.edge_target_missing`
-- [ ] `workflow.validation.cross_workflow_reference`
-- [ ] `workflow.validation.invalid_output_field`
-- [ ] `workflow.validation.duplicate_output_field`
-- [ ] `workflow.validation.output_field_description_required`
-- [ ] `workflow.validation.output_schema_too_large`
-- [ ] `workflow.validation.unknown_output_requirement`
-- [ ] `workflow.validation.invalid_input_binding`
-- [ ] `workflow.validation.invalid_template_placeholder`
-- [ ] `workflow.validation.invalid_context_mode`
-- [ ] `workflow.validation.invalid_fanout_join_topology`
-- [ ] `workflow.validation.agent_role_required`
-- [ ] `workflow.validation.agent_role_missing`
-- [ ] `workflow.validation.invalid_node_kind`
+- [x] `workflow.validation.missing_workflow_id`
+- [x] `workflow.validation.missing_node_id`
+- [x] `workflow.validation.duplicate_node_id`
+- [x] `workflow.validation.missing_node_key`
+- [x] `workflow.validation.invalid_node_key`
+- [x] `workflow.validation.duplicate_node_key`
+- [x] `workflow.validation.missing_start_node`
+- [x] `workflow.validation.multiple_start_nodes`
+- [x] `workflow.validation.invalid_start_node`
+- [x] `workflow.validation.invalid_start_outgoing_shape`
+- [x] `workflow.validation.terminal_has_outgoing_edge`
+- [x] `workflow.validation.terminal_is_executable`
+- [x] `workflow.validation.join_is_executable`
+- [x] `workflow.validation.invalid_join_node`
+- [x] `workflow.validation.invalid_join_outgoing_shape`
+- [x] `workflow.validation.node_unreachable_from_start`
+- [x] `workflow.validation.non_terminal_cannot_reach_terminal`
+- [x] `workflow.validation.missing_transition_group_id`
+- [x] `workflow.validation.duplicate_transition_group_id`
+- [x] `workflow.validation.empty_transition_group`
+- [x] `workflow.validation.missing_transition_id`
+- [x] `workflow.validation.invalid_transition_id`
+- [x] `workflow.validation.duplicate_transition_id`
+- [x] `workflow.validation.edge_transition_group_missing`
+- [x] `workflow.validation.missing_edge_id`
+- [x] `workflow.validation.duplicate_edge_id`
+- [x] `workflow.validation.missing_edge_key`
+- [x] `workflow.validation.invalid_edge_key`
+- [x] `workflow.validation.duplicate_edge_key`
+- [x] `workflow.validation.edge_target_missing`
+- [x] `workflow.validation.cross_workflow_reference`
+- [x] `workflow.validation.invalid_output_field`
+- [x] `workflow.validation.duplicate_output_field`
+- [x] `workflow.validation.output_field_description_required`
+- [x] `workflow.validation.output_schema_too_large`
+- [x] `workflow.validation.unknown_output_requirement`
+- [x] `workflow.validation.invalid_input_binding`
+- [x] `workflow.validation.invalid_template_placeholder`
+- [x] `workflow.validation.invalid_context_mode`
+- [x] `workflow.validation.invalid_fanout_join_topology`
+- [x] `workflow.validation.agent_role_required`
+- [x] `workflow.validation.agent_role_missing`
+- [x] `workflow.validation.invalid_node_kind`
+- [x] `workflow.validation.invalid_display_name`
 
 ### 1.3 Implement Domain Types
 
-- [ ] Define typed identifiers for workflow, node, transition group, edge, task, placement, run, transition.
-- [ ] Define node kinds: start, agent, join, terminal.
-- [ ] Define context-preservation modes.
-- [ ] Define node output schema field type with string-only fields.
-- [ ] Define output requirement type.
-- [ ] Define output/comment size constants: field name 64 chars, field description 1000 chars, output value 64 KiB, commentary 64 KiB, task comment 256 KiB.
-- [ ] Define model-facing key regex constant `^[a-z][a-z0-9_]{0,63}$` for node keys, transition IDs, edge keys, output field names, and binding names.
-- [ ] Define validation context type: draft, task creation, execution.
-- [ ] Define input binding and template placeholder domain types.
-- [ ] Define workflow definition aggregate.
-- [ ] Define project-context validation input with role resolver interface.
-- [ ] Define validation error code type.
-- [ ] Define validation error struct with code, message, and related IDs.
-- [ ] Keep JSON/DB-specific tags out of pure domain types unless unavoidable.
+- [x] Define typed identifiers for workflow, node, transition group, edge, task, placement, run, transition.
+- [x] Define node kinds: start, agent, join, terminal.
+- [x] Define context-preservation modes.
+- [x] Define node output schema field type with string-only fields.
+- [x] Define output requirement type.
+- [x] Define output/comment size constants: field name 64 chars, field description 1000 chars, output value 64 KiB, commentary 64 KiB, task comment 256 KiB.
+- [x] Define model-facing key regex constant `^[a-z][a-z0-9_]{0,63}$` for node keys, transition IDs, edge keys, output field names, and binding names.
+- [x] Define validation context type: draft, task creation, execution.
+- [x] Define input binding and template placeholder domain types.
+- [x] Define workflow definition aggregate.
+- [x] Define project-context validation input with role resolver interface.
+- [x] Define validation error code type.
+- [x] Define validation error struct with code, message, and related IDs.
+- [x] Keep JSON/DB-specific tags out of pure domain types unless unavoidable.
 
 ### 1.4 Implement Validation
 
-- [ ] Validate required IDs and keys.
-- [ ] Validate identifier/key formats and size limits.
-- [ ] Validate display names are trimmed non-empty and capped at 120 chars.
-- [ ] Validate one start node.
-- [ ] Validate node kind constraints.
-- [ ] Validate start, join, and terminal execution config constraints.
-- [ ] Validate transition group and edge source/target references.
-- [ ] Validate uniqueness constraints.
-- [ ] Validate graph reachability from start.
-- [ ] Validate terminal reachability from every non-terminal node.
-- [ ] Validate cycles/self-loops do not fail by themselves.
-- [ ] Validate output requirement references.
-- [ ] Validate input binding references and template placeholders.
-- [ ] Validate fan-out join topology restrictions.
-- [ ] Validate context mode values.
-- [ ] Validate agent role references through injected resolver.
-- [ ] Return structured validation errors with stable codes.
+- [x] Validate required IDs and keys.
+- [x] Validate identifier/key formats and size limits.
+- [x] Validate display names are trimmed non-empty and capped at 120 chars.
+- [x] Validate one start node.
+- [x] Validate node kind constraints.
+- [x] Validate start, join, and terminal execution config constraints.
+- [x] Validate transition group and edge source/target references.
+- [x] Validate uniqueness constraints.
+- [x] Validate graph reachability from start.
+- [x] Validate terminal reachability from every non-terminal node.
+- [x] Validate cycles/self-loops do not fail by themselves.
+- [x] Validate output requirement references.
+- [x] Validate input binding references and template placeholders.
+- [x] Validate fan-out join topology restrictions.
+- [x] Validate context mode values.
+- [x] Validate agent role references through injected resolver.
+- [x] Return structured validation errors with stable codes.
 
 ### 1.5 Slice Verification
 
-- [ ] Run `./scripts/test.sh ./server/workflow/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Review `server/workflow` files for package cohesion and no DB/runtime imports.
-- [ ] Commit slice with message like `feat: add workflow graph validation`.
+- [x] Run `./scripts/test.sh ./server/workflow/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Review `server/workflow` files for package cohesion and no DB/runtime imports.
+- [x] Commit slice with message like `feat: add workflow graph validation`.
 
 ## Slice 2: Metadata Schema, Queries, And Store
 
