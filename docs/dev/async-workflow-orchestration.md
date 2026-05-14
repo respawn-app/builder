@@ -53,7 +53,9 @@ Decisions will be recorded here during the planning interview.
 - Per-edge context preservation must be configurable in v1 with at least three modes: `new_session`, `continue_session`, and `compact_and_continue_session`.
 - V1 workflow definitions are SQLite-authoritative and created/edited through backend API plus a minimal CLI. No stable graph file format is required in v1.
 - Workflow definitions should be globally reusable. Projects link to workflow definitions rather than copying graph definitions. Workflow validation is project-contextual because subagent roles and workspace config may differ by project.
+- A project can link multiple workflows and has one default workflow for task creation.
 - V1 does not snapshot/version workflow definitions for existing tasks. Tasks use the current linked workflow definition; workflow-version edge cases are deferred.
+- Destructive graph edits are guarded. Deleting workflow graph elements requires no non-terminal tasks to reference them; deleting the initial/backlog node also requires selecting a replacement initial node.
 - Node config and edge config are distinct. Nodes configure agent runs: subagent role, prompt, output schema, limits, and run stop conditions. Edges configure transitions: next node, human approval/manual interaction, context preservation, input bindings, routing, and join/aggregation behavior.
 - Subagent role is the executable node's assignee. There is no separate assignee field. UI can display subagent roles as assignees for convenience.
 - Workflow nodes select existing subagent roles only; no per-node model/provider/tool/auth overrides. Subagent roles define agent identity fully.
@@ -66,6 +68,7 @@ Decisions will be recorded here during the planning interview.
 - Agent nodes complete by calling a node-specific completion tool, not by returning natural language. The completion payload chooses a user-defined outgoing transition when the node has more than one outgoing edge and supplies node output fields. Runtime failure, cancellation, and unanswered questions are orchestration states, not model-selected terminal statuses.
 - Workflow runs should treat a normal assistant final answer as invalid output. Runtime should append a nudge and continue until the model calls the completion tool, calls `ask_question`, is canceled, or hits a runtime error.
 - The model-facing completion control should be a static workflow-only tool, not a CLI command and not a dynamically generated per-node tool schema. Recommended shape: `complete_node` with `transition_id`, optional `commentary`, and `payload` as a flat `map[string]string`. Runtime validates the payload against active task/run/node state. If called outside an active workflow run, it returns an explicit not-in-workflow error.
+- `complete_node` is workflow control infrastructure and is available in every workflow run regardless of subagent role tool config.
 - User questions use existing `ask_question` tool-call/session infrastructure. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered. V1 should not introduce a separate durable task-question source of truth unless existing session transcript/resume semantics prove insufficient.
 - Node output schemas are user-authored but intentionally flat. Fields are strings; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
 - Completion tools expose only `transition_id`, never `next_node`. The selected edge derives the target node and transition behavior.
@@ -75,6 +78,7 @@ Decisions will be recorded here during the planning interview.
 - A task owns one managed worktree by default. Implementation and review nodes reuse it unless later node/edge configuration adds an explicit override.
 - Builder creates the task worktree when scheduling the first executable run that needs workspace access. In the default pipeline this coincides with moving the task from backlog into executable work.
 - Task worktree branch creation should reuse existing worktree logic. The branch name is the task short ID.
+- `continue_session` and `compact_and_continue_session` may transition across nodes with different subagent roles. Existing session locking means model/tool differences cannot be fully applied in the same session; Builder should apply the target node prompt/role guidance and accept that the prior session contract remains. Use `new_session` when the target node must get its fresh subagent contract.
 - Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work.
 - The execution queue is durable in SQLite. Startup reconciliation should inspect runnable/running/interrupted state and requeue safe work.
 - The queue does not own runtime leases. Runtime leases remain execution-control state, similar to current client/frontend leases, not durable queue authority.
@@ -89,17 +93,17 @@ Decisions will be recorded here during the planning interview.
 - `RunPromptService` should not back workflow nodes. It is a one-shot final-string API, while workflow nodes need durable runs, structured completion, interruption, and resume.
 - Existing user goal state should not be reused as workflow autonomy state. Workflow needs a goal-like loop shape, but task/node/run identity must own completion, interruption, and resume semantics.
 
-## Schema Direction
+## Completion Control Schema
 
-The completion tool should be generated from node config:
+The static `complete_node` tool should have a stable schema:
 
-- `transition_id`: required when a node has more than one outgoing edge; value should be an enum of valid outgoing edge IDs.
+- `transition_id`: optional string. Runtime requires it when a node has more than one outgoing edge and validates it against valid outgoing edge IDs.
 - `commentary`: optional catch-all string field; visible to the user and passed along to the next node by default.
-- user-defined fields: flat string fields such as `review_findings`, `verification`, `architecture_notes`, or `merge_notes`.
+- `payload`: optional flat string map for user-defined fields such as `review_findings`, `verification`, `architecture_notes`, or `merge_notes`.
 
 Prefer `transition_id` over `next_node` because the edge owns approval, context preservation, input/output bindings, and routing semantics. The target node is derived from the selected edge.
 
-Selected-edge validation then checks payload requirements. Example: a review node can define `review_findings` as an available output field, while only the `changes_requested` edge requires it.
+Node-specific field guidance belongs in developer prompts, not in the tool schema. Selected-edge validation checks payload requirements. Example: a review node can define `review_findings` as an available output field, while only the `changes_requested` edge requires it.
 
 ## Input Binding Direction
 
