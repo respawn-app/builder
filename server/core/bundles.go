@@ -25,6 +25,7 @@ import (
 	"builder/server/sessionview"
 	shelltool "builder/server/tools/shell"
 	"builder/server/updatestatus"
+	"builder/server/workflowsvc"
 	"builder/server/worktree"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -40,6 +41,7 @@ type Bundles struct {
 	Runtime     *RuntimeBundle
 	Sessions    *SessionBundle
 	Updates     *UpdateBundle
+	Workflows   *WorkflowBundle
 	Worktrees   *WorktreeBundle
 }
 
@@ -105,6 +107,10 @@ type WorktreeBundle struct {
 	worktrees client.WorktreeClient
 }
 
+type WorkflowBundle struct {
+	workflows client.WorkflowClient
+}
+
 func (s *Core) safeBundles() *Bundles {
 	if s == nil {
 		return emptyBundles()
@@ -140,6 +146,9 @@ func (b *Bundles) withDefaults() *Bundles {
 	}
 	if withDefaults.Updates == nil {
 		withDefaults.Updates = &UpdateBundle{}
+	}
+	if withDefaults.Workflows == nil {
+		withDefaults.Workflows = &WorkflowBundle{}
 	}
 	if withDefaults.Worktrees == nil {
 		withDefaults.Worktrees = &WorktreeBundle{}
@@ -183,6 +192,7 @@ type bundleCompositionInput struct {
 	sessionLifecycleService *sessionlifecycle.Service
 	sessionActivityService  *sessionactivity.Service
 	updateStatusService     *updatestatus.Service
+	workflowService         *workflowsvc.Service
 	worktreeService         *worktree.Service
 }
 
@@ -201,6 +211,7 @@ func composeBundles(in bundleCompositionInput) *Bundles {
 		Runtime:     newRuntimeBundle(in.runtimeSupport, in.runtimeRegistry, in.runtimeControlService, in.sessionRuntimeService, in.sessionActivityService),
 		Sessions:    newSessionBundle(in.sessionViewService, in.sessionLifecycleService),
 		Updates:     &UpdateBundle{updateStatus: in.updateStatusService},
+		Workflows:   newWorkflowBundle(in.workflowService),
 		Worktrees:   &WorktreeBundle{worktrees: client.NewLoopbackWorktreeClient(in.worktreeService)},
 	}
 }
@@ -256,6 +267,10 @@ func newRuntimeBundle(runtimeSupport serverbootstrap.RuntimeSupport, runtimeRegi
 		sessionRuntime:   client.NewLoopbackSessionRuntimeClient(sessionRuntimeService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
 	}
+}
+
+func newWorkflowBundle(workflowService *workflowsvc.Service) *WorkflowBundle {
+	return &WorkflowBundle{workflows: client.NewLoopbackWorkflowClient(workflowService)}
 }
 
 func newSessionBundle(sessionViewService *sessionview.Service, sessionLifecycleService *sessionlifecycle.Service) *SessionBundle {

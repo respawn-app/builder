@@ -361,12 +361,12 @@ Goal: typed backend service and read surfaces for CLI and POC GUI. Contracts are
 
 ### 3.1 Recon
 
-- [ ] Inspect `shared/serverapi` route DTO patterns.
-- [ ] Inspect `shared/servicecontract` interface patterns.
-- [ ] Inspect `shared/client` loopback/remote client patterns.
-- [ ] Inspect `server/transport` route registration patterns.
-- [ ] Inspect `shared/protocol` method constant and route-name patterns.
-- [ ] Inspect existing read-model packages such as `server/projectview`, `server/sessionview`, and `server/runtimeview`.
+- [x] Inspect `shared/serverapi` route DTO patterns.
+- [x] Inspect `shared/servicecontract` interface patterns.
+- [x] Inspect `shared/client` loopback/remote client patterns.
+- [x] Inspect `server/transport` route registration patterns.
+- [x] Inspect `shared/protocol` method constant and route-name patterns.
+- [x] Inspect existing read-model packages such as `server/projectview`, `server/sessionview`, and `server/runtimeview`.
 
 ### 3A: DTOs, Service Contracts, Clients, And Transport
 
@@ -374,31 +374,31 @@ Goal: route-shaped typed API surface without large read-model work.
 
 ### 3A.1 Red Tests
 
-- [ ] Add DTO validation tests for workflow create/update requests.
-- [ ] Add DTO validation tests for node/edge creation requests.
-- [ ] Add DTO validation tests for model-facing key regex and display-name `1..120` char limit after trimming.
-- [ ] Add DTO validation tests for task create/start/move/cancel/comment requests.
-- [ ] Add DTO/API tests for explicit project key create/update path, or document default-only task key support as a locked decision before skipping.
-- [ ] Add service test for project default workflow resolution.
-- [ ] Add service test for workflow validation endpoint using domain validator.
-- [ ] Add service test for workflow validation endpoint modes: draft, task creation, execution.
-- [ ] Add service test: cannot create task with workflow not linked to project.
-- [ ] Add service test: task creation rejects invalid default workflow with accumulated errors.
-- [ ] Add service test: task start validates current graph and applies start transition when implementation slice enables it.
-- [ ] Add service test: default workflow resolves within project only.
-- [ ] Add service test: project workflow unlink rejects non-terminal task references and soft-disables terminal-only links.
-- [ ] Add loopback client test for at least one workflow route.
-- [ ] Add remote/transport route test for same route if repo has route test pattern.
+- [x] Add DTO validation tests for workflow create/update requests.
+- [x] Add DTO validation tests for node/edge creation requests.
+- [x] Add DTO validation tests for model-facing key regex and display-name `1..120` char limit after trimming.
+- [x] Add DTO validation tests for task create/start/move/cancel/comment requests.
+- [x] Add DTO/API tests for explicit project key create/update path, or document default-only task key support as a locked decision before skipping.
+- [x] Add service test for project default workflow resolution.
+- [x] Add service test for workflow validation endpoint using domain validator.
+- [x] Add service test for workflow validation endpoint modes: draft, task creation, execution.
+- [x] Add service test: cannot create task with workflow not linked to project.
+- [x] Add service test: task creation rejects invalid default workflow with accumulated errors.
+- [x] Add service test: task start validates current graph and applies start transition when implementation slice enables it.
+- [x] Add service test: default workflow resolves within project only.
+- [x] Add service test: project workflow unlink rejects non-terminal task references and soft-disables terminal-only links.
+- [x] Add loopback client test for at least one workflow route.
+- [x] Add remote/transport route test for same route if repo has route test pattern.
 
 ### 3A.2 Implementation
 
-- [ ] Add `shared/serverapi/workflow.go` DTOs.
-- [ ] Add validation helpers with stable error codes.
-- [ ] Add `shared/servicecontract` workflow interface.
-- [ ] Add `shared/client` workflow client methods.
-- [ ] Add protocol/method constants if current transport pattern requires them.
-- [ ] Add `server/workflowsvc` service implementation and compose it from `server/core`.
-- [ ] Add transport route registration.
+- [x] Add `shared/serverapi/workflow.go` DTOs.
+- [x] Add validation helpers with stable error codes.
+- [x] Add `shared/servicecontract` workflow interface.
+- [x] Add `shared/client` workflow client methods.
+- [x] Add protocol/method constants if current transport pattern requires them.
+- [x] Add `server/workflowsvc` service implementation and compose it from `server/core`.
+- [x] Add transport route registration.
 
 ### 3B: Workflow Views
 
@@ -406,27 +406,27 @@ Goal: board and task read models for CLI and POC GUI adapter.
 
 ### 3B.1 Red Tests
 
-- [ ] Add read-model test for board node ordering.
-- [ ] Add read-model test for board active placement summaries.
-- [ ] Add read-model test for task detail including placements, runs, transitions, comments.
-- [ ] Add read-model test for transition history ordering.
-- [ ] Add read-model test for deleted comments hidden by default.
-- [ ] Add read-model test for active terminal placement projecting task done.
-- [ ] Add read-model test for interrupted run reason metadata.
-- [ ] Add read-model test for canceled task suppressing runnable state.
-- [ ] Add read-model test for invalid default workflow/task-create validation errors.
+- [x] Add read-model test for board node ordering.
+- [x] Add read-model test for board active placement summaries.
+- [x] Add read-model test for task detail including placements, runs, transitions, comments.
+- [x] Add read-model test for transition history ordering.
+- [x] Add read-model test for deleted comments hidden by default.
+- [x] Add read-model test for active terminal placement projecting task done.
+- [x] Add read-model test for interrupted run reason metadata.
+- [x] Add read-model test for canceled task suppressing runnable state.
+- [x] Add read-model test for invalid default workflow/task-create validation errors.
 
 ### 3B.2 Implementation
 
-- [ ] Add `server/workflowview` read-model package.
-- [ ] Ensure read models do not read session transcripts or `events.jsonl`.
-- [ ] Document mutable pre-2.0 contract expectation in code comments only where useful.
+- [x] Add `server/workflowview` read-model package.
+- [x] Ensure read models do not read session transcripts or `events.jsonl`.
+- [x] Document mutable pre-2.0 contract expectation in code comments only where useful.
 
 ### 3.4 Slice Verification
 
-- [ ] Run `./scripts/test.sh ./shared/serverapi/... ./shared/servicecontract/... ./shared/client/... ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowview/... ./server/transport/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: expose workflow task APIs`.
+- [x] Run `./scripts/test.sh ./shared/serverapi/... ./shared/servicecontract/... ./shared/client/... ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowview/... ./server/transport/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message like `feat: expose workflow task APIs`.
 
 ## Slice 4: Minimal Workflow And Task CLI
 

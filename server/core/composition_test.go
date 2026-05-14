@@ -61,4 +61,7 @@ func TestNewWithContextComposesRequiredBundles(t *testing.T) {
 	if appCore.bundles.Worktrees == nil || appCore.bundles.Worktrees.worktrees == nil {
 		t.Fatal("expected worktree bundle client")
 	}
+	if appCore.bundles.Workflows == nil || appCore.bundles.Workflows.workflows == nil {
+		t.Fatal("expected workflow bundle client")
+	}
 }

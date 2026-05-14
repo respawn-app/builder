@@ -27,6 +27,9 @@ import (
 	"builder/server/sessionview"
 	"builder/server/storagemigration"
 	"builder/server/updatestatus"
+	"builder/server/workflowstore"
+	"builder/server/workflowsvc"
+	"builder/server/workflowview"
 	"builder/server/worktree"
 	"builder/shared/buildinfo"
 	"builder/shared/client"
@@ -116,6 +119,29 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode).WithUpdateStatusProvider(updateStatusService)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
+	cleanupNewFailure := func() {
+		_ = rootLease.Close()
+		_ = metadataStore.Close()
+		if runtimeSupport.Background != nil {
+			_ = runtimeSupport.Background.Close()
+		}
+	}
+	workflowRoleResolver := configRoleResolver{settings: cfg.Settings}
+	workflowStore, err := workflowstore.New(metadataStore, workflowstore.WithRoleResolver(workflowRoleResolver))
+	if err != nil {
+		cleanupNewFailure()
+		return nil, fmt.Errorf("workflow bundle: store: %w", err)
+	}
+	workflowViewService, err := workflowview.New(metadataStore)
+	if err != nil {
+		cleanupNewFailure()
+		return nil, fmt.Errorf("workflow bundle: view: %w", err)
+	}
+	workflowService, err := workflowsvc.New(workflowStore, workflowViewService, workflowRoleResolver)
+	if err != nil {
+		cleanupNewFailure()
+		return nil, fmt.Errorf("workflow bundle: service: %w", err)
+	}
 	core := &Core{bundles: composeBundles(bundleCompositionInput{
 		cfg:                     cfg,
 		containerDir:            containerDir,
@@ -140,6 +166,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		sessionLifecycleService: sessionLifecycleService,
 		sessionActivityService:  sessionActivityService,
 		updateStatusService:     updateStatusService,
+		workflowService:         workflowService,
 		worktreeService:         worktreeService,
 	})}
 	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {
