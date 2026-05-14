@@ -1,15 +1,19 @@
-package clientui
+package runtimestate
 
-import "strings"
+import (
+	"strings"
+
+	"builder/shared/clientui"
+)
 
 type RuntimeRunState struct {
-	Run        RunLifecycle
-	Compaction CompactionLifecycle
-	Reviewer   ReviewerLifecycle
+	Run        clientui.RunLifecycle
+	Compaction clientui.CompactionLifecycle
+	Reviewer   clientui.ReviewerLifecycle
 }
 
 type RuntimeConversationState struct {
-	Freshness ConversationFreshness
+	Freshness clientui.ConversationFreshness
 }
 
 type RuntimeReasoningState struct {
@@ -18,10 +22,28 @@ type RuntimeReasoningState struct {
 
 type PendingInputState struct {
 	Input            string
-	PendingInjected  []QueuedUserMessage
+	PendingInjected  []clientui.QueuedUserMessage
 	LockedInjectText string
 	LockedInjectID   string
 	Submission       InputSubmissionLifecycle
+}
+
+type InputSubmissionLifecycle string
+
+const (
+	InputSubmissionUnlocked InputSubmissionLifecycle = "unlocked"
+	InputSubmissionLocked   InputSubmissionLifecycle = "locked"
+)
+
+func NewInputSubmissionLifecycle(locked bool) InputSubmissionLifecycle {
+	if locked {
+		return InputSubmissionLocked
+	}
+	return InputSubmissionUnlocked
+}
+
+func (s InputSubmissionLifecycle) IsLocked() bool {
+	return s == InputSubmissionLocked
 }
 
 type BackgroundNoticeKind uint8
@@ -48,7 +70,7 @@ const (
 
 type RuntimeTranscriptSyncCommand struct {
 	Reason        RuntimeTranscriptSyncReason
-	RecoveryCause TranscriptRecoveryCause
+	RecoveryCause clientui.TranscriptRecoveryCause
 }
 
 func (c RuntimeTranscriptSyncCommand) IsSet() bool {
@@ -113,7 +135,7 @@ const (
 
 type RuntimeReasoningStreamCommand struct {
 	Kind  RuntimeReasoningStreamCommandKind
-	Delta *ReasoningDelta
+	Delta *clientui.ReasoningDelta
 }
 
 type RuntimeReasoningReduction struct {
@@ -156,7 +178,7 @@ func ReduceRuntimeEvent(
 	input PendingInputState,
 	reasoningState RuntimeReasoningState,
 	activityRunning bool,
-	evt Event,
+	evt clientui.Event,
 ) RuntimeEventReduction {
 	return RuntimeEventReduction{
 		Transcript:          ReduceRuntimeTranscriptEvent(evt),
@@ -169,43 +191,43 @@ func ReduceRuntimeEvent(
 	}
 }
 
-func ReduceRuntimeTranscriptEvent(evt Event) RuntimeTranscriptReduction {
+func ReduceRuntimeTranscriptEvent(evt clientui.Event) RuntimeTranscriptReduction {
 	switch evt.Kind {
-	case EventStreamGap:
+	case clientui.EventStreamGap:
 		return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncStreamGap, RecoveryCause: evt.RecoveryCause}}
-	case EventConversationUpdated:
-		if evt.RecoveryCause != TranscriptRecoveryCauseNone {
+	case clientui.EventConversationUpdated:
+		if evt.RecoveryCause != clientui.TranscriptRecoveryCauseNone {
 			return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncRecovery, RecoveryCause: evt.RecoveryCause}}
 		}
 		if evt.CommittedTranscriptChanged {
 			return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncCommittedAdvance}}
 		}
-	case EventOngoingErrorUpdated:
+	case clientui.EventOngoingErrorUpdated:
 		return RuntimeTranscriptReduction{Sync: RuntimeTranscriptSyncCommand{Reason: RuntimeTranscriptSyncOngoingErrorUpdated}}
-	case EventAssistantDelta:
+	case clientui.EventAssistantDelta:
 		return RuntimeTranscriptReduction{AssistantStream: []RuntimeAssistantStreamCommand{{Kind: RuntimeAssistantStreamAppend, Delta: evt.AssistantDelta, StepID: evt.StepID}}}
-	case EventAssistantDeltaReset:
+	case clientui.EventAssistantDeltaReset:
 		return RuntimeTranscriptReduction{AssistantStream: []RuntimeAssistantStreamCommand{{Kind: RuntimeAssistantStreamClear, StepID: evt.StepID}}}
 	}
 	return RuntimeTranscriptReduction{}
 }
 
-func ReduceRuntimeRunStateEvent(state RuntimeRunState, activityRunning bool, evt Event) RuntimeRunStateReduction {
+func ReduceRuntimeRunStateEvent(state RuntimeRunState, activityRunning bool, evt clientui.Event) RuntimeRunStateReduction {
 	next := state
 	reduction := RuntimeRunStateReduction{State: next}
 	switch evt.Kind {
-	case EventCompactionStarted:
-		reduction.State.Compaction = NewCompactionLifecycle(true)
-	case EventCompactionCompleted, EventCompactionFailed:
-		reduction.State.Compaction = NewCompactionLifecycle(false)
-	case EventReviewerStarted:
-		reviewer, err := NewReviewerLifecycle(true, true)
+	case clientui.EventCompactionStarted:
+		reduction.State.Compaction = clientui.NewCompactionLifecycle(true)
+	case clientui.EventCompactionCompleted, clientui.EventCompactionFailed:
+		reduction.State.Compaction = clientui.NewCompactionLifecycle(false)
+	case clientui.EventReviewerStarted:
+		reviewer, err := clientui.NewReviewerLifecycle(true, true)
 		if err == nil {
 			reduction.State.Reviewer = reviewer
 		}
-	case EventReviewerCompleted:
-		reduction.State.Reviewer = ReviewerLifecycleIdle
-	case EventRunStateChanged:
+	case clientui.EventReviewerCompleted:
+		reduction.State.Reviewer = clientui.ReviewerLifecycleIdle
+	case clientui.EventRunStateChanged:
 		if evt.RunState == nil {
 			return reduction
 		}
@@ -225,24 +247,24 @@ func ReduceRuntimeRunStateEvent(state RuntimeRunState, activityRunning bool, evt
 	return reduction
 }
 
-func ReduceRuntimeConversationEvent(state RuntimeConversationState, evt Event) RuntimeConversationReduction {
-	if evt.Kind == EventUserMessageFlushed {
-		return RuntimeConversationReduction{State: RuntimeConversationState{Freshness: ConversationFreshnessEstablished}}
+func ReduceRuntimeConversationEvent(state RuntimeConversationState, evt clientui.Event) RuntimeConversationReduction {
+	if evt.Kind == clientui.EventUserMessageFlushed {
+		return RuntimeConversationReduction{State: RuntimeConversationState{Freshness: clientui.ConversationFreshnessEstablished}}
 	}
 	return RuntimeConversationReduction{State: state}
 }
 
-func ReduceRuntimePendingInputEvent(input PendingInputState, evt Event) RuntimePendingInputReduction {
+func ReduceRuntimePendingInputEvent(input PendingInputState, evt clientui.Event) RuntimePendingInputReduction {
 	next := clonePendingInputState(input)
 	reduction := RuntimePendingInputReduction{
 		State:        next,
 		DraftCommand: RuntimePendingInputKeepDraft,
 	}
 	switch evt.Kind {
-	case EventUserMessageFlushed:
+	case clientui.EventUserMessageFlushed:
 		consumed := consumedQueuedUserMessages(reduction.State.PendingInjected, evt.UserMessageBatchQueueItemIDs)
 		if len(consumed) > 0 {
-			reduction.State.PendingInjected = append([]QueuedUserMessage(nil), reduction.State.PendingInjected[len(consumed):]...)
+			reduction.State.PendingInjected = append([]clientui.QueuedUserMessage(nil), reduction.State.PendingInjected[len(consumed):]...)
 			reduction.PromptHistoryCommand = &RuntimePromptHistoryCommand{Text: evt.UserMessage}
 		}
 		if reduction.State.Submission.IsLocked() && containsQueuedUserMessageID(consumed, reduction.State.LockedInjectID) {
@@ -257,10 +279,10 @@ func ReduceRuntimePendingInputEvent(input PendingInputState, evt Event) RuntimeP
 	return reduction
 }
 
-func ReduceRuntimeReasoningEvent(state RuntimeReasoningState, evt Event) RuntimeReasoningReduction {
+func ReduceRuntimeReasoningEvent(state RuntimeReasoningState, evt clientui.Event) RuntimeReasoningReduction {
 	reduction := RuntimeReasoningReduction{State: state}
 	switch evt.Kind {
-	case EventReasoningDelta:
+	case clientui.EventReasoningDelta:
 		delta := cloneReasoningDelta(evt.ReasoningDelta)
 		reduction.Stream = append(reduction.Stream, RuntimeReasoningStreamCommand{Kind: RuntimeReasoningStreamUpsert, Delta: delta})
 		if delta != nil {
@@ -268,9 +290,9 @@ func ReduceRuntimeReasoningEvent(state RuntimeReasoningState, evt Event) Runtime
 				reduction.State.StatusHeader = nextHeader
 			}
 		}
-	case EventReasoningDeltaReset:
+	case clientui.EventReasoningDeltaReset:
 		reduction.Stream = append(reduction.Stream, RuntimeReasoningStreamCommand{Kind: RuntimeReasoningStreamClear})
-	case EventRunStateChanged:
+	case clientui.EventRunStateChanged:
 		if evt.RunState != nil {
 			if err := evt.RunState.Lifecycle.Validate(); err != nil {
 				break
@@ -284,15 +306,15 @@ func ReduceRuntimeReasoningEvent(state RuntimeReasoningState, evt Event) Runtime
 	return reduction
 }
 
-func ReduceRuntimeBackgroundProcessEvent(evt Event) RuntimeBackgroundProcessReduction {
-	if evt.Kind != EventBackgroundUpdated {
+func ReduceRuntimeBackgroundProcessEvent(evt clientui.Event) RuntimeBackgroundProcessReduction {
+	if evt.Kind != clientui.EventBackgroundUpdated {
 		return RuntimeBackgroundProcessReduction{}
 	}
 	return RuntimeBackgroundProcessReduction{Command: RuntimeBackgroundProcessRefresh}
 }
 
-func ReduceRuntimeNoticeEvent(evt Event) RuntimeNoticeReduction {
-	if evt.Kind != EventBackgroundUpdated {
+func ReduceRuntimeNoticeEvent(evt clientui.Event) RuntimeNoticeReduction {
+	if evt.Kind != clientui.EventBackgroundUpdated {
 		return RuntimeNoticeReduction{}
 	}
 	notice := backgroundNoticeFromEvent(evt.Background)
@@ -328,16 +350,16 @@ func ExtractReasoningStatusHeader(text string) string {
 func clonePendingInputState(input PendingInputState) PendingInputState {
 	cloned := input
 	if len(input.PendingInjected) > 0 {
-		cloned.PendingInjected = append([]QueuedUserMessage(nil), input.PendingInjected...)
+		cloned.PendingInjected = append([]clientui.QueuedUserMessage(nil), input.PendingInjected...)
 	}
 	return cloned
 }
 
-func consumedQueuedUserMessages(pending []QueuedUserMessage, ids []string) []QueuedUserMessage {
+func consumedQueuedUserMessages(pending []clientui.QueuedUserMessage, ids []string) []clientui.QueuedUserMessage {
 	if len(pending) == 0 || len(ids) == 0 {
 		return nil
 	}
-	consumed := make([]QueuedUserMessage, 0, len(ids))
+	consumed := make([]clientui.QueuedUserMessage, 0, len(ids))
 	for index, id := range ids {
 		if index >= len(pending) || pending[index].ID != id {
 			return consumed
@@ -347,7 +369,7 @@ func consumedQueuedUserMessages(pending []QueuedUserMessage, ids []string) []Que
 	return consumed
 }
 
-func containsQueuedUserMessageID(messages []QueuedUserMessage, id string) bool {
+func containsQueuedUserMessageID(messages []clientui.QueuedUserMessage, id string) bool {
 	if id == "" {
 		return false
 	}
@@ -359,7 +381,7 @@ func containsQueuedUserMessageID(messages []QueuedUserMessage, id string) bool {
 	return false
 }
 
-func cloneReasoningDelta(delta *ReasoningDelta) *ReasoningDelta {
+func cloneReasoningDelta(delta *clientui.ReasoningDelta) *clientui.ReasoningDelta {
 	if delta == nil {
 		return nil
 	}
@@ -367,7 +389,7 @@ func cloneReasoningDelta(delta *ReasoningDelta) *ReasoningDelta {
 	return &cloned
 }
 
-func backgroundNoticeFromEvent(evt *BackgroundShellEvent) *BackgroundNotice {
+func backgroundNoticeFromEvent(evt *clientui.BackgroundShellEvent) *BackgroundNotice {
 	if evt == nil || evt.NoticeSuppressed {
 		return nil
 	}

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"builder/cli/app/internal/runtimestate"
 	"builder/cli/tui"
 	"builder/shared/clientui"
 
@@ -56,7 +57,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	if m.turnQueueHook != nil {
 		m.turnQueueHook.OnProjectedRuntimeEvent(evt)
 	}
-	reduction := clientui.ReduceRuntimeEvent(
+	reduction := runtimestate.ReduceRuntimeEvent(
 		a.runtimeRunState(),
 		a.runtimeConversationState(),
 		a.pendingInputState(),
@@ -110,7 +111,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	}
 	for _, streamCommand := range reduction.Transcript.AssistantStream {
 		switch streamCommand.Kind {
-		case clientui.RuntimeAssistantStreamAppend:
+		case runtimestate.RuntimeAssistantStreamAppend:
 			delta := streamCommand.Delta
 			if shouldIgnoreStaleAssistantDelta(m, evt, delta) {
 				continue
@@ -124,7 +125,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 			}
 			m.sawAssistantDelta = true
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
-		case clientui.RuntimeAssistantStreamClear:
+		case runtimestate.RuntimeAssistantStreamClear:
 			if stepID := strings.TrimSpace(streamCommand.StepID); stepID != "" {
 				m.lastCommittedAssistantStepID = stepID
 			}
@@ -134,20 +135,20 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	}
 	for _, streamCommand := range reduction.Reasoning.Stream {
 		switch streamCommand.Kind {
-		case clientui.RuntimeReasoningStreamUpsert:
+		case runtimestate.RuntimeReasoningStreamUpsert:
 			if streamCommand.Delta == nil {
 				continue
 			}
 			m.reasoningLiveDirty = true
 			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: streamCommand.Delta.Key, Role: streamCommand.Delta.Role, Text: streamCommand.Delta.Text})
-		case clientui.RuntimeReasoningStreamClear:
+		case runtimestate.RuntimeReasoningStreamClear:
 			m.reasoningLiveDirty = false
 			m.forwardToView(tui.ClearStreamingReasoningMsg{})
 		}
 	}
 	if reduction.Notices.BackgroundNotice != nil {
 		kind := uiStatusNoticeSuccess
-		if reduction.Notices.BackgroundNotice.Kind == clientui.BackgroundNoticeError {
+		if reduction.Notices.BackgroundNotice.Kind == runtimestate.BackgroundNoticeError {
 			kind = uiStatusNoticeError
 		}
 		cmds = append(cmds, m.setTransientStatusWithKind(reduction.Notices.BackgroundNotice.Message, kind))
@@ -164,27 +165,27 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated, awaitsHydration: awaitsHydration}
 }
 
-func shouldInvalidateTransientTranscriptStateForSync(sync clientui.RuntimeTranscriptSyncCommand) bool {
+func shouldInvalidateTransientTranscriptStateForSync(sync runtimestate.RuntimeTranscriptSyncCommand) bool {
 	switch sync.Reason {
-	case clientui.RuntimeTranscriptSyncRecovery, clientui.RuntimeTranscriptSyncStreamGap, clientui.RuntimeTranscriptSyncCommittedAdvance:
+	case runtimestate.RuntimeTranscriptSyncRecovery, runtimestate.RuntimeTranscriptSyncStreamGap, runtimestate.RuntimeTranscriptSyncCommittedAdvance:
 		return true
 	default:
 		return false
 	}
 }
 
-func runtimeTranscriptSyncReasonLabel(sync clientui.RuntimeTranscriptSyncCommand) string {
+func runtimeTranscriptSyncReasonLabel(sync runtimestate.RuntimeTranscriptSyncCommand) string {
 	if !sync.IsSet() {
 		return ""
 	}
 	return string(sync.Reason)
 }
 
-func (a uiRuntimeAdapter) syncConversationFromRuntimeTranscriptCommand(sync clientui.RuntimeTranscriptSyncCommand) tea.Cmd {
+func (a uiRuntimeAdapter) syncConversationFromRuntimeTranscriptCommand(sync runtimestate.RuntimeTranscriptSyncCommand) tea.Cmd {
 	switch sync.Reason {
-	case clientui.RuntimeTranscriptSyncRecovery, clientui.RuntimeTranscriptSyncStreamGap:
+	case runtimestate.RuntimeTranscriptSyncRecovery, runtimestate.RuntimeTranscriptSyncStreamGap:
 		return a.model.requestRuntimeTranscriptSyncForContinuityLoss(sync.RecoveryCause)
-	case clientui.RuntimeTranscriptSyncCommittedAdvance, clientui.RuntimeTranscriptSyncOngoingErrorUpdated:
+	case runtimestate.RuntimeTranscriptSyncCommittedAdvance, runtimestate.RuntimeTranscriptSyncOngoingErrorUpdated:
 		return a.syncConversationFromEngine()
 	default:
 		return nil

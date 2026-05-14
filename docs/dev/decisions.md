@@ -24,6 +24,7 @@
 
 - Server owns durable lifecycle state, lifecycle mutations, and canonical lifecycle event streams.
 - CLI/TUI consumes client-facing DTOs and shared service clients; it does not own alternate durable/runtime lifecycle flows for embedded-local mode.
+- `shared/clientui` is a DTO/read-model boundary only. CLI runtime-event state transitions, pending-input policy, reasoning-stream presentation, activity transitions, transcript-sync commands, background notices, and prompt-history commands are owned by `cli/app/internal/runtimestate`, which depends only on `shared/clientui`.
 - Embedded-local mode adapts through the same loopback service/client boundary as remote/shared server mode. Direct in-process engine, broker, process, auth, or project objects may exist only behind server-owned adapters.
 - CLI production packages must not import `server/*` directly except documented composition bridge packages that adapt local embedded/server process wiring into shared/client-facing contracts. Current allowed bridge packages are `cli/app/internal/serverbridge` and `cli/builder/internal/serverbridge`; UI, TUI, status, auth presentation, and command handler files must consume shared DTOs/contracts or those bridges, not server domain packages.
 - User-visible side effects tied to lifecycle events are triggered at one client-facing accepted-event boundary, not inside only one transport or runtime path.

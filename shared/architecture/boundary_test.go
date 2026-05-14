@@ -49,6 +49,155 @@ func TestArchitectureBoundaries(t *testing.T) {
 	}
 }
 
+func TestSharedClientUIRemainsDTOOnly(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	clientUIRoot := filepath.Join(repoRoot, "shared", "clientui")
+	allowedStateTypes := map[string]struct{}{
+		"RunState": {},
+	}
+	bannedTypeNames := map[string]struct{}{
+		"RuntimeRunState":                     {},
+		"RuntimeConversationState":            {},
+		"RuntimeReasoningState":               {},
+		"PendingInputState":                   {},
+		"InputSubmissionLifecycle":            {},
+		"BackgroundNotice":                    {},
+		"RuntimeTranscriptReduction":          {},
+		"RuntimeRunStateReduction":            {},
+		"RuntimePendingInputReduction":        {},
+		"RuntimeReasoningReduction":           {},
+		"RuntimeBackgroundProcessReduction":   {},
+		"RuntimeConversationReduction":        {},
+		"RuntimeNoticeReduction":              {},
+		"RuntimeEventReduction":               {},
+		"RuntimeTranscriptSyncCommand":        {},
+		"RuntimeAssistantStreamCommand":       {},
+		"RuntimePendingInputDraftCommand":     {},
+		"RuntimePromptHistoryCommand":         {},
+		"RuntimeReasoningStreamCommand":       {},
+		"RuntimeBackgroundProcessCommand":     {},
+		"RuntimeAssistantStreamCommandKind":   {},
+		"RuntimeReasoningStreamCommandKind":   {},
+		"RuntimeDraftInputCommandKind":        {},
+		"RuntimeBackgroundProcessCommandKind": {},
+		"RuntimeActivityCommand":              {},
+	}
+	bannedFuncTerms := []string{
+		"Reduce",
+		"Reducer",
+		"Transition",
+		"Apply",
+		"PendingInput",
+		"PromptHistory",
+		"ReasoningStream",
+		"BackgroundNotice",
+		"Activity",
+	}
+	violations := make([]string, 0)
+	if err := filepath.WalkDir(clientUIRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		relPath, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			relPath = path
+		}
+		for _, decl := range file.Decls {
+			switch typedDecl := decl.(type) {
+			case *ast.FuncDecl:
+				name := typedDecl.Name.Name
+				for _, term := range bannedFuncTerms {
+					if strings.Contains(name, term) {
+						violations = append(violations, relPath+": DTO-only package must not define frontend state helper "+name)
+					}
+				}
+				if funcUsesRuntimeEventPolicyType(typedDecl.Type) && !strings.HasPrefix(name, "Normalize") {
+					violations = append(violations, relPath+": DTO-only package must not define runtime-event policy helper "+name)
+				}
+			case *ast.GenDecl:
+				if typedDecl.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range typedDecl.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					name := typeSpec.Name.Name
+					if _, banned := bannedTypeNames[name]; banned {
+						violations = append(violations, relPath+": DTO-only package must not define frontend state/presentation type "+name)
+					}
+					if strings.HasSuffix(name, "Reduction") {
+						violations = append(violations, relPath+": DTO-only package must not define reducer result type "+name)
+					}
+					if strings.HasSuffix(name, "Command") {
+						violations = append(violations, relPath+": DTO-only package must not define presentation command type "+name)
+					}
+					if strings.HasSuffix(name, "State") {
+						if _, allowed := allowedStateTypes[name]; !allowed {
+							violations = append(violations, relPath+": DTO-only package must not define mutable UI state holder "+name)
+						}
+					}
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("scan shared clientui DTO boundaries: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("shared/clientui DTO boundary violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func funcUsesRuntimeEventPolicyType(funcType *ast.FuncType) bool {
+	if funcType == nil {
+		return false
+	}
+	for _, fields := range []*ast.FieldList{funcType.Params, funcType.Results} {
+		if fields == nil {
+			continue
+		}
+		for _, field := range fields.List {
+			if exprUsesRuntimeEventPolicyType(field.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprUsesRuntimeEventPolicyType(expr ast.Expr) bool {
+	switch typedExpr := expr.(type) {
+	case *ast.Ident:
+		switch typedExpr.Name {
+		case "Event", "ReasoningDelta", "BackgroundShellEvent":
+			return true
+		default:
+			return false
+		}
+	case *ast.StarExpr:
+		return exprUsesRuntimeEventPolicyType(typedExpr.X)
+	case *ast.ArrayType:
+		return exprUsesRuntimeEventPolicyType(typedExpr.Elt)
+	case *ast.MapType:
+		return exprUsesRuntimeEventPolicyType(typedExpr.Key) || exprUsesRuntimeEventPolicyType(typedExpr.Value)
+	default:
+		return false
+	}
+}
+
 func TestCLIPackagesDoNotImportServerOutsideCompositionBridges(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	// Keep CLI -> server imports concentrated in documented local composition
