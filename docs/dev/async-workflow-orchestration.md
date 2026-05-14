@@ -35,11 +35,11 @@ Source: https://www.anthropic.com/engineering/building-effective-agents
 - Each workflow edge may specify context-preservation mode for the next node: start a new blank session with previous output/task metadata, continue the prior session with a new prompt/goal, or compact then continue the prior session with metadata.
 - Domain language is defined in `docs/dev/TERMINOLOGY.md`; use it consistently before naming database tables and services.
 
-## Open Questions
+## Remaining Implementation Risks
 
-- What CLI surface is enough to test v1 without building frontend?
-- How should user questions pause/resume tasks across many concurrent agents?
-- What is the migration path from current sessions/goals/subagents into workflow runs?
+- Existing `ask_question` resume must be proven against workflow interruption/restart; if it fails, ask persistence must become durable source of truth.
+- `complete_node` needs runtime hook work so terminal tool calls stop workflow node execution cleanly.
+- Task-owned worktree creation needs lower-level worktree primitives that do not require an interactive session controller lease.
 
 ## Product Decisions
 
@@ -47,15 +47,14 @@ Decisions will be recorded here during the planning interview.
 
 - V1's smallest testable vertical slice is backend/API/CLI first: create a task, auto-run at least one agent node in a worktree, capture structured completion, and move task status. The CLI can be clunky and removable; it exists to test backend behavior before GUI investment.
 - `Task` is the primary durable work item. Existing Builder sessions are execution artifacts under tasks, not the task itself. One task may accumulate many sessions through loops, branches, retries, and complex chains.
-- Moving a task from backlog to to-do should auto-run through auto nodes until the task reaches a terminal state or blocks on a user question, manual gate, error, capacity limit, or other explicit stop condition.
+- Moving a task from backlog to to-do should auto-run through auto nodes until the task reaches a terminal node or blocks on a user question, manual gate, error, capacity limit, or other explicit stop condition.
 - Workflow definitions may rely on TOML-configured subagent roles. This creates config drift risk; v1 accepts fail-fast validation rather than inventing a full stable workflow file/schema solution immediately.
 - Builder should support the major agentic workflow patterns from the Anthropic article in some form: prompt chaining, routing, parallelization with aggregation, orchestrator-workers, evaluator-optimizer loops, and open-ended autonomous agents.
 - Per-edge context preservation must be configurable in v1 with at least three modes: `new_session`, `continue_session`, and `compact_and_continue_session`.
 - V1 workflow definitions are SQLite-authoritative and created/edited through backend API plus a minimal CLI. No stable graph file format is required in v1.
 - Workflow definitions should be globally reusable. Projects link to workflow definitions rather than copying graph definitions. Workflow validation is project-contextual because subagent roles and workspace config may differ by project.
 - A project can link multiple workflows and has one default workflow for task creation.
-- V1 does not snapshot/version workflow definitions for existing tasks. Tasks use the current linked workflow definition; workflow-version edge cases are deferred.
-- Destructive graph edits are guarded. Deleting workflow graph elements requires no non-terminal tasks to reference them; deleting the initial/backlog node also requires selecting a replacement initial node.
+- V1 does not snapshot/version workflow definitions for existing tasks. Tasks use the current linked workflow definition. Behavior-affecting workflow edits are allowed while tasks exist; UI/API should warn that active tasks may change behavior. Destructive graph deletes are still guarded: deleting workflow graph elements requires no non-terminal tasks to reference them, and deleting the initial/backlog node also requires selecting a replacement initial node.
 - Node config and edge config are distinct. Nodes configure agent runs: subagent role, prompt, output schema, limits, and run stop conditions. Edges configure transitions: next node, human approval/manual interaction, context preservation, input bindings, routing, and join/aggregation behavior.
 - Subagent role is the executable node's assignee. There is no separate assignee field. UI can display subagent roles as assignees for convenience.
 - Workflow nodes select existing subagent roles only; no per-node model/provider/tool/auth overrides. Subagent roles define agent identity fully.
@@ -74,7 +73,7 @@ Decisions will be recorded here during the planning interview.
 - Workflow runs should treat a normal assistant final answer as invalid output. Runtime should append a nudge and continue until the model calls the completion tool, calls `ask_question`, is canceled, or hits a runtime error.
 - The model-facing completion control should be a static workflow-only tool, not a CLI command and not a dynamically generated per-node tool schema. Recommended shape: `complete_node` with `transition_id`, optional `commentary`, and `payload` as a flat `map[string]string`. Runtime validates the payload against active task/run/node state. If called outside an active workflow run, it returns an explicit not-in-workflow error.
 - `complete_node` is workflow control infrastructure and is available in every workflow run regardless of subagent role tool config.
-- User questions use existing `ask_question` tool-call/session infrastructure. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered. V1 should not introduce a separate durable task-question source of truth unless existing session transcript/resume semantics prove insufficient.
+- User questions use existing `ask_question` tool-call/session infrastructure. A model does not report `needs_user_input` as a completion status; it calls `ask_question`, and the run pauses until answered. V1 should not introduce a separate task-question projection. If existing ask infrastructure cannot reliably resume workflow asks, upgrade ask persistence as the source of truth instead of adding a shadow task-question table.
 - Node output schemas are user-authored but intentionally flat. Fields are strings; arrays, nested objects, and mixed scalar types are out of scope for v1. String-only fields keep UI/query/schema generation tractable while allowing users to stringify richer content when needed.
 - Completion tools expose only `transition_id`, never `next_node`. The selected transition group derives target nodes and transition behavior.
 - Every completion tool includes optional `commentary` as a visible, pass-along string escape hatch for content not captured by configured fields.
@@ -83,8 +82,8 @@ Decisions will be recorded here during the planning interview.
 - A task owns one managed worktree by default. Implementation and review nodes reuse it unless later node/edge configuration adds an explicit override.
 - Builder creates the task worktree when scheduling the first executable run that needs workspace access. In the default pipeline this coincides with moving the task from backlog into executable work.
 - Task worktree branch creation should reuse existing worktree logic. The branch name is the task short ID.
-- `continue_session` and `compact_and_continue_session` may transition across nodes with different subagent roles. Existing session locking means model/tool differences cannot be fully applied in the same session; Builder should apply the target node prompt/role guidance and accept that the prior session contract remains. Use `new_session` when the target node must get its fresh subagent contract.
-- Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work.
+- `continue_session` requires the same subagent role/session contract across source and target nodes. Direct continuation across roles is invalid because it cannot apply the target role contract and invalidates cache assumptions. `new_session` and `compact_and_continue_session` may cross roles because they use a fresh context boundary; compact mode carries a handoff document rather than preserving direct prompt-cache continuity.
+- Autonomous node stop limits are not part of v1. Operator cancellation and runtime errors still stop work. Repeated invalid workflow-protocol failures, such as repeated final answers or invalid `complete_node` payloads, may be capped if the guard is cheap to implement.
 - The execution queue is durable in SQLite. Startup reconciliation should inspect runnable/running/interrupted state and requeue safe work.
 - The queue does not own runtime leases. Runtime leases remain execution-control state, similar to current client/frontend leases, not durable queue authority.
 - If execution stops mid-node, mark the run `interrupted`, preserve session transcript and dirty worktree state, and require human resume. Resume continues the interrupted session/run instead of rerunning the whole node from scratch.
@@ -169,6 +168,8 @@ Do not reuse user goal state as workflow state. Workflow autonomy uses a goal-li
 4. Treat normal assistant final answers as invalid output and append a developer nudge.
 5. On accepted `complete_node`, persist transition payload and stop the node run without sending another model turn.
 
+Workflow workers need server-owned runtime activation/resume. They must not fake frontend controller ownership or reuse frontend leases as queue/liveness authority.
+
 ### Completion Tool
 
 `complete_node` is a static workflow-control tool exposed only when a session is executing a workflow node. It is available regardless of subagent role tool config.
@@ -188,6 +189,7 @@ Stable schema:
 Runtime validation:
 
 - If not in a workflow run, return a tool error.
+- Require `complete_node` to be the only tool call in the assistant response. If it is mixed with other tool calls, reject completion and nudge the model to retry cleanly.
 - If multiple transition groups are available, require `transition_id`.
 - Validate `transition_id` against source node transition groups.
 - Validate payload field names against node output schema.
@@ -207,6 +209,8 @@ Automatic node transitions come from accepted `complete_node` payloads. Manual m
 - They reject continuation modes when no valid source session exists.
 
 Edge approvals persist as pending transition logs. Approval means: approve a selected transition payload from a specific completed run/edge. After approval, Builder schedules target placements/runs from the stored payload.
+
+Pending approvals must store resolved transition group, edge set, and effective edge config snapshots so later graph edits do not change what the user approves.
 
 ### Parallelism And Joins
 
@@ -246,11 +250,15 @@ Startup reconciliation:
 
 Concurrency is one global config value, defaulting to five automated runs.
 
+Queue claims need fencing/idempotency. Claiming a queued run should use a transactional compare-and-swap from `queued` to `running`, store claim metadata, and make run completion/transition application one SQLite transaction.
+
 ### Worktrees
 
 A task owns one managed worktree by default. Builder creates it when the first workspace-requiring executable run is scheduled. Branch name is the task short ID and should reuse existing worktree branch/root collision handling.
 
 Worktree deletion/retargeting must treat non-terminal tasks referencing a managed worktree as blockers.
+
+Workflow worktree creation needs lower-level worktree primitives that create/register task worktrees without requiring a session controller lease or switching an interactive session.
 
 ### CLI Surface
 
@@ -264,8 +272,8 @@ Minimal testing-oriented commands:
 - `builder task create --title <title> --body <body> [--workflow <workflow>]`
 - `builder task list [--project <project>]`
 - `builder task show <short-id>`
-- `builder task move <short-id> <node> [--payload field=value ...]`
-- `builder task approve <transition-id>`
+- `builder task move <short-id> <node> --placement <placement-id> [--edge <edge-id>] [--payload field=value ...]`
+- `builder task approve <task-transition-id>`
 - `builder task resume <short-id>`
 - `builder task comment add|replace|delete <short-id> ...`
 
@@ -328,12 +336,14 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - `workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE`
 - `transition_group_id TEXT NOT NULL REFERENCES workflow_transition_groups(id) ON DELETE CASCADE`
 - `source_node_id TEXT NOT NULL REFERENCES workflow_nodes(id) ON DELETE CASCADE`
+- `edge_key TEXT NOT NULL`
 - `target_node_id TEXT NOT NULL REFERENCES workflow_nodes(id) ON DELETE CASCADE`
 - `requires_approval INTEGER NOT NULL DEFAULT 0`
 - `context_mode TEXT NOT NULL`
 - `input_bindings_json TEXT NOT NULL DEFAULT '{}'`
 - `payload_requirements_json TEXT NOT NULL DEFAULT '{}'`
 - `sort_order INTEGER NOT NULL DEFAULT 0`
+- unique `(transition_group_id, edge_key)`
 
 `project_workflow_links`
 
@@ -350,6 +360,7 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 
 - `id TEXT PRIMARY KEY`
 - `project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE`
+- `project_workflow_link_id TEXT NOT NULL REFERENCES project_workflow_links(id) ON DELETE RESTRICT`
 - `workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE RESTRICT`
 - `task_seq INTEGER NOT NULL`
 - `short_id TEXT NOT NULL`
@@ -383,6 +394,10 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - `node_id TEXT NOT NULL REFERENCES workflow_nodes(id) ON DELETE RESTRICT`
 - `session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL`
 - `state TEXT NOT NULL`
+- `claim_id TEXT NOT NULL DEFAULT ''`
+- `claimed_by TEXT NOT NULL DEFAULT ''`
+- `claimed_at_unix_ms INTEGER NOT NULL DEFAULT 0`
+- `state_generation INTEGER NOT NULL DEFAULT 0`
 - `queued_at_unix_ms INTEGER NOT NULL DEFAULT 0`
 - `started_at_unix_ms INTEGER NOT NULL DEFAULT 0`
 - `finished_at_unix_ms INTEGER NOT NULL DEFAULT 0`
@@ -411,9 +426,14 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - `id TEXT PRIMARY KEY`
 - `task_transition_id TEXT NOT NULL REFERENCES task_transitions(id) ON DELETE CASCADE`
 - `workflow_edge_id TEXT REFERENCES workflow_edges(id) ON DELETE SET NULL`
+- `edge_key TEXT NOT NULL DEFAULT ''`
 - `target_node_id TEXT REFERENCES workflow_nodes(id) ON DELETE SET NULL`
 - `target_placement_id TEXT REFERENCES task_node_placements(id) ON DELETE SET NULL`
 - `state TEXT NOT NULL` (`pending|queued|completed|blocked`)
+- `context_mode TEXT NOT NULL DEFAULT ''`
+- `requires_approval INTEGER NOT NULL DEFAULT 0`
+- `input_bindings_json TEXT NOT NULL DEFAULT '{}'`
+- `payload_requirements_json TEXT NOT NULL DEFAULT '{}'`
 - `metadata_json TEXT NOT NULL DEFAULT '{}'`
 
 `task_comments`
@@ -441,9 +461,13 @@ Use SQLite for structured workflow/task state. Keep transcripts and large sessio
 - `task_node_placements(task_id, state)`
 - `task_node_placements(node_id, state)`
 - `task_runs(state, queued_at_unix_ms)`
+- `task_runs(claim_id)`
 - `task_runs(task_id, created_at_unix_ms DESC)`
 - `task_transitions(task_id, created_at_unix_ms DESC)`
+- `task_transition_edges(task_transition_id, state)`
 - `task_comments(task_id, updated_at_unix_ms DESC)`
+
+Schema/domain validation must ensure workflow-scoped references do not cross workflows. Implement this with composite foreign keys where practical, and domain validation otherwise.
 
 ### Core Query Shapes
 

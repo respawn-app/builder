@@ -6,7 +6,7 @@ This document defines Builder product and domain language. Use these terms consi
 
 ### Task
 
-A durable user-facing unit of work. A task owns workflow state, task metadata, node history, edge-transition history, questions, and execution artifacts. Builder sessions are artifacts under a task, not the task itself.
+A durable user-facing unit of work. A task owns workflow state, task metadata, node history, edge-transition history, question associations, and execution artifacts. Builder sessions are artifacts under a task, not the task itself.
 
 ### Task Short ID
 
@@ -69,7 +69,7 @@ An edge configures:
 
 ### Transition Payload
 
-Structured data produced by a node run for a selected transition group. A transition payload includes the selected transition ID and node output fields carried into edge validation, task metadata updates, and the next node's input.
+Structured data produced by a node run for a selected transition group. A transition payload includes the selected transition ID and node output fields carried into edge validation, transition logs, and the next node's input.
 
 ### Payload Requirements
 
@@ -101,7 +101,7 @@ A run whose execution stopped before producing a valid transition payload. Its s
 
 ### Node Output Schema
 
-A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, task metadata updates, UI display, transition payloads, and the next node's input bindings.
+A node-owned schema for the structured output fields available when a run completes. Workflow orchestration uses these fields for edge decisions, UI display, transition payloads, and the next node's input bindings.
 
 ### Session
 
@@ -121,7 +121,7 @@ The set of branch node placements created by one fan-out transition group for on
 
 ### Join
 
-An edge or node transition point that waits for required inbound branch outputs before continuing.
+A non-agent node that waits for required inbound branch outputs before continuing.
 
 ### Question
 
@@ -131,7 +131,7 @@ A user-blocking ask emitted by a run. Questions pause the affected run or task p
 
 An agent node whose prompt asks it to coordinate work. Orchestration may use subagent/session infrastructure inside an agent run or route work through workflow graph branches.
 
-### Terminal State
+### Operational Stop State
 
 A workflow/task state where auto-execution stops because the task is done, canceled, failed, blocked, or awaiting manual/user action.
 
