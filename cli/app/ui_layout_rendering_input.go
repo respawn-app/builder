@@ -140,8 +140,7 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 	if len(promptLines) == 0 {
 		promptLines = []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
 	}
-	ellipsizeQuestionLines := askPromptUsesInlineQuestionPicker(promptLines)
-	promptLines = renderMarkdownAskQuestionPromptLines(promptLines, l.model.theme, width, ellipsizeQuestionLines)
+	promptLines = renderMarkdownAskQuestionPromptLines(promptLines, l.model.theme, width)
 	out := make([]wrappedAskPromptLine, 0, len(promptLines)*2)
 	cursorLineIndex := -1
 	for _, line := range promptLines {
@@ -149,11 +148,7 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 		lineCursor := -1
 		lineCursorCol := 0
 		if line.Kind == askPromptLineKindQuestion {
-			if ellipsizeQuestionLines {
-				parts = []string{truncateANSIRight(line.Text, width)}
-			} else {
-				parts = []string{line.Text}
-			}
+			parts = []string{line.Text}
 		}
 		if line.Kind == askPromptLineKindInput {
 			spec := uiEditableInputRenderSpec{Prefix: line.InputPrefix, Text: line.InputText, CursorIndex: line.InputCursor, RenderCursor: line.ShowsCursor}
@@ -188,16 +183,7 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 	return out, cursorLineIndex
 }
 
-func askPromptUsesInlineQuestionPicker(lines []askPromptLine) bool {
-	for _, line := range lines {
-		if line.Kind == askPromptLineKindOption {
-			return true
-		}
-	}
-	return false
-}
-
-func renderMarkdownAskQuestionPromptLines(lines []askPromptLine, theme string, width int, inlinePicker bool) []askPromptLine {
+func renderMarkdownAskQuestionPromptLines(lines []askPromptLine, theme string, width int) []askPromptLine {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -216,9 +202,6 @@ func renderMarkdownAskQuestionPromptLines(lines []askPromptLine, theme string, w
 			idx++
 		}
 		rendered := tui.RenderAskQuestionMarkdownLines(strings.Join(parts, "\n"), theme, width)
-		if inlinePicker {
-			rendered = tui.RenderInlineAskQuestionMarkdownLines(strings.Join(parts, "\n"), theme, width)
-		}
 		if len(rendered) == 0 {
 			out = append(out, lines[start:idx]...)
 			continue

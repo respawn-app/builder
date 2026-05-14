@@ -849,7 +849,7 @@ func TestOngoingAskQuestionsKeepModelOrderAndSeparateToolGroup(t *testing.T) {
 	}
 }
 
-func TestOngoingAskQuestionQuestionTextIsFaintAndNotTruncated(t *testing.T) {
+func TestOngoingAskQuestionQuestionTextWrapsWithoutEllipsis(t *testing.T) {
 	m := NewModel(WithPreviewLines(20), WithTheme("dark"))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 36})
 	m = updateModel(t, m, AppendTranscriptMsg{
@@ -870,11 +870,11 @@ func TestOngoingAskQuestionQuestionTextIsFaintAndNotTruncated(t *testing.T) {
 
 	rendered := m.View()
 	plain := plainTranscript(rendered)
-	if !strings.Contains(rendered, "\x1b[2m") {
-		t.Fatalf("expected faint ANSI styling on question text, got %q", rendered)
-	}
 	if !containsInOrder(plain, "Review the generated", "tail-marker visible?", "└ yes") {
 		t.Fatalf("expected wrapped question content preserved, got %q", plain)
+	}
+	if strings.Contains(rendered, "\x1b[2m") {
+		t.Fatalf("did not expect faint ANSI styling on committed question text, got %q", rendered)
 	}
 	if strings.Contains(plain, "…") {
 		t.Fatalf("expected committed ongoing question text to wrap without ellipsis, got %q", plain)
@@ -927,15 +927,15 @@ func TestOngoingAskQuestionMarkdownWrapsWithinViewport(t *testing.T) {
 	}
 }
 
-func TestPendingOngoingAskQuestionsUseQuestionGroupAndFaintQuestionText(t *testing.T) {
+func TestPendingOngoingAskQuestionsUseQuestionGroupAndEllipsizeQuestionText(t *testing.T) {
 	entries := []TranscriptEntry{
 		{
 			Role:       "tool_call",
-			Text:       "First pending question?",
+			Text:       "First pending question keeps going until tail-marker should not fit?",
 			ToolCallID: "call_first",
 			ToolCall: &transcript.ToolCallMeta{
 				ToolName: "ask_question",
-				Question: "First pending question?",
+				Question: "First pending question keeps going until tail-marker should not fit?",
 			},
 		},
 		{
@@ -959,16 +959,19 @@ func TestPendingOngoingAskQuestionsUseQuestionGroupAndFaintQuestionText(t *testi
 		},
 	}
 
-	rendered := RenderPendingOngoingSnapshot(entries, "dark", 80, "*")
+	rendered := RenderPendingOngoingSnapshot(entries, "dark", 42, "*")
 	plain := plainTranscript(rendered)
-	if !containsInOrder(plain, "* First pending question?", "* pwd", "* Second pending question?") {
+	if !containsInOrder(plain, "* First pending question", "* pwd", "* Second pending question?") {
 		t.Fatalf("expected pending questions and tool in model order, got %q", plain)
 	}
 	if got := strings.Count(plain, TranscriptDivider); got != 2 {
 		t.Fatalf("expected pending question/tool/question grouping to place two dividers, got %d in %q", got, plain)
 	}
-	if !strings.Contains(rendered, "\x1b[2m") {
-		t.Fatalf("expected pending question text to be faint, got %q", rendered)
+	if !strings.Contains(plain, "…") || strings.Contains(plain, "tail-marker") {
+		t.Fatalf("expected pending live question text to ellipsize, got %q", plain)
+	}
+	if strings.Contains(rendered, "\x1b[2m") {
+		t.Fatalf("did not expect faint ANSI styling on pending question text, got %q", rendered)
 	}
 }
 

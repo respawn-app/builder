@@ -732,7 +732,7 @@ func TestAskQuestionLargeMarkdownPromptPreservesLogicalLines(t *testing.T) {
 	}
 }
 
-func TestAskQuestionPromptQuestionLinesEllipsizeInsteadOfWrapping(t *testing.T) {
+func TestAskQuestionPickerQuestionLinesWrapInsteadOfEllipsizing(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 40
 	m.termHeight = 12
@@ -749,11 +749,19 @@ func TestAskQuestionPromptQuestionLinesEllipsizeInsteadOfWrapping(t *testing.T) 
 	if len(wrapped) == 0 {
 		t.Fatal("expected ask prompt lines")
 	}
-	if got := wrapped[0].Text; !strings.HasSuffix(ansi.Strip(got), "…") || lipgloss.Width(got) > 32 {
-		t.Fatalf("expected long live question line ellipsized to width, got %q width=%d", got, lipgloss.Width(got))
+	questionLines := 0
+	plain := make([]string, 0, len(wrapped))
+	for _, line := range wrapped {
+		if line.Line.Kind == askPromptLineKindQuestion {
+			questionLines++
+			plain = append(plain, ansi.Strip(line.Text))
+			if strings.HasSuffix(ansi.Strip(line.Text), "…") {
+				t.Fatalf("expected picker question line to wrap, not ellipsize: %+v", line)
+			}
+		}
 	}
-	if len(wrapped) > 1 && wrapped[1].Line.Kind == askPromptLineKindQuestion {
-		t.Fatalf("expected long question to stay on one ellipsized live line, got next question line %+v", wrapped[1])
+	if questionLines < 2 {
+		t.Fatalf("expected long picker question to wrap across multiple lines, got %d in %q", questionLines, strings.Join(plain, "\n"))
 	}
 }
 

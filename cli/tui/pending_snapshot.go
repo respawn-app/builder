@@ -82,8 +82,18 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 			out = append(out, block)
 			continue
 		}
+		if block.entryIndex < 0 || block.entryIndex >= len(entries) {
+			out = append(out, block)
+			continue
+		}
 		spinner := spinnerForEntry(entries[block.entryIndex], block.entryIndex)
 		if strings.TrimSpace(spinner) == "" {
+			if isAskQuestionToolCall(entries[block.entryIndex].ToolCall) {
+				if rebuilt, ok := m.renderPendingSpinnerBlock(block, entries, ""); ok {
+					out = append(out, rebuilt)
+					continue
+				}
+			}
 			out = append(out, block)
 			continue
 		}
@@ -108,14 +118,49 @@ func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []Transcrip
 	}
 	lines := block.lines
 	if isAskQuestionToolCall(entry.ToolCall) {
-		question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
-		lines = m.flattenAskQuestionEntryWithSymbol(block.role, question, suggestions, recommendedOptionIndex, "", false, spinnerSymbol)
+		question, _, _ := askQuestionDisplay(entry.ToolCall, entry.Text)
+		lines = m.flattenPendingAskQuestionEntryWithSymbol(block.role, question, spinnerSymbol)
 	} else {
 		combined := m.toolCallDisplayText(entry, block.role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
 		lines = m.flattenEntryWithMetaAndSymbol(block.role, combined, true, entry.ToolCall, spinnerSymbol)
 	}
 	lines = m.ongoingToolWithTreeGuideWithSymbol(block.role, lines, spinnerSymbol)
 	return ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex, entryEnd: block.entryEnd}, true
+}
+
+func (m Model) flattenPendingAskQuestionEntryWithSymbol(role RenderIntent, question string, symbolOverride string) []string {
+	renderWidth := m.entryRenderWidth(role, symbolOverride)
+	if renderWidth < 1 {
+		renderWidth = 1
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		question = "ask question"
+	}
+	lines := RenderInlineAskQuestionMarkdownLines(question, m.theme, renderWidth)
+	text := firstNonEmptyLine(lines)
+	if text == "" {
+		text = "ask question"
+	}
+	forceEllipsis := len(lines) > 1
+	text = truncateRenderedLineToWidthWithEllipsis(text, renderWidth, forceEllipsis)
+	prefix := m.entryPrefix(role, symbolOverride)
+	if prefix == "" {
+		return []string{text}
+	}
+	return []string{prefix + text}
+}
+
+func firstNonEmptyLine(lines []string) string {
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			return line
+		}
+	}
+	if len(lines) > 0 {
+		return lines[0]
+	}
+	return ""
 }
 
 func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []TranscriptEntry, consumedResults map[int]struct{}, resultIndex toolResultIndex) bool {

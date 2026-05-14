@@ -217,8 +217,6 @@ func (m Model) flattenAskQuestionEntryWithSymbol(role RenderIntent, question str
 	for idx, line := range lines {
 		display := line.text
 		switch line.kind {
-		case "question":
-			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), Faint)
 		case "suggestion":
 			display = m.palette().preview.Faint(true).Render(display)
 		case "recommended_suggestion":
