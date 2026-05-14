@@ -73,8 +73,11 @@ type ShellSettings struct {
 }
 
 type SubagentRole struct {
-	Settings Settings
-	Sources  map[string]string
+	Settings         Settings
+	Sources          map[string]string
+	Description      string
+	AgentCallable    bool
+	AgentCallableSet bool
 }
 
 type SystemPromptFileScope string

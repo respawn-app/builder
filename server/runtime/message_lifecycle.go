@@ -307,13 +307,8 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	if meta.AgentsInjected {
 		return nil
 	}
-	builder := newActiveMetaContextBuilder(meta, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
-	metaResult, err := builder.Build(metaContextBuildOptions{
-		IncludeAgents:        true,
-		IncludeSkills:        true,
-		IncludeEnvironment:   true,
-		IncludeSkillWarnings: true,
-	})
+	builder := e.newActiveBaseMetaContextBuilder(e.cfg.Model, time.Now())
+	metaResult, err := builder.Build(baseMetaContextBuildOptions(true))
 	if err != nil {
 		return err
 	}

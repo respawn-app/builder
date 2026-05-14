@@ -165,6 +165,8 @@ func writeBuiltInSubagentSections(builder *strings.Builder) {
 	}
 	builder.WriteString("\n[subagents.fast]\n")
 	builder.WriteString("# inherits all main settings unless overridden\n")
+	builder.WriteString("# agent_callable = true # set false to hide/block this role from Builder-session subagent calls\n")
+	builder.WriteString("# description = \"\" # model-visible role description for future/catalog uses\n")
 	builder.WriteString("# model = \"gpt-5.4-mini\" # built-in heuristic on exact OpenAI first-party setups\n")
 	builder.WriteString("# priority_request_mode = true # built-in heuristic on exact OpenAI first-party setups\n")
 	builder.WriteString("# model_context_window = 272000 # conservative default; larger API-key windows can be added later\n")

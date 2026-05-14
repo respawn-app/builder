@@ -43,6 +43,7 @@ type MessageType = clientui.MessageType
 const (
 	MessageTypeAgentsMD                  = clientui.MessageTypeAgentsMD
 	MessageTypeSkills                    = clientui.MessageTypeSkills
+	MessageTypeSubagents                 = clientui.MessageTypeSubagents
 	MessageTypeEnvironment               = clientui.MessageTypeEnvironment
 	MessageTypeCompactionSummary         = clientui.MessageTypeCompactionSummary
 	MessageTypeInterruption              = clientui.MessageTypeInterruption

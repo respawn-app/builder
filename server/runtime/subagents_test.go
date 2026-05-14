@@ -1,0 +1,303 @@
+package runtime
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"builder/server/llm"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/config"
+	"builder/shared/toolspec"
+)
+
+func TestSubagentsMetaMessageRendersCallableNonNoopRoles(t *testing.T) {
+	settings := config.Settings{
+		Model:         "gpt-5.5",
+		ThinkingLevel: "medium",
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolExecCommand: true,
+			toolspec.ToolPatch:       true,
+		},
+		Subagents: map[string]config.SubagentRole{
+			"research": {
+				Settings: config.Settings{
+					Model:         "gpt-5.4-mini",
+					ThinkingLevel: "high",
+					EnabledTools: map[toolspec.ID]bool{
+						toolspec.ToolExecCommand: true,
+						toolspec.ToolPatch:       false,
+					},
+				},
+				Sources:     map[string]string{"model": "file", "thinking_level": "file", "tools.patch": "file"},
+				Description: "Repo research specialist.",
+			},
+			"placebo": {
+				Settings:    config.Settings{Model: "gpt-5.5"},
+				Sources:     map[string]string{"model": "file"},
+				Description: "Sounds useful, but no behavior differs.",
+			},
+			"blocked": {
+				Settings:         config.Settings{Model: "gpt-5.4-mini"},
+				Sources:          map[string]string{"model": "file"},
+				AgentCallable:    false,
+				AgentCallableSet: true,
+			},
+			config.BuiltInSubagentRoleFast: {
+				Description: "ignored for now",
+			},
+		},
+	}
+	builder := newMetaContextBuilder("/tmp/work", "gpt-5.5", "medium", nil, time.Unix(0, 0)).
+		withSubagents(settings, []toolspec.ID{toolspec.ToolExecCommand})
+	result, err := builder.Build(metaContextBuildOptions{IncludeSubagents: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(result.Subagents) != 1 {
+		t.Fatalf("subagent messages = %d, want 1", len(result.Subagents))
+	}
+	content := result.Subagents[0].Content
+	for _, want := range []string{
+		"Available subagent roles:",
+		"- default: not specifying any role will invoke an exact clone of you, the general-purpose agent",
+		"- research: Repo research specialist.",
+		"Invoke with `",
+		"--agent=<role> \"<prompt>\"`.",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("content missing %q:\n%s", want, content)
+		}
+	}
+	for _, unwanted := range []string{"placebo", "blocked", "fast:"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("content should not include %q:\n%s", unwanted, content)
+		}
+	}
+}
+
+func TestSubagentsMetaMessageUsesFallbackAndRequiresCallerShell(t *testing.T) {
+	settings := config.Settings{
+		Model:               "gpt-5.5",
+		ThinkingLevel:       "medium",
+		PriorityRequestMode: true,
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolExecCommand: true,
+			toolspec.ToolPatch:       false,
+		},
+		Subagents: map[string]config.SubagentRole{
+			"worker": {
+				Settings: config.Settings{
+					Model:               "gpt-5.4-mini",
+					ThinkingLevel:       "high",
+					PriorityRequestMode: true,
+					EnabledTools: map[toolspec.ID]bool{
+						toolspec.ToolExecCommand: true,
+						toolspec.ToolPatch:       true,
+					},
+				},
+				Sources: map[string]string{"model": "file", "thinking_level": "file", "priority_request_mode": "file", "tools.patch": "file"},
+			},
+		},
+	}
+	withShell := newMetaContextBuilder("/tmp/work", "gpt-5.5", "medium", nil, time.Unix(0, 0)).
+		withSubagents(settings, []toolspec.ID{toolspec.ToolExecCommand})
+	result, err := withShell.Build(metaContextBuildOptions{IncludeSubagents: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(result.Subagents) != 1 || !strings.Contains(result.Subagents[0].Content, "- worker: gpt-5.4-mini, thinking high, fast mode on, can edit, can call shell") {
+		t.Fatalf("unexpected fallback content: %+v", result.Subagents)
+	}
+
+	withoutShell := newMetaContextBuilder("/tmp/work", "gpt-5.5", "medium", nil, time.Unix(0, 0)).
+		withSubagents(settings, []toolspec.ID{toolspec.ToolPatch})
+	result, err = withoutShell.Build(metaContextBuildOptions{IncludeSubagents: true})
+	if err != nil {
+		t.Fatalf("Build without shell: %v", err)
+	}
+	if len(result.Subagents) != 0 {
+		t.Fatalf("expected no subagent context without caller shell, got %+v", result.Subagents)
+	}
+}
+
+func TestSubagentsMetaMessageCurrentNonCallableRoleDoesNotDisableOtherRoles(t *testing.T) {
+	settings := config.Settings{
+		Model:         "gpt-5.5",
+		ThinkingLevel: "medium",
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolExecCommand: true,
+		},
+		Subagents: map[string]config.SubagentRole{
+			"current": {
+				Settings:         config.Settings{Model: "gpt-5.4-mini"},
+				Sources:          map[string]string{"model": "file"},
+				AgentCallable:    false,
+				AgentCallableSet: true,
+			},
+			"worker": {
+				Settings:    config.Settings{ThinkingLevel: "high"},
+				Sources:     map[string]string{"thinking_level": "file"},
+				Description: "Callable helper.",
+			},
+		},
+	}
+	builder := newMetaContextBuilder("/tmp/work", "gpt-5.5", "medium", nil, time.Unix(0, 0)).
+		withSubagents(settings, []toolspec.ID{toolspec.ToolExecCommand})
+	result, err := builder.Build(metaContextBuildOptions{IncludeSubagents: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(result.Subagents) != 1 {
+		t.Fatalf("subagent messages = %d, want 1", len(result.Subagents))
+	}
+	content := result.Subagents[0].Content
+	if !strings.Contains(content, "- worker: Callable helper.") {
+		t.Fatalf("expected callable helper in context:\n%s", content)
+	}
+	if strings.Contains(content, "current") {
+		t.Fatalf("non-callable current role should not be listed:\n%s", content)
+	}
+}
+
+func TestCompactionReinjectsSubagentsMetaContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	settings := config.Settings{
+		Model:         "gpt-5.5",
+		ThinkingLevel: "medium",
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolExecCommand: true,
+		},
+		Subagents: map[string]config.SubagentRole{
+			"worker": {
+				Settings:    config.Settings{ThinkingLevel: "high"},
+				Sources:     map[string]string{"thinking_level": "file"},
+				Description: "Callable helper.",
+			},
+		},
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:                   "gpt-5.5",
+		ThinkingLevel:           "medium",
+		EnabledTools:            []toolspec.ID{toolspec.ToolExecCommand},
+		SubagentCatalogSettings: settings,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	messages, err := eng.compactionReinjectedBaseMessages()
+	if err != nil {
+		t.Fatalf("compactionReinjectedBaseMessages: %v", err)
+	}
+	if !hasSubagentCatalog(messages, "- worker: Callable helper.") {
+		t.Fatalf("expected compaction-reinjected subagent catalog, got %+v", messages)
+	}
+}
+
+func TestManualCompactionPersistsSubagentCatalogInCanonicalTranscript(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	settings := config.Settings{
+		Model:         "gpt-5.5",
+		ThinkingLevel: "medium",
+		EnabledTools: map[toolspec.ID]bool{
+			toolspec.ToolExecCommand: true,
+		},
+		Subagents: map[string]config.SubagentRole{
+			"worker": {
+				Settings:    config.Settings{ThinkingLevel: "high"},
+				Sources:     map[string]string{"thinking_level": "file"},
+				Description: "Callable helper.",
+			},
+		},
+	}
+	cfg := Config{
+		Model:                   "gpt-5.5",
+		ThinkingLevel:           "medium",
+		CompactionMode:          "local",
+		EnabledTools:            []toolspec.ID{toolspec.ToolExecCommand},
+		SubagentCatalogSettings: settings,
+	}
+	client := &fakeCompactionClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if !hasSubagentCatalog(eng.snapshotMessages(), "- worker: Callable helper.") {
+		t.Fatalf("expected in-memory canonical transcript to keep subagent catalog, got %+v", eng.snapshotMessages())
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if !hasSubagentCatalog(restored.snapshotMessages(), "- worker: Callable helper.") {
+		t.Fatalf("expected persisted canonical transcript to keep subagent catalog, got %+v", restored.snapshotMessages())
+	}
+}
+
+func TestSplitMetaContextMessagesTreatsSubagentsAsMeta(t *testing.T) {
+	subagents := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSubagents, Content: "Available subagent roles:"}
+	messages := []llm.Message{
+		subagents,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+	meta, transcript := splitMetaContextMessages(messages)
+	if len(meta) != 1 || meta[0].MessageType != llm.MessageTypeSubagents {
+		t.Fatalf("expected subagents meta message, got %+v", meta)
+	}
+	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser {
+		t.Fatalf("expected user transcript, got %+v", transcript)
+	}
+}
+
+func hasSubagentCatalog(messages []llm.Message, content string) bool {
+	for _, message := range messages {
+		if message.MessageType == llm.MessageTypeSubagents && strings.Contains(message.Content, content) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReviewerPromptFiltersSubagentsMetaContext(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSubagents, Content: "Available subagent roles:\n- worker: specialist"},
+		{Role: llm.RoleUser, Content: "request"},
+	}
+	got, err := buildReviewerRequestMessagesWithBuilder(messages, newMetaContextBuilder(t.TempDir(), "gpt-5.5", "medium", nil, time.Unix(0, 0)), false)
+	if err != nil {
+		t.Fatalf("buildReviewerRequestMessagesWithBuilder: %v", err)
+	}
+	for _, message := range got {
+		if message.MessageType == llm.MessageTypeSubagents || strings.Contains(message.Content, "Available subagent roles") {
+			t.Fatalf("reviewer messages leaked subagent context: %+v", got)
+		}
+	}
+}

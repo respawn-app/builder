@@ -126,6 +126,10 @@ func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
 	return renderSystemPromptTemplate(strings.TrimSpace(SystemPrompt), args, "")
 }
 
+func BuilderRunCommand() string {
+	return selfcmd.RunCommandPrefix()
+}
+
 func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
 	if triggerHandoffEnabled {
 		return strings.TrimSpace(CompactionSoonReminderTriggerHandoffPrompt)

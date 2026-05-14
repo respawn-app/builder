@@ -106,6 +106,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		ProviderCapabilitiesOverride:  mainProvider.ProviderCapabilitiesOverride,
 		EnabledTools:                  enabledTools,
 		DisabledSkills:                config.DisabledSkillToggles(active),
+		SubagentCatalogSettings:       active,
 		SystemPromptFiles:             active.SystemPromptFiles,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
 		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,

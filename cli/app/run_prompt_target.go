@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,9 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	}
 	opts = workspaceConfig.Options
 	cfg := workspaceConfig.Config
+	if err := validateRunPromptAgentRole(cfg.Settings, opts.AgentRole, strings.TrimSpace(opts.WorkspaceContextSessionID) != ""); err != nil {
+		return nil, nil, err
+	}
 	target, err := serverattach.Resolve[runprompttarget.Target](ctx, serverattach.Request[runprompttarget.Target]{
 		Mode:   serverattach.ModeHeadless,
 		Remote: serverAttachRemotePolicy(cfg, remoteattach.SupportsRunPrompt, true),
@@ -85,6 +89,30 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 		return nil, nil, err
 	}
 	return target.Value.Client, target.Close, nil
+}
+
+const nonCallableSubagentRoleMessage = "User has disallowed calling this agent by other agents like you. Do not try to circumvent this, pick another suitable agent or do the work manually and let the user know your desire to use the subagent at the end of the task"
+
+func validateRunPromptAgentRole(settings config.Settings, rawRole string, builderSessionCaller bool) error {
+	roleName := config.NormalizeSubagentSelector(rawRole)
+	if roleName == "" {
+		if strings.TrimSpace(rawRole) != "" && !config.IsReservedSubagentRoleName(rawRole) {
+			return errors.New("invalid agent role " + strconv.Quote(rawRole))
+		}
+		return nil
+	}
+	role, exists := settings.Subagents[roleName]
+	if !exists && roleName != config.BuiltInSubagentRoleFast {
+		return unrecognizedRunPromptRoleError(roleName, config.AvailableSubagentRoleNames(settings, builderSessionCaller))
+	}
+	if builderSessionCaller && !config.SubagentRoleCallable(role) {
+		return errors.New(nonCallableSubagentRoleMessage)
+	}
+	return nil
+}
+
+func unrecognizedRunPromptRoleError(role string, available []string) error {
+	return errors.New("Unrecognized role " + strconv.Quote(role) + ". It may have been removed by the user during the session. Available roles: [" + strings.Join(available, ", ") + "]")
 }
 
 type embeddedRunPromptAttachment interface {

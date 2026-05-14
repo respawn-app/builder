@@ -12,6 +12,8 @@ import (
 	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type metaContextKind uint8
@@ -20,6 +22,7 @@ const (
 	metaContextKindUnknown metaContextKind = iota
 	metaContextKindAgents
 	metaContextKindSkills
+	metaContextKindSubagents
 	metaContextKindEnvironment
 	metaContextKindHeadless
 	metaContextKindHeadlessExit
@@ -38,6 +41,7 @@ type metaContextBuildOptions struct {
 	ExistingMessages          []llm.Message
 	IncludeAgents             bool
 	IncludeSkills             bool
+	IncludeSubagents          bool
 	IncludeEnvironment        bool
 	IncludeHeadless           bool
 	IncludeHeadlessExit       bool
@@ -49,6 +53,7 @@ type metaContextBuildResult struct {
 	Agents        []llm.Message
 	SkillWarnings []string
 	Skills        []llm.Message
+	Subagents     []llm.Message
 	Environment   []llm.Message
 	Headless      []llm.Message
 	HeadlessExit  []llm.Message
@@ -57,7 +62,7 @@ type metaContextBuildResult struct {
 }
 
 func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
-	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit)+len(r.Worktree)+len(r.WorktreeExit))
+	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Subagents)+len(r.Environment)+len(r.Headless)+len(r.HeadlessExit)+len(r.Worktree)+len(r.WorktreeExit))
 	out = append(out, r.OrderedBaseMessages()...)
 	out = append(out, r.Headless...)
 	out = append(out, r.HeadlessExit...)
@@ -67,9 +72,10 @@ func (r metaContextBuildResult) OrderedMetaMessages() []llm.Message {
 }
 
 func (r metaContextBuildResult) OrderedBaseMessages() []llm.Message {
-	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Environment))
+	out := make([]llm.Message, 0, len(r.Agents)+len(r.Skills)+len(r.Subagents)+len(r.Environment))
 	out = append(out, r.Environment...)
 	out = append(out, r.Skills...)
+	out = append(out, r.Subagents...)
 	out = append(out, r.Agents...)
 	return out
 }
@@ -79,12 +85,14 @@ func (r metaContextBuildResult) OrderedInjectionMessages() []llm.Message {
 }
 
 type metaContextBuilder struct {
-	workspaceRoot  string
-	environmentCWD string
-	model          string
-	thinkingLevel  string
-	disabledSkills map[string]bool
-	now            time.Time
+	workspaceRoot    string
+	environmentCWD   string
+	model            string
+	thinkingLevel    string
+	disabledSkills   map[string]bool
+	subagentSettings config.Settings
+	enabledTools     []toolspec.ID
+	now              time.Time
 }
 
 func newMetaContextBuilder(workspaceRoot, model, thinkingLevel string, disabledSkills map[string]bool, now time.Time) metaContextBuilder {
@@ -99,10 +107,31 @@ func newMetaContextBuilder(workspaceRoot, model, thinkingLevel string, disabledS
 	}
 }
 
+func (e *Engine) newActiveBaseMetaContextBuilder(model string, now time.Time) metaContextBuilder {
+	return newActiveMetaContextBuilder(e.store.Meta(), model, e.ThinkingLevel(), e.cfg.DisabledSkills, now).
+		withSubagents(e.cfg.SubagentCatalogSettings, e.cfg.EnabledTools)
+}
+
+func baseMetaContextBuildOptions(includeSkillWarnings bool) metaContextBuildOptions {
+	return metaContextBuildOptions{
+		IncludeAgents:        true,
+		IncludeSkills:        true,
+		IncludeSubagents:     true,
+		IncludeEnvironment:   true,
+		IncludeSkillWarnings: includeSkillWarnings,
+	}
+}
+
 func (b metaContextBuilder) withEnvironmentCWD(cwd string) metaContextBuilder {
 	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
 		b.environmentCWD = trimmed
 	}
+	return b
+}
+
+func (b metaContextBuilder) withSubagents(settings config.Settings, enabledTools []toolspec.ID) metaContextBuilder {
+	b.subagentSettings = settings
+	b.enabledTools = append([]toolspec.ID(nil), enabledTools...)
 	return b
 }
 
@@ -136,6 +165,12 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 				MessageType: llm.MessageTypeSkills,
 				Content:     renderSkillsContext(skills),
 			}})
+		}
+	}
+
+	if opts.IncludeSubagents {
+		if message, ok := b.subagentsMetaMessage(); ok {
+			collector.addMessages([]llm.Message{message})
 		}
 	}
 
@@ -214,6 +249,115 @@ func (b metaContextBuilder) discoverAgents(permissive bool) ([]llm.Message, erro
 
 func renderAgentsContext(path, contents string) string {
 	return fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, contents)
+}
+
+func (b metaContextBuilder) subagentsMetaMessage() (llm.Message, bool) {
+	if !toolEnabled(b.enabledTools, toolspec.ToolExecCommand) {
+		return llm.Message{}, false
+	}
+	roles := b.renderableSubagentRoles()
+	if len(roles) == 0 {
+		return llm.Message{}, false
+	}
+	lines := make([]string, 0, len(roles)+3)
+	lines = append(lines, "Available subagent roles:")
+	lines = append(lines, "- default: not specifying any role will invoke an exact clone of you, the general-purpose agent")
+	for _, role := range roles {
+		lines = append(lines, "- "+role.Name+": "+role.Description)
+	}
+	lines = append(lines, "---")
+	lines = append(lines, "Invoke with `"+prompts.BuilderRunCommand()+" --agent=<role> \"<prompt>\"`.")
+	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSubagents, Content: strings.Join(lines, "\n")}, true
+}
+
+type renderedSubagentRole struct {
+	Name        string
+	Description string
+}
+
+func (b metaContextBuilder) renderableSubagentRoles() []renderedSubagentRole {
+	settings := b.subagentSettings
+	if len(settings.Subagents) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(settings.Subagents))
+	for name := range settings.Subagents {
+		normalized := config.NormalizeSubagentRole(name)
+		if normalized == "" || normalized == config.BuiltInSubagentRoleFast {
+			continue
+		}
+		names = append(names, normalized)
+	}
+	sort.Strings(names)
+	out := make([]renderedSubagentRole, 0, len(names))
+	for _, name := range names {
+		role := settings.Subagents[name]
+		if !config.SubagentRoleCallable(role) || !config.SubagentRoleHasMeaningfulDiff(settings, role) {
+			continue
+		}
+		description := strings.TrimSpace(role.Description)
+		if description == "" {
+			description = fallbackSubagentDescription(settings, role)
+		}
+		if description == "" {
+			continue
+		}
+		out = append(out, renderedSubagentRole{Name: name, Description: description})
+	}
+	return out
+}
+
+func fallbackSubagentDescription(base config.Settings, role config.SubagentRole) string {
+	model := base.Model
+	if _, ok := role.Sources["model"]; ok {
+		model = role.Settings.Model
+	}
+	thinking := base.ThinkingLevel
+	if _, ok := role.Sources["thinking_level"]; ok {
+		thinking = role.Settings.ThinkingLevel
+	}
+	parts := []string{strings.TrimSpace(model), "thinking " + strings.TrimSpace(thinking)}
+	if role.Sources["priority_request_mode"] == "file" && role.Settings.PriorityRequestMode {
+		parts = append(parts, "fast mode on")
+	}
+	tools := effectiveRoleToolMap(base.EnabledTools, role)
+	if tools[toolspec.ToolPatch] || tools[toolspec.ToolEdit] {
+		parts = append(parts, "can edit")
+	}
+	if tools[toolspec.ToolExecCommand] {
+		parts = append(parts, "can call shell")
+	}
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return strings.Join(filtered, ", ")
+}
+
+func effectiveRoleToolMap(base map[toolspec.ID]bool, role config.SubagentRole) map[toolspec.ID]bool {
+	out := make(map[toolspec.ID]bool, len(base))
+	for key, enabled := range base {
+		out[key] = enabled
+	}
+	for _, id := range toolspec.CatalogIDs() {
+		sourceKey := "tools." + toolspec.ConfigName(id)
+		if _, ok := role.Sources[sourceKey]; ok {
+			out[id] = role.Settings.EnabledTools[id]
+		}
+	}
+	return out
+}
+
+func toolEnabled(enabled []toolspec.ID, want toolspec.ID) bool {
+	for _, id := range enabled {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }
 
 func headlessModeMetaMessage() (llm.Message, bool) {
@@ -296,6 +440,7 @@ type metaContextCollector struct {
 	seenWarningMessages map[string]bool
 	agents              []metaContextAgentMessage
 	skills              *llm.Message
+	subagents           *llm.Message
 	environment         *llm.Message
 	headless            *llm.Message
 	headlessExit        *llm.Message
@@ -367,6 +512,8 @@ func (c *metaContextCollector) slot(kind metaContextKind) **llm.Message {
 	switch kind {
 	case metaContextKindSkills:
 		return &c.skills
+	case metaContextKindSubagents:
+		return &c.subagents
 	case metaContextKindEnvironment:
 		return &c.environment
 	case metaContextKindHeadless:
@@ -398,6 +545,9 @@ func (c *metaContextCollector) result() metaContextBuildResult {
 	}
 	if c.skills != nil {
 		result.Skills = []llm.Message{*c.skills}
+	}
+	if c.subagents != nil {
+		result.Subagents = []llm.Message{*c.subagents}
 	}
 	if c.environment != nil {
 		result.Environment = []llm.Message{*c.environment}
@@ -448,6 +598,8 @@ func classifyMetaContextMessage(message llm.Message) (metaContextClassification,
 		}, true
 	case llm.MessageTypeSkills:
 		return metaContextClassification{kind: metaContextKindSkills, key: "skills", messageType: llm.MessageTypeSkills}, true
+	case llm.MessageTypeSubagents:
+		return metaContextClassification{kind: metaContextKindSubagents, key: "subagents", messageType: llm.MessageTypeSubagents}, true
 	case llm.MessageTypeEnvironment:
 		return metaContextClassification{kind: metaContextKindEnvironment, key: "environment", messageType: llm.MessageTypeEnvironment}, true
 	case llm.MessageTypeHeadlessMode:

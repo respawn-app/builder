@@ -122,10 +122,10 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	persistContinuation := func() error {
 		return next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL})
 	}
-	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentRole(trimmedRole) == "" {
+	if trimmedRole := strings.TrimSpace(overrides.AgentRole); trimmedRole != "" && config.NormalizeSubagentSelector(trimmedRole) == "" && !config.IsReservedSubagentRoleName(trimmedRole) {
 		return SessionPlan{}, nil, fmt.Errorf("invalid agent role %q", trimmedRole)
 	}
-	roleName := config.NormalizeSubagentRole(overrides.AgentRole)
+	roleName := config.NormalizeSubagentSelector(overrides.AgentRole)
 	if roleName != "" {
 		shouldPersistContinuation = true
 		providerBase := cloneSettings(plan.ActiveSettings)

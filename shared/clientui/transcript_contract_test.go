@@ -19,6 +19,7 @@ func TestTranscriptMessageContractWireValues(t *testing.T) {
 	messageTypes := map[MessageType]string{
 		MessageTypeAgentsMD:                  "agents.md",
 		MessageTypeSkills:                    "skills",
+		MessageTypeSubagents:                 "subagents",
 		MessageTypeEnvironment:               "environment",
 		MessageTypeCompactionSummary:         "compaction_summary",
 		MessageTypeInterruption:              "interruption",
