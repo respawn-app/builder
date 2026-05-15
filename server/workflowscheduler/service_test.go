@@ -319,8 +319,8 @@ func TestSchedulerRuntimeStartFailureInterruptsRun(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if err := scheduler.Process(ctx); err == nil {
-		t.Fatalf("expected starter error")
+	if err := scheduler.Process(ctx); !errors.Is(err, ErrRuntimeStartFailed) {
+		t.Fatalf("Process error = %v, want ErrRuntimeStartFailed", err)
 	}
 	runs, err := store.ListRuns(ctx, started.TaskID)
 	if err != nil {
@@ -328,6 +328,36 @@ func TestSchedulerRuntimeStartFailureInterruptsRun(t *testing.T) {
 	}
 	if runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != ReasonRuntimeStartFailed {
 		t.Fatalf("run after starter failure = %+v", runs[0])
+	}
+}
+
+func TestSchedulerStartContinuesAfterRuntimeStartFailure(t *testing.T) {
+	ctx := context.Background()
+	store, binding, _ := newSchedulerTestStore(t)
+	workflowID := createSchedulerValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	started := createAndStartSchedulerTask(t, ctx, store, binding.ProjectID)
+	starter := &recordingStarter{err: errors.New("role missing")}
+	scheduler, err := New(store, starter, Config{Concurrency: 1})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = scheduler.Close() })
+
+	if err := scheduler.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !scheduler.Started() {
+		t.Fatal("scheduler not marked started after isolated runtime start failure")
+	}
+	runs, err := store.ListRuns(ctx, started.TaskID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != ReasonRuntimeStartFailed {
+		t.Fatalf("run after startup starter failure = %+v", runs[0])
 	}
 }
 

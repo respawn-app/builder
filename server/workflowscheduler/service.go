@@ -18,7 +18,10 @@ const (
 	ReasonStartupOrphanedRun    = "workflow_startup_orphaned_run"
 )
 
-var ErrStopped = errors.New("workflow scheduler stopped")
+var (
+	ErrStopped            = errors.New("workflow scheduler stopped")
+	ErrRuntimeStartFailed = errors.New("workflow runtime start failed")
+)
 
 type Store interface {
 	ListRunnableRuns(ctx context.Context, limit int64) ([]workflowstore.RunnableRunRecord, error)
@@ -145,7 +148,11 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	if err := s.Process(ctx); err != nil {
-		return err
+		if errors.Is(err, ErrRuntimeStartFailed) {
+			s.logf("workflow.scheduler.startup_process_error error=%q", err.Error())
+		} else {
+			return err
+		}
 	}
 	s.mu.Lock()
 	if s.stopped {
@@ -328,9 +335,9 @@ func (s *Service) Process(ctx context.Context) error {
 			s.RuntimeFinished(claimed.ID, claimed.Generation)
 			s.logf("workflow.scheduler.runtime_start run_id=%s action=interrupt reason=%s", claimed.ID, ReasonRuntimeStartFailed)
 			if interruptErr := s.store.InterruptRunGeneration(context.WithoutCancel(ctx), claimed.ID, claimed.Generation, ReasonRuntimeStartFailed, fmt.Sprintf(`{"error":%q}`, err.Error())); interruptErr != nil {
-				return errors.Join(err, interruptErr)
+				return errors.Join(fmt.Errorf("%w: %w", ErrRuntimeStartFailed, err), interruptErr)
 			}
-			return err
+			return fmt.Errorf("%w: %w", ErrRuntimeStartFailed, err)
 		}
 	}
 	return nil
