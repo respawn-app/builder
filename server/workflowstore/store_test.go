@@ -633,6 +633,96 @@ func TestApprovePendingTransitionStartsStoredTargetEdgeSnapshot(t *testing.T) {
 	}
 }
 
+func TestApprovePendingTransitionIsConcurrentIdempotent(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createApprovalWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}})
+	if err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	var wg sync.WaitGroup
+	results := make([]CompleteRunResult, 2)
+	errs := make([]error, 2)
+	for index := range results {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			results[index], errs[index] = store.ApproveTransition(context.Background(), completed.TransitionID)
+		}(index)
+	}
+	wg.Wait()
+	for index, err := range errs {
+		if err != nil {
+			t.Fatalf("ApproveTransition[%d]: %v", index, err)
+		}
+	}
+	if results[0].State != "approved" || results[1].State != "approved" || len(results[0].PlacementIDs) != 1 || len(results[1].PlacementIDs) != 1 || results[0].PlacementIDs[0] != results[1].PlacementIDs[0] {
+		t.Fatalf("concurrent approval results = %+v", results)
+	}
+}
+
+func TestApprovePendingJoinEdgesProgressesJoin(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createFanoutJoinWorkflow(t, ctx, store)
+	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_a")
+	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_b")
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	implA := nodeByKey(t, def, "impl_a")
+	implB := nodeByKey(t, def, "impl_b")
+	first, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: branchRuns[implA.ID], TransitionID: "join", OutputValues: map[string]string{"summary": "branch a"}})
+	if err != nil {
+		t.Fatalf("CompleteRun branch a: %v", err)
+	}
+	if first.State != "pending_approval" {
+		t.Fatalf("first branch result = %+v, want pending approval", first)
+	}
+	firstApproved, err := store.ApproveTransition(ctx, first.TransitionID)
+	if err != nil {
+		t.Fatalf("ApproveTransition branch a: %v", err)
+	}
+	if len(firstApproved.PlacementIDs) != 0 || len(firstApproved.RunIDs) != 0 {
+		t.Fatalf("first approval result = %+v, want join still waiting", firstApproved)
+	}
+	second, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: branchRuns[implB.ID], TransitionID: "join", OutputValues: map[string]string{"summary": "branch b"}})
+	if err != nil {
+		t.Fatalf("CompleteRun branch b: %v", err)
+	}
+	secondApproved, err := store.ApproveTransition(ctx, second.TransitionID)
+	if err != nil {
+		t.Fatalf("ApproveTransition branch b: %v", err)
+	}
+	if len(secondApproved.PlacementIDs) != 1 || len(secondApproved.RunIDs) != 1 {
+		t.Fatalf("second approval result = %+v, want joined downstream run", secondApproved)
+	}
+	transitions, err := store.ListTransitions(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if transitions[len(transitions)-1].TransitionID != "done" || !strings.Contains(transitions[len(transitions)-1].OutputValues["aggregate"], "branch a") || !strings.Contains(transitions[len(transitions)-1].OutputValues["aggregate"], "branch b") {
+		t.Fatalf("transitions after approved join = %+v", transitions)
+	}
+}
+
 func TestRejectPendingApprovalTransitionMarksRejected(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -1726,6 +1816,45 @@ func TestResumeTaskRunRejectsRoleDrift(t *testing.T) {
 	}
 }
 
+func TestResumeTaskRunCanResumeInterruptedWaitingAskRun(t *testing.T) {
+	ctx := context.Background()
+	store, binding, cfg := newTestStoreWithConfig(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	sessionID := createTestSession(t, ctx, store, binding, cfg)
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	if err := store.SetRunWaitingAsk(ctx, started.RunID, claimed.Generation, "ask-missing"); err != nil {
+		t.Fatalf("SetRunWaitingAsk: %v", err)
+	}
+	if err := store.InterruptRun(ctx, started.RunID, "workflow_pending_ask_unavailable", "{}"); err != nil {
+		t.Fatalf("InterruptRun: %v", err)
+	}
+
+	resumed, err := store.ResumeTaskRun(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ResumeTaskRun: %v", err)
+	}
+	if resumed.ID != started.RunID || resumed.WaitingAskID != "" || resumed.InterruptedAt != 0 || resumed.StartedAt != 0 {
+		t.Fatalf("resumed waiting ask run = %+v, want requeued same run without waiting ask", resumed)
+	}
+}
+
 func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -2199,6 +2328,21 @@ WHERE id = ?`, string(placementID)).Scan(&batchID, &branchID); err != nil {
 		t.Fatalf("query placement parallel ids: %v", err)
 	}
 	return strings.TrimSpace(batchID.String), strings.TrimSpace(branchID.String)
+}
+
+func requireApprovalOnWorkflowEdge(t *testing.T, ctx context.Context, store *Store, workflowID workflow.WorkflowID, edgeKey string) {
+	t.Helper()
+	result, err := store.db.ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = ?`, string(workflowID), edgeKey)
+	if err != nil {
+		t.Fatalf("require approval on edge %s: %v", edgeKey, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("require approval rows for edge %s: %v", edgeKey, err)
+	}
+	if updated != 1 {
+		t.Fatalf("require approval on edge %s updated %d rows", edgeKey, updated)
+	}
 }
 
 func currentWorkflowRevision(t *testing.T, ctx context.Context, store *Store, workflowID workflow.WorkflowID) int64 {

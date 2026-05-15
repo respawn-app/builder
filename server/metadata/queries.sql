@@ -843,7 +843,8 @@ SET
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms),
     interrupted_at_unix_ms = sqlc.arg(interrupted_at_unix_ms),
     interruption_reason = sqlc.arg(interruption_reason),
-    interruption_detail_json = sqlc.arg(interruption_detail_json)
+    interruption_detail_json = sqlc.arg(interruption_detail_json),
+    waiting_ask_id = ''
 WHERE id = sqlc.arg(id)
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0;
@@ -866,7 +867,8 @@ SET
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms),
     interrupted_at_unix_ms = sqlc.arg(interrupted_at_unix_ms),
     interruption_reason = sqlc.arg(interruption_reason),
-    interruption_detail_json = sqlc.arg(interruption_detail_json)
+    interruption_detail_json = sqlc.arg(interruption_detail_json),
+    waiting_ask_id = ''
 WHERE task_id = sqlc.arg(task_id)
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0;

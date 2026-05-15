@@ -1978,7 +1978,8 @@ SET
     updated_at_unix_ms = ?1,
     interrupted_at_unix_ms = ?2,
     interruption_reason = ?3,
-    interruption_detail_json = ?4
+    interruption_detail_json = ?4,
+    waiting_ask_id = ''
 WHERE task_id = ?5
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
@@ -2045,7 +2046,8 @@ SET
     updated_at_unix_ms = ?1,
     interrupted_at_unix_ms = ?2,
     interruption_reason = ?3,
-    interruption_detail_json = ?4
+    interruption_detail_json = ?4,
+    waiting_ask_id = ''
 WHERE id = ?5
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0

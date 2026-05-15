@@ -107,11 +107,38 @@ WHERE id = ? AND state = 'pending_approval'`, now, id)
 		return CompleteRunResult{}, err
 	}
 	if updatedCount != 1 {
+		_ = tx.Rollback()
+		var currentState string
+		if scanErr := s.db.QueryRowContext(ctx, `SELECT state FROM task_transitions WHERE id = ?`, id).Scan(&currentState); scanErr != nil {
+			return CompleteRunResult{}, scanErr
+		}
+		if currentState == "approved" || currentState == "applied" {
+			return s.approvedTransitionResult(ctx, id, currentState)
+		}
 		return CompleteRunResult{}, sql.ErrNoRows
 	}
 	result := CompleteRunResult{TransitionID: workflow.TransitionID(id), State: "approved"}
 	for _, edge := range edges {
 		if edge.State != "pending" {
+			continue
+		}
+		targetEdge, err := edgeContractSnapshotFromTransitionEdge(edge)
+		if err != nil {
+			return CompleteRunResult{}, err
+		}
+		if targetEdge.TargetNode.Kind == workflow.NodeKindJoin {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE task_transition_edges
+SET state = 'applied'
+WHERE id = ? AND state = 'pending'`, edge.ID); err != nil {
+				return CompleteRunResult{}, fmt.Errorf("update approved join edge snapshot: %w", err)
+			}
+			joined, err := s.applyJoinIfReady(ctx, tx, q, now, taskID, sourceRun.PlacementID, sourceSnapshot, targetEdge)
+			if err != nil {
+				return CompleteRunResult{}, err
+			}
+			result.PlacementIDs = append(result.PlacementIDs, joined.PlacementIDs...)
+			result.RunIDs = append(result.RunIDs, joined.RunIDs...)
 			continue
 		}
 		targetPlacementID := prefixedID("placement")
@@ -129,10 +156,6 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 			continue
 		}
 		targetRunID := prefixedID("run")
-		targetEdge, err := edgeContractSnapshotFromTransitionEdge(edge)
-		if err != nil {
-			return CompleteRunResult{}, err
-		}
 		targetSnapshot, foundSnapshot, err := sourceSnapshot.forNode(targetEdge.TargetNode)
 		if err != nil {
 			return CompleteRunResult{}, err

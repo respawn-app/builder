@@ -61,7 +61,8 @@ SET
     updated_at_unix_ms = ?,
     interrupted_at_unix_ms = ?,
     interruption_reason = ?,
-    interruption_detail_json = ?
+    interruption_detail_json = ?,
+    waiting_ask_id = ''
 WHERE id = ?
   AND run_generation = ?
   AND completed_at_unix_ms = 0
@@ -124,7 +125,6 @@ JOIN workflow_nodes n ON n.id = r.node_id
 WHERE r.task_id = ?
   AND r.completed_at_unix_ms = 0
   AND r.interrupted_at_unix_ms > 0
-  AND r.waiting_ask_id = ''
   AND p.state = 'active'
   AND n.kind = 'agent'
 ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID))
