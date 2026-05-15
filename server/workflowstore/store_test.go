@@ -1325,6 +1325,36 @@ func TestManualMoveContinueSessionRequiresSourceSession(t *testing.T) {
 	}
 }
 
+func TestManualMovePendingApprovalRequiresSourceRun(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	agent := nodeByKey(t, def, "agent")
+
+	_, err = store.ManualMoveTask(ctx, ManualMoveRequest{TaskID: task.ID, TargetNodeID: agent.ID})
+	if err == nil || !strings.Contains(err.Error(), "source run") {
+		t.Fatalf("ManualMoveTask missing source run error = %v, want source run requirement", err)
+	}
+	placements, err := store.ListPlacements(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPlacements: %v", err)
+	}
+	if len(placements) != 1 || placements[0].State != "active" {
+		t.Fatalf("placements after rejected manual move = %+v, want original active placement", placements)
+	}
+}
+
 func TestManualMoveExecutableTargetRequiresApprovalBeforeAutomation(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)

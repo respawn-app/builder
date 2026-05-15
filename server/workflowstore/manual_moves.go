@@ -91,6 +91,9 @@ func (s *Store) ManualMoveTask(ctx context.Context, req ManualMoveRequest) (Manu
 		transitionState = "pending_approval"
 		edgeState = "pending"
 	}
+	if transitionState == "pending_approval" && sourceRunID == "" {
+		return ManualMoveResult{}, errors.New("manual move requiring approval needs a source run")
+	}
 	outputValuesJSON, err := marshalJSON(outputValues)
 	if err != nil {
 		return ManualMoveResult{}, err
