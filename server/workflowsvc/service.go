@@ -15,10 +15,20 @@ type Service struct {
 	view          *workflowview.Service
 	roleResolver  workflow.RoleResolver
 	taskWorktrees taskWorktreeEnsurer
+	runtimeCancel taskRuntimeCanceler
+	schedulerWake schedulerNotifier
 }
 
 type taskWorktreeEnsurer interface {
 	EnsureTaskWorktree(ctx context.Context, taskID string) error
+}
+
+type taskRuntimeCanceler interface {
+	CancelTaskRuns(ctx context.Context, taskID workflow.TaskID) error
+}
+
+type schedulerNotifier interface {
+	Notify()
 }
 
 type Option func(*Service)
@@ -26,6 +36,18 @@ type Option func(*Service)
 func WithTaskWorktreeEnsurer(ensurer taskWorktreeEnsurer) Option {
 	return func(s *Service) {
 		s.taskWorktrees = ensurer
+	}
+}
+
+func WithTaskRuntimeCanceler(canceler taskRuntimeCanceler) Option {
+	return func(s *Service) {
+		s.runtimeCancel = canceler
+	}
+}
+
+func WithSchedulerNotifier(notifier schedulerNotifier) Option {
+	return func(s *Service) {
+		s.schedulerWake = notifier
 	}
 }
 
@@ -219,14 +241,27 @@ func (s *Service) StartTaskAutomation(ctx context.Context, taskID string) (workf
 			return workflowstore.StartTaskResult{}, err
 		}
 	}
-	return s.store.StartTask(ctx, workflow.TaskID(taskID))
+	started, err := s.store.StartTask(ctx, workflow.TaskID(taskID))
+	if err != nil {
+		return workflowstore.StartTaskResult{}, err
+	}
+	if s.schedulerWake != nil {
+		s.schedulerWake.Notify()
+	}
+	return started, nil
 }
 
 func (s *Service) CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	return s.store.CancelTask(ctx, workflow.TaskID(req.TaskID), req.Reason)
+	if err := s.store.CancelTask(ctx, workflow.TaskID(req.TaskID), req.Reason); err != nil {
+		return err
+	}
+	if s.runtimeCancel != nil {
+		return s.runtimeCancel.CancelTaskRuns(ctx, workflow.TaskID(req.TaskID))
+	}
+	return nil
 }
 
 func (s *Service) AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {

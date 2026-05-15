@@ -142,10 +142,14 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 		detail.Placements = append(detail.Placements, placementDTO(placement))
 	}
 	for _, run := range runs {
-		detail.Runs = append(detail.Runs, serverapi.WorkflowRun{ID: run.ID, TaskID: run.TaskID, PlacementID: run.PlacementID, NodeID: run.NodeID, CompletedAtUnixMs: run.CompletedAtUnixMs, InterruptedAtUnixMs: run.InterruptedAtUnixMs, InterruptionReason: run.InterruptionReason})
+		detail.Runs = append(detail.Runs, serverapi.WorkflowRun{ID: run.ID, TaskID: run.TaskID, PlacementID: run.PlacementID, NodeID: run.NodeID, SessionID: run.SessionID.String, Generation: run.RunGeneration, StartedAtUnixMs: run.StartedAtUnixMs, CompletedAtUnixMs: run.CompletedAtUnixMs, InterruptedAtUnixMs: run.InterruptedAtUnixMs, InterruptionReason: run.InterruptionReason})
 	}
 	for _, transition := range transitions {
-		dto := serverapi.WorkflowTaskTransition{ID: transition.ID, TaskID: transition.TaskID, TransitionID: transition.TransitionID, State: transition.State, Commentary: transition.Commentary, CreatedAt: transition.CreatedAtUnixMs}
+		outputs := map[string]string{}
+		if err := decodeJSON(transition.OutputValuesJson, &outputs); err != nil {
+			return serverapi.WorkflowTaskDetail{}, err
+		}
+		dto := serverapi.WorkflowTaskTransition{ID: transition.ID, TaskID: transition.TaskID, TransitionID: transition.TransitionID, State: transition.State, Commentary: transition.Commentary, OutputValues: outputs, CreatedAt: transition.CreatedAtUnixMs}
 		edges, err := s.queries.ListTaskTransitionEdges(ctx, transition.ID)
 		if err != nil {
 			return serverapi.WorkflowTaskDetail{}, err

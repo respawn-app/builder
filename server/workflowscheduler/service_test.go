@@ -100,6 +100,36 @@ func TestSchedulerStartProcessesRebuiltRunnableWork(t *testing.T) {
 	}
 }
 
+func TestSchedulerStartProcessesRunnableWorkCreatedAfterStartup(t *testing.T) {
+	ctx := context.Background()
+	store, binding, _ := newSchedulerTestStore(t)
+	workflowID := createSchedulerValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	starter := &recordingStarter{}
+	scheduler, err := New(store, starter, Config{Concurrency: 1}, WithProcessInterval(10*time.Millisecond))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = scheduler.Close() })
+	if err := scheduler.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	startedRun := createAndStartSchedulerTask(t, ctx, store, binding.ProjectID)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		started := starter.requests()
+		if len(started) == 1 && started[0].RunID == startedRun.RunID {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("scheduler did not process post-start runnable run; requests=%+v", starter.requests())
+}
+
 func TestSchedulerDoesNotScheduleCanceledOrInterruptedTasks(t *testing.T) {
 	ctx := context.Background()
 	store, binding, _ := newSchedulerTestStore(t)

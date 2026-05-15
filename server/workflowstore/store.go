@@ -102,17 +102,18 @@ type ProjectWorkflowLinkRecord struct {
 }
 
 type TaskRecord struct {
-	ID            workflow.TaskID
-	ProjectID     string
-	WorkflowID    workflow.WorkflowID
-	LinkID        string
-	ShortID       string
-	Title         string
-	Body          string
-	SourceURL     string
-	CanceledAt    int64
-	CancelReason  string
-	GraphRevision int64
+	ID                workflow.TaskID
+	ProjectID         string
+	WorkflowID        workflow.WorkflowID
+	LinkID            string
+	ShortID           string
+	Title             string
+	Body              string
+	SourceURL         string
+	ManagedWorktreeID string
+	CanceledAt        int64
+	CancelReason      string
+	GraphRevision     int64
 }
 
 type PlacementRecord struct {
@@ -144,12 +145,25 @@ type RunnableRunRecord struct {
 	WorkflowRevisionSeen int64
 }
 
+type RunStartContext struct {
+	Run           RunRecord
+	Task          TaskRecord
+	Node          NodeRecord
+	TransitionIDs []string
+	InputValues   map[string]string
+	WorkspaceID   string
+	WorkspaceRoot string
+	WorktreeID    string
+	WorktreeRoot  string
+}
+
 type TransitionRecord struct {
 	ID           workflow.TransitionID
 	TaskID       workflow.TaskID
 	TransitionID string
 	State        string
 	Commentary   string
+	OutputValues map[string]string
 	CreatedAt    int64
 }
 

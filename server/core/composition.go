@@ -27,6 +27,7 @@ import (
 	"builder/server/sessionview"
 	"builder/server/storagemigration"
 	"builder/server/updatestatus"
+	"builder/server/workflowrunner"
 	"builder/server/workflowscheduler"
 	"builder/server/workflowstore"
 	"builder/server/workflowsvc"
@@ -138,15 +139,21 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: view: %w", err)
 	}
-	workflowService, err := workflowsvc.New(workflowStore, workflowViewService, workflowRoleResolver, workflowsvc.WithTaskWorktreeEnsurer(taskWorktreeEnsurer{service: worktreeService}))
+	workflowRuntimeStarter, err := workflowrunner.NewStarter(cfg, metadataStore, workflowStore, authSupport.AuthManager, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, workflowrunner.StarterOptions{Worktrees: taskWorktreeEnsurer{service: worktreeService}})
 	if err != nil {
 		cleanupNewFailure()
-		return nil, fmt.Errorf("workflow bundle: service: %w", err)
+		return nil, fmt.Errorf("workflow bundle: runtime starter: %w", err)
 	}
-	workflowScheduler, err := workflowscheduler.New(workflowStore, nil, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency})
+	workflowScheduler, err := workflowscheduler.New(workflowStore, workflowRuntimeStarter, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency})
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: scheduler: %w", err)
+	}
+	workflowRuntimeStarter.SetRuntimeFinished(workflowScheduler.RuntimeFinished)
+	workflowService, err := workflowsvc.New(workflowStore, workflowViewService, workflowRoleResolver, workflowsvc.WithTaskWorktreeEnsurer(taskWorktreeEnsurer{service: worktreeService}), workflowsvc.WithTaskRuntimeCanceler(workflowRuntimeStarter), workflowsvc.WithSchedulerNotifier(workflowScheduler))
+	if err != nil {
+		cleanupNewFailure()
+		return nil, fmt.Errorf("workflow bundle: service: %w", err)
 	}
 	core := &Core{bundles: composeBundles(bundleCompositionInput{
 		cfg:                     cfg,
@@ -174,6 +181,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		updateStatusService:     updateStatusService,
 		workflowService:         workflowService,
 		workflowScheduler:       workflowScheduler,
+		workflowRuntimeStarter:  workflowRuntimeStarter,
 		worktreeService:         worktreeService,
 	})}
 	if strings.TrimSpace(cfg.WorkspaceRoot) != "" {

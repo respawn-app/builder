@@ -181,6 +181,14 @@ func TestServiceStartTaskAutomationValidatesEnsuresWorktreeAndRecordsRunnableRun
 	if len(runs) != 1 || runs[0].ID != workflow.RunID(started.RunID) || runs[0].AutomationRequestedAt == 0 {
 		t.Fatalf("runs after automation = %+v", runs)
 	}
+	notifier := &recordingSchedulerNotifier{}
+	service.schedulerWake = notifier
+	if _, err := service.StartTaskAutomation(ctx, task.Task.ID); err == nil {
+		t.Fatalf("expected second start to fail")
+	}
+	if notifier.count != 0 {
+		t.Fatalf("scheduler notified on failed start")
+	}
 	transitions, err := service.store.ListTransitions(ctx, workflow.TaskID(task.Task.ID))
 	if err != nil {
 		t.Fatalf("ListTransitions: %v", err)
@@ -188,6 +196,70 @@ func TestServiceStartTaskAutomationValidatesEnsuresWorktreeAndRecordsRunnableRun
 	if len(transitions) != 1 || transitions[0].TransitionID != "start" {
 		t.Fatalf("start transition not applied: %+v", transitions)
 	}
+}
+
+func TestServiceStartTaskAutomationNotifiesScheduler(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	notifier := &recordingSchedulerNotifier{}
+	service.schedulerWake = notifier
+
+	if _, err := service.StartTaskAutomation(ctx, task.Task.ID); err != nil {
+		t.Fatalf("StartTaskAutomation: %v", err)
+	}
+	if notifier.count != 1 {
+		t.Fatalf("scheduler notifications = %d, want 1", notifier.count)
+	}
+}
+
+func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	if _, err := service.StartTaskAutomation(ctx, task.Task.ID); err != nil {
+		t.Fatalf("StartTaskAutomation: %v", err)
+	}
+	canceler := &recordingTaskRuntimeCanceler{}
+	service.runtimeCancel = canceler
+
+	if err := service.CancelWorkflowTask(ctx, serverapi.WorkflowTaskCancelRequest{TaskID: task.Task.ID, Reason: "stop"}); err != nil {
+		t.Fatalf("CancelWorkflowTask: %v", err)
+	}
+	if len(canceler.taskIDs) != 1 || canceler.taskIDs[0] != workflow.TaskID(task.Task.ID) {
+		t.Fatalf("canceled tasks = %+v", canceler.taskIDs)
+	}
+}
+
+type recordingSchedulerNotifier struct {
+	count int
+}
+
+func (n *recordingSchedulerNotifier) Notify() {
+	n.count++
+}
+
+type recordingTaskRuntimeCanceler struct {
+	taskIDs []workflow.TaskID
+}
+
+func (c *recordingTaskRuntimeCanceler) CancelTaskRuns(_ context.Context, taskID workflow.TaskID) error {
+	c.taskIDs = append(c.taskIDs, taskID)
+	return nil
 }
 
 type recordingTaskWorktreeEnsurer struct {

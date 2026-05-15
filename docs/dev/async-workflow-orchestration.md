@@ -158,7 +158,7 @@ Use opaque server-generated row IDs for internal primary keys. Use human/model-f
 
 Workflow node runs need dedicated developer instructions, similar to headless/subagent mode prompts. Add a prompt source such as `prompts/workflow_mode_prompt.md` and inject it only for workflow runs.
 
-Injection point: `server/workflowruntime` should use the same session launch/runtime wiring path extracted from `builder run`/headless mode. Inject `workflow_mode_prompt.md` as a developer-role mode prompt during runtime preparation, after the generic headless/subagent mode context is established and before the workflow node prompt is submitted. Scheduler and CLI code must not assemble duplicate workflow-mode prompts.
+Injection point: workflow runtime preparation should use the same session launch/runtime wiring path extracted from `builder run`/headless mode. `server/workflowruntime` owns completion contracts used by `server/runtime`; `server/workflowrunner` owns scheduler-to-session/runtime wiring so it can import `runtimewire`/headless helpers without creating a `runtime -> workflowruntime -> runtime` cycle. Inject `workflow_mode_prompt.md` as a developer-role mode prompt during runtime preparation, after the generic headless/subagent mode context is established and before the workflow node prompt is submitted. Scheduler and CLI code must not assemble duplicate workflow-mode prompts.
 
 The prompt must explain:
 
@@ -230,7 +230,8 @@ Add a server-owned workflow orchestration layer above sessions/runtimes:
 - `server/workflowstore`: metadata-store adapter and typed transactional persistence methods.
 - `server/workflowsvc`: application/use-case orchestration for workflow/task CRUD, task creation, task start, comments, approvals, manual moves, validation, cancellation, and resume.
 - `server/workflowscheduler`: runnable derivation, global concurrency, startup reconciliation, worker ownership, and scheduler lifecycle.
-- `server/workflowruntime`: execution adapter that prepares sessions, starts/resumes node runs, injects node prompts, handles workflow completion, and applies context-preservation modes.
+- `server/workflowruntime`: workflow completion/runtime contracts shared with `server/runtime`, including completion mode selection, schemas, controllers, and protocol validation helpers.
+- `server/workflowrunner`: execution adapter that prepares sessions, starts/resumes node runs, binds task worktrees, injects node prompts through runtime config, handles scheduler runtime lifecycle, and applies context-preservation modes.
 - `server/workflowview`: read-model service for project boards, task detail, run/transition history, and CLI-friendly views.
 - `shared/serverapi/workflow.go`: serializable request/response DTOs and validation for workflow/task APIs.
 - `shared/servicecontract`: workflow service interfaces following existing route-shaped contract pattern.

@@ -27,7 +27,7 @@ Do not treat this as a replacement for the spec. If spec and checklist conflict,
 Checked before implementation in this worktree:
 
 - `server/workflow` does not exist yet and is the locked pure domain package for Slice 1.
-- `server/workflowstore`, `server/workflowsvc`, `server/workflowscheduler`, `server/workflowruntime`, and `server/workflowview` do not exist yet and are intended package additions in later slices.
+- `server/workflowstore`, `server/workflowsvc`, `server/workflowscheduler`, `server/workflowruntime`, `server/workflowrunner`, and `server/workflowview` do not exist yet and are intended package additions in later slices.
 - Existing metadata paths are `server/metadata/migrations`, `server/metadata/queries.sql`, `server/metadata/store.go`, and `server/metadata/sqlitegen`.
 - Existing shared boundary paths are `shared/serverapi`, `shared/servicecontract`, and `shared/client`.
 - Existing transport path is `server/transport`.
@@ -648,8 +648,8 @@ Define this boundary before Slice 7 implementation, then reuse it in Slice 8. Fa
 - [x] Define fake provider/model adapter interface before Slice 7 runtime integration tests.
 - [x] Adapter must simulate model output and tool calls without provider network calls.
 - [x] Adapter must expose deterministic scripted steps: final answer, tool-call batch, `ask_question`, runtime error, and cancellation where needed by tests.
-- [ ] Adapter must record session/run/worktree inputs so tests can assert prompt/context/worktree behavior.
-- [ ] At least one Slice 8 vertical integration path must feed fake model output through the real runtime step loop and real workflow completion handling.
+- [x] Adapter must record session/run/worktree inputs so tests can assert prompt/context/worktree behavior.
+- [x] At least one Slice 8 vertical integration path must feed fake model output through the real runtime step loop and real workflow completion handling.
 - [x] Real-provider smoke must remain outside automated tests and behind Nikita approval.
 
 ## Slice 7: Workflow Prompting And Completion Runtime
@@ -733,42 +733,42 @@ Goal: one executable workflow node can run asynchronously through scheduler/sess
 
 ### 8.1 Red Tests
 
-- [ ] Add integration test for `backlog(start) -> agent -> done(terminal)`.
-- [ ] Add test task creation then explicit `task start` action marks first executable run runnable without relying on full manual-move semantics.
-- [ ] Add test scheduling executable node ensures task worktree.
-- [ ] Add test scheduler start creates new Builder session.
-- [ ] Add test workflow-mode prompt includes task title/body, node identity, completion mode, and bound transition output values.
-- [ ] Add fake provider/model flow that drives real runtime step loop and structured-output completion.
-- [ ] Add fake provider/model flow that drives real runtime step loop and dynamic `complete_node` completion.
-- [ ] Add test transition application moves task to done terminal node.
-- [ ] Add test commentary and output values stored in transition log.
-- [ ] Add test no full `events.jsonl` read occurs.
-- [ ] Add CLI-backed integration/smoke test if practical.
-- [ ] Add test executable run is not started if role disappeared after workflow validation.
-- [ ] Add test role-drift blocker surfaces stable validation code.
-- [ ] Add test worker starts and stops with server core lifecycle.
-- [ ] Add test shutdown cancels in-flight fake run and preserves interrupted state.
-- [ ] Add test two workers do not double-start same run.
+- [x] Add integration test for `backlog(start) -> agent -> done(terminal)`.
+- [x] Add test task creation then explicit `task start` action marks first executable run runnable without relying on full manual-move semantics.
+- [x] Add test scheduling executable node ensures task worktree.
+- [x] Add test scheduler start creates new Builder session.
+- [x] Add test workflow-mode prompt includes task title/body, node identity, completion mode, and bound transition output values.
+- [x] Add fake provider/model flow that drives real runtime step loop and structured-output completion.
+- [x] Add fake provider/model flow that drives real runtime step loop and dynamic `complete_node` completion.
+- [x] Add test transition application moves task to done terminal node.
+- [x] Add test commentary and output values stored in transition log.
+- [x] Add test no full `events.jsonl` read occurs.
+- [x] Add CLI-backed integration/smoke test if practical. Not rerun for Slice 8 because automated fake-model backend integration covers the async runtime path without provider calls; CLI/API harness was already covered in Slice 4 and Slice 5.5.
+- [x] Add test executable run is not started if role disappeared after workflow validation.
+- [x] Add test role-drift blocker surfaces stable validation code.
+- [x] Add test worker starts and stops with server core lifecycle.
+- [x] Add test shutdown cancels in-flight fake run and preserves interrupted state.
+- [x] Add test two workers do not double-start same run.
 
 ### 8.2 Implementation
 
-- [ ] Add workflow worker loop owned by server core lifecycle.
-- [ ] Add server-owned runtime activation/resume path, reusing suitable `builder run`/headless launch and runtime wiring pieces; do not fake frontend controller lease.
-- [ ] Add new-session creation path for workflow run.
-- [ ] Inject workflow node prompt/developer guidance.
-- [ ] Ensure task worktree before workspace-requiring executable run.
-- [ ] Connect runnable scheduler selection to runtime start.
-- [ ] Connect valid structured-output and dynamic-tool completion to transition application.
-- [ ] Mark source run/placement completed.
-- [ ] Create terminal placement on done node.
-- [ ] Surface run state in board/task read models.
+- [x] Add workflow worker loop owned by server core lifecycle.
+- [x] Add server-owned runtime activation/resume path, reusing suitable `builder run`/headless launch and runtime wiring pieces; do not fake frontend controller lease.
+- [x] Add new-session creation path for workflow run.
+- [x] Inject workflow node prompt/developer guidance.
+- [x] Ensure task worktree before workspace-requiring executable run.
+- [x] Connect runnable scheduler selection to runtime start.
+- [x] Connect valid structured-output and dynamic-tool completion to transition application.
+- [x] Mark source run/placement completed.
+- [x] Create terminal placement on done node.
+- [x] Surface run state in board/task read models.
 
 ### 8.3 Automated Verification
 
-- [ ] Run integration test with fake provider/model adapter through real runtime/tool handling.
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/worktree/... ./server/runtime/... ./server/metadata/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Confirm no real provider calls happened.
+- [x] Run integration test with fake provider/model adapter through real runtime/tool handling.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowrunner/... ./server/worktree/... ./server/runtime/... ./server/metadata/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Confirm no real provider calls happened.
 - [ ] Commit slice with message like `feat: run workflow agent node`.
 
 ### 8.4 Nikita Approval Gate

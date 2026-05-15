@@ -25,6 +25,7 @@ import (
 	"builder/server/sessionview"
 	shelltool "builder/server/tools/shell"
 	"builder/server/updatestatus"
+	"builder/server/workflowrunner"
 	"builder/server/workflowscheduler"
 	"builder/server/workflowsvc"
 	"builder/server/worktree"
@@ -196,6 +197,7 @@ type bundleCompositionInput struct {
 	updateStatusService     *updatestatus.Service
 	workflowService         *workflowsvc.Service
 	workflowScheduler       *workflowscheduler.Service
+	workflowRuntimeStarter  *workflowrunner.Starter
 	worktreeService         *worktree.Service
 }
 
@@ -206,6 +208,12 @@ func composeBundles(in bundleCompositionInput) *Bundles {
 			{name: "persistence root lock", close: in.rootLease.Close},
 			{name: "metadata store", close: in.metadataStore.Close},
 			{name: "background manager", close: in.runtimeSupport.Background.Close},
+			{name: "workflow runtime starter", close: func() error {
+				if in.workflowRuntimeStarter == nil {
+					return nil
+				}
+				return in.workflowRuntimeStarter.Close()
+			}},
 			{name: "workflow scheduler", close: func() error {
 				if in.workflowScheduler == nil {
 					return nil

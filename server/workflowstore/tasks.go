@@ -629,6 +629,42 @@ func (s *Store) InterruptRun(ctx context.Context, runID workflow.RunID, reason s
 	return nil
 }
 
+func (s *Store) InterruptRunGeneration(ctx context.Context, runID workflow.RunID, generation int64, reason string, detailJSON string) error {
+	if strings.TrimSpace(detailJSON) == "" {
+		detailJSON = "{}"
+	}
+	now := s.now().UnixMilli()
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    interrupted_at_unix_ms = ?,
+    interruption_reason = ?,
+    interruption_detail_json = ?
+WHERE id = ?
+  AND run_generation = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0`,
+		now,
+		now,
+		strings.TrimSpace(reason),
+		detailJSON,
+		string(runID),
+		generation,
+	)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) ReconcileStartedRuns(ctx context.Context, reason string) (int64, error) {
 	now := s.now().UnixMilli()
 	return s.queries.InterruptStartedWorkflowRunsForRecovery(ctx, sqlitegen.InterruptStartedWorkflowRunsForRecoveryParams{UpdatedAtUnixMs: now, InterruptedAtUnixMs: now, InterruptionReason: strings.TrimSpace(reason), InterruptionDetailJson: "{}"})
@@ -646,6 +682,166 @@ func (s *Store) ListWaitingAskRuns(ctx context.Context) ([]RunRecord, error) {
 	return out, nil
 }
 
+func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (RunStartContext, error) {
+	run, err := s.queries.GetTaskRun(ctx, string(runID))
+	if err != nil {
+		return RunStartContext{}, err
+	}
+	task, err := s.queries.GetTask(ctx, run.TaskID)
+	if err != nil {
+		return RunStartContext{}, err
+	}
+	snapshot := runStartSnapshot{}
+	if err := unmarshalJSON(run.RunStartSnapshotJson, &snapshot); err != nil {
+		return RunStartContext{}, err
+	}
+	inputValues, err := s.resolveRunInputValues(ctx, run.PlacementID, taskRecordFromTask(task))
+	if err != nil {
+		return RunStartContext{}, err
+	}
+	worktreeID := strings.TrimSpace(task.ManagedWorktreeID.String)
+	if worktreeID == "" {
+		return RunStartContext{
+			Run:           runRecordFromTaskRun(run),
+			Task:          taskRecordFromTask(task),
+			Node:          nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+			TransitionIDs: transitionIDsFromSnapshot(snapshot),
+			InputValues:   inputValues,
+		}, nil
+	}
+	worktree, err := s.metadata.GetWorktreeRecordByID(ctx, worktreeID)
+	if err != nil {
+		return RunStartContext{}, err
+	}
+	workspace, err := s.metadata.GetWorkspaceByID(ctx, worktree.WorkspaceID)
+	if err != nil {
+		return RunStartContext{}, err
+	}
+	return RunStartContext{
+		Run:           runRecordFromTaskRun(run),
+		Task:          taskRecordFromTask(task),
+		Node:          nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+		TransitionIDs: transitionIDsFromSnapshot(snapshot),
+		InputValues:   inputValues,
+		WorkspaceID:   workspace.ID,
+		WorkspaceRoot: workspace.CanonicalRootPath,
+		WorktreeID:    worktree.ID,
+		WorktreeRoot:  worktree.CanonicalRoot,
+	}, nil
+}
+
+func (s *Store) resolveRunInputValues(ctx context.Context, placementID string, task TaskRecord) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+    tr.commentary,
+    tr.output_values_json,
+    te.input_bindings_json
+FROM task_node_placements p
+JOIN task_transitions tr ON tr.id = p.created_by_transition_id
+JOIN task_transition_edges te
+    ON te.task_transition_id = tr.id
+    AND te.target_placement_id = p.id
+WHERE p.id = ?
+ORDER BY te.rowid ASC
+LIMIT 1`, placementID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workflow run input values: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return map[string]string{}, nil
+	}
+	var commentary, outputValuesJSON, inputBindingsJSON string
+	if err := rows.Scan(&commentary, &outputValuesJSON, &inputBindingsJSON); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	outputValues := map[string]string{}
+	if err := unmarshalJSON(outputValuesJSON, &outputValues); err != nil {
+		return nil, err
+	}
+	bindings := []workflow.InputBinding{}
+	if err := unmarshalJSON(inputBindingsJSON, &bindings); err != nil {
+		return nil, err
+	}
+	return resolveInputBindingValues(task, commentary, outputValues, bindings), nil
+}
+
+func resolveInputBindingValues(task TaskRecord, commentary string, outputValues map[string]string, bindings []workflow.InputBinding) map[string]string {
+	if len(bindings) == 0 {
+		return map[string]string{}
+	}
+	values := make(map[string]string, len(bindings))
+	for _, binding := range bindings {
+		name := strings.TrimSpace(binding.Name)
+		if name == "" {
+			continue
+		}
+		switch binding.Source {
+		case workflow.BindingSourceTask:
+			values[name] = taskInputBindingValue(task, binding.Field)
+		case workflow.BindingSourceTransitionOutput:
+			field := strings.TrimSpace(binding.Field)
+			if field == "commentary" {
+				values[name] = commentary
+			} else {
+				values[name] = outputValues[field]
+			}
+		}
+	}
+	return values
+}
+
+func taskInputBindingValue(task TaskRecord, field string) string {
+	switch strings.TrimSpace(field) {
+	case "short_id":
+		return task.ShortID
+	case "title":
+		return task.Title
+	case "body":
+		return task.Body
+	case "source_url":
+		return task.SourceURL
+	default:
+		return ""
+	}
+}
+
+func (s *Store) AttachRunSession(ctx context.Context, runID workflow.RunID, expectedGeneration int64, sessionID string) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    session_id = ?
+WHERE id = ?
+  AND run_generation = ?
+  AND started_at_unix_ms > 0
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND session_id IS NULL`,
+		s.now().UnixMilli(),
+		strings.TrimSpace(sessionID),
+		string(runID),
+		expectedGeneration,
+	)
+	if err != nil {
+		return fmt.Errorf("attach workflow run session: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) ListTransitions(ctx context.Context, taskID workflow.TaskID) ([]TransitionRecord, error) {
 	rows, err := s.queries.ListTaskTransitions(ctx, string(taskID))
 	if err != nil {
@@ -653,7 +849,11 @@ func (s *Store) ListTransitions(ctx context.Context, taskID workflow.TaskID) ([]
 	}
 	out := make([]TransitionRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, TransitionRecord{ID: workflow.TransitionID(row.ID), TaskID: workflow.TaskID(row.TaskID), TransitionID: row.TransitionID, State: row.State, Commentary: row.Commentary, CreatedAt: row.CreatedAtUnixMs})
+		outputs := map[string]string{}
+		if err := unmarshalJSON(row.OutputValuesJson, &outputs); err != nil {
+			return nil, err
+		}
+		out = append(out, TransitionRecord{ID: workflow.TransitionID(row.ID), TaskID: workflow.TaskID(row.TaskID), TransitionID: row.TransitionID, State: row.State, Commentary: row.Commentary, OutputValues: outputs, CreatedAt: row.CreatedAtUnixMs})
 	}
 	return out, nil
 }
@@ -696,6 +896,47 @@ func runRecordFromTaskRun(row sqlitegen.TaskRun) RunRecord {
 		FinalAnswerViolations: row.FinalAnswerViolationCount,
 		InvalidCompletions:    row.InvalidCompletionCount,
 	}
+}
+
+func taskRecordFromTask(row sqlitegen.Task) TaskRecord {
+	return TaskRecord{
+		ID:                workflow.TaskID(row.ID),
+		ProjectID:         row.ProjectID,
+		WorkflowID:        workflow.WorkflowID(row.WorkflowID),
+		LinkID:            row.ProjectWorkflowLinkID,
+		ShortID:           row.ShortID,
+		Title:             row.Title,
+		Body:              row.Body,
+		SourceURL:         row.SourceUrl,
+		ManagedWorktreeID: strings.TrimSpace(row.ManagedWorktreeID.String),
+		CanceledAt:        row.CanceledAtUnixMs,
+		CancelReason:      row.CancellationReason,
+		GraphRevision:     row.WorkflowRevisionSeen,
+	}
+}
+
+func nodeRecordFromSnapshot(node nodeContractSnapshot, workflowID workflow.WorkflowID) NodeRecord {
+	return NodeRecord{
+		ID:             node.ID,
+		WorkflowID:     workflowID,
+		Key:            node.Key,
+		Kind:           node.Kind,
+		DisplayName:    node.DisplayName,
+		SubagentRole:   node.SubagentRole,
+		PromptTemplate: node.PromptTemplate,
+		OutputFields:   append([]workflow.OutputField(nil), node.OutputFields...),
+	}
+}
+
+func transitionIDsFromSnapshot(snapshot runStartSnapshot) []string {
+	out := make([]string, 0, len(snapshot.TransitionGroups))
+	for _, group := range snapshot.TransitionGroups {
+		id := strings.TrimSpace(group.TransitionID)
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (s *Store) resolveTaskWorkflowLink(ctx context.Context, projectID string, workflowID workflow.WorkflowID) (sqlitegen.ProjectWorkflowLink, error) {

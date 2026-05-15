@@ -352,6 +352,9 @@ type WorkflowRun struct {
 	TaskID              string `json:"task_id"`
 	PlacementID         string `json:"placement_id"`
 	NodeID              string `json:"node_id"`
+	SessionID           string `json:"session_id,omitempty"`
+	Generation          int64  `json:"generation"`
+	StartedAtUnixMs     int64  `json:"started_at_unix_ms"`
 	CompletedAtUnixMs   int64  `json:"completed_at_unix_ms"`
 	InterruptedAtUnixMs int64  `json:"interrupted_at_unix_ms"`
 	InterruptionReason  string `json:"interruption_reason,omitempty"`
@@ -363,6 +366,7 @@ type WorkflowTaskTransition struct {
 	TransitionID string                   `json:"transition_id"`
 	State        string                   `json:"state"`
 	Commentary   string                   `json:"commentary,omitempty"`
+	OutputValues map[string]string        `json:"output_values,omitempty"`
 	CreatedAt    int64                    `json:"created_at_unix_ms"`
 	Edges        []WorkflowTransitionEdge `json:"edges,omitempty"`
 }

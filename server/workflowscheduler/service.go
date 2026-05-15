@@ -18,10 +18,13 @@ const (
 	ReasonStartupOrphanedRun    = "workflow_startup_orphaned_run"
 )
 
+var ErrStopped = errors.New("workflow scheduler stopped")
+
 type Store interface {
 	ListRunnableRuns(ctx context.Context, limit int64) ([]workflowstore.RunnableRunRecord, error)
 	ClaimRun(ctx context.Context, runID workflow.RunID, expectedGeneration int64) (workflowstore.RunnableRunRecord, error)
 	InterruptRun(ctx context.Context, runID workflow.RunID, reason string, detailJSON string) error
+	InterruptRunGeneration(ctx context.Context, runID workflow.RunID, generation int64, reason string, detailJSON string) error
 	ReconcileStartedRuns(ctx context.Context, reason string) (int64, error)
 	ListWaitingAskRuns(ctx context.Context) ([]workflowstore.RunRecord, error)
 }
@@ -57,12 +60,16 @@ type Service struct {
 	concurrency        int
 	claimRetries       int
 	claimBackoff       time.Duration
+	processInterval    time.Duration
 	logger             Logger
 
-	mu      sync.Mutex
-	active  map[workflow.RunID]StartRunRequest
-	stopped bool
-	started bool
+	mu         sync.Mutex
+	active     map[workflow.RunID]StartRunRequest
+	stopped    bool
+	started    bool
+	loopCancel context.CancelFunc
+	loopWG     sync.WaitGroup
+	wake       chan struct{}
 }
 
 func New(store Store, starter RuntimeStarter, cfg Config, opts ...Option) (*Service, error) {
@@ -73,7 +80,7 @@ func New(store Store, starter RuntimeStarter, cfg Config, opts ...Option) (*Serv
 	if concurrency <= 0 {
 		concurrency = 1
 	}
-	service := &Service{store: store, starter: starter, concurrency: concurrency, claimRetries: 3, claimBackoff: 10 * time.Millisecond, active: map[workflow.RunID]StartRunRequest{}}
+	service := &Service{store: store, starter: starter, concurrency: concurrency, claimRetries: 3, claimBackoff: 10 * time.Millisecond, processInterval: 500 * time.Millisecond, active: map[workflow.RunID]StartRunRequest{}, wake: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(service)
 	}
@@ -105,6 +112,14 @@ func WithClaimBackoff(retries int, backoff time.Duration) Option {
 	}
 }
 
+func WithProcessInterval(interval time.Duration) Option {
+	return func(s *Service) {
+		if interval > 0 {
+			s.processInterval = interval
+		}
+	}
+}
+
 func (s *Service) Start(ctx context.Context) error {
 	if s == nil {
 		return errors.New("workflow scheduler is required")
@@ -112,14 +127,35 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
-		return errors.New("workflow scheduler stopped")
+		return ErrStopped
 	}
-	s.started = true
+	if s.started {
+		s.mu.Unlock()
+		return s.Process(ctx)
+	}
 	s.mu.Unlock()
 	if err := s.Reconcile(ctx); err != nil {
 		return err
 	}
-	return s.Process(ctx)
+	if err := s.Process(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return ErrStopped
+	}
+	if s.started {
+		s.mu.Unlock()
+		return nil
+	}
+	loopCtx, cancel := context.WithCancel(context.Background())
+	s.loopCancel = cancel
+	s.loopWG.Add(1)
+	s.started = true
+	s.mu.Unlock()
+	go s.runLoop(loopCtx)
+	return nil
 }
 
 func (s *Service) Close() error {
@@ -127,8 +163,13 @@ func (s *Service) Close() error {
 		return nil
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.stopped = true
+	cancel := s.loopCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.loopWG.Wait()
 	return nil
 }
 
@@ -150,10 +191,47 @@ func (s *Service) ActiveCount() int {
 	return len(s.active)
 }
 
-func (s *Service) RuntimeFinished(runID workflow.RunID) {
+func (s *Service) RuntimeFinished(runID workflow.RunID, generation int64) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.active, runID)
+	current, ok := s.active[runID]
+	if ok && current.Generation == generation {
+		delete(s.active, runID)
+	}
+	s.mu.Unlock()
+	s.Notify()
+}
+
+func (s *Service) Notify() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		return
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) runLoop(ctx context.Context) {
+	defer s.loopWG.Done()
+	ticker := time.NewTicker(s.processInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.wake:
+		case <-ticker.C:
+		}
+		if err := s.Process(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrStopped) {
+			s.logf("workflow.scheduler.process_error error=%q", err.Error())
+		}
+	}
 }
 
 func (s *Service) Reconcile(ctx context.Context) error {
@@ -193,7 +271,7 @@ func (s *Service) Process(ctx context.Context) error {
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
-		return errors.New("workflow scheduler stopped")
+		return ErrStopped
 	}
 	if s.starter == nil {
 		s.mu.Unlock()
@@ -212,7 +290,7 @@ func (s *Service) Process(ctx context.Context) error {
 		s.mu.Lock()
 		if s.stopped {
 			s.mu.Unlock()
-			return errors.New("workflow scheduler stopped")
+			return ErrStopped
 		}
 		if len(s.active) >= s.concurrency {
 			s.mu.Unlock()
@@ -222,10 +300,13 @@ func (s *Service) Process(ctx context.Context) error {
 			s.mu.Unlock()
 			continue
 		}
+		reserved := StartRunRequest{RunID: candidate.ID, TaskID: candidate.TaskID, PlacementID: candidate.PlacementID, NodeID: candidate.NodeID, Generation: candidate.Generation}
+		s.active[candidate.ID] = reserved
 		s.mu.Unlock()
 
 		claimed, err := s.claimRunWithRetry(ctx, candidate)
 		if err != nil {
+			s.RuntimeFinished(candidate.ID, candidate.Generation)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -233,16 +314,17 @@ func (s *Service) Process(ctx context.Context) error {
 		}
 		req := StartRunRequest{RunID: claimed.ID, TaskID: claimed.TaskID, PlacementID: claimed.PlacementID, NodeID: claimed.NodeID, Generation: claimed.Generation}
 		s.logf("workflow.scheduler.selection run_id=%s task_id=%s generation=%d action=start", req.RunID, req.TaskID, req.Generation)
+		s.mu.Lock()
+		s.active[claimed.ID] = req
+		s.mu.Unlock()
 		if err := s.starter.StartWorkflowRun(ctx, req); err != nil {
+			s.RuntimeFinished(claimed.ID, claimed.Generation)
 			s.logf("workflow.scheduler.runtime_start run_id=%s action=interrupt reason=%s", claimed.ID, ReasonRuntimeStartFailed)
-			if interruptErr := s.store.InterruptRun(ctx, claimed.ID, ReasonRuntimeStartFailed, fmt.Sprintf(`{"error":%q}`, err.Error())); interruptErr != nil {
+			if interruptErr := s.store.InterruptRunGeneration(context.WithoutCancel(ctx), claimed.ID, claimed.Generation, ReasonRuntimeStartFailed, fmt.Sprintf(`{"error":%q}`, err.Error())); interruptErr != nil {
 				return errors.Join(err, interruptErr)
 			}
 			return err
 		}
-		s.mu.Lock()
-		s.active[claimed.ID] = req
-		s.mu.Unlock()
 	}
 	return nil
 }
