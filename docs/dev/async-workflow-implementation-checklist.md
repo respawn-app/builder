@@ -928,40 +928,40 @@ Goal: operationally usable workflow backend ready for GUI-driven QA.
 
 ### 13.1 Red Tests
 
-- [ ] Add restart test for runnable work rebuild.
-- [ ] Add restart test for orphaned started run becoming interrupted.
-- [ ] Add restart test for interrupted run staying interrupted.
-- [ ] Add restart test for waiting-for-question.
-- [ ] Add restart test for pending approval.
-- [ ] Add test canceled task remains unscheduled after restart.
-- [ ] Add test resume interrupted run continues same session/run/worktree.
-- [ ] Add test scheduling validation blocker records interrupted reason metadata.
-- [ ] Add test user cancel records interrupted outcome with cancel reason.
-- [ ] Add test runtime error records interrupted outcome with error reason.
-- [ ] Add test role drift at scheduling time.
-- [ ] Add test role drift at resume time.
-- [ ] Add test CLI/API surfaces stable error code.
+- [x] Add restart test for runnable work rebuild.
+- [x] Add restart test for orphaned started run becoming interrupted.
+- [x] Add restart test for interrupted run staying interrupted.
+- [x] Add restart test for waiting-for-question.
+- [x] Add restart test for pending approval.
+- [x] Add test canceled task remains unscheduled after restart.
+- [x] Add test resume interrupted run continues same session/run/worktree.
+- [x] Add test scheduling validation blocker records interrupted reason metadata.
+- [x] Add test user cancel records interrupted outcome with cancel reason.
+- [x] Add test runtime error records interrupted outcome with error reason.
+- [x] Add test role drift at scheduling time.
+- [x] Add test role drift at resume time.
+- [x] Add test CLI/API surfaces stable error code.
 
 ### 13.2 Implementation
 
-- [ ] Implement resume service and CLI.
-- [ ] Implement task cancellation service and CLI with task-level cancellation metadata.
-- [ ] Implement cancel-as-interrupted service behavior for active runs.
-- [ ] Implement runtime-error interruption transitions.
-- [ ] Add structured logs around scheduler runnable selection.
-- [ ] Add structured logs around run completion.
-- [ ] Add structured logs around transition application.
-- [ ] Add structured logs around validation blockers.
-- [ ] Add structured logs around workflow runtime errors.
-- [ ] Add role-drift validation at scheduling and resume.
-- [ ] Update read models for interrupted states and interruption reasons.
-- [ ] Update docs/dev decisions if new locked decisions emerged.
+- [x] Implement resume service and CLI.
+- [x] Implement task cancellation service and CLI with task-level cancellation metadata.
+- [x] Implement cancel-as-interrupted service behavior for active runs.
+- [x] Implement runtime-error interruption transitions.
+- [x] Add structured logs around scheduler runnable selection.
+- [x] Add structured logs around run completion.
+- [x] Add structured logs around transition application.
+- [x] Add structured logs around validation blockers.
+- [x] Add structured logs around workflow runtime errors.
+- [x] Add role-drift validation at scheduling and resume.
+- [x] Update read models for interrupted states and interruption reasons.
+- [x] Update docs/dev decisions if new locked decisions emerged.
 
 ### 13.3 Verification
 
-- [ ] Run full workflow package tests.
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowview/... ./server/metadata/... ./cli/builder/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Run full workflow package tests.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowview/... ./server/metadata/... ./cli/builder/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
 - [ ] Commit slice with message like `feat: harden workflow recovery`.
 
 ## GUI/POC Integration Checkpoints

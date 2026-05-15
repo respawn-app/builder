@@ -45,7 +45,7 @@ func taskSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "move":
 		return taskMoveSubcommand(args[1:], stdout, stderr)
 	case "resume":
-		return taskUnsupportedSubcommand(args[0], stdout, stderr)
+		return taskResumeSubcommand(args[1:], stdout, stderr)
 	case "comment":
 		return taskCommentSubcommand(args[1:], stdout, stderr)
 	default:
@@ -251,6 +251,48 @@ func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 	fmt.Fprintf(stdout, "canceled_task_id\t%s\n", taskID)
+	return 0
+}
+
+func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("builder task resume", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { writeTaskResumeUsage(fs) }
+	projectRef := fs.String("project", ".", "project id or path for short ids")
+	positionals, flagArgs := takeLeadingPositionals(args, 1)
+	if err := fs.Parse(flagArgs); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	positionals = append(positionals, fs.Args()...)
+	if len(positionals) != 1 {
+		fmt.Fprintln(stderr, "task resume requires <short-id-or-task-id>")
+		return 2
+	}
+	cfg, remote, err := workflowOpen(context.Background(), ".")
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer func() { _ = remote.Close() }()
+	taskID, err := resolveWorkflowTaskID(context.Background(), cfg, remote, *projectRef, positionals[0])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	ctx, cancel := workflowRPCContext(context.Background())
+	defer cancel()
+	resp, err := remote.ResumeWorkflowTask(ctx, serverapi.WorkflowTaskResumeRequest{TaskID: taskID})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "run_id\t%s\nplacement_id\t%s\nnode_id\t%s\ngeneration\t%d\n", resp.RunID, resp.PlacementID, resp.NodeID, resp.Generation)
+	if strings.TrimSpace(resp.SessionID) != "" {
+		fmt.Fprintf(stdout, "session_id\t%s\n", resp.SessionID)
+	}
 	return 0
 }
 

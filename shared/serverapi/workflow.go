@@ -250,6 +250,18 @@ type WorkflowTaskStartResponse struct {
 	RunID        string `json:"run_id"`
 }
 
+type WorkflowTaskResumeRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+type WorkflowTaskResumeResponse struct {
+	RunID       string `json:"run_id"`
+	PlacementID string `json:"placement_id"`
+	NodeID      string `json:"node_id"`
+	Generation  int64  `json:"generation"`
+	SessionID   string `json:"session_id,omitempty"`
+}
+
 type WorkflowTaskApproveRequest struct {
 	TransitionID string `json:"transition_id"`
 }
@@ -535,6 +547,10 @@ func (r WorkflowTaskCreateRequest) Validate() error {
 }
 
 func (r WorkflowTaskStartRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskResumeRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
 }
 

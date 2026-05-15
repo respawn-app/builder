@@ -103,6 +103,105 @@ func (s *Store) ListWaitingAskRuns(ctx context.Context) ([]RunRecord, error) {
 	return out, nil
 }
 
+func (s *Store) ResumeTaskRun(ctx context.Context, taskID workflow.TaskID) (RunRecord, error) {
+	if strings.TrimSpace(string(taskID)) == "" {
+		return RunRecord{}, errors.New("task id is required")
+	}
+	task, err := s.queries.GetTask(ctx, string(taskID))
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if task.CanceledAtUnixMs != 0 {
+		return RunRecord{}, errors.New("task is canceled")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+    r.id,
+    r.run_start_snapshot_json
+FROM task_runs r
+JOIN task_node_placements p ON p.id = r.placement_id
+JOIN workflow_nodes n ON n.id = r.node_id
+WHERE r.task_id = ?
+  AND r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms > 0
+  AND r.waiting_ask_id = ''
+  AND p.state = 'active'
+  AND n.kind = 'agent'
+ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID))
+	if err != nil {
+		return RunRecord{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	type candidate struct {
+		id           string
+		snapshotJSON string
+	}
+	candidates := []candidate{}
+	for rows.Next() {
+		var next candidate
+		if err := rows.Scan(&next.id, &next.snapshotJSON); err != nil {
+			return RunRecord{}, err
+		}
+		candidates = append(candidates, next)
+	}
+	if err := rows.Err(); err != nil {
+		return RunRecord{}, err
+	}
+	if len(candidates) == 0 {
+		return RunRecord{}, errors.New("task has no interrupted workflow run to resume")
+	}
+	if len(candidates) != 1 {
+		return RunRecord{}, errors.New("task has multiple interrupted workflow runs; resume by run is not supported yet")
+	}
+	snapshot := runStartSnapshot{}
+	if err := unmarshalJSON(candidates[0].snapshotJSON, &snapshot); err != nil {
+		return RunRecord{}, err
+	}
+	if err := s.validateRunnableRole(snapshot.Node.SubagentRole); err != nil {
+		return RunRecord{}, err
+	}
+	now := s.now().UnixMilli()
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    started_at_unix_ms = 0,
+    interrupted_at_unix_ms = 0,
+    interruption_reason = '',
+    interruption_detail_json = '{}',
+    waiting_ask_id = '',
+    run_generation = run_generation + 1
+WHERE id = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms > 0`, now, candidates[0].id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if updated != 1 {
+		return RunRecord{}, sql.ErrNoRows
+	}
+	run, err := s.queries.GetTaskRun(ctx, candidates[0].id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	return runRecordFromTaskRun(run), nil
+}
+
+func (s *Store) validateRunnableRole(role string) error {
+	trimmed := strings.TrimSpace(role)
+	if trimmed == "" {
+		return fmt.Errorf("workflow validation failed: [%s]", workflow.CodeAgentRoleRequired)
+	}
+	if s.roleResolver != nil && !s.roleResolver.RoleExists(trimmed) {
+		return fmt.Errorf("workflow validation failed: [%s]", workflow.CodeAgentRoleMissing)
+	}
+	return nil
+}
+
 func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (RunStartContext, error) {
 	run, err := s.queries.GetTaskRun(ctx, string(runID))
 	if err != nil {
@@ -311,11 +410,12 @@ WHERE id = ?
   AND started_at_unix_ms > 0
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
-  AND session_id IS NULL`,
+  AND (session_id IS NULL OR session_id = ?)`,
 		s.now().UnixMilli(),
 		strings.TrimSpace(sessionID),
 		string(runID),
 		expectedGeneration,
+		strings.TrimSpace(sessionID),
 	)
 	if err != nil {
 		return fmt.Errorf("attach workflow run session: %w", err)

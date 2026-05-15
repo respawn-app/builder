@@ -383,6 +383,65 @@ func TestWorkflowRuntimeStartFailsWhenRoleDisappearedAfterTaskStart(t *testing.T
 	}
 }
 
+func TestWorkflowRuntimeResumeInterruptedRunUsesSameSession(t *testing.T) {
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeTool)
+	task := fixture.createStartedTask(t)
+	if err := fixture.worktrees.EnsureTaskWorktree(context.Background(), string(task.ID)); err != nil {
+		t.Fatalf("EnsureTaskWorktree: %v", err)
+	}
+	runs, err := fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns initial: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("initial runs = %+v", runs)
+	}
+	claimed, err := fixture.store.ClaimRun(context.Background(), runs[0].ID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	input, err := fixture.store.GetRunStartContext(context.Background(), claimed.ID)
+	if err != nil {
+		t.Fatalf("GetRunStartContext: %v", err)
+	}
+	plan, _, err := fixture.starter.planSession(context.Background(), input)
+	if err != nil {
+		t.Fatalf("planSession initial: %v", err)
+	}
+	if _, err := fixture.metadata.ResolvePersistedSession(context.Background(), plan.Store.Meta().SessionID); err != nil {
+		t.Fatalf("ResolvePersistedSession: %v", err)
+	}
+	if err := fixture.store.AttachRunSession(context.Background(), claimed.ID, claimed.Generation, plan.Store.Meta().SessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	if err := fixture.store.InterruptRunGeneration(context.Background(), claimed.ID, claimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+	runs, err = fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns interrupted: %v", err)
+	}
+	if len(runs) != 1 || runs[0].InterruptedAt == 0 || strings.TrimSpace(runs[0].SessionID) == "" {
+		t.Fatalf("interrupted run session = %+v", runs)
+	}
+	originalSessionID := runs[0].SessionID
+	resumed, err := fixture.store.ResumeTaskRun(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ResumeTaskRun: %v", err)
+	}
+	resumedInput, err := fixture.store.GetRunStartContext(context.Background(), resumed.ID)
+	if err != nil {
+		t.Fatalf("GetRunStartContext resumed: %v", err)
+	}
+	resumePlan, _, err := fixture.starter.planSession(context.Background(), resumedInput)
+	if err != nil {
+		t.Fatalf("planSession resumed: %v", err)
+	}
+	if resumed.ID != runs[0].ID || resumePlan.Store.Meta().SessionID != originalSessionID {
+		t.Fatalf("resume plan session = %s for run %+v, want same session %s", resumePlan.Store.Meta().SessionID, resumed, originalSessionID)
+	}
+}
+
 type starterFixture struct {
 	cfg      config.App
 	metadata *metadata.Store

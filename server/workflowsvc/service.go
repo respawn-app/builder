@@ -232,6 +232,20 @@ func (s *Service) StartWorkflowTask(ctx context.Context, req serverapi.WorkflowT
 	return serverapi.WorkflowTaskStartResponse{TransitionID: started.TransitionID, PlacementID: string(started.PlacementID), RunID: string(started.RunID)}, nil
 }
 
+func (s *Service) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskResumeResponse{}, err
+	}
+	resumed, err := s.store.ResumeTaskRun(ctx, workflow.TaskID(req.TaskID))
+	if err != nil {
+		return serverapi.WorkflowTaskResumeResponse{}, err
+	}
+	if s.schedulerWake != nil {
+		s.schedulerWake.Notify()
+	}
+	return serverapi.WorkflowTaskResumeResponse{RunID: string(resumed.ID), PlacementID: string(resumed.PlacementID), NodeID: string(resumed.NodeID), Generation: resumed.Generation, SessionID: resumed.SessionID}, nil
+}
+
 func (s *Service) StartTaskAutomation(ctx context.Context, taskID string) (workflowstore.StartTaskResult, error) {
 	if s.taskWorktrees != nil {
 		if err := s.store.ValidateTaskStart(ctx, workflow.TaskID(taskID)); err != nil {

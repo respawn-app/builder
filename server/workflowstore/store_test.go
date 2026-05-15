@@ -1648,6 +1648,84 @@ func TestInterruptRunGenerationGuard(t *testing.T) {
 	}
 }
 
+func TestResumeTaskRunRequeuesInterruptedRunWithSameSession(t *testing.T) {
+	ctx := context.Background()
+	store, binding, cfg := newTestStoreWithConfig(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	sessionID := createTestSession(t, ctx, store, binding, cfg)
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	if err := store.InterruptRunGeneration(ctx, started.RunID, claimed.Generation, "manual", `{"reason":"test"}`); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+
+	resumed, err := store.ResumeTaskRun(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ResumeTaskRun: %v", err)
+	}
+	if resumed.ID != started.RunID || resumed.SessionID != sessionID || resumed.StartedAt != 0 || resumed.InterruptedAt != 0 || resumed.Generation <= claimed.Generation {
+		t.Fatalf("resumed run = %+v, want same run/session requeued with newer generation", resumed)
+	}
+	runnable, err := store.ListRunnableRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRunnableRuns: %v", err)
+	}
+	if len(runnable) != 1 || runnable[0].ID != started.RunID || runnable[0].SessionID != sessionID {
+		t.Fatalf("runnable after resume = %+v, want same run/session", runnable)
+	}
+	reclaimed, err := store.ClaimRun(ctx, started.RunID, resumed.Generation)
+	if err != nil {
+		t.Fatalf("ClaimRun after resume: %v", err)
+	}
+	if err := store.AttachRunSession(ctx, started.RunID, reclaimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession same session after resume: %v", err)
+	}
+}
+
+func TestResumeTaskRunRejectsRoleDrift(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.ClaimRun(ctx, started.RunID, 0); err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := store.InterruptRun(ctx, started.RunID, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRun: %v", err)
+	}
+	store.roleResolver = workflow.StaticRoleResolver{}
+
+	if _, err := store.ResumeTaskRun(ctx, task.ID); err == nil || !strings.Contains(err.Error(), string(workflow.CodeAgentRoleMissing)) {
+		t.Fatalf("ResumeTaskRun role drift error = %v, want %s", err, workflow.CodeAgentRoleMissing)
+	}
+}
+
 func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)

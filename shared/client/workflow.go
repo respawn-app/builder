@@ -23,6 +23,7 @@ type WorkflowClient interface {
 	ValidateWorkflow(ctx context.Context, req serverapi.WorkflowValidateRequest) (serverapi.WorkflowValidateResponse, error)
 	CreateWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCreateRequest) (serverapi.WorkflowTaskCreateResponse, error)
 	StartWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskStartRequest) (serverapi.WorkflowTaskStartResponse, error)
+	ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error)
 	ApproveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskApproveRequest) (serverapi.WorkflowTaskApproveResponse, error)
 	MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskMoveRequest) (serverapi.WorkflowTaskMoveResponse, error)
 	CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error
@@ -138,6 +139,13 @@ func (c *loopbackWorkflowClient) StartWorkflowTask(ctx context.Context, req serv
 		return serverapi.WorkflowTaskStartResponse{}, errors.New("workflow service is required")
 	}
 	return c.service.StartWorkflowTask(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowTaskResumeResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.ResumeWorkflowTask(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) ApproveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskApproveRequest) (serverapi.WorkflowTaskApproveResponse, error) {

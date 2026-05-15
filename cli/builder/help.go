@@ -32,7 +32,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder session-id",
 		"  builder goal <show|set|pause|resume|clear|complete>",
 		"  builder workflow <create|list|node|edge|link|unlink|default|validate|inspect>",
-		"  builder task <create|start|list|show|cancel|comment>",
+		"  builder task <create|start|resume|list|show|cancel|comment>",
 		"  builder project [path]",
 		"  builder project list",
 		"  builder project create --path <server-path> --name <project-name>",
@@ -202,6 +202,7 @@ func writeTaskUsage(fs *flag.FlagSet) {
 	writeHelpSection(out, "Usage of builder task:",
 		"  builder task create --title <title> --body <body> [--workflow <workflow>] [--project <project>]",
 		"  builder task start <short-id-or-task-id>",
+		"  builder task resume <short-id-or-task-id>",
 		"  builder task approve <transition-id>",
 		"  builder task move <short-id-or-task-id> <target-node-id> [--output name=value]",
 		"  builder task list [--project <project>]",
@@ -225,6 +226,12 @@ func writeTaskCreateUsage(fs *flag.FlagSet) {
 }
 
 func writeTaskStartUsage(fs *flag.FlagSet) {
+	writeTaskUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeTaskResumeUsage(fs *flag.FlagSet) {
 	writeTaskUsage(fs)
 	writeHelpSection(fs.Output(), "Flags:")
 	fs.PrintDefaults()

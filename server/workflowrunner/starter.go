@@ -251,6 +251,16 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 			return s.metadata, nil
 		},
 	}
+	if strings.TrimSpace(input.Run.SessionID) != "" {
+		plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.Run.SessionID})
+		if err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+		if err := plan.Store.EnsureDurable(); err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+		return plan, nil, nil
+	}
 	var plan launch.SessionPlan
 	switch input.ContextMode {
 	case "", workflow.ContextModeNewSession:
