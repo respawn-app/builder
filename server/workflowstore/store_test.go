@@ -2,10 +2,14 @@ package workflowstore
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"builder/server/metadata"
+	"builder/server/session"
 	"builder/server/workflow"
 	"builder/shared/config"
 )
@@ -519,6 +523,129 @@ func TestCompleteRunRejectsStaleGeneration(t *testing.T) {
 	}
 }
 
+func TestRunStartContextHandlesMissingInputEdgeAndMalformedJSON(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_transition_edges WHERE target_placement_id = ?`, string(started.PlacementID)); err != nil {
+		t.Fatalf("delete transition edge snapshot: %v", err)
+	}
+	input, err := store.GetRunStartContext(ctx, started.RunID)
+	if err != nil {
+		t.Fatalf("GetRunStartContext without input edge: %v", err)
+	}
+	if len(input.InputValues) != 0 {
+		t.Fatalf("input values without input edge = %+v, want empty", input.InputValues)
+	}
+	taskWithMalformedInputs, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task 2", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask malformed inputs: %v", err)
+	}
+	startedMalformedInputs, err := store.StartTask(ctx, taskWithMalformedInputs.ID)
+	if err != nil {
+		t.Fatalf("StartTask malformed inputs: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_transition_edges SET input_bindings_json = '{}' WHERE target_placement_id = ?`, string(startedMalformedInputs.PlacementID)); err != nil {
+		t.Fatalf("corrupt transition edge inputs: %v", err)
+	}
+	if _, err := store.GetRunStartContext(ctx, startedMalformedInputs.RunID); err == nil {
+		t.Fatalf("expected malformed transition edge input bindings error")
+	}
+}
+
+func TestAttachRunSessionGenerationGuard(t *testing.T) {
+	ctx := context.Background()
+	store, binding, cfg := newTestStoreWithConfig(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	sessionID := createTestSession(t, ctx, store, binding, cfg)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation-1, "session-stale"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale AttachRunSession error = %v, want sql.ErrNoRows", err)
+	}
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession current generation: %v", err)
+	}
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation, "session-second"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("second AttachRunSession error = %v, want sql.ErrNoRows", err)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if runs[0].SessionID != sessionID {
+		t.Fatalf("attached session = %q, want %q", runs[0].SessionID, sessionID)
+	}
+}
+
+func TestInterruptRunGenerationGuard(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := store.InterruptRunGeneration(ctx, started.RunID, claimed.Generation-1, "stale", "{}"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale InterruptRunGeneration error = %v, want sql.ErrNoRows", err)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns stale: %v", err)
+	}
+	if runs[0].InterruptedAt != 0 {
+		t.Fatalf("stale generation interrupted run: %+v", runs[0])
+	}
+	if err := store.InterruptRunGeneration(ctx, started.RunID, claimed.Generation, "current", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration current generation: %v", err)
+	}
+	if err := store.InterruptRunGeneration(ctx, started.RunID, claimed.Generation, "second", "{}"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("second InterruptRunGeneration error = %v, want sql.ErrNoRows", err)
+	}
+	runs, err = store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns current: %v", err)
+	}
+	if runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != "current" {
+		t.Fatalf("run after interrupt = %+v, want current interruption", runs[0])
+	}
+}
+
 func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -706,6 +833,12 @@ func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
 
 func newTestStore(t *testing.T) (*Store, metadata.Binding) {
 	t.Helper()
+	store, binding, _ := newTestStoreWithConfig(t)
+	return store, binding
+}
+
+func newTestStoreWithConfig(t *testing.T) (*Store, metadata.Binding, config.App) {
+	t.Helper()
 	home := t.TempDir()
 	workspaceRoot := t.TempDir()
 	t.Setenv("HOME", home)
@@ -729,7 +862,23 @@ func newTestStore(t *testing.T) (*Store, metadata.Binding) {
 	if err != nil {
 		t.Fatalf("workflowstore.New: %v", err)
 	}
-	return store, binding
+	return store, binding, cfg
+}
+
+func createTestSession(t *testing.T, ctx context.Context, store *Store, binding metadata.Binding, cfg config.App) string {
+	t.Helper()
+	sessionRoot := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	sessionStore, err := session.Create(sessionRoot, filepath.Base(cfg.WorkspaceRoot), cfg.WorkspaceRoot, store.metadata.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := sessionStore.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	if _, err := store.metadata.ResolvePersistedSession(ctx, sessionStore.Meta().SessionID); err != nil {
+		t.Fatalf("ResolvePersistedSession: %v", err)
+	}
+	return sessionStore.Meta().SessionID
 }
 
 func createValidWorkflow(t *testing.T, ctx context.Context, store *Store) workflow.WorkflowID {
