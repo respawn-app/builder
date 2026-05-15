@@ -255,6 +255,43 @@ func TestCompleteRunUsesRunStartSnapshotAfterGraphChanges(t *testing.T) {
 	}
 }
 
+func TestStartTaskRejectsCanceledAndAlreadyStartedTasks(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	canceled, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Canceled", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask canceled: %v", err)
+	}
+	if err := store.CancelTask(ctx, canceled.ID, "stop"); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if _, err := store.StartTask(ctx, canceled.ID); err == nil || !strings.Contains(err.Error(), "task is canceled") {
+		t.Fatalf("StartTask canceled error = %v", err)
+	}
+
+	startedTask, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Started", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask started: %v", err)
+	}
+	if _, err := store.StartTask(ctx, startedTask.ID); err != nil {
+		t.Fatalf("StartTask first: %v", err)
+	}
+	if _, err := store.StartTask(ctx, startedTask.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("StartTask second = %v, want sql.ErrNoRows", err)
+	}
+	runs, err := store.ListRuns(ctx, startedTask.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs after duplicate start = %+v, want exactly one", runs)
+	}
+}
+
 func TestCompleteRunRejectsUnsupportedRuntimeSnapshots(t *testing.T) {
 	tests := []struct {
 		name   string

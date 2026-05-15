@@ -314,8 +314,17 @@ func (s *Store) StartTask(ctx context.Context, taskID workflow.TaskID) (StartTas
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := s.queries.WithTx(tx)
-	if _, err := q.UpdateTaskNodePlacementState(ctx, sqlitegen.UpdateTaskNodePlacementStateParams{ID: prepared.startPlacement.ID, State: "completed", UpdatedAtUnixMs: now}); err != nil {
+	updatedStart, err := tx.ExecContext(ctx, `
+UPDATE task_node_placements
+SET state = ?, updated_at_unix_ms = ?
+WHERE id = ? AND state = 'active'`, "completed", now, prepared.startPlacement.ID)
+	if err != nil {
 		return StartTaskResult{}, err
+	}
+	if updated, err := updatedStart.RowsAffected(); err != nil {
+		return StartTaskResult{}, err
+	} else if updated != 1 {
+		return StartTaskResult{}, sql.ErrNoRows
 	}
 	if err := q.InsertTaskTransition(ctx, sqlitegen.InsertTaskTransitionParams{ID: transitionID, TaskID: string(taskID), SourcePlacementID: sql.NullString{String: prepared.startPlacement.ID, Valid: true}, SourceNodeID: sql.NullString{String: string(prepared.start.ID), Valid: true}, SourceNodeKey: string(prepared.start.Key), SourceNodeDisplayName: prepared.start.DisplayName, TransitionGroupID: sql.NullString{String: string(prepared.group.ID), Valid: true}, TransitionID: prepared.group.TransitionID, TransitionDisplayName: prepared.group.DisplayName, WorkflowRevisionSeen: prepared.workflow.GraphRevision, Actor: "system", State: "applied", OutputValuesJson: "{}", CreatedAtUnixMs: now, AppliedAtUnixMs: now}); err != nil {
 		return StartTaskResult{}, err
@@ -363,6 +372,9 @@ func (s *Store) prepareTaskStart(ctx context.Context, taskID workflow.TaskID) (p
 	task, err := s.queries.GetTask(ctx, string(taskID))
 	if err != nil {
 		return preparedTaskStart{}, err
+	}
+	if task.CanceledAtUnixMs != 0 {
+		return preparedTaskStart{}, fmt.Errorf("task is canceled")
 	}
 	def, wf, err := s.GetDefinition(ctx, workflow.WorkflowID(task.WorkflowID))
 	if err != nil {
