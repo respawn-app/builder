@@ -24,7 +24,11 @@ func (s *Store) AddComment(ctx context.Context, taskID workflow.TaskID, body str
 }
 
 func (s *Store) ReplaceComment(ctx context.Context, commentID string, body string) error {
-	updated, err := s.queries.UpdateTaskCommentBody(ctx, sqlitegen.UpdateTaskCommentBodyParams{ID: strings.TrimSpace(commentID), Body: strings.TrimSpace(body), UpdatedAtUnixMs: s.now().UnixMilli()})
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return errors.New("comment body is required")
+	}
+	updated, err := s.queries.UpdateTaskCommentBody(ctx, sqlitegen.UpdateTaskCommentBodyParams{ID: strings.TrimSpace(commentID), Body: trimmed, UpdatedAtUnixMs: s.now().UnixMilli()})
 	if err != nil {
 		return err
 	}

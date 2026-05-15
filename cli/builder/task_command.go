@@ -467,9 +467,6 @@ func resolveWorkflowTaskID(ctx context.Context, cfg config.App, remote workflowC
 			return "", fmt.Errorf("task %q is ambiguous; use task id", trimmed)
 		}
 	}
-	if strings.HasPrefix(trimmed, "task-") {
-		return trimmed, nil
-	}
 	if err != nil {
 		return "", err
 	}

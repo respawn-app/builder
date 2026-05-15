@@ -148,7 +148,7 @@ func (e *Engine) runGoalTurn(ctx context.Context, appendNudge bool) (assistant l
 		if err := e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
 			return err
 		}
-		if err := e.injectWorkflowModePromptIfNeeded(stepID); err != nil {
+		if err := e.injectWorkflowModePromptIfNeeded(stepCtx, stepID); err != nil {
 			return err
 		}
 		goal := e.Goal()

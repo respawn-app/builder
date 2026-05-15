@@ -92,8 +92,5 @@ func workflowPreflightError(workflowActive bool, localToolCalls []llm.ToolCall, 
 	if count != 1 {
 		return fmt.Errorf("complete_node must be called exactly once")
 	}
-	if len(localToolCalls) != 1 || len(hostedToolExecutions) != 0 {
-		return fmt.Errorf("complete_node cannot be mixed with other tool calls")
-	}
 	return nil
 }

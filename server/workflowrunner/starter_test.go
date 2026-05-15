@@ -63,7 +63,7 @@ func TestSchedulerRunsNewSessionWorkflowNodeWithStructuredOutput(t *testing.T) {
 	if first.StructuredOutput == nil {
 		t.Fatalf("structured output schema missing in request: %+v", first)
 	}
-	assertPromptContains(t, first, []string{"Task title: Run workflow", "Task body:\nBody for workflow", "Node key: agent", "Completion mode: structured_output", "summary: Summary.", "done"})
+	assertPromptContains(t, first, []string{"Task title: Run workflow", "Task body:\nBody for workflow", "Node key: agent", "Completion mode: structured_output", "summary: Summary.", "done (Done)"})
 	fixture.assertRunSessionUsesTaskWorktree(t, runs[0].SessionID)
 	if scheduler.ActiveCount() != 0 {
 		t.Fatalf("scheduler active count = %d, want 0 after runtime finish", scheduler.ActiveCount())
@@ -516,7 +516,7 @@ func createChainedStarterWorkflow(t *testing.T, store *workflowstore.Store) work
 	implID := workflow.NodeID("node-impl-" + string(created.ID))
 	for _, node := range []workflowstore.NodeRecord{
 		{ID: planID, WorkflowID: created.ID, Key: "plan", Kind: workflow.NodeKindAgent, DisplayName: "Plan", SubagentRole: "coder", PromptTemplate: "Plan the task.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
-		{ID: implID, WorkflowID: created.ID, Key: "implement", Kind: workflow.NodeKindAgent, DisplayName: "Implement", SubagentRole: "coder", PromptTemplate: "Use {{task_title}} and {{prior_summary}}.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
+		{ID: implID, WorkflowID: created.ID, Key: "implement", Kind: workflow.NodeKindAgent, DisplayName: "Implement", SubagentRole: "coder", PromptTemplate: "Use {{.Inputs.task_title}} and {{.Inputs.prior_summary}}.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
 	} {
 		if _, err := store.AddNode(ctx, node); err != nil {
 			t.Fatalf("AddNode %s: %v", node.Key, err)

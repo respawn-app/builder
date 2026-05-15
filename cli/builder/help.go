@@ -146,26 +146,6 @@ func writeGoalUsage(fs *flag.FlagSet) {
 	)
 }
 
-func writeGoalShowUsage(fs *flag.FlagSet) {
-	writeGoalUsage(fs)
-}
-
-func writeGoalSetUsage(fs *flag.FlagSet) {
-	writeGoalUsage(fs)
-}
-
-func writeGoalStatusUsage(fs *flag.FlagSet, _ string) {
-	writeGoalUsage(fs)
-}
-
-func writeGoalCompleteUsage(fs *flag.FlagSet) {
-	writeGoalUsage(fs)
-}
-
-func writeGoalClearUsage(fs *flag.FlagSet) {
-	writeGoalUsage(fs)
-}
-
 func writeWorkflowUsage(fs *flag.FlagSet) {
 	if fs == nil {
 		return
@@ -183,31 +163,17 @@ func writeWorkflowUsage(fs *flag.FlagSet) {
 		"  builder workflow inspect <workflow>",
 	)
 	writeHelpSection(out, "What This Does:",
-		"  Manage workflow definitions and project workflow links through the Builder server API.",
+		"  Manage workflow definitions, graph nodes/edges, and project workflow links through the Builder server API.",
+		"  Workflows describe durable agent pipelines: tasks start at a start node, agent nodes execute Builder runs, and terminal nodes mark completion.",
+		"  Use `workflow create`, add nodes/edges, link a workflow to a project, then create/start tasks with `builder task`.",
 		"  Workflow references may be exact workflow ids or exact workflow names.",
 	)
-}
-
-func writeWorkflowCreateUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
-}
-
-func writeWorkflowListUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
-}
-
-func writeWorkflowNodeUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
 }
 
 func writeWorkflowNodeAddUsage(fs *flag.FlagSet) {
 	writeWorkflowUsage(fs)
 	writeHelpSection(fs.Output(), "Flags:")
 	fs.PrintDefaults()
-}
-
-func writeWorkflowEdgeUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
 }
 
 func writeWorkflowEdgeAddUsage(fs *flag.FlagSet) {
@@ -222,22 +188,10 @@ func writeWorkflowLinkUsage(fs *flag.FlagSet) {
 	fs.PrintDefaults()
 }
 
-func writeWorkflowUnlinkUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
-}
-
-func writeWorkflowDefaultUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
-}
-
 func writeWorkflowValidateUsage(fs *flag.FlagSet) {
 	writeWorkflowUsage(fs)
 	writeHelpSection(fs.Output(), "Flags:")
 	fs.PrintDefaults()
-}
-
-func writeWorkflowInspectUsage(fs *flag.FlagSet) {
-	writeWorkflowUsage(fs)
 }
 
 func writeTaskUsage(fs *flag.FlagSet) {

@@ -85,9 +85,10 @@ func TestCompletionJSONSchemaIncludesTopLevelOutputFields(t *testing.T) {
 	}
 }
 
-func TestDecodeCompletionRejectsUnknownAndNonStringFields(t *testing.T) {
-	_, err := DecodeCompletion(json.RawMessage(`{"summary": 1, "extra": "x"}`), CompletionContract{
-		OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}},
+func TestDecodeCompletionRejectsUnknownFields(t *testing.T) {
+	_, err := DecodeCompletion(json.RawMessage(`{"transition_id":"done","commentary":"done","summary":"done","extra":"x"}`), CompletionContract{
+		TransitionIDs: []string{"done"},
+		OutputFields:  []workflow.OutputField{{Name: "summary", Description: "Summary."}},
 	})
 	if err == nil {
 		t.Fatal("expected validation error")
@@ -100,8 +101,8 @@ func TestDecodeCompletionRejectsUnknownAndNonStringFields(t *testing.T) {
 	for _, issue := range validation.Issues {
 		codes[issue.Code] = true
 	}
-	if !codes["non_string_value"] || !codes["unknown_output_field"] {
-		t.Fatalf("codes = %+v, want non_string_value and unknown_output_field", codes)
+	if !codes["unknown_output_field"] {
+		t.Fatalf("codes = %+v, want unknown_output_field", codes)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"builder/server/llm"
 )
 
+var ErrScriptedRuntime = errors.New("scripted runtime: no steps remaining")
+
 type Step struct {
 	Response llm.Response
 	Err      error
@@ -57,7 +59,7 @@ func (c *ScriptedClient) Generate(ctx context.Context, req llm.Request) (llm.Res
 	defer c.mu.Unlock()
 	c.calls = append(c.calls, req)
 	if len(c.steps) == 0 {
-		return llm.Response{}, nil
+		return llm.Response{}, ErrScriptedRuntime
 	}
 	step := c.steps[0]
 	c.steps = c.steps[1:]
@@ -96,4 +98,3 @@ func (c *ScriptedClient) RemainingSteps() int {
 
 var _ llm.Client = (*ScriptedClient)(nil)
 var _ llm.ProviderCapabilitiesClient = (*ScriptedClient)(nil)
-var ErrScriptedRuntime = errors.New("scripted runtime error")

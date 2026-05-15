@@ -97,6 +97,16 @@ WHERE id = ?3
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
   AND waiting_ask_id = ''
+  AND EXISTS (
+      SELECT 1
+      FROM tasks t
+      JOIN task_node_placements p ON p.id = task_runs.placement_id
+      JOIN workflow_nodes n ON n.id = task_runs.node_id
+      WHERE t.id = task_runs.task_id
+        AND t.canceled_at_unix_ms = 0
+        AND p.state = 'active'
+        AND n.kind = 'agent'
+  )
 RETURNING
     id,
     task_id,

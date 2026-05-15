@@ -238,7 +238,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolCompleteNode,
 		Aliases:        nil,
-		Description:    "Complete the current workflow node. Use this only in workflow tool-completion mode, exactly once, and do not mix it with other tool calls.",
+		Description:    "Complete the current workflow node. Use this only in workflow tool-completion mode, exactly once when the node work is done.",
 		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderCompleteNode,
@@ -249,6 +249,8 @@ var catalogEntries = []CatalogEntry{
 			defaultToolCallMeta(toolspec.ToolCompleteNode),
 			formatGenericToolResult,
 		),
+		// Runtime requests replace this fallback with the current workflow
+		// run contract, including valid transition IDs and node output fields.
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,

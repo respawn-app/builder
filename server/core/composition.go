@@ -121,7 +121,15 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore).WithCacheWarningMode(cfg.Settings.CacheWarningMode).WithUpdateStatusProvider(updateStatusService)
 	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
+	var workflowRuntimeStarter *workflowrunner.Starter
+	var workflowScheduler *workflowscheduler.Service
 	cleanupNewFailure := func() {
+		if workflowScheduler != nil {
+			_ = workflowScheduler.Close()
+		}
+		if workflowRuntimeStarter != nil {
+			_ = workflowRuntimeStarter.Close()
+		}
 		_ = rootLease.Close()
 		_ = metadataStore.Close()
 		if runtimeSupport.Background != nil {
@@ -139,12 +147,12 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: view: %w", err)
 	}
-	workflowRuntimeStarter, err := workflowrunner.NewStarter(cfg, metadataStore, workflowStore, authSupport.AuthManager, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, workflowrunner.StarterOptions{Worktrees: taskWorktreeEnsurer{service: worktreeService}})
+	workflowRuntimeStarter, err = workflowrunner.NewStarter(cfg, metadataStore, workflowStore, authSupport.AuthManager, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, workflowrunner.StarterOptions{Worktrees: taskWorktreeEnsurer{service: worktreeService}})
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: runtime starter: %w", err)
 	}
-	workflowScheduler, err := workflowscheduler.New(workflowStore, workflowRuntimeStarter, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency})
+	workflowScheduler, err = workflowscheduler.New(workflowStore, workflowRuntimeStarter, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency})
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: scheduler: %w", err)

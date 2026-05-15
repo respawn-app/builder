@@ -3,7 +3,6 @@ package workflowstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 	"github.com/google/uuid"
 )
 
@@ -77,7 +77,7 @@ type TransitionGroupRecord struct {
 	ID           workflow.TransitionGroupID
 	WorkflowID   workflow.WorkflowID
 	SourceNodeID workflow.NodeID
-	TransitionID string
+	TransitionID workflow.TransitionID
 	DisplayName  string
 }
 
@@ -146,15 +146,22 @@ type RunnableRunRecord struct {
 }
 
 type RunStartContext struct {
-	Run           RunRecord
-	Task          TaskRecord
-	Node          NodeRecord
-	TransitionIDs []string
-	InputValues   map[string]string
-	WorkspaceID   string
-	WorkspaceRoot string
-	WorktreeID    string
-	WorktreeRoot  string
+	Run               RunRecord
+	Task              TaskRecord
+	Node              NodeRecord
+	TransitionIDs     []string
+	TransitionOptions []TransitionOption
+	InputValues       map[string]string
+	WorkspaceID       string
+	WorkspaceRoot     string
+	WorktreeID        string
+	WorktreeRoot      string
+}
+
+type TransitionOption struct {
+	ID          string
+	DisplayName string
+	Description string
 }
 
 type TransitionRecord struct {
@@ -297,7 +304,7 @@ func (s *Store) AddTransitionGroup(ctx context.Context, group TransitionGroupRec
 	if group.ID == "" {
 		group.ID = workflow.TransitionGroupID(prefixedID("group"))
 	}
-	if err := q.InsertWorkflowTransitionGroup(ctx, sqlitegen.InsertWorkflowTransitionGroupParams{ID: string(group.ID), WorkflowID: string(group.WorkflowID), SourceNodeID: string(group.SourceNodeID), TransitionID: strings.TrimSpace(group.TransitionID), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: 100, MetadataJson: "{}"}); err != nil {
+	if err := q.InsertWorkflowTransitionGroup(ctx, sqlitegen.InsertWorkflowTransitionGroupParams{ID: string(group.ID), WorkflowID: string(group.WorkflowID), SourceNodeID: string(group.SourceNodeID), TransitionID: strings.TrimSpace(string(group.TransitionID)), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: 100, MetadataJson: "{}"}); err != nil {
 		return 0, fmt.Errorf("insert transition group: %w", err)
 	}
 	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(group.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
@@ -478,7 +485,7 @@ func (s *Store) GetDefinition(ctx context.Context, workflowID workflow.WorkflowI
 		def.Nodes = append(def.Nodes, workflow.Node{WorkflowID: workflow.WorkflowID(node.WorkflowID), ID: workflow.NodeID(node.ID), Key: workflow.ModelKey(node.NodeKey), DisplayName: node.DisplayName, Kind: workflow.NodeKind(node.Kind), SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, OutputFields: outputFields})
 	}
 	for _, group := range groups {
-		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: workflow.WorkflowID(group.WorkflowID), ID: workflow.TransitionGroupID(group.ID), SourceNodeID: workflow.NodeID(group.SourceNodeID), TransitionID: group.TransitionID, DisplayName: group.DisplayName})
+		def.TransitionGroups = append(def.TransitionGroups, workflow.TransitionGroup{WorkflowID: workflow.WorkflowID(group.WorkflowID), ID: workflow.TransitionGroupID(group.ID), SourceNodeID: workflow.NodeID(group.SourceNodeID), TransitionID: workflow.TransitionID(group.TransitionID), DisplayName: group.DisplayName})
 	}
 	for _, edge := range edges {
 		inputs := []workflow.InputBinding{}
@@ -510,19 +517,9 @@ func boolToInt64(value bool) int64 {
 }
 
 func marshalJSON(value any) (string, error) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return workflowjson.MarshalString(value)
 }
 
 func unmarshalJSON(raw string, target any) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	if err := json.Unmarshal([]byte(raw), target); err != nil {
-		return fmt.Errorf("decode workflow JSON: %w", err)
-	}
-	return nil
+	return workflowjson.UnmarshalString(raw, target)
 }

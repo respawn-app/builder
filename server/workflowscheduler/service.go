@@ -72,6 +72,13 @@ type Service struct {
 	wake       chan struct{}
 }
 
+const (
+	defaultClaimRetries    = 3
+	defaultClaimBackoff    = 10 * time.Millisecond
+	defaultProcessInterval = 500 * time.Millisecond
+	defaultWakeBuffer      = 1
+)
+
 func New(store Store, starter RuntimeStarter, cfg Config, opts ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("workflow scheduler store is required")
@@ -80,7 +87,7 @@ func New(store Store, starter RuntimeStarter, cfg Config, opts ...Option) (*Serv
 	if concurrency <= 0 {
 		concurrency = 1
 	}
-	service := &Service{store: store, starter: starter, concurrency: concurrency, claimRetries: 3, claimBackoff: 10 * time.Millisecond, processInterval: 500 * time.Millisecond, active: map[workflow.RunID]StartRunRequest{}, wake: make(chan struct{}, 1)}
+	service := &Service{store: store, starter: starter, concurrency: concurrency, claimRetries: defaultClaimRetries, claimBackoff: defaultClaimBackoff, processInterval: defaultProcessInterval, active: map[workflow.RunID]StartRunRequest{}, wake: make(chan struct{}, defaultWakeBuffer)}
 	for _, opt := range opts {
 		opt(service)
 	}

@@ -91,7 +91,8 @@ CREATE TABLE project_workflow_links (
     unlinked_at_unix_ms INTEGER NOT NULL DEFAULT 0 CHECK (unlinked_at_unix_ms >= 0),
     created_at_unix_ms INTEGER NOT NULL CHECK (created_at_unix_ms >= 0),
     updated_at_unix_ms INTEGER NOT NULL CHECK (updated_at_unix_ms >= 0),
-    UNIQUE (project_id, id)
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, id, workflow_id)
 );
 
 CREATE UNIQUE INDEX project_workflow_links_active_workflow_idx
@@ -128,7 +129,7 @@ CREATE TABLE tasks (
     metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
     UNIQUE (project_id, task_seq),
     UNIQUE (project_id, short_id),
-    FOREIGN KEY (project_id, project_workflow_link_id) REFERENCES project_workflow_links(project_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (project_id, project_workflow_link_id, workflow_id) REFERENCES project_workflow_links(project_id, id, workflow_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX tasks_project_workflow_link_idx

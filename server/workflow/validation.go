@@ -3,6 +3,7 @@ package workflow
 import (
 	"fmt"
 	"strings"
+	"text/template/parse"
 
 	"builder/shared/workflowkey"
 )
@@ -110,7 +111,7 @@ func (s *validationState) indexTransitionGroups() {
 		}
 		s.groupsByID[group.ID] = group
 		s.groupsBySource[group.SourceNodeID] = append(s.groupsBySource[group.SourceNodeID], group)
-		transitionID := strings.TrimSpace(group.TransitionID)
+		transitionID := strings.TrimSpace(string(group.TransitionID))
 		if transitionID == "" {
 			s.addHard(CodeMissingTransitionID, "transition id is required", ref)
 		} else if !validModelKey(transitionID) {
@@ -607,22 +608,59 @@ func nodeOutputFieldSet(node Node) map[string]bool {
 }
 
 func templatePlaceholders(template string) []string {
-	out := []string{}
-	for offset := 0; offset < len(template); {
-		start := strings.Index(template[offset:], "{{")
-		if start < 0 {
-			break
-		}
-		start += offset
-		end := strings.Index(template[start+2:], "}}")
-		if end < 0 {
-			out = append(out, strings.TrimSpace(template[start+2:]))
-			break
-		}
-		end += start + 2
-		out = append(out, strings.TrimSpace(template[start+2:end]))
-		offset = end + 2
+	tree, err := parse.Parse("workflow_node_prompt", template, "{{", "}}", nil)
+	if err != nil {
+		return nil
 	}
+	root := tree["workflow_node_prompt"]
+	if root == nil || root.Root == nil {
+		return nil
+	}
+	return templatePlaceholderWalker{}.collect(root.Root)
+}
+
+type templatePlaceholderWalker struct{}
+
+func (templatePlaceholderWalker) collect(node parse.Node) []string {
+	out := []string{}
+	var walk func(parse.Node)
+	walk = func(current parse.Node) {
+		switch typed := current.(type) {
+		case *parse.ListNode:
+			for _, child := range typed.Nodes {
+				walk(child)
+			}
+		case *parse.ActionNode:
+			walk(typed.Pipe)
+		case *parse.IfNode:
+			walk(typed.Pipe)
+			walk(typed.List)
+			walk(typed.ElseList)
+		case *parse.RangeNode:
+			walk(typed.Pipe)
+			walk(typed.List)
+			walk(typed.ElseList)
+		case *parse.WithNode:
+			walk(typed.Pipe)
+			walk(typed.List)
+			walk(typed.ElseList)
+		case *parse.PipeNode:
+			for _, command := range typed.Cmds {
+				walk(command)
+			}
+		case *parse.CommandNode:
+			for _, arg := range typed.Args {
+				walk(arg)
+			}
+		case *parse.FieldNode:
+			if len(typed.Ident) == 2 && typed.Ident[0] == "Inputs" {
+				out = append(out, typed.Ident[1])
+			}
+		case *parse.IdentifierNode:
+			out = append(out, typed.Ident)
+		}
+	}
+	walk(node)
 	return out
 }
 

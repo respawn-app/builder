@@ -68,7 +68,7 @@ type TransitionGroup struct {
 	WorkflowID   WorkflowID
 	ID           TransitionGroupID
 	SourceNodeID NodeID
-	TransitionID string
+	TransitionID TransitionID
 	DisplayName  string
 }
 

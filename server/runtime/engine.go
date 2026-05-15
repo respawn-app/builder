@@ -393,7 +393,7 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 		if err := e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
 			return err
 		}
-		if err := e.injectWorkflowModePromptIfNeeded(stepID); err != nil {
+		if err := e.injectWorkflowModePromptIfNeeded(stepCtx, stepID); err != nil {
 			return err
 		}
 		if err := e.materializePendingWorktreeReminder(stepID); err != nil {

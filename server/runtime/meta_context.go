@@ -12,6 +12,7 @@ import (
 	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/server/workflowruntime"
 	"builder/shared/config"
 	"builder/shared/toolspec"
 )
@@ -202,7 +203,7 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 		}
 	}
 	if opts.IncludeWorkflow {
-		if message, ok := workflowModeMetaMessage(); ok {
+		if message, ok := workflowModeMetaMessage(""); ok {
 			collector.addMessages([]llm.Message{message})
 		}
 	}
@@ -385,8 +386,16 @@ func headlessModeExitMetaMessage() (llm.Message, bool) {
 	return llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: content}, true
 }
 
-func workflowModeMetaMessage() (llm.Message, bool) {
-	content := strings.TrimSpace(prompts.WorkflowModePrompt)
+func workflowModeMetaMessage(mode workflowruntime.CompletionMode) (llm.Message, bool) {
+	content := ""
+	switch mode {
+	case workflowruntime.CompletionModeTool:
+		content = strings.TrimSpace(prompts.WorkflowToolModePrompt)
+	case workflowruntime.CompletionModeStructuredOutput:
+		content = strings.TrimSpace(prompts.WorkflowStructuredOutputModePrompt)
+	default:
+		content = strings.TrimSpace(prompts.WorkflowStructuredOutputModePrompt)
+	}
 	if content == "" {
 		return llm.Message{}, false
 	}

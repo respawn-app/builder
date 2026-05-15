@@ -8,7 +8,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"text/template"
 
+	"builder/prompts"
 	"builder/server/auth"
 	"builder/server/launch"
 	"builder/server/llm"
@@ -193,8 +195,12 @@ func (s *Starter) cleanupSession(ctx context.Context, store *session.Store) erro
 	if store == nil {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupCtx := context.WithoutCancel(ctx)
 	sessionID := store.Meta().SessionID
-	return errors.Join(store.RemoveDurable(), s.metadata.DeleteSessionRecordByID(ctx, sessionID))
+	return errors.Join(store.RemoveDurable(), s.metadata.DeleteSessionRecordByID(cleanupCtx, sessionID))
 }
 
 func (s *Starter) Close() error {
@@ -329,7 +335,12 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 	}
 	registration := runtimewire.RegisterSessionRuntime(plan.Store.Meta().SessionID, wiring.Engine, runtimeRegistry, s.backgroundRouter)
 	defer registration.Close()
-	if _, err := wiring.Engine.SubmitUserMessage(ctx, BuildNodePrompt(input, s.cfg.Settings.Workflow.CompletionMode)); err != nil {
+	prompt, promptErr := BuildNodePrompt(input, s.cfg.Settings.Workflow.CompletionMode)
+	if promptErr != nil {
+		s.interrupt(context.Background(), req.RunID, req.Generation, ReasonRuntimeFailed, promptErr)
+		return
+	}
+	if _, err := wiring.Engine.SubmitUserMessage(ctx, prompt); err != nil {
 		reason := ReasonRuntimeFailed
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			reason = ReasonRuntimeCanceled
@@ -372,56 +383,107 @@ func (s *Starter) interrupt(ctx context.Context, runID workflow.RunID, generatio
 	}
 }
 
-func BuildNodePrompt(input workflowstore.RunStartContext, mode config.WorkflowCompletionMode) string {
+func BuildNodePrompt(input workflowstore.RunStartContext, mode config.WorkflowCompletionMode) (string, error) {
+	nodePrompt, err := renderInputPlaceholders(input.Node.PromptTemplate, input)
+	if err != nil {
+		return "", err
+	}
+	return prompts.RenderWorkflowNodeContextPrompt(prompts.WorkflowNodeContextArgs{
+		TaskId:          string(input.Task.ID),
+		TaskShortId:     strings.TrimSpace(input.Task.ShortID),
+		TaskTitle:       strings.TrimSpace(input.Task.Title),
+		TaskBody:        strings.TrimSpace(input.Task.Body),
+		NodeId:          string(input.Node.ID),
+		NodeKey:         string(input.Node.Key),
+		NodeDisplayName: strings.TrimSpace(input.Node.DisplayName),
+		CompletionMode:  string(mode),
+		OutputFields:    workflowOutputFields(input.Node.OutputFields),
+		Transitions:     workflowTransitions(input.TransitionOptions, input.TransitionIDs),
+		InputValues:     workflowInputValues(input.InputValues),
+		NodePrompt:      nodePrompt,
+	})
+}
+
+func workflowOutputFields(fields []workflow.OutputField) []prompts.WorkflowOutputField {
+	out := make([]prompts.WorkflowOutputField, 0, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, prompts.WorkflowOutputField{Name: name, Description: strings.TrimSpace(field.Description)})
+	}
+	return out
+}
+
+func workflowTransitions(options []workflowstore.TransitionOption, transitionIDs []string) []prompts.WorkflowTransition {
+	capacity := len(options)
+	if len(transitionIDs) > capacity {
+		capacity = len(transitionIDs)
+	}
+	out := make([]prompts.WorkflowTransition, 0, capacity)
+	if len(options) > 0 {
+		for _, option := range options {
+			id := strings.TrimSpace(option.ID)
+			if id == "" {
+				continue
+			}
+			out = append(out, prompts.WorkflowTransition{ID: id, DisplayName: strings.TrimSpace(option.DisplayName), Description: strings.TrimSpace(option.Description)})
+		}
+		return out
+	}
+	for _, id := range transitionIDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed != "" {
+			out = append(out, prompts.WorkflowTransition{ID: trimmed})
+		}
+	}
+	return out
+}
+
+func workflowInputValues(values map[string]string) []prompts.WorkflowInputValue {
+	names := sortedInputValueNames(values)
+	out := make([]prompts.WorkflowInputValue, 0, len(names))
+	for _, name := range names {
+		out = append(out, prompts.WorkflowInputValue{Name: name, Value: values[name]})
+	}
+	return out
+}
+
+type nodePromptTemplateData struct {
+	TaskId          string
+	TaskShortId     string
+	TaskTitle       string
+	TaskBody        string
+	NodeId          string
+	NodeKey         string
+	NodeDisplayName string
+	Inputs          map[string]string
+}
+
+func renderInputPlaceholders(templateText string, input workflowstore.RunStartContext) (string, error) {
+	prompt := strings.TrimSpace(templateText)
+	if prompt == "" {
+		return "", nil
+	}
+	tmpl, err := template.New("workflow node prompt").Option("missingkey=error").Parse(prompt)
+	if err != nil {
+		return "", fmt.Errorf("parse workflow node prompt template: %w", err)
+	}
 	var b strings.Builder
-	b.WriteString("Workflow task\n")
-	b.WriteString("Task ID: ")
-	b.WriteString(string(input.Task.ID))
-	b.WriteString("\nTask short ID: ")
-	b.WriteString(input.Task.ShortID)
-	b.WriteString("\nTask title: ")
-	b.WriteString(input.Task.Title)
-	b.WriteString("\nTask body:\n")
-	b.WriteString(input.Task.Body)
-	b.WriteString("\n\nWorkflow node\n")
-	b.WriteString("Node ID: ")
-	b.WriteString(string(input.Node.ID))
-	b.WriteString("\nNode key: ")
-	b.WriteString(string(input.Node.Key))
-	b.WriteString("\nNode display name: ")
-	b.WriteString(input.Node.DisplayName)
-	b.WriteString("\nCompletion mode: ")
-	b.WriteString(string(mode))
-	if len(input.Node.OutputFields) > 0 {
-		b.WriteString("\n\nRequired node output fields:")
-		for _, field := range input.Node.OutputFields {
-			b.WriteString("\n- ")
-			b.WriteString(field.Name)
-			b.WriteString(": ")
-			b.WriteString(field.Description)
-		}
+	if err := tmpl.Execute(&b, nodePromptTemplateData{
+		TaskId:          string(input.Task.ID),
+		TaskShortId:     strings.TrimSpace(input.Task.ShortID),
+		TaskTitle:       strings.TrimSpace(input.Task.Title),
+		TaskBody:        strings.TrimSpace(input.Task.Body),
+		NodeId:          string(input.Node.ID),
+		NodeKey:         string(input.Node.Key),
+		NodeDisplayName: strings.TrimSpace(input.Node.DisplayName),
+		Inputs:          input.InputValues,
+	}); err != nil {
+		return "", fmt.Errorf("render workflow node prompt template: %w", err)
 	}
-	if len(input.TransitionIDs) > 0 {
-		b.WriteString("\n\nAvailable transition IDs:")
-		for _, id := range input.TransitionIDs {
-			b.WriteString("\n- ")
-			b.WriteString(id)
-		}
-	}
-	if len(input.InputValues) > 0 {
-		b.WriteString("\n\nBound input values:")
-		for _, name := range sortedInputValueNames(input.InputValues) {
-			b.WriteString("\n- ")
-			b.WriteString(name)
-			b.WriteString(": ")
-			b.WriteString(input.InputValues[name])
-		}
-	}
-	if prompt := strings.TrimSpace(input.Node.PromptTemplate); prompt != "" {
-		b.WriteString("\n\nNode prompt:\n")
-		b.WriteString(renderInputPlaceholders(prompt, input.InputValues))
-	}
-	return b.String()
+	return b.String(), nil
 }
 
 func sortedInputValueNames(values map[string]string) []string {
@@ -431,36 +493,6 @@ func sortedInputValueNames(values map[string]string) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func renderInputPlaceholders(template string, values map[string]string) string {
-	if len(values) == 0 {
-		return template
-	}
-	var b strings.Builder
-	for offset := 0; offset < len(template); {
-		start := strings.Index(template[offset:], "{{")
-		if start < 0 {
-			b.WriteString(template[offset:])
-			break
-		}
-		start += offset
-		b.WriteString(template[offset:start])
-		end := strings.Index(template[start+2:], "}}")
-		if end < 0 {
-			b.WriteString(template[start:])
-			break
-		}
-		end += start + 2
-		name := strings.TrimSpace(template[start+2 : end])
-		if value, ok := values[name]; ok {
-			b.WriteString(value)
-		} else {
-			b.WriteString(template[start : end+2])
-		}
-		offset = end + 2
-	}
-	return b.String()
 }
 
 var _ workflowscheduler.RuntimeStarter = (*Starter)(nil)

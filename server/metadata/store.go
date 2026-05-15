@@ -758,33 +758,40 @@ func (s *Store) BackfillProjectKeys(ctx context.Context) error {
 }
 
 func setMissingProjectKey(ctx context.Context, q *sqlitegen.Queries, projectID string, displayName string, updatedAtUnixMs int64) error {
-	rows, err := q.ListProjectKeyRows(ctx)
-	if err != nil {
-		return fmt.Errorf("list project keys: %w", err)
-	}
-	used := map[string]bool{}
-	alreadySet := false
-	for _, row := range rows {
-		key := strings.TrimSpace(row.ProjectKey)
-		if key != "" {
-			used[key] = true
+	const maxProjectKeyRetries = 8
+	for attempt := 0; attempt < maxProjectKeyRetries; attempt++ {
+		rows, err := q.ListProjectKeyRows(ctx)
+		if err != nil {
+			return fmt.Errorf("list project keys: %w", err)
 		}
-		if row.ID == projectID && key != "" {
-			alreadySet = true
+		used := map[string]bool{}
+		alreadySet := false
+		for _, row := range rows {
+			key := strings.TrimSpace(row.ProjectKey)
+			if key != "" {
+				used[key] = true
+			}
+			if row.ID == projectID && key != "" {
+				alreadySet = true
+			}
 		}
-	}
-	if alreadySet {
+		if alreadySet {
+			return nil
+		}
+		key := suggestProjectKey(displayName, projectID, used)
+		updated, err := q.SetProjectKey(ctx, sqlitegen.SetProjectKeyParams{ProjectKey: key, UpdatedAtUnixMs: updatedAtUnixMs, ProjectID: projectID})
+		if err != nil {
+			if isSQLiteUniqueConstraint(err) {
+				continue
+			}
+			return fmt.Errorf("set project key for %q: %w", projectID, err)
+		}
+		if updated == 0 {
+			return fmt.Errorf("set project key for %q: project not found", projectID)
+		}
 		return nil
 	}
-	key := suggestProjectKey(displayName, projectID, used)
-	updated, err := q.SetProjectKey(ctx, sqlitegen.SetProjectKeyParams{ProjectKey: key, UpdatedAtUnixMs: updatedAtUnixMs, ProjectID: projectID})
-	if err != nil {
-		return fmt.Errorf("set project key for %q: %w", projectID, err)
-	}
-	if updated == 0 {
-		return fmt.Errorf("set project key for %q: project not found", projectID)
-	}
-	return nil
+	return fmt.Errorf("set project key for %q: exhausted unique-key retries", projectID)
 }
 
 func (s *Store) SetProjectKey(ctx context.Context, projectID string, projectKey string) error {
@@ -799,7 +806,13 @@ func (s *Store) SetProjectKey(ctx context.Context, projectID string, projectKey 
 	if err != nil {
 		return err
 	}
-	state, err := s.queries.GetProjectKeyState(ctx, trimmedProjectID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin set project key tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	state, err := q.GetProjectKeyState(ctx, trimmedProjectID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
@@ -812,19 +825,29 @@ func (s *Store) SetProjectKey(ctx context.Context, projectID string, projectKey 
 	if strings.TrimSpace(state.ProjectKey) == normalizedKey {
 		return nil
 	}
-	updated, err := s.queries.SetProjectKey(ctx, sqlitegen.SetProjectKeyParams{
-		ProjectID:       trimmedProjectID,
-		ProjectKey:      normalizedKey,
-		UpdatedAtUnixMs: time.Now().UTC().UnixMilli(),
-	})
+	result, err := tx.ExecContext(ctx, `
+UPDATE projects
+SET project_key = ?, updated_at_unix_ms = ?
+WHERE id = ?
+  AND (
+    project_key = ?
+    OR NOT EXISTS (SELECT 1 FROM tasks WHERE project_id = ?)
+  )`, normalizedKey, time.Now().UTC().UnixMilli(), trimmedProjectID, normalizedKey, trimmedProjectID)
 	if err != nil {
 		if isSQLiteUniqueConstraint(err) {
 			return fmt.Errorf("project key %q is already in use", normalizedKey)
 		}
 		return fmt.Errorf("set project key: %w", err)
 	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set project key rows affected: %w", err)
+	}
 	if updated == 0 {
-		return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
+		return fmt.Errorf("project key is immutable after tasks exist")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit set project key tx: %w", err)
 	}
 	return nil
 }

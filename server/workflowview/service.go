@@ -3,13 +3,13 @@ package workflowview
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 
 	"builder/server/metadata"
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 	"builder/shared/serverapi"
 )
 
@@ -146,7 +146,7 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 	}
 	for _, transition := range transitions {
 		outputs := map[string]string{}
-		if err := decodeJSON(transition.OutputValuesJson, &outputs); err != nil {
+		if err := workflowjson.UnmarshalString(transition.OutputValuesJson, &outputs); err != nil {
 			return serverapi.WorkflowTaskDetail{}, err
 		}
 		dto := serverapi.WorkflowTaskTransition{ID: transition.ID, TaskID: transition.TaskID, TransitionID: transition.TransitionID, State: transition.State, Commentary: transition.Commentary, OutputValues: outputs, CreatedAt: transition.CreatedAtUnixMs}
@@ -186,22 +186,22 @@ func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.
 	nodeKinds := map[string]workflow.NodeKind{}
 	for _, node := range nodes {
 		fields := []serverapi.WorkflowOutputField{}
-		if err := decodeJSON(node.OutputFieldsJson, &fields); err != nil {
+		if err := workflowjson.UnmarshalString(node.OutputFieldsJson, &fields); err != nil {
 			return serverapi.WorkflowDefinition{}, nil, err
 		}
 		def.Nodes = append(def.Nodes, serverapi.WorkflowNode{ID: node.ID, WorkflowID: node.WorkflowID, Key: node.NodeKey, Kind: node.Kind, DisplayName: node.DisplayName, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, OutputFields: fields})
 		nodeKinds[node.ID] = workflow.NodeKind(node.Kind)
 	}
 	for _, group := range groups {
-		def.TransitionGroups = append(def.TransitionGroups, serverapi.WorkflowTransitionGroup{ID: group.ID, WorkflowID: group.WorkflowID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName})
+		def.TransitionGroups = append(def.TransitionGroups, serverapi.WorkflowTransitionGroup{ID: group.ID, WorkflowID: group.WorkflowID, SourceNodeID: group.SourceNodeID, TransitionID: string(group.TransitionID), DisplayName: group.DisplayName})
 	}
 	for _, edge := range edges {
 		inputs := []serverapi.WorkflowInputBinding{}
 		requirements := []serverapi.WorkflowOutputRequirement{}
-		if err := decodeJSON(edge.InputBindingsJson, &inputs); err != nil {
+		if err := workflowjson.UnmarshalString(edge.InputBindingsJson, &inputs); err != nil {
 			return serverapi.WorkflowDefinition{}, nil, err
 		}
-		if err := decodeJSON(edge.OutputRequirementsJson, &requirements); err != nil {
+		if err := workflowjson.UnmarshalString(edge.OutputRequirementsJson, &requirements); err != nil {
 			return serverapi.WorkflowDefinition{}, nil, err
 		}
 		def.Edges = append(def.Edges, serverapi.WorkflowEdge{ID: edge.ID, WorkflowID: edge.WorkflowID, TransitionGroupID: edge.TransitionGroupID, Key: edge.EdgeKey, TargetNodeID: edge.TargetNodeID, RequiresApproval: edge.RequiresApproval != 0, ContextMode: edge.ContextMode, InputBindings: inputs, OutputRequirements: requirements})
@@ -233,11 +233,4 @@ func placementDTO(placement sqlitegen.TaskNodePlacement) serverapi.WorkflowPlace
 
 func commentDTO(comment sqlitegen.TaskComment) serverapi.WorkflowTaskComment {
 	return serverapi.WorkflowTaskComment{ID: comment.ID, TaskID: comment.TaskID, Body: comment.Body, Author: comment.AuthorKind, AuthorID: comment.AuthorID, DeletedAt: comment.DeletedAtUnixMs, UpdatedAt: comment.UpdatedAtUnixMs}
-}
-
-func decodeJSON(raw string, target any) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	return json.Unmarshal([]byte(raw), target)
 }

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +84,7 @@ func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error
 	return e.appendMessage(stepID, metaResult.HeadlessExit[0])
 }
 
-func (e *Engine) injectWorkflowModePromptIfNeeded(stepID string) error {
+func (e *Engine) injectWorkflowModePromptIfNeeded(ctx context.Context, stepID string) error {
 	if !e.workflowRunActive() {
 		return nil
 	}
@@ -92,15 +93,15 @@ func (e *Engine) injectWorkflowModePromptIfNeeded(stepID string) error {
 			return nil
 		}
 	}
-	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
-	metaResult, err := builder.Build(metaContextBuildOptions{IncludeWorkflow: true})
+	mode, err := e.workflowCompletionMode(ctx)
 	if err != nil {
 		return err
 	}
-	if len(metaResult.Workflow) == 0 {
+	message, ok := workflowModeMetaMessage(mode)
+	if !ok {
 		return nil
 	}
-	return e.appendMessage(stepID, metaResult.Workflow[0])
+	return e.appendMessage(stepID, message)
 }
 
 func shouldInjectHeadlessModePromptForState(active bool) bool {

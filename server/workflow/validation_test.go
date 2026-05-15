@@ -424,7 +424,7 @@ func TestOutputBindingsTemplatesContextAndRoles(t *testing.T) {
 			def.Edges[1].InputBindings = []workflow.InputBinding{{Name: "task_ref", Source: workflow.BindingSourceTask, Field: "unknown"}}
 		}, code: workflow.CodeInvalidInputBinding},
 		{name: "invalid template placeholder", edit: func(def *workflow.Definition) {
-			def.Nodes[1].PromptTemplate = "Use {{missing}}."
+			def.Nodes[1].PromptTemplate = "Use {{.Inputs.missing}}."
 			def.Edges[0].InputBindings = []workflow.InputBinding{{Name: "task_title", Source: workflow.BindingSourceTask, Field: "title"}}
 		}, code: workflow.CodeInvalidTemplatePlaceholder},
 		{name: "invalid context mode", edit: func(def *workflow.Definition) { def.Edges[1].ContextMode = workflow.ContextMode("reuse") }, code: workflow.CodeInvalidContextMode},
@@ -445,7 +445,7 @@ func TestOutputBindingsTemplatesContextAndRoles(t *testing.T) {
 
 	t.Run("valid input bindings and template placeholders pass", func(t *testing.T) {
 		def := validWorkflow()
-		def.Nodes[1].PromptTemplate = "Implement {{task_title}} with {{prior_summary}}."
+		def.Nodes[1].PromptTemplate = "Implement {{.Inputs.task_title}} with {{.Inputs.prior_summary}}."
 		def.Edges[0].InputBindings = []workflow.InputBinding{
 			{Name: "task_title", Source: workflow.BindingSourceTask, Field: "title"},
 			{Name: "prior_summary", Source: workflow.BindingSourceTransitionOutput, Field: "commentary"},
@@ -706,7 +706,7 @@ func addAgentLoop(def *workflow.Definition, source workflow.NodeID, groupSuffix 
 		WorkflowID:   def.ID,
 		ID:           groupID,
 		SourceNodeID: source,
-		TransitionID: transitionID,
+		TransitionID: workflow.TransitionID(transitionID),
 		DisplayName:  "Loop",
 	})
 	def.Edges = append(def.Edges, workflow.Edge{

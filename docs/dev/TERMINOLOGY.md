@@ -14,15 +14,11 @@ A human-facing project-scoped task identifier. A task short ID combines a projec
 
 ### Project Key
 
-A short human-facing prefix used in task short IDs.
+A short human-facing prefix used in task short IDs. Project keys are uppercase, globally unique, and immutable after tasks exist for that project.
 
 ### Graph Revision
 
 A monotonic workflow graph counter incremented by graph-affecting workflow edits. It provides traceability for tasks, runs, transitions, approvals, and stale-behavior warnings without snapshotting the full workflow definition.
-
-### Task Body
-
-The primary task description. A task has a title, task short ID, and body.
 
 ### Workflow
 
@@ -125,7 +121,11 @@ A node-owned schema for the structured output fields available when a run comple
 
 ### Session
 
-Builder transcript/runtime artifact used by a run. A task may have many sessions due to loops, branches, retries, or context-preservation choices.
+Builder transcript/runtime artifact used by a run. A task may have many sessions due to loops, branches, retries, or context-preservation choices. In current code, "session" means the durable transcript from the start of a conversation until its terminal/end state; it can cross compaction and handoff boundaries. A single handoff-to-handoff model range is an execution slice within a session, not the whole session.
+
+### Session Run
+
+One live execution of a session through the runtime loop. A session can have multiple runtime activations over time through resume, queued user submissions, goal turns, compaction, or background continuation.
 
 ### Node Transition
 
@@ -149,7 +149,7 @@ A task-level stop operation that prevents further workflow automation for the ta
 
 ### Question
 
-A user-blocking ask emitted by a run. Questions pause the affected run or task path until answered.
+A user-blocking ask emitted by a run through the `ask_question` tool. Questions carry prompt text, optional suggestions/options, optional recommended option index, and schema-backed answer expectations. The frontend presents them as a modal/action surface; answering resumes the blocked runtime path through the normal question resolver.
 
 ### Orchestrator
 
@@ -166,3 +166,37 @@ Server-owned automation scheduler for runnable workflow work. Runnable work is d
 ### Task Comment
 
 A durable note attached to a task. Task comments capture user or agent observations, review notes, worklogs, and other task-local information that should not be committed into a worktree. A task comment can be added, replaced as a whole, or soft-deleted.
+
+## TUI And Transcript
+
+### Ongoing Mode
+
+Primary long-running TUI mode backed by normal-buffer terminal scrollback. Ongoing mode appends committed transcript history and live overlays without owning a scrollable viewport or rewriting previously emitted lines.
+
+### Detail Mode
+
+Transcript inspection mode with UI-local selection, expansion, and line-oriented viewport scrolling. Detail content can update while open, but scroll/anchor behavior stays stable unless user navigates.
+
+### Transcript Mode
+
+The rendering posture for transcript entries. Current modes are ongoing and detail; each transcript role declares whether it is visible in ongoing, collapsed in ongoing, detail-only, or hidden.
+
+### Alternate Screen
+
+Terminal screen buffer separate from normal scrollback. Builder avoids alternate screen for ongoing mode so persistent history remains in native terminal scrollback. Some focused pickers may use alternate screen for temporary UI.
+
+### Alternate Scroll
+
+Terminal mode `?1007`, which converts wheel input into cursor-key style events in alternate-screen contexts. Ongoing mode never enables alternate scroll. Detail may enable it only while active, then disable it on exit.
+
+### Mouse Capture
+
+Terminal mode where the app receives mouse events instead of leaving them to native terminal selection. Builder keeps mouse capture disabled in ongoing and detail modes so text selection/copy remains native.
+
+### Normal Buffer
+
+Terminal buffer with native scrollback. Ongoing mode renders committed history here and treats emitted lines as immutable.
+
+### Scrollback
+
+Terminal-owned history of normal-buffer output. Builder does not replay, clear, or restyle committed ongoing scrollback after startup.

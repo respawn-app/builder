@@ -275,7 +275,7 @@ func TestCompleteNodeOutsideWorkflowReturnsToolError(t *testing.T) {
 	}
 }
 
-func TestWorkflowMixedCompleteNodePreflightSkipsSideEffects(t *testing.T) {
+func TestWorkflowMixedCompleteNodeRunsSideEffects(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -308,14 +308,14 @@ func TestWorkflowMixedCompleteNodePreflightSkipsSideEffects(t *testing.T) {
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if got := sideEffect.count.Load(); got != 0 {
-		t.Fatalf("side-effect tool executions = %d, want 0", got)
+	if got := sideEffect.count.Load(); got != 1 {
+		t.Fatalf("side-effect tool executions = %d, want 1", got)
 	}
 	if got := controller.completed.Load(); got != 1 {
 		t.Fatalf("completions = %d, want 1", got)
 	}
-	if got := controller.violations.Load(); got != 1 {
-		t.Fatalf("violations = %d, want 1", got)
+	if got := controller.violations.Load(); got != 0 {
+		t.Fatalf("violations = %d, want 0", got)
 	}
 }
 

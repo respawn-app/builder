@@ -10,6 +10,7 @@ import (
 
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowjson"
 )
 
 type CreateTaskRequest struct {
@@ -326,7 +327,7 @@ WHERE id = ? AND state = 'active'`, "completed", now, prepared.startPlacement.ID
 	} else if updated != 1 {
 		return StartTaskResult{}, sql.ErrNoRows
 	}
-	if err := q.InsertTaskTransition(ctx, sqlitegen.InsertTaskTransitionParams{ID: transitionID, TaskID: string(taskID), SourcePlacementID: sql.NullString{String: prepared.startPlacement.ID, Valid: true}, SourceNodeID: sql.NullString{String: string(prepared.start.ID), Valid: true}, SourceNodeKey: string(prepared.start.Key), SourceNodeDisplayName: prepared.start.DisplayName, TransitionGroupID: sql.NullString{String: string(prepared.group.ID), Valid: true}, TransitionID: prepared.group.TransitionID, TransitionDisplayName: prepared.group.DisplayName, WorkflowRevisionSeen: prepared.workflow.GraphRevision, Actor: "system", State: "applied", OutputValuesJson: "{}", CreatedAtUnixMs: now, AppliedAtUnixMs: now}); err != nil {
+	if err := q.InsertTaskTransition(ctx, sqlitegen.InsertTaskTransitionParams{ID: transitionID, TaskID: string(taskID), SourcePlacementID: sql.NullString{String: prepared.startPlacement.ID, Valid: true}, SourceNodeID: sql.NullString{String: string(prepared.start.ID), Valid: true}, SourceNodeKey: string(prepared.start.Key), SourceNodeDisplayName: prepared.start.DisplayName, TransitionGroupID: sql.NullString{String: string(prepared.group.ID), Valid: true}, TransitionID: string(prepared.group.TransitionID), TransitionDisplayName: prepared.group.DisplayName, WorkflowRevisionSeen: prepared.workflow.GraphRevision, Actor: "system", State: "applied", OutputValuesJson: "{}", CreatedAtUnixMs: now, AppliedAtUnixMs: now}); err != nil {
 		return StartTaskResult{}, err
 	}
 	if err := q.InsertTaskNodePlacement(ctx, sqlitegen.InsertTaskNodePlacementParams{ID: targetPlacementID, TaskID: string(taskID), NodeID: string(prepared.target.ID), State: "active", CreatedByTransitionID: sql.NullString{String: transitionID, Valid: true}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
@@ -713,11 +714,12 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 	worktreeID := strings.TrimSpace(task.ManagedWorktreeID.String)
 	if worktreeID == "" {
 		return RunStartContext{
-			Run:           runRecordFromTaskRun(run),
-			Task:          taskRecordFromTask(task),
-			Node:          nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
-			TransitionIDs: transitionIDsFromSnapshot(snapshot),
-			InputValues:   inputValues,
+			Run:               runRecordFromTaskRun(run),
+			Task:              taskRecordFromTask(task),
+			Node:              nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+			TransitionIDs:     transitionIDsFromSnapshot(snapshot),
+			TransitionOptions: transitionOptionsFromSnapshot(snapshot),
+			InputValues:       inputValues,
 		}, nil
 	}
 	worktree, err := s.metadata.GetWorktreeRecordByID(ctx, worktreeID)
@@ -729,15 +731,16 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 		return RunStartContext{}, err
 	}
 	return RunStartContext{
-		Run:           runRecordFromTaskRun(run),
-		Task:          taskRecordFromTask(task),
-		Node:          nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
-		TransitionIDs: transitionIDsFromSnapshot(snapshot),
-		InputValues:   inputValues,
-		WorkspaceID:   workspace.ID,
-		WorkspaceRoot: workspace.CanonicalRootPath,
-		WorktreeID:    worktree.ID,
-		WorktreeRoot:  worktree.CanonicalRoot,
+		Run:               runRecordFromTaskRun(run),
+		Task:              taskRecordFromTask(task),
+		Node:              nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+		TransitionIDs:     transitionIDsFromSnapshot(snapshot),
+		TransitionOptions: transitionOptionsFromSnapshot(snapshot),
+		InputValues:       inputValues,
+		WorkspaceID:       workspace.ID,
+		WorkspaceRoot:     workspace.CanonicalRootPath,
+		WorktreeID:        worktree.ID,
+		WorktreeRoot:      worktree.CanonicalRoot,
 	}, nil
 }
 
@@ -958,6 +961,18 @@ func transitionIDsFromSnapshot(snapshot runStartSnapshot) []string {
 	return out
 }
 
+func transitionOptionsFromSnapshot(snapshot runStartSnapshot) []TransitionOption {
+	out := make([]TransitionOption, 0, len(snapshot.TransitionGroups))
+	for _, group := range snapshot.TransitionGroups {
+		id := strings.TrimSpace(group.TransitionID)
+		if id == "" {
+			continue
+		}
+		out = append(out, TransitionOption{ID: id, DisplayName: strings.TrimSpace(group.DisplayName)})
+	}
+	return out
+}
+
 func (s *Store) resolveTaskWorkflowLink(ctx context.Context, projectID string, workflowID workflow.WorkflowID) (sqlitegen.ProjectWorkflowLink, error) {
 	if strings.TrimSpace(string(workflowID)) == "" {
 		return s.queries.GetDefaultProjectWorkflowLink(ctx, projectID)
@@ -1006,11 +1021,7 @@ func startTransition(def workflow.Definition, startNodeID workflow.NodeID) (work
 }
 
 func mustJSON(value any) string {
-	raw, err := marshalJSON(value)
-	if err != nil {
-		return "null"
-	}
-	return raw
+	return workflowjson.MustMarshalString(value)
 }
 
 func newRunStartSnapshot(def workflow.Definition, record WorkflowRecord, nodeID workflow.NodeID) (runStartSnapshot, error) {
@@ -1036,7 +1047,7 @@ func newRunStartSnapshot(def workflow.Definition, record WorkflowRecord, nodeID 
 		Node:                 nodeSnapshot(node),
 	}
 	for _, group := range groupsBySource[nodeID] {
-		groupSnapshot := transitionContractSnapshot{ID: group.ID, TransitionID: group.TransitionID, DisplayName: group.DisplayName}
+		groupSnapshot := transitionContractSnapshot{ID: group.ID, TransitionID: string(group.TransitionID), DisplayName: group.DisplayName}
 		for _, edge := range edgesByGroup[group.ID] {
 			target, ok := nodes[edge.TargetNodeID]
 			if !ok {

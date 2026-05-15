@@ -76,7 +76,7 @@ func workflowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 func workflowCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder workflow create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowCreateUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	description := fs.String("description", "", "workflow description")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -110,7 +110,7 @@ func workflowCreateSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 func workflowListSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder workflow list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowListUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -146,7 +146,7 @@ func workflowNodeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	fs := flag.NewFlagSet("builder workflow node", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowNodeUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fs.Usage()
 		if len(args) == 0 {
@@ -216,7 +216,7 @@ func workflowEdgeSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	fs := flag.NewFlagSet("builder workflow edge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowEdgeUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fs.Usage()
 		if len(args) == 0 {
@@ -353,7 +353,7 @@ func workflowLinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) i
 func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder workflow unlink", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowUnlinkUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	positionals, flagArgs := takeLeadingPositionals(args, 2)
 	if err := fs.Parse(flagArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -390,7 +390,7 @@ func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 func workflowDefaultSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder workflow default", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowDefaultUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	positionals, flagArgs := takeLeadingPositionals(args, 2)
 	if err := fs.Parse(flagArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -479,7 +479,7 @@ func workflowValidateSubcommand(args []string, stdout io.Writer, stderr io.Write
 func workflowInspectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("builder workflow inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { writeWorkflowInspectUsage(fs) }
+	fs.Usage = func() { writeWorkflowUsage(fs) }
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if err := fs.Parse(flagArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
