@@ -877,7 +877,7 @@ Goal: edge approval and manual override transitions are durable, validated, and 
 - [x] Run approval/manual move tests.
 - [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowsvc/... ./server/workflowview/... ./cli/builder/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow approvals`.
+- [x] Commit slice with message like `feat: add workflow approvals`.
 
 ## Slice 12: Fan-Out, Parallel Branches, And Joins
 
