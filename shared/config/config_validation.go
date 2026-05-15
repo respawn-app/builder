@@ -280,6 +280,12 @@ func normalizeWorkflowCompletionMode(raw string) WorkflowCompletionMode {
 }
 
 func validateWorkflowSettings(state settingsState, _ map[string]string) error {
+	if state.Settings.Workflow.CompletionMode == "" &&
+		state.Settings.Workflow.Concurrency == 0 &&
+		state.Settings.Workflow.MaxFinalAnswerViolations == 0 &&
+		state.Settings.Workflow.MaxInvalidCompletionAttempts == 0 {
+		return nil
+	}
 	switch state.Settings.Workflow.CompletionMode {
 	case WorkflowCompletionModeAuto, WorkflowCompletionModeStructuredOutput, WorkflowCompletionModeTool:
 	default:

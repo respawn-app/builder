@@ -83,6 +83,26 @@ func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error
 	return e.appendMessage(stepID, metaResult.HeadlessExit[0])
 }
 
+func (e *Engine) injectWorkflowModePromptIfNeeded(stepID string) error {
+	if !e.workflowRunActive() {
+		return nil
+	}
+	for _, msg := range e.snapshotMessages() {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeWorkflowMode {
+			return nil
+		}
+	}
+	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{IncludeWorkflow: true})
+	if err != nil {
+		return err
+	}
+	if len(metaResult.Workflow) == 0 {
+		return nil
+	}
+	return e.appendMessage(stepID, metaResult.Workflow[0])
+}
+
 func shouldInjectHeadlessModePromptForState(active bool) bool {
 	return !active
 }

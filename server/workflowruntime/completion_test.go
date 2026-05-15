@@ -1,0 +1,98 @@
+package workflowruntime
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"builder/server/llm"
+	"builder/server/workflow"
+	"builder/shared/config"
+)
+
+func TestSelectCompletionMode(t *testing.T) {
+	supported := llm.ProviderCapabilities{SupportsResponsesAPI: true}
+	unsupported := llm.ProviderCapabilities{}
+	tests := []struct {
+		name    string
+		mode    config.WorkflowCompletionMode
+		caps    llm.ProviderCapabilities
+		want    CompletionMode
+		wantErr string
+	}{
+		{name: "auto structured", mode: config.WorkflowCompletionModeAuto, caps: supported, want: CompletionModeStructuredOutput},
+		{name: "auto tool", mode: config.WorkflowCompletionModeAuto, caps: unsupported, want: CompletionModeTool},
+		{name: "forced tool", mode: config.WorkflowCompletionModeTool, caps: supported, want: CompletionModeTool},
+		{name: "forced structured unsupported", mode: config.WorkflowCompletionModeStructuredOutput, caps: unsupported, wantErr: "responses API"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SelectCompletionMode(tt.mode, tt.caps)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("SelectCompletionMode error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SelectCompletionMode: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("mode = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompletionJSONSchemaIncludesTopLevelOutputFields(t *testing.T) {
+	raw, err := CompletionJSONSchema(CompletionContract{
+		TransitionIDs: []string{"done", "blocked"},
+		OutputFields: []workflow.OutputField{
+			{Name: "summary", Description: "Summary of work."},
+			{Name: "risk", Description: "Risk note."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompletionJSONSchema: %v", err)
+	}
+	var schema struct {
+		AdditionalProperties bool                         `json:"additionalProperties"`
+		Required             []string                     `json:"required"`
+		Properties           map[string]map[string]string `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	if schema.AdditionalProperties {
+		t.Fatal("schema allows additional properties")
+	}
+	if _, ok := schema.Properties["summary"]; !ok {
+		t.Fatalf("schema properties missing summary: %+v", schema.Properties)
+	}
+	if got := schema.Properties["summary"]["description"]; got != "Summary of work." {
+		t.Fatalf("summary description = %q", got)
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "transition_id" {
+		t.Fatalf("required = %+v, want [transition_id]", schema.Required)
+	}
+}
+
+func TestDecodeCompletionRejectsUnknownAndNonStringFields(t *testing.T) {
+	_, err := DecodeCompletion(json.RawMessage(`{"summary": 1, "extra": "x"}`), CompletionContract{
+		OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}},
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	validation, ok := err.(ValidationError)
+	if !ok {
+		t.Fatalf("error type = %T, want ValidationError", err)
+	}
+	codes := map[string]bool{}
+	for _, issue := range validation.Issues {
+		codes[issue.Code] = true
+	}
+	if !codes["non_string_value"] || !codes["unknown_output_field"] {
+		t.Fatalf("codes = %+v, want non_string_value and unknown_output_field", codes)
+	}
+}

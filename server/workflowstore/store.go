@@ -135,6 +135,8 @@ type RunRecord struct {
 	InterruptedAt         int64
 	InterruptionReason    string
 	WaitingAskID          string
+	FinalAnswerViolations int64
+	InvalidCompletions    int64
 }
 
 type RunnableRunRecord struct {

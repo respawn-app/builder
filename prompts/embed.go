@@ -89,6 +89,9 @@ var HeadlessModePrompt string
 //go:embed headless_mode_exit_prompt.md
 var HeadlessModeExitPrompt string
 
+//go:embed workflow_mode_prompt.md
+var WorkflowModePrompt string
+
 //go:embed worktree_mode_prompt.md
 var WorktreeModePrompt string
 

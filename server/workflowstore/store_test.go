@@ -328,6 +328,170 @@ func TestCompleteRunValidatesOutputRequirements(t *testing.T) {
 	}
 }
 
+func TestCompleteRunInfersSingleTransitionID(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		t.Fatalf("CompleteRun inferred transition: %v", err)
+	}
+}
+
+func TestCompleteRunRejectsMissingTransitionIDWhenAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	agent := nodeByKey(t, def, "agent")
+	done := nodeByKind(t, def, workflow.NodeKindTerminal)
+	if _, err := store.AddTransitionGroup(ctx, TransitionGroupRecord{ID: workflow.TransitionGroupID("group-blocked-" + string(workflowID)), WorkflowID: workflowID, SourceNodeID: agent.ID, TransitionID: "blocked", DisplayName: "Blocked"}); err != nil {
+		t.Fatalf("AddTransitionGroup blocked: %v", err)
+	}
+	if _, err := store.AddEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-blocked-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: workflow.TransitionGroupID("group-blocked-" + string(workflowID)), Key: "blocked", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession}); err != nil {
+		t.Fatalf("AddEdge blocked: %v", err)
+	}
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, OutputValues: map[string]string{"summary": "done"}}); err == nil || !strings.Contains(err.Error(), "transition id is required") {
+		t.Fatalf("expected missing transition id error, got %v", err)
+	}
+}
+
+func TestCompleteRunRejectsUnknownOutputField(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done", "extra": "nope"}}); err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("expected unknown output error, got %v", err)
+	}
+}
+
+func TestCompleteRunReturnsStructuredValidationIssues(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	_, err = store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"extra": "nope"}})
+	validation, ok := err.(CompletionValidationError)
+	if !ok {
+		t.Fatalf("error = %T %v, want CompletionValidationError", err, err)
+	}
+	codes := map[string]bool{}
+	for _, issue := range validation.Issues {
+		codes[issue.Code] = true
+	}
+	if !codes["unknown_output_field"] || !codes["required_output_missing"] {
+		t.Fatalf("validation codes = %+v, want unknown_output_field and required_output_missing", codes)
+	}
+}
+
+func TestCompleteRunRejectsOversizedCompletionFields(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	_, err = store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": strings.Repeat("a", workflow.MaxOutputValueBytes+1)}})
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected oversized output error, got %v", err)
+	}
+	_, err = store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", Commentary: strings.Repeat("a", workflow.MaxCommentaryBytes+1), OutputValues: map[string]string{"summary": "done"}})
+	if err == nil || !strings.Contains(err.Error(), "commentary is too large") {
+		t.Fatalf("expected oversized commentary error, got %v", err)
+	}
+}
+
+func TestRecordProtocolViolationInterruptsAtCap(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	first, err := store.RecordProtocolViolation(ctx, RecordProtocolViolationRequest{RunID: started.RunID, Kind: ProtocolViolationFinalAnswer, MaxCount: 2, Detail: `{"detail":"first"}`})
+	if err != nil {
+		t.Fatalf("RecordProtocolViolation first: %v", err)
+	}
+	if first.Count != 1 || first.Interrupted {
+		t.Fatalf("first violation = %+v, want count 1 active", first)
+	}
+	second, err := store.RecordProtocolViolation(ctx, RecordProtocolViolationRequest{RunID: started.RunID, Kind: ProtocolViolationFinalAnswer, MaxCount: 2, Detail: `{"detail":"second"}`})
+	if err != nil {
+		t.Fatalf("RecordProtocolViolation second: %v", err)
+	}
+	if second.Count != 2 || !second.Interrupted {
+		t.Fatalf("second violation = %+v, want count 2 interrupted", second)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 || runs[0].FinalAnswerViolations != 2 || runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != "workflow_protocol_violation_limit" {
+		t.Fatalf("run after cap = %+v", runs)
+	}
+}
+
 func TestCompleteRunRejectsStaleGeneration(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)

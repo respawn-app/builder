@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"builder/server/metadata/sqlitegen"
@@ -33,6 +34,52 @@ type CompleteRunRequest struct {
 	Actor              string
 	ExpectedGeneration int64
 	RequireGeneration  bool
+}
+
+type CompletionValidationIssue struct {
+	Code    string
+	Field   string
+	Message string
+}
+
+type CompletionValidationError struct {
+	Issues []CompletionValidationIssue
+}
+
+func (e CompletionValidationError) Error() string {
+	if len(e.Issues) == 0 {
+		return "workflow completion is invalid"
+	}
+	parts := make([]string, 0, len(e.Issues))
+	for _, issue := range e.Issues {
+		if strings.TrimSpace(issue.Field) != "" {
+			parts = append(parts, issue.Field+": "+issue.Message)
+			continue
+		}
+		parts = append(parts, issue.Message)
+	}
+	return "workflow completion is invalid: " + strings.Join(parts, "; ")
+}
+
+type ProtocolViolationKind string
+
+const (
+	ProtocolViolationFinalAnswer       ProtocolViolationKind = "final_answer"
+	ProtocolViolationInvalidCompletion ProtocolViolationKind = "invalid_completion"
+)
+
+type RecordProtocolViolationRequest struct {
+	RunID              workflow.RunID
+	Kind               ProtocolViolationKind
+	MaxCount           int
+	Detail             string
+	ExpectedGeneration int64
+	RequireGeneration  bool
+}
+
+type RecordProtocolViolationResult struct {
+	Count       int64
+	Interrupted bool
 }
 
 type CompleteRunResult struct {
@@ -337,19 +384,21 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 	if strings.TrimSpace(string(req.RunID)) == "" {
 		return CompleteRunResult{}, errors.New("run id is required")
 	}
-	if strings.TrimSpace(req.TransitionID) == "" {
-		return CompleteRunResult{}, errors.New("transition id is required")
-	}
 	if len(req.Commentary) > workflow.MaxCommentaryBytes {
-		return CompleteRunResult{}, errors.New("commentary is too large")
+		return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "commentary_too_large", Field: "commentary", Message: "commentary is too large"}}}
 	}
-	for name, value := range req.OutputValues {
+	issues := []CompletionValidationIssue{}
+	for _, name := range sortedStringKeys(req.OutputValues) {
+		value := req.OutputValues[name]
 		if strings.TrimSpace(name) == "" {
-			return CompleteRunResult{}, errors.New("output field name is required")
+			issues = append(issues, CompletionValidationIssue{Code: "output_field_required", Message: "output field name is required"})
 		}
 		if len(value) > workflow.MaxOutputValueBytes {
-			return CompleteRunResult{}, fmt.Errorf("output field %q is too large", name)
+			issues = append(issues, CompletionValidationIssue{Code: "output_too_large", Field: strings.TrimSpace(name), Message: "output field is too large"})
 		}
+	}
+	if len(issues) > 0 {
+		return CompleteRunResult{}, CompletionValidationError{Issues: issues}
 	}
 	actor := strings.TrimSpace(req.Actor)
 	if actor == "" {
@@ -378,12 +427,24 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 	if err := unmarshalJSON(run.RunStartSnapshotJson, &snapshot); err != nil {
 		return CompleteRunResult{}, err
 	}
-	group, ok := snapshot.transitionByID(req.TransitionID)
-	if !ok {
-		return CompleteRunResult{}, fmt.Errorf("transition %q is not available in run-start snapshot", req.TransitionID)
+	selectedTransitionID := strings.TrimSpace(req.TransitionID)
+	if selectedTransitionID == "" {
+		if len(snapshot.TransitionGroups) == 0 {
+			return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "no_outgoing_transition", Field: "transition_id", Message: "no outgoing transition is available in run-start snapshot"}}}
+		}
+		if len(snapshot.TransitionGroups) != 1 {
+			return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "transition_id_required", Field: "transition_id", Message: "transition id is required when multiple transitions are available"}}}
+		}
+		selectedTransitionID = snapshot.TransitionGroups[0].TransitionID
 	}
-	if err := validateRequiredOutputs(group, req.OutputValues); err != nil {
-		return CompleteRunResult{}, err
+	group, ok := snapshot.transitionByID(selectedTransitionID)
+	if !ok {
+		return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "invalid_transition_id", Field: "transition_id", Message: fmt.Sprintf("transition %q is not available in run-start snapshot", selectedTransitionID)}}}
+	}
+	issues = append(issues, knownOutputIssues(snapshot.Node, req.OutputValues)...)
+	issues = append(issues, requiredOutputIssues(group, req.OutputValues)...)
+	if len(issues) > 0 {
+		return CompleteRunResult{}, CompletionValidationError{Issues: issues}
 	}
 	outputValuesJSON, err := marshalJSON(req.OutputValues)
 	if err != nil {
@@ -411,9 +472,29 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := s.queries.WithTx(tx)
-	if updated, err := q.UpdateTaskRunOutcome(ctx, sqlitegen.UpdateTaskRunOutcomeParams{ID: run.ID, UpdatedAtUnixMs: now, CompletedAtUnixMs: now, InterruptionDetailJson: "{}", FinalAnswerViolationCount: run.FinalAnswerViolationCount, InvalidCompletionCount: run.InvalidCompletionCount}); err != nil {
+	updatedRun, err := tx.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    completed_at_unix_ms = ?,
+    waiting_ask_id = ''
+WHERE id = ?
+  AND run_generation = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0`,
+		now,
+		now,
+		run.ID,
+		run.RunGeneration,
+	)
+	if err != nil {
 		return CompleteRunResult{}, fmt.Errorf("complete run: %w", err)
-	} else if updated != 1 {
+	}
+	updatedCount, err := updatedRun.RowsAffected()
+	if err != nil {
+		return CompleteRunResult{}, err
+	}
+	if updatedCount != 1 {
 		return CompleteRunResult{}, sql.ErrNoRows
 	}
 	if updated, err := q.UpdateTaskNodePlacementState(ctx, sqlitegen.UpdateTaskNodePlacementStateParams{ID: run.PlacementID, State: "completed", UpdatedAtUnixMs: now}); err != nil {
@@ -612,6 +693,8 @@ func runRecordFromTaskRun(row sqlitegen.TaskRun) RunRecord {
 		InterruptedAt:         row.InterruptedAtUnixMs,
 		InterruptionReason:    row.InterruptionReason,
 		WaitingAskID:          row.WaitingAskID,
+		FinalAnswerViolations: row.FinalAnswerViolationCount,
+		InvalidCompletions:    row.InvalidCompletionCount,
 	}
 }
 
@@ -744,15 +827,130 @@ func (g transitionContractSnapshot) requiresApproval() bool {
 	return false
 }
 
-func validateRequiredOutputs(group transitionContractSnapshot, values map[string]string) error {
+func requiredOutputIssues(group transitionContractSnapshot, values map[string]string) []CompletionValidationIssue {
+	issues := []CompletionValidationIssue{}
 	for _, edge := range group.Edges {
 		for _, requirement := range edge.OutputRequirements {
 			if strings.TrimSpace(values[requirement.FieldName]) == "" {
-				return fmt.Errorf("required output %q is missing", requirement.FieldName)
+				issues = append(issues, CompletionValidationIssue{Code: "required_output_missing", Field: requirement.FieldName, Message: "required output is missing"})
 			}
 		}
 	}
-	return nil
+	return issues
+}
+
+func knownOutputIssues(node nodeContractSnapshot, values map[string]string) []CompletionValidationIssue {
+	known := make(map[string]bool, len(node.OutputFields))
+	for _, field := range node.OutputFields {
+		name := strings.TrimSpace(field.Name)
+		if name != "" {
+			known[name] = true
+		}
+	}
+	issues := []CompletionValidationIssue{}
+	for _, name := range sortedStringKeys(values) {
+		field := strings.TrimSpace(name)
+		if field == "" {
+			continue
+		}
+		if !known[field] {
+			issues = append(issues, CompletionValidationIssue{Code: "unknown_output_field", Field: field, Message: "output field is not declared by source node"})
+		}
+	}
+	return issues
+}
+
+func sortedStringKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *Store) RecordProtocolViolation(ctx context.Context, req RecordProtocolViolationRequest) (RecordProtocolViolationResult, error) {
+	if strings.TrimSpace(string(req.RunID)) == "" {
+		return RecordProtocolViolationResult{}, errors.New("run id is required")
+	}
+	if req.MaxCount <= 0 {
+		return RecordProtocolViolationResult{}, errors.New("protocol violation max count must be > 0")
+	}
+	detail := strings.TrimSpace(req.Detail)
+	if detail == "" {
+		detail = "{}"
+	}
+	now := s.now().UnixMilli()
+	var count int64
+	var interruptedAt int64
+	var err error
+	switch req.Kind {
+	case ProtocolViolationFinalAnswer:
+		err = s.db.QueryRowContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    final_answer_violation_count = final_answer_violation_count + 1,
+    interrupted_at_unix_ms = CASE WHEN final_answer_violation_count + 1 >= ? THEN ? ELSE interrupted_at_unix_ms END,
+    interruption_reason = CASE WHEN final_answer_violation_count + 1 >= ? THEN 'workflow_protocol_violation_limit' ELSE interruption_reason END,
+    interruption_detail_json = CASE WHEN final_answer_violation_count + 1 >= ? THEN ? ELSE interruption_detail_json END
+WHERE id = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND (? = 0 OR run_generation = ?)
+RETURNING final_answer_violation_count, interrupted_at_unix_ms`,
+			now, req.MaxCount, now, req.MaxCount, req.MaxCount, detail, string(req.RunID), boolToInt64(req.RequireGeneration), req.ExpectedGeneration,
+		).Scan(&count, &interruptedAt)
+	case ProtocolViolationInvalidCompletion:
+		err = s.db.QueryRowContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    invalid_completion_count = invalid_completion_count + 1,
+    interrupted_at_unix_ms = CASE WHEN invalid_completion_count + 1 >= ? THEN ? ELSE interrupted_at_unix_ms END,
+    interruption_reason = CASE WHEN invalid_completion_count + 1 >= ? THEN 'workflow_protocol_violation_limit' ELSE interruption_reason END,
+    interruption_detail_json = CASE WHEN invalid_completion_count + 1 >= ? THEN ? ELSE interruption_detail_json END
+WHERE id = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND (? = 0 OR run_generation = ?)
+RETURNING invalid_completion_count, interrupted_at_unix_ms`,
+			now, req.MaxCount, now, req.MaxCount, req.MaxCount, detail, string(req.RunID), boolToInt64(req.RequireGeneration), req.ExpectedGeneration,
+		).Scan(&count, &interruptedAt)
+	default:
+		return RecordProtocolViolationResult{}, fmt.Errorf("unsupported protocol violation kind %q", req.Kind)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		run, getErr := s.queries.GetTaskRun(ctx, string(req.RunID))
+		if getErr != nil {
+			return RecordProtocolViolationResult{}, getErr
+		}
+		if run.CompletedAtUnixMs != 0 {
+			return RecordProtocolViolationResult{Count: protocolViolationCount(run, req.Kind), Interrupted: true}, nil
+		}
+		if run.InterruptedAtUnixMs != 0 {
+			return RecordProtocolViolationResult{Count: protocolViolationCount(run, req.Kind), Interrupted: true}, nil
+		}
+		if req.RequireGeneration && run.RunGeneration != req.ExpectedGeneration {
+			return RecordProtocolViolationResult{}, fmt.Errorf("stale workflow run generation: got %d want %d", req.ExpectedGeneration, run.RunGeneration)
+		}
+		return RecordProtocolViolationResult{}, sql.ErrNoRows
+	}
+	if err != nil {
+		return RecordProtocolViolationResult{}, err
+	}
+	return RecordProtocolViolationResult{Count: count, Interrupted: interruptedAt != 0}, nil
+}
+
+func protocolViolationCount(run sqlitegen.TaskRun, kind ProtocolViolationKind) int64 {
+	switch kind {
+	case ProtocolViolationFinalAnswer:
+		return run.FinalAnswerViolationCount
+	case ProtocolViolationInvalidCompletion:
+		return run.InvalidCompletionCount
+	default:
+		return 0
+	}
 }
 
 func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, transitionID string, revision int64, edge edgeContractSnapshot, targetPlacementID string, state string) error {

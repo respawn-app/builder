@@ -645,12 +645,12 @@ Goal: scheduler rebuilds runnable workflow work from durable placement/run inten
 
 Define this boundary before Slice 7 implementation, then reuse it in Slice 8. Fake provider/model transport is allowed; fake workflowruntime that bypasses real runtime/tool execution is allowed only for scheduler tests, not vertical completion tests.
 
-- [ ] Define fake provider/model adapter interface before Slice 7 runtime integration tests.
-- [ ] Adapter must simulate model output and tool calls without provider network calls.
-- [ ] Adapter must expose deterministic scripted steps: final answer, tool-call batch, `ask_question`, runtime error, and cancellation where needed by tests.
+- [x] Define fake provider/model adapter interface before Slice 7 runtime integration tests.
+- [x] Adapter must simulate model output and tool calls without provider network calls.
+- [x] Adapter must expose deterministic scripted steps: final answer, tool-call batch, `ask_question`, runtime error, and cancellation where needed by tests.
 - [ ] Adapter must record session/run/worktree inputs so tests can assert prompt/context/worktree behavior.
 - [ ] At least one Slice 8 vertical integration path must feed fake model output through the real runtime step loop and real workflow completion handling.
-- [ ] Real-provider smoke must remain outside automated tests and behind Nikita approval.
+- [x] Real-provider smoke must remain outside automated tests and behind Nikita approval.
 
 ## Slice 7: Workflow Prompting And Completion Runtime
 
@@ -658,73 +658,73 @@ Goal: runtime can identify workflow run context, inject workflow-mode instructio
 
 ### 7.1 Recon
 
-- [ ] Inspect `server/tools/definitions.go`.
-- [ ] Inspect `shared/toolspec/toolspec.go`.
-- [ ] Inspect `server/runtime/tool_executor.go`.
-- [ ] Inspect `server/runtime/step_executor.go`.
-- [ ] Inspect `server/runtimewire` workflow-relevant runtime construction.
-- [ ] Inspect `server/runprompt` headless launch/wiring/progress patterns for reusable workflow runtime pieces.
-- [ ] Inspect `prompts/headless_mode_prompt.md` and headless prompt injection path before designing workflow mode prompt.
-- [ ] Inspect `server/sessionruntime` and `server/runtimecontrol` activation/control boundaries.
-- [ ] Inspect runtime tests for tool call execution and final answer handling.
-- [ ] Identify where tool-call batch preflight belongs.
-- [ ] Inspect `server/llm` structured output request support and reviewer structured-output usage.
+- [x] Inspect `server/tools/definitions.go`.
+- [x] Inspect `shared/toolspec/toolspec.go`.
+- [x] Inspect `server/runtime/tool_executor.go`.
+- [x] Inspect `server/runtime/step_executor.go`.
+- [x] Inspect `server/runtimewire` workflow-relevant runtime construction.
+- [x] Inspect `server/runprompt` headless launch/wiring/progress patterns for reusable workflow runtime pieces.
+- [x] Inspect `prompts/headless_mode_prompt.md` and headless prompt injection path before designing workflow mode prompt.
+- [x] Inspect `server/sessionruntime` and `server/runtimecontrol` activation/control boundaries.
+- [x] Inspect runtime tests for tool call execution and final answer handling.
+- [x] Identify where tool-call batch preflight belongs.
+- [x] Inspect `server/llm` structured output request support and reviewer structured-output usage.
 
 ### 7.2 Red Tests
 
-- [ ] Add prompt test for `prompts/workflow_mode_prompt.md` content and injection.
-- [ ] Add prompt test that workflow mode prompt is injected through the workflowruntime/headless runtime preparation path before the node prompt, not assembled by scheduler/CLI.
-- [ ] Add config test for temporary global completion mode `auto|structured_output|tool` with no workflow/node override.
-- [ ] Add test that `auto` selects structured output when provider capabilities support it and dynamic tool mode otherwise.
-- [ ] Add test that forced `structured_output` fails fast with actionable error when unsupported.
-- [ ] Add test that forced `tool` always uses dynamic tool mode.
-- [ ] Add schema generation test for structured output with top-level custom fields and descriptions.
-- [ ] Add schema generation test for dynamic `complete_node` tool with top-level custom fields and descriptions.
-- [ ] Add runtime test: `complete_node` outside workflow returns not-in-workflow error.
-- [ ] Add runtime test: `complete_node` tool schema is not advertised outside workflow tool-completion runs.
-- [ ] Add runtime test: `complete_node` available despite subagent role tool config.
-- [ ] Add runtime test: mixed `complete_node` plus another tool is rejected before side effects.
-- [ ] Add runtime test: two `complete_node` calls in one assistant response are rejected before side effects.
-- [ ] Add runtime test: any side-effecting tool mixed with `complete_node` does not execute.
-- [ ] Add runtime test: structured output completion accepted when configured/supported.
-- [ ] Add runtime test: `auto` falls back to tool mode when structured output is unsupported.
-- [ ] Add runtime test: missing transition ID accepted when one outgoing transition group.
-- [ ] Add runtime test: missing transition ID rejected when multiple groups.
-- [ ] Add runtime test: empty `transition_id` is rejected when transition ID is required.
-- [ ] Add runtime test: invalid transition ID rejected.
-- [ ] Add runtime test: unknown output field rejected.
-- [ ] Add runtime test: non-string output value rejected.
-- [ ] Add runtime test: oversized output/commentary rejected.
-- [ ] Add runtime test: missing and empty edge-required output rejected after transition selection.
-- [ ] Add runtime test: unknown output field plus missing required output returns deterministic structured errors.
-- [ ] Add runtime test: no outgoing transition group gives actionable validation error.
-- [ ] Add runtime test: valid completion persists structured/tool completion result and stops without another model turn.
-- [ ] Add runtime test: normal final answer in workflow run gets developer nudge and continues.
-- [ ] Add runtime test: consecutive final-answer protocol violations hit cap and interrupt the run.
-- [ ] Add runtime test: consecutive invalid completions hit cap and interrupt the run.
-- [ ] Add regression test: non-workflow tool execution unchanged.
+- [x] Add prompt test for `prompts/workflow_mode_prompt.md` content and injection.
+- [x] Add prompt test that workflow mode prompt is injected through the workflowruntime/headless runtime preparation path before the node prompt, not assembled by scheduler/CLI.
+- [x] Add config test for temporary global completion mode `auto|structured_output|tool` with no workflow/node override.
+- [x] Add test that `auto` selects structured output when provider capabilities support it and dynamic tool mode otherwise.
+- [x] Add test that forced `structured_output` fails fast with actionable error when unsupported.
+- [x] Add test that forced `tool` always uses dynamic tool mode.
+- [x] Add schema generation test for structured output with top-level custom fields and descriptions.
+- [x] Add schema generation test for dynamic `complete_node` tool with top-level custom fields and descriptions.
+- [x] Add runtime test: `complete_node` outside workflow returns not-in-workflow error.
+- [x] Add runtime test: `complete_node` tool schema is not advertised outside workflow tool-completion runs.
+- [x] Add runtime test: `complete_node` available despite subagent role tool config.
+- [x] Add runtime test: mixed `complete_node` plus another tool is rejected before side effects.
+- [x] Add runtime test: two `complete_node` calls in one assistant response are rejected before side effects.
+- [x] Add runtime test: any side-effecting tool mixed with `complete_node` does not execute.
+- [x] Add runtime test: structured output completion accepted when configured/supported.
+- [x] Add runtime test: `auto` falls back to tool mode when structured output is unsupported.
+- [x] Add runtime test: missing transition ID accepted when one outgoing transition group.
+- [x] Add runtime test: missing transition ID rejected when multiple groups.
+- [x] Add runtime test: empty `transition_id` is rejected when transition ID is required.
+- [x] Add runtime test: invalid transition ID rejected.
+- [x] Add runtime test: unknown output field rejected.
+- [x] Add runtime test: non-string output value rejected.
+- [x] Add runtime test: oversized output/commentary rejected.
+- [x] Add runtime test: missing and empty edge-required output rejected after transition selection.
+- [x] Add runtime test: unknown output field plus missing required output returns deterministic structured errors.
+- [x] Add runtime test: no outgoing transition group gives actionable validation error.
+- [x] Add runtime test: valid completion persists structured/tool completion result and stops without another model turn.
+- [x] Add runtime test: normal final answer in workflow run gets developer nudge and continues.
+- [x] Add runtime test: consecutive final-answer protocol violations hit cap and interrupt the run.
+- [x] Add runtime test: consecutive invalid completions hit cap and interrupt the run.
+- [x] Add regression test: non-workflow tool execution unchanged.
 
 ### 7.3 Implementation
 
-- [ ] Add workflow-mode prompt source and runtime injection.
-- [ ] Add temporary global workflow completion mode config.
-- [ ] Implement completion mode precedence: global config only, `auto` provider-capability check, forced structured-output error on unsupported provider, forced tool mode bypassing structured output.
-- [ ] Implement workflow protocol cap config under `[workflow]` with defaults `max_final_answer_violations = 3` and `max_invalid_completion_attempts = 5`.
-- [ ] Add structured-output schema generator.
-- [ ] Add dynamic `complete_node` tool schema generator.
-- [ ] Add workflow run context carrier into runtime structured-output/tool execution.
-- [ ] Add tool-call preflight for mixed `complete_node`.
-- [ ] Add exactly-one-completion preflight before any tool side effects.
-- [ ] Add completion validation hook into workflow service for both modes.
-- [ ] Add terminal signal from tool execution to step loop.
-- [ ] Add final-answer invalid-output nudge for workflow runs.
-- [ ] Persist/increment protocol violation counters and interrupt after cap.
-- [ ] Keep prompt/tool definitions centralized.
+- [x] Add workflow-mode prompt source and runtime injection.
+- [x] Add temporary global workflow completion mode config.
+- [x] Implement completion mode precedence: global config only, `auto` provider-capability check, forced structured-output error on unsupported provider, forced tool mode bypassing structured output.
+- [x] Implement workflow protocol cap config under `[workflow]` with defaults `max_final_answer_violations = 3` and `max_invalid_completion_attempts = 5`.
+- [x] Add structured-output schema generator.
+- [x] Add dynamic `complete_node` tool schema generator.
+- [x] Add workflow run context carrier into runtime structured-output/tool execution.
+- [x] Add tool-call preflight for mixed `complete_node`.
+- [x] Add exactly-one-completion preflight before any tool side effects.
+- [x] Add completion validation hook into workflow service for both modes.
+- [x] Add terminal signal from tool execution to step loop.
+- [x] Add final-answer invalid-output nudge for workflow runs.
+- [x] Persist/increment protocol violation counters and interrupt after cap.
+- [x] Keep prompt/tool definitions centralized.
 
 ### 7.4 Verification
 
-- [ ] Run `./scripts/test.sh ./server/runtime/... ./server/tools/... ./shared/toolspec/... ./server/workflow/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Run `./scripts/test.sh ./server/runtime/... ./server/tools/... ./shared/toolspec/... ./server/workflow/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
 - [ ] Commit slice with message like `feat: add workflow completion tool`.
 
 ## Slice 8: Single-Agent `new_session` Vertical Slice
