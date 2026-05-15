@@ -456,3 +456,64 @@ func TestWorkflowFinalAnswerViolationsInterruptAtCap(t *testing.T) {
 		t.Fatalf("max hits = %d, want 1", got)
 	}
 }
+
+func TestWorkflowEmptyFinalAnswerViolationsInterruptAtCap(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	controller := &fakeWorkflowController{}
+	client := &fakeClient{responses: []llm.Response{
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:       "gpt-5",
+		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("model calls = %d, want 3", len(client.calls))
+	}
+	if got := controller.maxHits.Load(); got != 1 {
+		t.Fatalf("max hits = %d, want 1", got)
+	}
+}
+
+func TestWorkflowStructuredEmptyFinalInterruptsAtInvalidCompletionCap(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	controller := &fakeWorkflowController{}
+	client := &fakeClient{responses: []llm.Response{
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200000}},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+		Model:       "gpt-5",
+		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeStructuredOutput),
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(client.calls))
+	}
+	if got := controller.maxHits.Load(); got != 1 {
+		t.Fatalf("max hits = %d, want 1", got)
+	}
+}

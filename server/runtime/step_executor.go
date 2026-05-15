@@ -373,7 +373,7 @@ func (s *defaultStepExecutor) handleWorkflowAssistantWithoutTools(ctx context.Co
 		return false, false, err
 	}
 	content := strings.TrimSpace(assistantMsg.Content)
-	if mode == workflowruntime.CompletionModeStructuredOutput && content != "" {
+	if mode == workflowruntime.CompletionModeStructuredOutput && assistantMsg.Phase == llm.MessagePhaseFinal {
 		parsed, parseErr := workflowruntime.DecodeCompletion([]byte(content), e.cfg.WorkflowRun.Contract)
 		if parseErr != nil {
 			terminal, nudgeErr := s.appendWorkflowInvalidCompletionNudge(ctx, stepID, parseErr)
@@ -393,7 +393,7 @@ func (s *defaultStepExecutor) handleWorkflowAssistantWithoutTools(ctx context.Co
 		}
 		return true, true, nil
 	}
-	if mode == workflowruntime.CompletionModeTool && assistantMsg.Phase == llm.MessagePhaseFinal && content != "" {
+	if mode == workflowruntime.CompletionModeTool && assistantMsg.Phase == llm.MessagePhaseFinal {
 		record, recordErr := e.recordWorkflowProtocolViolation(ctx, workflowruntime.ViolationKindFinalAnswer, content)
 		if recordErr != nil {
 			return true, false, recordErr
