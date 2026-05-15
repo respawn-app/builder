@@ -769,7 +769,7 @@ Goal: one executable workflow node can run asynchronously through scheduler/sess
 - [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowrunner/... ./server/worktree/... ./server/runtime/... ./server/metadata/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
 - [x] Confirm no real provider calls happened.
-- [ ] Commit slice with message like `feat: run workflow agent node`.
+- [x] Commit slice with message like `feat: run workflow agent node`.
 
 ### 8.4 Nikita Approval Gate
 
