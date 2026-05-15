@@ -20,6 +20,7 @@ import (
 	"builder/server/workflowview"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 func TestSchedulerRunsNewSessionWorkflowNodeWithStructuredOutput(t *testing.T) {
@@ -91,6 +92,33 @@ func TestSchedulerRunsNewSessionWorkflowNodeWithCompleteNodeTool(t *testing.T) {
 	reqs := fixture.client.Requests()
 	if len(reqs) == 0 || !requestHasTool(reqs[0], "complete_node") {
 		t.Fatalf("complete_node not exposed in request: %+v", reqs)
+	}
+}
+
+func TestWorkflowRuntimeDoesNotExposeAskQuestionUntilQuestionsAreWired(t *testing.T) {
+	input := json.RawMessage(`{"transition_id":"done","commentary":"finished tool","summary":"tool ok"}`)
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeTool, workflowtest.ToolBatch("complete", llm.ToolCall{ID: "call-complete", Name: "complete_node", Input: input}))
+	role := fixture.cfg.Settings.Subagents["coder"]
+	role.Settings.EnabledTools = map[toolspec.ID]bool{toolspec.ToolAskQuestion: true}
+	role.Sources["tools."+toolspec.ConfigName(toolspec.ToolAskQuestion)] = "test"
+	fixture.cfg.Settings.Subagents["coder"] = role
+	fixture.rebuildStarter(t)
+	task := fixture.createStartedTask(t)
+	scheduler := fixture.scheduler(t)
+
+	if err := scheduler.Process(context.Background()); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	fixture.waitForCompletedRun(t, task.ID)
+	reqs := fixture.client.Requests()
+	if len(reqs) == 0 {
+		t.Fatal("fake model was not called")
+	}
+	if requestHasTool(reqs[0], string(toolspec.ToolAskQuestion)) {
+		t.Fatalf("ask_question exposed in workflow request: %+v", reqs[0].Tools)
+	}
+	if !requestHasTool(reqs[0], string(toolspec.ToolCompleteNode)) {
+		t.Fatalf("complete_node missing in workflow request: %+v", reqs[0].Tools)
 	}
 }
 

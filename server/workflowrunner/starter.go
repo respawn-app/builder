@@ -26,6 +26,7 @@ import (
 	"builder/server/workflowstore"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 	"builder/shared/transcriptdiag"
 )
 
@@ -282,7 +283,7 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 	if s.clientFactory != nil {
 		client = s.clientFactory(req)
 	}
-	wiring, err := runtimewire.NewRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, input.WorktreeRoot, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
+	wiring, err := runtimewire.NewRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, workflowRuntimeEnabledTools(plan.EnabledTools), input.WorktreeRoot, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
 		Headless: true,
 		FastMode: nil,
 		Sources:  plan.Source.Sources,
@@ -346,6 +347,17 @@ func (s *Starter) finish(runID workflow.RunID, generation int64) {
 	if finished != nil {
 		finished(runID, generation)
 	}
+}
+
+func workflowRuntimeEnabledTools(enabled []toolspec.ID) []toolspec.ID {
+	out := make([]toolspec.ID, 0, len(enabled))
+	for _, id := range enabled {
+		if id == toolspec.ToolAskQuestion {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (s *Starter) interrupt(ctx context.Context, runID workflow.RunID, generation int64, reason string, cause error) {
