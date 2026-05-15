@@ -2,11 +2,10 @@ package workflow
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
-)
 
-var modelKeyRegexp = regexp.MustCompile(ModelKeyPattern)
+	"builder/shared/workflowkey"
+)
 
 var reservedOutputFieldNames = map[string]bool{
 	"commentary":    true,
@@ -115,7 +114,7 @@ func (s *validationState) indexTransitionGroups() {
 		if transitionID == "" {
 			s.addHard(CodeMissingTransitionID, "transition id is required", ref)
 		} else if !validModelKey(transitionID) {
-			s.addHard(CodeInvalidTransitionID, "transition id must match "+ModelKeyPattern, ref)
+			s.addHard(CodeInvalidTransitionID, "transition id must "+workflowkey.Description, ref)
 		} else {
 			bySource := seenTransitionBySource[group.SourceNodeID]
 			if bySource == nil {
@@ -163,7 +162,7 @@ func (s *validationState) validateNodes() {
 		if strings.TrimSpace(string(node.Key)) == "" {
 			s.addHard(CodeMissingNodeKey, "node key is required", ref)
 		} else if !validModelKey(string(node.Key)) {
-			s.addHard(CodeInvalidNodeKey, "node key must match "+ModelKeyPattern, ref)
+			s.addHard(CodeInvalidNodeKey, "node key must "+workflowkey.Description, ref)
 		} else if previousNodeID, exists := s.nodeKeys[node.Key]; exists && previousNodeID != node.ID {
 			s.addHard(CodeDuplicateNodeKey, "node key must be unique", ref)
 		} else {
@@ -221,7 +220,7 @@ func (s *validationState) validateEdges() {
 		if strings.TrimSpace(string(edge.Key)) == "" {
 			s.addHard(CodeMissingEdgeKey, "edge key is required", ref)
 		} else if !validModelKey(string(edge.Key)) {
-			s.addHard(CodeInvalidEdgeKey, "edge key must match "+ModelKeyPattern, ref)
+			s.addHard(CodeInvalidEdgeKey, "edge key must "+workflowkey.Description, ref)
 		}
 		if strings.TrimSpace(string(edge.TargetNodeID)) == "" {
 			s.addHard(CodeEdgeTargetMissing, "edge target node is required", ref)
@@ -561,7 +560,7 @@ func validDisplayName(value string) bool {
 }
 
 func validModelKey(value string) bool {
-	return modelKeyRegexp.MatchString(strings.TrimSpace(value))
+	return workflowkey.Valid(value)
 }
 
 func validContextMode(value ContextMode) bool {

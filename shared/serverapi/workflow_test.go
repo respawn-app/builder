@@ -3,6 +3,8 @@ package serverapi
 import (
 	"strings"
 	"testing"
+
+	"builder/shared/workflowkey"
 )
 
 func TestWorkflowCreateUpdateRequestValidation(t *testing.T) {
@@ -24,7 +26,7 @@ func TestWorkflowNodeAndEdgeRequestValidation(t *testing.T) {
 	}
 	invalidNode := validNode
 	invalidNode.Key = "Bad-Key"
-	if err := invalidNode.Validate(); err == nil || !strings.Contains(err.Error(), workflowModelKeyPattern) {
+	if err := invalidNode.Validate(); err == nil || !strings.Contains(err.Error(), workflowkey.Description) {
 		t.Fatalf("invalid node key error = %v", err)
 	} else if validationErr, ok := err.(WorkflowRequestValidationError); !ok || validationErr.Code != WorkflowRequestErrorInvalidKey {
 		t.Fatalf("invalid node key error type = %#v", err)
@@ -41,7 +43,7 @@ func TestWorkflowNodeAndEdgeRequestValidation(t *testing.T) {
 	}
 	invalidEdge := validEdge
 	invalidEdge.OutputRequirements = []WorkflowOutputRequirement{{FieldName: "Summary"}}
-	if err := invalidEdge.Validate(); err == nil || !strings.Contains(err.Error(), workflowModelKeyPattern) {
+	if err := invalidEdge.Validate(); err == nil || !strings.Contains(err.Error(), workflowkey.Description) {
 		t.Fatalf("invalid output requirement error = %v", err)
 	}
 }

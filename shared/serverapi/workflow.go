@@ -2,13 +2,10 @@ package serverapi
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+
+	"builder/shared/workflowkey"
 )
-
-const workflowModelKeyPattern = `^[a-z][a-z0-9_]{0,63}$`
-
-var workflowModelKeyRE = regexp.MustCompile(workflowModelKeyPattern)
 
 const (
 	WorkflowRequestErrorRequired    = "workflow.request.required"
@@ -580,8 +577,8 @@ func validateDisplayName(name string) error {
 }
 
 func validateModelKey(name string, value string) error {
-	if !workflowModelKeyRE.MatchString(strings.TrimSpace(value)) {
-		return workflowRequestError(WorkflowRequestErrorInvalidKey, name, fmt.Sprintf("%s must match %s", name, workflowModelKeyPattern))
+	if !workflowkey.Valid(value) {
+		return workflowRequestError(WorkflowRequestErrorInvalidKey, name, fmt.Sprintf("%s must %s", name, workflowkey.Description))
 	}
 	return nil
 }

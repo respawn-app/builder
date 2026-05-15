@@ -229,12 +229,19 @@ func (s *Store) UnlinkProjectWorkflow(ctx context.Context, linkID string, replac
 			return err
 		}
 	}
-	if strings.TrimSpace(replacementDefaultLinkID) != "" {
+	replacementDefaultLinkID = strings.TrimSpace(replacementDefaultLinkID)
+	if replacementDefaultLinkID != "" {
 		if err := q.ClearProjectDefaultWorkflowLinks(ctx, sqlitegen.ClearProjectDefaultWorkflowLinksParams{ProjectID: link.ProjectID, UpdatedAtUnixMs: now}); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE project_workflow_links SET is_default = 1, updated_at_unix_ms = ? WHERE id = ? AND project_id = ? AND unlinked_at_unix_ms = 0`, now, replacementDefaultLinkID, link.ProjectID); err != nil {
+		updated, err := tx.ExecContext(ctx, `UPDATE project_workflow_links SET is_default = 1, updated_at_unix_ms = ? WHERE id = ? AND project_id = ? AND unlinked_at_unix_ms = 0`, now, replacementDefaultLinkID, link.ProjectID)
+		if err != nil {
 			return err
+		}
+		if count, err := updated.RowsAffected(); err != nil {
+			return err
+		} else if count != 1 {
+			return fmt.Errorf("replacement default workflow link is invalid")
 		}
 	}
 	return tx.Commit()

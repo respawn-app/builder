@@ -714,12 +714,38 @@ func TestProjectWorkflowUnlinkGuardsActiveAndDefaultLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkWorkflow other: %v", err)
 	}
+	spareWorkflowID := createValidWorkflow(t, ctx, store)
+	spareLink, err := store.LinkWorkflow(ctx, binding.ProjectID, spareWorkflowID, false)
+	if err != nil {
+		t.Fatalf("LinkWorkflow spare: %v", err)
+	}
 	if err := store.UnlinkProjectWorkflow(ctx, link.ID, ""); err == nil || !strings.Contains(err.Error(), "replacement default") {
 		t.Fatalf("expected replacement default guard, got %v", err)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, otherLink.ID, ""); err != nil {
+	if err := store.UnlinkProjectWorkflow(ctx, link.ID, "missing-link"); err == nil || !strings.Contains(err.Error(), "replacement default") {
+		t.Fatalf("expected invalid replacement default guard, got %v", err)
+	}
+	links, err := store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after invalid replacement: %v", err)
+	}
+	if len(links) != 3 || !links[0].IsDefault {
+		t.Fatalf("links after invalid replacement = %+v, want original default preserved", links)
+	}
+	if err := store.UnlinkProjectWorkflow(ctx, spareLink.ID, ""); err != nil {
 		t.Fatalf("unlink unused non-default link should physically delete: %v", err)
 	}
+	if err := store.UnlinkProjectWorkflow(ctx, link.ID, otherLink.ID); err != nil {
+		t.Fatalf("unlink default with valid replacement: %v", err)
+	}
+	links, err = store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after replacement: %v", err)
+	}
+	if len(links) != 1 || links[0].ID != otherLink.ID || !links[0].IsDefault {
+		t.Fatalf("links after valid replacement = %+v, want replacement default", links)
+	}
+	link = otherLink
 	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)

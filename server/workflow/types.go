@@ -45,8 +45,6 @@ const (
 	MaxTaskCommentBytes            = 256 * 1024
 )
 
-const ModelKeyPattern = `^[a-z][a-z0-9_]{0,63}$`
-
 type Definition struct {
 	ID               WorkflowID
 	DisplayName      string

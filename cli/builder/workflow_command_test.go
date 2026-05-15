@@ -204,7 +204,7 @@ func TestWorkflowCommandValidationErrorsAreActionable(t *testing.T) {
 	}
 	workflowID := labeledOutputValue(t, workflowOut, "workflow_id")
 	_, stderr, code := runWorkflowRootCommand("workflow", "node", "add", workflowID, "--key", "Bad-Key", "--kind", "agent")
-	if code == 0 || !strings.Contains(stderr, "key must match") {
+	if code == 0 || !strings.Contains(stderr, "key must start with a lowercase letter") {
 		t.Fatalf("invalid node code=%d stderr=%q, want actionable key validation", code, stderr)
 	}
 }
