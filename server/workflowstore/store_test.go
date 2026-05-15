@@ -723,6 +723,59 @@ func TestApprovePendingJoinEdgesProgressesJoin(t *testing.T) {
 	}
 }
 
+func TestApprovePendingJoinWaitsForAllBranchApprovals(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createFanoutJoinWorkflow(t, ctx, store)
+	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_a")
+	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_b")
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	implA := nodeByKey(t, def, "impl_a")
+	implB := nodeByKey(t, def, "impl_b")
+	first, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: branchRuns[implA.ID], TransitionID: "join", OutputValues: map[string]string{"summary": "branch a"}})
+	if err != nil {
+		t.Fatalf("CompleteRun branch a: %v", err)
+	}
+	second, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: branchRuns[implB.ID], TransitionID: "join", OutputValues: map[string]string{"summary": "branch b"}})
+	if err != nil {
+		t.Fatalf("CompleteRun branch b: %v", err)
+	}
+	firstApproved, err := store.ApproveTransition(ctx, first.TransitionID)
+	if err != nil {
+		t.Fatalf("ApproveTransition branch a: %v", err)
+	}
+	if len(firstApproved.PlacementIDs) != 0 || len(firstApproved.RunIDs) != 0 {
+		t.Fatalf("first approval result = %+v, want join waiting for second approval", firstApproved)
+	}
+	secondApproved, err := store.ApproveTransition(ctx, second.TransitionID)
+	if err != nil {
+		t.Fatalf("ApproveTransition branch b: %v", err)
+	}
+	if len(secondApproved.PlacementIDs) != 1 || len(secondApproved.RunIDs) != 1 {
+		t.Fatalf("second approval result = %+v, want joined downstream run", secondApproved)
+	}
+	transitions, err := store.ListTransitions(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	doneTransitions := 0
+	for _, transition := range transitions {
+		if transition.TransitionID == "done" {
+			doneTransitions++
+		}
+	}
+	if doneTransitions != 1 {
+		t.Fatalf("done transition count = %d, transitions=%+v", doneTransitions, transitions)
+	}
+}
+
 func TestRejectPendingApprovalTransitionMarksRejected(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
