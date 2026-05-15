@@ -6,21 +6,21 @@ Do not treat this as a replacement for the spec. If spec and checklist conflict,
 
 ## Working Rules
 
-- [ ] Work one slice at a time, in order, unless Nikita explicitly changes priority.
-- [ ] Use TDD for production behavior: write failing tests first, implement, refactor.
-- [ ] Keep each slice buildable before moving to the next slice.
-- [ ] Commit after each completed slice or stable sub-slice.
-- [ ] Do not run real-provider workflow QA without explicit Nikita approval.
-- [ ] Use fake model/runtime adapters for automated workflow runtime tests.
-- [ ] Keep CLI as internal harness/agent surface, not Nikita's manual QA surface.
-- [ ] Treat workflow API/read-model DTOs as mutable before Builder 2.0.
-- [ ] Keep POC GUI integration behind a thin adapter layer.
-- [ ] Never load full `events.jsonl` in workflow code or tests.
-- [ ] Update `docs/dev/decisions.md` when a new locked product/architecture decision is made.
-- [ ] When a slice changes a locked decision, update `docs/dev/decisions.md` first, then this checklist/spec.
-- [ ] Avoid staging unrelated user changes; inspect `git status --short` before every commit.
-- [ ] Use this checklist as the handoff contract during implementation; do not invent parallel task trackers.
-- [ ] Mark checklist items incrementally while implementing so handoffs resume from exact state.
+- [x] Work one slice at a time, in order, unless Nikita explicitly changes priority.
+- [x] Use TDD for production behavior: write failing tests first, implement, refactor.
+- [x] Keep each slice buildable before moving to the next slice.
+- [x] Commit after each completed slice or stable sub-slice.
+- [x] Do not run real-provider workflow QA without explicit Nikita approval.
+- [x] Use fake model/runtime adapters for automated workflow runtime tests.
+- [x] Keep CLI as internal harness/agent surface, not Nikita's manual QA surface.
+- [x] Treat workflow API/read-model DTOs as mutable before Builder 2.0.
+- [x] Keep POC GUI integration behind a thin adapter layer.
+- [x] Never load full `events.jsonl` in workflow code or tests.
+- [x] Update `docs/dev/decisions.md` when a new locked product/architecture decision is made.
+- [x] When a slice changes a locked decision, update `docs/dev/decisions.md` first, then this checklist/spec.
+- [x] Avoid staging unrelated user changes; inspect `git status --short` before every commit.
+- [x] Use this checklist as the handoff contract during implementation; do not invent parallel task trackers.
+- [x] Mark checklist items incrementally while implementing so handoffs resume from exact state.
 
 ## Repo Path Assumptions
 
@@ -978,12 +978,12 @@ These are coordination points for Nikita's parallel GUI POC. Backend API shapes 
 
 Run when all intended workflow slices for release are complete.
 
-- [ ] Run full test suite through `./scripts/test.sh`.
-- [ ] Run release build through `./scripts/build.sh --output ./bin/builder`.
-- [ ] Run no-LLM coding-agent smoke check from fresh persistence root.
-- [ ] Run GUI/POC fake-runtime smoke if available.
-- [ ] Run real-provider smoke only if Nikita explicitly approves.
-- [ ] Verify docs and decisions are up to date.
-- [ ] Verify no unrelated user changes are staged.
-- [ ] Verify task/workflow code never reads full `events.jsonl`.
-- [ ] Verify all new business logic has tests.
+- [x] Run full test suite through `./scripts/test.sh`.
+- [x] Run release build through `./scripts/build.sh --output ./bin/builder`.
+- [x] Run no-LLM coding-agent smoke check from fresh persistence root.
+- [x] Run GUI/POC fake-runtime smoke if available.
+- [x] Run real-provider smoke only if Nikita explicitly approves.
+- [x] Verify docs and decisions are up to date.
+- [x] Verify no unrelated user changes are staged.
+- [x] Verify task/workflow code never reads full `events.jsonl`.
+- [x] Verify all new business logic has tests.
