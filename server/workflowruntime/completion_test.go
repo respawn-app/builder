@@ -56,9 +56,13 @@ func TestCompletionJSONSchemaIncludesTopLevelOutputFields(t *testing.T) {
 		t.Fatalf("CompletionJSONSchema: %v", err)
 	}
 	var schema struct {
-		AdditionalProperties bool                         `json:"additionalProperties"`
-		Required             []string                     `json:"required"`
-		Properties           map[string]map[string]string `json:"properties"`
+		AdditionalProperties bool     `json:"additionalProperties"`
+		Required             []string `json:"required"`
+		Properties           map[string]struct {
+			Type        string   `json:"type"`
+			Description string   `json:"description"`
+			Enum        []string `json:"enum,omitempty"`
+		} `json:"properties"`
 	}
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
@@ -69,8 +73,11 @@ func TestCompletionJSONSchemaIncludesTopLevelOutputFields(t *testing.T) {
 	if _, ok := schema.Properties["summary"]; !ok {
 		t.Fatalf("schema properties missing summary: %+v", schema.Properties)
 	}
-	if got := schema.Properties["summary"]["description"]; got != "Summary of work." {
+	if got := schema.Properties["summary"].Description; got != "Summary of work." {
 		t.Fatalf("summary description = %q", got)
+	}
+	if got := strings.Join(schema.Properties["transition_id"].Enum, ","); got != "blocked,done" {
+		t.Fatalf("transition_id enum = %q, want blocked,done", got)
 	}
 	wantRequired := []string{"transition_id", "commentary", "risk", "summary"}
 	if strings.Join(schema.Required, ",") != strings.Join(wantRequired, ",") {
@@ -136,4 +143,24 @@ func TestDecodeCompletionRequiresProtocolAndOutputFields(t *testing.T) {
 	if parsed.TransitionID != "done" {
 		t.Fatalf("transition_id = %q, want done", parsed.TransitionID)
 	}
+}
+
+func TestDecodeCompletionRejectsUndeclaredTransitionID(t *testing.T) {
+	_, err := DecodeCompletion(json.RawMessage(`{"transition_id":"unknown","commentary":"done","summary":"done"}`), CompletionContract{
+		TransitionIDs: []string{"done", "blocked"},
+		OutputFields:  []workflow.OutputField{{Name: "summary", Description: "Summary."}},
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	validation, ok := err.(ValidationError)
+	if !ok {
+		t.Fatalf("error type = %T, want ValidationError", err)
+	}
+	for _, issue := range validation.Issues {
+		if issue.Code == "invalid_transition_id" && issue.Field == "transition_id" {
+			return
+		}
+	}
+	t.Fatalf("missing invalid_transition_id issue: %+v", validation.Issues)
 }

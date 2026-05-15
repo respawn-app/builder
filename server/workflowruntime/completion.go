@@ -163,11 +163,16 @@ func StructuredOutput(contract CompletionContract) (*llm.StructuredOutput, error
 }
 
 func CompletionJSONSchema(contract CompletionContract) (json.RawMessage, error) {
+	transitionIDs := sortedUniqueNonEmptyStrings(contract.TransitionIDs)
+	transitionProperty := map[string]any{
+		"type":        "string",
+		"description": "Transition ID to take. Required when multiple outgoing transitions are available.",
+	}
+	if len(transitionIDs) > 0 {
+		transitionProperty["enum"] = transitionIDs
+	}
 	properties := map[string]any{
-		"transition_id": map[string]any{
-			"type":        "string",
-			"description": "Transition ID to take. Required when multiple outgoing transitions are available.",
-		},
+		"transition_id": transitionProperty,
 		"commentary": map[string]any{
 			"type":        "string",
 			"description": "Brief explanation of what was completed and why this transition was selected.",
@@ -275,6 +280,8 @@ func DecodeCompletion(raw json.RawMessage, contract CompletionContract) (ParsedC
 	}
 	if !seen["transition_id"] || parsed.TransitionID == "" {
 		issues = append(issues, ValidationIssue{Code: "required_field_missing", Field: "transition_id", Message: "transition_id is required"})
+	} else if validTransitions := transitionIDSet(contract.TransitionIDs); len(validTransitions) > 0 && !validTransitions[parsed.TransitionID] {
+		issues = append(issues, ValidationIssue{Code: "invalid_transition_id", Field: "transition_id", Message: "transition_id is not declared by this workflow run"})
 	}
 	if !seen["commentary"] {
 		issues = append(issues, ValidationIssue{Code: "required_field_missing", Field: "commentary", Message: "commentary is required"})
@@ -373,6 +380,21 @@ func uniqueNonEmptyStrings(values []string) []string {
 		}
 		seen[trimmed] = true
 		out = append(out, trimmed)
+	}
+	return out
+}
+
+func sortedUniqueNonEmptyStrings(values []string) []string {
+	out := uniqueNonEmptyStrings(values)
+	sort.Strings(out)
+	return out
+}
+
+func transitionIDSet(values []string) map[string]bool {
+	ids := uniqueNonEmptyStrings(values)
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
 	}
 	return out
 }
