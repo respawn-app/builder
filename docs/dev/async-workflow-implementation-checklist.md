@@ -838,7 +838,7 @@ Goal: edge context modes work and enforce role/session contract constraints.
 - [x] Run context mode tests.
 - [x] Run `./scripts/test.sh ./server/workflowruntime/... ./server/runtime/... ./server/session/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow context modes`.
+- [x] Commit slice with message like `feat: add workflow context modes`.
 
 ## Slice 11: Approvals And Manual Moves
 
