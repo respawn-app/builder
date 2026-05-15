@@ -773,10 +773,12 @@ Goal: one executable workflow node can run asynchronously through scheduler/sess
 
 ### 8.4 Nikita Approval Gate
 
-- [ ] Ask Nikita before any real-provider smoke test.
-- [ ] If approved, define exact provider/model, max expected cost, and stop condition.
-- [ ] Prefer POC GUI for Nikita-led QA when available.
-- [ ] If no GUI exists yet, keep real-provider QA optional and do not block backend progress.
+- [x] Ask Nikita before any real-provider smoke test.
+- [x] If approved, define exact provider/model, max expected cost, and stop condition.
+- [x] Prefer POC GUI for Nikita-led QA when available.
+- [x] If no GUI exists yet, keep real-provider QA optional and do not block backend progress.
+
+Gate note: Nikita confirmed after PR #262 stack that the Slice 8 real-provider smoke already ran and 8.4 is cleared. No GUI exists yet, so backend progress is unblocked for Slices 9-13.
 
 ## Slice 9: Question Pause And Resume
 
