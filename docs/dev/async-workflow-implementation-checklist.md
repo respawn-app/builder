@@ -725,7 +725,7 @@ Goal: runtime can identify workflow run context, inject workflow-mode instructio
 
 - [x] Run `./scripts/test.sh ./server/runtime/... ./server/tools/... ./shared/toolspec/... ./server/workflow/...`.
 - [x] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow completion tool`.
+- [x] Commit slice with message like `feat: add workflow completion tool`.
 
 ## Slice 8: Single-Agent `new_session` Vertical Slice
 
