@@ -2,9 +2,9 @@ package workflowrunner
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,7 +18,6 @@ import (
 	"builder/server/workflowscheduler"
 	"builder/server/workflowstore"
 	"builder/server/workflowview"
-	"builder/server/worktree"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -201,12 +200,12 @@ type starterFixture struct {
 	view     interface {
 		GetTask(context.Context, string) (serverapi.WorkflowTaskDetail, error)
 	}
-	worktreeService *worktree.Service
-	client          *workflowtest.ScriptedClient
-	clientFactory   func(workflowscheduler.StartRunRequest) llm.Client
-	starter         *Starter
-	workflowID      workflow.WorkflowID
-	projectID       string
+	worktrees     *metadataTaskWorktrees
+	client        *workflowtest.ScriptedClient
+	clientFactory func(workflowscheduler.StartRunRequest) llm.Client
+	starter       *Starter
+	workflowID    workflow.WorkflowID
+	projectID     string
 }
 
 func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps ...workflowtest.Step) starterFixture {
@@ -214,7 +213,6 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	initGitRepository(t, workspace)
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -242,12 +240,12 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	if err != nil {
 		t.Fatalf("workflowview.New: %v", err)
 	}
-	worktreeService := worktree.NewService(metadataStore, nil, nil, nil, nil, nil, worktree.ServiceOptions{BaseDir: cfg.Settings.Worktrees.BaseDir})
+	worktrees := &metadataTaskWorktrees{t: t, metadata: metadataStore, workspaceID: binding.WorkspaceID, root: filepath.Join(home, "task-worktrees")}
 	client := workflowtest.NewScriptedClient(llm.ProviderCapabilities{ProviderID: "fake", SupportsResponsesAPI: mode == config.WorkflowCompletionModeStructuredOutput}, steps...)
 	clientFactory := func(workflowscheduler.StartRunRequest) llm.Client { return client }
 	starter, err := NewStarter(cfg, metadataStore, store, nil, nil, nil, nil, StarterOptions{
 		ClientFactory: clientFactory,
-		Worktrees:     taskWorktreeEnsurer{service: worktreeService},
+		Worktrees:     worktrees,
 	})
 	if err != nil {
 		t.Fatalf("NewStarter: %v", err)
@@ -257,7 +255,7 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	if _, err := store.LinkWorkflow(context.Background(), binding.ProjectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
-	return starterFixture{cfg: cfg, metadata: metadataStore, store: store, view: view, worktreeService: worktreeService, client: client, clientFactory: clientFactory, starter: starter, workflowID: workflowID, projectID: binding.ProjectID}
+	return starterFixture{cfg: cfg, metadata: metadataStore, store: store, view: view, worktrees: worktrees, client: client, clientFactory: clientFactory, starter: starter, workflowID: workflowID, projectID: binding.ProjectID}
 }
 
 func (f *starterFixture) rebuildStarter(t *testing.T) {
@@ -267,7 +265,7 @@ func (f *starterFixture) rebuildStarter(t *testing.T) {
 	}
 	starter, err := NewStarter(f.cfg, f.metadata, f.store, nil, nil, nil, nil, StarterOptions{
 		ClientFactory: f.clientFactory,
-		Worktrees:     taskWorktreeEnsurer{service: f.worktreeService},
+		Worktrees:     f.worktrees,
 	})
 	if err != nil {
 		t.Fatalf("NewStarter: %v", err)
@@ -395,13 +393,50 @@ func (f starterFixture) assertRunSessionUsesTaskWorktree(t *testing.T, sessionID
 	return target.EffectiveWorkdir
 }
 
-type taskWorktreeEnsurer struct {
-	service *worktree.Service
+type metadataTaskWorktrees struct {
+	t           *testing.T
+	metadata    *metadata.Store
+	workspaceID string
+	root        string
 }
 
-func (e taskWorktreeEnsurer) EnsureTaskWorktree(ctx context.Context, taskID string) error {
-	_, err := e.service.EnsureTaskWorktree(ctx, worktree.EnsureTaskWorktreeRequest{TaskID: taskID})
-	return err
+func (e *metadataTaskWorktrees) EnsureTaskWorktree(ctx context.Context, taskID string) error {
+	if e == nil || e.metadata == nil {
+		return nil
+	}
+	var shortID string
+	if err := e.metadata.DB().QueryRowContext(ctx, `SELECT short_id FROM tasks WHERE id = ?`, taskID).Scan(&shortID); err != nil {
+		return err
+	}
+	worktreeID := "worktree-" + taskID
+	worktreeRoot := filepath.Join(e.root, shortID)
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		return err
+	}
+	if err := e.metadata.UpsertWorktreeRecord(ctx, metadata.WorktreeRecord{
+		ID:              worktreeID,
+		WorkspaceID:     e.workspaceID,
+		CanonicalRoot:   worktreeRoot,
+		DisplayName:     shortID,
+		Availability:    "available",
+		BuilderManaged:  true,
+		CreatedBranch:   true,
+		GitMetadataJSON: `{}`,
+	}); err != nil {
+		return err
+	}
+	result, err := e.metadata.DB().ExecContext(ctx, `UPDATE tasks SET managed_worktree_id = ?, updated_at_unix_ms = ? WHERE id = ?`, sql.NullString{String: worktreeID, Valid: true}, time.Now().UTC().UnixMilli(), taskID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func createStarterWorkflow(t *testing.T, store *workflowstore.Store) workflow.WorkflowID {
@@ -554,28 +589,6 @@ func (c *blockingClient) waitForReturn(t *testing.T) {
 	case <-c.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for fake model return")
-	}
-}
-
-func initGitRepository(t *testing.T, dir string) {
-	t.Helper()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "workflow@example.com")
-	runGit(t, dir, "config", "user.name", "Workflow Test")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("workflow\n"), 0o644); err != nil {
-		t.Fatalf("write README: %v", err)
-	}
-	runGit(t, dir, "add", "README.md")
-	runGit(t, dir, "commit", "-m", "init")
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 
