@@ -366,19 +366,12 @@ func (s *validationState) validateKindConstraints() {
 func (s *validationState) validateRuntimeSupport() {
 	for _, edge := range s.def.Edges {
 		ref := ValidationError{WorkflowID: s.def.ID, EdgeID: edge.ID, TransitionGroupID: edge.TransitionGroupID}
-		if edge.RequiresApproval {
-			s.addSemantic(CodeUnsupportedApprovalExecution, "approval-gated edges cannot execute until approval resume is implemented", ref)
+		targetKind := NodeKind("")
+		if target, exists := s.nodesByID[edge.TargetNodeID]; exists {
+			targetKind = target.Kind
 		}
-		if validContextMode(edge.ContextMode) && edge.ContextMode != ContextModeNewSession {
-			s.addSemantic(CodeUnsupportedContextMode, "non-new-session context modes cannot execute until continuation modes are implemented", ref)
-		}
-		if target, exists := s.nodesByID[edge.TargetNodeID]; exists && target.Kind == NodeKindJoin {
-			s.addSemantic(CodeUnsupportedJoinExecution, "join targets cannot execute until join progression is implemented", ref)
-		}
-		for _, binding := range edge.InputBindings {
-			if binding.Source == BindingSourceJoin {
-				s.addSemantic(CodeUnsupportedJoinBinding, "join-sourced input bindings cannot execute until join aggregation is implemented", ref)
-			}
+		for _, issue := range UnsupportedRuntimeFeatures(RuntimeSupportEdge{ContextMode: edge.ContextMode, RequiresApproval: edge.RequiresApproval, TargetKind: targetKind, InputBindings: edge.InputBindings}) {
+			s.addSemantic(issue.Code, issue.Message, ref)
 		}
 	}
 }

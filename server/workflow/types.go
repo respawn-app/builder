@@ -188,6 +188,37 @@ type ValidationError struct {
 	BlocksContext     bool
 }
 
+type RuntimeSupportEdge struct {
+	ContextMode      ContextMode
+	RequiresApproval bool
+	TargetKind       NodeKind
+	InputBindings    []InputBinding
+}
+
+type RuntimeSupportIssue struct {
+	Code    ValidationErrorCode
+	Message string
+}
+
+func UnsupportedRuntimeFeatures(edge RuntimeSupportEdge) []RuntimeSupportIssue {
+	issues := []RuntimeSupportIssue{}
+	if edge.RequiresApproval {
+		issues = append(issues, RuntimeSupportIssue{Code: CodeUnsupportedApprovalExecution, Message: "approval-gated edges cannot execute until approval resume is implemented"})
+	}
+	if edge.ContextMode != "" && edge.ContextMode != ContextModeNewSession {
+		issues = append(issues, RuntimeSupportIssue{Code: CodeUnsupportedContextMode, Message: "non-new-session context modes cannot execute until continuation modes are implemented"})
+	}
+	if edge.TargetKind == NodeKindJoin {
+		issues = append(issues, RuntimeSupportIssue{Code: CodeUnsupportedJoinExecution, Message: "join targets cannot execute until join progression is implemented"})
+	}
+	for _, binding := range edge.InputBindings {
+		if binding.Source == BindingSourceJoin {
+			issues = append(issues, RuntimeSupportIssue{Code: CodeUnsupportedJoinBinding, Message: "join-sourced input bindings cannot execute until join aggregation is implemented"})
+		}
+	}
+	return issues
+}
+
 type ValidationResult struct {
 	Context ValidationContext
 	Errors  []ValidationError

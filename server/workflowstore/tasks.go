@@ -465,14 +465,12 @@ func (s *Store) CompleteRun(ctx context.Context, req CompleteRunRequest) (Comple
 	if len(issues) > 0 {
 		return CompleteRunResult{}, CompletionValidationError{Issues: issues}
 	}
-	if group.requiresApproval() {
-		return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "approval_execution_unsupported", Field: "transition_id", Message: "approval-gated transitions cannot execute until approval resume is implemented"}}}
-	}
-	if group.hasUnsupportedContextMode() {
-		return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "context_mode_unsupported", Field: "transition_id", Message: "non-new-session context modes cannot execute until continuation modes are implemented"}}}
-	}
-	if group.targetsJoin() {
-		return CompleteRunResult{}, CompletionValidationError{Issues: []CompletionValidationIssue{{Code: "join_execution_unsupported", Field: "transition_id", Message: "join targets cannot execute until join progression is implemented"}}}
+	if supportIssues := group.unsupportedRuntimeIssues(); len(supportIssues) > 0 {
+		issues := make([]CompletionValidationIssue, 0, len(supportIssues))
+		for _, issue := range supportIssues {
+			issues = append(issues, CompletionValidationIssue{Code: string(issue.Code), Field: "transition_id", Message: issue.Message})
+		}
+		return CompleteRunResult{}, CompletionValidationError{Issues: issues}
 	}
 	outputValuesJSON, err := marshalJSON(req.OutputValues)
 	if err != nil {
@@ -806,6 +804,10 @@ func resolveInputBindingValues(task TaskRecord, commentary string, outputValues 
 				values[name] = outputValues[field]
 			}
 		case workflow.BindingSourceJoin:
+			issues := workflow.UnsupportedRuntimeFeatures(workflow.RuntimeSupportEdge{InputBindings: []workflow.InputBinding{binding}})
+			if len(issues) > 0 {
+				return nil, fmt.Errorf("%s", issues[0].Message)
+			}
 			return nil, fmt.Errorf("join-sourced input bindings cannot execute until join aggregation is implemented")
 		default:
 			return nil, fmt.Errorf("unsupported input binding source %q", binding.Source)
@@ -1076,31 +1078,17 @@ func (s runStartSnapshot) transitionByID(transitionID string) (transitionContrac
 	return transitionContractSnapshot{}, false
 }
 
-func (g transitionContractSnapshot) requiresApproval() bool {
+func (g transitionContractSnapshot) unsupportedRuntimeIssues() []workflow.RuntimeSupportIssue {
+	issues := []workflow.RuntimeSupportIssue{}
 	for _, edge := range g.Edges {
-		if edge.RequiresApproval {
-			return true
-		}
+		issues = append(issues, workflow.UnsupportedRuntimeFeatures(workflow.RuntimeSupportEdge{
+			ContextMode:      edge.ContextMode,
+			RequiresApproval: edge.RequiresApproval,
+			TargetKind:       edge.TargetNode.Kind,
+			InputBindings:    edge.InputBindings,
+		})...)
 	}
-	return false
-}
-
-func (g transitionContractSnapshot) hasUnsupportedContextMode() bool {
-	for _, edge := range g.Edges {
-		if edge.ContextMode != workflow.ContextModeNewSession {
-			return true
-		}
-	}
-	return false
-}
-
-func (g transitionContractSnapshot) targetsJoin() bool {
-	for _, edge := range g.Edges {
-		if edge.TargetNode.Kind == workflow.NodeKindJoin {
-			return true
-		}
-	}
-	return false
+	return issues
 }
 
 func requiredOutputIssues(group transitionContractSnapshot, values map[string]string) []CompletionValidationIssue {

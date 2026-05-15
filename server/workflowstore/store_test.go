@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"builder/server/metadata"
@@ -292,6 +293,58 @@ func TestStartTaskRejectsCanceledAndAlreadyStartedTasks(t *testing.T) {
 	}
 }
 
+func TestStartTaskConcurrentCallsCreateOneRun(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := store.StartTask(ctx, task.ID)
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	noRows := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, sql.ErrNoRows):
+			noRows++
+		default:
+			t.Fatalf("StartTask concurrent unexpected error: %v", err)
+		}
+	}
+	if successes != 1 || noRows != 1 {
+		t.Fatalf("concurrent starts successes=%d noRows=%d, want 1/1", successes, noRows)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs after concurrent start = %+v, want exactly one", runs)
+	}
+}
+
 func TestCompleteRunRejectsUnsupportedRuntimeSnapshots(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -303,7 +356,7 @@ func TestCompleteRunRejectsUnsupportedRuntimeSnapshots(t *testing.T) {
 			mutate: func(snapshot *runStartSnapshot) {
 				snapshot.TransitionGroups[0].Edges[0].RequiresApproval = true
 			},
-			want: "approval-gated transitions cannot execute",
+			want: "approval-gated edges cannot execute",
 		},
 		{
 			name: "join target",
