@@ -72,8 +72,9 @@ func TestCompletionJSONSchemaIncludesTopLevelOutputFields(t *testing.T) {
 	if got := schema.Properties["summary"]["description"]; got != "Summary of work." {
 		t.Fatalf("summary description = %q", got)
 	}
-	if len(schema.Required) != 1 || schema.Required[0] != "transition_id" {
-		t.Fatalf("required = %+v, want [transition_id]", schema.Required)
+	wantRequired := []string{"transition_id", "commentary", "risk", "summary"}
+	if strings.Join(schema.Required, ",") != strings.Join(wantRequired, ",") {
+		t.Fatalf("required = %+v, want %+v", schema.Required, wantRequired)
 	}
 }
 

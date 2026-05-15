@@ -173,15 +173,13 @@ func CompletionJSONSchema(contract CompletionContract) (json.RawMessage, error) 
 			"description": "Brief explanation of what was completed and why this transition was selected.",
 		},
 	}
-	required := []string{}
-	if len(uniqueNonEmptyStrings(contract.TransitionIDs)) > 1 {
-		required = append(required, "transition_id")
-	}
+	required := []string{"transition_id", "commentary"}
 	for _, field := range sortedOutputFields(contract.OutputFields) {
 		name := strings.TrimSpace(field.Name)
 		if name == "" {
 			continue
 		}
+		required = append(required, name)
 		properties[name] = map[string]any{
 			"type":        "string",
 			"description": strings.TrimSpace(field.Description),
