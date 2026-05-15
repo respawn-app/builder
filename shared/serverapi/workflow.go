@@ -355,6 +355,7 @@ type WorkflowRun struct {
 	CompletedAtUnixMs   int64  `json:"completed_at_unix_ms"`
 	InterruptedAtUnixMs int64  `json:"interrupted_at_unix_ms"`
 	InterruptionReason  string `json:"interruption_reason,omitempty"`
+	WaitingAskID        string `json:"waiting_ask_id,omitempty"`
 }
 
 type WorkflowTaskTransition struct {

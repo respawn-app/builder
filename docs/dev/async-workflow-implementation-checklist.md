@@ -786,26 +786,28 @@ Goal: workflow runs use existing `ask_question` source of truth for pause/resume
 
 ### 9.1 Red Tests
 
-- [ ] Add test workflow run calls `ask_question`.
-- [ ] Add test run state becomes `waiting_for_question`.
-- [ ] Add test answer resumes same run/session.
-- [ ] Add test resumed run completes with workflow completion.
-- [ ] Add restart/reconciliation test with pending ask using Slice 6 rehydration boundary.
-- [ ] Add failure test for missing/unrehydratable pending ask becoming interrupted if not already covered in Slice 6.
+- [x] Add test workflow run calls `ask_question`.
+- [x] Add test run state becomes `waiting_for_question`.
+- [x] Add test answer resumes same run/session.
+- [x] Add test resumed run completes with workflow completion.
+- [x] Add restart/reconciliation test with pending ask using Slice 6 rehydration boundary.
+- [x] Add failure test for missing/unrehydratable pending ask becoming interrupted if not already covered in Slice 6.
 
 ### 9.2 Implementation
 
-- [ ] Wire ask pause state from runtime to workflow run state.
-- [ ] Rehydrate pending ask on startup through the `PendingAskResolver` path proven in Slice 6.
-- [ ] If infra fails proof, pause slice and design durable ask persistence upgrade as SSOT.
-- [ ] Do not create shadow task-question projection table.
-- [ ] Derive any task question view from source-of-truth ask state.
+- [x] Wire ask pause state from runtime to workflow run state.
+- [x] Rehydrate pending ask on startup through the `PendingAskResolver` path proven in Slice 6.
+- [x] If infra fails proof, pause slice and design durable ask persistence upgrade as SSOT.
+- [x] Do not create shadow task-question projection table.
+- [x] Derive any task question view from source-of-truth ask state.
+
+Slice 9 note: workflow runs now store only the active `waiting_ask_id` pointer while the ask itself remains source-of-truth in the live prompt registry/`ask_question` flow. Scheduler rehydrates live pending asks through `PendingAskResolver`; if the ask is missing after restart, the run interrupts with `workflow_pending_ask_unavailable`.
 
 ### 9.3 Verification
 
-- [ ] Run ask/workflow tests.
-- [ ] Run `./scripts/test.sh ./server/tools/askquestion/... ./server/runtime/... ./server/workflow/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Run ask/workflow tests.
+- [x] Run `./scripts/test.sh ./server/tools/askquestion/... ./server/runtime/... ./server/workflow/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
 - [ ] Commit slice with message matching implemented path.
 
 ## Slice 10: Context-Preservation Modes

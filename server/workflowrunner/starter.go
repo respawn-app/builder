@@ -40,6 +40,8 @@ const (
 type RuntimeStore interface {
 	GetRunStartContext(context.Context, workflow.RunID) (workflowstore.RunStartContext, error)
 	AttachRunSession(context.Context, workflow.RunID, int64, string) error
+	SetRunWaitingAsk(context.Context, workflow.RunID, int64, string) error
+	ClearRunWaitingAsk(context.Context, workflow.RunID, int64, string) error
 	CompleteRun(context.Context, workflowstore.CompleteRunRequest) (workflowstore.CompleteRunResult, error)
 	RecordProtocolViolation(context.Context, workflowstore.RecordProtocolViolationRequest) (workflowstore.RecordProtocolViolationResult, error)
 	InterruptRun(context.Context, workflow.RunID, string, string) error
@@ -53,6 +55,7 @@ type TaskWorktreeEnsurer interface {
 type RuntimeEventRegistry interface {
 	runtimewire.RuntimeRegistry
 	PublishRuntimeEvent(sessionID string, evt runtime.Event)
+	AwaitPromptResponse(ctx context.Context, sessionID string, req askquestion.Request) (askquestion.Response, error)
 }
 
 type Starter struct {
@@ -324,14 +327,26 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 		return
 	}
 	defer func() { _ = wiring.Close() }()
-	if wiring.AskBroker != nil {
-		wiring.AskBroker.SetAskHandler(func(askquestion.Request) (askquestion.Response, error) {
-			return askquestion.Response{}, errors.New("workflow questions are not wired until Slice 9")
-		})
-	}
 	var runtimeRegistry runtimewire.RuntimeRegistry
 	if s.runtimes != nil {
 		runtimeRegistry = s.runtimes
+	}
+	if wiring.AskBroker != nil && s.runtimes != nil {
+		sessionID := plan.Store.Meta().SessionID
+		wiring.AskBroker.SetAskHandler(func(askReq askquestion.Request) (askquestion.Response, error) {
+			if err := s.store.SetRunWaitingAsk(context.Background(), req.RunID, req.Generation, askReq.ID); err != nil {
+				return askquestion.Response{}, err
+			}
+			resp, askErr := s.runtimes.AwaitPromptResponse(ctx, sessionID, askReq)
+			if clearErr := s.store.ClearRunWaitingAsk(context.Background(), req.RunID, req.Generation, askReq.ID); clearErr != nil && askErr == nil {
+				return askquestion.Response{}, clearErr
+			}
+			return resp, askErr
+		})
+	} else if wiring.AskBroker != nil {
+		wiring.AskBroker.SetAskHandler(func(askquestion.Request) (askquestion.Response, error) {
+			return askquestion.Response{}, errors.New("workflow questions require runtime registry")
+		})
 	}
 	registration := runtimewire.RegisterSessionRuntime(plan.Store.Meta().SessionID, wiring.Engine, runtimeRegistry, s.backgroundRouter)
 	defer registration.Close()
@@ -363,9 +378,6 @@ func (s *Starter) finish(runID workflow.RunID, generation int64) {
 func workflowRuntimeEnabledTools(enabled []toolspec.ID) []toolspec.ID {
 	out := make([]toolspec.ID, 0, len(enabled))
 	for _, id := range enabled {
-		if id == toolspec.ToolAskQuestion {
-			continue
-		}
 		out = append(out, id)
 	}
 	return out

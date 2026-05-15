@@ -2,9 +2,13 @@ package core
 
 import (
 	"testing"
+	"time"
 
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/registry"
+	askquestion "builder/server/tools/askquestion"
+	"builder/server/workflow"
 )
 
 func TestNewWithContextComposesRequiredBundles(t *testing.T) {
@@ -74,4 +78,43 @@ func TestNewWithContextComposesRequiredBundles(t *testing.T) {
 	if !scheduler.Stopped() {
 		t.Fatal("expected workflow scheduler to stop during core close")
 	}
+}
+
+func TestRuntimePendingAskResolverUsesPendingPromptSource(t *testing.T) {
+	resolver := runtimePendingAskResolver{prompts: fakePendingPromptSource{items: map[string][]registry.PendingPromptSnapshot{
+		"session-1": {
+			{Request: askquestion.Request{ID: "ask-1", Question: "Need input?"}, CreatedAt: time.Unix(1, 0)},
+			{Request: askquestion.Request{ID: "approval-1", Question: "Approve?", Approval: true}, CreatedAt: time.Unix(2, 0)},
+		},
+	}}}
+
+	ok, err := resolver.CanRehydrate(t.Context(), "session-1", workflow.RunID("run-1"), "ask-1")
+	if err != nil {
+		t.Fatalf("CanRehydrate ask: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected pending ordinary ask to rehydrate")
+	}
+	ok, err = resolver.CanRehydrate(t.Context(), "session-1", workflow.RunID("run-1"), "approval-1")
+	if err != nil {
+		t.Fatalf("CanRehydrate approval: %v", err)
+	}
+	if ok {
+		t.Fatal("approval prompt must not satisfy workflow ask rehydration")
+	}
+	ok, err = resolver.CanRehydrate(t.Context(), "session-1", workflow.RunID("run-1"), "missing")
+	if err != nil {
+		t.Fatalf("CanRehydrate missing: %v", err)
+	}
+	if ok {
+		t.Fatal("missing ask should not rehydrate")
+	}
+}
+
+type fakePendingPromptSource struct {
+	items map[string][]registry.PendingPromptSnapshot
+}
+
+func (f fakePendingPromptSource) ListPendingPrompts(sessionID string) []registry.PendingPromptSnapshot {
+	return append([]registry.PendingPromptSnapshot(nil), f.items[sessionID]...)
 }

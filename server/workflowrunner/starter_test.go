@@ -13,6 +13,8 @@ import (
 
 	"builder/server/llm"
 	"builder/server/metadata"
+	"builder/server/registry"
+	askquestion "builder/server/tools/askquestion"
 	"builder/server/workflow"
 	"builder/server/workflowruntime/workflowtest"
 	"builder/server/workflowscheduler"
@@ -95,9 +97,12 @@ func TestSchedulerRunsNewSessionWorkflowNodeWithCompleteNodeTool(t *testing.T) {
 	}
 }
 
-func TestWorkflowRuntimeDoesNotExposeAskQuestionUntilQuestionsAreWired(t *testing.T) {
-	input := json.RawMessage(`{"transition_id":"done","commentary":"finished tool","summary":"tool ok"}`)
-	fixture := newStarterFixture(t, config.WorkflowCompletionModeTool, workflowtest.ToolBatch("complete", llm.ToolCall{ID: "call-complete", Name: "complete_node", Input: input}))
+func TestWorkflowRuntimeAskQuestionWaitsAndResumesSameRunSession(t *testing.T) {
+	completeInput := json.RawMessage(`{"transition_id":"done","commentary":"answered and finished","summary":"question ok"}`)
+	fixture := newStarterFixture(t, config.WorkflowCompletionModeTool,
+		workflowtest.AskQuestion("call-ask", []byte(`{"question":"Need direction?","suggestions":["ship","stop"],"recommended_option_index":1}`)),
+		workflowtest.ToolBatch("complete", llm.ToolCall{ID: "call-complete", Name: "complete_node", Input: completeInput}),
+	)
 	role := fixture.cfg.Settings.Subagents["coder"]
 	role.Settings.EnabledTools = map[toolspec.ID]bool{toolspec.ToolAskQuestion: true}
 	role.Sources["tools."+toolspec.ConfigName(toolspec.ToolAskQuestion)] = "test"
@@ -109,13 +114,35 @@ func TestWorkflowRuntimeDoesNotExposeAskQuestionUntilQuestionsAreWired(t *testin
 	if err := scheduler.Process(context.Background()); err != nil {
 		t.Fatalf("Process: %v", err)
 	}
+	waiting := fixture.waitForWaitingAsk(t, task.ID, "call-ask")
+	pending := fixture.runtimes.ListPendingPrompts(waiting.SessionID)
+	if len(pending) != 1 || pending[0].Request.ID != "call-ask" || pending[0].Request.Question != "Need direction?" {
+		t.Fatalf("pending prompts = %+v", pending)
+	}
+	if err := fixture.runtimes.SubmitPromptResponse(waiting.SessionID, askquestion.Response{RequestID: "call-ask", Answer: "Ship it"}, nil); err != nil {
+		t.Fatalf("SubmitPromptResponse: %v", err)
+	}
 	fixture.waitForCompletedRun(t, task.ID)
+	runs, err := fixture.store.ListRuns(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 || runs[0].SessionID != waiting.SessionID || runs[0].WaitingAskID != "" {
+		t.Fatalf("run after answer = %+v, want same session and cleared waiting ask", runs)
+	}
+	transitions, err := fixture.store.ListTransitions(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if len(transitions) != 2 || transitions[1].Commentary != "answered and finished" || transitions[1].OutputValues["summary"] != "question ok" {
+		t.Fatalf("completion transition = %+v", transitions)
+	}
 	reqs := fixture.client.Requests()
 	if len(reqs) == 0 {
 		t.Fatal("fake model was not called")
 	}
-	if requestHasTool(reqs[0], string(toolspec.ToolAskQuestion)) {
-		t.Fatalf("ask_question exposed in workflow request: %+v", reqs[0].Tools)
+	if !requestHasTool(reqs[0], string(toolspec.ToolAskQuestion)) {
+		t.Fatalf("ask_question missing in workflow request: %+v", reqs[0].Tools)
 	}
 	if !requestHasTool(reqs[0], string(toolspec.ToolCompleteNode)) {
 		t.Fatalf("complete_node missing in workflow request: %+v", reqs[0].Tools)
@@ -231,6 +258,7 @@ type starterFixture struct {
 	worktrees     *metadataTaskWorktrees
 	client        *workflowtest.ScriptedClient
 	clientFactory func(workflowscheduler.StartRunRequest) llm.Client
+	runtimes      *registry.RuntimeRegistry
 	starter       *Starter
 	workflowID    workflow.WorkflowID
 	projectID     string
@@ -271,7 +299,8 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	worktrees := &metadataTaskWorktrees{t: t, metadata: metadataStore, workspaceID: binding.WorkspaceID, root: filepath.Join(home, "task-worktrees")}
 	client := workflowtest.NewScriptedClient(llm.ProviderCapabilities{ProviderID: "fake", SupportsResponsesAPI: mode == config.WorkflowCompletionModeStructuredOutput}, steps...)
 	clientFactory := func(workflowscheduler.StartRunRequest) llm.Client { return client }
-	starter, err := NewStarter(cfg, metadataStore, store, nil, nil, nil, nil, StarterOptions{
+	runtimes := registry.NewRuntimeRegistry()
+	starter, err := NewStarter(cfg, metadataStore, store, nil, nil, nil, runtimes, StarterOptions{
 		ClientFactory: clientFactory,
 		Worktrees:     worktrees,
 	})
@@ -283,7 +312,7 @@ func newStarterFixture(t *testing.T, mode config.WorkflowCompletionMode, steps .
 	if _, err := store.LinkWorkflow(context.Background(), binding.ProjectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
-	return starterFixture{cfg: cfg, metadata: metadataStore, store: store, view: view, worktrees: worktrees, client: client, clientFactory: clientFactory, starter: starter, workflowID: workflowID, projectID: binding.ProjectID}
+	return starterFixture{cfg: cfg, metadata: metadataStore, store: store, view: view, worktrees: worktrees, client: client, clientFactory: clientFactory, runtimes: runtimes, starter: starter, workflowID: workflowID, projectID: binding.ProjectID}
 }
 
 func (f *starterFixture) rebuildStarter(t *testing.T) {
@@ -291,7 +320,10 @@ func (f *starterFixture) rebuildStarter(t *testing.T) {
 	if f.starter != nil {
 		_ = f.starter.Close()
 	}
-	starter, err := NewStarter(f.cfg, f.metadata, f.store, nil, nil, nil, nil, StarterOptions{
+	if f.runtimes == nil {
+		f.runtimes = registry.NewRuntimeRegistry()
+	}
+	starter, err := NewStarter(f.cfg, f.metadata, f.store, nil, nil, nil, f.runtimes, StarterOptions{
 		ClientFactory: f.clientFactory,
 		Worktrees:     f.worktrees,
 	})
@@ -344,6 +376,29 @@ func (f starterFixture) waitForCompletedRun(t *testing.T, taskID workflow.TaskID
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for workflow run completion")
+}
+
+func (f starterFixture) waitForWaitingAsk(t *testing.T, taskID workflow.TaskID, askID string) workflowstore.RunRecord {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, err := f.store.ListRuns(context.Background(), taskID)
+		if err != nil {
+			t.Fatalf("ListRuns: %v", err)
+		}
+		if len(runs) == 1 && runs[0].WaitingAskID == askID {
+			if strings.TrimSpace(runs[0].SessionID) == "" {
+				t.Fatalf("waiting run has no session: %+v", runs[0])
+			}
+			if runs[0].CompletedAt != 0 || runs[0].InterruptedAt != 0 {
+				t.Fatalf("waiting run has terminal outcome: %+v", runs[0])
+			}
+			return runs[0]
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for workflow run ask %s", askID)
+	return workflowstore.RunRecord{}
 }
 
 func (f starterFixture) waitForRunCount(t *testing.T, taskID workflow.TaskID, count int) {

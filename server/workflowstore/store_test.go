@@ -826,6 +826,64 @@ func TestAttachRunSessionGenerationGuard(t *testing.T) {
 	}
 }
 
+func TestSetAndClearRunWaitingAskGenerationGuard(t *testing.T) {
+	ctx := context.Background()
+	store, binding, cfg := newTestStoreWithConfig(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	sessionID := createTestSession(t, ctx, store, binding, cfg)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := store.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+
+	if err := store.SetRunWaitingAsk(ctx, started.RunID, claimed.Generation-1, "ask-stale"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale SetRunWaitingAsk error = %v, want sql.ErrNoRows", err)
+	}
+	if err := store.SetRunWaitingAsk(ctx, started.RunID, claimed.Generation, "ask-1"); err != nil {
+		t.Fatalf("SetRunWaitingAsk current generation: %v", err)
+	}
+	waiting, err := store.ListWaitingAskRuns(ctx)
+	if err != nil {
+		t.Fatalf("ListWaitingAskRuns: %v", err)
+	}
+	if len(waiting) != 1 || waiting[0].ID != started.RunID || waiting[0].WaitingAskID != "ask-1" || waiting[0].SessionID != sessionID {
+		t.Fatalf("waiting runs = %+v", waiting)
+	}
+	if _, err := store.ClaimRun(ctx, started.RunID, claimed.Generation); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ClaimRun while waiting error = %v, want sql.ErrNoRows", err)
+	}
+	if err := store.ClearRunWaitingAsk(ctx, started.RunID, claimed.Generation-1, "ask-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale ClearRunWaitingAsk error = %v, want sql.ErrNoRows", err)
+	}
+	if err := store.ClearRunWaitingAsk(ctx, started.RunID, claimed.Generation, "ask-other"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("wrong ask ClearRunWaitingAsk error = %v, want sql.ErrNoRows", err)
+	}
+	if err := store.ClearRunWaitingAsk(ctx, started.RunID, claimed.Generation, "ask-1"); err != nil {
+		t.Fatalf("ClearRunWaitingAsk current ask: %v", err)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if runs[0].WaitingAskID != "" || runs[0].CompletedAt != 0 || runs[0].InterruptedAt != 0 {
+		t.Fatalf("run after clear = %+v", runs[0])
+	}
+}
+
 func TestInterruptRunGenerationGuard(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
