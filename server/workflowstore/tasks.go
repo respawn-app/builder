@@ -1144,6 +1144,10 @@ func sortedStringKeys(values map[string]string) []string {
 	return keys
 }
 
+// RecordProtocolViolation increments the active run's protocol-violation
+// counter. If the run became terminal before the increment, no new violation is
+// recorded and the existing counter is returned with Interrupted=true so callers
+// can stop retrying without surfacing a stale terminal-run error.
 func (s *Store) RecordProtocolViolation(ctx context.Context, req RecordProtocolViolationRequest) (RecordProtocolViolationResult, error) {
 	if strings.TrimSpace(string(req.RunID)) == "" {
 		return RecordProtocolViolationResult{}, errors.New("run id is required")
