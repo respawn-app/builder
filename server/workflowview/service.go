@@ -3,6 +3,7 @@ package workflowview
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"sort"
 	"strconv"
@@ -287,11 +288,19 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 	for _, placement := range placements {
 		detail.Placements = append(detail.Placements, placementDTO(placement, nodeByID))
 	}
+	sessionNames, err := s.sessionNamesByRun(ctx, runs)
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
 	for _, run := range runs {
-		detail.Runs = append(detail.Runs, s.runDTO(ctx, run, nodeByID))
+		detail.Runs = append(detail.Runs, runDTO(run, nodeByID, sessionNames))
+	}
+	edgesByTransitionID, err := s.transitionEdgesByTransitionID(ctx, transitions)
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
 	}
 	for _, transition := range transitions {
-		dto, err := s.transitionDTO(ctx, transition)
+		dto, err := transitionDTO(transition, edgesByTransitionID[transition.ID])
 		if err != nil {
 			return serverapi.WorkflowTaskDetail{}, err
 		}
@@ -329,8 +338,12 @@ func (s *Service) ListTaskActivity(ctx context.Context, req serverapi.WorkflowTa
 	if err != nil {
 		return serverapi.WorkflowTaskActivityListResponse{}, err
 	}
+	edgesByTransitionID, err := s.transitionEdgesByTransitionID(ctx, transitions)
+	if err != nil {
+		return serverapi.WorkflowTaskActivityListResponse{}, err
+	}
 	for _, transition := range transitions {
-		dto, err := s.transitionDTO(ctx, transition)
+		dto, err := transitionDTO(transition, edgesByTransitionID[transition.ID])
 		if err != nil {
 			return serverapi.WorkflowTaskActivityListResponse{}, err
 		}
@@ -344,8 +357,12 @@ func (s *Service) ListTaskActivity(ctx context.Context, req serverapi.WorkflowTa
 	if err != nil {
 		return serverapi.WorkflowTaskActivityListResponse{}, err
 	}
+	sessionNames, err := s.sessionNamesByRun(ctx, runs)
+	if err != nil {
+		return serverapi.WorkflowTaskActivityListResponse{}, err
+	}
 	for _, run := range runs {
-		dto := s.runDTO(ctx, run, nodeByID)
+		dto := runDTO(run, nodeByID, sessionNames)
 		if run.StartedAtUnixMs != 0 {
 			items = append(items, serverapi.WorkflowTaskActivityItem{ActivityID: "run_started:" + run.ID, Type: "run_started", TaskID: task.ID, OccurredAtUnixMs: run.StartedAtUnixMs, UpdatedAtUnixMs: run.UpdatedAtUnixMs, Summary: "Run started", Run: dto})
 		}
@@ -365,15 +382,12 @@ func (s *Service) ListTaskActivity(ctx context.Context, req serverapi.WorkflowTa
 	if pageSize == 0 {
 		pageSize = 50
 	}
-	offset, err := parseOffsetPageToken(req.PageToken)
+	cursor, err := parseActivityPageToken(req.PageToken)
 	if err != nil {
 		return serverapi.WorkflowTaskActivityListResponse{}, err
 	}
-	nextPageToken := ""
-	if len(items) > offset+pageSize {
-		nextPageToken = strconv.Itoa(offset + pageSize)
-	}
-	return serverapi.WorkflowTaskActivityListResponse{Items: pageActivityItems(items, offset, pageSize), NextPageToken: nextPageToken, GeneratedAtUnixMs: time.Now().UTC().UnixMilli()}, nil
+	page, nextPageToken := pageActivityItems(items, cursor, pageSize)
+	return serverapi.WorkflowTaskActivityListResponse{Items: page, NextPageToken: nextPageToken, GeneratedAtUnixMs: time.Now().UTC().UnixMilli()}, nil
 }
 
 func (s *Service) GetTaskTeleportTarget(ctx context.Context, req serverapi.WorkflowTaskTeleportTargetRequest) (serverapi.WorkflowTaskTeleportTargetResponse, error) {
@@ -404,6 +418,9 @@ func (s *Service) GetTaskTeleportTarget(ctx context.Context, req serverapi.Workf
 		break
 	}
 	if !found {
+		if requestedRunID != "" {
+			return serverapi.WorkflowTaskTeleportTargetResponse{Available: false, TaskID: task.ID, RunID: requestedRunID, ProjectID: task.ProjectID, FailureReason: "run not found for task"}, nil
+		}
 		return serverapi.WorkflowTaskTeleportTargetResponse{Available: false, TaskID: task.ID, RunID: requestedRunID, ProjectID: task.ProjectID, FailureReason: "no task run session yet"}, nil
 	}
 	if strings.TrimSpace(selected.SessionID.String) == "" {
@@ -604,15 +621,13 @@ func worktreeView(row sqlitegen.GetWorktreeByIDRow) serverapi.WorktreeView {
 	return serverapi.WorktreeView{WorktreeID: row.ID, DisplayName: row.DisplayName, CanonicalRoot: row.CanonicalRootPath, Availability: row.Availability, IsMain: row.IsMain != 0, BuilderManaged: row.BuilderManaged != 0, CreatedBranch: row.CreatedBranch != 0, OriginSessionID: row.OriginSessionID}
 }
 
-func (s *Service) runDTO(ctx context.Context, run sqlitegen.TaskRun, nodes map[string]serverapi.WorkflowNode) serverapi.WorkflowRun {
+func runDTO(run sqlitegen.TaskRun, nodes map[string]serverapi.WorkflowNode, sessionNames map[string]string) serverapi.WorkflowRun {
 	dto := serverapi.WorkflowRun{ID: run.ID, TaskID: run.TaskID, PlacementID: run.PlacementID, NodeID: run.NodeID, SessionID: run.SessionID.String, Generation: run.RunGeneration, StartedAtUnixMs: run.StartedAtUnixMs, CompletedAtUnixMs: run.CompletedAtUnixMs, InterruptedAtUnixMs: run.InterruptedAtUnixMs, InterruptionReason: run.InterruptionReason, WaitingAskID: run.WaitingAskID, Status: runStatus(run)}
 	if node, ok := nodes[run.NodeID]; ok {
 		dto.Role = node.SubagentRole
 	}
-	if strings.TrimSpace(run.SessionID.String) != "" {
-		if session, err := s.queries.GetSessionRecordByID(ctx, run.SessionID.String); err == nil {
-			dto.SessionName = session.Name
-		}
+	if name, ok := sessionNames[strings.TrimSpace(run.SessionID.String)]; ok {
+		dto.SessionName = name
 	}
 	return dto
 }
@@ -632,7 +647,7 @@ func runStatus(run sqlitegen.TaskRun) string {
 	}
 }
 
-func (s *Service) transitionDTO(ctx context.Context, transition sqlitegen.TaskTransition) (serverapi.WorkflowTaskTransition, error) {
+func transitionDTO(transition sqlitegen.TaskTransition, edges []sqlitegen.TaskTransitionEdge) (serverapi.WorkflowTaskTransition, error) {
 	outputs := map[string]string{}
 	if err := workflowjson.UnmarshalString(transition.OutputValuesJson, &outputs); err != nil {
 		return serverapi.WorkflowTaskTransition{}, err
@@ -655,10 +670,6 @@ func (s *Service) transitionDTO(ctx context.Context, transition sqlitegen.TaskTr
 		OutputValues:          outputs,
 		CreatedAt:             transition.CreatedAtUnixMs,
 		AppliedAtUnixMs:       transition.AppliedAtUnixMs,
-	}
-	edges, err := s.queries.ListTaskTransitionEdges(ctx, transition.ID)
-	if err != nil {
-		return serverapi.WorkflowTaskTransition{}, err
 	}
 	for _, edge := range edges {
 		inputs := []serverapi.WorkflowInputBinding{}
@@ -690,6 +701,105 @@ func (s *Service) transitionDTO(ctx context.Context, transition sqlitegen.TaskTr
 	return dto, nil
 }
 
+func (s *Service) sessionNamesByRun(ctx context.Context, runs []sqlitegen.TaskRun) (map[string]string, error) {
+	sessionIDs := []string{}
+	seen := map[string]bool{}
+	for _, run := range runs {
+		sessionID := strings.TrimSpace(run.SessionID.String)
+		if sessionID == "" || seen[sessionID] {
+			continue
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+		seen[sessionID] = true
+	}
+	if len(sessionIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	placeholders := make([]string, 0, len(sessionIDs))
+	args := make([]any, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, sessionID)
+	}
+	rows, err := s.metadata.DB().QueryContext(ctx, `SELECT id, name FROM sessions WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var sessionID, name string
+		if err := rows.Scan(&sessionID, &name); err != nil {
+			return nil, err
+		}
+		out[sessionID] = name
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) transitionEdgesByTransitionID(ctx context.Context, transitions []sqlitegen.TaskTransition) (map[string][]sqlitegen.TaskTransitionEdge, error) {
+	transitionIDs := make([]string, 0, len(transitions))
+	args := make([]any, 0, len(transitions))
+	for _, transition := range transitions {
+		transitionIDs = append(transitionIDs, "?")
+		args = append(args, transition.ID)
+	}
+	out := map[string][]sqlitegen.TaskTransitionEdge{}
+	if len(args) == 0 {
+		return out, nil
+	}
+	rows, err := s.metadata.DB().QueryContext(ctx, `
+SELECT
+    id,
+    task_transition_id,
+    workflow_edge_id,
+    edge_key,
+    workflow_revision_seen,
+    target_node_id,
+    target_node_key,
+    target_node_display_name,
+    target_node_kind,
+    target_placement_id,
+    state,
+    context_mode,
+    requires_approval,
+    input_bindings_json,
+    output_requirements_json,
+    metadata_json
+FROM task_transition_edges
+WHERE task_transition_id IN (`+strings.Join(transitionIDs, ",")+`)
+ORDER BY task_transition_id ASC, rowid ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var edge sqlitegen.TaskTransitionEdge
+		if err := rows.Scan(
+			&edge.ID,
+			&edge.TaskTransitionID,
+			&edge.WorkflowEdgeID,
+			&edge.EdgeKey,
+			&edge.WorkflowRevisionSeen,
+			&edge.TargetNodeID,
+			&edge.TargetNodeKey,
+			&edge.TargetNodeDisplayName,
+			&edge.TargetNodeKind,
+			&edge.TargetPlacementID,
+			&edge.State,
+			&edge.ContextMode,
+			&edge.RequiresApproval,
+			&edge.InputBindingsJson,
+			&edge.OutputRequirementsJson,
+			&edge.MetadataJson,
+		); err != nil {
+			return nil, err
+		}
+		out[edge.TaskTransitionID] = append(out[edge.TaskTransitionID], edge)
+	}
+	return out, rows.Err()
+}
+
 func sortActivityItems(items []serverapi.WorkflowTaskActivityItem) {
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].OccurredAtUnixMs != items[j].OccurredAtUnixMs {
@@ -699,15 +809,57 @@ func sortActivityItems(items []serverapi.WorkflowTaskActivityItem) {
 	})
 }
 
-func pageActivityItems(items []serverapi.WorkflowTaskActivityItem, offset int, pageSize int) []serverapi.WorkflowTaskActivityItem {
-	if offset >= len(items) {
-		return []serverapi.WorkflowTaskActivityItem{}
+type activityPageCursor struct {
+	occurredAtUnixMs int64
+	activityID       string
+	hasValue         bool
+}
+
+func parseActivityPageToken(token string) (activityPageCursor, error) {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		return activityPageCursor{}, nil
 	}
-	end := offset + pageSize
+	timestampPart, encodedID, ok := strings.Cut(trimmed, "|")
+	if !ok {
+		return activityPageCursor{}, errors.New("page_token is invalid")
+	}
+	occurredAt, err := strconv.ParseInt(timestampPart, 10, 64)
+	if err != nil || occurredAt < 0 {
+		return activityPageCursor{}, errors.New("page_token is invalid")
+	}
+	decodedID, err := base64.RawURLEncoding.DecodeString(encodedID)
+	if err != nil || strings.TrimSpace(string(decodedID)) == "" {
+		return activityPageCursor{}, errors.New("page_token is invalid")
+	}
+	return activityPageCursor{occurredAtUnixMs: occurredAt, activityID: string(decodedID), hasValue: true}, nil
+}
+
+func pageActivityItems(items []serverapi.WorkflowTaskActivityItem, cursor activityPageCursor, pageSize int) ([]serverapi.WorkflowTaskActivityItem, string) {
+	start := 0
+	if cursor.hasValue {
+		start = len(items)
+		for index, item := range items {
+			if item.OccurredAtUnixMs < cursor.occurredAtUnixMs || (item.OccurredAtUnixMs == cursor.occurredAtUnixMs && item.ActivityID < cursor.activityID) {
+				start = index
+				break
+			}
+		}
+	}
+	if start >= len(items) {
+		return []serverapi.WorkflowTaskActivityItem{}, ""
+	}
+	end := start + pageSize
 	if end > len(items) {
 		end = len(items)
 	}
-	return items[offset:end]
+	page := items[start:end]
+	if end >= len(items) {
+		return page, ""
+	}
+	last := page[len(page)-1]
+	nextToken := strconv.FormatInt(last.OccurredAtUnixMs, 10) + "|" + base64.RawURLEncoding.EncodeToString([]byte(last.ActivityID))
+	return page, nextToken
 }
 
 func (s *Service) approvalAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {

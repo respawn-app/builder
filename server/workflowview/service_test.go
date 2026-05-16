@@ -447,6 +447,13 @@ func TestTaskActivityListMergesDurableTaskEventsAndPaginatesStably(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListTaskActivity first: %v", err)
 	}
+	newComment, err := workflowStore.AddComment(ctx, task.ID, "newer note", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment newer: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE task_comments SET updated_at_unix_ms = 222 WHERE id = ?`, newComment.ID); err != nil {
+		t.Fatalf("force newer comment timestamp: %v", err)
+	}
 	second, err := view.ListTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: string(task.ID), PageSize: 10, PageToken: first.NextPageToken})
 	if err != nil {
 		t.Fatalf("ListTaskActivity second: %v", err)
@@ -456,6 +463,9 @@ func TestTaskActivityListMergesDurableTaskEventsAndPaginatesStably(t *testing.T)
 	for _, item := range append(first.Items, second.Items...) {
 		if seen[item.ActivityID] {
 			t.Fatalf("duplicate activity item across pages: %s", item.ActivityID)
+		}
+		if item.ActivityID == "comment:"+newComment.ID {
+			t.Fatalf("newer activity inserted between page fetches leaked into older page: %+v", item)
 		}
 		seen[item.ActivityID] = true
 		kinds[item.Type] = true
@@ -542,6 +552,13 @@ func TestTaskTeleportTargetReturnsIdentifiersOrUnavailableReason(t *testing.T) {
 	}
 	if unavailable.Available || unavailable.FailureReason == "" {
 		t.Fatalf("unavailable target = %+v", unavailable)
+	}
+	missingRun, err := view.GetTaskTeleportTarget(ctx, serverapi.WorkflowTaskTeleportTargetRequest{TaskID: string(task.ID), RunID: "missing-run"})
+	if err != nil {
+		t.Fatalf("GetTaskTeleportTarget missing run: %v", err)
+	}
+	if missingRun.Available || missingRun.FailureReason != "run not found for task" {
+		t.Fatalf("missing run target = %+v", missingRun)
 	}
 	worktreeID := "worktree-teleport"
 	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), DisplayName: "Task worktree", Availability: "available", BuilderManaged: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 1}); err != nil {
