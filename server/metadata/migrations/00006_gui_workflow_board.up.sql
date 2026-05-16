@@ -17,6 +17,38 @@ CREATE INDEX workflow_node_groups_workflow_sort_idx
 ALTER TABLE workflow_nodes
     ADD COLUMN group_id TEXT REFERENCES workflow_node_groups(id) ON DELETE SET NULL;
 
+-- +goose StatementBegin
+CREATE TRIGGER workflow_nodes_group_workflow_insert
+BEFORE INSERT ON workflow_nodes
+FOR EACH ROW
+WHEN NEW.group_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM workflow_node_groups g
+    WHERE g.id = NEW.group_id
+      AND g.workflow_id = NEW.workflow_id
+  )
+BEGIN
+    SELECT RAISE(ABORT, 'workflow_nodes.group_id must belong to node workflow');
+END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE TRIGGER workflow_nodes_group_workflow_update
+BEFORE UPDATE OF workflow_id, group_id ON workflow_nodes
+FOR EACH ROW
+WHEN NEW.group_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM workflow_node_groups g
+    WHERE g.id = NEW.group_id
+      AND g.workflow_id = NEW.workflow_id
+  )
+BEGIN
+    SELECT RAISE(ABORT, 'workflow_nodes.group_id must belong to node workflow');
+END;
+-- +goose StatementEnd
+
 CREATE TABLE workflow_events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL DEFAULT '',

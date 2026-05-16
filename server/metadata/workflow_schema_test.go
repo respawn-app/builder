@@ -119,8 +119,20 @@ func TestWorkflowSchemaConstraints(t *testing.T) {
 	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
 	seedWorkflowTask(t, store, binding.ProjectID, "BLD-1")
 
+	if _, err := store.db.Exec(`
+INSERT INTO workflows (id, name, graph_revision, created_at_unix_ms, updated_at_unix_ms, metadata_json)
+VALUES ('workflow-other', 'Other', 1, ?, ?, '{}');
+INSERT INTO workflow_node_groups (id, workflow_id, group_key, display_name, metadata_json)
+VALUES ('group-workflow-1', 'workflow-1', 'impl', 'Implementation', '{}'),
+       ('group-other', 'workflow-other', 'impl', 'Implementation', '{}');
+`, now, now); err != nil {
+		t.Fatalf("seed node groups: %v", err)
+	}
+
 	assertSQLiteConstraint(t, store.db, `INSERT INTO workflow_nodes (id, workflow_id, node_key, kind, display_name, output_fields_json, metadata_json) VALUES ('node-second-start', 'workflow-1', 'second_start', 'start', 'Second Start', '[]', '{}')`)
 	assertSQLiteConstraint(t, store.db, `INSERT INTO workflow_nodes (id, workflow_id, node_key, kind, display_name, output_fields_json, metadata_json) VALUES ('node-invalid-kind', 'workflow-1', 'bad', 'robot', 'Bad', '[]', '{}')`)
+	assertSQLiteConstraint(t, store.db, `INSERT INTO workflow_nodes (id, workflow_id, node_key, kind, display_name, output_fields_json, group_id, metadata_json) VALUES ('node-cross-group', 'workflow-1', 'cross_group', 'agent', 'Cross Group', '[]', 'group-other', '{}')`)
+	assertSQLiteConstraint(t, store.db, `UPDATE workflow_nodes SET group_id = 'group-other' WHERE id = 'node-agent'`)
 	assertSQLiteConstraint(t, store.db, `INSERT INTO workflow_edges (id, workflow_id, transition_group_id, edge_key, target_node_id, requires_approval, context_mode, input_bindings_json, output_requirements_json, metadata_json) VALUES ('edge-invalid-bool', 'workflow-1', 'group-start', 'bad_bool', 'node-agent', 2, 'new_session', '{}', '{}', '{}')`)
 	assertSQLiteConstraint(t, store.db, `INSERT INTO workflows (id, name, graph_revision, created_at_unix_ms, updated_at_unix_ms, metadata_json) VALUES ('workflow-bad-time', 'Bad', 1, -1, 1, '{}')`)
 	assertSQLiteConstraint(t, store.db, `INSERT INTO workflows (id, name, graph_revision, created_at_unix_ms, updated_at_unix_ms, metadata_json) VALUES ('workflow-bad-rev', 'Bad', 0, 1, 1, '{}')`)
