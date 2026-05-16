@@ -8,7 +8,7 @@ Current focus:
 
 - [x] Slice 0: connectivity/readiness/capabilities.
 - [x] Slice 1: Home/project admin/project key/workspaces.
-- [ ] Slice 2: workflow picker, selected board, groups, live updates.
+- [x] Slice 2: workflow picker, selected board, groups, live updates.
 - [ ] Slice 3: task source workspace and Backlog editing.
 - [ ] Slice 4: actions, attention inbox, questions, approvals.
 - [ ] Slice 5: task detail, activity feed, comments, teleport.
@@ -47,4 +47,17 @@ Slice 1 notes:
 
 Slice 2 notes:
 
-- Current next step: add selected-workflow board/picker tracer tests and wire group/live-update foundations from the plan.
+- Started: 2026-05-16.
+- Completed tracer: selected `workflow.board.get` returns project identity, picker, selected workflow, safe columns, groups, cards, done preview, action facts, generated timestamp, and event watermark.
+- Completed tracer: visual workflow node groups have schema, store/service/API routes, graph revision bumps, node group assignment, and board group projection.
+- Completed tracer: `workflow.subscribeProject` route/client/transport/service streams durable monotonic invalidation events after `after_sequence`; empty project ID subscribes to global Home invalidations.
+- Home `latest_event_sequence` now reads durable workflow event watermark instead of Slice 1 placeholder `0`.
+- Current card workspace chip uses primary/default workspace fallback until Slice 3 persists task source workspace.
+- Verification passed:
+  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler`
+  - `./scripts/test.sh ./server/metadata ./server/projectview ./cli/builder ./cli/app ./server/core ./server/serve`
+  - `./scripts/build.sh --output ./bin/builder`
+
+Slice 3 notes:
+
+- Current next step: add migration/store tracer for `tasks.source_workspace_id`, optional body, pre-start update, and worktree source fallback.

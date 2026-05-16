@@ -733,7 +733,8 @@ Current status:
 - [x] Nikita accepted implementation by setting goal to implement slices 0-5.
 - [x] Slice 0 implementation complete.
 - [x] Slice 1 Home/project admin/project key/workspaces implementation complete.
-- [ ] Next action: implement Slice 2 workflow picker, selected board, groups, and live updates.
+- [x] Slice 2 workflow picker, selected board, groups, and live updates implementation complete.
+- [ ] Next action: implement Slice 3 task source workspace and Backlog editing.
 
 Source-of-truth rules:
 
@@ -816,38 +817,38 @@ Completion criteria:
 
 ### Slice 2 Checklist: Workflow Picker, Selected Board, Groups, Live Updates
 
-Status: not started.
+Status: complete.
 
 Goal: GUI can render one selected workflow board with picker, groups, task cards, action facts, done preview, and race-safe invalidations.
 
 Implementation checklist:
 
-- [ ] Recon `server/workflowview`, workflow graph/link/default storage, scheduler/store task state, existing streaming routes, and project/session event plumbing.
-- [ ] Add failing tests for selected-workflow board returning only selected workflow cards.
-- [ ] Add failing tests for picker ordering by default, MRU, then display name.
-- [ ] Add failing tests for picker default flag, validation blockers, display names, graph revisions, and unlinked workflow handling.
-- [ ] Add failing tests that board columns expose `WorkflowBoardNodeSummary` and do not leak authoring prompt templates/output schemas.
-- [ ] Add failing tests for column order, Backlog left, Done preview limit, card statuses, action flags, and multi-active interrupt detail requirement.
-- [ ] Add failing tests for grouped workflow metadata, deterministic ungrouped representation, and graph revision bump on group metadata changes.
-- [ ] Add failing tests for `workflow.subscribeProject` invalidation events, monotonic sequence, `after_sequence`, and snapshot watermark race safety.
-- [ ] Add visual group schema/store/service/API support before relying on grouped board output.
-- [ ] Extend workflow definition create/update to accept optional visual groups and node group assignments for CLI/API seeding.
-- [ ] Implement selected board read model and picker DTOs using server-native state facts.
-- [ ] Implement card action fact computation without GUI-only state.
-- [ ] Implement project/workflow invalidation event storage or sequence source with monotonic ordering.
-- [ ] Wire `workflow.board.get` and `workflow.subscribeProject` through contracts, clients, and transport/streaming layers.
-- [ ] Support empty-project subscription for global Home invalidations from Home read-model watermarks.
-- [ ] Use legacy/default workspace fallback for card workspace summaries until Slice 3 makes task source workspace authoritative.
-- [ ] Sync GUI docs if board grouping, status, or action semantics change.
+- [x] Recon `server/workflowview`, workflow graph/link/default storage, scheduler/store task state, existing streaming routes, and project/session event plumbing.
+- [x] Add failing tests for selected-workflow board returning only selected workflow cards.
+- [x] Add failing tests for picker ordering by default, MRU, then display name.
+- [x] Add failing tests for picker default flag, validation blockers, display names, graph revisions, and unlinked workflow handling.
+- [x] Add failing tests that board columns expose `WorkflowBoardNodeSummary` and do not leak authoring prompt templates/output schemas.
+- [x] Add failing tests for column order, Backlog left, Done preview limit, card statuses, action flags, and multi-active interrupt detail requirement.
+- [x] Add failing tests for grouped workflow metadata, deterministic ungrouped representation, and graph revision bump on group metadata changes.
+- [x] Add failing tests for `workflow.subscribeProject` invalidation events, monotonic sequence, `after_sequence`, and snapshot watermark race safety.
+- [x] Add visual group schema/store/service/API support before relying on grouped board output.
+- [x] Extend workflow definition create/update to accept optional visual groups and node group assignments for CLI/API seeding.
+- [x] Implement selected board read model and picker DTOs using server-native state facts.
+- [x] Implement card action fact computation without GUI-only state.
+- [x] Implement project/workflow invalidation event storage or sequence source with monotonic ordering.
+- [x] Wire `workflow.board.get` and `workflow.subscribeProject` through contracts, clients, and transport/streaming layers.
+- [x] Support empty-project subscription for global Home invalidations from Home read-model watermarks.
+- [x] Use legacy/default workspace fallback for card workspace summaries until Slice 3 makes task source workspace authoritative.
+- [x] Sync GUI docs if board grouping, status, or action semantics change.
 
 Completion criteria:
 
-- [ ] Board route returns selected workflow board, picker, columns, groups, cards, done preview, and latest event sequence.
-- [ ] Live update subscription can resume from read-model watermark without lost invalidations.
-- [ ] Board DTO contains no workflow authoring prompt/template internals.
-- [ ] Group metadata is first-class and revisioned.
-- [ ] Picker orders default workflow first, then MRU, then display name.
-- [ ] Verification commands pass:
+- [x] Board route returns selected workflow board, picker, columns, groups, cards, done preview, and latest event sequence.
+- [x] Live update subscription can resume from read-model watermark without lost invalidations.
+- [x] Board DTO contains no workflow authoring prompt/template internals.
+- [x] Group metadata is first-class and revisioned.
+- [x] Picker orders default workflow first, then MRU, then display name.
+- [x] Verification commands pass:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler`
   - `./scripts/build.sh --output ./bin/builder`
 

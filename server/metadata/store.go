@@ -1163,6 +1163,17 @@ func (s *Store) ListProjectHomeSummaries(ctx context.Context, pageSize int, offs
 	return out, nil
 }
 
+func (s *Store) LatestWorkflowEventSequence(ctx context.Context, projectID string) (int64, error) {
+	if s == nil || s.queries == nil {
+		return 0, errors.New("metadata store is required")
+	}
+	value, err := s.queries.GetLatestWorkflowEventSequence(ctx, strings.TrimSpace(projectID))
+	if err != nil {
+		return 0, err
+	}
+	return int64FromStoredValue(value), nil
+}
+
 func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clientui.ProjectOverview, error) {
 	if s == nil || s.queries == nil {
 		return clientui.ProjectOverview{}, errors.New("metadata store is required")
@@ -1585,6 +1596,23 @@ func projectHomeSummaryFromRow(row sqlitegen.ListProjectHomeSummariesRow) server
 		TaskCount:            int(row.TaskCount),
 		AttentionCount:       int(row.AttentionCount),
 		WorkflowCount:        int(row.WorkflowCount),
+	}
+}
+
+func int64FromStoredValue(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case []byte:
+		parsed, _ := strconv.ParseInt(string(typed), 10, 64)
+		return parsed
+	case string:
+		parsed, _ := strconv.ParseInt(typed, 10, 64)
+		return parsed
+	default:
+		return 0
 	}
 }
 

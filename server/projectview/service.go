@@ -107,11 +107,15 @@ func (s *Service) ListProjectHome(ctx context.Context, req serverapi.ProjectHome
 		summaries = summaries[:pageSize]
 		nextPageToken = strconv.Itoa(offset + pageSize)
 	}
+	latestSequence, err := s.metadata.LatestWorkflowEventSequence(ctx, "")
+	if err != nil {
+		return serverapi.ProjectHomeListResponse{}, err
+	}
 	return serverapi.ProjectHomeListResponse{
 		Projects:            summaries,
 		NextPageToken:       nextPageToken,
 		GeneratedAtUnixMs:   time.Now().UTC().UnixMilli(),
-		LatestEventSequence: 0,
+		LatestEventSequence: latestSequence,
 	}, nil
 }
 

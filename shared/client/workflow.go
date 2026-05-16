@@ -13,6 +13,9 @@ type WorkflowClient interface {
 	UpdateWorkflow(ctx context.Context, req serverapi.WorkflowUpdateRequest) (serverapi.WorkflowGetResponse, error)
 	ListWorkflows(ctx context.Context, req serverapi.WorkflowListRequest) (serverapi.WorkflowListResponse, error)
 	GetWorkflow(ctx context.Context, req serverapi.WorkflowGetRequest) (serverapi.WorkflowGetResponse, error)
+	AddWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupAddRequest) (serverapi.WorkflowNodeGroupResponse, error)
+	UpdateWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupUpdateRequest) (serverapi.WorkflowNodeGroupResponse, error)
+	DeleteWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupDeleteRequest) error
 	AddWorkflowNode(ctx context.Context, req serverapi.WorkflowNodeAddRequest) (serverapi.WorkflowNodeAddResponse, error)
 	AddWorkflowTransitionGroup(ctx context.Context, req serverapi.WorkflowTransitionGroupAddRequest) (serverapi.WorkflowTransitionGroupAddResponse, error)
 	AddWorkflowEdge(ctx context.Context, req serverapi.WorkflowEdgeAddRequest) (serverapi.WorkflowEdgeAddResponse, error)
@@ -31,6 +34,7 @@ type WorkflowClient interface {
 	ListWorkflowTaskComments(ctx context.Context, req serverapi.WorkflowTaskCommentListRequest) (serverapi.WorkflowTaskCommentListResponse, error)
 	ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error
 	DeleteWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentDeleteRequest) error
+	SubscribeWorkflowProject(ctx context.Context, req serverapi.WorkflowProjectSubscribeRequest) (serverapi.WorkflowProjectSubscription, error)
 	GetWorkflowBoard(ctx context.Context, req serverapi.WorkflowBoardRequest) (serverapi.WorkflowBoardResponse, error)
 	GetWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error)
 }
@@ -69,6 +73,27 @@ func (c *loopbackWorkflowClient) GetWorkflow(ctx context.Context, req serverapi.
 		return serverapi.WorkflowGetResponse{}, errors.New("workflow service is required")
 	}
 	return c.service.GetWorkflow(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) AddWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupAddRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowNodeGroupResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.AddWorkflowNodeGroup(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) UpdateWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupUpdateRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowNodeGroupResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.UpdateWorkflowNodeGroup(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) DeleteWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupDeleteRequest) error {
+	if c == nil || c.service == nil {
+		return errors.New("workflow service is required")
+	}
+	return c.service.DeleteWorkflowNodeGroup(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) AddWorkflowNode(ctx context.Context, req serverapi.WorkflowNodeAddRequest) (serverapi.WorkflowNodeAddResponse, error) {
@@ -195,6 +220,13 @@ func (c *loopbackWorkflowClient) DeleteWorkflowTaskComment(ctx context.Context, 
 		return errors.New("workflow service is required")
 	}
 	return c.service.DeleteWorkflowTaskComment(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) SubscribeWorkflowProject(ctx context.Context, req serverapi.WorkflowProjectSubscribeRequest) (serverapi.WorkflowProjectSubscription, error) {
+	if c == nil || c.service == nil {
+		return nil, errors.New("workflow service is required")
+	}
+	return c.service.SubscribeWorkflowProject(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) GetWorkflowBoard(ctx context.Context, req serverapi.WorkflowBoardRequest) (serverapi.WorkflowBoardResponse, error) {

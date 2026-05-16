@@ -649,6 +649,17 @@ func workflowDisplayNameFromKey(key string) string {
 
 func sortedWorkflowTasks(board serverapi.WorkflowBoard) []serverapi.WorkflowTaskSummary {
 	seen := map[string]serverapi.WorkflowTaskSummary{}
+	for _, card := range append(board.Cards, board.DonePreview...) {
+		seen[card.TaskID] = serverapi.WorkflowTaskSummary{
+			ID:            card.TaskID,
+			ProjectID:     board.ProjectID,
+			WorkflowID:    card.WorkflowID,
+			ShortID:       card.ShortID,
+			Title:         card.Title,
+			Done:          card.Status.Kind == "done",
+			ActiveNodeIDs: append([]string(nil), card.ActiveNodeIDs...),
+		}
+	}
 	for _, workflow := range board.Workflows {
 		for _, task := range workflow.Tasks {
 			seen[task.ID] = task

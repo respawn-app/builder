@@ -201,6 +201,20 @@ func (c *Remote) GetWorkflow(ctx context.Context, req serverapi.WorkflowGetReque
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowGet, req, &resp)
 }
 
+func (c *Remote) AddWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupAddRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+	var resp serverapi.WorkflowNodeGroupResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowNodeGroupAdd, req, &resp)
+}
+
+func (c *Remote) UpdateWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupUpdateRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+	var resp serverapi.WorkflowNodeGroupResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowNodeGroupUpdate, req, &resp)
+}
+
+func (c *Remote) DeleteWorkflowNodeGroup(ctx context.Context, req serverapi.WorkflowNodeGroupDeleteRequest) error {
+	return c.callUnscoped(ctx, protocol.MethodWorkflowNodeGroupDelete, req, &struct{}{})
+}
+
 func (c *Remote) AddWorkflowNode(ctx context.Context, req serverapi.WorkflowNodeAddRequest) (serverapi.WorkflowNodeAddResponse, error) {
 	var resp serverapi.WorkflowNodeAddResponse
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowAddNode, req, &resp)

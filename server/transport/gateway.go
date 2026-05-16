@@ -123,6 +123,7 @@ var gatewaySubscriptionHandlerEntries = map[string]gatewaySubscriptionHandler{
 	protocol.MethodSessionSubscribeActivity: (*Gateway).serveSessionActivitySubscription,
 	protocol.MethodProcessSubscribeOutput:   (*Gateway).serveProcessOutputSubscription,
 	protocol.MethodPromptSubscribeActivity:  (*Gateway).servePromptActivitySubscription,
+	protocol.MethodWorkflowSubscribeProject: (*Gateway).serveWorkflowProjectSubscription,
 }
 
 var gatewaySubscriptionHandlers = routeHandlersForKind(rpccontract.KindSubscription, gatewaySubscriptionHandlerEntries)

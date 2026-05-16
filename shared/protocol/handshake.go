@@ -30,6 +30,9 @@ const (
 	MethodWorkflowUpdate                        = "workflow.update"
 	MethodWorkflowList                          = "workflow.list"
 	MethodWorkflowGet                           = "workflow.get"
+	MethodWorkflowNodeGroupAdd                  = "workflow.nodeGroup.add"
+	MethodWorkflowNodeGroupUpdate               = "workflow.nodeGroup.update"
+	MethodWorkflowNodeGroupDelete               = "workflow.nodeGroup.delete"
 	MethodWorkflowAddNode                       = "workflow.addNode"
 	MethodWorkflowAddTransitionGroup            = "workflow.addTransitionGroup"
 	MethodWorkflowAddEdge                       = "workflow.addEdge"
@@ -49,6 +52,9 @@ const (
 	MethodWorkflowTaskCommentReplace            = "workflow.task.comment.replace"
 	MethodWorkflowTaskCommentDelete             = "workflow.task.comment.delete"
 	MethodWorkflowBoardGet                      = "workflow.board.get"
+	MethodWorkflowSubscribeProject              = "workflow.subscribeProject"
+	MethodWorkflowProjectEvent                  = "workflow.project"
+	MethodWorkflowProjectComplete               = "workflow.project.complete"
 	MethodWorkflowTaskGet                       = "workflow.task.get"
 	MethodSessionPlan                           = "session.plan"
 	MethodSessionGetMainView                    = "session.getMainView"
@@ -151,6 +157,20 @@ type ProcessOutputEventParams struct {
 
 type PromptActivityEventParams struct {
 	Event clientui.PendingPromptEvent `json:"event"`
+}
+
+type WorkflowProjectEventParams struct {
+	Event WorkflowProjectEvent `json:"event"`
+}
+
+type WorkflowProjectEvent struct {
+	Sequence         int64    `json:"sequence"`
+	ProjectID        string   `json:"project_id,omitempty"`
+	WorkflowID       string   `json:"workflow_id,omitempty"`
+	Resource         string   `json:"resource"`
+	Action           string   `json:"action"`
+	ChangedIDs       []string `json:"changed_ids,omitempty"`
+	OccurredAtUnixMs int64    `json:"occurred_at_unix_ms"`
 }
 
 type StreamCompleteParams struct {

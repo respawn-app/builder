@@ -146,6 +146,7 @@ INSERT INTO workflow_nodes (
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 ) VALUES (
@@ -157,9 +158,67 @@ INSERT INTO workflow_nodes (
     sqlc.arg(subagent_role),
     sqlc.arg(prompt_template),
     sqlc.arg(output_fields_json),
+    sqlc.narg(group_id),
     sqlc.arg(sort_order),
     sqlc.arg(metadata_json)
 );
+
+-- name: InsertWorkflowNodeGroup :exec
+INSERT INTO workflow_node_groups (
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(workflow_id),
+    sqlc.arg(group_key),
+    sqlc.arg(display_name),
+    sqlc.arg(sort_order),
+    sqlc.arg(metadata_json)
+);
+
+-- name: UpdateWorkflowNodeGroup :execrows
+UPDATE workflow_node_groups
+SET
+    group_key = sqlc.arg(group_key),
+    display_name = sqlc.arg(display_name),
+    sort_order = sqlc.arg(sort_order),
+    metadata_json = sqlc.arg(metadata_json)
+WHERE id = sqlc.arg(id)
+  AND workflow_id = sqlc.arg(workflow_id);
+
+-- name: DeleteWorkflowNodeGroup :execrows
+DELETE FROM workflow_node_groups
+WHERE id = sqlc.arg(id)
+  AND workflow_id = sqlc.arg(workflow_id);
+
+-- name: ListWorkflowNodeGroups :many
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = sqlc.arg(workflow_id)
+ORDER BY sort_order ASC, rowid ASC;
+
+-- name: GetWorkflowNodeGroupByKey :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = sqlc.arg(workflow_id)
+  AND group_key = sqlc.arg(group_key)
+LIMIT 1;
 
 -- name: ListWorkflowNodes :many
 SELECT
@@ -171,6 +230,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -187,6 +247,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -201,6 +262,11 @@ WHERE id = sqlc.arg(id);
 -- name: DeleteWorkflowNode :execrows
 DELETE FROM workflow_nodes
 WHERE id = sqlc.arg(id);
+
+-- name: CountWorkflowNodesByGroup :one
+SELECT CAST(COUNT(*) AS INTEGER) AS node_count
+FROM workflow_nodes
+WHERE group_id = sqlc.arg(group_id);
 
 -- name: InsertWorkflowTransitionGroup :exec
 INSERT INTO workflow_transition_groups (
@@ -1060,6 +1126,50 @@ FROM task_comments
 WHERE task_id = sqlc.arg(task_id)
   AND (sqlc.arg(include_deleted) != 0 OR deleted_at_unix_ms = 0)
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
+
+-- name: InsertWorkflowEvent :one
+INSERT INTO workflow_events (
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+) VALUES (
+    sqlc.arg(project_id),
+    sqlc.arg(workflow_id),
+    sqlc.arg(resource),
+    sqlc.arg(action),
+    sqlc.arg(changed_ids_json),
+    sqlc.arg(occurred_at_unix_ms)
+)
+RETURNING sequence;
+
+-- name: GetLatestWorkflowEventSequence :one
+SELECT COALESCE(MAX(sequence), 0) AS sequence
+FROM workflow_events
+WHERE sqlc.arg(project_id) = ''
+   OR project_id = sqlc.arg(project_id)
+   OR project_id = '';
+
+-- name: ListWorkflowEventsAfter :many
+SELECT
+    sequence,
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+FROM workflow_events
+WHERE sequence > sqlc.arg(after_sequence)
+  AND (
+      sqlc.arg(project_id) = ''
+      OR project_id = sqlc.arg(project_id)
+      OR project_id = ''
+  )
+ORDER BY sequence ASC
+LIMIT sqlc.arg(limit_rows);
 
 -- name: GetWorkspaceBindingByID :one
 SELECT

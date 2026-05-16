@@ -9,6 +9,7 @@ import (
 	"builder/server/workflow"
 	"builder/server/workflowstore"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 func TestBoardAndTaskDetailUseDurableWorkflowMetadataOnly(t *testing.T) {
@@ -45,27 +46,27 @@ func TestBoardAndTaskDetailUseDurableWorkflowMetadataOnly(t *testing.T) {
 		t.Fatalf("CompleteRun: %v", err)
 	}
 
-	board, err := view.GetBoard(ctx, binding.ProjectID)
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
-	if len(board.Workflows) != 1 || len(board.Workflows[0].Tasks) != 1 {
+	if len(board.WorkflowPicker) != 1 || len(board.DonePreview) != 1 {
 		t.Fatalf("board = %+v", board)
 	}
-	if !board.Workflows[0].Tasks[0].Done {
-		t.Fatalf("task summary should infer done from active terminal placement: %+v", board.Workflows[0].Tasks[0])
+	if board.DonePreview[0].Status.Kind != "done" {
+		t.Fatalf("task card should infer done from active terminal placement: %+v", board.DonePreview[0])
 	}
-	if len(board.Workflows[0].Nodes) < 2 || board.Workflows[0].Nodes[0].Node.Kind != string(workflow.NodeKindStart) {
-		t.Fatalf("board node ordering = %+v", board.Workflows[0].Nodes)
+	if len(board.Columns) < 2 || board.Columns[0].Node.Kind != string(workflow.NodeKindStart) {
+		t.Fatalf("board column ordering = %+v", board.Columns)
 	}
 	foundDoneNodeTask := false
-	for _, node := range board.Workflows[0].Nodes {
-		if node.Node.Kind == string(workflow.NodeKindTerminal) && len(node.Tasks) == 1 {
+	for _, column := range board.Columns {
+		if column.Node.Kind == string(workflow.NodeKindTerminal) && column.TaskCount == 1 {
 			foundDoneNodeTask = true
 		}
 	}
 	if !foundDoneNodeTask {
-		t.Fatalf("board nodes do not contain task on terminal node: %+v", board.Workflows[0].Nodes)
+		t.Fatalf("board columns do not contain task on terminal node: %+v", board.Columns)
 	}
 
 	detail, err := view.GetTask(ctx, string(task.ID))
@@ -104,23 +105,21 @@ func TestBoardAndTaskDetailProjectParallelBranchPlacements(t *testing.T) {
 		t.Fatalf("CompleteRun split: %v", err)
 	}
 
-	board, err := view.GetBoard(ctx, binding.ProjectID)
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
-	if len(board.Workflows) != 1 || len(board.Workflows[0].Tasks) != 1 || len(board.Workflows[0].Tasks[0].ActiveNodeIDs) != 2 {
+	if len(board.Cards) != 1 || len(board.Cards[0].ActiveNodeIDs) != 2 {
 		t.Fatalf("board task summary = %+v, want two active branch nodes", board)
 	}
 	activeBranchPlacements := 0
-	for _, node := range board.Workflows[0].Nodes {
-		for _, placement := range node.ActivePlacements {
-			if placement.ParallelBatchTransitionID == string(split.TransitionID) && placement.ParallelBranchEdgeID != "" {
-				activeBranchPlacements++
-			}
+	for _, nodeID := range board.Cards[0].ActiveNodeIDs {
+		if nodeID != "" {
+			activeBranchPlacements++
 		}
 	}
 	if activeBranchPlacements != 2 {
-		t.Fatalf("board active placements = %+v, want two branch placements with batch/branch ids", board.Workflows[0].Nodes)
+		t.Fatalf("board active nodes = %+v, want two branch nodes", board.Cards[0].ActiveNodeIDs)
 	}
 
 	detail, err := view.GetTask(ctx, string(task.ID))
@@ -135,6 +134,81 @@ func TestBoardAndTaskDetailProjectParallelBranchPlacements(t *testing.T) {
 	}
 	if detailBranchPlacements != 2 {
 		t.Fatalf("detail placements = %+v, want two branch placements with batch/branch ids", detail.Placements)
+	}
+}
+
+func TestBoardSelectsWorkflowAndReturnsPickerAndGroups(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defaultWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, defaultWorkflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow default: %v", err)
+	}
+	selected, err := workflowStore.CreateWorkflow(ctx, workflowstore.CreateWorkflowRequest{Name: "Selected Workflow"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow selected: %v", err)
+	}
+	if _, _, err := workflowStore.AddNodeGroup(ctx, workflowstore.NodeGroupRecord{WorkflowID: selected.ID, Key: "impl", DisplayName: "Implementation", SortOrder: 10}); err != nil {
+		t.Fatalf("AddNodeGroup: %v", err)
+	}
+	def, _, err := workflowStore.GetDefinition(ctx, selected.ID)
+	if err != nil {
+		t.Fatalf("GetDefinition selected: %v", err)
+	}
+	start := workflowViewNodeByKind(t, def, workflow.NodeKindStart)
+	done := workflowViewNodeByKind(t, def, workflow.NodeKindTerminal)
+	agentID := workflow.NodeID("node-selected-agent-" + string(selected.ID))
+	if _, err := workflowStore.AddNode(ctx, workflowstore.NodeRecord{ID: agentID, WorkflowID: selected.ID, Key: "agent", Kind: workflow.NodeKindAgent, DisplayName: "Agent", GroupKey: "impl", SubagentRole: "coder", PromptTemplate: "Do work.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}}); err != nil {
+		t.Fatalf("AddNode selected: %v", err)
+	}
+	startGroup := workflow.TransitionGroupID("group-selected-start-" + string(selected.ID))
+	doneGroup := workflow.TransitionGroupID("group-selected-done-" + string(selected.ID))
+	if _, err := workflowStore.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: startGroup, WorkflowID: selected.ID, SourceNodeID: start.ID, TransitionID: "start", DisplayName: "Start"}); err != nil {
+		t.Fatalf("AddTransitionGroup start: %v", err)
+	}
+	if _, err := workflowStore.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-selected-start-" + string(selected.ID)), WorkflowID: selected.ID, TransitionGroupID: startGroup, Key: "start", TargetNodeID: agentID, ContextMode: workflow.ContextModeNewSession}); err != nil {
+		t.Fatalf("AddEdge start: %v", err)
+	}
+	if _, err := workflowStore.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: doneGroup, WorkflowID: selected.ID, SourceNodeID: agentID, TransitionID: "done", DisplayName: "Done"}); err != nil {
+		t.Fatalf("AddTransitionGroup done: %v", err)
+	}
+	if _, err := workflowStore.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-selected-done-" + string(selected.ID)), WorkflowID: selected.ID, TransitionGroupID: doneGroup, Key: "done", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession, OutputRequirements: []workflow.OutputRequirement{{FieldName: "summary"}}}); err != nil {
+		t.Fatalf("AddEdge done: %v", err)
+	}
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, selected.ID, false); err != nil {
+		t.Fatalf("LinkWorkflow selected: %v", err)
+	}
+	defaultTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: defaultWorkflowID, Title: "Default task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask default: %v", err)
+	}
+	selectedTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: selected.ID, Title: "Selected task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask selected: %v", err)
+	}
+
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, WorkflowID: string(selected.ID)}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	if board.SelectedWorkflow.WorkflowID != string(selected.ID) {
+		t.Fatalf("selected workflow = %+v, want %s", board.SelectedWorkflow, selected.ID)
+	}
+	if len(board.WorkflowPicker) != 2 || !board.WorkflowPicker[0].IsProjectDefault {
+		t.Fatalf("picker = %+v, want default first and two workflows", board.WorkflowPicker)
+	}
+	if len(board.Cards) != 1 || board.Cards[0].TaskID != string(selectedTask.ID) || board.Cards[0].TaskID == string(defaultTask.ID) {
+		t.Fatalf("cards = %+v, want only selected workflow task %s", board.Cards, selectedTask.ID)
+	}
+	if len(board.Groups) != 1 || board.Groups[0].Key != "impl" || len(board.Groups[0].NodeIDs) != 1 || board.Groups[0].NodeIDs[0] != string(agentID) {
+		t.Fatalf("groups = %+v, want implementation group with agent", board.Groups)
+	}
+	if board.Project.ProjectKey != "WOR" || board.GeneratedAtUnixMs == 0 {
+		t.Fatalf("project/generated fields missing: %+v", board)
 	}
 }
 
@@ -352,7 +426,7 @@ func TestWorkflowViewRejectsMissingIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := view.GetBoard(context.Background(), " "); err == nil || !strings.Contains(err.Error(), "project_id") {
+	if _, err := view.GetBoard(context.Background(), serverapi.WorkflowBoardRequest{ProjectID: " "}, workflow.StaticRoleResolver{}); err == nil || !strings.Contains(err.Error(), "project_id") {
 		t.Fatalf("GetBoard missing id error = %v", err)
 	}
 	if _, err := view.GetTask(context.Background(), " "); err == nil || !strings.Contains(err.Error(), "task_id") {

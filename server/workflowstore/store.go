@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,9 +69,30 @@ type NodeRecord struct {
 	Key            workflow.ModelKey
 	Kind           workflow.NodeKind
 	DisplayName    string
+	GroupID        string
+	GroupKey       string
 	SubagentRole   string
 	PromptTemplate string
 	OutputFields   []workflow.OutputField
+}
+
+type NodeGroupRecord struct {
+	ID           string
+	WorkflowID   workflow.WorkflowID
+	Key          workflow.ModelKey
+	DisplayName  string
+	SortOrder    int64
+	MetadataJSON string
+}
+
+type WorkflowEventRecord struct {
+	Sequence         int64
+	ProjectID        string
+	WorkflowID       string
+	Resource         string
+	Action           string
+	ChangedIDs       []string
+	OccurredAtUnixMs int64
 }
 
 type TransitionGroupRecord struct {
@@ -278,6 +300,10 @@ func (s *Store) AddNode(ctx context.Context, node NodeRecord) (int64, error) {
 	if node.ID == "" {
 		node.ID = workflow.NodeID(prefixedID("node"))
 	}
+	groupID, err := resolveWorkflowNodeGroupID(ctx, q, string(node.WorkflowID), node.GroupID, node.GroupKey)
+	if err != nil {
+		return 0, err
+	}
 	if err := q.InsertWorkflowNode(ctx, sqlitegen.InsertWorkflowNodeParams{
 		ID:               string(node.ID),
 		WorkflowID:       string(node.WorkflowID),
@@ -287,6 +313,7 @@ func (s *Store) AddNode(ctx context.Context, node NodeRecord) (int64, error) {
 		SubagentRole:     strings.TrimSpace(node.SubagentRole),
 		PromptTemplate:   strings.TrimSpace(node.PromptTemplate),
 		OutputFieldsJson: outputFields,
+		GroupID:          nullableString(groupID),
 		SortOrder:        100,
 		MetadataJson:     "{}",
 	}); err != nil {
@@ -300,6 +327,174 @@ func (s *Store) AddNode(ctx context.Context, node NodeRecord) (int64, error) {
 		return 0, err
 	}
 	return revision, nil
+}
+
+func (s *Store) AddNodeGroup(ctx context.Context, group NodeGroupRecord) (NodeGroupRecord, int64, error) {
+	if strings.TrimSpace(string(group.WorkflowID)) == "" {
+		return NodeGroupRecord{}, 0, errors.New("workflow id is required")
+	}
+	if strings.TrimSpace(string(group.Key)) == "" {
+		return NodeGroupRecord{}, 0, errors.New("group key is required")
+	}
+	if strings.TrimSpace(group.DisplayName) == "" {
+		return NodeGroupRecord{}, 0, errors.New("group display name is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return NodeGroupRecord{}, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	if strings.TrimSpace(group.ID) == "" {
+		group.ID = prefixedID("workflow-node-group")
+	}
+	metadataJSON := strings.TrimSpace(group.MetadataJSON)
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	if err := q.InsertWorkflowNodeGroup(ctx, sqlitegen.InsertWorkflowNodeGroupParams{ID: group.ID, WorkflowID: string(group.WorkflowID), GroupKey: string(group.Key), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: group.SortOrder, MetadataJson: metadataJSON}); err != nil {
+		return NodeGroupRecord{}, 0, fmt.Errorf("insert workflow node group: %w", err)
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(group.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return NodeGroupRecord{}, 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return NodeGroupRecord{}, 0, err
+	}
+	group.MetadataJSON = metadataJSON
+	return group, revision, nil
+}
+
+func (s *Store) UpdateNodeGroup(ctx context.Context, group NodeGroupRecord) (NodeGroupRecord, int64, error) {
+	if strings.TrimSpace(group.ID) == "" {
+		return NodeGroupRecord{}, 0, errors.New("group id is required")
+	}
+	if strings.TrimSpace(string(group.WorkflowID)) == "" {
+		return NodeGroupRecord{}, 0, errors.New("workflow id is required")
+	}
+	if strings.TrimSpace(string(group.Key)) == "" {
+		return NodeGroupRecord{}, 0, errors.New("group key is required")
+	}
+	if strings.TrimSpace(group.DisplayName) == "" {
+		return NodeGroupRecord{}, 0, errors.New("group display name is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return NodeGroupRecord{}, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	metadataJSON := strings.TrimSpace(group.MetadataJSON)
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	updated, err := q.UpdateWorkflowNodeGroup(ctx, sqlitegen.UpdateWorkflowNodeGroupParams{ID: group.ID, WorkflowID: string(group.WorkflowID), GroupKey: string(group.Key), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: group.SortOrder, MetadataJson: metadataJSON})
+	if err != nil {
+		return NodeGroupRecord{}, 0, fmt.Errorf("update workflow node group: %w", err)
+	}
+	if updated != 1 {
+		return NodeGroupRecord{}, 0, sql.ErrNoRows
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(group.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return NodeGroupRecord{}, 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return NodeGroupRecord{}, 0, err
+	}
+	group.MetadataJSON = metadataJSON
+	return group, revision, nil
+}
+
+func (s *Store) DeleteNodeGroup(ctx context.Context, workflowID workflow.WorkflowID, groupID string) (int64, error) {
+	if strings.TrimSpace(string(workflowID)) == "" {
+		return 0, errors.New("workflow id is required")
+	}
+	if strings.TrimSpace(groupID) == "" {
+		return 0, errors.New("group id is required")
+	}
+	nodeCount, err := s.queries.CountWorkflowNodesByGroup(ctx, nullableString(groupID))
+	if err != nil {
+		return 0, err
+	}
+	if nodeCount > 0 {
+		return 0, errors.New("workflow node group is in use")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	deleted, err := q.DeleteWorkflowNodeGroup(ctx, sqlitegen.DeleteWorkflowNodeGroupParams{ID: strings.TrimSpace(groupID), WorkflowID: string(workflowID)})
+	if err != nil {
+		return 0, fmt.Errorf("delete workflow node group: %w", err)
+	}
+	if deleted != 1 {
+		return 0, sql.ErrNoRows
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(workflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	return revision, tx.Commit()
+}
+
+func (s *Store) RecordWorkflowEvent(ctx context.Context, event WorkflowEventRecord) (int64, error) {
+	if strings.TrimSpace(event.Resource) == "" {
+		return 0, errors.New("event resource is required")
+	}
+	if strings.TrimSpace(event.Action) == "" {
+		return 0, errors.New("event action is required")
+	}
+	changedIDs, err := marshalJSON(event.ChangedIDs)
+	if err != nil {
+		return 0, err
+	}
+	occurredAt := event.OccurredAtUnixMs
+	if occurredAt == 0 {
+		occurredAt = s.now().UnixMilli()
+	}
+	return s.queries.InsertWorkflowEvent(ctx, sqlitegen.InsertWorkflowEventParams{
+		ProjectID:        strings.TrimSpace(event.ProjectID),
+		WorkflowID:       strings.TrimSpace(event.WorkflowID),
+		Resource:         strings.TrimSpace(event.Resource),
+		Action:           strings.TrimSpace(event.Action),
+		ChangedIdsJson:   changedIDs,
+		OccurredAtUnixMs: occurredAt,
+	})
+}
+
+func (s *Store) LatestWorkflowEventSequence(ctx context.Context, projectID string) (int64, error) {
+	sequence, err := s.queries.GetLatestWorkflowEventSequence(ctx, strings.TrimSpace(projectID))
+	if err != nil {
+		return 0, err
+	}
+	return int64FromDBValue(sequence), nil
+}
+
+func (s *Store) ListWorkflowEventsAfter(ctx context.Context, projectID string, afterSequence int64, limit int64) ([]WorkflowEventRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.queries.ListWorkflowEventsAfter(ctx, sqlitegen.ListWorkflowEventsAfterParams{
+		AfterSequence: afterSequence,
+		ProjectID:     strings.TrimSpace(projectID),
+		LimitRows:     limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkflowEventRecord, 0, len(rows))
+	for _, row := range rows {
+		changedIDs := []string{}
+		if err := unmarshalJSON(row.ChangedIdsJson, &changedIDs); err != nil {
+			return nil, err
+		}
+		out = append(out, WorkflowEventRecord{Sequence: row.Sequence, ProjectID: row.ProjectID, WorkflowID: row.WorkflowID, Resource: row.Resource, Action: row.Action, ChangedIDs: changedIDs, OccurredAtUnixMs: row.OccurredAtUnixMs})
+	}
+	return out, nil
 }
 
 func (s *Store) AddTransitionGroup(ctx context.Context, group TransitionGroupRecord) (int64, error) {
@@ -513,8 +708,53 @@ func workflowRecordFromRow(row sqlitegen.Workflow) WorkflowRecord {
 	return WorkflowRecord{ID: workflow.WorkflowID(row.ID), Name: row.Name, Description: row.Description, GraphRevision: row.GraphRevision}
 }
 
+func nodeGroupRecordFromRow(row sqlitegen.WorkflowNodeGroup) NodeGroupRecord {
+	return NodeGroupRecord{ID: row.ID, WorkflowID: workflow.WorkflowID(row.WorkflowID), Key: workflow.ModelKey(row.GroupKey), DisplayName: row.DisplayName, SortOrder: row.SortOrder, MetadataJSON: row.MetadataJson}
+}
+
+func resolveWorkflowNodeGroupID(ctx context.Context, q *sqlitegen.Queries, workflowID string, groupID string, groupKey string) (string, error) {
+	trimmedGroupID := strings.TrimSpace(groupID)
+	if trimmedGroupID != "" {
+		return trimmedGroupID, nil
+	}
+	trimmedGroupKey := strings.TrimSpace(groupKey)
+	if trimmedGroupKey == "" {
+		return "", nil
+	}
+	row, err := q.GetWorkflowNodeGroupByKey(ctx, sqlitegen.GetWorkflowNodeGroupByKeyParams{WorkflowID: strings.TrimSpace(workflowID), GroupKey: trimmedGroupKey})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("workflow node group %q not found", trimmedGroupKey)
+		}
+		return "", err
+	}
+	return row.ID, nil
+}
+
 func prefixedID(prefix string) string {
 	return prefix + "-" + uuid.NewString()
+}
+
+func nullableString(value string) sql.NullString {
+	trimmed := strings.TrimSpace(value)
+	return sql.NullString{String: trimmed, Valid: trimmed != ""}
+}
+
+func int64FromDBValue(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case []byte:
+		parsed, _ := strconv.ParseInt(string(typed), 10, 64)
+		return parsed
+	case string:
+		parsed, _ := strconv.ParseInt(typed, 10, 64)
+		return parsed
+	default:
+		return 0
+	}
 }
 
 func boolToInt64(value bool) int64 {

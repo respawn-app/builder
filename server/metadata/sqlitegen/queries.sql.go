@@ -316,6 +316,19 @@ func (q *Queries) CountTasksByProjectWorkflowLink(ctx context.Context, projectWo
 	return task_count, err
 }
 
+const countWorkflowNodesByGroup = `-- name: CountWorkflowNodesByGroup :one
+SELECT CAST(COUNT(*) AS INTEGER) AS node_count
+FROM workflow_nodes
+WHERE group_id = ?1
+`
+
+func (q *Queries) CountWorkflowNodesByGroup(ctx context.Context, groupID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countWorkflowNodesByGroup, groupID)
+	var node_count int64
+	err := row.Scan(&node_count)
+	return node_count, err
+}
+
 const deleteProjectWorkflowLink = `-- name: DeleteProjectWorkflowLink :execrows
 DELETE FROM project_workflow_links
 WHERE id = ?1
@@ -349,6 +362,25 @@ WHERE id = ?1
 
 func (q *Queries) DeleteWorkflowNode(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteWorkflowNode, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteWorkflowNodeGroup = `-- name: DeleteWorkflowNodeGroup :execrows
+DELETE FROM workflow_node_groups
+WHERE id = ?1
+  AND workflow_id = ?2
+`
+
+type DeleteWorkflowNodeGroupParams struct {
+	ID         string
+	WorkflowID string
+}
+
+func (q *Queries) DeleteWorkflowNodeGroup(ctx context.Context, arg DeleteWorkflowNodeGroupParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteWorkflowNodeGroup, arg.ID, arg.WorkflowID)
 	if err != nil {
 		return 0, err
 	}
@@ -469,6 +501,21 @@ func (q *Queries) GetDefaultProjectWorkflowLink(ctx context.Context, projectID s
 		&i.UpdatedAtUnixMs,
 	)
 	return i, err
+}
+
+const getLatestWorkflowEventSequence = `-- name: GetLatestWorkflowEventSequence :one
+SELECT COALESCE(MAX(sequence), 0) AS sequence
+FROM workflow_events
+WHERE ?1 = ''
+   OR project_id = ?1
+   OR project_id = ''
+`
+
+func (q *Queries) GetLatestWorkflowEventSequence(ctx context.Context, projectID interface{}) (interface{}, error) {
+	row := q.db.QueryRowContext(ctx, getLatestWorkflowEventSequence, projectID)
+	var sequence interface{}
+	err := row.Scan(&sequence)
+	return sequence, err
 }
 
 const getProjectDisplayName = `-- name: GetProjectDisplayName :one
@@ -918,6 +965,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -925,9 +973,23 @@ WHERE id = ?1
 LIMIT 1
 `
 
-func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (WorkflowNode, error) {
+type GetWorkflowNodeRow struct {
+	ID               string
+	WorkflowID       string
+	NodeKey          string
+	Kind             string
+	DisplayName      string
+	SubagentRole     string
+	PromptTemplate   string
+	OutputFieldsJson string
+	GroupID          sql.NullString
+	SortOrder        int64
+	MetadataJson     string
+}
+
+func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (GetWorkflowNodeRow, error) {
 	row := q.db.QueryRowContext(ctx, getWorkflowNode, id)
-	var i WorkflowNode
+	var i GetWorkflowNodeRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowID,
@@ -937,6 +999,40 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (WorkflowNode,
 		&i.SubagentRole,
 		&i.PromptTemplate,
 		&i.OutputFieldsJson,
+		&i.GroupID,
+		&i.SortOrder,
+		&i.MetadataJson,
+	)
+	return i, err
+}
+
+const getWorkflowNodeGroupByKey = `-- name: GetWorkflowNodeGroupByKey :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = ?1
+  AND group_key = ?2
+LIMIT 1
+`
+
+type GetWorkflowNodeGroupByKeyParams struct {
+	WorkflowID string
+	GroupKey   string
+}
+
+func (q *Queries) GetWorkflowNodeGroupByKey(ctx context.Context, arg GetWorkflowNodeGroupByKeyParams) (WorkflowNodeGroup, error) {
+	row := q.db.QueryRowContext(ctx, getWorkflowNodeGroupByKey, arg.WorkflowID, arg.GroupKey)
+	var i WorkflowNodeGroup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.GroupKey,
+		&i.DisplayName,
 		&i.SortOrder,
 		&i.MetadataJson,
 	)
@@ -1828,6 +1924,48 @@ func (q *Queries) InsertWorkflowEdge(ctx context.Context, arg InsertWorkflowEdge
 	return err
 }
 
+const insertWorkflowEvent = `-- name: InsertWorkflowEvent :one
+INSERT INTO workflow_events (
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6
+)
+RETURNING sequence
+`
+
+type InsertWorkflowEventParams struct {
+	ProjectID        string
+	WorkflowID       string
+	Resource         string
+	Action           string
+	ChangedIdsJson   string
+	OccurredAtUnixMs int64
+}
+
+func (q *Queries) InsertWorkflowEvent(ctx context.Context, arg InsertWorkflowEventParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertWorkflowEvent,
+		arg.ProjectID,
+		arg.WorkflowID,
+		arg.Resource,
+		arg.Action,
+		arg.ChangedIdsJson,
+		arg.OccurredAtUnixMs,
+	)
+	var sequence int64
+	err := row.Scan(&sequence)
+	return sequence, err
+}
+
 const insertWorkflowNode = `-- name: InsertWorkflowNode :exec
 INSERT INTO workflow_nodes (
     id,
@@ -1838,6 +1976,7 @@ INSERT INTO workflow_nodes (
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 ) VALUES (
@@ -1850,7 +1989,8 @@ INSERT INTO workflow_nodes (
     ?7,
     ?8,
     ?9,
-    ?10
+    ?10,
+    ?11
 )
 `
 
@@ -1863,6 +2003,7 @@ type InsertWorkflowNodeParams struct {
 	SubagentRole     string
 	PromptTemplate   string
 	OutputFieldsJson string
+	GroupID          sql.NullString
 	SortOrder        int64
 	MetadataJson     string
 }
@@ -1877,6 +2018,46 @@ func (q *Queries) InsertWorkflowNode(ctx context.Context, arg InsertWorkflowNode
 		arg.SubagentRole,
 		arg.PromptTemplate,
 		arg.OutputFieldsJson,
+		arg.GroupID,
+		arg.SortOrder,
+		arg.MetadataJson,
+	)
+	return err
+}
+
+const insertWorkflowNodeGroup = `-- name: InsertWorkflowNodeGroup :exec
+INSERT INTO workflow_node_groups (
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6
+)
+`
+
+type InsertWorkflowNodeGroupParams struct {
+	ID           string
+	WorkflowID   string
+	GroupKey     string
+	DisplayName  string
+	SortOrder    int64
+	MetadataJson string
+}
+
+func (q *Queries) InsertWorkflowNodeGroup(ctx context.Context, arg InsertWorkflowNodeGroupParams) error {
+	_, err := q.db.ExecContext(ctx, insertWorkflowNodeGroup,
+		arg.ID,
+		arg.WorkflowID,
+		arg.GroupKey,
+		arg.DisplayName,
 		arg.SortOrder,
 		arg.MetadataJson,
 	)
@@ -3124,6 +3305,106 @@ func (q *Queries) ListWorkflowEdges(ctx context.Context, workflowID string) ([]W
 	return items, nil
 }
 
+const listWorkflowEventsAfter = `-- name: ListWorkflowEventsAfter :many
+SELECT
+    sequence,
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+FROM workflow_events
+WHERE sequence > ?1
+  AND (
+      ?2 = ''
+      OR project_id = ?2
+      OR project_id = ''
+  )
+ORDER BY sequence ASC
+LIMIT ?3
+`
+
+type ListWorkflowEventsAfterParams struct {
+	AfterSequence int64
+	ProjectID     interface{}
+	LimitRows     int64
+}
+
+func (q *Queries) ListWorkflowEventsAfter(ctx context.Context, arg ListWorkflowEventsAfterParams) ([]WorkflowEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkflowEventsAfter, arg.AfterSequence, arg.ProjectID, arg.LimitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowEvent
+	for rows.Next() {
+		var i WorkflowEvent
+		if err := rows.Scan(
+			&i.Sequence,
+			&i.ProjectID,
+			&i.WorkflowID,
+			&i.Resource,
+			&i.Action,
+			&i.ChangedIdsJson,
+			&i.OccurredAtUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowNodeGroups = `-- name: ListWorkflowNodeGroups :many
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = ?1
+ORDER BY sort_order ASC, rowid ASC
+`
+
+func (q *Queries) ListWorkflowNodeGroups(ctx context.Context, workflowID string) ([]WorkflowNodeGroup, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkflowNodeGroups, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowNodeGroup
+	for rows.Next() {
+		var i WorkflowNodeGroup
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkflowID,
+			&i.GroupKey,
+			&i.DisplayName,
+			&i.SortOrder,
+			&i.MetadataJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkflowNodes = `-- name: ListWorkflowNodes :many
 SELECT
     id,
@@ -3134,6 +3415,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -3141,15 +3423,29 @@ WHERE workflow_id = ?1
 ORDER BY sort_order ASC, rowid ASC
 `
 
-func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]WorkflowNode, error) {
+type ListWorkflowNodesRow struct {
+	ID               string
+	WorkflowID       string
+	NodeKey          string
+	Kind             string
+	DisplayName      string
+	SubagentRole     string
+	PromptTemplate   string
+	OutputFieldsJson string
+	GroupID          sql.NullString
+	SortOrder        int64
+	MetadataJson     string
+}
+
+func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]ListWorkflowNodesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listWorkflowNodes, workflowID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []WorkflowNode
+	var items []ListWorkflowNodesRow
 	for rows.Next() {
-		var i WorkflowNode
+		var i ListWorkflowNodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowID,
@@ -3159,6 +3455,7 @@ func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]W
 			&i.SubagentRole,
 			&i.PromptTemplate,
 			&i.OutputFieldsJson,
+			&i.GroupID,
 			&i.SortOrder,
 			&i.MetadataJson,
 		); err != nil {
@@ -3568,6 +3865,41 @@ func (q *Queries) UpdateWorkflowInfo(ctx context.Context, arg UpdateWorkflowInfo
 		arg.Description,
 		arg.UpdatedAtUnixMs,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateWorkflowNodeGroup = `-- name: UpdateWorkflowNodeGroup :execrows
+UPDATE workflow_node_groups
+SET
+    group_key = ?1,
+    display_name = ?2,
+    sort_order = ?3,
+    metadata_json = ?4
+WHERE id = ?5
+  AND workflow_id = ?6
+`
+
+type UpdateWorkflowNodeGroupParams struct {
+	GroupKey     string
+	DisplayName  string
+	SortOrder    int64
+	MetadataJson string
+	ID           string
+	WorkflowID   string
+}
+
+func (q *Queries) UpdateWorkflowNodeGroup(ctx context.Context, arg UpdateWorkflowNodeGroupParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorkflowNodeGroup,
+		arg.GroupKey,
+		arg.DisplayName,
+		arg.SortOrder,
+		arg.MetadataJson,
+		arg.ID,
+		arg.WorkflowID,
 	)
 	if err != nil {
 		return 0, err

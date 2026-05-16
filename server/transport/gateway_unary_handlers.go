@@ -182,6 +182,21 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return g.deps.WorkflowClient().GetWorkflow(ctx, params)
 		})
 	},
+	protocol.MethodWorkflowNodeGroupAdd: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupAddRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+			return g.deps.WorkflowClient().AddWorkflowNodeGroup(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowNodeGroupUpdate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupUpdateRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+			return g.deps.WorkflowClient().UpdateWorkflowNodeGroup(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowNodeGroupDelete: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupDeleteRequest) (struct{}, error) {
+			return struct{}{}, g.deps.WorkflowClient().DeleteWorkflowNodeGroup(ctx, params)
+		})
+	},
 	protocol.MethodWorkflowAddNode: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowNodeAddRequest) (serverapi.WorkflowNodeAddResponse, error) {
 			return g.deps.WorkflowClient().AddWorkflowNode(ctx, params)

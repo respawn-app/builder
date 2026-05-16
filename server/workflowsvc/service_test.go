@@ -396,7 +396,7 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkflowBoard: %v", err)
 	}
-	if len(board.Board.Workflows) != 1 || len(board.Board.Workflows[0].Tasks) != 1 {
+	if len(board.Board.Cards) != 1 {
 		t.Fatalf("board = %+v", board.Board)
 	}
 	detail, err := service.GetWorkflowTask(ctx, serverapi.WorkflowTaskGetRequest{TaskID: task.Task.ID})
@@ -405,6 +405,38 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 	}
 	if detail.Task.Summary.ID != task.Task.ID || len(detail.Task.Comments) != 1 {
 		t.Fatalf("detail = %+v", detail.Task)
+	}
+}
+
+func TestServiceWorkflowProjectSubscriptionReplaysEvents(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: created.Workflow.ID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID, AfterSequence: 0})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+	event, err := sub.Next(ctx)
+	if err != nil {
+		t.Fatalf("subscription Next: %v", err)
+	}
+	if event.Sequence == 0 || event.ProjectID != binding.ProjectID || event.WorkflowID != created.Workflow.ID || event.Resource != "workflow_link" {
+		t.Fatalf("event = %+v, want workflow link event", event)
+	}
+	board, err := service.GetWorkflowBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("GetWorkflowBoard: %v", err)
+	}
+	if board.Board.LatestEventSequence < event.Sequence {
+		t.Fatalf("board watermark = %d, want >= event %d", board.Board.LatestEventSequence, event.Sequence)
 	}
 }
 

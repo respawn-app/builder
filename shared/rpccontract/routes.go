@@ -199,6 +199,9 @@ var routeContracts = []Route{
 	unary[serverapi.WorkflowUpdateRequest, serverapi.WorkflowGetResponse](protocol.MethodWorkflowUpdate, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
 	unary[serverapi.WorkflowListRequest, serverapi.WorkflowListResponse](protocol.MethodWorkflowList, AuthPreServerAuth, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
 	unary[serverapi.WorkflowGetRequest, serverapi.WorkflowGetResponse](protocol.MethodWorkflowGet, AuthPreServerAuth, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
+	unary[serverapi.WorkflowNodeGroupAddRequest, serverapi.WorkflowNodeGroupResponse](protocol.MethodWorkflowNodeGroupAdd, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
+	unary[serverapi.WorkflowNodeGroupUpdateRequest, serverapi.WorkflowNodeGroupResponse](protocol.MethodWorkflowNodeGroupUpdate, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
+	unary[serverapi.WorkflowNodeGroupDeleteRequest, struct{}](protocol.MethodWorkflowNodeGroupDelete, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
 	unary[serverapi.WorkflowNodeAddRequest, serverapi.WorkflowNodeAddResponse](protocol.MethodWorkflowAddNode, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
 	unary[serverapi.WorkflowTransitionGroupAddRequest, serverapi.WorkflowTransitionGroupAddResponse](protocol.MethodWorkflowAddTransitionGroup, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
 	unary[serverapi.WorkflowEdgeAddRequest, serverapi.WorkflowEdgeAddResponse](protocol.MethodWorkflowAddEdge, AuthServer, ScopeProjectView, ConnectionUnscoped, DependencyWorkflow),
@@ -271,6 +274,7 @@ var routeContracts = []Route{
 	subscription[serverapi.SessionActivitySubscribeRequest, protocol.SessionActivityEventParams](protocol.MethodSessionSubscribeActivity, AuthServer, ScopeAttachedSession, DependencySessionActivity, protocol.MethodSessionActivityEvent, protocol.MethodSessionActivityComplete),
 	subscription[serverapi.ProcessOutputSubscribeRequest, protocol.ProcessOutputEventParams](protocol.MethodProcessSubscribeOutput, AuthServer, ScopeProcessActiveProject, DependencyProcessOutput, protocol.MethodProcessOutputEvent, protocol.MethodProcessOutputComplete),
 	subscription[serverapi.PromptActivitySubscribeRequest, protocol.PromptActivityEventParams](protocol.MethodPromptSubscribeActivity, AuthServer, ScopeAttachedSession, DependencyPromptActivity, protocol.MethodPromptActivityEvent, protocol.MethodPromptActivityComplete),
+	subscription[serverapi.WorkflowProjectSubscribeRequest, protocol.WorkflowProjectEventParams](protocol.MethodWorkflowSubscribeProject, AuthServer, ScopeProjectView, DependencyWorkflow, protocol.MethodWorkflowProjectEvent, protocol.MethodWorkflowProjectComplete),
 	notification[serverapi.RunPromptProgress](protocol.MethodRunPromptProgress),
 	notification[protocol.SessionActivityEventParams](protocol.MethodSessionActivityEvent),
 	notification[protocol.StreamCompleteParams](protocol.MethodSessionActivityComplete),
@@ -278,6 +282,8 @@ var routeContracts = []Route{
 	notification[protocol.StreamCompleteParams](protocol.MethodProcessOutputComplete),
 	notification[protocol.PromptActivityEventParams](protocol.MethodPromptActivityEvent),
 	notification[protocol.StreamCompleteParams](protocol.MethodPromptActivityComplete),
+	notification[protocol.WorkflowProjectEventParams](protocol.MethodWorkflowProjectEvent),
+	notification[protocol.StreamCompleteParams](protocol.MethodWorkflowProjectComplete),
 }
 
 func Routes() []Route {
