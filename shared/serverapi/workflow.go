@@ -306,6 +306,7 @@ type WorkflowTaskStartResponse struct {
 
 type WorkflowTaskResumeRequest struct {
 	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
 }
 
 type WorkflowTaskResumeResponse struct {
@@ -317,7 +318,8 @@ type WorkflowTaskResumeResponse struct {
 }
 
 type WorkflowTaskApproveRequest struct {
-	TransitionID string `json:"transition_id"`
+	TaskTransitionID string `json:"task_transition_id,omitempty"`
+	TransitionID     string `json:"transition_id,omitempty"`
 }
 
 type WorkflowTaskApproveResponse struct {
@@ -344,6 +346,66 @@ type WorkflowTaskMoveResponse struct {
 type WorkflowTaskCancelRequest struct {
 	TaskID string `json:"task_id"`
 	Reason string `json:"reason,omitempty"`
+}
+
+type WorkflowTaskInterruptRequest struct {
+	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type WorkflowTaskInterruptResponse struct {
+	RunID string `json:"run_id"`
+}
+
+type WorkflowAttentionListRequest struct {
+	ProjectID string `json:"project_id,omitempty"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type WorkflowAttentionListResponse struct {
+	Items               []WorkflowAttentionItem `json:"items"`
+	NextPageToken       string                  `json:"next_page_token,omitempty"`
+	GeneratedAtUnixMs   int64                   `json:"generated_at_unix_ms"`
+	LatestEventSequence int64                   `json:"latest_event_sequence"`
+}
+
+type WorkflowTaskAttentionListRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+type WorkflowTaskAttentionListResponse struct {
+	Items             []WorkflowAttentionItem `json:"items"`
+	GeneratedAtUnixMs int64                   `json:"generated_at_unix_ms"`
+}
+
+type WorkflowAttentionItem struct {
+	ID                  string `json:"id"`
+	Kind                string `json:"kind"`
+	ProjectID           string `json:"project_id,omitempty"`
+	WorkflowID          string `json:"workflow_id,omitempty"`
+	TaskID              string `json:"task_id,omitempty"`
+	TaskShortID         string `json:"task_short_id,omitempty"`
+	TaskTitle           string `json:"task_title,omitempty"`
+	RunID               string `json:"run_id,omitempty"`
+	SessionID           string `json:"session_id,omitempty"`
+	AskID               string `json:"ask_id,omitempty"`
+	TaskTransitionID    string `json:"task_transition_id,omitempty"`
+	Message             string `json:"message"`
+	OccurredAtUnixMs    int64  `json:"occurred_at_unix_ms"`
+	LatestEventSequence int64  `json:"latest_event_sequence,omitempty"`
+}
+
+type WorkflowTaskQuestionAnswerRequest struct {
+	ClientRequestID      string `json:"client_request_id"`
+	TaskID               string `json:"task_id"`
+	RunID                string `json:"run_id,omitempty"`
+	AskID                string `json:"ask_id"`
+	ErrorMessage         string `json:"error_message,omitempty"`
+	Answer               string `json:"answer,omitempty"`
+	SelectedOptionNumber int    `json:"selected_option_number,omitempty"`
+	FreeformAnswer       string `json:"freeform_answer,omitempty"`
 }
 
 type WorkflowTaskCommentAddRequest struct {
@@ -782,7 +844,10 @@ func (r WorkflowTaskResumeRequest) Validate() error {
 }
 
 func (r WorkflowTaskApproveRequest) Validate() error {
-	return validateRequired("transition_id", r.TransitionID)
+	if strings.TrimSpace(r.TaskTransitionID) != "" {
+		return nil
+	}
+	return validateRequired("task_transition_id", r.TransitionID)
 }
 
 func (r WorkflowTaskMoveRequest) Validate() error {
@@ -794,6 +859,51 @@ func (r WorkflowTaskMoveRequest) Validate() error {
 
 func (r WorkflowTaskCancelRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskInterruptRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowAttentionListRequest) Validate() error {
+	if r.PageSize < 0 {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "page_size", Message: "page_size must be non-negative"}
+	}
+	return nil
+}
+
+func (r WorkflowTaskAttentionListRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskQuestionAnswerRequest) Validate() error {
+	for _, field := range []struct{ name, value string }{{"client_request_id", r.ClientRequestID}, {"task_id", r.TaskID}, {"ask_id", r.AskID}} {
+		if err := validateRequired(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	answerModes := 0
+	if strings.TrimSpace(r.Answer) != "" {
+		answerModes++
+	}
+	if strings.TrimSpace(r.FreeformAnswer) != "" {
+		answerModes++
+	}
+	if r.SelectedOptionNumber != 0 {
+		answerModes++
+	}
+	hasAnswer := answerModes > 0
+	hasError := strings.TrimSpace(r.ErrorMessage) != ""
+	if hasAnswer && hasError {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "error_message", Message: "error_message cannot be combined with answer fields"}
+	}
+	if answerModes > 1 {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "answer", Message: "exactly one answer mode is allowed"}
+	}
+	if !hasAnswer && !hasError {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorRequired, Field: "answer", Message: "answer is required"}
+	}
+	return nil
 }
 
 func (r WorkflowTaskCommentAddRequest) Validate() error {

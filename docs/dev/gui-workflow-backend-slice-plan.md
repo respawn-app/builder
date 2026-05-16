@@ -734,7 +734,7 @@ Current status:
 - [x] Slice 0 implementation complete.
 - [x] Slice 1 Home/project admin/project key/workspaces implementation complete.
 - [x] Slice 2 workflow picker, selected board, groups, and live updates implementation complete.
-- [ ] Next action: implement Slice 4 actions, attention inbox, questions, and approvals.
+- [ ] Next action: implement Slice 5 task detail, activity feed, comments, and teleport.
 
 Source-of-truth rules:
 
@@ -889,36 +889,36 @@ Completion criteria:
 
 ### Slice 4 Checklist: Actions, Attention Inbox, Questions, Approvals
 
-Status: not started.
+Status: complete.
 
 Goal: GUI can operate active tasks and Home can route questions, approvals, and interrupted runs into task detail.
 
 Implementation checklist:
 
-- [ ] Recon workflow run interrupt/resume internals, approval transitions, waiting ask markers, prompt-control answer path, cancellation behavior, and existing comments/transition persistence.
-- [ ] Add failing tests for global and project-filtered `workflow.attention.list` returning approvals, waiting asks, interrupted runs, and validation blockers newest-first.
-- [ ] Add failing tests for `workflow.task.attention.list` resolving all unresolved task attention items.
-- [ ] Add failing tests that `workflow.attention.list` includes `latest_event_sequence` and can pair with empty-project subscription without fetch/subscribe races.
-- [ ] Add failing tests for interrupt: no `run_id` succeeds with one active run, conflicts with multiple active runs, and specific `run_id` interrupts only that run.
-- [ ] Add failing tests for resume: no `run_id` succeeds with one interrupted run and conflicts with multiple interrupted runs.
-- [ ] Add failing tests that approval uses GUI field `task_transition_id` and applies stored transition snapshot, not current graph.
-- [ ] Add failing tests for task-scoped question answer validating task/run/ask membership, rejecting conflicting answer modes, enforcing idempotent `client_request_id`, and succeeding without GUI-held controller lease.
-- [ ] Add failing tests that cancel suppresses scheduling and interrupts active runs with backend default reason.
-- [ ] Implement attention read model over durable approval, ask, interrupted-run, and validation-blocker sources.
-- [ ] Wire `workflow.task.interrupt`, `workflow.attention.list`, `workflow.task.attention.list`, and `workflow.task.question.answer`.
-- [ ] Add optional `run_id` to resume request while preserving existing unambiguous task-level behavior.
-- [ ] Rename/introduce GUI approval field `task_transition_id`; keep compatibility only if needed by existing non-GUI clients.
-- [ ] Emit live-update invalidations for attention/action state changes.
-- [ ] Sync GUI docs if attention priority, action conflicts, or approval/question behavior changes.
+- [x] Recon workflow run interrupt/resume internals, approval transitions, waiting ask markers, prompt-control answer path, cancellation behavior, and existing comments/transition persistence.
+- [x] Add failing tests for global and project-filtered `workflow.attention.list` returning approvals, waiting asks, interrupted runs, and validation blockers newest-first.
+- [x] Add failing tests for `workflow.task.attention.list` resolving all unresolved task attention items.
+- [x] Add failing tests that `workflow.attention.list` includes `latest_event_sequence` and can pair with empty-project subscription without fetch/subscribe races.
+- [x] Add failing tests for interrupt: no `run_id` succeeds with one active run, conflicts with multiple active runs, and specific `run_id` interrupts only that run.
+- [x] Add failing tests for resume: no `run_id` succeeds with one interrupted run and conflicts with multiple interrupted runs.
+- [x] Add failing tests that approval uses GUI field `task_transition_id` and applies stored transition snapshot, not current graph.
+- [x] Add failing tests for task-scoped question answer validating task/run/ask membership, rejecting conflicting answer modes, enforcing idempotent `client_request_id`, and succeeding without GUI-held controller lease.
+- [x] Add failing tests that cancel suppresses scheduling and interrupts active runs with backend default reason.
+- [x] Implement attention read model over durable approval, ask, interrupted-run, and validation-blocker sources.
+- [x] Wire `workflow.task.interrupt`, `workflow.attention.list`, `workflow.task.attention.list`, and `workflow.task.question.answer`.
+- [x] Add optional `run_id` to resume request while preserving existing unambiguous task-level behavior.
+- [x] Rename/introduce GUI approval field `task_transition_id`; keep compatibility only if needed by existing non-GUI clients.
+- [x] Emit live-update invalidations for attention/action state changes.
+- [x] Sync GUI docs if attention priority, action conflicts, or approval/question behavior changes.
 
 Completion criteria:
 
-- [ ] Home attention inbox can list all MVP attention types globally and per project.
-- [ ] Attention list includes an event watermark usable with empty-project subscription.
-- [ ] Task detail can operate per-run interrupt/resume for fan-out or multi-active tasks.
-- [ ] GUI can answer task-scoped questions without taking a TUI controller lease.
-- [ ] GUI approval path uses `task_transition_id`.
-- [ ] Verification commands pass:
+- [x] Home attention inbox can list all MVP attention types globally and per project.
+- [x] Attention list includes an event watermark usable with empty-project subscription.
+- [x] Task detail can operate per-run interrupt/resume for fan-out or multi-active tasks.
+- [x] GUI can answer task-scoped questions without taking a TUI controller lease.
+- [x] GUI approval path uses `task_transition_id`.
+- [x] Verification commands pass:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler ./server/workflowrunner ./server/workflowruntime ./server/runprompt ./server/primaryrun ./server/registry`
   - `./scripts/build.sh --output ./bin/builder`
 

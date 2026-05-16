@@ -269,6 +269,11 @@ func (c *Remote) StartWorkflowTask(ctx context.Context, req serverapi.WorkflowTa
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowTaskStart, req, &resp)
 }
 
+func (c *Remote) InterruptWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error) {
+	var resp serverapi.WorkflowTaskInterruptResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowTaskInterrupt, req, &resp)
+}
+
 func (c *Remote) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
 	var resp serverapi.WorkflowTaskResumeResponse
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowTaskResume, req, &resp)
@@ -286,6 +291,20 @@ func (c *Remote) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTas
 
 func (c *Remote) CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error {
 	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskCancel, req, &struct{}{})
+}
+
+func (c *Remote) ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
+	var resp serverapi.WorkflowAttentionListResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowAttentionList, req, &resp)
+}
+
+func (c *Remote) ListWorkflowTaskAttention(ctx context.Context, req serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error) {
+	var resp serverapi.WorkflowTaskAttentionListResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowTaskAttentionList, req, &resp)
+}
+
+func (c *Remote) AnswerWorkflowTaskQuestion(ctx context.Context, req serverapi.WorkflowTaskQuestionAnswerRequest) error {
+	return c.callUnscoped(ctx, protocol.MethodWorkflowTaskQuestionAnswer, req, &struct{}{})
 }
 
 func (c *Remote) AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {

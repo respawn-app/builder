@@ -287,6 +287,78 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 	return detail, nil
 }
 
+func (s *Service) ListAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest, roleResolver workflow.RoleResolver) (serverapi.WorkflowAttentionListResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowAttentionListResponse{}, err
+	}
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = 50
+	}
+	offset, err := parseOffsetPageToken(req.PageToken)
+	if err != nil {
+		return serverapi.WorkflowAttentionListResponse{}, err
+	}
+	items, err := s.attentionItems(ctx, strings.TrimSpace(req.ProjectID), "", roleResolver)
+	if err != nil {
+		return serverapi.WorkflowAttentionListResponse{}, err
+	}
+	sortAttentionItems(items)
+	nextPageToken := ""
+	if len(items) > offset+pageSize {
+		nextPageToken = strconv.Itoa(offset + pageSize)
+	}
+	items = pageAttentionItems(items, offset, pageSize)
+	latestSequence, err := s.latestEventSequence(ctx, req.ProjectID)
+	if err != nil {
+		return serverapi.WorkflowAttentionListResponse{}, err
+	}
+	return serverapi.WorkflowAttentionListResponse{Items: items, NextPageToken: nextPageToken, GeneratedAtUnixMs: time.Now().UTC().UnixMilli(), LatestEventSequence: latestSequence}, nil
+}
+
+func (s *Service) ListTaskAttention(ctx context.Context, req serverapi.WorkflowTaskAttentionListRequest, roleResolver workflow.RoleResolver) (serverapi.WorkflowTaskAttentionListResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskAttentionListResponse{}, err
+	}
+	task, err := s.queries.GetTask(ctx, strings.TrimSpace(req.TaskID))
+	if err != nil {
+		return serverapi.WorkflowTaskAttentionListResponse{}, err
+	}
+	items, err := s.attentionItems(ctx, task.ProjectID, task.ID, roleResolver)
+	if err != nil {
+		return serverapi.WorkflowTaskAttentionListResponse{}, err
+	}
+	sortAttentionItems(items)
+	return serverapi.WorkflowTaskAttentionListResponse{Items: items, GeneratedAtUnixMs: time.Now().UTC().UnixMilli()}, nil
+}
+
+func (s *Service) attentionItems(ctx context.Context, projectID string, taskID string, roleResolver workflow.RoleResolver) ([]serverapi.WorkflowAttentionItem, error) {
+	items := []serverapi.WorkflowAttentionItem{}
+	approvals, err := s.approvalAttentionItems(ctx, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, approvals...)
+	questions, err := s.questionAttentionItems(ctx, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, questions...)
+	interrupted, err := s.interruptedRunAttentionItems(ctx, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, interrupted...)
+	if strings.TrimSpace(taskID) == "" {
+		blockers, err := s.validationAttentionItems(ctx, projectID, roleResolver)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, blockers...)
+	}
+	return items, nil
+}
+
 func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.WorkflowDefinition, map[string]workflow.NodeKind, error) {
 	row, err := s.queries.GetWorkflow(ctx, workflowID)
 	if err != nil {
@@ -370,6 +442,158 @@ func placementDTO(placement sqlitegen.TaskNodePlacement) serverapi.WorkflowPlace
 
 func commentDTO(comment sqlitegen.TaskComment) serverapi.WorkflowTaskComment {
 	return serverapi.WorkflowTaskComment{ID: comment.ID, TaskID: comment.TaskID, Body: comment.Body, Author: comment.AuthorKind, AuthorID: comment.AuthorID, DeletedAt: comment.DeletedAtUnixMs, UpdatedAt: comment.UpdatedAtUnixMs}
+}
+
+func (s *Service) approvalAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
+	rows, err := s.metadata.DB().QueryContext(ctx, `
+SELECT tt.id, t.project_id, t.workflow_id, t.id, t.short_id, t.title, tt.created_at_unix_ms
+FROM task_transitions tt
+JOIN tasks t ON t.id = tt.task_id
+WHERE tt.state = 'pending_approval'
+  AND t.canceled_at_unix_ms = 0
+  AND (? = '' OR t.project_id = ?)
+  AND (? = '' OR t.id = ?)
+ORDER BY tt.created_at_unix_ms DESC, tt.rowid DESC`, strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := []serverapi.WorkflowAttentionItem{}
+	for rows.Next() {
+		var transitionID, rowProjectID, workflowID, rowTaskID, shortID, title string
+		var occurred int64
+		if err := rows.Scan(&transitionID, &rowProjectID, &workflowID, &rowTaskID, &shortID, &title, &occurred); err != nil {
+			return nil, err
+		}
+		items = append(items, serverapi.WorkflowAttentionItem{ID: "approval:" + transitionID, Kind: "approval", ProjectID: rowProjectID, WorkflowID: workflowID, TaskID: rowTaskID, TaskShortID: shortID, TaskTitle: title, TaskTransitionID: transitionID, Message: "Approval required", OccurredAtUnixMs: occurred})
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) questionAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
+	rows, err := s.metadata.DB().QueryContext(ctx, `
+SELECT r.id, COALESCE(r.session_id, ''), r.waiting_ask_id, t.project_id, t.workflow_id, t.id, t.short_id, t.title, r.updated_at_unix_ms
+FROM task_runs r
+JOIN tasks t ON t.id = r.task_id
+WHERE trim(r.waiting_ask_id) != ''
+  AND r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms = 0
+  AND t.canceled_at_unix_ms = 0
+  AND (? = '' OR t.project_id = ?)
+  AND (? = '' OR t.id = ?)
+ORDER BY r.updated_at_unix_ms DESC, r.rowid DESC`, strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := []serverapi.WorkflowAttentionItem{}
+	for rows.Next() {
+		var runID, sessionID, askID, rowProjectID, workflowID, rowTaskID, shortID, title string
+		var occurred int64
+		if err := rows.Scan(&runID, &sessionID, &askID, &rowProjectID, &workflowID, &rowTaskID, &shortID, &title, &occurred); err != nil {
+			return nil, err
+		}
+		items = append(items, serverapi.WorkflowAttentionItem{ID: "question:" + runID + ":" + askID, Kind: "question", ProjectID: rowProjectID, WorkflowID: workflowID, TaskID: rowTaskID, TaskShortID: shortID, TaskTitle: title, RunID: runID, SessionID: sessionID, AskID: askID, Message: "Question waiting for answer", OccurredAtUnixMs: occurred})
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) interruptedRunAttentionItems(ctx context.Context, projectID string, taskID string) ([]serverapi.WorkflowAttentionItem, error) {
+	rows, err := s.metadata.DB().QueryContext(ctx, `
+SELECT r.id, COALESCE(r.session_id, ''), r.interruption_reason, t.project_id, t.workflow_id, t.id, t.short_id, t.title, r.interrupted_at_unix_ms
+FROM task_runs r
+JOIN tasks t ON t.id = r.task_id
+WHERE r.interrupted_at_unix_ms > 0
+  AND r.completed_at_unix_ms = 0
+  AND t.canceled_at_unix_ms = 0
+  AND (? = '' OR t.project_id = ?)
+  AND (? = '' OR t.id = ?)
+ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, strings.TrimSpace(projectID), strings.TrimSpace(projectID), strings.TrimSpace(taskID), strings.TrimSpace(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := []serverapi.WorkflowAttentionItem{}
+	for rows.Next() {
+		var runID, sessionID, reason, rowProjectID, workflowID, rowTaskID, shortID, title string
+		var occurred int64
+		if err := rows.Scan(&runID, &sessionID, &reason, &rowProjectID, &workflowID, &rowTaskID, &shortID, &title, &occurred); err != nil {
+			return nil, err
+		}
+		message := "Run interrupted"
+		if strings.TrimSpace(reason) != "" {
+			message = "Run interrupted: " + strings.TrimSpace(reason)
+		}
+		items = append(items, serverapi.WorkflowAttentionItem{ID: "interrupted_run:" + runID, Kind: "interrupted_run", ProjectID: rowProjectID, WorkflowID: workflowID, TaskID: rowTaskID, TaskShortID: shortID, TaskTitle: title, RunID: runID, SessionID: sessionID, Message: message, OccurredAtUnixMs: occurred})
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) validationAttentionItems(ctx context.Context, projectID string, roleResolver workflow.RoleResolver) ([]serverapi.WorkflowAttentionItem, error) {
+	rows, err := s.metadata.DB().QueryContext(ctx, `
+SELECT project_id, workflow_id, updated_at_unix_ms
+FROM project_workflow_links
+WHERE unlinked_at_unix_ms = 0
+  AND (? = '' OR project_id = ?)
+ORDER BY updated_at_unix_ms DESC, rowid DESC`, strings.TrimSpace(projectID), strings.TrimSpace(projectID))
+	if err != nil {
+		return nil, err
+	}
+	type workflowLink struct {
+		projectID  string
+		workflowID string
+		occurredAt int64
+	}
+	links := []workflowLink{}
+	for rows.Next() {
+		var rowProjectID, workflowID string
+		var occurred int64
+		if err := rows.Scan(&rowProjectID, &workflowID, &occurred); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		links = append(links, workflowLink{projectID: rowProjectID, workflowID: workflowID, occurredAt: occurred})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	items := []serverapi.WorkflowAttentionItem{}
+	for _, link := range links {
+		def, _, err := s.definition(ctx, link.workflowID)
+		if err != nil {
+			return nil, err
+		}
+		validation := workflow.ValidateDefinition(definitionForValidation(def), workflow.ValidationOptions{Context: workflow.ValidationContextTaskCreation, RoleResolver: roleResolver})
+		if validation.Valid() {
+			continue
+		}
+		items = append(items, serverapi.WorkflowAttentionItem{ID: "validation_blocker:" + link.projectID + ":" + link.workflowID, Kind: "validation_blocker", ProjectID: link.projectID, WorkflowID: link.workflowID, Message: "Workflow is invalid for task creation", OccurredAtUnixMs: link.occurredAt})
+	}
+	return items, nil
+}
+
+func sortAttentionItems(items []serverapi.WorkflowAttentionItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].OccurredAtUnixMs != items[j].OccurredAtUnixMs {
+			return items[i].OccurredAtUnixMs > items[j].OccurredAtUnixMs
+		}
+		return items[i].ID > items[j].ID
+	})
+}
+
+func pageAttentionItems(items []serverapi.WorkflowAttentionItem, offset int, pageSize int) []serverapi.WorkflowAttentionItem {
+	if offset >= len(items) {
+		return []serverapi.WorkflowAttentionItem{}
+	}
+	end := offset + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[offset:end]
 }
 
 func parseOffsetPageToken(token string) (int, error) {

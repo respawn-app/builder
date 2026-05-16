@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"builder/server/requestmemo"
+	askquestion "builder/server/tools/askquestion"
 	"builder/server/workflow"
 	"builder/server/workflowstore"
 	"builder/server/workflowview"
@@ -21,6 +23,8 @@ type Service struct {
 	taskWorktrees taskWorktreeEnsurer
 	runtimeCancel taskRuntimeCanceler
 	schedulerWake schedulerNotifier
+	prompts       pendingPromptResponder
+	questionMemo  *requestmemo.Memo[taskQuestionAnswerMemoRequest, struct{}]
 }
 
 type taskWorktreeEnsurer interface {
@@ -31,8 +35,26 @@ type taskRuntimeCanceler interface {
 	CancelTaskRuns(ctx context.Context, taskID workflow.TaskID) error
 }
 
+type taskRuntimeRunCanceler interface {
+	CancelRun(ctx context.Context, runID workflow.RunID) error
+}
+
 type schedulerNotifier interface {
 	Notify()
+}
+
+type pendingPromptResponder interface {
+	SubmitPromptResponse(sessionID string, resp askquestion.Response, err error) error
+}
+
+type taskQuestionAnswerMemoRequest struct {
+	TaskID               string
+	RunID                string
+	AskID                string
+	ErrorMessage         string
+	Answer               string
+	SelectedOptionNumber int
+	FreeformAnswer       string
 }
 
 type workflowProjectSubscription struct {
@@ -62,6 +84,12 @@ func WithSchedulerNotifier(notifier schedulerNotifier) Option {
 	}
 }
 
+func WithPromptResponder(responder pendingPromptResponder) Option {
+	return func(s *Service) {
+		s.prompts = responder
+	}
+}
+
 func New(store *workflowstore.Store, view *workflowview.Service, roleResolver workflow.RoleResolver, opts ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("workflow store is required")
@@ -69,7 +97,7 @@ func New(store *workflowstore.Store, view *workflowview.Service, roleResolver wo
 	if view == nil {
 		return nil, errors.New("workflow view is required")
 	}
-	service := &Service{store: store, view: view, roleResolver: roleResolver}
+	service := &Service{store: store, view: view, roleResolver: roleResolver, questionMemo: requestmemo.New[taskQuestionAnswerMemoRequest, struct{}]()}
 	for _, opt := range opts {
 		opt(service)
 	}
@@ -308,16 +336,38 @@ func (s *Service) StartWorkflowTask(ctx context.Context, req serverapi.WorkflowT
 	return serverapi.WorkflowTaskStartResponse{TransitionID: started.TransitionID, PlacementID: string(started.PlacementID), RunID: string(started.RunID)}, nil
 }
 
+func (s *Service) InterruptWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskInterruptResponse{}, err
+	}
+	interrupted, err := s.store.InterruptTaskRun(ctx, workflow.TaskID(req.TaskID), workflow.RunID(req.RunID), req.Reason)
+	if err != nil {
+		return serverapi.WorkflowTaskInterruptResponse{}, err
+	}
+	if canceler, ok := s.runtimeCancel.(taskRuntimeRunCanceler); ok {
+		if err := canceler.CancelRun(ctx, interrupted.ID); err != nil {
+			return serverapi.WorkflowTaskInterruptResponse{}, err
+		}
+	}
+	if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
+		s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "interrupted", req.TaskID, string(interrupted.ID))
+	}
+	return serverapi.WorkflowTaskInterruptResponse{RunID: string(interrupted.ID)}, nil
+}
+
 func (s *Service) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowTaskResumeResponse{}, err
 	}
-	resumed, err := s.store.ResumeTaskRun(ctx, workflow.TaskID(req.TaskID))
+	resumed, err := s.store.ResumeTaskRunByID(ctx, workflow.TaskID(req.TaskID), workflow.RunID(req.RunID))
 	if err != nil {
 		return serverapi.WorkflowTaskResumeResponse{}, err
 	}
 	if s.schedulerWake != nil {
 		s.schedulerWake.Notify()
+	}
+	if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
+		s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "resumed", req.TaskID, string(resumed.ID))
 	}
 	return serverapi.WorkflowTaskResumeResponse{RunID: string(resumed.ID), PlacementID: string(resumed.PlacementID), NodeID: string(resumed.NodeID), Generation: resumed.Generation, SessionID: resumed.SessionID}, nil
 }
@@ -345,12 +395,19 @@ func (s *Service) ApproveWorkflowTask(ctx context.Context, req serverapi.Workflo
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowTaskApproveResponse{}, err
 	}
-	approved, err := s.store.ApproveTransition(ctx, workflow.TransitionID(req.TransitionID))
+	transitionID := strings.TrimSpace(req.TaskTransitionID)
+	if transitionID == "" {
+		transitionID = strings.TrimSpace(req.TransitionID)
+	}
+	approved, err := s.store.ApproveTransition(ctx, workflow.TransitionID(transitionID))
 	if err != nil {
 		return serverapi.WorkflowTaskApproveResponse{}, err
 	}
 	if s.schedulerWake != nil {
 		s.schedulerWake.Notify()
+	}
+	if taskID, projectID, workflowID, detailErr := s.taskIdentityForTransition(ctx, transitionID); detailErr == nil {
+		s.publishWorkflowEvent(ctx, projectID, workflowID, "task", "approved", taskID, transitionID)
 	}
 	return serverapi.WorkflowTaskApproveResponse{TransitionID: string(approved.TransitionID), State: approved.State, PlacementIDs: placementIDs(approved.PlacementIDs), RunIDs: runIDs(approved.RunIDs)}, nil
 }
@@ -373,13 +430,76 @@ func (s *Service) CancelWorkflowTask(ctx context.Context, req serverapi.Workflow
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	if err := s.store.CancelTask(ctx, workflow.TaskID(req.TaskID), req.Reason); err != nil {
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "user_canceled"
+	}
+	if err := s.store.CancelTask(ctx, workflow.TaskID(req.TaskID), reason); err != nil {
 		return err
+	}
+	if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
+		s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "canceled", req.TaskID)
 	}
 	if s.runtimeCancel != nil {
 		return s.runtimeCancel.CancelTaskRuns(ctx, workflow.TaskID(req.TaskID))
 	}
 	return nil
+}
+
+func (s *Service) ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowAttentionListResponse{}, err
+	}
+	return s.view.ListAttention(ctx, req, s.roleResolver)
+}
+
+func (s *Service) ListWorkflowTaskAttention(ctx context.Context, req serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskAttentionListResponse{}, err
+	}
+	return s.view.ListTaskAttention(ctx, req, s.roleResolver)
+}
+
+func (s *Service) AnswerWorkflowTaskQuestion(ctx context.Context, req serverapi.WorkflowTaskQuestionAnswerRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	if s == nil || s.prompts == nil {
+		return errors.New("prompt responder is required")
+	}
+	memoReq := taskQuestionAnswerMemoRequest{TaskID: req.TaskID, RunID: req.RunID, AskID: req.AskID, ErrorMessage: req.ErrorMessage, Answer: req.Answer, SelectedOptionNumber: req.SelectedOptionNumber, FreeformAnswer: req.FreeformAnswer}
+	_, err := s.questionMemo.Do(ctx, req.ClientRequestID, memoReq, sameTaskQuestionAnswerMemoRequest, func(ctx context.Context) (struct{}, error) {
+		run, err := s.store.ResolveTaskWaitingAsk(ctx, workflow.TaskID(req.TaskID), workflow.RunID(req.RunID), req.AskID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if strings.TrimSpace(req.ErrorMessage) != "" {
+			if err := s.prompts.SubmitPromptResponse(run.SessionID, askquestion.Response{RequestID: req.AskID}, errors.New(req.ErrorMessage)); err != nil {
+				return struct{}{}, err
+			}
+		} else if err := s.prompts.SubmitPromptResponse(run.SessionID, askquestion.Response{RequestID: req.AskID, Answer: req.Answer, SelectedOptionNumber: req.SelectedOptionNumber, FreeformAnswer: req.FreeformAnswer}, nil); err != nil {
+			return struct{}{}, err
+		}
+		if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
+			s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "question_answered", req.TaskID, string(run.ID), req.AskID)
+		}
+		return struct{}{}, nil
+	})
+	return err
+}
+
+func (s *Service) taskIdentityForTransition(ctx context.Context, transitionID string) (taskID string, projectID string, workflowID string, err error) {
+	return s.store.TaskIdentityForTransition(ctx, workflow.TransitionID(transitionID))
+}
+
+func sameTaskQuestionAnswerMemoRequest(a taskQuestionAnswerMemoRequest, b taskQuestionAnswerMemoRequest) bool {
+	return a.TaskID == b.TaskID &&
+		a.RunID == b.RunID &&
+		a.AskID == b.AskID &&
+		a.ErrorMessage == b.ErrorMessage &&
+		a.Answer == b.Answer &&
+		a.SelectedOptionNumber == b.SelectedOptionNumber &&
+		a.FreeformAnswer == b.FreeformAnswer
 }
 
 func (s *Service) AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {

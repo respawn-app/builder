@@ -252,6 +252,11 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return g.deps.WorkflowClient().StartWorkflowTask(ctx, params)
 		})
 	},
+	protocol.MethodWorkflowTaskInterrupt: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error) {
+			return g.deps.WorkflowClient().InterruptWorkflowTask(ctx, params)
+		})
+	},
 	protocol.MethodWorkflowTaskResume: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
 			return g.deps.WorkflowClient().ResumeWorkflowTask(ctx, params)
@@ -270,6 +275,21 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 	protocol.MethodWorkflowTaskCancel: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowTaskCancelRequest) (struct{}, error) {
 			return struct{}{}, g.deps.WorkflowClient().CancelWorkflowTask(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowAttentionList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
+			return g.deps.WorkflowClient().ListWorkflowAttention(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskAttentionList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error) {
+			return g.deps.WorkflowClient().ListWorkflowTaskAttention(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskQuestionAnswer: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskQuestionAnswerRequest) (struct{}, error) {
+			return struct{}{}, g.deps.WorkflowClient().AnswerWorkflowTaskQuestion(ctx, params)
 		})
 	},
 	protocol.MethodWorkflowTaskCommentAdd: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {

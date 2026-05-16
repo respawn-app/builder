@@ -27,10 +27,14 @@ type WorkflowClient interface {
 	CreateWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCreateRequest) (serverapi.WorkflowTaskCreateResponse, error)
 	UpdateWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskUpdateRequest) (serverapi.WorkflowTaskUpdateResponse, error)
 	StartWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskStartRequest) (serverapi.WorkflowTaskStartResponse, error)
+	InterruptWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error)
 	ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error)
 	ApproveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskApproveRequest) (serverapi.WorkflowTaskApproveResponse, error)
 	MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskMoveRequest) (serverapi.WorkflowTaskMoveResponse, error)
 	CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error
+	ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error)
+	ListWorkflowTaskAttention(ctx context.Context, req serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error)
+	AnswerWorkflowTaskQuestion(ctx context.Context, req serverapi.WorkflowTaskQuestionAnswerRequest) error
 	AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error)
 	ListWorkflowTaskComments(ctx context.Context, req serverapi.WorkflowTaskCommentListRequest) (serverapi.WorkflowTaskCommentListResponse, error)
 	ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error
@@ -174,6 +178,13 @@ func (c *loopbackWorkflowClient) StartWorkflowTask(ctx context.Context, req serv
 	return c.service.StartWorkflowTask(ctx, req)
 }
 
+func (c *loopbackWorkflowClient) InterruptWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowTaskInterruptResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.InterruptWorkflowTask(ctx, req)
+}
+
 func (c *loopbackWorkflowClient) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
 	if c == nil || c.service == nil {
 		return serverapi.WorkflowTaskResumeResponse{}, errors.New("workflow service is required")
@@ -200,6 +211,27 @@ func (c *loopbackWorkflowClient) CancelWorkflowTask(ctx context.Context, req ser
 		return errors.New("workflow service is required")
 	}
 	return c.service.CancelWorkflowTask(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) ListWorkflowAttention(ctx context.Context, req serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowAttentionListResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.ListWorkflowAttention(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) ListWorkflowTaskAttention(ctx context.Context, req serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowTaskAttentionListResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.ListWorkflowTaskAttention(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) AnswerWorkflowTaskQuestion(ctx context.Context, req serverapi.WorkflowTaskQuestionAnswerRequest) error {
+	if c == nil || c.service == nil {
+		return errors.New("workflow service is required")
+	}
+	return c.service.AnswerWorkflowTaskQuestion(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) AddWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"builder/server/metadata"
+	askquestion "builder/server/tools/askquestion"
 	"builder/server/workflow"
 	"builder/server/workflowstore"
 	"builder/server/workflowview"
@@ -122,6 +123,57 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 	}
 	if !actions["created"] || !actions["updated"] || !actions["started"] {
 		t.Fatalf("task events = %+v, want created/updated/started", events)
+	}
+}
+
+func TestServiceAnswersTaskQuestionWithoutControllerLease(t *testing.T) {
+	ctx := context.Background()
+	service, binding, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Question", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	started, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("StartWorkflowTask: %v", err)
+	}
+	claimed, err := service.store.ClaimRun(ctx, workflow.RunID(started.RunID), 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	sessionID := "session-task-question"
+	if _, err := metadataStore.DB().ExecContext(ctx, `INSERT INTO sessions (id, project_id, workspace_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, launch_visible, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json) VALUES (?, ?, ?, ?, '', '', '', '', 1, 1, 0, 0, 0, 0, 1, '.', '{}', '{}', '{}', '{}')`, sessionID, binding.ProjectID, binding.WorkspaceID, "sessions/"+sessionID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if err := service.store.AttachRunSession(ctx, workflow.RunID(started.RunID), claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	if err := service.store.SetRunWaitingAsk(ctx, workflow.RunID(started.RunID), claimed.Generation, "ask-task-question"); err != nil {
+		t.Fatalf("SetRunWaitingAsk: %v", err)
+	}
+	responder := &recordingPromptResponder{}
+	service.prompts = responder
+
+	req := serverapi.WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-question", TaskID: task.Task.ID, AskID: "ask-task-question", FreeformAnswer: "ship it"}
+	if err := service.AnswerWorkflowTaskQuestion(ctx, req); err != nil {
+		t.Fatalf("AnswerWorkflowTaskQuestion: %v", err)
+	}
+	if responder.sessionID != sessionID || responder.response.RequestID != "ask-task-question" || responder.response.FreeformAnswer != "ship it" {
+		t.Fatalf("prompt response = session:%q response:%+v", responder.sessionID, responder.response)
+	}
+	if err := service.AnswerWorkflowTaskQuestion(ctx, req); err != nil {
+		t.Fatalf("AnswerWorkflowTaskQuestion replay: %v", err)
+	}
+	req.FreeformAnswer = "different"
+	if err := service.AnswerWorkflowTaskQuestion(ctx, req); err == nil || !strings.Contains(err.Error(), "reused with different parameters") {
+		t.Fatalf("AnswerWorkflowTaskQuestion mismatch error = %v", err)
+	}
+	if err := service.AnswerWorkflowTaskQuestion(ctx, serverapi.WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-bad", TaskID: task.Task.ID, AskID: "missing", FreeformAnswer: "nope"}); err == nil || !strings.Contains(err.Error(), "not pending") {
+		t.Fatalf("AnswerWorkflowTaskQuestion missing ask error = %v", err)
 	}
 }
 
@@ -271,6 +323,36 @@ func TestServiceStartTaskAutomationNotifiesScheduler(t *testing.T) {
 	}
 }
 
+func TestServiceInterruptTaskTargetsRunAndCancelsRuntime(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	started, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("StartWorkflowTask: %v", err)
+	}
+	if _, err := service.store.ClaimRun(ctx, workflow.RunID(started.RunID), 0); err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	canceler := &recordingTaskRuntimeCanceler{}
+	service.runtimeCancel = canceler
+
+	interrupted, err := service.InterruptWorkflowTask(ctx, serverapi.WorkflowTaskInterruptRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("InterruptWorkflowTask: %v", err)
+	}
+	if interrupted.RunID != started.RunID || len(canceler.runIDs) != 1 || canceler.runIDs[0] != workflow.RunID(started.RunID) {
+		t.Fatalf("interrupt response=%+v canceled runs=%+v", interrupted, canceler.runIDs)
+	}
+}
+
 func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
 	ctx := context.Background()
 	service, binding := newWorkflowServiceTestService(t)
@@ -343,6 +425,7 @@ func (n *recordingSchedulerNotifier) Notify() {
 
 type recordingTaskRuntimeCanceler struct {
 	taskIDs []workflow.TaskID
+	runIDs  []workflow.RunID
 }
 
 func (c *recordingTaskRuntimeCanceler) CancelTaskRuns(_ context.Context, taskID workflow.TaskID) error {
@@ -350,9 +433,27 @@ func (c *recordingTaskRuntimeCanceler) CancelTaskRuns(_ context.Context, taskID 
 	return nil
 }
 
+func (c *recordingTaskRuntimeCanceler) CancelRun(_ context.Context, runID workflow.RunID) error {
+	c.runIDs = append(c.runIDs, runID)
+	return nil
+}
+
 type recordingTaskWorktreeEnsurer struct {
 	taskID string
 	hook   func(string)
+}
+
+type recordingPromptResponder struct {
+	sessionID string
+	response  askquestion.Response
+	err       error
+}
+
+func (r *recordingPromptResponder) SubmitPromptResponse(sessionID string, resp askquestion.Response, err error) error {
+	r.sessionID = sessionID
+	r.response = resp
+	r.err = err
+	return nil
 }
 
 func (e *recordingTaskWorktreeEnsurer) EnsureTaskWorktree(ctx context.Context, taskID string) error {

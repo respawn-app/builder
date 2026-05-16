@@ -2095,6 +2095,51 @@ func TestResumeTaskRunCanResumeInterruptedWaitingAskRun(t *testing.T) {
 	}
 }
 
+func TestInterruptAndResumeTaskRunCanTargetSpecificRun(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createFanoutJoinWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
+	runIDs := make([]workflow.RunID, 0, len(branchRuns))
+	for _, runID := range branchRuns {
+		runIDs = append(runIDs, runID)
+	}
+	if len(runIDs) != 2 {
+		t.Fatalf("branch runs = %+v, want two", branchRuns)
+	}
+	for _, runID := range runIDs {
+		if _, err := store.ClaimRun(ctx, runID, 0); err != nil {
+			t.Fatalf("ClaimRun %s: %v", runID, err)
+		}
+	}
+	if _, err := store.InterruptTaskRun(ctx, task.ID, "", "manual"); err == nil || !strings.Contains(err.Error(), "run_id is required") {
+		t.Fatalf("InterruptTaskRun ambiguous error = %v", err)
+	}
+	interrupted, err := store.InterruptTaskRun(ctx, task.ID, runIDs[0], "manual")
+	if err != nil {
+		t.Fatalf("InterruptTaskRun selected: %v", err)
+	}
+	if interrupted.ID != runIDs[0] || interrupted.InterruptedAt == 0 {
+		t.Fatalf("interrupted = %+v, want %s", interrupted, runIDs[0])
+	}
+	if _, err := store.InterruptTaskRun(ctx, task.ID, runIDs[1], "manual"); err != nil {
+		t.Fatalf("InterruptTaskRun second selected: %v", err)
+	}
+	if _, err := store.ResumeTaskRunByID(ctx, task.ID, ""); err == nil || !strings.Contains(err.Error(), "run_id is required") {
+		t.Fatalf("ResumeTaskRun ambiguous error = %v", err)
+	}
+	resumed, err := store.ResumeTaskRunByID(ctx, task.ID, runIDs[0])
+	if err != nil {
+		t.Fatalf("ResumeTaskRunByID selected: %v", err)
+	}
+	if resumed.ID != runIDs[0] || resumed.InterruptedAt != 0 || resumed.StartedAt != 0 {
+		t.Fatalf("resumed = %+v, want selected run reset", resumed)
+	}
+}
+
 func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)

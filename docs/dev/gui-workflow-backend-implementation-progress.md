@@ -10,7 +10,7 @@ Current focus:
 - [x] Slice 1: Home/project admin/project key/workspaces.
 - [x] Slice 2: workflow picker, selected board, groups, live updates.
 - [x] Slice 3: task source workspace and Backlog editing.
-- [ ] Slice 4: actions, attention inbox, questions, approvals.
+- [x] Slice 4: actions, attention inbox, questions, approvals.
 - [ ] Slice 5: task detail, activity feed, comments, teleport.
 
 Working rules:
@@ -69,4 +69,17 @@ Slice 3 notes:
 - Verification passed:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/metadata ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/worktree`
   - `./scripts/test.sh ./cli/builder ./server/workflowscheduler ./server/workflowrunner`
+  - `./scripts/build.sh --output ./bin/builder`
+
+Slice 4 notes:
+
+- Started: 2026-05-16.
+- Completed tracer: `workflow.attention.list` and `workflow.task.attention.list` return approval, question, interrupted-run, and validation-blocker items with generated timestamps and workflow event watermarks.
+- Completed tracer: `workflow.task.interrupt` supports unambiguous task-level interrupt, explicit `run_id` for fan-out, DB interruption, runtime run cancellation, and invalidation events.
+- Completed tracer: `workflow.task.resume` preserves task-level behavior and adds optional `run_id` for multiple interrupted runs.
+- Completed tracer: GUI approvals use `task_transition_id` while retaining legacy `transition_id` compatibility, and approval applies stored transition edge snapshots.
+- Completed tracer: `workflow.task.question.answer` validates task/run/ask membership, enforces idempotent `client_request_id`, rejects conflicting answer modes, and submits prompt responses without a controller lease.
+- Completed tracer: task cancellation now uses backend default reason `user_canceled`, cancels active runtimes, and emits task invalidation events.
+- Verification passed:
+  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler ./server/workflowrunner ./server/workflowruntime ./server/runprompt ./server/primaryrun ./server/registry`
   - `./scripts/build.sh --output ./bin/builder`

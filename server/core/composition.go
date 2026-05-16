@@ -161,7 +161,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		return nil, fmt.Errorf("workflow bundle: scheduler: %w", err)
 	}
 	workflowRuntimeStarter.SetRuntimeFinished(workflowScheduler.RuntimeFinished)
-	workflowService, err := workflowsvc.New(workflowStore, workflowViewService, workflowRoleResolver, workflowsvc.WithTaskWorktreeEnsurer(taskWorktreeEnsurer{service: worktreeService}), workflowsvc.WithTaskRuntimeCanceler(workflowRuntimeStarter), workflowsvc.WithSchedulerNotifier(workflowScheduler))
+	workflowService, err := workflowsvc.New(workflowStore, workflowViewService, workflowRoleResolver, workflowsvc.WithTaskWorktreeEnsurer(taskWorktreeEnsurer{service: worktreeService}), workflowsvc.WithTaskRuntimeCanceler(workflowRuntimeStarter), workflowsvc.WithSchedulerNotifier(workflowScheduler), workflowsvc.WithPromptResponder(runtimeRegistry))
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: service: %w", err)

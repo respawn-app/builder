@@ -327,6 +327,93 @@ func TestTaskDetailProjectsWaitingAskRun(t *testing.T) {
 	}
 }
 
+func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = 'done'`, string(workflowID)); err != nil {
+		t.Fatalf("require approval: %v", err)
+	}
+	approvalTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Approval", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask approval: %v", err)
+	}
+	approvalStarted, err := workflowStore.StartTask(ctx, approvalTask.ID)
+	if err != nil {
+		t.Fatalf("StartTask approval: %v", err)
+	}
+	pendingApproval, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: approvalStarted.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}})
+	if err != nil {
+		t.Fatalf("CompleteRun approval: %v", err)
+	}
+	if pendingApproval.State != "pending_approval" {
+		t.Fatalf("approval completion = %+v, want pending_approval", pendingApproval)
+	}
+	questionTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Question", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask question: %v", err)
+	}
+	questionStarted, err := workflowStore.StartTask(ctx, questionTask.ID)
+	if err != nil {
+		t.Fatalf("StartTask question: %v", err)
+	}
+	questionClaimed, err := workflowStore.ClaimRun(ctx, questionStarted.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun question: %v", err)
+	}
+	sessionID := "session-attention-question"
+	if _, err := store.DB().ExecContext(ctx, `INSERT INTO sessions (id, project_id, workspace_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, launch_visible, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json) VALUES (?, ?, ?, ?, '', '', '', '', 1, 1, 0, 0, 0, 0, 1, '.', '{}', '{}', '{}', '{}')`, sessionID, binding.ProjectID, binding.WorkspaceID, "sessions/"+sessionID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if err := workflowStore.AttachRunSession(ctx, questionStarted.RunID, questionClaimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession question: %v", err)
+	}
+	if err := workflowStore.SetRunWaitingAsk(ctx, questionStarted.RunID, questionClaimed.Generation, "ask-attention"); err != nil {
+		t.Fatalf("SetRunWaitingAsk: %v", err)
+	}
+	interruptedTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Interrupted", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask interrupted: %v", err)
+	}
+	interruptedStarted, err := workflowStore.StartTask(ctx, interruptedTask.ID)
+	if err != nil {
+		t.Fatalf("StartTask interrupted: %v", err)
+	}
+	interruptedClaimed, err := workflowStore.ClaimRun(ctx, interruptedStarted.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun interrupted: %v", err)
+	}
+	if err := workflowStore.InterruptRunGeneration(ctx, interruptedStarted.RunID, interruptedClaimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+
+	resp, err := view.ListAttention(ctx, serverapi.WorkflowAttentionListRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	kinds := map[string]serverapi.WorkflowAttentionItem{}
+	for _, item := range resp.Items {
+		kinds[item.Kind] = item
+	}
+	if kinds["approval"].TaskTransitionID != string(pendingApproval.TransitionID) || kinds["question"].AskID != "ask-attention" || kinds["interrupted_run"].RunID != string(interruptedStarted.RunID) {
+		t.Fatalf("attention items = %+v", resp.Items)
+	}
+	taskResp, err := view.ListTaskAttention(ctx, serverapi.WorkflowTaskAttentionListRequest{TaskID: string(questionTask.ID)}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListTaskAttention: %v", err)
+	}
+	if len(taskResp.Items) != 1 || taskResp.Items[0].Kind != "question" || taskResp.Items[0].TaskID != string(questionTask.ID) {
+		t.Fatalf("task attention items = %+v", taskResp.Items)
+	}
+}
+
 func newWorkflowViewTestStore(t *testing.T) (*metadata.Store, *workflowstore.Store, metadata.Binding) {
 	t.Helper()
 	home := t.TempDir()
