@@ -87,6 +87,28 @@ func TestWorkflowCreateUpdateReadAndGraphPersistence(t *testing.T) {
 	}
 }
 
+func TestAddNodeRejectsNodeGroupFromDifferentWorkflow(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	workflowA, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Workflow A"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow A: %v", err)
+	}
+	workflowB, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Workflow B"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow B: %v", err)
+	}
+	group, _, err := store.AddNodeGroup(ctx, NodeGroupRecord{ID: "group-a", WorkflowID: workflowA.ID, Key: "impl", DisplayName: "Implementation"})
+	if err != nil {
+		t.Fatalf("AddNodeGroup: %v", err)
+	}
+
+	_, err = store.AddNode(ctx, NodeRecord{ID: "node-cross-group", WorkflowID: workflowB.ID, GroupID: group.ID, Key: "agent", Kind: workflow.NodeKindAgent, DisplayName: "Agent"})
+	if err == nil || !strings.Contains(err.Error(), "belongs to workflow") {
+		t.Fatalf("AddNode cross-workflow group error = %v", err)
+	}
+}
+
 func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)

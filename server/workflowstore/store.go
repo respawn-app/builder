@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -473,7 +472,7 @@ func (s *Store) LatestWorkflowEventSequence(ctx context.Context, projectID strin
 	if err != nil {
 		return 0, err
 	}
-	return int64FromDBValue(sequence), nil
+	return sequence, nil
 }
 
 func (s *Store) ListWorkflowEventsAfter(ctx context.Context, projectID string, afterSequence int64, limit int64) ([]WorkflowEventRecord, error) {
@@ -717,6 +716,16 @@ func nodeGroupRecordFromRow(row sqlitegen.WorkflowNodeGroup) NodeGroupRecord {
 func resolveWorkflowNodeGroupID(ctx context.Context, q *sqlitegen.Queries, workflowID string, groupID string, groupKey string) (string, error) {
 	trimmedGroupID := strings.TrimSpace(groupID)
 	if trimmedGroupID != "" {
+		row, err := q.GetWorkflowNodeGroupByID(ctx, trimmedGroupID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", fmt.Errorf("workflow node group %q not found", trimmedGroupID)
+			}
+			return "", err
+		}
+		if row.WorkflowID != strings.TrimSpace(workflowID) {
+			return "", fmt.Errorf("workflow node group %q belongs to workflow %q", trimmedGroupID, row.WorkflowID)
+		}
 		return trimmedGroupID, nil
 	}
 	trimmedGroupKey := strings.TrimSpace(groupKey)
@@ -740,23 +749,6 @@ func prefixedID(prefix string) string {
 func nullableString(value string) sql.NullString {
 	trimmed := strings.TrimSpace(value)
 	return sql.NullString{String: trimmed, Valid: trimmed != ""}
-}
-
-func int64FromDBValue(value any) int64 {
-	switch typed := value.(type) {
-	case int64:
-		return typed
-	case int:
-		return int64(typed)
-	case []byte:
-		parsed, _ := strconv.ParseInt(string(typed), 10, 64)
-		return parsed
-	case string:
-		parsed, _ := strconv.ParseInt(typed, 10, 64)
-		return parsed
-	default:
-		return 0
-	}
 }
 
 func boolToInt64(value bool) int64 {

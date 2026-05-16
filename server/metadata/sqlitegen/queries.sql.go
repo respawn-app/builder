@@ -517,16 +517,16 @@ func (q *Queries) GetDefaultProjectWorkflowLink(ctx context.Context, projectID s
 }
 
 const getLatestWorkflowEventSequence = `-- name: GetLatestWorkflowEventSequence :one
-SELECT COALESCE(MAX(sequence), 0) AS sequence
+SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER) AS sequence
 FROM workflow_events
 WHERE ?1 = ''
    OR project_id = ?1
    OR project_id = ''
 `
 
-func (q *Queries) GetLatestWorkflowEventSequence(ctx context.Context, projectID interface{}) (interface{}, error) {
+func (q *Queries) GetLatestWorkflowEventSequence(ctx context.Context, projectID interface{}) (int64, error) {
 	row := q.db.QueryRowContext(ctx, getLatestWorkflowEventSequence, projectID)
-	var sequence interface{}
+	var sequence int64
 	err := row.Scan(&sequence)
 	return sequence, err
 }
@@ -1015,6 +1015,33 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (GetWorkflowNo
 		&i.PromptTemplate,
 		&i.OutputFieldsJson,
 		&i.GroupID,
+		&i.SortOrder,
+		&i.MetadataJson,
+	)
+	return i, err
+}
+
+const getWorkflowNodeGroupByID = `-- name: GetWorkflowNodeGroupByID :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE id = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetWorkflowNodeGroupByID(ctx context.Context, id string) (WorkflowNodeGroup, error) {
+	row := q.db.QueryRowContext(ctx, getWorkflowNodeGroupByID, id)
+	var i WorkflowNodeGroup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.GroupKey,
+		&i.DisplayName,
 		&i.SortOrder,
 		&i.MetadataJson,
 	)

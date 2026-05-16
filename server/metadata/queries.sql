@@ -220,6 +220,18 @@ WHERE workflow_id = sqlc.arg(workflow_id)
   AND group_key = sqlc.arg(group_key)
 LIMIT 1;
 
+-- name: GetWorkflowNodeGroupByID :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE id = sqlc.arg(id)
+LIMIT 1;
+
 -- name: ListWorkflowNodes :many
 SELECT
     id,
@@ -1164,7 +1176,7 @@ INSERT INTO workflow_events (
 RETURNING sequence;
 
 -- name: GetLatestWorkflowEventSequence :one
-SELECT COALESCE(MAX(sequence), 0) AS sequence
+SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER) AS sequence
 FROM workflow_events
 WHERE sqlc.arg(project_id) = ''
    OR project_id = sqlc.arg(project_id)

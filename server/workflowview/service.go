@@ -1611,26 +1611,9 @@ func applyColumnTaskCounts(columns []serverapi.WorkflowBoardColumn, cards []serv
 }
 
 func (s *Service) latestEventSequence(ctx context.Context, projectID string) (int64, error) {
-	value, err := s.queries.GetLatestWorkflowEventSequence(ctx, strings.TrimSpace(projectID))
+	sequence, err := s.queries.GetLatestWorkflowEventSequence(ctx, strings.TrimSpace(projectID))
 	if err != nil {
 		return 0, err
 	}
-	return int64FromDBValue(value), nil
-}
-
-func int64FromDBValue(value any) int64 {
-	switch typed := value.(type) {
-	case int64:
-		return typed
-	case int:
-		return int64(typed)
-	case []byte:
-		parsed, _ := strconv.ParseInt(string(typed), 10, 64)
-		return parsed
-	case string:
-		parsed, _ := strconv.ParseInt(typed, 10, 64)
-		return parsed
-	default:
-		return 0
-	}
+	return sequence, nil
 }

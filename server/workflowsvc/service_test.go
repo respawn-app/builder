@@ -577,6 +577,20 @@ func TestServiceWorkflowUnlinkRejectsNonTerminalAndSoftDisablesTerminalHistory(t
 	if len(links) != 1 || links[0].UnlinkedAtUnixMs == 0 {
 		t.Fatalf("links after unlink = %+v", links)
 	}
+	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
+	if err != nil {
+		t.Fatalf("ListWorkflowEventsAfter: %v", err)
+	}
+	var unlinkEvent workflowstore.WorkflowEventRecord
+	for _, event := range events {
+		if event.Resource == "workflow_link" && event.Action == "unlinked" {
+			unlinkEvent = event
+			break
+		}
+	}
+	if unlinkEvent.ProjectID != binding.ProjectID || unlinkEvent.WorkflowID != workflowID {
+		t.Fatalf("unlink event = %+v, want project/workflow identity", unlinkEvent)
+	}
 }
 
 func TestServiceCommentsAndReadModels(t *testing.T) {
