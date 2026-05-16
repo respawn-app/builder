@@ -39,6 +39,8 @@ type WorkflowClient interface {
 	ListWorkflowTaskComments(ctx context.Context, req serverapi.WorkflowTaskCommentListRequest) (serverapi.WorkflowTaskCommentListResponse, error)
 	ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentReplaceRequest) error
 	DeleteWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentDeleteRequest) error
+	ListWorkflowTaskActivity(ctx context.Context, req serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error)
+	GetWorkflowTaskTeleportTarget(ctx context.Context, req serverapi.WorkflowTaskTeleportTargetRequest) (serverapi.WorkflowTaskTeleportTargetResponse, error)
 	SubscribeWorkflowProject(ctx context.Context, req serverapi.WorkflowProjectSubscribeRequest) (serverapi.WorkflowProjectSubscription, error)
 	GetWorkflowBoard(ctx context.Context, req serverapi.WorkflowBoardRequest) (serverapi.WorkflowBoardResponse, error)
 	GetWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error)
@@ -260,6 +262,20 @@ func (c *loopbackWorkflowClient) DeleteWorkflowTaskComment(ctx context.Context, 
 		return errors.New("workflow service is required")
 	}
 	return c.service.DeleteWorkflowTaskComment(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) ListWorkflowTaskActivity(ctx context.Context, req serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowTaskActivityListResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.ListWorkflowTaskActivity(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) GetWorkflowTaskTeleportTarget(ctx context.Context, req serverapi.WorkflowTaskTeleportTargetRequest) (serverapi.WorkflowTaskTeleportTargetResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowTaskTeleportTargetResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.GetWorkflowTaskTeleportTarget(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) SubscribeWorkflowProject(ctx context.Context, req serverapi.WorkflowProjectSubscribeRequest) (serverapi.WorkflowProjectSubscription, error) {

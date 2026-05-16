@@ -219,6 +219,7 @@ type CommentRecord struct {
 	Author    string
 	AuthorID  string
 	DeletedAt int64
+	CreatedAt int64
 	UpdatedAt int64
 }
 

@@ -580,6 +580,35 @@ type WorkflowTaskGetResponse struct {
 	Task WorkflowTaskDetail `json:"task"`
 }
 
+type WorkflowTaskActivityListRequest struct {
+	TaskID    string `json:"task_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type WorkflowTaskActivityListResponse struct {
+	Items             []WorkflowTaskActivityItem `json:"items"`
+	NextPageToken     string                     `json:"next_page_token,omitempty"`
+	GeneratedAtUnixMs int64                      `json:"generated_at_unix_ms"`
+}
+
+type WorkflowTaskTeleportTargetRequest struct {
+	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
+}
+
+type WorkflowTaskTeleportTargetResponse struct {
+	Available     bool   `json:"available"`
+	TaskID        string `json:"task_id,omitempty"`
+	RunID         string `json:"run_id,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	ProjectID     string `json:"project_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorktreeID    string `json:"worktree_id,omitempty"`
+	CwdRelpath    string `json:"cwd_relpath,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
 type WorkflowTaskSummary struct {
 	ID                string   `json:"id"`
 	ProjectID         string   `json:"project_id"`
@@ -598,9 +627,15 @@ type WorkflowTaskSummary struct {
 
 type WorkflowTaskDetail struct {
 	Summary         WorkflowTaskSummary      `json:"summary"`
+	Project         ProjectBoardProject      `json:"project"`
+	Workflow        WorkflowPickerItem       `json:"workflow"`
 	Body            string                   `json:"body"`
 	SourceURL       string                   `json:"source_url,omitempty"`
 	SourceWorkspace ProjectWorkspaceSummary  `json:"source_workspace"`
+	ManagedWorktree WorktreeView             `json:"managed_worktree,omitempty"`
+	Status          WorkflowTaskStatus       `json:"status"`
+	Actions         WorkflowTaskActions      `json:"actions"`
+	Attention       []WorkflowAttentionItem  `json:"attention,omitempty"`
 	Placements      []WorkflowPlacement      `json:"placements"`
 	Runs            []WorkflowRun            `json:"runs"`
 	Transitions     []WorkflowTaskTransition `json:"transitions"`
@@ -611,6 +646,9 @@ type WorkflowPlacement struct {
 	ID                        string `json:"id"`
 	TaskID                    string `json:"task_id"`
 	NodeID                    string `json:"node_id"`
+	NodeKey                   string `json:"node_key,omitempty"`
+	NodeDisplayName           string `json:"node_display_name,omitempty"`
+	NodeKind                  string `json:"node_kind,omitempty"`
 	State                     string `json:"state"`
 	ParallelBatchTransitionID string `json:"parallel_batch_transition_id,omitempty"`
 	ParallelBranchEdgeID      string `json:"parallel_branch_edge_id,omitempty"`
@@ -622,6 +660,9 @@ type WorkflowRun struct {
 	PlacementID         string `json:"placement_id"`
 	NodeID              string `json:"node_id"`
 	SessionID           string `json:"session_id,omitempty"`
+	SessionName         string `json:"session_name,omitempty"`
+	Role                string `json:"role,omitempty"`
+	Status              string `json:"status"`
 	Generation          int64  `json:"generation"`
 	StartedAtUnixMs     int64  `json:"started_at_unix_ms"`
 	CompletedAtUnixMs   int64  `json:"completed_at_unix_ms"`
@@ -631,35 +672,67 @@ type WorkflowRun struct {
 }
 
 type WorkflowTaskTransition struct {
-	ID           string                   `json:"id"`
-	TaskID       string                   `json:"task_id"`
-	TransitionID string                   `json:"transition_id"`
-	State        string                   `json:"state"`
-	Commentary   string                   `json:"commentary,omitempty"`
-	OutputValues map[string]string        `json:"output_values,omitempty"`
-	CreatedAt    int64                    `json:"created_at_unix_ms"`
-	Edges        []WorkflowTransitionEdge `json:"edges,omitempty"`
+	ID                    string                   `json:"id"`
+	TaskID                string                   `json:"task_id"`
+	SourceRunID           string                   `json:"source_run_id,omitempty"`
+	SourcePlacementID     string                   `json:"source_placement_id,omitempty"`
+	SourceNodeID          string                   `json:"source_node_id,omitempty"`
+	SourceNodeKey         string                   `json:"source_node_key,omitempty"`
+	SourceNodeDisplayName string                   `json:"source_node_display_name,omitempty"`
+	TransitionGroupID     string                   `json:"transition_group_id,omitempty"`
+	TransitionID          string                   `json:"transition_id"`
+	TransitionDisplayName string                   `json:"transition_display_name,omitempty"`
+	WorkflowRevisionSeen  int64                    `json:"workflow_revision_seen"`
+	Actor                 string                   `json:"actor,omitempty"`
+	State                 string                   `json:"state"`
+	Commentary            string                   `json:"commentary,omitempty"`
+	OutputValues          map[string]string        `json:"output_values,omitempty"`
+	CreatedAt             int64                    `json:"created_at_unix_ms"`
+	AppliedAtUnixMs       int64                    `json:"applied_at_unix_ms"`
+	Edges                 []WorkflowTransitionEdge `json:"edges,omitempty"`
 }
 
 type WorkflowTransitionEdge struct {
-	ID                   string `json:"id"`
-	TaskTransitionID     string `json:"task_transition_id"`
-	WorkflowEdgeID       string `json:"workflow_edge_id,omitempty"`
-	EdgeKey              string `json:"edge_key"`
-	TargetNodeID         string `json:"target_node_id,omitempty"`
-	TargetPlacementID    string `json:"target_placement_id,omitempty"`
-	State                string `json:"state"`
-	WorkflowRevisionSeen int64  `json:"workflow_revision_seen"`
+	ID                    string                      `json:"id"`
+	TaskTransitionID      string                      `json:"task_transition_id"`
+	WorkflowEdgeID        string                      `json:"workflow_edge_id,omitempty"`
+	EdgeKey               string                      `json:"edge_key"`
+	TargetNodeID          string                      `json:"target_node_id,omitempty"`
+	TargetNodeKey         string                      `json:"target_node_key,omitempty"`
+	TargetNodeDisplayName string                      `json:"target_node_display_name,omitempty"`
+	TargetNodeKind        string                      `json:"target_node_kind,omitempty"`
+	TargetPlacementID     string                      `json:"target_placement_id,omitempty"`
+	State                 string                      `json:"state"`
+	ContextMode           string                      `json:"context_mode,omitempty"`
+	RequiresApproval      bool                        `json:"requires_approval"`
+	InputBindings         []WorkflowInputBinding      `json:"input_bindings,omitempty"`
+	OutputRequirements    []WorkflowOutputRequirement `json:"output_requirements,omitempty"`
+	WorkflowRevisionSeen  int64                       `json:"workflow_revision_seen"`
 }
 
 type WorkflowTaskComment struct {
-	ID        string `json:"id"`
-	TaskID    string `json:"task_id"`
-	Body      string `json:"body"`
-	Author    string `json:"author"`
-	AuthorID  string `json:"author_id,omitempty"`
-	DeletedAt int64  `json:"deleted_at_unix_ms"`
-	UpdatedAt int64  `json:"updated_at_unix_ms"`
+	ID              string `json:"id"`
+	TaskID          string `json:"task_id"`
+	Body            string `json:"body"`
+	Author          string `json:"author"`
+	AuthorID        string `json:"author_id,omitempty"`
+	DeletedAt       int64  `json:"deleted_at_unix_ms"`
+	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
+	UpdatedAt       int64  `json:"updated_at_unix_ms"`
+}
+
+type WorkflowTaskActivityItem struct {
+	ActivityID       string                 `json:"activity_id"`
+	Type             string                 `json:"type"`
+	TaskID           string                 `json:"task_id"`
+	OccurredAtUnixMs int64                  `json:"occurred_at_unix_ms"`
+	UpdatedAtUnixMs  int64                  `json:"updated_at_unix_ms"`
+	Actor            string                 `json:"actor,omitempty"`
+	Summary          string                 `json:"summary"`
+	Comment          WorkflowTaskComment    `json:"comment,omitempty"`
+	Transition       WorkflowTaskTransition `json:"transition,omitempty"`
+	Run              WorkflowRun            `json:"run,omitempty"`
+	Attention        WorkflowAttentionItem  `json:"attention,omitempty"`
 }
 
 func (r WorkflowCreateRequest) Validate() error {
@@ -958,6 +1031,23 @@ func (r WorkflowProjectSubscribeRequest) Validate() error {
 }
 
 func (r WorkflowTaskGetRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskActivityListRequest) Validate() error {
+	if err := validateRequired("task_id", r.TaskID); err != nil {
+		return err
+	}
+	if r.PageSize < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", "page_size must be non-negative")
+	}
+	if strings.TrimSpace(r.PageToken) != r.PageToken {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")
+	}
+	return nil
+}
+
+func (r WorkflowTaskTeleportTargetRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
 }
 

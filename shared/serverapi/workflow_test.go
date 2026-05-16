@@ -88,6 +88,18 @@ func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "", Author: "user"}).Validate(); err == nil || !strings.Contains(err.Error(), "body") {
 		t.Fatalf("empty comment body error = %v", err)
 	}
+	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: 10}).Validate(); err != nil {
+		t.Fatalf("valid activity list rejected: %v", err)
+	}
+	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "page_size") {
+		t.Fatalf("invalid activity page size error = %v", err)
+	}
+	if err := (WorkflowTaskTeleportTargetRequest{TaskID: "task-1"}).Validate(); err != nil {
+		t.Fatalf("valid teleport target rejected: %v", err)
+	}
+	if err := (WorkflowTaskTeleportTargetRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "task_id") {
+		t.Fatalf("empty teleport task id error = %v", err)
+	}
 }
 
 func TestWorkflowValidateRequestValidation(t *testing.T) {

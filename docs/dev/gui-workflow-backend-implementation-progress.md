@@ -11,7 +11,7 @@ Current focus:
 - [x] Slice 2: workflow picker, selected board, groups, live updates.
 - [x] Slice 3: task source workspace and Backlog editing.
 - [x] Slice 4: actions, attention inbox, questions, approvals.
-- [ ] Slice 5: task detail, activity feed, comments, teleport.
+- [x] Slice 5: task detail, activity feed, comments, teleport.
 
 Working rules:
 
@@ -83,3 +83,16 @@ Slice 4 notes:
 - Verification passed:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler ./server/workflowrunner ./server/workflowruntime ./server/runprompt ./server/primaryrun ./server/registry`
   - `./scripts/build.sh --output ./bin/builder`
+
+Slice 5 notes:
+
+- Started: 2026-05-16.
+- Completed tracer: `workflow.task.get` now includes project/workflow identity, source workspace, managed worktree summary, enriched placements, run session/name/role/status, unresolved attention, task status, and action flags.
+- Completed tracer: `workflow.task.activity.list` is a paginated newest-first read model over comments, transition snapshots, run start/complete/interrupt timestamps, and task cancellation metadata.
+- Completed tracer: activity pagination is deterministic for same-timestamp rows via stable activity IDs, and approval transition activity exposes stored source node, transition label/id, edge requirements, commentary, actor, graph revision, and applied timestamp inputs.
+- Completed tracer: comment add/edit/delete remains full CRUD, updates the activity feed, and emits live task invalidations.
+- Completed tracer: `workflow.task.teleportTarget.get` returns identifier-only target data for task run sessions and a plain unavailable reason before a run session exists.
+- Verification passed:
+  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/session ./server/runtimeview`
+  - `./scripts/build.sh --output ./bin/builder`
+  - `go test ./server/core ./cli/builder ./server/serve -count=1 -timeout=120s`

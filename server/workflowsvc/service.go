@@ -510,6 +510,9 @@ func (s *Service) AddWorkflowTaskComment(ctx context.Context, req serverapi.Work
 	if err != nil {
 		return serverapi.WorkflowTaskCommentAddResponse{}, err
 	}
+	if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
+		s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "comment_added", req.TaskID, comment.ID)
+	}
 	return serverapi.WorkflowTaskCommentAddResponse{Comment: commentRecord(comment)}, nil
 }
 
@@ -532,14 +535,44 @@ func (s *Service) ReplaceWorkflowTaskComment(ctx context.Context, req serverapi.
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	return s.store.ReplaceComment(ctx, req.CommentID, req.Body)
+	taskID, projectID, workflowID, err := s.taskIdentityForComment(ctx, req.CommentID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ReplaceComment(ctx, req.CommentID, req.Body); err != nil {
+		return err
+	}
+	s.publishWorkflowEvent(ctx, projectID, workflowID, "task", "comment_updated", taskID, req.CommentID)
+	return nil
 }
 
 func (s *Service) DeleteWorkflowTaskComment(ctx context.Context, req serverapi.WorkflowTaskCommentDeleteRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	return s.store.DeleteComment(ctx, req.CommentID)
+	taskID, projectID, workflowID, err := s.taskIdentityForComment(ctx, req.CommentID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteComment(ctx, req.CommentID); err != nil {
+		return err
+	}
+	s.publishWorkflowEvent(ctx, projectID, workflowID, "task", "comment_deleted", taskID, req.CommentID)
+	return nil
+}
+
+func (s *Service) ListWorkflowTaskActivity(ctx context.Context, req serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskActivityListResponse{}, err
+	}
+	return s.view.ListTaskActivity(ctx, req)
+}
+
+func (s *Service) GetWorkflowTaskTeleportTarget(ctx context.Context, req serverapi.WorkflowTaskTeleportTargetRequest) (serverapi.WorkflowTaskTeleportTargetResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskTeleportTargetResponse{}, err
+	}
+	return s.view.GetTaskTeleportTarget(ctx, req)
 }
 
 func (s *Service) GetWorkflowBoard(ctx context.Context, req serverapi.WorkflowBoardRequest) (serverapi.WorkflowBoardResponse, error) {
@@ -622,7 +655,11 @@ func projectWorkflowLink(row workflowstore.ProjectWorkflowLinkRecord) serverapi.
 }
 
 func commentRecord(row workflowstore.CommentRecord) serverapi.WorkflowTaskComment {
-	return serverapi.WorkflowTaskComment{ID: row.ID, TaskID: string(row.TaskID), Body: row.Body, Author: row.Author, AuthorID: row.AuthorID, DeletedAt: row.DeletedAt, UpdatedAt: row.UpdatedAt}
+	return serverapi.WorkflowTaskComment{ID: row.ID, TaskID: string(row.TaskID), Body: row.Body, Author: row.Author, AuthorID: row.AuthorID, DeletedAt: row.DeletedAt, CreatedAtUnixMs: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+}
+
+func (s *Service) taskIdentityForComment(ctx context.Context, commentID string) (taskID string, projectID string, workflowID string, err error) {
+	return s.store.TaskIdentityForComment(ctx, strings.TrimSpace(commentID))
 }
 
 func outputFields(in []serverapi.WorkflowOutputField) []workflow.OutputField {

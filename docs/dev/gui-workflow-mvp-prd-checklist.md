@@ -134,13 +134,13 @@ Keep MVP sections in dependency order: macOS/native surface, visual design syste
 - [ ] Server exposes project-wide workflow board read model for selected project/workflow, including tasks from all project workspaces.
 - [ ] Server exposes task create action.
 - [ ] Server exposes task create/edit input for main workspace selection before task starts.
-- [ ] Server exposes task detail read model with worktree path, agent role, agent status, session ID/name, current node/status, completion state.
+- [x] Server exposes task detail read model with worktree path, agent role, agent status, session ID/name, current node/status, completion state.
 - [ ] Server exposes drag/drop task movement/start action for backlog-to-first-active-node start.
 - [ ] Server exposes task interrupt action for active/running task sessions.
-- [ ] Server exposes task/session attach identifiers needed by local terminal teleport.
-- [ ] Server exposes paginated unified task activity feed endpoint backed by existing persisted audit data only.
-- [ ] Task activity feed includes comments and transitions at minimum.
-- [ ] Task activity feed may include other useful entries only when already stored and ready to query; do not invent new tables or data types only for the feed.
+- [x] Server exposes task/session attach identifiers needed by local terminal teleport.
+- [x] Server exposes paginated unified task activity feed endpoint backed by existing persisted audit data only.
+- [x] Task activity feed includes comments and transitions at minimum.
+- [x] Task activity feed may include other useful entries only when already stored and ready to query; do not invent new tables or data types only for the feed.
 - [ ] Server exposes enough task state changes for visual board updates.
 - [x] Board data refresh uses initial snapshot plus WebSocket updates.
 - [x] Reconnect triggers full board refresh.

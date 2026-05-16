@@ -2,10 +2,12 @@ package workflowview
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
 	"builder/server/metadata"
+	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
 	"builder/server/workflowstore"
 	"builder/shared/config"
@@ -324,6 +326,251 @@ func TestTaskDetailProjectsWaitingAskRun(t *testing.T) {
 	}
 	if len(detail.Runs) != 1 || detail.Runs[0].WaitingAskID != "ask-view-1" || detail.Runs[0].SessionID != sessionID {
 		t.Fatalf("runs do not project waiting ask: %+v", detail.Runs)
+	}
+}
+
+func TestTaskDetailProjectsGuiIdentityWorktreeStatusActionsAndAttention(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	worktreeID := "worktree-detail"
+	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), DisplayName: "Task worktree", Availability: "available", BuilderManaged: 1, CreatedBranch: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 2}); err != nil {
+		t.Fatalf("UpsertWorktree: %v", err)
+	}
+	if _, err := store.Queries().UpdateTaskManagedWorktree(ctx, sqlitegen.UpdateTaskManagedWorktreeParams{ID: string(task.ID), ManagedWorktreeID: sql.NullString{String: worktreeID, Valid: true}, UpdatedAtUnixMs: 3}); err != nil {
+		t.Fatalf("UpdateTaskManagedWorktree: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := workflowStore.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	sessionID := "session-detail"
+	if _, err := store.DB().ExecContext(ctx, `INSERT INTO sessions (id, project_id, workspace_id, worktree_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, launch_visible, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json) VALUES (?, ?, ?, ?, ?, 'Task session', '', '', '', 1, 1, 0, 0, 0, 0, 1, 'subdir', '{}', '{}', '{}', '{}')`, sessionID, binding.ProjectID, binding.WorkspaceID, worktreeID, "sessions/"+sessionID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if err := workflowStore.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	if err := workflowStore.SetRunWaitingAsk(ctx, started.RunID, claimed.Generation, "ask-detail"); err != nil {
+		t.Fatalf("SetRunWaitingAsk: %v", err)
+	}
+
+	detail, err := view.GetTask(ctx, string(task.ID))
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if detail.Project.ProjectID != binding.ProjectID || detail.Project.ProjectKey != "WOR" || detail.Workflow.WorkflowID != string(workflowID) || !detail.Workflow.IsProjectDefault {
+		t.Fatalf("identity = project:%+v workflow:%+v", detail.Project, detail.Workflow)
+	}
+	if detail.ManagedWorktree.WorktreeID != worktreeID || !detail.ManagedWorktree.BuilderManaged || detail.ManagedWorktree.CanonicalRoot == "" {
+		t.Fatalf("managed worktree = %+v", detail.ManagedWorktree)
+	}
+	if detail.Status.Kind != "waiting_question" || !detail.Actions.CanInterrupt {
+		t.Fatalf("status/actions = %+v/%+v", detail.Status, detail.Actions)
+	}
+	if len(detail.Attention) != 1 || detail.Attention[0].Kind != "question" || detail.Attention[0].AskID != "ask-detail" {
+		t.Fatalf("attention = %+v", detail.Attention)
+	}
+	if len(detail.Placements) < 2 || detail.Placements[1].NodeDisplayName == "" || detail.Placements[1].NodeKind == "" {
+		t.Fatalf("placements missing node metadata: %+v", detail.Placements)
+	}
+	if len(detail.Runs) != 1 || detail.Runs[0].SessionName != "Task session" || detail.Runs[0].Role != "coder" || detail.Runs[0].Status != "waiting_question" {
+		t.Fatalf("runs = %+v", detail.Runs)
+	}
+}
+
+func TestTaskActivityListMergesDurableTaskEventsAndPaginatesStably(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	comment, err := workflowStore.AddComment(ctx, task.ID, "note", "user", "nek")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if err := workflowStore.ReplaceComment(ctx, comment.ID, "edited note"); err != nil {
+		t.Fatalf("ReplaceComment: %v", err)
+	}
+	claimed, err := workflowStore.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := workflowStore.InterruptRunGeneration(ctx, started.RunID, claimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+	if err := workflowStore.CancelTask(ctx, task.ID, "stop"); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE task_comments SET updated_at_unix_ms = 111 WHERE id = ?`, comment.ID); err != nil {
+		t.Fatalf("force comment timestamp: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE task_runs SET started_at_unix_ms = 111, interrupted_at_unix_ms = 111, updated_at_unix_ms = 111 WHERE id = ?`, string(started.RunID)); err != nil {
+		t.Fatalf("force run timestamp: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE tasks SET canceled_at_unix_ms = 111, updated_at_unix_ms = 111 WHERE id = ?`, string(task.ID)); err != nil {
+		t.Fatalf("force task timestamp: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE task_transitions SET created_at_unix_ms = 111, applied_at_unix_ms = 111 WHERE task_id = ?`, string(task.ID)); err != nil {
+		t.Fatalf("force transition timestamp: %v", err)
+	}
+
+	first, err := view.ListTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: string(task.ID), PageSize: 2})
+	if err != nil {
+		t.Fatalf("ListTaskActivity first: %v", err)
+	}
+	second, err := view.ListTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: string(task.ID), PageSize: 10, PageToken: first.NextPageToken})
+	if err != nil {
+		t.Fatalf("ListTaskActivity second: %v", err)
+	}
+	seen := map[string]bool{}
+	kinds := map[string]bool{}
+	for _, item := range append(first.Items, second.Items...) {
+		if seen[item.ActivityID] {
+			t.Fatalf("duplicate activity item across pages: %s", item.ActivityID)
+		}
+		seen[item.ActivityID] = true
+		kinds[item.Type] = true
+	}
+	for _, kind := range []string{"comment", "transition", "run_started", "run_interrupted", "task_canceled"} {
+		if !kinds[kind] {
+			t.Fatalf("activity kinds = %+v, missing %s; items=%+v/%+v", kinds, kind, first.Items, second.Items)
+		}
+	}
+	if first.Items[0].OccurredAtUnixMs != 111 || first.Items[1].OccurredAtUnixMs != 111 || first.NextPageToken == "" {
+		t.Fatalf("first page = %+v", first)
+	}
+}
+
+func TestTaskActivityProjectsApprovalSnapshots(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = 'done'`, string(workflowID)); err != nil {
+		t.Fatalf("require approval: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	pending, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "ship"}, Commentary: "needs approval", Actor: "agent"})
+	if err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	resp, err := view.ListTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: string(task.ID)})
+	if err != nil {
+		t.Fatalf("ListTaskActivity: %v", err)
+	}
+	var transition serverapi.WorkflowTaskTransition
+	hasRunCompleted := false
+	for _, item := range resp.Items {
+		if item.Type == "run_completed" && item.Run.ID == string(started.RunID) {
+			hasRunCompleted = true
+		}
+		if item.Type == "transition" && item.Transition.ID == string(pending.TransitionID) {
+			transition = item.Transition
+		}
+	}
+	if !hasRunCompleted {
+		t.Fatalf("activity missing run_completed item: %+v", resp.Items)
+	}
+	if transition.ID == "" || transition.SourceNodeID == "" || transition.SourceNodeDisplayName != "Agent" || transition.TransitionDisplayName != "Done" || transition.WorkflowRevisionSeen == 0 || transition.Actor != "agent" || transition.Commentary != "needs approval" || transition.AppliedAtUnixMs != 0 {
+		t.Fatalf("transition snapshot = %+v", transition)
+	}
+	if len(transition.Edges) != 1 || !transition.Edges[0].RequiresApproval || transition.Edges[0].TargetNodeDisplayName == "" || len(transition.Edges[0].OutputRequirements) != 1 || transition.Edges[0].WorkflowRevisionSeen == 0 {
+		t.Fatalf("edge snapshot = %+v", transition.Edges)
+	}
+}
+
+func TestTaskTeleportTargetReturnsIdentifiersOrUnavailableReason(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	unavailable, err := view.GetTaskTeleportTarget(ctx, serverapi.WorkflowTaskTeleportTargetRequest{TaskID: string(task.ID)})
+	if err != nil {
+		t.Fatalf("GetTaskTeleportTarget unavailable: %v", err)
+	}
+	if unavailable.Available || unavailable.FailureReason == "" {
+		t.Fatalf("unavailable target = %+v", unavailable)
+	}
+	worktreeID := "worktree-teleport"
+	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), DisplayName: "Task worktree", Availability: "available", BuilderManaged: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 1}); err != nil {
+		t.Fatalf("UpsertWorktree: %v", err)
+	}
+	if _, err := store.Queries().UpdateTaskManagedWorktree(ctx, sqlitegen.UpdateTaskManagedWorktreeParams{ID: string(task.ID), ManagedWorktreeID: sql.NullString{String: worktreeID, Valid: true}, UpdatedAtUnixMs: 2}); err != nil {
+		t.Fatalf("UpdateTaskManagedWorktree: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	claimed, err := workflowStore.ClaimRun(ctx, started.RunID, 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	sessionID := "session-teleport"
+	if _, err := store.DB().ExecContext(ctx, `INSERT INTO sessions (id, project_id, workspace_id, worktree_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, launch_visible, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json) VALUES (?, ?, ?, ?, ?, '', '', '', '', 1, 1, 0, 0, 0, 0, 1, 'subdir', '{}', '{}', '{}', '{}')`, sessionID, binding.ProjectID, binding.WorkspaceID, worktreeID, "sessions/"+sessionID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if err := workflowStore.AttachRunSession(ctx, started.RunID, claimed.Generation, sessionID); err != nil {
+		t.Fatalf("AttachRunSession: %v", err)
+	}
+	target, err := view.GetTaskTeleportTarget(ctx, serverapi.WorkflowTaskTeleportTargetRequest{TaskID: string(task.ID), RunID: string(started.RunID)})
+	if err != nil {
+		t.Fatalf("GetTaskTeleportTarget: %v", err)
+	}
+	if !target.Available || target.SessionID != sessionID || target.ProjectID != binding.ProjectID || target.WorkspaceID != binding.WorkspaceID || target.WorktreeID != worktreeID || target.CwdRelpath != "subdir" {
+		t.Fatalf("target = %+v", target)
 	}
 }
 

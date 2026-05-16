@@ -20,7 +20,7 @@ func (s *Store) AddComment(ctx context.Context, taskID workflow.TaskID, body str
 	if err := s.queries.InsertTaskComment(ctx, sqlitegen.InsertTaskCommentParams{ID: id, TaskID: string(taskID), Body: trimmed, AuthorKind: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), SourceRunID: sql.NullString{}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, MetadataJson: "{}"}); err != nil {
 		return CommentRecord{}, err
 	}
-	return CommentRecord{ID: id, TaskID: taskID, Body: trimmed, Author: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), UpdatedAt: now}, nil
+	return CommentRecord{ID: id, TaskID: taskID, Body: trimmed, Author: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func (s *Store) ReplaceComment(ctx context.Context, commentID string, body string) error {
@@ -50,6 +50,19 @@ func (s *Store) DeleteComment(ctx context.Context, commentID string) error {
 	return nil
 }
 
+func (s *Store) TaskIdentityForComment(ctx context.Context, commentID string) (taskID string, projectID string, workflowID string, err error) {
+	row := s.metadata.DB().QueryRowContext(ctx, `
+SELECT t.id, t.project_id, t.workflow_id
+FROM task_comments c
+JOIN tasks t ON t.id = c.task_id
+WHERE c.id = ?
+LIMIT 1`, strings.TrimSpace(commentID))
+	if scanErr := row.Scan(&taskID, &projectID, &workflowID); scanErr != nil {
+		return "", "", "", scanErr
+	}
+	return taskID, projectID, workflowID, nil
+}
+
 func (s *Store) ListComments(ctx context.Context, taskID workflow.TaskID, includeDeleted bool) ([]CommentRecord, error) {
 	rows, err := s.queries.ListTaskComments(ctx, sqlitegen.ListTaskCommentsParams{TaskID: string(taskID), IncludeDeleted: boolToInt64(includeDeleted)})
 	if err != nil {
@@ -57,7 +70,7 @@ func (s *Store) ListComments(ctx context.Context, taskID workflow.TaskID, includ
 	}
 	out := make([]CommentRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, CommentRecord{ID: row.ID, TaskID: workflow.TaskID(row.TaskID), Body: row.Body, Author: row.AuthorKind, AuthorID: row.AuthorID, DeletedAt: row.DeletedAtUnixMs, UpdatedAt: row.UpdatedAtUnixMs})
+		out = append(out, CommentRecord{ID: row.ID, TaskID: workflow.TaskID(row.TaskID), Body: row.Body, Author: row.AuthorKind, AuthorID: row.AuthorID, DeletedAt: row.DeletedAtUnixMs, CreatedAt: row.CreatedAtUnixMs, UpdatedAt: row.UpdatedAtUnixMs})
 	}
 	return out, nil
 }

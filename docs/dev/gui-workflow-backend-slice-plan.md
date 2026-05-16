@@ -734,7 +734,9 @@ Current status:
 - [x] Slice 0 implementation complete.
 - [x] Slice 1 Home/project admin/project key/workspaces implementation complete.
 - [x] Slice 2 workflow picker, selected board, groups, and live updates implementation complete.
-- [ ] Next action: implement Slice 5 task detail, activity feed, comments, and teleport.
+- [x] Slice 3 task source workspace and Backlog editing implementation complete.
+- [x] Slice 4 actions, attention inbox, questions, and approvals implementation complete.
+- [x] Slice 5 implementation complete.
 
 Source-of-truth rules:
 
@@ -924,32 +926,32 @@ Completion criteria:
 
 ### Slice 5 Checklist: Task Detail, Activity Feed, Comments, Teleport
 
-Status: not started.
+Status: complete.
 
 Goal: task detail dialog has complete server-backed identity, status, feed, comments, and temporary TUI teleport target data.
 
 Implementation checklist:
 
-- [ ] Recon existing task get/detail, comments CRUD, transition persistence, run/session metadata, cancellation metadata, and CLI/TUI attach identifiers.
-- [ ] Add failing tests that expanded `workflow.task.get` includes project/workflow identity, source workspace, managed worktree, placements, runs/sessions, unresolved attention, cancellation, and action flags.
-- [ ] Add failing tests for `workflow.task.activity.list` merging comments, transitions, run starts/completions/interruptions, and task cancellation newest-first.
-- [ ] Add failing tests for stable activity pagination under same-timestamp rows.
-- [ ] Add failing tests that approval activity includes stored source node, transition label/id, target nodes, requirements, commentary, graph revision, and stale-warning inputs.
-- [ ] Add failing tests that comment create/edit/delete updates activity feed and emits live-update invalidations.
-- [ ] Add failing tests for `workflow.task.teleportTarget.get` returning identifiers for runs with sessions and unavailable reason for pre-start/no-session tasks.
-- [ ] Expand task detail read model without loading full transcripts or `events.jsonl`.
-- [ ] Implement activity feed as a read model over existing durable comments, transitions, task runs, and cancellation data; do not add a separate GUI event table solely for feed.
-- [ ] Wire activity and teleport routes through DTOs, service contract, client, and transport.
-- [ ] Keep teleport endpoint identifier-only; GUI/native bridge owns terminal launch and local CLI command.
-- [ ] Sync GUI docs if task detail, feed item kinds, or teleport contract changes.
+- [x] Recon existing task get/detail, comments CRUD, transition persistence, run/session metadata, cancellation metadata, and CLI/TUI attach identifiers.
+- [x] Add failing tests that expanded `workflow.task.get` includes project/workflow identity, source workspace, managed worktree, placements, runs/sessions, unresolved attention, cancellation, and action flags.
+- [x] Add failing tests for `workflow.task.activity.list` merging comments, transitions, run starts/completions/interruptions, and task cancellation newest-first.
+- [x] Add failing tests for stable activity pagination under same-timestamp rows.
+- [x] Add failing tests that approval activity includes stored source node, transition label/id, target nodes, requirements, commentary, graph revision, and stale-warning inputs.
+- [x] Add failing tests that comment create/edit/delete updates activity feed and emits live-update invalidations.
+- [x] Add failing tests for `workflow.task.teleportTarget.get` returning identifiers for runs with sessions and unavailable reason for pre-start/no-session tasks.
+- [x] Expand task detail read model without loading full transcripts or `events.jsonl`.
+- [x] Implement activity feed as a read model over existing durable comments, transitions, task runs, and cancellation data; do not add a separate GUI event table solely for feed.
+- [x] Wire activity and teleport routes through DTOs, service contract, client, and transport.
+- [x] Keep teleport endpoint identifier-only; GUI/native bridge owns terminal launch and local CLI command.
+- [x] Sync GUI docs if task detail, feed item kinds, or teleport contract changes.
 
 Completion criteria:
 
-- [ ] Task detail route gives GUI enough data for fixed header, actions, unresolved attention, comments, feed, and teleport button state.
-- [ ] Activity feed paginates newest-first from durable data without transcript replay.
-- [ ] Comments remain full CRUD and visible in feed.
-- [ ] Teleport target returns plain unavailable reason when no attachable session exists.
-- [ ] Verification commands pass:
+- [x] Task detail route gives GUI enough data for fixed header, actions, unresolved attention, comments, feed, and teleport button state.
+- [x] Activity feed paginates newest-first from durable data without transcript replay.
+- [x] Comments remain full CRUD and visible in feed.
+- [x] Teleport target returns plain unavailable reason when no attachable session exists.
+- [x] Verification commands pass:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/session ./server/runtimeview`
   - `./scripts/build.sh --output ./bin/builder`
 

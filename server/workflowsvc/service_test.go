@@ -126,6 +126,63 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 	}
 }
 
+func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	added, err := service.AddWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentAddRequest{TaskID: task.Task.ID, Body: "first", Author: "user", AuthorID: "nek"})
+	if err != nil {
+		t.Fatalf("AddWorkflowTaskComment: %v", err)
+	}
+	if added.Comment.CreatedAtUnixMs == 0 || added.Comment.UpdatedAt == 0 {
+		t.Fatalf("added comment missing timestamps: %+v", added.Comment)
+	}
+	if err := service.ReplaceWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentReplaceRequest{CommentID: added.Comment.ID, Body: "updated"}); err != nil {
+		t.Fatalf("ReplaceWorkflowTaskComment: %v", err)
+	}
+	activity, err := service.ListWorkflowTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("ListWorkflowTaskActivity: %v", err)
+	}
+	if len(activity.Items) == 0 || activity.Items[0].Type != "comment" || activity.Items[0].Comment.Body != "updated" {
+		t.Fatalf("activity after replace = %+v", activity.Items)
+	}
+	if err := service.DeleteWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentDeleteRequest{CommentID: added.Comment.ID}); err != nil {
+		t.Fatalf("DeleteWorkflowTaskComment: %v", err)
+	}
+	activity, err = service.ListWorkflowTaskActivity(ctx, serverapi.WorkflowTaskActivityListRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("ListWorkflowTaskActivity after delete: %v", err)
+	}
+	for _, item := range activity.Items {
+		if item.Type == "comment" && item.Comment.ID == added.Comment.ID {
+			t.Fatalf("deleted comment visible in activity: %+v", activity.Items)
+		}
+	}
+	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
+	if err != nil {
+		t.Fatalf("ListWorkflowEventsAfter: %v", err)
+	}
+	actions := map[string]bool{}
+	for _, event := range events {
+		if event.Resource == "task" {
+			actions[event.Action] = true
+		}
+	}
+	for _, action := range []string{"comment_added", "comment_updated", "comment_deleted"} {
+		if !actions[action] {
+			t.Fatalf("events = %+v, missing %s", events, action)
+		}
+	}
+}
+
 func TestServiceAnswersTaskQuestionWithoutControllerLease(t *testing.T) {
 	ctx := context.Background()
 	service, binding, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)

@@ -84,7 +84,7 @@ This map keeps GUI sequencing concrete. "Ready now" means the GUI can build the 
 - [ ] Backend-gated: Board read-only views. Depends on GUI backend Slice 2 workflow picker, selected board, groups, and live updates.
 - [ ] Backend-gated: Task create, Backlog editing, source workspace, drag-to-start, and worktree/branch display. Depends on GUI backend Slice 3 task source workspace and Backlog editing.
 - [ ] Backend-gated: Cancel, resume, interrupt, attention rows, questions, and approvals. Depends on GUI backend Slice 4 actions, attention inbox, questions, and approvals.
-- [ ] Backend-gated: Task detail read-only views, activity feed, comments, and teleport identifiers. Depends on GUI backend Slice 5 task detail, activity feed, comments, and teleport target.
+- [x] Backend-gated: Task detail read-only views, activity feed, comments, and teleport identifiers. Depends on GUI backend Slice 5 task detail, activity feed, comments, and teleport target.
 - [ ] Backend-gated: Manual moves/recovery controls. Later than MVP unless promoted into a GUI backend slice.
 
 ## PRD Coverage Audit
@@ -203,11 +203,11 @@ This inventory tracks user-facing capabilities described by `docs/dev/async-work
 - [ ] MVP: Server exposes task create/edit input for main workspace selection before task starts.
 - [ ] MVP: Server exposes drag/drop task movement/start action for backlog-to-first-active-node start.
 - [ ] MVP: Server exposes task interrupt action for active/running task sessions.
-- [ ] MVP: Server exposes task detail read model with worktree path, agent role, agent status, session ID/name, current node/status, and completion state.
-- [ ] MVP: Server exposes task/session attach identifiers needed by local terminal teleport.
-- [ ] MVP: Server exposes paginated unified task activity feed endpoint for comments and changes.
-- [ ] MVP: Task activity feed includes comments and transitions at minimum.
-- [ ] MVP: Task activity feed may include other useful entries only when already stored and ready to query; do not invent new tables or data types only for the feed.
+- [x] MVP: Server exposes task detail read model with worktree path, agent role, agent status, session ID/name, current node/status, and completion state.
+- [x] MVP: Server exposes task/session attach identifiers needed by local terminal teleport.
+- [x] MVP: Server exposes paginated unified task activity feed endpoint for comments and changes.
+- [x] MVP: Task activity feed includes comments and transitions at minimum.
+- [x] MVP: Task activity feed may include other useful entries only when already stored and ready to query; do not invent new tables or data types only for the feed.
 - [ ] MVP: Server exposes enough task state changes for visual board updates.
 - [x] MVP decision: Board data refresh uses initial snapshot plus WebSocket updates.
 - [x] MVP decision: Reconnect triggers full board refresh.
