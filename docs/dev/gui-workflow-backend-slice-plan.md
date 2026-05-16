@@ -194,7 +194,8 @@ Changed server API:
   - Add `project_key string`
   - Keep `display_name string`
   - Keep `workspace_root string`
-  - Validate `project_key` with project-key rules: uppercase, globally unique, 2-8 chars, `^[A-Z][A-Z0-9]{1,7}$`.
+  - Validate non-empty `project_key` with project-key rules: uppercase, globally unique, 2-8 chars, `^[A-Z][A-Z0-9]{1,7}$`.
+  - Omitted `project_key` keeps existing allocation/backfill behavior for current callers.
 
 - `ProjectCreateResponse`
   - Include project key in `ProjectBinding`.
@@ -216,7 +217,6 @@ New DTO fields:
   - `task_count int`
   - `attention_count int`
   - `workflow_count int`
-  - `has_valid_default_workflow bool`
 
 - `ProjectWorkspaceSummary`
   - `workspace_id string`
@@ -230,6 +230,8 @@ Store/query changes:
 
 - Add paginated project-home query sorted by latest activity descending.
 - Latest activity should consider project/workspace/session/task activity where cheap and indexed.
+- Add the monotonic project/global event sequence foundation used by Home watermarks; Slice 2 wires the WebSocket subscription on top.
+- Add an attention-count helper over the same durable sources later exposed by the Slice 4 attention inbox: pending approvals, waiting asks, interrupted runs, and read-model-only validation blockers.
 - Project key creation should happen in the same transaction as project/workspace creation.
 - Expose project key collision as typed validation error, not raw SQLite unique text.
 - `project.workspace.list` can initially reuse existing `ListProjectWorkspaces` query.
@@ -243,6 +245,8 @@ Tests:
 - Home list is paginated and sorted by latest activity descending.
 - Home summary includes project key and primary workspace metadata.
 - Home summary includes default workflow ID/name/validity so clicking a project can open the default workflow board without an extra workflow list round trip.
+- Home summary represents no valid default workflow as `default_workflow_valid=false`; GUI opens the blocker state and keeps New Task disabled.
+- Home summary includes event watermark and attention count from the durable attention sources available at that slice.
 - Workspace list returns primary/default workspace and all attached workspaces.
 
 ## Task Source Workspace And Backlog Editing
@@ -407,11 +411,18 @@ Workflow group model:
 - Proposed schema:
   - `workflow_node_groups(id, workflow_id, group_key, display_name, sort_order, metadata_json)`
   - `workflow_nodes.group_id` nullable reference.
+- Minimal authoring mutation contract:
+  - Existing workflow definition create/update APIs accept optional `node_groups []WorkflowNodeGroupSpec`.
+  - Workflow node specs accept optional `group_key`.
+  - `WorkflowNodeGroupSpec` fields: `group_key string`, `display_name string`, `sort_order int`, `metadata_json string`.
+  - Group keys are unique within a workflow, stable across graph revisions, and use the same key style as node keys.
+  - Node group assignment is validated against declared groups during workflow definition create/update.
 - Grouped workflows with group metadata render group islands.
 - Workflows without group metadata return one implicit ungrouped group or empty `groups` with groupless columns.
 - Group metadata changes are graph-affecting and increment `workflows.graph_revision`.
-- Add service/store/API support for group metadata before relying on grouped board read models. GUI MVP consumes groups but does not author them.
-- Add internal CLI support only if needed to seed grouped workflows for fake-runtime/manual QA.
+- Add service/store/API support for group metadata before relying on grouped board read models.
+- GUI MVP consumes groups but does not author them; CLI/API workflow authoring can seed groups through the workflow definition path.
+- Add internal CLI support only if existing workflow authoring cannot seed grouped workflows for fake-runtime/manual QA.
 
 Live updates:
 
@@ -433,6 +444,7 @@ Live updates:
     - `occurred_at_unix_ms int64`
 - Event resources include `project`, `workspace`, `workflow`, `board`, `task`, `run`, `transition`, `comment`, and `attention`.
 - Board and Home read models include the latest event sequence as a snapshot watermark. Clients subscribe with that watermark to avoid fetch-then-subscribe races.
+- `project_id` is optional for the subscription. Empty `project_id` subscribes to global Home invalidations across projects; non-empty `project_id` subscribes to one project. `workflow_id` is valid only with non-empty `project_id`.
 - GUI treats events as invalidations and refetches relevant read models.
 - Reconnect always performs full refresh; no mutation replay.
 
@@ -447,8 +459,10 @@ Tests:
 - Card action flags follow single active run interrupt decision.
 - Grouped workflow returns group metadata and node membership.
 - Ungrouped workflow returns deterministic ungrouped representation.
+- Workflow definition create/update validates group keys, node assignments, and graph revision bumps for group metadata changes.
 - Subscription emits invalidation events for task create/start/comment/transition/cancel.
 - Subscription can resume from board snapshot watermark and does not lose mutations between fetch and subscribe.
+- Empty-project subscription resumes from Home snapshot watermark and does not lose global Home/attention mutations between fetch and subscribe.
 
 ## Actions, Attention Inbox, Questions, Approvals
 
@@ -479,6 +493,7 @@ New server API:
     - `items []WorkflowAttentionItem`
     - `next_page_token string`
     - `generated_at_unix_ms int64`
+    - `latest_event_sequence int64`
 
 `project_id` is optional. Empty `project_id` returns the global Home attention inbox across projects; non-empty `project_id` filters to one project.
 
@@ -510,7 +525,6 @@ Changed server API:
     - `ask_id string`
     - `selected_option_number int`
     - `freeform_answer string`
-    - `answer string`
     - `client_request_id string`
   - Response: `WorkflowTaskQuestionAnswerResponse`
   - Fields:
@@ -553,8 +567,10 @@ Rules:
 - Attention read model includes approvals from `task_transitions.state = 'pending_approval'`.
 - Attention read model includes waiting questions from `task_runs.waiting_ask_id`.
 - Attention read model includes interrupted active agent runs.
+- `validation_blocker` is read-model-only. It is derived from interrupted run reason metadata or workflow validation state and must not introduce a separate durable validation-blocker table.
 - Question details are resolved through a task/run/ask bridge when task detail opens contextual resume.
 - Question answer action validates that `ask_id` belongs to the task run/session, then delegates to the existing prompt-control answer path with server-owned workflow authority instead of requiring GUI to hold a TUI controller lease.
+- Question answer accepts exactly one answer mode. `selected_option_number` is used for option asks, `freeform_answer` is used for freeform asks, and conflicting/empty mode input returns typed validation. `client_request_id` is an idempotency key scoped to task/run/ask and should return the first successful answer result on retry.
 - If ask details cannot rehydrate, represent it as interrupted/validation attention with actionable resume path.
 - Board/card Interrupt is available only when exactly one active run is interruptible.
 - Task detail exposes per-run inline Interrupt controls when multiple active runs/fan-out branches exist.
@@ -752,7 +768,7 @@ Completion criteria:
 - [ ] Missing/expired auth produces generic readiness blocker, not a special GUI auth flow.
 - [ ] `server.capabilities.get` returns every MVP capability ID.
 - [ ] Verification commands pass:
-  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/auth ./server/bootstrap ./server/embedded`
+  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/auth ./server/bootstrap ./server/embedded ./server/core ./server/serve ./cli/app`
   - `./scripts/build.sh --output ./bin/builder`
 
 ### Slice 1 Checklist: Home, Project Admin, Project Key, Workspaces
@@ -766,7 +782,10 @@ Implementation checklist:
 - [ ] Recon `server/projectview`, `server/metadata`, existing SQLC queries, project binding DTOs, project create tests, workspace list behavior, and workflow link/default metadata.
 - [ ] Add failing tests for explicit `project_key` create, invalid key, collision, transactional rollback, and omitted-key compatibility.
 - [ ] Add failing tests for `project.home.list` pagination, latest-activity sort, project key, primary workspace summary, counts, default workflow ID/name/validity, and event sequence watermark.
+- [ ] Add failing tests for no-valid-default-workflow Home summary so GUI can open a blocker state and keep New Task disabled.
 - [ ] Add failing tests for `project.workspace.list` returning all workspaces plus default/primary workspace.
+- [ ] Add or reuse monotonic event sequence storage/emitter foundation for Home watermarks; Slice 2 adds subscription delivery.
+- [ ] Add attention-count helper over pending approvals, waiting asks, interrupted runs, and read-model-only validation blockers.
 - [ ] Add/adjust SQL queries and store methods for paginated Home summaries without full scans over unbounded data.
 - [ ] Wire `project.home.list` and `project.workspace.list` through DTOs, method constants, route registry, service contract, client, and transport.
 - [ ] Add `project_key` to project create request/response and project identity DTOs where GUI displays identity.
@@ -779,9 +798,10 @@ Completion criteria:
 - [ ] GUI can create project with chosen key.
 - [ ] Existing project create callers still work without sending key.
 - [ ] Home summary has default workflow ID/name/validity.
+- [ ] Home summary exposes event watermark and attention count without depending on the Slice 4 paginated attention API.
 - [ ] Home and workspace list routes are paginated/typed and client-callable.
 - [ ] Verification commands pass:
-  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/projectview ./server/metadata ./server/workflowstore ./server/workflowview`
+  - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/projectview ./server/metadata ./server/workflowstore ./server/workflowview ./server/core ./server/serve ./cli/app`
   - `./scripts/build.sh --output ./bin/builder`
 
 ### Slice 2 Checklist: Workflow Picker, Selected Board, Groups, Live Updates
@@ -794,16 +814,19 @@ Implementation checklist:
 
 - [ ] Recon `server/workflowview`, workflow graph/link/default storage, scheduler/store task state, existing streaming routes, and project/session event plumbing.
 - [ ] Add failing tests for selected-workflow board returning only selected workflow cards.
+- [ ] Add failing tests for picker ordering by default, MRU, then display name.
 - [ ] Add failing tests for picker default flag, validation blockers, display names, graph revisions, and unlinked workflow handling.
 - [ ] Add failing tests that board columns expose `WorkflowBoardNodeSummary` and do not leak authoring prompt templates/output schemas.
 - [ ] Add failing tests for column order, Backlog left, Done preview limit, card statuses, action flags, and multi-active interrupt detail requirement.
 - [ ] Add failing tests for grouped workflow metadata, deterministic ungrouped representation, and graph revision bump on group metadata changes.
 - [ ] Add failing tests for `workflow.subscribeProject` invalidation events, monotonic sequence, `after_sequence`, and snapshot watermark race safety.
 - [ ] Add visual group schema/store/service/API support before relying on grouped board output.
+- [ ] Extend workflow definition create/update to accept optional visual groups and node group assignments for CLI/API seeding.
 - [ ] Implement selected board read model and picker DTOs using server-native state facts.
 - [ ] Implement card action fact computation without GUI-only state.
 - [ ] Implement project/workflow invalidation event storage or sequence source with monotonic ordering.
 - [ ] Wire `workflow.board.get` and `workflow.subscribeProject` through contracts, clients, and transport/streaming layers.
+- [ ] Support empty-project subscription for global Home invalidations from Home read-model watermarks.
 - [ ] Use legacy/default workspace fallback for card workspace summaries until Slice 3 makes task source workspace authoritative.
 - [ ] Sync GUI docs if board grouping, status, or action semantics change.
 
@@ -813,6 +836,7 @@ Completion criteria:
 - [ ] Live update subscription can resume from read-model watermark without lost invalidations.
 - [ ] Board DTO contains no workflow authoring prompt/template internals.
 - [ ] Group metadata is first-class and revisioned.
+- [ ] Picker orders default workflow first, then MRU, then display name.
 - [ ] Verification commands pass:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/workflowscheduler`
   - `./scripts/build.sh --output ./bin/builder`
@@ -829,11 +853,13 @@ Implementation checklist:
 - [ ] Add failing migration/store tests for `tasks.source_workspace_id`, project-bound workspace invariant, backfill/default behavior, and legacy fallback.
 - [ ] Add failing service/API tests for task create with selected workspace, omitted body, omitted workspace defaulting to primary, and foreign-project workspace rejection.
 - [ ] Add failing tests for `workflow.task.update` editing title/body/source workspace before start and rejecting edits after start/cancel.
+- [ ] Add failing tests for GUI drag-to-start/drop semantics using `workflow.task.start`: Backlog task dropped onto first active node starts immediately, uses selected workflow/source workspace, and emits invalidation.
 - [ ] Add failing tests that `EnsureTaskWorktree` uses task source workspace before primary fallback.
 - [ ] Add migration with DB-level project-bound invariant when feasible; otherwise enforce equivalent checked transaction and document reason in code.
 - [ ] Update task create validation so body is optional.
 - [ ] Add task source workspace fields to summary/detail/card DTOs and read models.
 - [ ] Wire `workflow.task.update` through DTOs, route registry, service contract, client, and transport.
+- [ ] Confirm existing `workflow.task.start` is sufficient for GUI drop-to-start or narrow its request/validation without adding a visible Start button concept.
 - [ ] Update worktree service to select source workspace first.
 - [ ] Sync GUI docs if pre-start edit rules or workspace labels change.
 
@@ -842,6 +868,7 @@ Completion criteria:
 - [ ] New tasks persist source workspace and optional body.
 - [ ] Task source workspace is immutable after first run/start.
 - [ ] Worktree creation uses selected source workspace.
+- [ ] Drag-to-start behavior is covered by server tests and invalidation events.
 - [ ] Board/task detail expose source workspace from persisted task state.
 - [ ] Verification commands pass:
   - `./scripts/test.sh ./shared/serverapi ./shared/servicecontract ./shared/client ./shared/protocol ./shared/rpccontract ./server/transport ./server/metadata ./server/workflowsvc ./server/workflowstore ./server/workflowview ./server/worktree`
@@ -858,10 +885,11 @@ Implementation checklist:
 - [ ] Recon workflow run interrupt/resume internals, approval transitions, waiting ask markers, prompt-control answer path, cancellation behavior, and existing comments/transition persistence.
 - [ ] Add failing tests for global and project-filtered `workflow.attention.list` returning approvals, waiting asks, interrupted runs, and validation blockers newest-first.
 - [ ] Add failing tests for `workflow.task.attention.list` resolving all unresolved task attention items.
+- [ ] Add failing tests that `workflow.attention.list` includes `latest_event_sequence` and can pair with empty-project subscription without fetch/subscribe races.
 - [ ] Add failing tests for interrupt: no `run_id` succeeds with one active run, conflicts with multiple active runs, and specific `run_id` interrupts only that run.
 - [ ] Add failing tests for resume: no `run_id` succeeds with one interrupted run and conflicts with multiple interrupted runs.
 - [ ] Add failing tests that approval uses GUI field `task_transition_id` and applies stored transition snapshot, not current graph.
-- [ ] Add failing tests for task-scoped question answer validating task/run/ask membership and succeeding without GUI-held controller lease.
+- [ ] Add failing tests for task-scoped question answer validating task/run/ask membership, rejecting conflicting answer modes, enforcing idempotent `client_request_id`, and succeeding without GUI-held controller lease.
 - [ ] Add failing tests that cancel suppresses scheduling and interrupts active runs with backend default reason.
 - [ ] Implement attention read model over durable approval, ask, interrupted-run, and validation-blocker sources.
 - [ ] Wire `workflow.task.interrupt`, `workflow.attention.list`, `workflow.task.attention.list`, and `workflow.task.question.answer`.
@@ -873,6 +901,7 @@ Implementation checklist:
 Completion criteria:
 
 - [ ] Home attention inbox can list all MVP attention types globally and per project.
+- [ ] Attention list includes an event watermark usable with empty-project subscription.
 - [ ] Task detail can operate per-run interrupt/resume for fan-out or multi-active tasks.
 - [ ] GUI can answer task-scoped questions without taking a TUI controller lease.
 - [ ] GUI approval path uses `task_transition_id`.
