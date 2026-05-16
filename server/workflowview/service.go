@@ -41,6 +41,9 @@ func (s *Service) GetDefinition(ctx context.Context, workflowID string) (servera
 }
 
 func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardRequest, roleResolver workflow.RoleResolver) (serverapi.WorkflowBoard, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowBoard{}, err
+	}
 	if s == nil {
 		return serverapi.WorkflowBoard{}, errors.New("workflow view service is required")
 	}
@@ -89,10 +92,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	seen := map[string]bool{}
 	linkByWorkflowID := map[string]sqlitegen.ProjectWorkflowLink{}
 	for _, link := range links {
-		existing, exists := linkByWorkflowID[link.WorkflowID]
-		if !exists || existing.UnlinkedAtUnixMs != 0 {
-			linkByWorkflowID[link.WorkflowID] = link
-		}
+		linkByWorkflowID[link.WorkflowID] = preferredProjectWorkflowLink(linkByWorkflowID[link.WorkflowID], link)
 		if !seen[link.WorkflowID] {
 			workflowIDs = append(workflowIDs, link.WorkflowID)
 			seen[link.WorkflowID] = true
@@ -155,6 +155,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	groups := boardGroups(def)
 	columns := boardColumns(def)
 	cards := make([]serverapi.WorkflowBoardTaskCard, 0)
+	doneCards := make([]serverapi.WorkflowBoardTaskCard, 0)
 	donePreview := make([]serverapi.WorkflowBoardTaskCard, 0)
 	for _, task := range tasks {
 		if task.WorkflowID != selected.WorkflowID {
@@ -165,6 +166,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 			return serverapi.WorkflowBoard{}, err
 		}
 		if done {
+			doneCards = append(doneCards, card)
 			if len(donePreview) < donePreviewLimit {
 				donePreview = append(donePreview, card)
 			}
@@ -176,8 +178,8 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	if len(cards) > offset+pageSize {
 		nextPageToken = strconv.Itoa(offset + pageSize)
 	}
+	applyColumnTaskCounts(columns, cards, doneCards)
 	cards = pageCards(cards, offset, pageSize)
-	applyColumnTaskCounts(columns, cards, donePreview)
 	latestSequence, err := s.latestEventSequence(ctx, projectID)
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
@@ -267,7 +269,7 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 		return serverapi.WorkflowTaskDetail{}, err
 	}
 	for _, link := range links {
-		linkByWorkflowID[link.WorkflowID] = link
+		linkByWorkflowID[link.WorkflowID] = preferredProjectWorkflowLink(linkByWorkflowID[link.WorkflowID], link)
 	}
 	nodeByID := workflowNodeByID(def)
 	summary := taskSummary(task, placements, nodeKinds)
@@ -275,7 +277,8 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 	detail := serverapi.WorkflowTaskDetail{Summary: summary, Project: projectBoardProject(project), Workflow: workflowPickerItem(def, linkByWorkflowID[task.WorkflowID], nil), Body: task.Body, SourceURL: task.SourceUrl, SourceWorkspace: sourceWorkspaceForTask(task, workspacesByID, primaryWorkspace), Status: status, Actions: actions}
 	if strings.TrimSpace(task.ManagedWorktreeID.String) != "" {
 		if worktree, err := s.queries.GetWorktreeByID(ctx, strings.TrimSpace(task.ManagedWorktreeID.String)); err == nil {
-			detail.ManagedWorktree = worktreeView(worktree)
+			view := worktreeView(worktree)
+			detail.ManagedWorktree = &view
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return serverapi.WorkflowTaskDetail{}, err
 		}
@@ -604,6 +607,16 @@ func workflowPickerItem(def serverapi.WorkflowDefinition, link sqlitegen.Project
 	return item
 }
 
+func preferredProjectWorkflowLink(current sqlitegen.ProjectWorkflowLink, next sqlitegen.ProjectWorkflowLink) sqlitegen.ProjectWorkflowLink {
+	if current.ID == "" {
+		return next
+	}
+	if current.UnlinkedAtUnixMs != 0 && next.UnlinkedAtUnixMs == 0 {
+		return next
+	}
+	return current
+}
+
 func worktreeView(row sqlitegen.GetWorktreeByIDRow) serverapi.WorktreeView {
 	return serverapi.WorktreeView{WorktreeID: row.ID, DisplayName: row.DisplayName, CanonicalRoot: row.CanonicalRootPath, Availability: row.Availability, IsMain: row.IsMain != 0, BuilderManaged: row.BuilderManaged != 0, CreatedBranch: row.CreatedBranch != 0, OriginSessionID: row.OriginSessionID}
 }
@@ -732,7 +745,8 @@ func (s *Service) activityItemsFromRows(task sqlitegen.Task, rows []taskActivity
 				return nil, errors.New("activity comment source is missing")
 			}
 			item.Summary = "Comment"
-			item.Comment = commentDTO(comment)
+			dto := commentDTO(comment)
+			item.Comment = &dto
 		case "transition":
 			transition, ok := transitions[row.sourceID]
 			if !ok {
@@ -748,13 +762,14 @@ func (s *Service) activityItemsFromRows(task sqlitegen.Task, rows []taskActivity
 			}
 			item.Actor = transition.Actor
 			item.Summary = "Transition: " + summary
-			item.Transition = dto
+			item.Transition = &dto
 		case "run_started", "run_completed", "run_interrupted":
 			run, ok := runs[row.sourceID]
 			if !ok {
 				return nil, errors.New("activity run source is missing")
 			}
-			item.Run = runDTO(run, nodes, sessionNames)
+			runView := runDTO(run, nodes, sessionNames)
+			item.Run = &runView
 			switch row.kind {
 			case "run_started":
 				item.Summary = "Run started"
@@ -762,7 +777,8 @@ func (s *Service) activityItemsFromRows(task sqlitegen.Task, rows []taskActivity
 				item.Summary = "Run completed"
 			case "run_interrupted":
 				item.Summary = "Run interrupted"
-				item.Attention = serverapi.WorkflowAttentionItem{ID: "interrupted_run:" + run.ID, Kind: "interrupted_run", ProjectID: task.ProjectID, WorkflowID: task.WorkflowID, TaskID: task.ID, TaskShortID: task.ShortID, TaskTitle: task.Title, RunID: run.ID, SessionID: run.SessionID.String, Message: "Run interrupted", OccurredAtUnixMs: run.InterruptedAtUnixMs}
+				attention := serverapi.WorkflowAttentionItem{ID: "interrupted_run:" + run.ID, Kind: "interrupted_run", ProjectID: task.ProjectID, WorkflowID: task.WorkflowID, TaskID: task.ID, TaskShortID: task.ShortID, TaskTitle: task.Title, RunID: run.ID, SessionID: run.SessionID.String, Message: "Run interrupted", OccurredAtUnixMs: run.InterruptedAtUnixMs}
+				item.Attention = &attention
 			}
 		case "task_canceled":
 			item.Summary = "Task canceled"
@@ -1573,12 +1589,19 @@ func pageCards(cards []serverapi.WorkflowBoardTaskCard, offset int, pageSize int
 	return cards[offset:end]
 }
 
-func applyColumnTaskCounts(columns []serverapi.WorkflowBoardColumn, cards []serverapi.WorkflowBoardTaskCard, donePreview []serverapi.WorkflowBoardTaskCard) {
+func applyColumnTaskCounts(columns []serverapi.WorkflowBoardColumn, cards []serverapi.WorkflowBoardTaskCard, doneCards []serverapi.WorkflowBoardTaskCard) {
 	indexByNodeID := map[string]int{}
 	for index, column := range columns {
 		indexByNodeID[column.Node.NodeID] = index
 	}
-	for _, card := range append(cards, donePreview...) {
+	for _, card := range cards {
+		for _, nodeID := range card.ActiveNodeIDs {
+			if index, ok := indexByNodeID[nodeID]; ok {
+				columns[index].TaskCount++
+			}
+		}
+	}
+	for _, card := range doneCards {
 		for _, nodeID := range card.ActiveNodeIDs {
 			if index, ok := indexByNodeID[nodeID]; ok {
 				columns[index].TaskCount++

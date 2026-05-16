@@ -53,7 +53,7 @@ func TestEnsureWorkspaceBindingDoesNotRegisterUnknownWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureWorkspaceBinding after registration: %v", err)
 	}
-	if resolved.ProjectID != binding.ProjectID || resolved.WorkspaceID != binding.WorkspaceID {
+	if resolved.ProjectID != binding.ProjectID || resolved.WorkspaceID != binding.WorkspaceID || resolved.ProjectKey != binding.ProjectKey {
 		t.Fatalf("resolved binding mismatch: got %+v want %+v", resolved, binding)
 	}
 }

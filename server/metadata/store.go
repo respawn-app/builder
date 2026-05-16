@@ -426,6 +426,7 @@ func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string
 	if err == nil {
 		return Binding{
 			ProjectID:       row.ProjectID,
+			ProjectKey:      row.ProjectKey,
 			ProjectName:     row.ProjectDisplayName,
 			WorkspaceID:     row.WorkspaceID,
 			CanonicalRoot:   row.WorkspaceRoot,

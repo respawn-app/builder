@@ -73,11 +73,17 @@ func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskApproveRequest{TaskTransitionID: "transition-1"}).Validate(); err != nil {
 		t.Fatalf("valid task approval rejected: %v", err)
 	}
+	if err := (WorkflowTaskApproveRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "transition_id") {
+		t.Fatalf("empty legacy task approval error = %v", err)
+	}
 	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", FreeformAnswer: "answer"}).Validate(); err != nil {
 		t.Fatalf("valid task question answer rejected: %v", err)
 	}
 	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", SelectedOptionNumber: 1, FreeformAnswer: "because"}).Validate(); err != nil {
 		t.Fatalf("valid selected option plus freeform rejected: %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", SelectedOptionNumber: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "selected_option_number") {
+		t.Fatalf("negative selected option error = %v", err)
 	}
 	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", ErrorMessage: "err", FreeformAnswer: "answer"}).Validate(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("conflicting task question answer error = %v", err)

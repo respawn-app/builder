@@ -300,6 +300,81 @@ func TestBoardPickerRetainsUnlinkedWorkflowState(t *testing.T) {
 	}
 }
 
+func TestTaskDetailPrefersActiveWorkflowLink(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	link, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true)
+	if err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Title: "Historical", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	if err := workflowStore.UnlinkProjectWorkflow(ctx, link.ID, ""); err != nil {
+		t.Fatalf("UnlinkProjectWorkflow: %v", err)
+	}
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow relink: %v", err)
+	}
+
+	detail, err := view.GetTask(ctx, string(task.ID))
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if detail.Workflow.UnlinkedAtUnixMs != 0 || !detail.Workflow.IsProjectDefault || !detail.Workflow.ValidForTaskCreation {
+		t.Fatalf("workflow link = %+v, want active default link", detail.Workflow)
+	}
+}
+
+func TestBoardColumnTaskCountsUseFullSelectedWorkflow(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	for _, title := range []string{"Task A", "Task B"} {
+		if _, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Title: title, Body: "Body"}); err != nil {
+			t.Fatalf("CreateTask %s: %v", title, err)
+		}
+	}
+
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, PageSize: 1}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	if len(board.Cards) != 1 || board.NextPageToken == "" {
+		t.Fatalf("paged cards = %+v next=%q, want one card with next page", board.Cards, board.NextPageToken)
+	}
+	backlogCount := 0
+	for _, column := range board.Columns {
+		if column.IsBacklog {
+			backlogCount = column.TaskCount
+			break
+		}
+	}
+	if backlogCount != 2 {
+		t.Fatalf("backlog count = %d, want full selected workflow count 2", backlogCount)
+	}
+}
+
 func TestTaskDetailProjectsCancellationAndInterruptedRun(t *testing.T) {
 	ctx := context.Background()
 	store, workflowStore, binding := newWorkflowViewTestStore(t)
@@ -424,7 +499,7 @@ func TestTaskDetailProjectsGuiIdentityWorktreeStatusActionsAndAttention(t *testi
 	if detail.Project.ProjectID != binding.ProjectID || detail.Project.ProjectKey != "WOR" || detail.Workflow.WorkflowID != string(workflowID) || !detail.Workflow.IsProjectDefault {
 		t.Fatalf("identity = project:%+v workflow:%+v", detail.Project, detail.Workflow)
 	}
-	if detail.ManagedWorktree.WorktreeID != worktreeID || !detail.ManagedWorktree.BuilderManaged || detail.ManagedWorktree.CanonicalRoot == "" {
+	if detail.ManagedWorktree == nil || detail.ManagedWorktree.WorktreeID != worktreeID || !detail.ManagedWorktree.BuilderManaged || detail.ManagedWorktree.CanonicalRoot == "" {
 		t.Fatalf("managed worktree = %+v", detail.ManagedWorktree)
 	}
 	if detail.Status.Kind != "waiting_question" || !detail.Actions.CanInterrupt {
@@ -560,11 +635,11 @@ func TestTaskActivityProjectsApprovalSnapshots(t *testing.T) {
 	var transition serverapi.WorkflowTaskTransition
 	hasRunCompleted := false
 	for _, item := range resp.Items {
-		if item.Type == "run_completed" && item.Run.ID == string(started.RunID) {
+		if item.Type == "run_completed" && item.Run != nil && item.Run.ID == string(started.RunID) {
 			hasRunCompleted = true
 		}
-		if item.Type == "transition" && item.Transition.ID == string(pending.TransitionID) {
-			transition = item.Transition
+		if item.Type == "transition" && item.Transition != nil && item.Transition.ID == string(pending.TransitionID) {
+			transition = *item.Transition
 		}
 	}
 	if !hasRunCompleted {
@@ -865,6 +940,9 @@ func TestWorkflowViewRejectsMissingIDs(t *testing.T) {
 	}
 	if _, err := view.GetBoard(context.Background(), serverapi.WorkflowBoardRequest{ProjectID: " "}, workflow.StaticRoleResolver{}); err == nil || !strings.Contains(err.Error(), "project_id") {
 		t.Fatalf("GetBoard missing id error = %v", err)
+	}
+	if _, err := view.GetBoard(context.Background(), serverapi.WorkflowBoardRequest{ProjectID: "project-1", PageSize: -1}, workflow.StaticRoleResolver{}); err == nil || !strings.Contains(err.Error(), "page_size") {
+		t.Fatalf("GetBoard negative page size error = %v", err)
 	}
 	if _, err := view.GetTask(context.Background(), " "); err == nil || !strings.Contains(err.Error(), "task_id") {
 		t.Fatalf("GetTask missing id error = %v", err)

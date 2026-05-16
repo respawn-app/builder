@@ -235,6 +235,9 @@ func (s *Service) ListProjectWorkspaces(ctx context.Context, req serverapi.Proje
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectWorkspaceListResponse{}, err
 	}
+	if err := s.syncMetadata(ctx); err != nil {
+		return serverapi.ProjectWorkspaceListResponse{}, err
+	}
 	workspaces, err := s.metadata.ListProjectWorkspaces(ctx, req.ProjectID)
 	if err != nil {
 		return serverapi.ProjectWorkspaceListResponse{}, err

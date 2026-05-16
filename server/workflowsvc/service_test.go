@@ -151,7 +151,7 @@ func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing
 	if err != nil {
 		t.Fatalf("ListWorkflowTaskActivity: %v", err)
 	}
-	if len(activity.Items) == 0 || activity.Items[0].Type != "comment" || activity.Items[0].Comment.Body != "updated" {
+	if len(activity.Items) == 0 || activity.Items[0].Type != "comment" || activity.Items[0].Comment == nil || activity.Items[0].Comment.Body != "updated" {
 		t.Fatalf("activity after replace = %+v", activity.Items)
 	}
 	if err := service.DeleteWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentDeleteRequest{CommentID: added.Comment.ID}); err != nil {
@@ -162,7 +162,7 @@ func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing
 		t.Fatalf("ListWorkflowTaskActivity after delete: %v", err)
 	}
 	for _, item := range activity.Items {
-		if item.Type == "comment" && item.Comment.ID == added.Comment.ID {
+		if item.Type == "comment" && item.Comment != nil && item.Comment.ID == added.Comment.ID {
 			t.Fatalf("deleted comment visible in activity: %+v", activity.Items)
 		}
 	}

@@ -632,7 +632,7 @@ type WorkflowTaskDetail struct {
 	Body            string                   `json:"body"`
 	SourceURL       string                   `json:"source_url,omitempty"`
 	SourceWorkspace ProjectWorkspaceSummary  `json:"source_workspace"`
-	ManagedWorktree WorktreeView             `json:"managed_worktree,omitempty"`
+	ManagedWorktree *WorktreeView            `json:"managed_worktree,omitempty"`
 	Status          WorkflowTaskStatus       `json:"status"`
 	Actions         WorkflowTaskActions      `json:"actions"`
 	Attention       []WorkflowAttentionItem  `json:"attention,omitempty"`
@@ -722,17 +722,17 @@ type WorkflowTaskComment struct {
 }
 
 type WorkflowTaskActivityItem struct {
-	ActivityID       string                 `json:"activity_id"`
-	Type             string                 `json:"type"`
-	TaskID           string                 `json:"task_id"`
-	OccurredAtUnixMs int64                  `json:"occurred_at_unix_ms"`
-	UpdatedAtUnixMs  int64                  `json:"updated_at_unix_ms"`
-	Actor            string                 `json:"actor,omitempty"`
-	Summary          string                 `json:"summary"`
-	Comment          WorkflowTaskComment    `json:"comment,omitempty"`
-	Transition       WorkflowTaskTransition `json:"transition,omitempty"`
-	Run              WorkflowRun            `json:"run,omitempty"`
-	Attention        WorkflowAttentionItem  `json:"attention,omitempty"`
+	ActivityID       string                  `json:"activity_id"`
+	Type             string                  `json:"type"`
+	TaskID           string                  `json:"task_id"`
+	OccurredAtUnixMs int64                   `json:"occurred_at_unix_ms"`
+	UpdatedAtUnixMs  int64                   `json:"updated_at_unix_ms"`
+	Actor            string                  `json:"actor,omitempty"`
+	Summary          string                  `json:"summary"`
+	Comment          *WorkflowTaskComment    `json:"comment,omitempty"`
+	Transition       *WorkflowTaskTransition `json:"transition,omitempty"`
+	Run              *WorkflowRun            `json:"run,omitempty"`
+	Attention        *WorkflowAttentionItem  `json:"attention,omitempty"`
 }
 
 func (r WorkflowCreateRequest) Validate() error {
@@ -920,7 +920,7 @@ func (r WorkflowTaskApproveRequest) Validate() error {
 	if strings.TrimSpace(r.TaskTransitionID) != "" {
 		return nil
 	}
-	return validateRequired("task_transition_id", r.TransitionID)
+	return validateRequired("transition_id", r.TransitionID)
 }
 
 func (r WorkflowTaskMoveRequest) Validate() error {
@@ -957,7 +957,10 @@ func (r WorkflowTaskQuestionAnswerRequest) Validate() error {
 	}
 	hasTextAnswer := strings.TrimSpace(r.Answer) != ""
 	hasFreeform := strings.TrimSpace(r.FreeformAnswer) != ""
-	hasSelected := r.SelectedOptionNumber != 0
+	if r.SelectedOptionNumber < 0 {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "selected_option_number", Message: "selected_option_number must be non-negative"}
+	}
+	hasSelected := r.SelectedOptionNumber > 0
 	hasAnswer := hasTextAnswer || hasFreeform || hasSelected
 	hasError := strings.TrimSpace(r.ErrorMessage) != ""
 	if hasAnswer && hasError {
