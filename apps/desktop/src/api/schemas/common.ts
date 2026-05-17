@@ -83,7 +83,7 @@ export const workflowPickerItemSchema: z.ZodType<WorkflowPickerItem> = z
     graph_revision: z.number(),
     is_project_default: z.boolean(),
     valid_for_task_creation: z.boolean(),
-    validation_errors: z.array(validationErrorSchema).optional().default([]),
+    validation_errors: z.array(validationErrorSchema).nullish().transform((value) => value ?? []),
   })
   .transform((value) => ({
     id: value.workflow_id,

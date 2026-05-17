@@ -23,6 +23,11 @@ import {
   workspaceSummarySchema,
 } from "./common";
 
+const boardGroupsSchema = z.array(boardGroupSchema).nullish().transform((value) => value ?? []);
+const boardColumnsSchema = z.array(boardColumnSchema).nullish().transform((value) => value ?? []);
+const boardCardsSchema = z.array(boardCardSchema).nullish().transform((value) => value ?? []);
+const workflowPickerSchema = z.array(workflowPickerItemSchema).nullish().transform((value) => value ?? []);
+
 export const workflowBoardSchema: z.ZodType<WorkflowBoard> = z
   .object({
     board: z.object({
@@ -32,11 +37,11 @@ export const workflowBoardSchema: z.ZodType<WorkflowBoard> = z
         display_name: z.string(),
       }),
       selected_workflow: workflowPickerItemSchema,
-      workflows: z.array(workflowPickerItemSchema),
-      groups: z.array(boardGroupSchema).optional().default([]),
-      columns: z.array(boardColumnSchema),
-      cards: z.array(boardCardSchema),
-      done_preview: z.array(boardCardSchema).optional().default([]),
+      workflows: workflowPickerSchema,
+      groups: boardGroupsSchema,
+      columns: boardColumnsSchema,
+      cards: boardCardsSchema,
+      done_preview: boardCardsSchema,
       next_page_token: z.string().optional().default(""),
       generated_at_unix_ms: z.number(),
       latest_event_sequence: z.number(),

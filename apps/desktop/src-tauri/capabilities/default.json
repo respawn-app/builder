@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default Builder desktop permissions.",
   "windows": ["main"],
-  "permissions": ["opener:default"]
+  "permissions": ["opener:default", "clipboard-manager:allow-read-text", "clipboard-manager:allow-write-text"]
 }

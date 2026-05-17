@@ -1,5 +1,6 @@
 import { useState, type SyntheticEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Plus } from "lucide-react";
 
 import type { AttentionItem, ProjectSummary } from "../../api";
 import { errorMessage } from "../../api/errors";
@@ -8,8 +9,8 @@ import { useAppNavigation } from "../../app/navigation";
 import { useAppServices } from "../../app/useAppServices";
 import { useStatusController } from "../../app/useStatusController";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
-import { Badge, Button, EmptyState, ErrorState, Island, TextInput } from "../../ui";
-import { useGlobalAttentionPages, useProjectCreation, useProjectPages, useWorkspaceAttach } from "./useHomeData";
+import { Badge, Button, ErrorState, TextInput } from "../../ui";
+import { useGlobalAttentionPages, useProjectCreation, useProjectPages } from "./useHomeData";
 
 type ProjectDraft = Readonly<{
   name: string;
@@ -19,35 +20,15 @@ type ProjectDraft = Readonly<{
 
 export function HomeRoute() {
   const { t } = useTranslation();
-  const projects = useProjectPages();
-  const attention = useGlobalAttentionPages();
-  const projectItems = projects.data?.pages.flatMap((page) => page.projects) ?? [];
-  const attentionItems = attention.data?.pages.flatMap((page) => page.items) ?? [];
-
-  return (
-    <div className="home-page">
-      <HomeHeader />
-      <div className="home-grid">
-        <Island aria-labelledby="projects-title" tone="secondary">
-          <h2 id="projects-title">{t("home.projectsPane")}</h2>
-          <ProjectList items={projectItems} query={projects} />
-        </Island>
-        <Island aria-labelledby="attention-title" tone="secondary">
-          <h2 id="attention-title">{t("home.attentionPane")}</h2>
-          <AttentionList items={attentionItems} query={attention} />
-        </Island>
-      </div>
-    </div>
-  );
-}
-
-function HomeHeader() {
-  const { t } = useTranslation();
-  const { api, endpoint, nativeBridge } = useAppServices();
+  const { api, nativeBridge } = useAppServices();
   const { push } = useStatusController();
   const connection = useConnectionSnapshot();
   const navigation = useAppNavigation();
   const creation = useProjectCreation();
+  const projects = useProjectPages();
+  const attention = useGlobalAttentionPages();
+  const projectItems = projects.data?.pages.flatMap((page) => page.projects) ?? [];
+  const attentionItems = attention.data?.pages.flatMap((page) => page.items) ?? [];
   const [draft, setDraft] = useState<ProjectDraft | null>(null);
   const disabled = connection.phase !== "connected";
 
@@ -80,24 +61,65 @@ function HomeHeader() {
   }
 
   return (
+    <div className="home-page">
+      <HomeHeader
+        creationError={creation.error}
+        draft={draft}
+        isCreating={creation.isPending}
+        onSubmitDraft={(event) => void submitDraft(event)}
+        setDraft={setDraft}
+      />
+      <div className="home-grid">
+        <section aria-labelledby="projects-title" className="home-pane">
+          <div className="home-pane__header">
+            <h2 id="projects-title">{t("home.projectsPane")}</h2>
+            <button
+              aria-label={t("home.newProject")}
+              className="icon-button"
+              disabled={disabled}
+              onClick={() => void chooseWorkspace()}
+              type="button"
+            >
+              <Plus aria-hidden="true" size={20} strokeWidth={1.5} />
+            </button>
+          </div>
+          <ProjectList items={projectItems} query={projects} />
+        </section>
+        <section aria-labelledby="attention-title" className="home-pane">
+          <h2 id="attention-title">{t("home.attentionPane")}</h2>
+          <AttentionList items={attentionItems} query={attention} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+type HomeHeaderProps = Readonly<{
+  creationError: Error | null;
+  draft: ProjectDraft | null;
+  isCreating: boolean;
+  onSubmitDraft: (event: SyntheticEvent<HTMLFormElement>) => void;
+  setDraft: (draft: ProjectDraft) => void;
+}>;
+
+function HomeHeader({
+  creationError,
+  draft,
+  isCreating,
+  onSubmitDraft,
+  setDraft,
+}: HomeHeaderProps) {
+  const { t } = useTranslation();
+
+  return (
     <header className="page-header">
-      <div>
-        <p className="eyebrow">{t("app.endpoint")}</p>
-        <h1>{t("home.title")}</h1>
-        <p className="mono">{endpoint}</p>
-      </div>
-      <div className="page-actions">
-        <Button disabled={disabled} onClick={() => void chooseWorkspace()} variant="primary">
-          {t("home.newProject")}
-        </Button>
-      </div>
       {draft !== null ? (
-        <form className="inline-form" onSubmit={(event) => void submitDraft(event)}>
+        <form className="inline-form" onSubmit={onSubmitDraft}>
           <TextInput label={t("home.projectName")} onChange={(event) => { setDraft({ ...draft, name: event.target.value }); }} value={draft.name} />
           <TextInput label={t("home.projectKey")} onChange={(event) => { setDraft({ ...draft, key: event.target.value }); }} value={draft.key} />
           <TextInput disabled label={t("home.workspaceRoot")} value={draft.workspaceRoot} />
-          {creation.error !== null ? <p className="form-error">{errorMessage(creation.error)}</p> : null}
-          <Button disabled={creation.isPending || disabled} type="submit" variant="primary">
+          {creationError !== null ? <p className="form-error">{errorMessage(creationError)}</p> : null}
+          <Button disabled={isCreating} type="submit" variant="primary">
             {t("home.createProject")}
           </Button>
         </form>
@@ -120,7 +142,7 @@ function ProjectList({ items, query }: ProjectListProps) {
     return <ErrorState body={errorMessage(query.error)} title={t("states.error")} />;
   }
   if (items.length === 0) {
-    return <EmptyState body={t("home.emptyBody")} title={t("home.emptyTitle")} />;
+    return <HomeInlineEmptyState body={t("home.emptyBody")} title={t("home.emptyTitle")} />;
   }
   return (
     <div className="row-list">
@@ -137,23 +159,7 @@ function ProjectList({ items, query }: ProjectListProps) {
 }
 
 function ProjectRow({ project }: Readonly<{ project: ProjectSummary }>) {
-  const { t } = useTranslation();
   const navigation = useAppNavigation();
-  const { nativeBridge } = useAppServices();
-  const { push } = useStatusController();
-  const attach = useWorkspaceAttach();
-  const connection = useConnectionSnapshot();
-
-  async function addWorkspace(): Promise<void> {
-    try {
-      const selected = await nativeBridge.directories.selectDirectory({ title: t("home.chooseWorkspace") });
-      if (selected !== null) {
-        await attach.mutateAsync({ projectID: project.id, workspaceRoot: selected.path });
-      }
-    } catch (error) {
-      push({ id: `attach-${project.id}`, tone: "danger", title: t("form.serverError"), body: errorMessage(error) });
-    }
-  }
 
   return (
     <article className="project-row">
@@ -161,21 +167,7 @@ function ProjectRow({ project }: Readonly<{ project: ProjectSummary }>) {
         <span className="mono">{project.key}</span>
         <strong>{project.name}</strong>
         <span>{project.primaryWorkspace.rootPath}</span>
-        <span>{t("home.updated", { time: formatRelativeTime(project.updatedAt) })}</span>
       </button>
-      <div className="chip-row">
-        <Badge tone={project.defaultWorkflowValid ? "success" : "warning"}>{project.defaultWorkflowName || t("board.noWorkflowTitle")}</Badge>
-        <Badge tone="info">
-          {t("home.projectChips", {
-            tasks: project.taskCount,
-            attention: project.attentionCount,
-            workflows: project.workflowCount,
-          })}
-        </Badge>
-        <Button disabled={connection.phase !== "connected" || attach.isPending} onClick={() => void addWorkspace()} variant="ghost">
-          {t("home.addWorkspace")}
-        </Button>
-      </div>
     </article>
   );
 }
@@ -195,7 +187,7 @@ function AttentionList({ items, query }: AttentionListProps) {
     return <ErrorState body={errorMessage(query.error)} title={t("states.error")} />;
   }
   if (items.length === 0) {
-    return <EmptyState body={t("home.noAttentionBody")} title={t("home.noAttentionTitle")} />;
+    return <HomeInlineEmptyState body={t("home.noAttentionBody")} title={t("home.noAttentionTitle")} />;
   }
   return (
     <div className="row-list">
@@ -213,6 +205,15 @@ function AttentionList({ items, query }: AttentionListProps) {
           {query.isFetchingNextPage ? t("app.loadingMore") : t("app.loadMore")}
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+function HomeInlineEmptyState({ title, body }: Readonly<{ title: string; body: string }>) {
+  return (
+    <div className="home-empty-inline">
+      <h3>{title}</h3>
+      <p>{body}</p>
     </div>
   );
 }

@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default Builder desktop permissions.","local":true,"windows":["main"],"permissions":["opener:default"]}}
+{"default":{"identifier":"default","description":"Default Builder desktop permissions.","local":true,"windows":["main"],"permissions":["opener:default","clipboard-manager:allow-read-text","clipboard-manager:allow-write-text"]}}

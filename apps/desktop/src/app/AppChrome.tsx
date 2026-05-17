@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Home } from "lucide-react";
+import type { PointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Badge, Island } from "../ui";
-import { useConnectionSnapshot } from "./useConnectionSnapshot";
+import { Island } from "../ui";
+import { useAppServices } from "./useAppServices";
 
 export type AppChromeProps = Readonly<{
   children: ReactNode;
@@ -11,29 +12,39 @@ export type AppChromeProps = Readonly<{
 
 export function AppChrome({ children }: AppChromeProps) {
   const { t } = useTranslation();
-  const connection = useConnectionSnapshot();
+  const { nativeBridge } = useAppServices();
 
   return (
     <main className="app-shell">
-      <header className="app-chrome">
-        <div className="app-chrome__brand">
-          <div className="app-logo" aria-hidden="true" />
-          <div>
-            <p>{t("app.title")}</p>
-            <span>{t("app.subtitle")}</span>
-          </div>
-        </div>
-        <nav className="app-chrome__nav">
-          <Link className="ui-button ui-button--ghost" to="/">{t("app.home")}</Link>
-          <Link className="ui-button ui-button--ghost" to="/settings">{t("app.settings")}</Link>
-        </nav>
-        <Badge tone={connection.phase === "connected" ? "success" : "warning"}>
-          {connection.phase === "connected" ? t("app.connected") : t("app.reconnecting")}
-        </Badge>
-      </header>
+      <div
+        className="native-titlebar-drag-region"
+        data-tauri-drag-region
+        onPointerDown={(event) => {
+          void startNativeWindowDrag(event, nativeBridge.window.startDragging);
+        }}
+      />
+      <Link
+        aria-label={t("app.home")}
+        className={`native-home-link ${isMacOS() ? "native-home-link--macos" : "native-home-link--default"}`}
+        to="/"
+      >
+        <Home aria-hidden="true" size={16} strokeWidth={1.125} />
+      </Link>
       <Island className="app-surface" tone="primary">
         {children}
       </Island>
     </main>
   );
+}
+
+function isMacOS(): boolean {
+  return typeof navigator !== "undefined" && /Mac OS|Macintosh/u.test(navigator.userAgent);
+}
+
+async function startNativeWindowDrag(event: PointerEvent<HTMLDivElement>, startDragging: () => Promise<void>): Promise<void> {
+  if (event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  await startDragging();
 }

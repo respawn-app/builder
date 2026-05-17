@@ -8,6 +8,6 @@ describe("App", () => {
     render(<App services={createTestServices(startupRoutes)} />);
 
     expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
-    expect(screen.getByText("Workflow remote control")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New Project" })).toBeInTheDocument();
   });
 });

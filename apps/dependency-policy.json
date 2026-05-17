@@ -14,6 +14,7 @@
         "@tanstack/react-router",
         "@tauri-apps/api",
         "i18next",
+        "lucide-react",
         "react",
         "react-dom",
         "react-hook-form",
@@ -46,7 +47,7 @@
       ]
     },
     "@builder/desktop-native-bridge": {
-      "dependencies": ["@tauri-apps/api"],
+      "dependencies": ["@tauri-apps/api", "@tauri-apps/plugin-clipboard-manager"],
       "devDependencies": ["typescript", "vitest"]
     }
   }

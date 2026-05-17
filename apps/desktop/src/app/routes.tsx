@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { BoardRoute } from "../features/board/BoardRoute";
 import { HomeRoute } from "../features/home/HomeRoute";
-import { SettingsRoute } from "../features/settings/SettingsRoute";
 import { StandaloneTaskRoute } from "../features/task-detail/StandaloneTaskRoute";
 import { StartupGate } from "../features/startup/StartupGate";
 import { AppChrome } from "./AppChrome";
@@ -30,12 +29,6 @@ const homeRoute = createRoute({
   component: HomeRoute,
 });
 
-const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/settings",
-  component: SettingsRoute,
-});
-
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId",
@@ -49,7 +42,7 @@ const taskRoute = createRoute({
   component: TaskRoute,
 });
 
-const routeTree = rootRoute.addChildren([homeRoute, settingsRoute, projectRoute, taskRoute]);
+const routeTree = rootRoute.addChildren([homeRoute, projectRoute, taskRoute]);
 
 export function createAppRouter() {
   return createRouter({ routeTree });

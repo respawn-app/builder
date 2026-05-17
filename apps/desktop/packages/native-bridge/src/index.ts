@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 export type NativeCapabilityState = Readonly<{
   clipboard: Readonly<{
@@ -24,6 +26,7 @@ export type NativeCapabilityState = Readonly<{
   appMenu: boolean;
   updater: boolean;
   windowControls: boolean;
+  windowDrag: boolean;
   macosVibrancy: boolean;
 }>;
 
@@ -50,6 +53,9 @@ export type NativeBridge = Readonly<{
   }>;
   builder: Readonly<{
     resolveContext(): Promise<NativeBuilderContext>;
+  }>;
+  window: Readonly<{
+    startDragging(): Promise<void>;
   }>;
 }>;
 
@@ -107,6 +113,7 @@ const unavailableCapabilities: NativeCapabilityState = {
   appMenu: false,
   updater: false,
   windowControls: false,
+  windowDrag: false,
   macosVibrancy: false,
 };
 
@@ -120,11 +127,11 @@ export function createBrowserNativeBridge(): NativeBridge {
   return {
     capabilities: unavailableCapabilities,
     clipboard: {
-      async writeText(): Promise<void> {
-        throw new Error("Clipboard write is unavailable in this shell.");
+      async writeText(value: string): Promise<void> {
+        await writeText(value);
       },
       async readText(): Promise<string> {
-        throw new Error("Clipboard read is unavailable in this shell.");
+        return readText();
       },
     },
     directories: {
@@ -155,6 +162,11 @@ export function createBrowserNativeBridge(): NativeBridge {
     builder: {
       async resolveContext(): Promise<NativeBuilderContext> {
         return { serverEndpoint: "ws://127.0.0.1:53082/rpc", persistenceRoot: "" };
+      },
+    },
+    window: {
+      async startDragging(): Promise<void> {
+        return Promise.resolve();
       },
     },
   };
@@ -203,6 +215,11 @@ export function createTauriNativeBridge(): NativeBridge {
         return invoke<NativeBuilderContext>("resolve_builder_context");
       },
     },
+    window: {
+      async startDragging(): Promise<void> {
+        await getCurrentWindow().startDragging();
+      },
+    },
   };
 }
 
@@ -225,8 +242,8 @@ function validateExternalUrl(url: string): string {
 function createTauriCapabilities(): NativeCapabilityState {
   return {
     clipboard: {
-      writeText: false,
-      readText: false,
+      writeText: true,
+      readText: true,
     },
     directories: {
       select: true,
@@ -247,6 +264,7 @@ function createTauriCapabilities(): NativeCapabilityState {
     appMenu: false,
     updater: false,
     windowControls: false,
+    windowDrag: true,
     macosVibrancy: false,
   };
 }

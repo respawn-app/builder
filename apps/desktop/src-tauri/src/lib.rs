@@ -26,17 +26,21 @@ fn resolve_builder_context() -> Result<BuilderNativeContext, String> {
 }
 
 #[tauri::command]
-fn select_directory(app: tauri::AppHandle, title: String) -> Result<Option<String>, String> {
-    app.dialog()
-        .file()
-        .set_title(title)
-        .blocking_pick_folder()
-        .map(|path| {
-            path.into_path()
-                .map(|path| path.to_string_lossy().to_string())
-                .map_err(|error| format!("Directory picker returned invalid path: {error}"))
-        })
-        .transpose()
+async fn select_directory(app: tauri::AppHandle, title: String) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_title(title).pick_folder(move |selection| {
+        let result = selection
+            .map(|path| {
+                path.into_path()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .map_err(|error| format!("Directory picker returned invalid path: {error}"))
+            })
+            .transpose();
+        let _ = sender.send(result);
+    });
+    receiver
+        .await
+        .map_err(|_| "Directory picker closed before returning a result.".to_string())?
 }
 
 #[tauri::command]
@@ -83,6 +87,7 @@ fn append_gui_log(entry: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
