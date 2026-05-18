@@ -10,7 +10,7 @@ export function RouteTransitionFrame() {
   return (
     <div
       className={cx(
-        "route-transition-frame h-full min-h-0",
+        "route-transition-frame h-full min-h-0 min-w-0 w-full",
         routeUsesEdgeToEdgeLayout(location.pathname) ? undefined : "p-[var(--space-2)]",
       )}
       data-testid="route-transition-frame"

@@ -47,6 +47,8 @@ describe("App", () => {
     expect(screen.getByTestId("app-shell-content")).toHaveClass(
       "app-region-no-drag",
       "min-h-0",
+      "min-w-0",
+      "w-full",
       "overflow-visible",
     );
     expect(screen.getByTestId("app-shell-content")).not.toHaveClass("island-glass");
@@ -54,6 +56,8 @@ describe("App", () => {
       "route-transition-frame",
       "h-full",
       "min-h-0",
+      "min-w-0",
+      "w-full",
       "p-[var(--space-2)]",
     );
     expect(screen.getByTestId("home-route-root")).toHaveClass("h-full", "min-h-0");

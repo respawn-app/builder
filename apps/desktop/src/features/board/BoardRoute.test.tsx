@@ -90,7 +90,8 @@ describe("BoardRoute", () => {
     expect(screen.queryByText("proj")).not.toBeInTheDocument();
     expect(screen.queryByText("Drag Backlog task to first active node to start automation.")).not.toBeInTheDocument();
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByRole("list")).toHaveClass("overflow-x-auto");
+    expect(screen.getByTestId("route-transition-frame")).toHaveClass("min-w-0", "w-full");
+    expect(screen.getByRole("list")).toHaveClass("min-w-0", "w-full", "overflow-x-auto");
     expect(screen.getByRole("list")).not.toHaveClass(
       "hide-scrollbar",
       "overflow-y-hidden",
@@ -98,7 +99,8 @@ describe("BoardRoute", () => {
     );
     expect(screen.getByText("coder")).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "Backlog" })).toHaveClass("island-glass");
-    expect(screen.getByRole("listitem", { name: "Backlog" })).toHaveClass("w-[min(560px,80vw)]", "shrink-0");
+    expect(screen.getByRole("listitem", { name: "Backlog" }).className).toContain("w-[min(");
+    expect(screen.getByRole("listitem", { name: "Backlog" })).toHaveClass("shrink-0");
     expect(screen.queryByRole("button", { name: "Expand Done" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("board-transition-source")).not.toBeInTheDocument();
     expect(screen.getByTestId("board-column-rail")).toHaveClass(

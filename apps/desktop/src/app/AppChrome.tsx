@@ -69,7 +69,7 @@ export function AppChrome({ children }: AppChromeProps) {
           {title}
         </div>
       ) : null}
-      <div className="app-region-no-drag min-h-0 overflow-visible" data-testid="app-shell-content">
+      <div className="app-region-no-drag min-h-0 min-w-0 w-full overflow-visible" data-testid="app-shell-content">
         {children}
       </div>
     </main>
