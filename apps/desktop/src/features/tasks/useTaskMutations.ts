@@ -31,6 +31,8 @@ export function useUpdateTask(taskID: string) {
     mutationFn: async (input: TaskEditInput) => api.updateTask(input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.task(taskID) });
+      await queryClient.invalidateQueries({ queryKey: ["board"] });
+      await queryClient.invalidateQueries({ queryKey: ["attention"] });
     },
   });
 }

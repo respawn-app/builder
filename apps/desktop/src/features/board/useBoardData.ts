@@ -1,17 +1,42 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
+import type { WorkflowBoard } from "../../api";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
 
 export function useBoard(projectID: string, workflowID: string) {
   const { api } = useAppServices();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.board(projectID, workflowID),
-    queryFn: async () => api.getBoard(projectID, workflowID),
+    queryFn: async ({ pageParam }) => api.getBoard(projectID, workflowID, pageParam),
+    initialPageParam: "",
     enabled: projectID.length > 0,
+    getNextPageParam: (lastPage) => (lastPage.nextPageToken.length > 0 ? lastPage.nextPageToken : undefined),
+    select: (data) => combineBoardPages(data.pages),
   });
+}
+
+function combineBoardPages(pages: readonly WorkflowBoard[]): WorkflowBoard {
+  const first = pages[0];
+  if (first === undefined) {
+    throw new Error("board pages are empty");
+  }
+  const cardsByID = new Map(first.cards.map((card) => [card.id, card]));
+  for (const page of pages.slice(1)) {
+    for (const card of page.cards) {
+      cardsByID.set(card.id, card);
+    }
+  }
+  const last = pages.at(-1) ?? first;
+  return {
+    ...first,
+    cards: [...cardsByID.values()],
+    generatedAt: last.generatedAt,
+    latestEventSequence: last.latestEventSequence,
+    nextPageToken: last.nextPageToken,
+  };
 }
 
 export function useProjectBoardSubscription(projectID: string, workflowID: string, latestSequence: number) {
@@ -39,7 +64,9 @@ export function useProjectBoardSubscription(projectID: string, workflowID: strin
         void refresh();
       },
     });
-    return () => { subscription.close(); };
+    return () => {
+      subscription.close();
+    };
   }, [api, connection.generation, connection.phase, latestSequence, projectID, queryClient, workflowID]);
 
   useEffect(() => {
@@ -61,15 +88,18 @@ export function useBoardTaskActions(projectID: string, workflowID: string) {
       onSuccess: refresh,
     }),
     move: useMutation({
-      mutationFn: async (input: Readonly<{ taskID: string; targetNodeID: string }>) => api.moveTask(input.taskID, input.targetNodeID),
+      mutationFn: async (input: Readonly<{ taskID: string; targetNodeID: string }>) =>
+        api.moveTask(input.taskID, input.targetNodeID),
       onSuccess: refresh,
     }),
     interrupt: useMutation({
-      mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) => api.interruptTask(input.taskID, input.runID),
+      mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) =>
+        api.interruptTask(input.taskID, input.runID),
       onSuccess: refresh,
     }),
     resume: useMutation({
-      mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) => api.resumeTask(input.taskID, input.runID),
+      mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) =>
+        api.resumeTask(input.taskID, input.runID),
       onSuccess: refresh,
     }),
   };

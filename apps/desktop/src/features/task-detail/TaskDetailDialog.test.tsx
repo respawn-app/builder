@@ -1,28 +1,38 @@
-import { createBrowserNativeBridge, type NativeBridge, type NativeBuilderSessionLaunch } from "@builder/desktop-native-bridge";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+/* eslint-disable max-lines -- Task detail route tests keep representative detail/native bridge fixtures local. */
+import {
+  createBrowserNativeBridge,
+  type NativeBridge,
+  type NativeBuilderSessionLaunch,
+  type NativeTaskDetailChanged,
+  type NativeTaskDetailTarget,
+} from "@builder/desktop-native-bridge";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../../App";
 import type { JsonObject, JsonValue } from "../../api/json";
 import { createTestServices, startupRoutes } from "../../testSupport/appServices";
 
 describe("TaskDetailDialog", () => {
-  it("answers questions, approves transitions, comments, and teleports through native bridge", async () => {
+  it("renders direct task route inline with inbox, tabs, comments, approvals, questions, and runs", async () => {
     window.history.pushState(null, "", "/tasks/task-1");
     const launched: NativeBuilderSessionLaunch[] = [];
-    const services = createTestServices([
-      ...startupRoutes,
-      { method: "workflow.task.get", result: taskDetailResponse },
-      { method: "workflow.task.activity.list", result: activityResponse },
-      { method: "ask.listPendingBySession", result: pendingAskResponse },
-      { method: "workflow.task.question.answer", result: {} },
-      { method: "workflow.task.approve", result: {} },
-      { method: "workflow.task.comment.add", result: commentAddResponse },
-      { method: "workflow.task.teleportTarget.get", result: teleportResponse },
-    ], nativeBridge(launched));
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.task.get", result: taskDetailResponse },
+        { method: "workflow.task.activity.list", result: activityResponse },
+        { method: "ask.listPendingBySession", result: pendingAskResponse },
+        { method: "workflow.task.question.answer", result: {} },
+        { method: "workflow.task.approve", result: {} },
+        { method: "workflow.task.comment.add", result: commentAddResponse },
+        { method: "workflow.task.teleportTarget.get", result: teleportResponse },
+      ],
+      nativeBridge(launched),
+    );
 
     render(<App services={services} />);
 
-    const recommendedOption = await screen.findByRole("button", { name: /Use option A/u });
+    const recommendedOption = await screen.findByRole("radio", { name: /Use option A/u });
     expect(recommendedOption).toBeInTheDocument();
     fireEvent.click(recommendedOption);
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
@@ -55,10 +65,122 @@ describe("TaskDetailDialog", () => {
       });
     });
 
+    fireEvent.click(screen.getByRole("tab", { name: /Runs/u }));
     fireEvent.click(screen.getByRole("button", { name: "Teleport" }));
     await waitFor(() => {
       expect(launched).toEqual([{ sessionId: "session-teleport", cwd: "/tmp/worktree/subdir" }]);
     });
+  });
+
+  it("opens Home Inbox rows through native task detail window when available", async () => {
+    window.history.pushState(null, "", "/");
+    const opened: NativeTaskDetailTarget[] = [];
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        {
+          method: "workflow.attention.list",
+          result: {
+            items: [
+              {
+                ...attentionBase,
+                id: "attention-question",
+                kind: "question",
+                run_id: "run-1",
+                session_id: "session-1",
+                ask_id: "ask-1",
+                task_transition_id: "",
+                message: "Pick answer",
+              },
+            ],
+            next_page_token: "",
+            generated_at_unix_ms: 1,
+            latest_event_sequence: 1,
+          },
+        },
+      ],
+      nativeBridgeWithTaskDetailWindow(opened),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByTestId("attention-row"));
+    await waitFor(() => {
+      expect(opened).toEqual([{ resumeRunId: "", taskId: "task-1" }]);
+    });
+  });
+
+  it("refreshes visible Home Inbox queries after native task detail mutations", async () => {
+    window.history.pushState(null, "", "/");
+    let onChanged: ((event: NativeTaskDetailChanged) => void) | null = null;
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        {
+          method: "workflow.attention.list",
+          handler: (_params, callIndex) => ({
+            items: callIndex === 0 ? [attentionResponseItem] : [],
+            next_page_token: "",
+            generated_at_unix_ms: callIndex + 1,
+            latest_event_sequence: callIndex + 1,
+          }),
+        },
+      ],
+      nativeBridgeWithTaskDetailChangeHandler((handler) => {
+        onChanged = handler;
+      }),
+    );
+
+    render(<App services={services} />);
+    expect(await screen.findByTestId("attention-row")).toBeInTheDocument();
+
+    act(() => {
+      onChanged?.({ taskId: "task-1" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("attention-row")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows plain backend and native teleport failures", async () => {
+    window.history.pushState(null, "", "/tasks/task-1");
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.task.get", result: taskDetailNoInboxResponse },
+        { method: "workflow.task.activity.list", result: activityResponse },
+        {
+          method: "workflow.task.teleportTarget.get",
+          result: { ...teleportResponse, available: false, failure_reason: "No active session." },
+        },
+      ],
+      nativeBridge([]),
+    );
+
+    const view = render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Runs/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Teleport" }));
+    expect(await screen.findByText("No active session.")).toBeInTheDocument();
+    view.unmount();
+
+    window.history.pushState(null, "", "/tasks/task-1");
+    const failingServices = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.task.get", result: taskDetailNoInboxResponse },
+        { method: "workflow.task.activity.list", result: activityResponse },
+        { method: "workflow.task.teleportTarget.get", result: teleportResponse },
+      ],
+      failingTerminalBridge("Local Builder executable is unavailable."),
+    );
+
+    render(<App services={failingServices} />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Runs/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Teleport" }));
+    expect(await screen.findByText("Local Builder executable is unavailable.")).toBeInTheDocument();
   });
 });
 
@@ -73,6 +195,55 @@ function nativeBridge(launched: NativeBuilderSessionLaunch[]): NativeBridge {
     terminal: {
       async launchBuilderSession(target): Promise<void> {
         launched.push(target);
+      },
+    },
+  };
+}
+
+function nativeBridgeWithTaskDetailWindow(opened: NativeTaskDetailTarget[]): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      taskDetailWindow: true,
+    },
+    taskDetail: {
+      ...base.taskDetail,
+      async openWindow(target): Promise<void> {
+        opened.push(target);
+      },
+    },
+  };
+}
+
+function failingTerminalBridge(message: string): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      terminal: { launchBuilderSession: true },
+    },
+    terminal: {
+      async launchBuilderSession(): Promise<void> {
+        throw new Error(message);
+      },
+    },
+  };
+}
+
+function nativeBridgeWithTaskDetailChangeHandler(
+  onRegistered: (handler: (event: NativeTaskDetailChanged) => void) => void,
+): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    taskDetail: {
+      ...base.taskDetail,
+      async onChanged(handler): Promise<() => void> {
+        onRegistered(handler);
+        return () => undefined;
       },
     },
   };
@@ -118,6 +289,17 @@ const attentionBase = {
   latest_event_sequence: 1,
 };
 
+const attentionResponseItem = {
+  ...attentionBase,
+  id: "attention-question",
+  kind: "question",
+  run_id: "run-1",
+  session_id: "session-1",
+  ask_id: "ask-1",
+  task_transition_id: "",
+  message: "Pick answer",
+};
+
 const taskDetailResponse = {
   task: {
     summary: {
@@ -136,7 +318,14 @@ const taskDetailResponse = {
     body: "Need operator input",
     source_workspace: workspace,
     managed_worktree: { root_path: "/tmp/worktree" },
-    status: { kind: "running", label: "Running", native_state: "running", node_ids: ["node-1"], run_ids: ["run-1"], attention_types: ["question", "approval"] },
+    status: {
+      kind: "running",
+      label: "Running",
+      native_state: "running",
+      node_ids: ["node-1"],
+      run_ids: ["run-1"],
+      attention_types: ["question", "approval"],
+    },
     actions: taskActions,
     attention: [
       {
@@ -206,6 +395,14 @@ const taskDetailResponse = {
   },
 };
 
+const taskDetailNoInboxResponse = {
+  task: {
+    ...taskDetailResponse.task,
+    attention: [],
+    transitions: [],
+  },
+};
+
 const activityResponse = {
   items: [
     {
@@ -263,7 +460,10 @@ const teleportResponse = {
   failure_reason: "",
 };
 
-function callParams(calls: readonly Readonly<{ method: string; params: JsonValue }>[], method: string): JsonObject {
+function callParams(
+  calls: readonly Readonly<{ method: string; params: JsonValue }>[],
+  method: string,
+): JsonObject {
   const params = calls.find((call) => call.method === method)?.params;
   if (!isJsonObject(params)) {
     throw new Error(`Missing object params for ${method}.`);

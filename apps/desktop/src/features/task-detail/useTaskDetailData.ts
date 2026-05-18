@@ -4,6 +4,8 @@ import type { QuestionAnswerInput } from "../../api";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 
+const slidingWindowPageLimit = 6;
+
 export function useTaskDetail(taskID: string, enabled: boolean) {
   const { api } = useAppServices();
   return useQuery({
@@ -20,6 +22,7 @@ export function useTaskActivity(taskID: string, enabled: boolean) {
     queryFn: async ({ pageParam }) => api.listTaskActivity(taskID, pageParam),
     enabled: enabled && taskID.length > 0,
     initialPageParam: "",
+    maxPages: slidingWindowPageLimit,
     getNextPageParam: (lastPage) => (lastPage.nextPageToken.length > 0 ? lastPage.nextPageToken : undefined),
   });
 }
@@ -33,12 +36,17 @@ export function usePendingAsks(sessionID: string) {
   });
 }
 
-export function useTaskMutations(taskID: string) {
+export function useTaskMutations(taskID: string, onChanged?: () => void) {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   async function refresh(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: queryKeys.task(taskID) });
     await queryClient.invalidateQueries({ queryKey: queryKeys.activity(taskID) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    await queryClient.invalidateQueries({ queryKey: ["attention"] });
+    await queryClient.invalidateQueries({ queryKey: ["board"] });
+    await queryClient.invalidateQueries({ queryKey: ["pending-asks"] });
+    onChanged?.();
   }
   return {
     addComment: useMutation({
@@ -46,7 +54,8 @@ export function useTaskMutations(taskID: string) {
       onSuccess: refresh,
     }),
     replaceComment: useMutation({
-      mutationFn: async (input: Readonly<{ commentID: string; body: string }>) => api.replaceComment(input.commentID, input.body),
+      mutationFn: async (input: Readonly<{ commentID: string; body: string }>) =>
+        api.replaceComment(input.commentID, input.body),
       onSuccess: refresh,
     }),
     deleteComment: useMutation({

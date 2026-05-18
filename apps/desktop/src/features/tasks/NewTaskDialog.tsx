@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -30,6 +30,7 @@ export function NewTaskDialog({ board, open, onClose }: NewTaskDialogProps) {
   const workspaces = useWorkspaces(board.projectID);
   const createTask = useCreateTask(board.projectID, board.selectedWorkflow.id);
   const defaultWorkspaceID = workspaces.data?.defaultWorkspaceID ?? "";
+  const initializedOpenRef = useRef(false);
   const form = useForm<NewTaskFormValues>({
     resolver: zodResolver(newTaskSchema),
     defaultValues: {
@@ -40,8 +41,13 @@ export function NewTaskDialog({ board, open, onClose }: NewTaskDialogProps) {
   });
 
   useEffect(() => {
-    if (open && defaultWorkspaceID.length > 0) {
+    if (!open) {
+      initializedOpenRef.current = false;
+      return;
+    }
+    if (!initializedOpenRef.current && defaultWorkspaceID.length > 0) {
       form.reset({ title: "", body: "", sourceWorkspaceID: defaultWorkspaceID });
+      initializedOpenRef.current = true;
     }
   }, [defaultWorkspaceID, form, open]);
 
@@ -61,13 +67,26 @@ export function NewTaskDialog({ board, open, onClose }: NewTaskDialogProps) {
 
   return (
     <Dialog closeLabel={t("app.close")} onClose={onClose} open={open} title={t("task.newTitle")}>
-      <form className="stack" onSubmit={(event) => void form.handleSubmit(submit)(event)}>
-        <TextInput error={form.formState.errors.title !== undefined ? t("form.required") : undefined} label={t("task.name")} {...form.register("title")} />
-        <TextArea label={t("task.body")} placeholder={t("task.bodyPlaceholder")} rows={6} {...form.register("body")} />
+      <form className="grid gap-[var(--space-3)]" onSubmit={(event) => void form.handleSubmit(submit)(event)}>
+        <TextInput
+          error={form.formState.errors.title !== undefined ? t("form.required") : undefined}
+          label={t("task.name")}
+          {...form.register("title")}
+        />
+        <TextArea
+          label={t("task.body")}
+          placeholder={t("task.bodyPlaceholder")}
+          rows={6}
+          {...form.register("body")}
+        />
         {workspaceItems.length === 1 ? (
           <Badge tone="info">{workspaceItems[0]?.name ?? t("task.sourceWorkspace")}</Badge>
         ) : (
-          <SelectField disabled={workspaceItems.length <= 1} label={t("task.sourceWorkspace")} {...form.register("sourceWorkspaceID")}>
+          <SelectField
+            disabled={workspaceItems.length <= 1}
+            label={t("task.sourceWorkspace")}
+            {...form.register("sourceWorkspaceID")}
+          >
             {workspaceItems.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
                 {workspace.name}
@@ -75,7 +94,9 @@ export function NewTaskDialog({ board, open, onClose }: NewTaskDialogProps) {
             ))}
           </SelectField>
         )}
-        {createTask.error !== null ? <p className="form-error">{errorMessage(createTask.error)}</p> : null}
+        {createTask.error !== null ? (
+          <p className="m-0 text-[var(--color-error)]">{errorMessage(createTask.error)}</p>
+        ) : null}
         <Button disabled={disabled} type="submit" variant="primary">
           {t("task.create")}
         </Button>

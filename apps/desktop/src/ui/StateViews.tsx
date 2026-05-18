@@ -10,8 +10,14 @@ export type LoadingStateProps = Readonly<{
 
 export function LoadingState({ title, body }: LoadingStateProps) {
   return (
-    <Island className="ui-state" tone="floating">
-      <div className="ui-spinner" aria-hidden="true" />
+    <Island
+      className="grid animate-[surface-reveal_var(--motion-normal)] place-items-start gap-[var(--space-3)]"
+      tone="floating"
+    >
+      <div
+        className="h-6 w-6 motion-safe:animate-spin rounded-full border-[3px] border-[var(--color-outline)] border-t-[var(--color-primary)]"
+        aria-hidden="true"
+      />
       <h2>{title}</h2>
       <p>{body}</p>
     </Island>
@@ -26,10 +32,13 @@ export type EmptyStateProps = Readonly<{
 
 export function EmptyState({ title, body, action }: EmptyStateProps) {
   return (
-    <Island className="ui-state" tone="secondary">
+    <Island
+      className="grid animate-[surface-reveal_var(--motion-normal)] place-items-start gap-[var(--space-3)]"
+      tone="secondary"
+    >
       <h2>{title}</h2>
       <p>{body}</p>
-      {action !== undefined ? <div className="ui-state__action">{action}</div> : null}
+      {action !== undefined ? <div>{action}</div> : null}
     </Island>
   );
 }
@@ -44,7 +53,10 @@ export type ErrorStateProps = Readonly<{
 
 export function ErrorState({ title, body, retryLabel, onRetry, children }: ErrorStateProps) {
   return (
-    <Island className="ui-state ui-state--error" tone="floating">
+    <Island
+      className="grid animate-[surface-reveal_var(--motion-normal)] place-items-start gap-[var(--space-3)]"
+      tone="floating"
+    >
       <h2>{title}</h2>
       <p>{body}</p>
       {children}

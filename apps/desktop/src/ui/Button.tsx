@@ -10,9 +10,26 @@ export type ButtonProps = Readonly<{
 }> &
   ButtonHTMLAttributes<HTMLButtonElement>;
 
-export function Button({ children, className, variant = "secondary", type = "button", ...props }: ButtonProps) {
+export function Button({
+  children,
+  className,
+  variant = "secondary",
+  type = "button",
+  ...props
+}: ButtonProps) {
   return (
-    <button className={cx("ui-button", `ui-button--${variant}`, className)} type={type} {...props}>
+    <button
+      className={cx(
+        "rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[14px] py-[10px] text-[var(--color-on-island)] disabled:cursor-not-allowed disabled:opacity-55",
+        variant === "primary" &&
+          "border-transparent bg-[var(--color-primary)] text-[var(--color-on-primary)]",
+        variant === "danger" && "text-[var(--color-error)]",
+        variant === "ghost" && "border-transparent bg-transparent",
+        className,
+      )}
+      type={type}
+      {...props}
+    >
       {children}
     </button>
   );
