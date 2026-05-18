@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"builder/server/metadata"
@@ -254,11 +255,198 @@ func TestMetadataServiceListsProjectWorkspacesForGUI(t *testing.T) {
 	if len(list.Workspaces) != 2 {
 		t.Fatalf("workspace count = %d, want 2: %+v", len(list.Workspaces), list.Workspaces)
 	}
-	if list.Workspaces[0].WorkspaceID != binding.WorkspaceID || !list.Workspaces[0].IsPrimary {
-		t.Fatalf("first workspace = %+v, want primary %q", list.Workspaces[0], binding.WorkspaceID)
+	if list.Workspaces[0].WorkspaceID != attached.WorkspaceID {
+		t.Fatalf("first workspace = %+v, want newest attached %q", list.Workspaces[0], attached.WorkspaceID)
 	}
-	if list.Workspaces[1].WorkspaceID != attached.WorkspaceID {
-		t.Fatalf("second workspace = %+v, want %q", list.Workspaces[1], attached.WorkspaceID)
+	if list.Workspaces[1].WorkspaceID != binding.WorkspaceID || !list.Workspaces[1].IsPrimary {
+		t.Fatalf("second workspace = %+v, want primary %q", list.Workspaces[1], binding.WorkspaceID)
+	}
+}
+
+func TestMetadataServicePaginatesProjectWorkspacesForGUI(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	first, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject first: %v", err)
+	}
+	second, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject second: %v", err)
+	}
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	page1, err := svc.ListProjectWorkspaces(context.Background(), serverapi.ProjectWorkspaceListRequest{ProjectID: binding.ProjectID, PageSize: 2})
+	if err != nil {
+		t.Fatalf("ListProjectWorkspaces page1: %v", err)
+	}
+	if got := workspaceIDs(page1.Workspaces); len(got) != 2 || got[0] != second.WorkspaceID || got[1] != first.WorkspaceID {
+		t.Fatalf("page1 workspace ids = %+v, want [%s %s]", got, second.WorkspaceID, first.WorkspaceID)
+	}
+	if page1.NextPageToken == "" {
+		t.Fatalf("page1 next token empty: %+v", page1)
+	}
+
+	page2, err := svc.ListProjectWorkspaces(context.Background(), serverapi.ProjectWorkspaceListRequest{ProjectID: binding.ProjectID, PageSize: 2, PageToken: page1.NextPageToken})
+	if err != nil {
+		t.Fatalf("ListProjectWorkspaces page2: %v", err)
+	}
+	if got := workspaceIDs(page2.Workspaces); len(got) != 1 || got[0] != binding.WorkspaceID {
+		t.Fatalf("page2 workspace ids = %+v, want [%s]", got, binding.WorkspaceID)
+	}
+	if page2.NextPageToken != "" {
+		t.Fatalf("page2 next token = %q, want empty", page2.NextPageToken)
+	}
+}
+
+func TestMetadataServiceUpdatesProjectNameForEditPage(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	updated, err := svc.UpdateProject(context.Background(), serverapi.ProjectUpdateRequest{
+		ProjectID:   binding.ProjectID,
+		DisplayName: "Edited project",
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject: %v", err)
+	}
+	if updated.Project.ProjectID != binding.ProjectID {
+		t.Fatalf("updated project id = %q, want %q", updated.Project.ProjectID, binding.ProjectID)
+	}
+	if updated.Project.DisplayName != "Edited project" {
+		t.Fatalf("updated display name = %q, want Edited project", updated.Project.DisplayName)
+	}
+
+	home, err := svc.ListProjectHome(context.Background(), serverapi.ProjectHomeListRequest{PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListProjectHome: %v", err)
+	}
+	if len(home.Projects) != 1 || home.Projects[0].DisplayName != "Edited project" {
+		t.Fatalf("home projects = %+v, want edited name", home.Projects)
+	}
+}
+
+func TestMetadataServiceRejectsInvalidProjectEditNames(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	for _, displayName := range []string{"", " trimmed", "trimmed ", "line\nbreak", strings.Repeat("a", 81)} {
+		_, err := svc.UpdateProject(context.Background(), serverapi.ProjectUpdateRequest{
+			ProjectID:   binding.ProjectID,
+			DisplayName: displayName,
+		})
+		if err == nil {
+			t.Fatalf("UpdateProject(%q) succeeded, want validation error", displayName)
+		}
+	}
+}
+
+func TestMetadataServiceSetsDefaultWorkspaceForEditPage(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	attached, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	updated, err := svc.SetDefaultWorkspace(context.Background(), serverapi.ProjectDefaultWorkspaceSetRequest{
+		ProjectID:   binding.ProjectID,
+		WorkspaceID: attached.WorkspaceID,
+	})
+	if err != nil {
+		t.Fatalf("SetDefaultWorkspace: %v", err)
+	}
+	if updated.Project.PrimaryWorkspace.WorkspaceID != attached.WorkspaceID {
+		t.Fatalf("updated primary workspace = %+v, want %q", updated.Project.PrimaryWorkspace, attached.WorkspaceID)
+	}
+
+	list, err := svc.ListProjectWorkspaces(context.Background(), serverapi.ProjectWorkspaceListRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("ListProjectWorkspaces: %v", err)
+	}
+	if list.DefaultWorkspaceID != attached.WorkspaceID {
+		t.Fatalf("default workspace = %q, want %q", list.DefaultWorkspaceID, attached.WorkspaceID)
+	}
+}
+
+func TestMetadataServiceUnlinksWorkspaceForEditPage(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	attached, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	blocked, err := svc.UnlinkWorkspaceFromProject(context.Background(), serverapi.ProjectWorkspaceUnlinkRequest{
+		ProjectID:   binding.ProjectID,
+		WorkspaceID: binding.WorkspaceID,
+	})
+	if err != nil {
+		t.Fatalf("UnlinkWorkspaceFromProject blocked: %v", err)
+	}
+	if blocked.Unlinked || !hasWorkspaceUnlinkBlocker(blocked.Blockers, "default_workspace") {
+		t.Fatalf("blocked unlink = %+v, want default workspace blocker", blocked)
+	}
+
+	unlinked, err := svc.UnlinkWorkspaceFromProject(context.Background(), serverapi.ProjectWorkspaceUnlinkRequest{
+		ProjectID:   binding.ProjectID,
+		WorkspaceID: attached.WorkspaceID,
+	})
+	if err != nil {
+		t.Fatalf("UnlinkWorkspaceFromProject: %v", err)
+	}
+	if !unlinked.Unlinked || len(unlinked.Blockers) != 0 {
+		t.Fatalf("unlink result = %+v, want success", unlinked)
+	}
+	list, err := svc.ListProjectWorkspaces(context.Background(), serverapi.ProjectWorkspaceListRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("ListProjectWorkspaces: %v", err)
+	}
+	if len(list.Workspaces) != 1 || list.Workspaces[0].WorkspaceID != binding.WorkspaceID {
+		t.Fatalf("workspaces after unlink = %+v, want only default", list.Workspaces)
+	}
+}
+
+func TestMetadataServiceGetsProjectEditForGUI(t *testing.T) {
+	store, _, binding := newProjectViewMetadataStore(t)
+	attached, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	edit, err := svc.GetProjectEdit(context.Background(), serverapi.ProjectEditGetRequest{ProjectID: binding.ProjectID, PageSize: 1})
+	if err != nil {
+		t.Fatalf("GetProjectEdit: %v", err)
+	}
+	if edit.ProjectID != binding.ProjectID || edit.ProjectKey != binding.ProjectKey || edit.DisplayName != binding.ProjectName {
+		t.Fatalf("edit identity = %+v, want %s/%s/%s", edit, binding.ProjectID, binding.ProjectKey, binding.ProjectName)
+	}
+	if edit.DefaultWorkspaceID != binding.WorkspaceID {
+		t.Fatalf("default workspace = %q, want %q", edit.DefaultWorkspaceID, binding.WorkspaceID)
+	}
+	if got := workspaceIDs(edit.Workspaces); len(got) != 1 || got[0] != attached.WorkspaceID {
+		t.Fatalf("edit page1 workspaces = %+v, want newest attached %q", got, attached.WorkspaceID)
+	}
+	if edit.NextPageToken == "" {
+		t.Fatalf("edit next token empty: %+v", edit)
 	}
 }
 
@@ -317,8 +505,8 @@ func TestMetadataServiceListsProjectHomeForGUI(t *testing.T) {
 	if firstPage.GeneratedAtUnixMs <= 0 {
 		t.Fatalf("generated_at_unix_ms = %d, want positive", firstPage.GeneratedAtUnixMs)
 	}
-	if firstPage.LatestEventSequence != 0 {
-		t.Fatalf("latest_event_sequence = %d, want foundation watermark 0", firstPage.LatestEventSequence)
+	if firstPage.LatestEventSequence <= 0 {
+		t.Fatalf("latest_event_sequence = %d, want project mutation watermark", firstPage.LatestEventSequence)
 	}
 
 	secondPage, err := svc.ListProjectHome(context.Background(), serverapi.ProjectHomeListRequest{PageSize: 1, PageToken: firstPage.NextPageToken})
@@ -483,4 +671,21 @@ func newProjectViewMetadataStore(t *testing.T) (*metadata.Store, config.App, met
 		t.Fatalf("RegisterWorkspaceBinding: %v", err)
 	}
 	return store, cfg, binding
+}
+
+func workspaceIDs(workspaces []serverapi.ProjectWorkspaceSummary) []string {
+	out := make([]string, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		out = append(out, workspace.WorkspaceID)
+	}
+	return out
+}
+
+func hasWorkspaceUnlinkBlocker(blockers []serverapi.ProjectWorkspaceUnlinkBlocker, code string) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
 }

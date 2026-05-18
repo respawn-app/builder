@@ -1556,7 +1556,7 @@ func TestManualMoveRejectsActiveParallelBatch(t *testing.T) {
 	}
 }
 
-func TestCreateTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
+func TestStartTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeContinueSession, "reviewer")
@@ -1564,9 +1564,12 @@ func TestCreateTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
 
-	_, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err == nil || !strings.Contains(err.Error(), string(workflow.CodeInvalidContinueSessionRole)) {
-		t.Fatalf("CreateTask error = %v, want %s", err, workflow.CodeInvalidContinueSessionRole)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask invalid workflow backlog: %v", err)
+	}
+	if _, err := store.StartTask(ctx, task.ID); err == nil || !strings.Contains(err.Error(), string(workflow.CodeInvalidContinueSessionRole)) {
+		t.Fatalf("StartTask error = %v, want %s", err, workflow.CodeInvalidContinueSessionRole)
 	}
 }
 
@@ -2195,7 +2198,7 @@ func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	}
 }
 
-func TestTaskCreateRejectsInvalidOrUnlinkedWorkflow(t *testing.T) {
+func TestTaskCreateAllowsInvalidWorkflowBacklogButRejectsUnlinkedWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	invalid, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Invalid"})
@@ -2205,8 +2208,19 @@ func TestTaskCreateRejectsInvalidOrUnlinkedWorkflow(t *testing.T) {
 	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, invalid.ID, true); err != nil {
 		t.Fatalf("LinkWorkflow invalid: %v", err)
 	}
-	if _, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"}); err == nil || !strings.Contains(err.Error(), "workflow validation failed") {
-		t.Fatalf("expected invalid default workflow error, got %v", err)
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask invalid default workflow backlog: %v", err)
+	}
+	if _, err := store.StartTask(ctx, task.ID); err == nil || !strings.Contains(err.Error(), "workflow validation failed") {
+		t.Fatalf("expected invalid workflow start error, got %v", err)
+	}
+	updatedBody := "Updated body"
+	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: "Updated", Body: &updatedBody, SourceWorkspaceID: binding.WorkspaceID}); err != nil {
+		t.Fatalf("UpdateTask invalid workflow backlog: %v", err)
+	}
+	if _, err := store.AddComment(ctx, task.ID, "Comment", "user", "operator"); err != nil {
+		t.Fatalf("AddComment invalid workflow backlog: %v", err)
 	}
 	valid := createValidWorkflow(t, ctx, store)
 	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, valid, false); err != nil {
@@ -2214,8 +2228,8 @@ func TestTaskCreateRejectsInvalidOrUnlinkedWorkflow(t *testing.T) {
 	}
 	if task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: valid, Title: "Explicit", Body: "Body"}); err != nil {
 		t.Fatalf("CreateTask explicit valid workflow: %v", err)
-	} else if !strings.HasPrefix(task.ShortID, "WOR-1") {
-		t.Fatalf("explicit task short id = %q, want WOR-1", task.ShortID)
+	} else if !strings.HasPrefix(task.ShortID, "WOR-2") {
+		t.Fatalf("explicit task short id = %q, want WOR-2", task.ShortID)
 	}
 	unlinked, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Unlinked"})
 	if err != nil {

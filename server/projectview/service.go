@@ -27,6 +27,8 @@ type Service struct {
 const (
 	defaultProjectHomePageSize = 50
 	maxProjectHomePageSize     = 100
+	defaultWorkspacePageSize   = 100
+	maxWorkspacePageSize       = 100
 )
 
 func NewMetadataService(metadataStore *metadata.Store, projectID string, containerDir string) (*Service, error) {
@@ -195,6 +197,121 @@ func (s *Service) CreateProject(ctx context.Context, req serverapi.ProjectCreate
 	return serverapi.ProjectCreateResponse{Binding: projectBindingFromMetadata(binding)}, nil
 }
 
+func (s *Service) UpdateProject(ctx context.Context, req serverapi.ProjectUpdateRequest) (serverapi.ProjectUpdateResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectUpdateResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectUpdateResponse{}, errors.New("project service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectUpdateResponse{}, err
+	}
+	if err := s.metadata.UpdateProjectDisplayName(ctx, req.ProjectID, req.DisplayName); err != nil {
+		return serverapi.ProjectUpdateResponse{}, err
+	}
+	projects, err := s.metadata.ListProjectHomeSummaries(ctx, req.ProjectID, 1, 0)
+	if err != nil {
+		return serverapi.ProjectUpdateResponse{}, err
+	}
+	if len(projects) == 0 {
+		return serverapi.ProjectUpdateResponse{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(req.ProjectID))
+	}
+	return serverapi.ProjectUpdateResponse{Project: projects[0]}, nil
+}
+
+func (s *Service) GetProjectEdit(ctx context.Context, req serverapi.ProjectEditGetRequest) (serverapi.ProjectEditGetResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectEditGetResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectEditGetResponse{}, errors.New("project service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectEditGetResponse{}, err
+	}
+	projects, err := s.metadata.ListProjectHomeSummaries(ctx, req.ProjectID, 1, 0)
+	if err != nil {
+		return serverapi.ProjectEditGetResponse{}, err
+	}
+	if len(projects) == 0 {
+		return serverapi.ProjectEditGetResponse{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(req.ProjectID))
+	}
+	workspaces, err := s.ListProjectWorkspaces(ctx, serverapi.ProjectWorkspaceListRequest{
+		ProjectID: req.ProjectID,
+		PageSize:  req.PageSize,
+		PageToken: req.PageToken,
+	})
+	if err != nil {
+		return serverapi.ProjectEditGetResponse{}, err
+	}
+	project := projects[0]
+	return serverapi.ProjectEditGetResponse{
+		ProjectID:          project.ProjectID,
+		ProjectKey:         project.ProjectKey,
+		DisplayName:        project.DisplayName,
+		DefaultWorkspaceID: workspaces.DefaultWorkspaceID,
+		Workspaces:         workspaces.Workspaces,
+		NextPageToken:      workspaces.NextPageToken,
+	}, nil
+}
+
+func (s *Service) SetDefaultWorkspace(ctx context.Context, req serverapi.ProjectDefaultWorkspaceSetRequest) (serverapi.ProjectDefaultWorkspaceSetResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, errors.New("project service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
+	}
+	if err := s.metadata.SetProjectDefaultWorkspace(ctx, req.ProjectID, req.WorkspaceID); err != nil {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
+	}
+	projects, err := s.metadata.ListProjectHomeSummaries(ctx, req.ProjectID, 1, 0)
+	if err != nil {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
+	}
+	if len(projects) == 0 {
+		return serverapi.ProjectDefaultWorkspaceSetResponse{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(req.ProjectID))
+	}
+	return serverapi.ProjectDefaultWorkspaceSetResponse{Project: projects[0]}, nil
+}
+
+func (s *Service) UnlinkWorkspaceFromProject(ctx context.Context, req serverapi.ProjectWorkspaceUnlinkRequest) (serverapi.ProjectWorkspaceUnlinkResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectWorkspaceUnlinkResponse{}, errors.New("project service is required")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
+	}
+	blockers, err := s.metadata.UnlinkProjectWorkspace(ctx, req.ProjectID, req.WorkspaceID)
+	if err != nil {
+		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
+	}
+	resp := serverapi.ProjectWorkspaceUnlinkResponse{
+		ProjectID:   strings.TrimSpace(req.ProjectID),
+		WorkspaceID: strings.TrimSpace(req.WorkspaceID),
+		Blockers:    blockers,
+		Unlinked:    len(blockers) == 0,
+	}
+	if !resp.Unlinked {
+		return resp, nil
+	}
+	projects, err := s.metadata.ListProjectHomeSummaries(ctx, req.ProjectID, 1, 0)
+	if err != nil {
+		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
+	}
+	if len(projects) > 0 {
+		resp.Project = &projects[0]
+	}
+	return resp, nil
+}
+
 func (s *Service) selectSingleAvailableWorkspace(ctx context.Context) (serverapi.ProjectWorkspacePlanSelected, bool, error) {
 	projects, err := s.ListProjects(ctx, serverapi.ProjectListRequest{})
 	if err != nil {
@@ -238,20 +355,42 @@ func (s *Service) ListProjectWorkspaces(ctx context.Context, req serverapi.Proje
 	if err := s.syncMetadata(ctx); err != nil {
 		return serverapi.ProjectWorkspaceListResponse{}, err
 	}
-	workspaces, err := s.metadata.ListProjectWorkspaces(ctx, req.ProjectID)
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = defaultWorkspacePageSize
+	}
+	if pageSize > maxWorkspacePageSize {
+		pageSize = maxWorkspacePageSize
+	}
+	offset, err := parseProjectHomePageToken(req.PageToken)
 	if err != nil {
 		return serverapi.ProjectWorkspaceListResponse{}, err
 	}
+	projects, err := s.metadata.ListProjectHomeSummaries(ctx, req.ProjectID, 1, 0)
+	if err != nil {
+		return serverapi.ProjectWorkspaceListResponse{}, err
+	}
+	if len(projects) == 0 {
+		return serverapi.ProjectWorkspaceListResponse{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, strings.TrimSpace(req.ProjectID))
+	}
+	workspaces, err := s.metadata.ListProjectWorkspacesPage(ctx, req.ProjectID, pageSize+1, offset)
+	if err != nil {
+		return serverapi.ProjectWorkspaceListResponse{}, err
+	}
+	nextPageToken := ""
+	if len(workspaces) > pageSize {
+		workspaces = workspaces[:pageSize]
+		nextPageToken = strconv.Itoa(offset + pageSize)
+	}
 	response := serverapi.ProjectWorkspaceListResponse{
-		ProjectID:  strings.TrimSpace(req.ProjectID),
-		Workspaces: make([]serverapi.ProjectWorkspaceSummary, 0, len(workspaces)),
+		ProjectID:          strings.TrimSpace(req.ProjectID),
+		Workspaces:         make([]serverapi.ProjectWorkspaceSummary, 0, len(workspaces)),
+		DefaultWorkspaceID: projects[0].PrimaryWorkspace.WorkspaceID,
+		NextPageToken:      nextPageToken,
 	}
 	for _, workspace := range workspaces {
 		summary := projectWorkspaceSummaryFromClientUI(workspace)
 		response.Workspaces = append(response.Workspaces, summary)
-		if workspace.IsPrimary {
-			response.DefaultWorkspaceID = workspace.WorkspaceID
-		}
 	}
 	return response, nil
 }

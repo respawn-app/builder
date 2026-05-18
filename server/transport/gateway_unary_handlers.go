@@ -50,20 +50,6 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return response, nil
 		})
 	},
-	protocol.MethodServerCapabilitiesGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
-		return decodeAndHandle(req, func(params serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error) {
-			statusClient := g.deps.ServerStatusClient()
-			if statusClient == nil {
-				return serverapi.ServerCapabilitiesResponse{}, errors.New("server status client is required")
-			}
-			response, err := statusClient.GetServerCapabilities(ctx, params)
-			if err != nil {
-				return serverapi.ServerCapabilitiesResponse{}, err
-			}
-			response.ProtocolVersion = g.identity.ProtocolVersion
-			return response, nil
-		})
-	},
 	protocol.MethodAuthCompleteBootstrap: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.AuthCompleteBootstrapRequest) (serverapi.AuthCompleteBootstrapResponse, error) {
 			bootstrapClient := g.deps.AuthBootstrapClient()
@@ -137,9 +123,29 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return g.deps.ProjectViewClient().CreateProject(ctx, params)
 		})
 	},
+	protocol.MethodProjectEditGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectEditGetRequest) (serverapi.ProjectEditGetResponse, error) {
+			return g.deps.ProjectViewClient().GetProjectEdit(ctx, params)
+		})
+	},
+	protocol.MethodProjectUpdate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectUpdateRequest) (serverapi.ProjectUpdateResponse, error) {
+			return g.deps.ProjectViewClient().UpdateProject(ctx, params)
+		})
+	},
+	protocol.MethodProjectSetDefaultWorkspace: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectDefaultWorkspaceSetRequest) (serverapi.ProjectDefaultWorkspaceSetResponse, error) {
+			return g.deps.ProjectViewClient().SetDefaultWorkspace(ctx, params)
+		})
+	},
 	protocol.MethodProjectWorkspaceList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
 			return g.deps.ProjectViewClient().ListProjectWorkspaces(ctx, params)
+		})
+	},
+	protocol.MethodProjectUnlinkWorkspace: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectWorkspaceUnlinkRequest) (serverapi.ProjectWorkspaceUnlinkResponse, error) {
+			return g.deps.ProjectViewClient().UnlinkWorkspaceFromProject(ctx, params)
 		})
 	},
 	protocol.MethodProjectAttachWorkspace: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {

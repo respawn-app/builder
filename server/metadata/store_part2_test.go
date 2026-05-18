@@ -21,7 +21,7 @@ func TestResolvePersistedSessionRejectsEscapingArtifactRelpath(t *testing.T) {
 	if err := store.queries.UpsertSession(ctx, sqlitegen.UpsertSessionParams{
 		ID:                 "session-escape",
 		ProjectID:          binding.ProjectID,
-		WorkspaceID:        binding.WorkspaceID,
+		WorkspaceID:        sql.NullString{String: binding.WorkspaceID, Valid: true},
 		WorktreeID:         sql.NullString{},
 		ArtifactRelpath:    "../escape",
 		Name:               "",

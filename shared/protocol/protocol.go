@@ -1,9 +1,18 @@
 package protocol
 
-import "time"
+import (
+	_ "embed"
+	"encoding/json"
+	"strings"
+	"time"
+)
+
+//go:embed version.json
+var versionDefinition []byte
+
+var Version = mustLoadVersion()
 
 const (
-	Version           = "2"
 	RPCPath           = "/rpc"
 	HealthPath        = "/healthz"
 	HealthStatusOK    = "ok"
@@ -45,4 +54,18 @@ type DiscoveryRecord struct {
 	ReadyURL  string         `json:"ready_url"`
 	StartedAt time.Time      `json:"started_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func mustLoadVersion() string {
+	var definition struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(versionDefinition, &definition); err != nil {
+		panic("load protocol version: " + err.Error())
+	}
+	version := strings.TrimSpace(definition.Version)
+	if version == "" {
+		panic("load protocol version: version is required")
+	}
+	return version
 }

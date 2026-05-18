@@ -33,6 +33,7 @@ func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerRead
 	response := serverapi.ServerReadinessResponse{
 		Ready:           ready,
 		ServerVersion:   buildinfo.Version,
+		ServerBuild:     buildinfo.Version,
 		ProtocolVersion: protocol.Version,
 		AuthReady:       authReady,
 		AuthRequired:    authRequired,
@@ -50,39 +51,4 @@ func (s *Service) GetServerReadiness(ctx context.Context, _ serverapi.ServerRead
 		}}
 	}
 	return response, nil
-}
-
-func (s *Service) GetServerCapabilities(context.Context, serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error) {
-	return serverapi.ServerCapabilitiesResponse{
-		ServerVersion:   buildinfo.Version,
-		ProtocolVersion: protocol.Version,
-		Capabilities:    requiredMVPCapabilities(),
-	}, nil
-}
-
-func requiredMVPCapabilities() []serverapi.ServerCapability {
-	ids := []string{
-		"gui.home",
-		"project.key.create",
-		"project.workspace.list",
-		"workflow.board.selected",
-		"workflow.board.groups",
-		"workflow.live_updates",
-		"workflow.task.source_workspace",
-		"workflow.task.create",
-		"workflow.task.edit_backlog",
-		"workflow.task.start",
-		"workflow.task.interrupt",
-		"workflow.task.resume",
-		"workflow.task.cancel",
-		"workflow.attention.list",
-		"workflow.task.activity",
-		"workflow.task.comments",
-		"workflow.task.teleport",
-	}
-	out := make([]serverapi.ServerCapability, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, serverapi.ServerCapability{ID: id, Available: true, RequiredForMVP: true})
-	}
-	return out
 }

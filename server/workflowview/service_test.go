@@ -375,6 +375,42 @@ func TestBoardColumnTaskCountsUseFullSelectedWorkflow(t *testing.T) {
 	}
 }
 
+func TestBoardProjectsManualMoveTargetsFromServerPermissions(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewNoOutputDoneWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if _, err := workflowStore.StartTask(ctx, task.ID); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	def, _, err := workflowStore.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	done := workflowViewNodeByKind(t, def, workflow.NodeKindTerminal)
+
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	if len(board.Cards) != 1 {
+		t.Fatalf("board cards = %+v, want one active card", board.Cards)
+	}
+	if got := board.Cards[0].Actions.ManualMoveTargetNodeIDs; len(got) != 1 || got[0] != string(done.ID) {
+		t.Fatalf("manual move targets = %+v, want %s", got, done.ID)
+	}
+}
+
 func TestTaskDetailProjectsCancellationAndInterruptedRun(t *testing.T) {
 	ctx := context.Background()
 	store, workflowStore, binding := newWorkflowViewTestStore(t)
@@ -911,6 +947,39 @@ func createWorkflowViewValidWorkflow(t *testing.T, ctx context.Context, store *w
 		t.Fatalf("AddTransitionGroup done: %v", err)
 	}
 	if _, err := store.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-done-" + string(created.ID)), WorkflowID: created.ID, TransitionGroupID: workflow.TransitionGroupID("group-done-" + string(created.ID)), Key: "done", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession, OutputRequirements: []workflow.OutputRequirement{{FieldName: "summary"}}}); err != nil {
+		t.Fatalf("AddEdge done: %v", err)
+	}
+	return created.ID
+}
+
+func createWorkflowViewNoOutputDoneWorkflow(t *testing.T, ctx context.Context, store *workflowstore.Store) workflow.WorkflowID {
+	t.Helper()
+	created, err := store.CreateWorkflow(ctx, workflowstore.CreateWorkflowRequest{Name: "Manual Done Workflow"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	def, _, err := store.GetDefinition(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	start := workflowViewNodeByKind(t, def, workflow.NodeKindStart)
+	done := workflowViewNodeByKind(t, def, workflow.NodeKindTerminal)
+	agentID := workflow.NodeID("node-agent-" + string(created.ID))
+	if _, err := store.AddNode(ctx, workflowstore.NodeRecord{ID: agentID, WorkflowID: created.ID, Key: "agent", Kind: workflow.NodeKindAgent, DisplayName: "Agent", SubagentRole: "coder", PromptTemplate: "Do work."}); err != nil {
+		t.Fatalf("AddNode: %v", err)
+	}
+	startGroupID := workflow.TransitionGroupID("group-start-" + string(created.ID))
+	if _, err := store.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: startGroupID, WorkflowID: created.ID, SourceNodeID: start.ID, TransitionID: "start", DisplayName: "Start"}); err != nil {
+		t.Fatalf("AddTransitionGroup start: %v", err)
+	}
+	if _, err := store.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-start-" + string(created.ID)), WorkflowID: created.ID, TransitionGroupID: startGroupID, Key: "start", TargetNodeID: agentID, ContextMode: workflow.ContextModeNewSession}); err != nil {
+		t.Fatalf("AddEdge start: %v", err)
+	}
+	doneGroupID := workflow.TransitionGroupID("group-done-" + string(created.ID))
+	if _, err := store.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: doneGroupID, WorkflowID: created.ID, SourceNodeID: agentID, TransitionID: "done", DisplayName: "Done"}); err != nil {
+		t.Fatalf("AddTransitionGroup done: %v", err)
+	}
+	if _, err := store.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-done-" + string(created.ID)), WorkflowID: created.ID, TransitionGroupID: doneGroupID, Key: "done", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession}); err != nil {
 		t.Fatalf("AddEdge done: %v", err)
 	}
 	return created.ID

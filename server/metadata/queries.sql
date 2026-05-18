@@ -10,6 +10,19 @@ JOIN projects p ON p.id = w.project_id
 WHERE w.canonical_root_path = sqlc.arg(canonical_root_path)
 LIMIT 1;
 
+-- name: GetWorkspaceBindingByProjectAndCanonicalRoot :one
+SELECT
+    p.id AS project_id,
+    p.display_name AS project_display_name,
+    p.project_key,
+    w.id AS workspace_id,
+    w.canonical_root_path AS workspace_root
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+WHERE w.project_id = sqlc.arg(project_id)
+  AND w.canonical_root_path = sqlc.arg(canonical_root_path)
+LIMIT 1;
+
 -- name: GetWorkspaceByCanonicalRoot :one
 SELECT
     id,
@@ -617,6 +630,7 @@ SET
     title = sqlc.arg(title),
     body = sqlc.arg(body),
     source_workspace_id = sqlc.narg(source_workspace_id),
+    metadata_json = sqlc.arg(metadata_json),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
 WHERE id = sqlc.arg(id);
 
@@ -633,6 +647,17 @@ JOIN task_node_placements p
     AND p.state IN ('active', 'waiting_approval')
 JOIN workflow_nodes n ON n.id = p.node_id
 WHERE t.managed_worktree_id = sqlc.arg(managed_worktree_id)
+  AND t.canceled_at_unix_ms = 0
+  AND n.kind != 'terminal';
+
+-- name: CountNonTerminalTasksBySourceWorkspace :one
+SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count
+FROM tasks t
+JOIN task_node_placements p
+    ON p.task_id = t.id
+    AND p.state IN ('active', 'waiting_approval')
+JOIN workflow_nodes n ON n.id = p.node_id
+WHERE t.source_workspace_id = sqlc.arg(workspace_id)
   AND t.canceled_at_unix_ms = 0
   AND n.kind != 'terminal';
 
@@ -1285,7 +1310,7 @@ INSERT INTO workspaces (
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(updated_at_unix_ms)
 )
-ON CONFLICT(canonical_root_path) DO NOTHING;
+ON CONFLICT(id) DO NOTHING;
 
 -- name: UpdateWorkspaceBindingCanonicalRoot :execrows
 UPDATE workspaces
@@ -1295,6 +1320,46 @@ SET
     availability = sqlc.arg(availability),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
 WHERE id = sqlc.arg(id);
+
+-- name: DeleteWorkspaceBindingByID :execrows
+DELETE FROM workspaces
+WHERE project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(workspace_id);
+
+-- name: CountActiveSessionsByWorkspace :one
+SELECT CAST(COUNT(*) AS INTEGER) AS session_count
+FROM sessions
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND in_flight_step <> 0;
+
+-- name: CountActiveTaskRunsByWorkspace :one
+SELECT CAST(COUNT(DISTINCT r.id) AS INTEGER) AS run_count
+FROM task_runs r
+JOIN tasks t ON t.id = r.task_id
+LEFT JOIN sessions s ON s.id = r.session_id
+WHERE r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms = 0
+  AND (
+      t.source_workspace_id = sqlc.arg(workspace_id)
+      OR s.workspace_id = sqlc.arg(workspace_id)
+  );
+
+-- name: CountManagedOwnedWorktreesByWorkspace :one
+SELECT CAST(COUNT(*) AS INTEGER) AS worktree_count
+FROM worktrees
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND builder_managed <> 0
+  AND created_branch <> 0;
+
+-- name: CountTasksMissingSourceWorkspaceSnapshot :one
+SELECT CAST(COUNT(*) AS INTEGER) AS task_count
+FROM tasks
+WHERE source_workspace_id = sqlc.arg(workspace_id)
+  AND (
+      NOT json_valid(metadata_json)
+      OR NULLIF(json_extract(metadata_json, '$.source_workspace_snapshot.root_path'), '') IS NULL
+      OR NULLIF(json_extract(metadata_json, '$.source_workspace_snapshot.display_name'), '') IS NULL
+  );
 
 -- name: ListWorktreesByWorkspaceID :many
 SELECT
@@ -1478,10 +1543,32 @@ FROM projects
 WHERE id = sqlc.arg(project_id)
 LIMIT 1;
 
+-- name: SetProjectDisplayName :execrows
+UPDATE projects
+SET
+    display_name = sqlc.arg(display_name),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(project_id);
+
 -- name: CountProjectWorkspaces :one
 SELECT CAST(COUNT(*) AS INTEGER) AS workspace_count
 FROM workspaces
 WHERE project_id = sqlc.arg(project_id);
+
+-- name: ClearProjectPrimaryWorkspaces :execrows
+UPDATE workspaces
+SET
+    is_primary = 0,
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE project_id = sqlc.arg(project_id);
+
+-- name: SetProjectWorkspacePrimary :execrows
+UPDATE workspaces
+SET
+    is_primary = 1,
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(workspace_id);
 
 -- name: ListProjects :many
 SELECT
@@ -1594,6 +1681,22 @@ WHERE w.project_id = sqlc.arg(project_id)
 GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
 ORDER BY w.is_primary DESC, latest_activity_unix_ms DESC, w.created_at_unix_ms ASC, w.rowid ASC;
 
+-- name: ListProjectWorkspacesPage :many
+SELECT
+    w.id,
+    w.display_name,
+    w.canonical_root_path AS root_path,
+    w.is_primary,
+    CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
+    COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
+FROM workspaces w
+LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
+WHERE w.project_id = sqlc.arg(project_id)
+GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
+ORDER BY w.created_at_unix_ms DESC, w.rowid DESC
+LIMIT sqlc.arg(limit_rows)
+OFFSET sqlc.arg(offset_rows);
+
 -- name: ListSessionsByProject :many
 SELECT
     id,
@@ -1623,9 +1726,9 @@ SELECT
     s.locked_json,
     s.usage_state_json,
     s.metadata_json,
-    w.canonical_root_path AS workspace_root
+    COALESCE(w.canonical_root_path, json_extract(s.metadata_json, '$.workspace_root'), '') AS workspace_root
 FROM sessions s
-JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN workspaces w ON w.id = s.workspace_id
 WHERE s.id = sqlc.arg(session_id)
 LIMIT 1;
 
@@ -1633,17 +1736,17 @@ LIMIT 1;
 SELECT
     s.id AS session_id,
     s.project_id,
-    s.workspace_id,
-    w.display_name AS workspace_name,
-    w.canonical_root_path AS workspace_root,
-    w.availability AS workspace_availability,
+    COALESCE(s.workspace_id, '') AS workspace_id,
+    COALESCE(w.display_name, json_extract(s.metadata_json, '$.workspace_container'), '') AS workspace_name,
+    COALESCE(w.canonical_root_path, json_extract(s.metadata_json, '$.workspace_root'), '') AS workspace_root,
+    COALESCE(w.availability, '') AS workspace_availability,
     s.worktree_id,
     COALESCE(wt.display_name, '') AS worktree_name,
     COALESCE(wt.canonical_root_path, '') AS worktree_root,
     COALESCE(wt.availability, '') AS worktree_availability,
     s.cwd_relpath
 FROM sessions s
-JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN workspaces w ON w.id = s.workspace_id
 LEFT JOIN worktrees wt ON wt.id = s.worktree_id
 WHERE s.id = sqlc.arg(session_id)
 LIMIT 1;

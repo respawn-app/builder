@@ -107,12 +107,30 @@ type ProjectHomeSummary struct {
 
 type ProjectWorkspaceListRequest struct {
 	ProjectID string `json:"project_id"`
+	PageSize  int    `json:"page_size"`
+	PageToken string `json:"page_token"`
 }
 
 type ProjectWorkspaceListResponse struct {
 	ProjectID          string                    `json:"project_id"`
 	Workspaces         []ProjectWorkspaceSummary `json:"workspaces"`
 	DefaultWorkspaceID string                    `json:"default_workspace_id"`
+	NextPageToken      string                    `json:"next_page_token"`
+}
+
+type ProjectEditGetRequest struct {
+	ProjectID string `json:"project_id"`
+	PageSize  int    `json:"page_size"`
+	PageToken string `json:"page_token"`
+}
+
+type ProjectEditGetResponse struct {
+	ProjectID          string                    `json:"project_id"`
+	ProjectKey         string                    `json:"project_key"`
+	DisplayName        string                    `json:"display_name"`
+	DefaultWorkspaceID string                    `json:"default_workspace_id"`
+	Workspaces         []ProjectWorkspaceSummary `json:"workspaces"`
+	NextPageToken      string                    `json:"next_page_token"`
 }
 
 type ProjectWorkspaceSummary struct {
@@ -122,6 +140,43 @@ type ProjectWorkspaceSummary struct {
 	Availability    string `json:"availability"`
 	IsPrimary       bool   `json:"is_primary"`
 	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
+}
+
+type ProjectUpdateRequest struct {
+	ProjectID   string `json:"project_id"`
+	DisplayName string `json:"display_name"`
+}
+
+type ProjectUpdateResponse struct {
+	Project ProjectHomeSummary `json:"project"`
+}
+
+type ProjectDefaultWorkspaceSetRequest struct {
+	ProjectID   string `json:"project_id"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type ProjectDefaultWorkspaceSetResponse struct {
+	Project ProjectHomeSummary `json:"project"`
+}
+
+type ProjectWorkspaceUnlinkRequest struct {
+	ProjectID   string `json:"project_id"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type ProjectWorkspaceUnlinkResponse struct {
+	ProjectID   string                          `json:"project_id"`
+	WorkspaceID string                          `json:"workspace_id"`
+	Unlinked    bool                            `json:"unlinked"`
+	Blockers    []ProjectWorkspaceUnlinkBlocker `json:"blockers,omitempty"`
+	Project     *ProjectHomeSummary             `json:"project,omitempty"`
+}
+
+type ProjectWorkspaceUnlinkBlocker struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Count   int    `json:"count,omitempty"`
 }
 
 type ProjectAttachWorkspaceRequest struct {
@@ -178,14 +233,41 @@ func (r ProjectBindingPlanRequest) Validate() error {
 }
 
 func (r ProjectCreateRequest) Validate() error {
-	if strings.TrimSpace(r.DisplayName) == "" {
-		return errors.New("display_name is required")
+	if err := validateProjectDisplayName(r.DisplayName); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.WorkspaceRoot) == "" {
 		return errors.New("workspace_root is required")
 	}
 	if trimmedKey := strings.TrimSpace(r.ProjectKey); trimmedKey != "" && !isValidProjectKey(trimmedKey) {
 		return errors.New("project_key must match ^[A-Z][A-Z0-9]{1,7}$")
+	}
+	return nil
+}
+
+func (r ProjectUpdateRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	return validateProjectDisplayName(r.DisplayName)
+}
+
+func (r ProjectDefaultWorkspaceSetRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	if strings.TrimSpace(r.WorkspaceID) == "" {
+		return errors.New("workspace_id is required")
+	}
+	return nil
+}
+
+func (r ProjectWorkspaceUnlinkRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	if strings.TrimSpace(r.WorkspaceID) == "" {
+		return errors.New("workspace_id is required")
 	}
 	return nil
 }
@@ -211,8 +293,22 @@ func (r ProjectAttachWorkspaceRequest) Validate() error {
 }
 
 func (r ProjectWorkspaceListRequest) Validate() error {
-	if strings.TrimSpace(r.ProjectID) == "" {
+	return validateProjectWorkspacePage(r.ProjectID, r.PageSize, r.PageToken)
+}
+
+func (r ProjectEditGetRequest) Validate() error {
+	return validateProjectWorkspacePage(r.ProjectID, r.PageSize, r.PageToken)
+}
+
+func validateProjectWorkspacePage(projectID string, pageSize int, pageToken string) error {
+	if strings.TrimSpace(projectID) == "" {
 		return errors.New("project_id is required")
+	}
+	if pageSize < 0 {
+		return errors.New("page_size must be non-negative")
+	}
+	if strings.TrimSpace(pageToken) != pageToken {
+		return errors.New("page_token must not have leading or trailing whitespace")
 	}
 	return nil
 }
@@ -257,4 +353,17 @@ func isValidProjectKey(key string) bool {
 		}
 	}
 	return true
+}
+
+func validateProjectDisplayName(name string) error {
+	if name != strings.TrimSpace(name) {
+		return errors.New("display_name must not have leading or trailing whitespace")
+	}
+	if strings.ContainsAny(name, "\r\n") {
+		return errors.New("display_name must be one line")
+	}
+	if length := len([]rune(name)); length < 1 || length > 80 {
+		return errors.New("display_name must be 1-80 visible characters")
+	}
+	return nil
 }

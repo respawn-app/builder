@@ -190,6 +190,27 @@ func (q *Queries) ClearProjectDefaultWorkflowLinks(ctx context.Context, arg Clea
 	return err
 }
 
+const clearProjectPrimaryWorkspaces = `-- name: ClearProjectPrimaryWorkspaces :execrows
+UPDATE workspaces
+SET
+    is_primary = 0,
+    updated_at_unix_ms = ?1
+WHERE project_id = ?2
+`
+
+type ClearProjectPrimaryWorkspacesParams struct {
+	UpdatedAtUnixMs int64
+	ProjectID       string
+}
+
+func (q *Queries) ClearProjectPrimaryWorkspaces(ctx context.Context, arg ClearProjectPrimaryWorkspacesParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, clearProjectPrimaryWorkspaces, arg.UpdatedAtUnixMs, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countActiveProjectWorkflowLinks = `-- name: CountActiveProjectWorkflowLinks :one
 SELECT CAST(COUNT(*) AS INTEGER) AS active_link_count
 FROM project_workflow_links
@@ -202,6 +223,55 @@ func (q *Queries) CountActiveProjectWorkflowLinks(ctx context.Context, projectID
 	var active_link_count int64
 	err := row.Scan(&active_link_count)
 	return active_link_count, err
+}
+
+const countActiveSessionsByWorkspace = `-- name: CountActiveSessionsByWorkspace :one
+SELECT CAST(COUNT(*) AS INTEGER) AS session_count
+FROM sessions
+WHERE workspace_id = ?1
+  AND in_flight_step <> 0
+`
+
+func (q *Queries) CountActiveSessionsByWorkspace(ctx context.Context, workspaceID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveSessionsByWorkspace, workspaceID)
+	var session_count int64
+	err := row.Scan(&session_count)
+	return session_count, err
+}
+
+const countActiveTaskRunsByWorkspace = `-- name: CountActiveTaskRunsByWorkspace :one
+SELECT CAST(COUNT(DISTINCT r.id) AS INTEGER) AS run_count
+FROM task_runs r
+JOIN tasks t ON t.id = r.task_id
+LEFT JOIN sessions s ON s.id = r.session_id
+WHERE r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms = 0
+  AND (
+      t.source_workspace_id = ?1
+      OR s.workspace_id = ?1
+  )
+`
+
+func (q *Queries) CountActiveTaskRunsByWorkspace(ctx context.Context, workspaceID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveTaskRunsByWorkspace, workspaceID)
+	var run_count int64
+	err := row.Scan(&run_count)
+	return run_count, err
+}
+
+const countManagedOwnedWorktreesByWorkspace = `-- name: CountManagedOwnedWorktreesByWorkspace :one
+SELECT CAST(COUNT(*) AS INTEGER) AS worktree_count
+FROM worktrees
+WHERE workspace_id = ?1
+  AND builder_managed <> 0
+  AND created_branch <> 0
+`
+
+func (q *Queries) CountManagedOwnedWorktreesByWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countManagedOwnedWorktreesByWorkspace, workspaceID)
+	var worktree_count int64
+	err := row.Scan(&worktree_count)
+	return worktree_count, err
 }
 
 const countNonTerminalTasksByManagedWorktree = `-- name: CountNonTerminalTasksByManagedWorktree :one
@@ -235,6 +305,25 @@ WHERE t.project_workflow_link_id = ?1
 
 func (q *Queries) CountNonTerminalTasksByProjectWorkflowLink(ctx context.Context, projectWorkflowLinkID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countNonTerminalTasksByProjectWorkflowLink, projectWorkflowLinkID)
+	var task_count int64
+	err := row.Scan(&task_count)
+	return task_count, err
+}
+
+const countNonTerminalTasksBySourceWorkspace = `-- name: CountNonTerminalTasksBySourceWorkspace :one
+SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count
+FROM tasks t
+JOIN task_node_placements p
+    ON p.task_id = t.id
+    AND p.state IN ('active', 'waiting_approval')
+JOIN workflow_nodes n ON n.id = p.node_id
+WHERE t.source_workspace_id = ?1
+  AND t.canceled_at_unix_ms = 0
+  AND n.kind != 'terminal'
+`
+
+func (q *Queries) CountNonTerminalTasksBySourceWorkspace(ctx context.Context, workspaceID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countNonTerminalTasksBySourceWorkspace, workspaceID)
 	var task_count int64
 	err := row.Scan(&task_count)
 	return task_count, err
@@ -329,6 +418,24 @@ func (q *Queries) CountTasksByProjectWorkflowLink(ctx context.Context, projectWo
 	return task_count, err
 }
 
+const countTasksMissingSourceWorkspaceSnapshot = `-- name: CountTasksMissingSourceWorkspaceSnapshot :one
+SELECT CAST(COUNT(*) AS INTEGER) AS task_count
+FROM tasks
+WHERE source_workspace_id = ?1
+  AND (
+      NOT json_valid(metadata_json)
+      OR NULLIF(json_extract(metadata_json, '$.source_workspace_snapshot.root_path'), '') IS NULL
+      OR NULLIF(json_extract(metadata_json, '$.source_workspace_snapshot.display_name'), '') IS NULL
+  )
+`
+
+func (q *Queries) CountTasksMissingSourceWorkspaceSnapshot(ctx context.Context, workspaceID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTasksMissingSourceWorkspaceSnapshot, workspaceID)
+	var task_count int64
+	err := row.Scan(&task_count)
+	return task_count, err
+}
+
 const countWorkflowNodesByGroup = `-- name: CountWorkflowNodesByGroup :one
 SELECT CAST(COUNT(*) AS INTEGER) AS node_count
 FROM workflow_nodes
@@ -394,6 +501,25 @@ type DeleteWorkflowNodeGroupParams struct {
 
 func (q *Queries) DeleteWorkflowNodeGroup(ctx context.Context, arg DeleteWorkflowNodeGroupParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteWorkflowNodeGroup, arg.ID, arg.WorkflowID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteWorkspaceBindingByID = `-- name: DeleteWorkspaceBindingByID :execrows
+DELETE FROM workspaces
+WHERE project_id = ?1
+  AND id = ?2
+`
+
+type DeleteWorkspaceBindingByIDParams struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func (q *Queries) DeleteWorkspaceBindingByID(ctx context.Context, arg DeleteWorkspaceBindingByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteWorkspaceBindingByID, arg.ProjectID, arg.WorkspaceID)
 	if err != nil {
 		return 0, err
 	}
@@ -681,17 +807,17 @@ const getSessionExecutionTargetByID = `-- name: GetSessionExecutionTargetByID :o
 SELECT
     s.id AS session_id,
     s.project_id,
-    s.workspace_id,
-    w.display_name AS workspace_name,
-    w.canonical_root_path AS workspace_root,
-    w.availability AS workspace_availability,
+    COALESCE(s.workspace_id, '') AS workspace_id,
+    COALESCE(w.display_name, json_extract(s.metadata_json, '$.workspace_container'), '') AS workspace_name,
+    COALESCE(w.canonical_root_path, json_extract(s.metadata_json, '$.workspace_root'), '') AS workspace_root,
+    COALESCE(w.availability, '') AS workspace_availability,
     s.worktree_id,
     COALESCE(wt.display_name, '') AS worktree_name,
     COALESCE(wt.canonical_root_path, '') AS worktree_root,
     COALESCE(wt.availability, '') AS worktree_availability,
     s.cwd_relpath
 FROM sessions s
-JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN workspaces w ON w.id = s.workspace_id
 LEFT JOIN worktrees wt ON wt.id = s.worktree_id
 WHERE s.id = ?1
 LIMIT 1
@@ -748,9 +874,9 @@ SELECT
     s.locked_json,
     s.usage_state_json,
     s.metadata_json,
-    w.canonical_root_path AS workspace_root
+    COALESCE(w.canonical_root_path, json_extract(s.metadata_json, '$.workspace_root'), '') AS workspace_root
 FROM sessions s
-JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN workspaces w ON w.id = s.workspace_id
 WHERE s.id = ?1
 LIMIT 1
 `
@@ -1139,6 +1265,46 @@ type GetWorkspaceBindingByIDRow struct {
 func (q *Queries) GetWorkspaceBindingByID(ctx context.Context, workspaceID string) (GetWorkspaceBindingByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getWorkspaceBindingByID, workspaceID)
 	var i GetWorkspaceBindingByIDRow
+	err := row.Scan(
+		&i.ProjectID,
+		&i.ProjectDisplayName,
+		&i.ProjectKey,
+		&i.WorkspaceID,
+		&i.WorkspaceRoot,
+	)
+	return i, err
+}
+
+const getWorkspaceBindingByProjectAndCanonicalRoot = `-- name: GetWorkspaceBindingByProjectAndCanonicalRoot :one
+SELECT
+    p.id AS project_id,
+    p.display_name AS project_display_name,
+    p.project_key,
+    w.id AS workspace_id,
+    w.canonical_root_path AS workspace_root
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+WHERE w.project_id = ?1
+  AND w.canonical_root_path = ?2
+LIMIT 1
+`
+
+type GetWorkspaceBindingByProjectAndCanonicalRootParams struct {
+	ProjectID         string
+	CanonicalRootPath string
+}
+
+type GetWorkspaceBindingByProjectAndCanonicalRootRow struct {
+	ProjectID          string
+	ProjectDisplayName string
+	ProjectKey         string
+	WorkspaceID        string
+	WorkspaceRoot      string
+}
+
+func (q *Queries) GetWorkspaceBindingByProjectAndCanonicalRoot(ctx context.Context, arg GetWorkspaceBindingByProjectAndCanonicalRootParams) (GetWorkspaceBindingByProjectAndCanonicalRootRow, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceBindingByProjectAndCanonicalRoot, arg.ProjectID, arg.CanonicalRootPath)
+	var i GetWorkspaceBindingByProjectAndCanonicalRootRow
 	err := row.Scan(
 		&i.ProjectID,
 		&i.ProjectDisplayName,
@@ -2175,7 +2341,7 @@ INSERT INTO workspaces (
     ?8,
     ?9
 )
-ON CONFLICT(canonical_root_path) DO NOTHING
+ON CONFLICT(id) DO NOTHING
 `
 
 type InsertWorkspaceBindingParams struct {
@@ -2557,6 +2723,68 @@ func (q *Queries) ListProjectWorkspaces(ctx context.Context, projectID string) (
 	var items []ListProjectWorkspacesRow
 	for rows.Next() {
 		var i ListProjectWorkspacesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.RootPath,
+			&i.IsPrimary,
+			&i.SessionCount,
+			&i.LatestActivityUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectWorkspacesPage = `-- name: ListProjectWorkspacesPage :many
+SELECT
+    w.id,
+    w.display_name,
+    w.canonical_root_path AS root_path,
+    w.is_primary,
+    CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
+    COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
+FROM workspaces w
+LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
+WHERE w.project_id = ?1
+GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
+ORDER BY w.created_at_unix_ms DESC, w.rowid DESC
+LIMIT ?3
+OFFSET ?2
+`
+
+type ListProjectWorkspacesPageParams struct {
+	ProjectID  string
+	OffsetRows int64
+	LimitRows  int64
+}
+
+type ListProjectWorkspacesPageRow struct {
+	ID                   string
+	DisplayName          string
+	RootPath             string
+	IsPrimary            int64
+	SessionCount         int64
+	LatestActivityUnixMs int64
+}
+
+func (q *Queries) ListProjectWorkspacesPage(ctx context.Context, arg ListProjectWorkspacesPageParams) ([]ListProjectWorkspacesPageRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectWorkspacesPage, arg.ProjectID, arg.OffsetRows, arg.LimitRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectWorkspacesPageRow
+	for rows.Next() {
+		var i ListProjectWorkspacesPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.DisplayName,
@@ -3681,6 +3909,28 @@ func (q *Queries) ListWorktreesByWorkspaceID(ctx context.Context, workspaceID st
 	return items, nil
 }
 
+const setProjectDisplayName = `-- name: SetProjectDisplayName :execrows
+UPDATE projects
+SET
+    display_name = ?1,
+    updated_at_unix_ms = ?2
+WHERE id = ?3
+`
+
+type SetProjectDisplayNameParams struct {
+	DisplayName     string
+	UpdatedAtUnixMs int64
+	ProjectID       string
+}
+
+func (q *Queries) SetProjectDisplayName(ctx context.Context, arg SetProjectDisplayNameParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectDisplayName, arg.DisplayName, arg.UpdatedAtUnixMs, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProjectKey = `-- name: SetProjectKey :execrows
 UPDATE projects
 SET
@@ -3697,6 +3947,29 @@ type SetProjectKeyParams struct {
 
 func (q *Queries) SetProjectKey(ctx context.Context, arg SetProjectKeyParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProjectKey, arg.ProjectKey, arg.UpdatedAtUnixMs, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setProjectWorkspacePrimary = `-- name: SetProjectWorkspacePrimary :execrows
+UPDATE workspaces
+SET
+    is_primary = 1,
+    updated_at_unix_ms = ?1
+WHERE project_id = ?2
+  AND id = ?3
+`
+
+type SetProjectWorkspacePrimaryParams struct {
+	UpdatedAtUnixMs int64
+	ProjectID       string
+	WorkspaceID     string
+}
+
+func (q *Queries) SetProjectWorkspacePrimary(ctx context.Context, arg SetProjectWorkspacePrimaryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectWorkspacePrimary, arg.UpdatedAtUnixMs, arg.ProjectID, arg.WorkspaceID)
 	if err != nil {
 		return 0, err
 	}
@@ -3761,7 +4034,7 @@ WHERE id = ?5
 `
 
 type UpdateSessionExecutionTargetByIDParams struct {
-	WorkspaceID     string
+	WorkspaceID     sql.NullString
 	WorktreeID      sql.NullString
 	CwdRelpath      string
 	UpdatedAtUnixMs int64
@@ -3811,14 +4084,16 @@ SET
     title = ?1,
     body = ?2,
     source_workspace_id = ?3,
-    updated_at_unix_ms = ?4
-WHERE id = ?5
+    metadata_json = ?4,
+    updated_at_unix_ms = ?5
+WHERE id = ?6
 `
 
 type UpdateTaskEditableFieldsParams struct {
 	Title             string
 	Body              string
 	SourceWorkspaceID sql.NullString
+	MetadataJson      string
 	UpdatedAtUnixMs   int64
 	ID                string
 }
@@ -3828,6 +4103,7 @@ func (q *Queries) UpdateTaskEditableFields(ctx context.Context, arg UpdateTaskEd
 		arg.Title,
 		arg.Body,
 		arg.SourceWorkspaceID,
+		arg.MetadataJson,
 		arg.UpdatedAtUnixMs,
 		arg.ID,
 	)
@@ -4166,7 +4442,7 @@ ON CONFLICT(id) DO UPDATE SET
 type UpsertSessionParams struct {
 	ID                 string
 	ProjectID          string
-	WorkspaceID        string
+	WorkspaceID        sql.NullString
 	WorktreeID         sql.NullString
 	ArtifactRelpath    string
 	Name               string
