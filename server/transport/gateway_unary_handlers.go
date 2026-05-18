@@ -35,6 +35,35 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return bootstrapClient.GetAuthBootstrapStatus(ctx, params)
 		})
 	},
+	protocol.MethodServerReadinessGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ServerReadinessRequest) (serverapi.ServerReadinessResponse, error) {
+			statusClient := g.deps.ServerStatusClient()
+			if statusClient == nil {
+				return serverapi.ServerReadinessResponse{}, errors.New("server status client is required")
+			}
+			response, err := statusClient.GetServerReadiness(ctx, params)
+			if err != nil {
+				return serverapi.ServerReadinessResponse{}, err
+			}
+			response.ServerID = g.identity.ServerID
+			response.ProtocolVersion = g.identity.ProtocolVersion
+			return response, nil
+		})
+	},
+	protocol.MethodServerCapabilitiesGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error) {
+			statusClient := g.deps.ServerStatusClient()
+			if statusClient == nil {
+				return serverapi.ServerCapabilitiesResponse{}, errors.New("server status client is required")
+			}
+			response, err := statusClient.GetServerCapabilities(ctx, params)
+			if err != nil {
+				return serverapi.ServerCapabilitiesResponse{}, err
+			}
+			response.ProtocolVersion = g.identity.ProtocolVersion
+			return response, nil
+		})
+	},
 	protocol.MethodAuthCompleteBootstrap: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.AuthCompleteBootstrapRequest) (serverapi.AuthCompleteBootstrapResponse, error) {
 			bootstrapClient := g.deps.AuthBootstrapClient()
@@ -88,6 +117,11 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return g.deps.ProjectViewClient().ListProjects(ctx, params)
 		})
 	},
+	protocol.MethodProjectHomeList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectHomeListRequest) (serverapi.ProjectHomeListResponse, error) {
+			return g.deps.ProjectViewClient().ListProjectHome(ctx, params)
+		})
+	},
 	protocol.MethodProjectResolvePath: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 			return g.deps.ProjectViewClient().ResolveProjectPath(ctx, params)
@@ -101,6 +135,11 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 	protocol.MethodProjectCreate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
 			return g.deps.ProjectViewClient().CreateProject(ctx, params)
+		})
+	},
+	protocol.MethodProjectWorkspaceList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
+			return g.deps.ProjectViewClient().ListProjectWorkspaces(ctx, params)
 		})
 	},
 	protocol.MethodProjectAttachWorkspace: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
@@ -141,6 +180,21 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 	protocol.MethodWorkflowGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowGetRequest) (serverapi.WorkflowGetResponse, error) {
 			return g.deps.WorkflowClient().GetWorkflow(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowNodeGroupAdd: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupAddRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+			return g.deps.WorkflowClient().AddWorkflowNodeGroup(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowNodeGroupUpdate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupUpdateRequest) (serverapi.WorkflowNodeGroupResponse, error) {
+			return g.deps.WorkflowClient().UpdateWorkflowNodeGroup(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowNodeGroupDelete: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowNodeGroupDeleteRequest) (struct{}, error) {
+			return struct{}{}, g.deps.WorkflowClient().DeleteWorkflowNodeGroup(ctx, params)
 		})
 	},
 	protocol.MethodWorkflowAddNode: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
@@ -188,9 +242,19 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return g.deps.WorkflowClient().CreateWorkflowTask(ctx, params)
 		})
 	},
+	protocol.MethodWorkflowTaskUpdate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskUpdateRequest) (serverapi.WorkflowTaskUpdateResponse, error) {
+			return g.deps.WorkflowClient().UpdateWorkflowTask(ctx, params)
+		})
+	},
 	protocol.MethodWorkflowTaskStart: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowTaskStartRequest) (serverapi.WorkflowTaskStartResponse, error) {
 			return g.deps.WorkflowClient().StartWorkflowTask(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskInterrupt: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskInterruptRequest) (serverapi.WorkflowTaskInterruptResponse, error) {
+			return g.deps.WorkflowClient().InterruptWorkflowTask(ctx, params)
 		})
 	},
 	protocol.MethodWorkflowTaskResume: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
@@ -213,6 +277,21 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 			return struct{}{}, g.deps.WorkflowClient().CancelWorkflowTask(ctx, params)
 		})
 	},
+	protocol.MethodWorkflowAttentionList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowAttentionListRequest) (serverapi.WorkflowAttentionListResponse, error) {
+			return g.deps.WorkflowClient().ListWorkflowAttention(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskAttentionList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskAttentionListRequest) (serverapi.WorkflowTaskAttentionListResponse, error) {
+			return g.deps.WorkflowClient().ListWorkflowTaskAttention(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskQuestionAnswer: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskQuestionAnswerRequest) (struct{}, error) {
+			return struct{}{}, g.deps.WorkflowClient().AnswerWorkflowTaskQuestion(ctx, params)
+		})
+	},
 	protocol.MethodWorkflowTaskCommentAdd: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowTaskCommentAddRequest) (serverapi.WorkflowTaskCommentAddResponse, error) {
 			return g.deps.WorkflowClient().AddWorkflowTaskComment(ctx, params)
@@ -231,6 +310,16 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 	protocol.MethodWorkflowTaskCommentDelete: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
 		return decodeAndHandle(req, func(params serverapi.WorkflowTaskCommentDeleteRequest) (struct{}, error) {
 			return struct{}{}, g.deps.WorkflowClient().DeleteWorkflowTaskComment(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskActivityList: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error) {
+			return g.deps.WorkflowClient().ListWorkflowTaskActivity(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowTaskTeleportTargetGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowTaskTeleportTargetRequest) (serverapi.WorkflowTaskTeleportTargetResponse, error) {
+			return g.deps.WorkflowClient().GetWorkflowTaskTeleportTarget(ctx, params)
 		})
 	},
 	protocol.MethodWorkflowBoardGet: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {

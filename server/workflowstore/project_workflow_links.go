@@ -45,6 +45,14 @@ func (s *Store) ListProjectWorkflowLinks(ctx context.Context, projectID string) 
 	return out, nil
 }
 
+func (s *Store) GetProjectWorkflowLink(ctx context.Context, linkID string) (ProjectWorkflowLinkRecord, error) {
+	row, err := s.queries.GetProjectWorkflowLink(ctx, strings.TrimSpace(linkID))
+	if err != nil {
+		return ProjectWorkflowLinkRecord{}, err
+	}
+	return linkRecordFromRow(row), nil
+}
+
 func (s *Store) SetDefaultProjectWorkflowLink(ctx context.Context, projectID string, workflowID workflow.WorkflowID) (ProjectWorkflowLinkRecord, error) {
 	now := s.now().UnixMilli()
 	tx, err := s.db.BeginTx(ctx, nil)

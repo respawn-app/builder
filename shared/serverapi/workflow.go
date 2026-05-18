@@ -1,6 +1,7 @@
 package serverapi
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -48,9 +49,20 @@ type WorkflowNode struct {
 	Key            string                `json:"key"`
 	Kind           string                `json:"kind"`
 	DisplayName    string                `json:"display_name"`
+	GroupID        string                `json:"group_id,omitempty"`
+	GroupKey       string                `json:"group_key,omitempty"`
 	SubagentRole   string                `json:"subagent_role,omitempty"`
 	PromptTemplate string                `json:"prompt_template,omitempty"`
 	OutputFields   []WorkflowOutputField `json:"output_fields,omitempty"`
+}
+
+type WorkflowNodeGroup struct {
+	GroupID      string `json:"group_id"`
+	WorkflowID   string `json:"workflow_id"`
+	GroupKey     string `json:"group_key"`
+	DisplayName  string `json:"display_name"`
+	SortOrder    int    `json:"sort_order"`
+	MetadataJSON string `json:"metadata_json,omitempty"`
 }
 
 type WorkflowTransitionGroup struct {
@@ -89,6 +101,7 @@ type WorkflowInputBinding struct {
 }
 
 type WorkflowDefinition struct {
+	NodeGroups       []WorkflowNodeGroup       `json:"node_groups,omitempty"`
 	Workflow         WorkflowRecord            `json:"workflow"`
 	Nodes            []WorkflowNode            `json:"nodes"`
 	TransitionGroups []WorkflowTransitionGroup `json:"transition_groups"`
@@ -130,6 +143,7 @@ type WorkflowNodeAddRequest struct {
 	Key            string                `json:"key"`
 	Kind           string                `json:"kind"`
 	DisplayName    string                `json:"display_name"`
+	GroupKey       string                `json:"group_key,omitempty"`
 	SubagentRole   string                `json:"subagent_role,omitempty"`
 	PromptTemplate string                `json:"prompt_template,omitempty"`
 	OutputFields   []WorkflowOutputField `json:"output_fields,omitempty"`
@@ -137,6 +151,34 @@ type WorkflowNodeAddRequest struct {
 
 type WorkflowNodeAddResponse struct {
 	GraphRevision int64 `json:"graph_revision"`
+}
+
+type WorkflowNodeGroupAddRequest struct {
+	WorkflowID   string `json:"workflow_id"`
+	GroupID      string `json:"group_id,omitempty"`
+	GroupKey     string `json:"group_key"`
+	DisplayName  string `json:"display_name"`
+	SortOrder    int    `json:"sort_order"`
+	MetadataJSON string `json:"metadata_json,omitempty"`
+}
+
+type WorkflowNodeGroupUpdateRequest struct {
+	WorkflowID   string `json:"workflow_id"`
+	GroupID      string `json:"group_id"`
+	GroupKey     string `json:"group_key"`
+	DisplayName  string `json:"display_name"`
+	SortOrder    int    `json:"sort_order"`
+	MetadataJSON string `json:"metadata_json,omitempty"`
+}
+
+type WorkflowNodeGroupDeleteRequest struct {
+	WorkflowID string `json:"workflow_id"`
+	GroupID    string `json:"group_id"`
+}
+
+type WorkflowNodeGroupResponse struct {
+	Group         WorkflowNodeGroup `json:"group"`
+	GraphRevision int64             `json:"graph_revision"`
 }
 
 type WorkflowTransitionGroupAddRequest struct {
@@ -229,14 +271,26 @@ type WorkflowValidationError struct {
 }
 
 type WorkflowTaskCreateRequest struct {
-	ProjectID  string `json:"project_id"`
-	WorkflowID string `json:"workflow_id,omitempty"`
-	Title      string `json:"title"`
-	Body       string `json:"body"`
-	SourceURL  string `json:"source_url,omitempty"`
+	ProjectID         string `json:"project_id"`
+	WorkflowID        string `json:"workflow_id,omitempty"`
+	Title             string `json:"title"`
+	Body              string `json:"body,omitempty"`
+	SourceURL         string `json:"source_url,omitempty"`
+	SourceWorkspaceID string `json:"source_workspace_id,omitempty"`
 }
 
 type WorkflowTaskCreateResponse struct {
+	Task WorkflowTaskSummary `json:"task"`
+}
+
+type WorkflowTaskUpdateRequest struct {
+	TaskID            string  `json:"task_id"`
+	Title             string  `json:"title"`
+	Body              *string `json:"body,omitempty"`
+	SourceWorkspaceID string  `json:"source_workspace_id,omitempty"`
+}
+
+type WorkflowTaskUpdateResponse struct {
 	Task WorkflowTaskSummary `json:"task"`
 }
 
@@ -252,6 +306,7 @@ type WorkflowTaskStartResponse struct {
 
 type WorkflowTaskResumeRequest struct {
 	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
 }
 
 type WorkflowTaskResumeResponse struct {
@@ -263,7 +318,8 @@ type WorkflowTaskResumeResponse struct {
 }
 
 type WorkflowTaskApproveRequest struct {
-	TransitionID string `json:"transition_id"`
+	TaskTransitionID string `json:"task_transition_id,omitempty"`
+	TransitionID     string `json:"transition_id,omitempty"`
 }
 
 type WorkflowTaskApproveResponse struct {
@@ -290,6 +346,66 @@ type WorkflowTaskMoveResponse struct {
 type WorkflowTaskCancelRequest struct {
 	TaskID string `json:"task_id"`
 	Reason string `json:"reason,omitempty"`
+}
+
+type WorkflowTaskInterruptRequest struct {
+	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type WorkflowTaskInterruptResponse struct {
+	RunID string `json:"run_id"`
+}
+
+type WorkflowAttentionListRequest struct {
+	ProjectID string `json:"project_id,omitempty"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type WorkflowAttentionListResponse struct {
+	Items               []WorkflowAttentionItem `json:"items"`
+	NextPageToken       string                  `json:"next_page_token,omitempty"`
+	GeneratedAtUnixMs   int64                   `json:"generated_at_unix_ms"`
+	LatestEventSequence int64                   `json:"latest_event_sequence"`
+}
+
+type WorkflowTaskAttentionListRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+type WorkflowTaskAttentionListResponse struct {
+	Items             []WorkflowAttentionItem `json:"items"`
+	GeneratedAtUnixMs int64                   `json:"generated_at_unix_ms"`
+}
+
+type WorkflowAttentionItem struct {
+	ID                  string `json:"id"`
+	Kind                string `json:"kind"`
+	ProjectID           string `json:"project_id,omitempty"`
+	WorkflowID          string `json:"workflow_id,omitempty"`
+	TaskID              string `json:"task_id,omitempty"`
+	TaskShortID         string `json:"task_short_id,omitempty"`
+	TaskTitle           string `json:"task_title,omitempty"`
+	RunID               string `json:"run_id,omitempty"`
+	SessionID           string `json:"session_id,omitempty"`
+	AskID               string `json:"ask_id,omitempty"`
+	TaskTransitionID    string `json:"task_transition_id,omitempty"`
+	Message             string `json:"message"`
+	OccurredAtUnixMs    int64  `json:"occurred_at_unix_ms"`
+	LatestEventSequence int64  `json:"latest_event_sequence,omitempty"`
+}
+
+type WorkflowTaskQuestionAnswerRequest struct {
+	ClientRequestID      string `json:"client_request_id"`
+	TaskID               string `json:"task_id"`
+	RunID                string `json:"run_id,omitempty"`
+	AskID                string `json:"ask_id"`
+	ErrorMessage         string `json:"error_message,omitempty"`
+	Answer               string `json:"answer,omitempty"`
+	SelectedOptionNumber int    `json:"selected_option_number,omitempty"`
+	FreeformAnswer       string `json:"freeform_answer,omitempty"`
 }
 
 type WorkflowTaskCommentAddRequest struct {
@@ -322,7 +438,11 @@ type WorkflowTaskCommentDeleteRequest struct {
 }
 
 type WorkflowBoardRequest struct {
-	ProjectID string `json:"project_id"`
+	ProjectID        string `json:"project_id"`
+	WorkflowID       string `json:"workflow_id,omitempty"`
+	DonePreviewLimit int    `json:"done_preview_limit"`
+	PageSize         int    `json:"page_size"`
+	PageToken        string `json:"page_token"`
 }
 
 type WorkflowBoardResponse struct {
@@ -330,8 +450,114 @@ type WorkflowBoardResponse struct {
 }
 
 type WorkflowBoard struct {
-	ProjectID string                  `json:"project_id"`
-	Workflows []WorkflowBoardWorkflow `json:"workflows"`
+	ProjectID           string                  `json:"project_id"`
+	Project             ProjectBoardProject     `json:"project"`
+	SelectedWorkflow    WorkflowPickerItem      `json:"selected_workflow"`
+	WorkflowPicker      []WorkflowPickerItem    `json:"workflows"`
+	Groups              []WorkflowBoardGroup    `json:"groups"`
+	Columns             []WorkflowBoardColumn   `json:"columns"`
+	Cards               []WorkflowBoardTaskCard `json:"cards"`
+	DonePreview         []WorkflowBoardTaskCard `json:"done_preview"`
+	NextPageToken       string                  `json:"next_page_token"`
+	GeneratedAtUnixMs   int64                   `json:"generated_at_unix_ms"`
+	LatestEventSequence int64                   `json:"latest_event_sequence"`
+	Workflows           []WorkflowBoardWorkflow `json:"legacy_workflows,omitempty"`
+}
+
+type ProjectBoardProject struct {
+	ProjectID   string `json:"project_id"`
+	ProjectKey  string `json:"project_key"`
+	DisplayName string `json:"display_name"`
+}
+
+type WorkflowPickerItem struct {
+	WorkflowID           string                    `json:"workflow_id"`
+	DisplayName          string                    `json:"display_name"`
+	Description          string                    `json:"description"`
+	GraphRevision        int64                     `json:"graph_revision"`
+	IsProjectDefault     bool                      `json:"is_project_default"`
+	ValidForTaskCreation bool                      `json:"valid_for_task_creation"`
+	ValidationErrors     []WorkflowValidationError `json:"validation_errors,omitempty"`
+	UnlinkedAtUnixMs     int64                     `json:"unlinked_at_unix_ms"`
+}
+
+type WorkflowBoardGroup struct {
+	GroupID     string   `json:"group_id"`
+	Key         string   `json:"key"`
+	DisplayName string   `json:"display_name"`
+	SortOrder   int      `json:"sort_order"`
+	NodeIDs     []string `json:"node_ids"`
+}
+
+type WorkflowBoardColumn struct {
+	Node      WorkflowBoardNodeSummary `json:"node"`
+	GroupID   string                   `json:"group_id,omitempty"`
+	SortOrder int                      `json:"sort_order"`
+	IsBacklog bool                     `json:"is_backlog"`
+	IsDone    bool                     `json:"is_done"`
+	TaskCount int                      `json:"task_count"`
+}
+
+type WorkflowBoardNodeSummary struct {
+	NodeID       string `json:"node_id"`
+	Key          string `json:"key"`
+	Kind         string `json:"kind"`
+	DisplayName  string `json:"display_name"`
+	AssigneeRole string `json:"assignee_role,omitempty"`
+	SortOrder    int    `json:"sort_order"`
+}
+
+type WorkflowBoardTaskCard struct {
+	TaskID          string                  `json:"task_id"`
+	ShortID         string                  `json:"short_id"`
+	Title           string                  `json:"title"`
+	BodyPreview     string                  `json:"body_preview,omitempty"`
+	WorkflowID      string                  `json:"workflow_id"`
+	ActiveNodeIDs   []string                `json:"active_node_ids,omitempty"`
+	SourceWorkspace ProjectWorkspaceSummary `json:"source_workspace"`
+	Status          WorkflowTaskStatus      `json:"status"`
+	Actions         WorkflowTaskActions     `json:"actions"`
+	UpdatedAtUnixMs int64                   `json:"updated_at_unix_ms"`
+}
+
+type WorkflowTaskStatus struct {
+	Kind           string   `json:"kind"`
+	Label          string   `json:"label"`
+	NativeState    string   `json:"native_state"`
+	NodeIDs        []string `json:"node_ids,omitempty"`
+	RunIDs         []string `json:"run_ids,omitempty"`
+	AttentionTypes []string `json:"attention_types,omitempty"`
+}
+
+type WorkflowTaskActions struct {
+	CanStart                bool   `json:"can_start"`
+	CanInterrupt            bool   `json:"can_interrupt"`
+	InterruptRunID          string `json:"interrupt_run_id,omitempty"`
+	CanResume               bool   `json:"can_resume"`
+	ResumeRunID             string `json:"resume_run_id,omitempty"`
+	CanCancel               bool   `json:"can_cancel"`
+	NeedsDetailForInterrupt bool   `json:"needs_detail_for_interrupt"`
+	NeedsDetailForResume    bool   `json:"needs_detail_for_resume"`
+}
+
+type WorkflowProjectSubscribeRequest struct {
+	ProjectID     string `json:"project_id,omitempty"`
+	AfterSequence int64  `json:"after_sequence"`
+}
+
+type WorkflowProjectEvent struct {
+	Sequence         int64    `json:"sequence"`
+	ProjectID        string   `json:"project_id,omitempty"`
+	WorkflowID       string   `json:"workflow_id,omitempty"`
+	Resource         string   `json:"resource"`
+	Action           string   `json:"action"`
+	ChangedIDs       []string `json:"changed_ids,omitempty"`
+	OccurredAtUnixMs int64    `json:"occurred_at_unix_ms"`
+}
+
+type WorkflowProjectSubscription interface {
+	Next(ctx context.Context) (WorkflowProjectEvent, error)
+	Close() error
 }
 
 type WorkflowBoardWorkflow struct {
@@ -354,30 +580,75 @@ type WorkflowTaskGetResponse struct {
 	Task WorkflowTaskDetail `json:"task"`
 }
 
+type WorkflowTaskActivityListRequest struct {
+	TaskID    string `json:"task_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type WorkflowTaskActivityListResponse struct {
+	Items             []WorkflowTaskActivityItem `json:"items"`
+	NextPageToken     string                     `json:"next_page_token,omitempty"`
+	GeneratedAtUnixMs int64                      `json:"generated_at_unix_ms"`
+}
+
+type WorkflowTaskTeleportTargetRequest struct {
+	TaskID string `json:"task_id"`
+	RunID  string `json:"run_id,omitempty"`
+}
+
+type WorkflowTaskTeleportTargetResponse struct {
+	Available     bool   `json:"available"`
+	TaskID        string `json:"task_id,omitempty"`
+	RunID         string `json:"run_id,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	ProjectID     string `json:"project_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorktreeID    string `json:"worktree_id,omitempty"`
+	CwdRelpath    string `json:"cwd_relpath,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
 type WorkflowTaskSummary struct {
-	ID            string   `json:"id"`
-	ProjectID     string   `json:"project_id"`
-	WorkflowID    string   `json:"workflow_id"`
-	ShortID       string   `json:"short_id"`
-	Title         string   `json:"title"`
-	CanceledAt    int64    `json:"canceled_at_unix_ms"`
-	CancelReason  string   `json:"cancel_reason,omitempty"`
-	Done          bool     `json:"done"`
-	ActiveNodeIDs []string `json:"active_node_ids,omitempty"`
+	ID                string   `json:"id"`
+	ProjectID         string   `json:"project_id"`
+	WorkflowID        string   `json:"workflow_id"`
+	ShortID           string   `json:"short_id"`
+	Title             string   `json:"title"`
+	BodyPreview       string   `json:"body_preview,omitempty"`
+	SourceWorkspaceID string   `json:"source_workspace_id,omitempty"`
+	CanceledAt        int64    `json:"canceled_at_unix_ms"`
+	CancelReason      string   `json:"cancel_reason,omitempty"`
+	CreatedAtUnixMs   int64    `json:"created_at_unix_ms"`
+	UpdatedAtUnixMs   int64    `json:"updated_at_unix_ms"`
+	Done              bool     `json:"done"`
+	ActiveNodeIDs     []string `json:"active_node_ids,omitempty"`
 }
 
 type WorkflowTaskDetail struct {
-	Summary     WorkflowTaskSummary      `json:"summary"`
-	Placements  []WorkflowPlacement      `json:"placements"`
-	Runs        []WorkflowRun            `json:"runs"`
-	Transitions []WorkflowTaskTransition `json:"transitions"`
-	Comments    []WorkflowTaskComment    `json:"comments"`
+	Summary         WorkflowTaskSummary      `json:"summary"`
+	Project         ProjectBoardProject      `json:"project"`
+	Workflow        WorkflowPickerItem       `json:"workflow"`
+	Body            string                   `json:"body"`
+	SourceURL       string                   `json:"source_url,omitempty"`
+	SourceWorkspace ProjectWorkspaceSummary  `json:"source_workspace"`
+	ManagedWorktree *WorktreeView            `json:"managed_worktree,omitempty"`
+	Status          WorkflowTaskStatus       `json:"status"`
+	Actions         WorkflowTaskActions      `json:"actions"`
+	Attention       []WorkflowAttentionItem  `json:"attention,omitempty"`
+	Placements      []WorkflowPlacement      `json:"placements"`
+	Runs            []WorkflowRun            `json:"runs"`
+	Transitions     []WorkflowTaskTransition `json:"transitions"`
+	Comments        []WorkflowTaskComment    `json:"comments"`
 }
 
 type WorkflowPlacement struct {
 	ID                        string `json:"id"`
 	TaskID                    string `json:"task_id"`
 	NodeID                    string `json:"node_id"`
+	NodeKey                   string `json:"node_key,omitempty"`
+	NodeDisplayName           string `json:"node_display_name,omitempty"`
+	NodeKind                  string `json:"node_kind,omitempty"`
 	State                     string `json:"state"`
 	ParallelBatchTransitionID string `json:"parallel_batch_transition_id,omitempty"`
 	ParallelBranchEdgeID      string `json:"parallel_branch_edge_id,omitempty"`
@@ -389,6 +660,9 @@ type WorkflowRun struct {
 	PlacementID         string `json:"placement_id"`
 	NodeID              string `json:"node_id"`
 	SessionID           string `json:"session_id,omitempty"`
+	SessionName         string `json:"session_name,omitempty"`
+	Role                string `json:"role,omitempty"`
+	Status              string `json:"status"`
 	Generation          int64  `json:"generation"`
 	StartedAtUnixMs     int64  `json:"started_at_unix_ms"`
 	CompletedAtUnixMs   int64  `json:"completed_at_unix_ms"`
@@ -398,35 +672,67 @@ type WorkflowRun struct {
 }
 
 type WorkflowTaskTransition struct {
-	ID           string                   `json:"id"`
-	TaskID       string                   `json:"task_id"`
-	TransitionID string                   `json:"transition_id"`
-	State        string                   `json:"state"`
-	Commentary   string                   `json:"commentary,omitempty"`
-	OutputValues map[string]string        `json:"output_values,omitempty"`
-	CreatedAt    int64                    `json:"created_at_unix_ms"`
-	Edges        []WorkflowTransitionEdge `json:"edges,omitempty"`
+	ID                    string                   `json:"id"`
+	TaskID                string                   `json:"task_id"`
+	SourceRunID           string                   `json:"source_run_id,omitempty"`
+	SourcePlacementID     string                   `json:"source_placement_id,omitempty"`
+	SourceNodeID          string                   `json:"source_node_id,omitempty"`
+	SourceNodeKey         string                   `json:"source_node_key,omitempty"`
+	SourceNodeDisplayName string                   `json:"source_node_display_name,omitempty"`
+	TransitionGroupID     string                   `json:"transition_group_id,omitempty"`
+	TransitionID          string                   `json:"transition_id"`
+	TransitionDisplayName string                   `json:"transition_display_name,omitempty"`
+	WorkflowRevisionSeen  int64                    `json:"workflow_revision_seen"`
+	Actor                 string                   `json:"actor,omitempty"`
+	State                 string                   `json:"state"`
+	Commentary            string                   `json:"commentary,omitempty"`
+	OutputValues          map[string]string        `json:"output_values,omitempty"`
+	CreatedAt             int64                    `json:"created_at_unix_ms"`
+	AppliedAtUnixMs       int64                    `json:"applied_at_unix_ms"`
+	Edges                 []WorkflowTransitionEdge `json:"edges,omitempty"`
 }
 
 type WorkflowTransitionEdge struct {
-	ID                   string `json:"id"`
-	TaskTransitionID     string `json:"task_transition_id"`
-	WorkflowEdgeID       string `json:"workflow_edge_id,omitempty"`
-	EdgeKey              string `json:"edge_key"`
-	TargetNodeID         string `json:"target_node_id,omitempty"`
-	TargetPlacementID    string `json:"target_placement_id,omitempty"`
-	State                string `json:"state"`
-	WorkflowRevisionSeen int64  `json:"workflow_revision_seen"`
+	ID                    string                      `json:"id"`
+	TaskTransitionID      string                      `json:"task_transition_id"`
+	WorkflowEdgeID        string                      `json:"workflow_edge_id,omitempty"`
+	EdgeKey               string                      `json:"edge_key"`
+	TargetNodeID          string                      `json:"target_node_id,omitempty"`
+	TargetNodeKey         string                      `json:"target_node_key,omitempty"`
+	TargetNodeDisplayName string                      `json:"target_node_display_name,omitempty"`
+	TargetNodeKind        string                      `json:"target_node_kind,omitempty"`
+	TargetPlacementID     string                      `json:"target_placement_id,omitempty"`
+	State                 string                      `json:"state"`
+	ContextMode           string                      `json:"context_mode,omitempty"`
+	RequiresApproval      bool                        `json:"requires_approval"`
+	InputBindings         []WorkflowInputBinding      `json:"input_bindings,omitempty"`
+	OutputRequirements    []WorkflowOutputRequirement `json:"output_requirements,omitempty"`
+	WorkflowRevisionSeen  int64                       `json:"workflow_revision_seen"`
 }
 
 type WorkflowTaskComment struct {
-	ID        string `json:"id"`
-	TaskID    string `json:"task_id"`
-	Body      string `json:"body"`
-	Author    string `json:"author"`
-	AuthorID  string `json:"author_id,omitempty"`
-	DeletedAt int64  `json:"deleted_at_unix_ms"`
-	UpdatedAt int64  `json:"updated_at_unix_ms"`
+	ID              string `json:"id"`
+	TaskID          string `json:"task_id"`
+	Body            string `json:"body"`
+	Author          string `json:"author"`
+	AuthorID        string `json:"author_id,omitempty"`
+	DeletedAt       int64  `json:"deleted_at_unix_ms"`
+	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
+	UpdatedAt       int64  `json:"updated_at_unix_ms"`
+}
+
+type WorkflowTaskActivityItem struct {
+	ActivityID       string                  `json:"activity_id"`
+	Type             string                  `json:"type"`
+	TaskID           string                  `json:"task_id"`
+	OccurredAtUnixMs int64                   `json:"occurred_at_unix_ms"`
+	UpdatedAtUnixMs  int64                   `json:"updated_at_unix_ms"`
+	Actor            string                  `json:"actor,omitempty"`
+	Summary          string                  `json:"summary"`
+	Comment          *WorkflowTaskComment    `json:"comment,omitempty"`
+	Transition       *WorkflowTaskTransition `json:"transition,omitempty"`
+	Run              *WorkflowRun            `json:"run,omitempty"`
+	Attention        *WorkflowAttentionItem  `json:"attention,omitempty"`
 }
 
 func (r WorkflowCreateRequest) Validate() error {
@@ -457,6 +763,11 @@ func (r WorkflowNodeAddRequest) Validate() error {
 	if err := validateDisplayName(r.DisplayName); err != nil {
 		return err
 	}
+	if strings.TrimSpace(r.GroupKey) != "" {
+		if err := validateModelKey("group_key", r.GroupKey); err != nil {
+			return err
+		}
+	}
 	for _, field := range r.OutputFields {
 		if err := validateModelKey("output_field.name", field.Name); err != nil {
 			return err
@@ -466,6 +777,48 @@ func (r WorkflowNodeAddRequest) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (r WorkflowNodeGroupAddRequest) Validate() error {
+	if err := validateRequired("workflow_id", r.WorkflowID); err != nil {
+		return err
+	}
+	if err := validateModelKey("group_key", r.GroupKey); err != nil {
+		return err
+	}
+	if err := validateDisplayName(r.DisplayName); err != nil {
+		return err
+	}
+	if r.SortOrder < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "sort_order", "sort_order must be non-negative")
+	}
+	return nil
+}
+
+func (r WorkflowNodeGroupUpdateRequest) Validate() error {
+	if err := validateRequired("workflow_id", r.WorkflowID); err != nil {
+		return err
+	}
+	if err := validateRequired("group_id", r.GroupID); err != nil {
+		return err
+	}
+	if err := validateModelKey("group_key", r.GroupKey); err != nil {
+		return err
+	}
+	if err := validateDisplayName(r.DisplayName); err != nil {
+		return err
+	}
+	if r.SortOrder < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "sort_order", "sort_order must be non-negative")
+	}
+	return nil
+}
+
+func (r WorkflowNodeGroupDeleteRequest) Validate() error {
+	if err := validateRequired("workflow_id", r.WorkflowID); err != nil {
+		return err
+	}
+	return validateRequired("group_id", r.GroupID)
 }
 
 func (r WorkflowTransitionGroupAddRequest) Validate() error {
@@ -538,7 +891,16 @@ func (r WorkflowValidateRequest) Validate() error {
 }
 
 func (r WorkflowTaskCreateRequest) Validate() error {
-	for _, field := range []struct{ name, value string }{{"project_id", r.ProjectID}, {"title", r.Title}, {"body", r.Body}} {
+	for _, field := range []struct{ name, value string }{{"project_id", r.ProjectID}, {"title", r.Title}} {
+		if err := validateRequired(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r WorkflowTaskUpdateRequest) Validate() error {
+	for _, field := range []struct{ name, value string }{{"task_id", r.TaskID}, {"title", r.Title}} {
 		if err := validateRequired(field.name, field.value); err != nil {
 			return err
 		}
@@ -555,6 +917,9 @@ func (r WorkflowTaskResumeRequest) Validate() error {
 }
 
 func (r WorkflowTaskApproveRequest) Validate() error {
+	if strings.TrimSpace(r.TaskTransitionID) != "" {
+		return nil
+	}
 	return validateRequired("transition_id", r.TransitionID)
 }
 
@@ -567,6 +932,47 @@ func (r WorkflowTaskMoveRequest) Validate() error {
 
 func (r WorkflowTaskCancelRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskInterruptRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowAttentionListRequest) Validate() error {
+	if r.PageSize < 0 {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "page_size", Message: "page_size must be non-negative"}
+	}
+	return nil
+}
+
+func (r WorkflowTaskAttentionListRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskQuestionAnswerRequest) Validate() error {
+	for _, field := range []struct{ name, value string }{{"client_request_id", r.ClientRequestID}, {"task_id", r.TaskID}, {"ask_id", r.AskID}} {
+		if err := validateRequired(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	hasTextAnswer := strings.TrimSpace(r.Answer) != ""
+	hasFreeform := strings.TrimSpace(r.FreeformAnswer) != ""
+	if r.SelectedOptionNumber < 0 {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "selected_option_number", Message: "selected_option_number must be non-negative"}
+	}
+	hasSelected := r.SelectedOptionNumber > 0
+	hasAnswer := hasTextAnswer || hasFreeform || hasSelected
+	hasError := strings.TrimSpace(r.ErrorMessage) != ""
+	if hasAnswer && hasError {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "error_message", Message: "error_message cannot be combined with answer fields"}
+	}
+	if hasTextAnswer && (hasFreeform || hasSelected) {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorInvalidMode, Field: "answer", Message: "answer cannot be combined with selected_option_number or freeform_answer"}
+	}
+	if !hasAnswer && !hasError {
+		return WorkflowRequestValidationError{Code: WorkflowRequestErrorRequired, Field: "answer", Message: "answer is required"}
+	}
+	return nil
 }
 
 func (r WorkflowTaskCommentAddRequest) Validate() error {
@@ -595,10 +1001,49 @@ func (r WorkflowTaskCommentDeleteRequest) Validate() error {
 }
 
 func (r WorkflowBoardRequest) Validate() error {
-	return validateRequired("project_id", r.ProjectID)
+	if err := validateRequired("project_id", r.ProjectID); err != nil {
+		return err
+	}
+	if r.DonePreviewLimit < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "done_preview_limit", "done_preview_limit must be non-negative")
+	}
+	if r.PageSize < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", "page_size must be non-negative")
+	}
+	if strings.TrimSpace(r.PageToken) != r.PageToken {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")
+	}
+	return nil
+}
+
+func (r WorkflowProjectSubscribeRequest) Validate() error {
+	if r.AfterSequence < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "after_sequence", "after_sequence must be non-negative")
+	}
+	if strings.TrimSpace(r.ProjectID) != r.ProjectID {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "project_id", "project_id must not have leading or trailing whitespace")
+	}
+	return nil
 }
 
 func (r WorkflowTaskGetRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskActivityListRequest) Validate() error {
+	if err := validateRequired("task_id", r.TaskID); err != nil {
+		return err
+	}
+	if r.PageSize < 0 {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_size", "page_size must be non-negative")
+	}
+	if strings.TrimSpace(r.PageToken) != r.PageToken {
+		return workflowRequestError(WorkflowRequestErrorInvalidMode, "page_token", "page_token must not have leading or trailing whitespace")
+	}
+	return nil
+}
+
+func (r WorkflowTaskTeleportTargetRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
 }
 

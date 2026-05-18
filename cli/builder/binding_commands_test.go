@@ -42,6 +42,10 @@ func (s bindingCommandTimeoutProjectViewStub) ListProjects(ctx context.Context, 
 	return s.listProjects(ctx, req)
 }
 
+func (bindingCommandTimeoutProjectViewStub) ListProjectHome(context.Context, serverapi.ProjectHomeListRequest) (serverapi.ProjectHomeListResponse, error) {
+	return serverapi.ProjectHomeListResponse{}, errors.New("unexpected ListProjectHome call")
+}
+
 func (s bindingCommandTimeoutProjectViewStub) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 	if s.resolveProjectPath == nil {
 		return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
@@ -58,6 +62,10 @@ func (s bindingCommandTimeoutProjectViewStub) CreateProject(ctx context.Context,
 		return serverapi.ProjectCreateResponse{}, errors.New("unexpected CreateProject call")
 	}
 	return s.createProject(ctx, req)
+}
+
+func (bindingCommandTimeoutProjectViewStub) ListProjectWorkspaces(context.Context, serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
+	return serverapi.ProjectWorkspaceListResponse{}, errors.New("unexpected ListProjectWorkspaces call")
 }
 
 func (s bindingCommandTimeoutProjectViewStub) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {

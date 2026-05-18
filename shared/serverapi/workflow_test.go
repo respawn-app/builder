@@ -49,11 +49,17 @@ func TestWorkflowNodeAndEdgeRequestValidation(t *testing.T) {
 }
 
 func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
-	if err := (WorkflowTaskCreateRequest{ProjectID: "project-1", Title: "Task", Body: "Body"}).Validate(); err != nil {
+	if err := (WorkflowTaskCreateRequest{ProjectID: "project-1", Title: "Task"}).Validate(); err != nil {
 		t.Fatalf("valid task create rejected: %v", err)
 	}
 	if err := (WorkflowTaskCreateRequest{ProjectID: "project-1", Title: "", Body: "Body"}).Validate(); err == nil || !strings.Contains(err.Error(), "title") {
 		t.Fatalf("empty title error = %v", err)
+	}
+	if err := (WorkflowTaskUpdateRequest{TaskID: "task-1", Title: "Task"}).Validate(); err != nil {
+		t.Fatalf("valid task update rejected: %v", err)
+	}
+	if err := (WorkflowTaskUpdateRequest{TaskID: "task-1", Title: " "}).Validate(); err == nil || !strings.Contains(err.Error(), "title") {
+		t.Fatalf("empty update title error = %v", err)
 	}
 	if err := (WorkflowTaskStartRequest{TaskID: "task-1"}).Validate(); err != nil {
 		t.Fatalf("valid task start rejected: %v", err)
@@ -61,11 +67,47 @@ func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskResumeRequest{TaskID: "task-1"}).Validate(); err != nil {
 		t.Fatalf("valid task resume rejected: %v", err)
 	}
+	if err := (WorkflowTaskInterruptRequest{TaskID: "task-1"}).Validate(); err != nil {
+		t.Fatalf("valid task interrupt rejected: %v", err)
+	}
+	if err := (WorkflowTaskApproveRequest{TaskTransitionID: "transition-1"}).Validate(); err != nil {
+		t.Fatalf("valid task approval rejected: %v", err)
+	}
+	if err := (WorkflowTaskApproveRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "transition_id") {
+		t.Fatalf("empty legacy task approval error = %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", FreeformAnswer: "answer"}).Validate(); err != nil {
+		t.Fatalf("valid task question answer rejected: %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", SelectedOptionNumber: 1, FreeformAnswer: "because"}).Validate(); err != nil {
+		t.Fatalf("valid selected option plus freeform rejected: %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", SelectedOptionNumber: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "selected_option_number") {
+		t.Fatalf("negative selected option error = %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", ErrorMessage: "err", FreeformAnswer: "answer"}).Validate(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("conflicting task question answer error = %v", err)
+	}
+	if err := (WorkflowTaskQuestionAnswerRequest{ClientRequestID: "req-1", TaskID: "task-1", AskID: "ask-1", Answer: "one", FreeformAnswer: "two"}).Validate(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("multi-mode task question answer error = %v", err)
+	}
 	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "comment", Author: "user"}).Validate(); err != nil {
 		t.Fatalf("valid comment add rejected: %v", err)
 	}
 	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "", Author: "user"}).Validate(); err == nil || !strings.Contains(err.Error(), "body") {
 		t.Fatalf("empty comment body error = %v", err)
+	}
+	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: 10}).Validate(); err != nil {
+		t.Fatalf("valid activity list rejected: %v", err)
+	}
+	if err := (WorkflowTaskActivityListRequest{TaskID: "task-1", PageSize: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "page_size") {
+		t.Fatalf("invalid activity page size error = %v", err)
+	}
+	if err := (WorkflowTaskTeleportTargetRequest{TaskID: "task-1"}).Validate(); err != nil {
+		t.Fatalf("valid teleport target rejected: %v", err)
+	}
+	if err := (WorkflowTaskTeleportTargetRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "task_id") {
+		t.Fatalf("empty teleport task id error = %v", err)
 	}
 }
 

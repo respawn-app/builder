@@ -87,6 +87,28 @@ func TestWorkflowCreateUpdateReadAndGraphPersistence(t *testing.T) {
 	}
 }
 
+func TestAddNodeRejectsNodeGroupFromDifferentWorkflow(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	workflowA, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Workflow A"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow A: %v", err)
+	}
+	workflowB, err := store.CreateWorkflow(ctx, CreateWorkflowRequest{Name: "Workflow B"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow B: %v", err)
+	}
+	group, _, err := store.AddNodeGroup(ctx, NodeGroupRecord{ID: "group-a", WorkflowID: workflowA.ID, Key: "impl", DisplayName: "Implementation"})
+	if err != nil {
+		t.Fatalf("AddNodeGroup: %v", err)
+	}
+
+	_, err = store.AddNode(ctx, NodeRecord{ID: "node-cross-group", WorkflowID: workflowB.ID, GroupID: group.ID, Key: "agent", Kind: workflow.NodeKindAgent, DisplayName: "Agent"})
+	if err == nil || !strings.Contains(err.Error(), "belongs to workflow") {
+		t.Fatalf("AddNode cross-workflow group error = %v", err)
+	}
+}
+
 func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -176,6 +198,92 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	}
 	if runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != "task_canceled" {
 		t.Fatalf("run not interrupted by cancel: %+v", runs[0])
+	}
+}
+
+func TestTaskCreatePersistsSourceWorkspaceAndOptionalBody(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	source, err := store.metadata.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject source: %v", err)
+	}
+
+	selected, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: " Selected ", SourceWorkspaceID: source.WorkspaceID})
+	if err != nil {
+		t.Fatalf("CreateTask selected source workspace: %v", err)
+	}
+	if selected.Body != "" || selected.SourceWorkspaceID != source.WorkspaceID {
+		t.Fatalf("selected task = %+v, want empty body and source workspace %q", selected, source.WorkspaceID)
+	}
+	defaulted, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Defaulted"})
+	if err != nil {
+		t.Fatalf("CreateTask default source workspace: %v", err)
+	}
+	if defaulted.SourceWorkspaceID != binding.WorkspaceID {
+		t.Fatalf("default source workspace = %q, want primary %q", defaulted.SourceWorkspaceID, binding.WorkspaceID)
+	}
+	other, err := store.metadata.CreateProjectForWorkspace(ctx, t.TempDir(), "Other")
+	if err != nil {
+		t.Fatalf("CreateProjectForWorkspace other: %v", err)
+	}
+	if _, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Foreign", SourceWorkspaceID: other.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "source workspace") {
+		t.Fatalf("CreateTask foreign source workspace error = %v", err)
+	}
+}
+
+func TestTaskUpdateEditsBacklogFieldsUntilAutomationStarts(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	source, err := store.metadata.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject source: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Before", Body: "before"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	afterBody := " after body "
+	updated, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: " After ", Body: &afterBody, SourceWorkspaceID: source.WorkspaceID})
+	if err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	if updated.Title != "After" || updated.Body != "after body" || updated.SourceWorkspaceID != source.WorkspaceID {
+		t.Fatalf("updated task = %+v", updated)
+	}
+	renamed, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: "Renamed"})
+	if err != nil {
+		t.Fatalf("UpdateTask title only: %v", err)
+	}
+	if renamed.Title != "Renamed" || renamed.Body != "after body" || renamed.SourceWorkspaceID != source.WorkspaceID {
+		t.Fatalf("title-only update = %+v, want previous body and source workspace preserved", renamed)
+	}
+	if _, err := store.StartTask(ctx, task.ID); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	tooLateBody := "body"
+	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: "Too late", Body: &tooLateBody, SourceWorkspaceID: source.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "cannot edit task after automation starts") {
+		t.Fatalf("UpdateTask after start error = %v", err)
+	}
+
+	canceled, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Canceled"})
+	if err != nil {
+		t.Fatalf("CreateTask canceled: %v", err)
+	}
+	if err := store.CancelTask(ctx, canceled.ID, "stop"); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: canceled.ID, Title: "Too late", Body: &tooLateBody, SourceWorkspaceID: binding.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("UpdateTask canceled error = %v", err)
 	}
 }
 
@@ -2015,6 +2123,51 @@ func TestResumeTaskRunCanResumeInterruptedWaitingAskRun(t *testing.T) {
 	}
 	if resumed.ID != started.RunID || resumed.WaitingAskID != "" || resumed.InterruptedAt != 0 || resumed.StartedAt != 0 {
 		t.Fatalf("resumed waiting ask run = %+v, want requeued same run without waiting ask", resumed)
+	}
+}
+
+func TestInterruptAndResumeTaskRunCanTargetSpecificRun(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createFanoutJoinWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
+	runIDs := make([]workflow.RunID, 0, len(branchRuns))
+	for _, runID := range branchRuns {
+		runIDs = append(runIDs, runID)
+	}
+	if len(runIDs) != 2 {
+		t.Fatalf("branch runs = %+v, want two", branchRuns)
+	}
+	for _, runID := range runIDs {
+		if _, err := store.ClaimRun(ctx, runID, 0); err != nil {
+			t.Fatalf("ClaimRun %s: %v", runID, err)
+		}
+	}
+	if _, err := store.InterruptTaskRun(ctx, task.ID, "", "manual"); err == nil || !strings.Contains(err.Error(), "run_id is required") {
+		t.Fatalf("InterruptTaskRun ambiguous error = %v", err)
+	}
+	interrupted, err := store.InterruptTaskRun(ctx, task.ID, runIDs[0], "manual")
+	if err != nil {
+		t.Fatalf("InterruptTaskRun selected: %v", err)
+	}
+	if interrupted.ID != runIDs[0] || interrupted.InterruptedAt == 0 {
+		t.Fatalf("interrupted = %+v, want %s", interrupted, runIDs[0])
+	}
+	if _, err := store.InterruptTaskRun(ctx, task.ID, runIDs[1], "manual"); err != nil {
+		t.Fatalf("InterruptTaskRun second selected: %v", err)
+	}
+	if _, err := store.ResumeTaskRunByID(ctx, task.ID, ""); err == nil || !strings.Contains(err.Error(), "run_id is required") {
+		t.Fatalf("ResumeTaskRun ambiguous error = %v", err)
+	}
+	resumed, err := store.ResumeTaskRunByID(ctx, task.ID, runIDs[0])
+	if err != nil {
+		t.Fatalf("ResumeTaskRunByID selected: %v", err)
+	}
+	if resumed.ID != runIDs[0] || resumed.InterruptedAt != 0 || resumed.StartedAt != 0 {
+		t.Fatalf("resumed = %+v, want selected run reset", resumed)
 	}
 }
 

@@ -39,6 +39,10 @@ func (*projectViewRemoteStub) ListProjects(context.Context, serverapi.ProjectLis
 	return serverapi.ProjectListResponse{}, errors.New("unexpected ListProjects call")
 }
 
+func (*projectViewRemoteStub) ListProjectHome(context.Context, serverapi.ProjectHomeListRequest) (serverapi.ProjectHomeListResponse, error) {
+	return serverapi.ProjectHomeListResponse{}, errors.New("unexpected ListProjectHome call")
+}
+
 func (*projectViewRemoteStub) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 	return serverapi.ProjectResolvePathResponse{}, errors.New("unexpected ResolveProjectPath call")
 }
@@ -49,6 +53,10 @@ func (*projectViewRemoteStub) CreateProject(context.Context, serverapi.ProjectCr
 
 func (*projectViewRemoteStub) AttachWorkspaceToProject(context.Context, serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
 	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("unexpected AttachWorkspaceToProject call")
+}
+
+func (*projectViewRemoteStub) ListProjectWorkspaces(context.Context, serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
+	return serverapi.ProjectWorkspaceListResponse{}, errors.New("unexpected ListProjectWorkspaces call")
 }
 
 func (*projectViewRemoteStub) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {

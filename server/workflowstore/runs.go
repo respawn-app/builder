@@ -87,6 +87,80 @@ WHERE id = ?
 	return nil
 }
 
+func (s *Store) InterruptTaskRun(ctx context.Context, taskID workflow.TaskID, runID workflow.RunID, reason string) (RunRecord, error) {
+	if strings.TrimSpace(string(taskID)) == "" {
+		return RunRecord{}, errors.New("task id is required")
+	}
+	trimmedRunID := strings.TrimSpace(string(runID))
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+    r.id,
+    r.task_id,
+    r.placement_id,
+    r.node_id,
+    r.session_id,
+    r.run_generation,
+    r.workflow_revision_seen,
+    r.automation_requested_at_unix_ms,
+    r.created_at_unix_ms,
+    r.updated_at_unix_ms,
+    r.started_at_unix_ms,
+    r.completed_at_unix_ms,
+    r.interrupted_at_unix_ms,
+    r.interruption_reason,
+    r.interruption_detail_json,
+    r.waiting_ask_id,
+    r.final_answer_violation_count,
+    r.invalid_completion_count,
+    r.run_start_snapshot_json,
+    r.metadata_json
+FROM task_runs r
+JOIN task_node_placements p ON p.id = r.placement_id
+JOIN workflow_nodes n ON n.id = r.node_id
+WHERE r.task_id = ?
+  AND (? = '' OR r.id = ?)
+  AND r.started_at_unix_ms > 0
+  AND r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms = 0
+  AND p.state = 'active'
+  AND n.kind = 'agent'
+ORDER BY r.started_at_unix_ms DESC, r.rowid DESC`, string(taskID), trimmedRunID, trimmedRunID)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	candidates := []RunRecord{}
+	for rows.Next() {
+		var row sqlitegen.TaskRun
+		if err := rows.Scan(&row.ID, &row.TaskID, &row.PlacementID, &row.NodeID, &row.SessionID, &row.RunGeneration, &row.WorkflowRevisionSeen, &row.AutomationRequestedAtUnixMs, &row.CreatedAtUnixMs, &row.UpdatedAtUnixMs, &row.StartedAtUnixMs, &row.CompletedAtUnixMs, &row.InterruptedAtUnixMs, &row.InterruptionReason, &row.InterruptionDetailJson, &row.WaitingAskID, &row.FinalAnswerViolationCount, &row.InvalidCompletionCount, &row.RunStartSnapshotJson, &row.MetadataJson); err != nil {
+			return RunRecord{}, err
+		}
+		candidates = append(candidates, runRecordFromTaskRun(row))
+	}
+	if err := rows.Err(); err != nil {
+		return RunRecord{}, err
+	}
+	if len(candidates) == 0 {
+		return RunRecord{}, errors.New("task has no active workflow run to interrupt")
+	}
+	if trimmedRunID == "" && len(candidates) != 1 {
+		return RunRecord{}, errors.New("task has multiple active workflow runs; run_id is required")
+	}
+	selected := candidates[0]
+	interruptReason := strings.TrimSpace(reason)
+	if interruptReason == "" {
+		interruptReason = "user_interrupt"
+	}
+	if err := s.InterruptRun(ctx, selected.ID, interruptReason, "{}"); err != nil {
+		return RunRecord{}, err
+	}
+	run, err := s.queries.GetTaskRun(ctx, string(selected.ID))
+	if err != nil {
+		return RunRecord{}, err
+	}
+	return runRecordFromTaskRun(run), nil
+}
+
 func (s *Store) ReconcileStartedRuns(ctx context.Context, reason string) (int64, error) {
 	now := s.now().UnixMilli()
 	return s.queries.InterruptStartedWorkflowRunsForRecovery(ctx, sqlitegen.InterruptStartedWorkflowRunsForRecoveryParams{UpdatedAtUnixMs: now, InterruptedAtUnixMs: now, InterruptionReason: strings.TrimSpace(reason), InterruptionDetailJson: "{}"})
@@ -105,6 +179,10 @@ func (s *Store) ListWaitingAskRuns(ctx context.Context) ([]RunRecord, error) {
 }
 
 func (s *Store) ResumeTaskRun(ctx context.Context, taskID workflow.TaskID) (RunRecord, error) {
+	return s.ResumeTaskRunByID(ctx, taskID, "")
+}
+
+func (s *Store) ResumeTaskRunByID(ctx context.Context, taskID workflow.TaskID, runID workflow.RunID) (RunRecord, error) {
 	if strings.TrimSpace(string(taskID)) == "" {
 		return RunRecord{}, errors.New("task id is required")
 	}
@@ -115,6 +193,7 @@ func (s *Store) ResumeTaskRun(ctx context.Context, taskID workflow.TaskID) (RunR
 	if task.CanceledAtUnixMs != 0 {
 		return RunRecord{}, errors.New("task is canceled")
 	}
+	trimmedRunID := strings.TrimSpace(string(runID))
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
     r.id,
@@ -123,11 +202,12 @@ FROM task_runs r
 JOIN task_node_placements p ON p.id = r.placement_id
 JOIN workflow_nodes n ON n.id = r.node_id
 WHERE r.task_id = ?
+  AND (? = '' OR r.id = ?)
   AND r.completed_at_unix_ms = 0
   AND r.interrupted_at_unix_ms > 0
   AND p.state = 'active'
   AND n.kind = 'agent'
-ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID))
+ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID), trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -150,8 +230,8 @@ ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID))
 	if len(candidates) == 0 {
 		return RunRecord{}, errors.New("task has no interrupted workflow run to resume")
 	}
-	if len(candidates) != 1 {
-		return RunRecord{}, errors.New("task has multiple interrupted workflow runs; resume by run is not supported yet")
+	if trimmedRunID == "" && len(candidates) != 1 {
+		return RunRecord{}, errors.New("task has multiple interrupted workflow runs; run_id is required")
 	}
 	snapshot := runStartSnapshot{}
 	if err := unmarshalJSON(candidates[0].snapshotJSON, &snapshot); err != nil {
@@ -495,4 +575,68 @@ WHERE id = ?
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) ResolveTaskWaitingAsk(ctx context.Context, taskID workflow.TaskID, runID workflow.RunID, askID string) (RunRecord, error) {
+	trimmedTaskID := strings.TrimSpace(string(taskID))
+	trimmedRunID := strings.TrimSpace(string(runID))
+	trimmedAskID := strings.TrimSpace(askID)
+	if trimmedTaskID == "" {
+		return RunRecord{}, errors.New("task id is required")
+	}
+	if trimmedAskID == "" {
+		return RunRecord{}, errors.New("ask id is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+    id,
+    task_id,
+    placement_id,
+    node_id,
+    session_id,
+    run_generation,
+    workflow_revision_seen,
+    automation_requested_at_unix_ms,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    started_at_unix_ms,
+    completed_at_unix_ms,
+    interrupted_at_unix_ms,
+    interruption_reason,
+    interruption_detail_json,
+    waiting_ask_id,
+    final_answer_violation_count,
+    invalid_completion_count,
+    run_start_snapshot_json,
+    metadata_json
+FROM task_runs
+WHERE task_id = ?
+  AND waiting_ask_id = ?
+  AND (? = '' OR id = ?)
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND trim(COALESCE(session_id, '')) != ''
+ORDER BY updated_at_unix_ms DESC, rowid DESC`, trimmedTaskID, trimmedAskID, trimmedRunID, trimmedRunID)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	matches := []RunRecord{}
+	for rows.Next() {
+		var row sqlitegen.TaskRun
+		if err := rows.Scan(&row.ID, &row.TaskID, &row.PlacementID, &row.NodeID, &row.SessionID, &row.RunGeneration, &row.WorkflowRevisionSeen, &row.AutomationRequestedAtUnixMs, &row.CreatedAtUnixMs, &row.UpdatedAtUnixMs, &row.StartedAtUnixMs, &row.CompletedAtUnixMs, &row.InterruptedAtUnixMs, &row.InterruptionReason, &row.InterruptionDetailJson, &row.WaitingAskID, &row.FinalAnswerViolationCount, &row.InvalidCompletionCount, &row.RunStartSnapshotJson, &row.MetadataJson); err != nil {
+			return RunRecord{}, err
+		}
+		matches = append(matches, runRecordFromTaskRun(row))
+	}
+	if err := rows.Err(); err != nil {
+		return RunRecord{}, err
+	}
+	if len(matches) == 0 {
+		return RunRecord{}, errors.New("task ask is not pending")
+	}
+	if trimmedRunID == "" && len(matches) != 1 {
+		return RunRecord{}, errors.New("task has multiple matching pending asks; run_id is required")
+	}
+	return matches[0], nil
 }

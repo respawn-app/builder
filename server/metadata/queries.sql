@@ -2,6 +2,7 @@
 SELECT
     p.id AS project_id,
     p.display_name AS project_display_name,
+    p.project_key,
     w.id AS workspace_id,
     w.canonical_root_path AS workspace_root
 FROM workspaces w
@@ -145,6 +146,7 @@ INSERT INTO workflow_nodes (
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 ) VALUES (
@@ -156,9 +158,79 @@ INSERT INTO workflow_nodes (
     sqlc.arg(subagent_role),
     sqlc.arg(prompt_template),
     sqlc.arg(output_fields_json),
+    sqlc.narg(group_id),
     sqlc.arg(sort_order),
     sqlc.arg(metadata_json)
 );
+
+-- name: InsertWorkflowNodeGroup :exec
+INSERT INTO workflow_node_groups (
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(workflow_id),
+    sqlc.arg(group_key),
+    sqlc.arg(display_name),
+    sqlc.arg(sort_order),
+    sqlc.arg(metadata_json)
+);
+
+-- name: UpdateWorkflowNodeGroup :execrows
+UPDATE workflow_node_groups
+SET
+    group_key = sqlc.arg(group_key),
+    display_name = sqlc.arg(display_name),
+    sort_order = sqlc.arg(sort_order),
+    metadata_json = sqlc.arg(metadata_json)
+WHERE id = sqlc.arg(id)
+  AND workflow_id = sqlc.arg(workflow_id);
+
+-- name: DeleteWorkflowNodeGroup :execrows
+DELETE FROM workflow_node_groups
+WHERE id = sqlc.arg(id)
+  AND workflow_id = sqlc.arg(workflow_id);
+
+-- name: ListWorkflowNodeGroups :many
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = sqlc.arg(workflow_id)
+ORDER BY sort_order ASC, rowid ASC;
+
+-- name: GetWorkflowNodeGroupByKey :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE workflow_id = sqlc.arg(workflow_id)
+  AND group_key = sqlc.arg(group_key)
+LIMIT 1;
+
+-- name: GetWorkflowNodeGroupByID :one
+SELECT
+    id,
+    workflow_id,
+    group_key,
+    display_name,
+    sort_order,
+    metadata_json
+FROM workflow_node_groups
+WHERE id = sqlc.arg(id)
+LIMIT 1;
 
 -- name: ListWorkflowNodes :many
 SELECT
@@ -170,6 +242,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -186,6 +259,7 @@ SELECT
     subagent_role,
     prompt_template,
     output_fields_json,
+    group_id,
     sort_order,
     metadata_json
 FROM workflow_nodes
@@ -200,6 +274,11 @@ WHERE id = sqlc.arg(id);
 -- name: DeleteWorkflowNode :execrows
 DELETE FROM workflow_nodes
 WHERE id = sqlc.arg(id);
+
+-- name: CountWorkflowNodesByGroup :one
+SELECT CAST(COUNT(*) AS INTEGER) AS node_count
+FROM workflow_nodes
+WHERE group_id = sqlc.arg(group_id);
 
 -- name: InsertWorkflowTransitionGroup :exec
 INSERT INTO workflow_transition_groups (
@@ -452,6 +531,7 @@ INSERT INTO tasks (
     title,
     body,
     source_url,
+    source_workspace_id,
     managed_worktree_id,
     canceled_at_unix_ms,
     cancellation_reason,
@@ -469,6 +549,7 @@ INSERT INTO tasks (
     sqlc.arg(title),
     sqlc.arg(body),
     sqlc.arg(source_url),
+    sqlc.narg(source_workspace_id),
     sqlc.narg(managed_worktree_id),
     0,
     '',
@@ -489,6 +570,7 @@ SELECT
     title,
     body,
     source_url,
+    source_workspace_id,
     managed_worktree_id,
     canceled_at_unix_ms,
     cancellation_reason,
@@ -518,6 +600,7 @@ SELECT
     title,
     body,
     source_url,
+    source_workspace_id,
     managed_worktree_id,
     canceled_at_unix_ms,
     cancellation_reason,
@@ -527,6 +610,20 @@ SELECT
 FROM tasks
 WHERE project_id = sqlc.arg(project_id)
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
+
+-- name: UpdateTaskEditableFields :execrows
+UPDATE tasks
+SET
+    title = sqlc.arg(title),
+    body = sqlc.arg(body),
+    source_workspace_id = sqlc.narg(source_workspace_id),
+    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
+WHERE id = sqlc.arg(id);
+
+-- name: CountTaskRunsByTask :one
+SELECT CAST(COUNT(*) AS INTEGER) AS run_count
+FROM task_runs
+WHERE task_id = sqlc.arg(task_id);
 
 -- name: CountNonTerminalTasksByManagedWorktree :one
 SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS ref_count
@@ -1060,10 +1157,55 @@ WHERE task_id = sqlc.arg(task_id)
   AND (sqlc.arg(include_deleted) != 0 OR deleted_at_unix_ms = 0)
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
 
+-- name: InsertWorkflowEvent :one
+INSERT INTO workflow_events (
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+) VALUES (
+    sqlc.arg(project_id),
+    sqlc.arg(workflow_id),
+    sqlc.arg(resource),
+    sqlc.arg(action),
+    sqlc.arg(changed_ids_json),
+    sqlc.arg(occurred_at_unix_ms)
+)
+RETURNING sequence;
+
+-- name: GetLatestWorkflowEventSequence :one
+SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER) AS sequence
+FROM workflow_events
+WHERE sqlc.arg(project_id) = ''
+   OR project_id = sqlc.arg(project_id)
+   OR project_id = '';
+
+-- name: ListWorkflowEventsAfter :many
+SELECT
+    sequence,
+    project_id,
+    workflow_id,
+    resource,
+    action,
+    changed_ids_json,
+    occurred_at_unix_ms
+FROM workflow_events
+WHERE sequence > sqlc.arg(after_sequence)
+  AND (
+      sqlc.arg(project_id) = ''
+      OR project_id = sqlc.arg(project_id)
+      OR project_id = ''
+  )
+ORDER BY sequence ASC
+LIMIT sqlc.arg(limit_rows);
+
 -- name: GetWorkspaceBindingByID :one
 SELECT
     p.id AS project_id,
     p.display_name AS project_display_name,
+    p.project_key,
     w.id AS workspace_id,
     w.canonical_root_path AS workspace_root
 FROM workspaces w
@@ -1345,19 +1487,89 @@ WHERE project_id = sqlc.arg(project_id);
 SELECT
     p.id,
     p.display_name,
+    p.project_key,
     w.canonical_root_path AS root_path,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
 LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
-GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
+GROUP BY p.id, p.display_name, p.project_key, w.canonical_root_path, p.updated_at_unix_ms
 ORDER BY latest_activity_unix_ms DESC;
+
+-- name: ListProjectHomeSummaries :many
+SELECT
+    p.id AS project_id,
+    p.project_key,
+    p.display_name,
+    w.id AS primary_workspace_id,
+    w.display_name AS primary_workspace_display_name,
+    w.canonical_root_path AS primary_workspace_root_path,
+    w.updated_at_unix_ms AS primary_workspace_updated_at_unix_ms,
+    COALESCE(default_workflow.id, '') AS default_workflow_id,
+    COALESCE(default_workflow.name, '') AS default_workflow_name,
+    CASE WHEN default_workflow.id IS NULL THEN 0 ELSE 1 END AS default_workflow_valid,
+    CAST(MAX(
+        p.updated_at_unix_ms,
+        w.updated_at_unix_ms,
+        COALESCE((SELECT MAX(s.updated_at_unix_ms) FROM sessions s WHERE s.project_id = p.id AND s.launch_visible <> 0), 0),
+        COALESCE((SELECT MAX(t.updated_at_unix_ms) FROM tasks t WHERE t.project_id = p.id), 0),
+        COALESCE((SELECT MAX(pwl.updated_at_unix_ms) FROM project_workflow_links pwl WHERE pwl.project_id = p.id AND pwl.unlinked_at_unix_ms = 0), 0)
+    ) AS INTEGER) AS latest_activity_unix_ms,
+    CAST((SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS INTEGER) AS task_count,
+    CAST((
+        SELECT COUNT(DISTINCT attention_tasks.id)
+        FROM tasks attention_tasks
+        WHERE attention_tasks.project_id = p.id
+          AND attention_tasks.canceled_at_unix_ms = 0
+          AND (
+              EXISTS (
+                  SELECT 1
+                  FROM task_node_placements tnp
+                  WHERE tnp.task_id = attention_tasks.id
+                    AND tnp.state = 'waiting_approval'
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM task_transitions tt
+                  WHERE tt.task_id = attention_tasks.id
+                    AND tt.state = 'pending_approval'
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM task_runs tr
+                  WHERE tr.task_id = attention_tasks.id
+                    AND tr.completed_at_unix_ms = 0
+                    AND (
+                        tr.interrupted_at_unix_ms > 0
+                        OR trim(tr.waiting_ask_id) <> ''
+                    )
+              )
+          )
+    ) AS INTEGER) AS attention_count,
+    CAST((
+        SELECT COUNT(*)
+        FROM project_workflow_links pwl
+        WHERE pwl.project_id = p.id
+          AND pwl.unlinked_at_unix_ms = 0
+    ) AS INTEGER) AS workflow_count
+FROM projects p
+JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
+LEFT JOIN project_workflow_links default_link
+    ON default_link.project_id = p.id
+   AND default_link.is_default = 1
+   AND default_link.unlinked_at_unix_ms = 0
+LEFT JOIN workflows default_workflow ON default_workflow.id = default_link.workflow_id
+WHERE (sqlc.arg(project_id) = '' OR p.id = sqlc.arg(project_id))
+ORDER BY latest_activity_unix_ms DESC, p.rowid DESC
+LIMIT sqlc.arg(limit_rows)
+OFFSET sqlc.arg(offset_rows);
 
 -- name: GetProjectSummary :one
 SELECT
     p.id,
     p.display_name,
+    p.project_key,
     w.canonical_root_path AS root_path,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
@@ -1365,7 +1577,7 @@ FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
 LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 WHERE p.id = sqlc.arg(project_id)
-GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
+GROUP BY p.id, p.display_name, p.project_key, w.canonical_root_path, p.updated_at_unix_ms
 LIMIT 1;
 
 -- name: ListProjectWorkspaces :many

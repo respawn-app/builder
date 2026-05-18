@@ -236,6 +236,16 @@ func (s *Starter) CancelTaskRuns(ctx context.Context, taskID workflow.TaskID) er
 	return nil
 }
 
+func (s *Starter) CancelRun(ctx context.Context, runID workflow.RunID) error {
+	s.mu.Lock()
+	cancel := s.cancel[runID]
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
 func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartContext) (launch.SessionPlan, []string, error) {
 	cfg := s.cfg
 	cfg.WorkspaceRoot = strings.TrimSpace(input.WorkspaceRoot)

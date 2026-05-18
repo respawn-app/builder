@@ -32,6 +32,12 @@ type remoteProcessOutputSubscription struct {
 	once  sync.Once
 }
 
+type remoteWorkflowProjectSubscription struct {
+	conn  rpcwire.Conn
+	route rpccontract.Route
+	once  sync.Once
+}
+
 func (c *Remote) SubscribePromptActivity(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
 	route := mustRemoteRoute(protocol.MethodPromptSubscribeActivity)
 	conn, cleanup, err := c.openSessionRPCConn(ctx, req.SessionID)
@@ -120,6 +126,20 @@ func (c *Remote) SubscribeProcessOutput(ctx context.Context, req serverapi.Proce
 		return nil, err
 	}
 	return &remoteProcessOutputSubscription{conn: conn, route: route}, nil
+}
+
+func (c *Remote) SubscribeWorkflowProject(ctx context.Context, req serverapi.WorkflowProjectSubscribeRequest) (serverapi.WorkflowProjectSubscription, error) {
+	route := mustRemoteRoute(protocol.MethodWorkflowSubscribeProject)
+	conn, cleanup, err := c.openRPCConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ack protocol.SubscribeResponse
+	if err := callRPC(ctx, conn, "subscribe-workflow-project", protocol.MethodWorkflowSubscribeProject, req, &ack); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &remoteWorkflowProjectSubscription{conn: conn, route: route}, nil
 }
 
 func (c *Remote) openSessionRPCConn(ctx context.Context, sessionID string) (rpcwire.Conn, func(), error) {
@@ -239,6 +259,42 @@ func (s *remoteProcessOutputSubscription) Next(ctx context.Context) (clientui.Pr
 }
 
 func (s *remoteProcessOutputSubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+	return nil
+}
+
+func (s *remoteWorkflowProjectSubscription) Next(ctx context.Context) (serverapi.WorkflowProjectEvent, error) {
+	frame, err := receiveFrame(ctx, s.conn)
+	if err != nil {
+		return serverapi.WorkflowProjectEvent{}, serverapi.NormalizeStreamError(err)
+	}
+	switch frame.Method {
+	case s.route.EventMethod:
+		var params protocol.WorkflowProjectEventParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return serverapi.WorkflowProjectEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		return serverapi.WorkflowProjectEvent{Sequence: params.Event.Sequence, ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}, nil
+	case s.route.CompleteMethod:
+		var params protocol.StreamCompleteParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return serverapi.WorkflowProjectEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		_ = s.Close()
+		return serverapi.WorkflowProjectEvent{}, streamCompleteError(params)
+	default:
+		return serverapi.WorkflowProjectEvent{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", frame.Method))
+	}
+}
+
+func (s *remoteWorkflowProjectSubscription) Close() error {
 	if s == nil {
 		return nil
 	}

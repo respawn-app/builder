@@ -25,6 +25,7 @@ type Gateway struct {
 }
 
 type GatewayDependencies interface {
+	GatewayServerStatusDependencies
 	GatewayAuthDependencies
 	GatewayProjectDependencies
 	GatewaySessionDependencies
@@ -32,6 +33,10 @@ type GatewayDependencies interface {
 	GatewayPromptDependencies
 	GatewayProcessDependencies
 	GatewayWorktreeDependencies
+}
+
+type GatewayServerStatusDependencies interface {
+	ServerStatusClient() client.ServerStatusClient
 }
 
 type GatewayAuthDependencies interface {
@@ -118,6 +123,7 @@ var gatewaySubscriptionHandlerEntries = map[string]gatewaySubscriptionHandler{
 	protocol.MethodSessionSubscribeActivity: (*Gateway).serveSessionActivitySubscription,
 	protocol.MethodProcessSubscribeOutput:   (*Gateway).serveProcessOutputSubscription,
 	protocol.MethodPromptSubscribeActivity:  (*Gateway).servePromptActivitySubscription,
+	protocol.MethodWorkflowSubscribeProject: (*Gateway).serveWorkflowProjectSubscription,
 }
 
 var gatewaySubscriptionHandlers = routeHandlersForKind(rpccontract.KindSubscription, gatewaySubscriptionHandlerEntries)

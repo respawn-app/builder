@@ -9,15 +9,19 @@ import (
 
 const (
 	MethodHandshake                             = "protocol.handshake"
+	MethodServerReadinessGet                    = "server.readiness.get"
+	MethodServerCapabilitiesGet                 = "server.capabilities.get"
 	MethodAuthGetBootstrapStatus                = "auth.getBootstrapStatus"
 	MethodAuthCompleteBootstrap                 = "auth.completeBootstrap"
 	MethodAuthGetStatus                         = "auth.getStatus"
 	MethodAttachProject                         = "project.attach"
 	MethodAttachSession                         = "session.attach"
 	MethodProjectList                           = "project.list"
+	MethodProjectHomeList                       = "project.home.list"
 	MethodProjectResolvePath                    = "project.resolvePath"
 	MethodProjectPlanWorkspaceBinding           = "project.planWorkspaceBinding"
 	MethodProjectCreate                         = "project.create"
+	MethodProjectWorkspaceList                  = "project.workspace.list"
 	MethodProjectAttachWorkspace                = "project.attachWorkspace"
 	MethodProjectRebindWorkspace                = "project.rebindWorkspace"
 	MethodProjectGetOverview                    = "project.getOverview"
@@ -26,6 +30,9 @@ const (
 	MethodWorkflowUpdate                        = "workflow.update"
 	MethodWorkflowList                          = "workflow.list"
 	MethodWorkflowGet                           = "workflow.get"
+	MethodWorkflowNodeGroupAdd                  = "workflow.nodeGroup.add"
+	MethodWorkflowNodeGroupUpdate               = "workflow.nodeGroup.update"
+	MethodWorkflowNodeGroupDelete               = "workflow.nodeGroup.delete"
 	MethodWorkflowAddNode                       = "workflow.addNode"
 	MethodWorkflowAddTransitionGroup            = "workflow.addTransitionGroup"
 	MethodWorkflowAddEdge                       = "workflow.addEdge"
@@ -35,16 +42,26 @@ const (
 	MethodWorkflowUnlinkProject                 = "workflow.unlinkProject"
 	MethodWorkflowValidate                      = "workflow.validate"
 	MethodWorkflowTaskCreate                    = "workflow.task.create"
+	MethodWorkflowTaskUpdate                    = "workflow.task.update"
 	MethodWorkflowTaskStart                     = "workflow.task.start"
+	MethodWorkflowTaskInterrupt                 = "workflow.task.interrupt"
 	MethodWorkflowTaskResume                    = "workflow.task.resume"
 	MethodWorkflowTaskApprove                   = "workflow.task.approve"
 	MethodWorkflowTaskMove                      = "workflow.task.move"
 	MethodWorkflowTaskCancel                    = "workflow.task.cancel"
+	MethodWorkflowAttentionList                 = "workflow.attention.list"
+	MethodWorkflowTaskAttentionList             = "workflow.task.attention.list"
+	MethodWorkflowTaskQuestionAnswer            = "workflow.task.question.answer"
 	MethodWorkflowTaskCommentAdd                = "workflow.task.comment.add"
 	MethodWorkflowTaskCommentList               = "workflow.task.comment.list"
 	MethodWorkflowTaskCommentReplace            = "workflow.task.comment.replace"
 	MethodWorkflowTaskCommentDelete             = "workflow.task.comment.delete"
+	MethodWorkflowTaskActivityList              = "workflow.task.activity.list"
+	MethodWorkflowTaskTeleportTargetGet         = "workflow.task.teleportTarget.get"
 	MethodWorkflowBoardGet                      = "workflow.board.get"
+	MethodWorkflowSubscribeProject              = "workflow.subscribeProject"
+	MethodWorkflowProjectEvent                  = "workflow.project"
+	MethodWorkflowProjectComplete               = "workflow.project.complete"
 	MethodWorkflowTaskGet                       = "workflow.task.get"
 	MethodSessionPlan                           = "session.plan"
 	MethodSessionGetMainView                    = "session.getMainView"
@@ -147,6 +164,20 @@ type ProcessOutputEventParams struct {
 
 type PromptActivityEventParams struct {
 	Event clientui.PendingPromptEvent `json:"event"`
+}
+
+type WorkflowProjectEventParams struct {
+	Event WorkflowProjectEvent `json:"event"`
+}
+
+type WorkflowProjectEvent struct {
+	Sequence         int64    `json:"sequence"`
+	ProjectID        string   `json:"project_id,omitempty"`
+	WorkflowID       string   `json:"workflow_id,omitempty"`
+	Resource         string   `json:"resource"`
+	Action           string   `json:"action"`
+	ChangedIDs       []string `json:"changed_ids,omitempty"`
+	OccurredAtUnixMs int64    `json:"occurred_at_unix_ms"`
 }
 
 type StreamCompleteParams struct {

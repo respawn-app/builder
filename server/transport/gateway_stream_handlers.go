@@ -175,3 +175,35 @@ func (g *Gateway) servePromptActivitySubscription(conn rpcwire.Conn, ctx context
 		}
 	}
 }
+
+func (g *Gateway) serveWorkflowProjectSubscription(conn rpcwire.Conn, ctx context.Context, state *connectionState, route rpccontract.Route, req protocol.Request) {
+	params, err := decodeParams[serverapi.WorkflowProjectSubscribeRequest](req.Params)
+	if err != nil {
+		_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+		return
+	}
+	if err := params.Validate(); err != nil {
+		_ = sendResponse(ctx, conn, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+		return
+	}
+	sub, err := g.deps.WorkflowClient().SubscribeWorkflowProject(ctx, params)
+	if err != nil {
+		_ = sendResponse(ctx, conn, responseForError(req.ID, err))
+		return
+	}
+	defer func() { _ = sub.Close() }()
+	if !sendResponse(ctx, conn, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: route.EventMethod})) {
+		return
+	}
+	for {
+		evt, err := sub.Next(ctx)
+		if err != nil {
+			_ = sendNotification(ctx, conn, route.CompleteMethod, streamCompleteParams(err))
+			return
+		}
+		params := protocol.WorkflowProjectEventParams{Event: protocol.WorkflowProjectEvent{Sequence: evt.Sequence, ProjectID: evt.ProjectID, WorkflowID: evt.WorkflowID, Resource: evt.Resource, Action: evt.Action, ChangedIDs: evt.ChangedIDs, OccurredAtUnixMs: evt.OccurredAtUnixMs}}
+		if err := sendNotification(ctx, conn, route.EventMethod, params); err != nil {
+			return
+		}
+	}
+}

@@ -39,6 +39,9 @@ type testProjectViewClient struct {
 func (c *testProjectViewClient) ListProjects(context.Context, serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	return serverapi.ProjectListResponse{}, nil
 }
+func (c *testProjectViewClient) ListProjectHome(context.Context, serverapi.ProjectHomeListRequest) (serverapi.ProjectHomeListResponse, error) {
+	return serverapi.ProjectHomeListResponse{}, nil
+}
 func (c *testProjectViewClient) ResolveProjectPath(context.Context, serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 	return serverapi.ProjectResolvePathResponse{}, nil
 }
@@ -53,6 +56,9 @@ func (c *testProjectViewClient) CreateProject(_ context.Context, req serverapi.P
 func (c *testProjectViewClient) AttachWorkspaceToProject(_ context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
 	c.attachReq = req
 	return c.attach, nil
+}
+func (c *testProjectViewClient) ListProjectWorkspaces(context.Context, serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
+	return serverapi.ProjectWorkspaceListResponse{}, nil
 }
 func (c *testProjectViewClient) RebindWorkspace(context.Context, serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
 	return serverapi.ProjectRebindWorkspaceResponse{}, nil

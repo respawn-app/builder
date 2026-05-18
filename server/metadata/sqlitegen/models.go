@@ -73,6 +73,7 @@ type Task struct {
 	Title                 string
 	Body                  string
 	SourceUrl             string
+	SourceWorkspaceID     sql.NullString
 	ManagedWorktreeID     sql.NullString
 	CanceledAtUnixMs      int64
 	CancellationReason    string
@@ -192,6 +193,16 @@ type WorkflowEdge struct {
 	MetadataJson           string
 }
 
+type WorkflowEvent struct {
+	Sequence         int64
+	ProjectID        string
+	WorkflowID       string
+	Resource         string
+	Action           string
+	ChangedIdsJson   string
+	OccurredAtUnixMs int64
+}
+
 type WorkflowNode struct {
 	ID               string
 	WorkflowID       string
@@ -203,6 +214,16 @@ type WorkflowNode struct {
 	OutputFieldsJson string
 	SortOrder        int64
 	MetadataJson     string
+	GroupID          sql.NullString
+}
+
+type WorkflowNodeGroup struct {
+	ID           string
+	WorkflowID   string
+	GroupKey     string
+	DisplayName  string
+	SortOrder    int64
+	MetadataJson string
 }
 
 type WorkflowTransitionGroup struct {
