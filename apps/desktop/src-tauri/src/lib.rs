@@ -9,6 +9,7 @@ const BUILDER_CONFIG_NAME: &str = "config.toml";
 const DEFAULT_PERSISTENCE_ROOT: &str = "~/.builder";
 const DEFAULT_SERVER_HOST: &str = "127.0.0.1";
 const DEFAULT_SERVER_PORT: u16 = 53082;
+const DEFAULT_THEME: &str = "auto";
 const GUI_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const GUI_LOG_RETAIN_BYTES: u64 = 5 * 1024 * 1024;
 const GUI_LOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
@@ -18,6 +19,7 @@ const GUI_LOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
 struct BuilderNativeContext {
     server_endpoint: String,
     persistence_root: String,
+    theme: String,
 }
 
 #[tauri::command]
@@ -130,6 +132,7 @@ fn builder_native_context() -> Result<BuilderNativeContext, String> {
     Ok(BuilderNativeContext {
         server_endpoint: server_rpc_url(&settings.server_host, settings.server_port),
         persistence_root: settings.persistence_root.to_string_lossy().to_string(),
+        theme: settings.theme,
     })
 }
 
@@ -137,12 +140,14 @@ struct BuilderSettings {
     server_host: String,
     server_port: u16,
     persistence_root: PathBuf,
+    theme: String,
 }
 
 fn load_builder_settings() -> Result<BuilderSettings, String> {
     let mut server_host = DEFAULT_SERVER_HOST.to_string();
     let mut server_port = DEFAULT_SERVER_PORT;
     let mut persistence_root = resolve_configured_path(DEFAULT_PERSISTENCE_ROOT)?;
+    let mut theme = DEFAULT_THEME.to_string();
 
     if let Some(config) = read_home_config()? {
         if let Some(value) = config.get("server_host").and_then(toml::Value::as_str) {
@@ -156,6 +161,11 @@ fn load_builder_settings() -> Result<BuilderSettings, String> {
         if let Some(value) = config.get("persistence_root").and_then(toml::Value::as_str) {
             if !value.trim().is_empty() {
                 persistence_root = resolve_configured_path(value)?;
+            }
+        }
+        if let Some(value) = config.get("theme").and_then(toml::Value::as_str) {
+            if !value.trim().is_empty() {
+                theme = parse_theme(value, "theme")?;
             }
         }
     }
@@ -173,6 +183,11 @@ fn load_builder_settings() -> Result<BuilderSettings, String> {
             persistence_root = resolve_configured_path(value.trim())?;
         }
     }
+    if let Ok(value) = env::var("BUILDER_THEME") {
+        if !value.trim().is_empty() {
+            theme = parse_theme(&value, "BUILDER_THEME")?;
+        }
+    }
 
     if server_host.trim().is_empty() {
         return Err("server_host must not be empty.".to_string());
@@ -181,6 +196,7 @@ fn load_builder_settings() -> Result<BuilderSettings, String> {
         server_host,
         server_port,
         persistence_root,
+        theme,
     })
 }
 
@@ -209,6 +225,14 @@ fn parse_server_port_string(value: &str) -> Result<u16, String> {
         .parse::<i64>()
         .map_err(|_| "BUILDER_SERVER_PORT must be between 1 and 65535.".to_string())?;
     parse_server_port(parsed)
+}
+
+fn parse_theme(value: &str, setting_name: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "auto" | "light" | "dark" => Ok(normalized),
+        _ => Err(format!("{setting_name} must be one of auto, light, or dark.")),
+    }
 }
 
 fn resolve_configured_path(value: &str) -> Result<PathBuf, String> {
@@ -330,7 +354,7 @@ fn trim_log_if_needed(path: &Path, append_bytes: u64) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{builder_continue_command, server_rpc_url, shell_quote};
+    use super::{builder_continue_command, parse_theme, server_rpc_url, shell_quote};
 
     #[test]
     fn builder_terminal_command_uses_interactive_continue() {
@@ -353,5 +377,20 @@ mod tests {
     #[test]
     fn server_rpc_url_uses_configured_remote_hosts() {
         assert_eq!(server_rpc_url("192.0.2.10", 53082), "ws://192.0.2.10:53082/rpc");
+    }
+
+    #[test]
+    fn parse_theme_accepts_supported_values_case_insensitively() {
+        assert_eq!(parse_theme("auto", "theme").expect("auto theme"), "auto");
+        assert_eq!(parse_theme(" Light ", "theme").expect("light theme"), "light");
+        assert_eq!(parse_theme("DARK", "theme").expect("dark theme"), "dark");
+    }
+
+    #[test]
+    fn parse_theme_rejects_unknown_values() {
+        assert_eq!(
+            parse_theme("solarized", "BUILDER_THEME").expect_err("invalid theme"),
+            "BUILDER_THEME must be one of auto, light, or dark.",
+        );
     }
 }

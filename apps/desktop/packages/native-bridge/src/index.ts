@@ -1,6 +1,18 @@
+/* eslint-disable max-lines -- Native bridge is the package-level contract surface; Phase 8 will revisit capability cleanup. */
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+
+import {
+  fitCurrentWindowToContent,
+  openNativeDialogWindow,
+  type NativeDialogContentSize,
+  type NativeDialogWindowOptions,
+} from "./dialogs";
+
+export type { NativeDialogContentSize, NativeDialogWindowOptions } from "./dialogs";
 
 export type NativeCapabilityState = Readonly<{
   clipboard: Readonly<{
@@ -27,6 +39,8 @@ export type NativeCapabilityState = Readonly<{
   updater: boolean;
   windowControls: boolean;
   windowDrag: boolean;
+  projectCreationWindow: boolean;
+  taskDetailWindow: boolean;
   macosVibrancy: boolean;
 }>;
 
@@ -56,6 +70,22 @@ export type NativeBridge = Readonly<{
   }>;
   window: Readonly<{
     startDragging(): Promise<void>;
+    closeCurrent(): Promise<void>;
+    fitCurrentToContent(size: NativeDialogContentSize): Promise<void>;
+  }>;
+  dialogs: Readonly<{
+    openWindow(options: NativeDialogWindowOptions): Promise<void>;
+  }>;
+  projectCreation: Readonly<{
+    openWindow(draft: NativeProjectCreationDraft): Promise<void>;
+    notifyCreated(binding: NativeProjectBinding): Promise<void>;
+    onCreated(handler: (binding: NativeProjectBinding) => void): Promise<NativeUnlisten>;
+  }>;
+  taskDetail: Readonly<{
+    openWindow(target: NativeTaskDetailTarget): Promise<void>;
+    onOpen(handler: (target: NativeTaskDetailTarget) => void): Promise<NativeUnlisten>;
+    notifyChanged(event: NativeTaskDetailChanged): Promise<void>;
+    onChanged(handler: (event: NativeTaskDetailChanged) => void): Promise<NativeUnlisten>;
   }>;
 }>;
 
@@ -84,10 +114,34 @@ export type NativeLogEntry = Readonly<{
   occurredAt: string;
 }>;
 
+export type NativeBuilderTheme = "auto" | "light" | "dark";
+
 export type NativeBuilderContext = Readonly<{
   serverEndpoint: string;
   persistenceRoot: string;
+  theme: NativeBuilderTheme;
 }>;
+
+export type NativeProjectCreationDraft = Readonly<{
+  name: string;
+  key: string;
+  workspaceRoot: string;
+}>;
+
+export type NativeProjectBinding = Readonly<{
+  projectID: string;
+}>;
+
+export type NativeTaskDetailTarget = Readonly<{
+  taskId: string;
+  resumeRunId: string;
+}>;
+
+export type NativeTaskDetailChanged = Readonly<{
+  taskId: string;
+}>;
+
+export type NativeUnlisten = () => void;
 
 const unavailableCapabilities: NativeCapabilityState = {
   clipboard: {
@@ -114,8 +168,14 @@ const unavailableCapabilities: NativeCapabilityState = {
   updater: false,
   windowControls: false,
   windowDrag: false,
+  projectCreationWindow: false,
+  taskDetailWindow: false,
   macosVibrancy: false,
 };
+
+const taskDetailWindowLabel = "native-dialog-task-detail";
+const taskDetailOpenEvent = "builder://task-detail-open";
+const taskDetailChangedEvent = "builder://task-detail-changed";
 
 declare global {
   interface Window {
@@ -127,11 +187,11 @@ export function createBrowserNativeBridge(): NativeBridge {
   return {
     capabilities: unavailableCapabilities,
     clipboard: {
-      async writeText(value: string): Promise<void> {
-        await writeText(value);
+      async writeText(): Promise<void> {
+        throw new Error("Native clipboard is unavailable in this shell.");
       },
       async readText(): Promise<string> {
-        return readText();
+        throw new Error("Native clipboard is unavailable in this shell.");
       },
     },
     directories: {
@@ -161,12 +221,48 @@ export function createBrowserNativeBridge(): NativeBridge {
     },
     builder: {
       async resolveContext(): Promise<NativeBuilderContext> {
-        return { serverEndpoint: "ws://127.0.0.1:53082/rpc", persistenceRoot: "" };
+        return { serverEndpoint: "ws://127.0.0.1:53082/rpc", persistenceRoot: "", theme: "auto" };
       },
     },
     window: {
       async startDragging(): Promise<void> {
         return Promise.resolve();
+      },
+      async closeCurrent(): Promise<void> {
+        return Promise.resolve();
+      },
+      async fitCurrentToContent(): Promise<void> {
+        return Promise.resolve();
+      },
+    },
+    dialogs: {
+      async openWindow(): Promise<void> {
+        throw new Error("Native dialog windows are unavailable in this shell.");
+      },
+    },
+    projectCreation: {
+      async openWindow(): Promise<void> {
+        throw new Error("Native project creation window is unavailable in this shell.");
+      },
+      async notifyCreated(): Promise<void> {
+        return Promise.resolve();
+      },
+      async onCreated(): Promise<NativeUnlisten> {
+        return () => undefined;
+      },
+    },
+    taskDetail: {
+      async openWindow(): Promise<void> {
+        throw new Error("Native task detail window is unavailable in this shell.");
+      },
+      async onOpen(): Promise<NativeUnlisten> {
+        return () => undefined;
+      },
+      async notifyChanged(): Promise<void> {
+        return Promise.resolve();
+      },
+      async onChanged(): Promise<NativeUnlisten> {
+        return () => undefined;
       },
     },
   };
@@ -177,11 +273,11 @@ export function createTauriNativeBridge(): NativeBridge {
   return {
     capabilities,
     clipboard: {
-      async writeText(): Promise<void> {
-        throw new Error("Clipboard write is unavailable in this shell.");
+      async writeText(value: string): Promise<void> {
+        await writeText(value);
       },
       async readText(): Promise<string> {
-        throw new Error("Clipboard read is unavailable in this shell.");
+        return readText();
       },
     },
     directories: {
@@ -219,6 +315,85 @@ export function createTauriNativeBridge(): NativeBridge {
       async startDragging(): Promise<void> {
         await getCurrentWindow().startDragging();
       },
+      async closeCurrent(): Promise<void> {
+        await getCurrentWindow().close();
+      },
+      async fitCurrentToContent(size: NativeDialogContentSize): Promise<void> {
+        await fitCurrentWindowToContent(size);
+      },
+    },
+    dialogs: {
+      async openWindow(options: NativeDialogWindowOptions): Promise<void> {
+        await openNativeDialogWindow(options);
+      },
+    },
+    projectCreation: {
+      async openWindow(draft: NativeProjectCreationDraft): Promise<void> {
+        await openNativeDialogWindow({
+          initialHeight: 440,
+          initialWidth: 640,
+          label: `project-create-${Date.now().toString()}`,
+          params: {
+            key: draft.key,
+            name: draft.name,
+            workspaceRoot: draft.workspaceRoot,
+          },
+          route: "/native-dialog/project-create",
+          title: "Create project",
+        });
+      },
+      async notifyCreated(binding: NativeProjectBinding): Promise<void> {
+        await emitTo("main", "builder://project-created", binding);
+      },
+      async onCreated(handler: (binding: NativeProjectBinding) => void): Promise<NativeUnlisten> {
+        return listen<NativeProjectBinding>("builder://project-created", (event) => {
+          handler(event.payload);
+        });
+      },
+    },
+    taskDetail: {
+      async openWindow(target: NativeTaskDetailTarget): Promise<void> {
+        const existing = await WebviewWindow.getByLabel(taskDetailWindowLabel);
+        if (existing !== null) {
+          await retargetTaskDetailWindow(existing, target);
+          return;
+        }
+        try {
+          await openNativeDialogWindow({
+            initialHeight: 760,
+            initialWidth: 980,
+            label: taskDetailWindowLabel,
+            maximizable: true,
+            params: {
+              resumeRunId: target.resumeRunId,
+              taskId: target.taskId,
+            },
+            resizable: true,
+            route: "/native-dialog/task-detail",
+            title: "Task",
+          });
+        } catch (cause) {
+          const raced = await WebviewWindow.getByLabel(taskDetailWindowLabel);
+          if (raced !== null) {
+            await retargetTaskDetailWindow(raced, target);
+            return;
+          }
+          throw cause;
+        }
+      },
+      async onOpen(handler: (target: NativeTaskDetailTarget) => void): Promise<NativeUnlisten> {
+        return listen<NativeTaskDetailTarget>(taskDetailOpenEvent, (event) => {
+          handler(event.payload);
+        });
+      },
+      async notifyChanged(event: NativeTaskDetailChanged): Promise<void> {
+        await emitTo("main", taskDetailChangedEvent, event);
+      },
+      async onChanged(handler: (event: NativeTaskDetailChanged) => void): Promise<NativeUnlisten> {
+        return listen<NativeTaskDetailChanged>(taskDetailChangedEvent, (event) => {
+          handler(event.payload);
+        });
+      },
     },
   };
 }
@@ -237,6 +412,14 @@ function validateExternalUrl(url: string): string {
     throw new Error("External link protocol is not allowed.");
   }
   return parsed.toString();
+}
+
+async function retargetTaskDetailWindow(
+  window: WebviewWindow,
+  target: NativeTaskDetailTarget,
+): Promise<void> {
+  await window.emit(taskDetailOpenEvent, target);
+  await window.setFocus();
 }
 
 function createTauriCapabilities(): NativeCapabilityState {
@@ -265,6 +448,8 @@ function createTauriCapabilities(): NativeCapabilityState {
     updater: false,
     windowControls: false,
     windowDrag: true,
+    projectCreationWindow: true,
+    taskDetailWindow: true,
     macosVibrancy: false,
   };
 }
