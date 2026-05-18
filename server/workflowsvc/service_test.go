@@ -245,6 +245,43 @@ func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
 	}
 }
 
+func TestServiceResumeTaskRequeuesRunAndNotifiesScheduler(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	started, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("StartWorkflowTask: %v", err)
+	}
+	claimed, err := service.store.ClaimRun(ctx, workflow.RunID(started.RunID), 0)
+	if err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := service.store.InterruptRunGeneration(ctx, workflow.RunID(started.RunID), claimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration: %v", err)
+	}
+	notifier := &recordingSchedulerNotifier{}
+	service.schedulerWake = notifier
+
+	resumed, err := service.ResumeWorkflowTask(ctx, serverapi.WorkflowTaskResumeRequest{TaskID: task.Task.ID})
+	if err != nil {
+		t.Fatalf("ResumeWorkflowTask: %v", err)
+	}
+	if resumed.RunID != started.RunID || resumed.Generation <= claimed.Generation || resumed.PlacementID == "" || resumed.NodeID == "" {
+		t.Fatalf("resume response = %+v, want same run requeued", resumed)
+	}
+	if notifier.count != 1 {
+		t.Fatalf("scheduler notifications = %d, want 1", notifier.count)
+	}
+}
+
 type recordingSchedulerNotifier struct {
 	count int
 }

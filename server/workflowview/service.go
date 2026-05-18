@@ -162,7 +162,7 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 		detail.Placements = append(detail.Placements, placementDTO(placement))
 	}
 	for _, run := range runs {
-		detail.Runs = append(detail.Runs, serverapi.WorkflowRun{ID: run.ID, TaskID: run.TaskID, PlacementID: run.PlacementID, NodeID: run.NodeID, SessionID: run.SessionID.String, Generation: run.RunGeneration, StartedAtUnixMs: run.StartedAtUnixMs, CompletedAtUnixMs: run.CompletedAtUnixMs, InterruptedAtUnixMs: run.InterruptedAtUnixMs, InterruptionReason: run.InterruptionReason})
+		detail.Runs = append(detail.Runs, serverapi.WorkflowRun{ID: run.ID, TaskID: run.TaskID, PlacementID: run.PlacementID, NodeID: run.NodeID, SessionID: run.SessionID.String, Generation: run.RunGeneration, StartedAtUnixMs: run.StartedAtUnixMs, CompletedAtUnixMs: run.CompletedAtUnixMs, InterruptedAtUnixMs: run.InterruptedAtUnixMs, InterruptionReason: run.InterruptionReason, WaitingAskID: run.WaitingAskID})
 	}
 	for _, transition := range transitions {
 		outputs := map[string]string{}
@@ -248,7 +248,7 @@ func taskSummary(task sqlitegen.Task, placements []sqlitegen.TaskNodePlacement, 
 }
 
 func placementDTO(placement sqlitegen.TaskNodePlacement) serverapi.WorkflowPlacement {
-	return serverapi.WorkflowPlacement{ID: placement.ID, TaskID: placement.TaskID, NodeID: placement.NodeID, State: placement.State}
+	return serverapi.WorkflowPlacement{ID: placement.ID, TaskID: placement.TaskID, NodeID: placement.NodeID, State: placement.State, ParallelBatchTransitionID: strings.TrimSpace(placement.ParallelBatchTransitionID.String), ParallelBranchEdgeID: strings.TrimSpace(placement.ParallelBranchEdgeID.String)}
 }
 
 func commentDTO(comment sqlitegen.TaskComment) serverapi.WorkflowTaskComment {

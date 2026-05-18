@@ -3,6 +3,7 @@ package workflowstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,8 @@ SET
     updated_at_unix_ms = ?,
     interrupted_at_unix_ms = ?,
     interruption_reason = ?,
-    interruption_detail_json = ?
+    interruption_detail_json = ?,
+    waiting_ask_id = ''
 WHERE id = ?
   AND run_generation = ?
   AND completed_at_unix_ms = 0
@@ -102,6 +104,104 @@ func (s *Store) ListWaitingAskRuns(ctx context.Context) ([]RunRecord, error) {
 	return out, nil
 }
 
+func (s *Store) ResumeTaskRun(ctx context.Context, taskID workflow.TaskID) (RunRecord, error) {
+	if strings.TrimSpace(string(taskID)) == "" {
+		return RunRecord{}, errors.New("task id is required")
+	}
+	task, err := s.queries.GetTask(ctx, string(taskID))
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if task.CanceledAtUnixMs != 0 {
+		return RunRecord{}, errors.New("task is canceled")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+    r.id,
+    r.run_start_snapshot_json
+FROM task_runs r
+JOIN task_node_placements p ON p.id = r.placement_id
+JOIN workflow_nodes n ON n.id = r.node_id
+WHERE r.task_id = ?
+  AND r.completed_at_unix_ms = 0
+  AND r.interrupted_at_unix_ms > 0
+  AND p.state = 'active'
+  AND n.kind = 'agent'
+ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID))
+	if err != nil {
+		return RunRecord{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	type candidate struct {
+		id           string
+		snapshotJSON string
+	}
+	candidates := []candidate{}
+	for rows.Next() {
+		var next candidate
+		if err := rows.Scan(&next.id, &next.snapshotJSON); err != nil {
+			return RunRecord{}, err
+		}
+		candidates = append(candidates, next)
+	}
+	if err := rows.Err(); err != nil {
+		return RunRecord{}, err
+	}
+	if len(candidates) == 0 {
+		return RunRecord{}, errors.New("task has no interrupted workflow run to resume")
+	}
+	if len(candidates) != 1 {
+		return RunRecord{}, errors.New("task has multiple interrupted workflow runs; resume by run is not supported yet")
+	}
+	snapshot := runStartSnapshot{}
+	if err := unmarshalJSON(candidates[0].snapshotJSON, &snapshot); err != nil {
+		return RunRecord{}, err
+	}
+	if err := s.validateRunnableRole(snapshot.Node.SubagentRole); err != nil {
+		return RunRecord{}, err
+	}
+	now := s.now().UnixMilli()
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    started_at_unix_ms = 0,
+    interrupted_at_unix_ms = 0,
+    interruption_reason = '',
+    interruption_detail_json = '{}',
+    waiting_ask_id = '',
+    run_generation = run_generation + 1
+WHERE id = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms > 0`, now, candidates[0].id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if updated != 1 {
+		return RunRecord{}, sql.ErrNoRows
+	}
+	run, err := s.queries.GetTaskRun(ctx, candidates[0].id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	return runRecordFromTaskRun(run), nil
+}
+
+func (s *Store) validateRunnableRole(role string) error {
+	trimmed := strings.TrimSpace(role)
+	if trimmed == "" {
+		return fmt.Errorf("workflow validation failed: [%s]", workflow.CodeAgentRoleRequired)
+	}
+	if s.roleResolver != nil && !s.roleResolver.RoleExists(trimmed) {
+		return fmt.Errorf("workflow validation failed: [%s]", workflow.CodeAgentRoleMissing)
+	}
+	return nil
+}
+
 func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (RunStartContext, error) {
 	run, err := s.queries.GetTaskRun(ctx, string(runID))
 	if err != nil {
@@ -119,12 +219,20 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 	if err != nil {
 		return RunStartContext{}, err
 	}
+	transitionContext, err := s.resolveRunTransitionContext(ctx, run.PlacementID)
+	if err != nil {
+		return RunStartContext{}, err
+	}
 	worktreeID := strings.TrimSpace(task.ManagedWorktreeID.String)
 	if worktreeID == "" {
 		return RunStartContext{
 			Run:               runRecordFromTaskRun(run),
 			Task:              taskRecordFromTask(task),
 			Node:              nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+			ContextMode:       transitionContext.ContextMode,
+			SourceRunID:       transitionContext.SourceRunID,
+			SourceSessionID:   transitionContext.SourceSessionID,
+			SourceNode:        transitionContext.SourceNode,
 			TransitionIDs:     transitionIDsFromSnapshot(snapshot),
 			TransitionOptions: transitionOptionsFromSnapshot(snapshot),
 			InputValues:       inputValues,
@@ -142,6 +250,10 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 		Run:               runRecordFromTaskRun(run),
 		Task:              taskRecordFromTask(task),
 		Node:              nodeRecordFromSnapshot(snapshot.Node, snapshot.WorkflowID),
+		ContextMode:       transitionContext.ContextMode,
+		SourceRunID:       transitionContext.SourceRunID,
+		SourceSessionID:   transitionContext.SourceSessionID,
+		SourceNode:        transitionContext.SourceNode,
 		TransitionIDs:     transitionIDsFromSnapshot(snapshot),
 		TransitionOptions: transitionOptionsFromSnapshot(snapshot),
 		InputValues:       inputValues,
@@ -150,6 +262,55 @@ func (s *Store) GetRunStartContext(ctx context.Context, runID workflow.RunID) (R
 		WorktreeID:        worktree.ID,
 		WorktreeRoot:      worktree.CanonicalRoot,
 	}, nil
+}
+
+type runTransitionContext struct {
+	ContextMode     workflow.ContextMode
+	SourceRunID     workflow.RunID
+	SourceSessionID string
+	SourceNode      NodeRecord
+}
+
+func (s *Store) resolveRunTransitionContext(ctx context.Context, placementID string) (runTransitionContext, error) {
+	var contextMode string
+	var sourceRunID sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+SELECT
+    te.context_mode,
+    tr.source_run_id
+FROM task_node_placements p
+JOIN task_transitions tr ON tr.id = p.created_by_transition_id
+JOIN task_transition_edges te
+    ON te.task_transition_id = tr.id
+    AND te.target_placement_id = p.id
+WHERE p.id = ?
+ORDER BY te.rowid ASC
+LIMIT 1`, placementID).Scan(&contextMode, &sourceRunID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runTransitionContext{ContextMode: workflow.ContextModeNewSession}, nil
+	}
+	if err != nil {
+		return runTransitionContext{}, fmt.Errorf("resolve workflow run transition context: %w", err)
+	}
+	resolved := runTransitionContext{ContextMode: workflow.ContextMode(strings.TrimSpace(contextMode))}
+	if resolved.ContextMode == "" {
+		resolved.ContextMode = workflow.ContextModeNewSession
+	}
+	if !sourceRunID.Valid || strings.TrimSpace(sourceRunID.String) == "" {
+		return resolved, nil
+	}
+	sourceRun, err := s.queries.GetTaskRun(ctx, sourceRunID.String)
+	if err != nil {
+		return runTransitionContext{}, err
+	}
+	sourceSnapshot := runStartSnapshot{}
+	if err := unmarshalJSON(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
+		return runTransitionContext{}, err
+	}
+	resolved.SourceRunID = workflow.RunID(sourceRun.ID)
+	resolved.SourceSessionID = strings.TrimSpace(sourceRun.SessionID.String)
+	resolved.SourceNode = nodeRecordFromSnapshot(sourceSnapshot.Node, sourceSnapshot.WorkflowID)
+	return resolved, nil
 }
 
 func (s *Store) resolveRunInputValues(ctx context.Context, placementID string, task TaskRecord) (map[string]string, error) {
@@ -215,11 +376,7 @@ func resolveInputBindingValues(task TaskRecord, commentary string, outputValues 
 				values[name] = outputValues[field]
 			}
 		case workflow.BindingSourceJoin:
-			issues := workflow.UnsupportedRuntimeFeatures(workflow.RuntimeSupportEdge{InputBindings: []workflow.InputBinding{binding}})
-			if len(issues) > 0 {
-				return nil, fmt.Errorf("%s", issues[0].Message)
-			}
-			return nil, fmt.Errorf("join-sourced input bindings cannot execute until join aggregation is implemented")
+			values[name] = outputValues[strings.TrimSpace(binding.Field)]
 		default:
 			return nil, fmt.Errorf("unsupported input binding source %q", binding.Source)
 		}
@@ -253,14 +410,82 @@ WHERE id = ?
   AND started_at_unix_ms > 0
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
-  AND session_id IS NULL`,
+  AND (session_id IS NULL OR session_id = ?)`,
 		s.now().UnixMilli(),
 		strings.TrimSpace(sessionID),
 		string(runID),
 		expectedGeneration,
+		strings.TrimSpace(sessionID),
 	)
 	if err != nil {
 		return fmt.Errorf("attach workflow run session: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) SetRunWaitingAsk(ctx context.Context, runID workflow.RunID, expectedGeneration int64, askID string) error {
+	trimmedAskID := strings.TrimSpace(askID)
+	if trimmedAskID == "" {
+		return fmt.Errorf("ask id is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    waiting_ask_id = ?
+WHERE id = ?
+  AND run_generation = ?
+  AND started_at_unix_ms > 0
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND waiting_ask_id = ''`,
+		s.now().UnixMilli(),
+		trimmedAskID,
+		string(runID),
+		expectedGeneration,
+	)
+	if err != nil {
+		return fmt.Errorf("set workflow run waiting ask: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) ClearRunWaitingAsk(ctx context.Context, runID workflow.RunID, expectedGeneration int64, askID string) error {
+	trimmedAskID := strings.TrimSpace(askID)
+	if trimmedAskID == "" {
+		return fmt.Errorf("ask id is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE task_runs
+SET
+    updated_at_unix_ms = ?,
+    waiting_ask_id = ''
+WHERE id = ?
+  AND run_generation = ?
+  AND completed_at_unix_ms = 0
+  AND interrupted_at_unix_ms = 0
+  AND waiting_ask_id = ?`,
+		s.now().UnixMilli(),
+		string(runID),
+		expectedGeneration,
+		trimmedAskID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear workflow run waiting ask: %w", err)
 	}
 	updated, err := result.RowsAffected()
 	if err != nil {

@@ -20,6 +20,7 @@ type workflowCommandLoopbackRemote struct {
 	client.WorkflowClient
 	cfg     config.App
 	binding metadata.Binding
+	store   *workflowstore.Store
 }
 
 func (r *workflowCommandLoopbackRemote) Close() error { return nil }
@@ -180,8 +181,23 @@ func TestWorkflowAndTaskCommandsUseWorkflowAPI(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("task start exit=%d stderr=%q", code, startErr)
 	}
-	if labeledOutputValue(t, startOut, "run_id") == "" {
+	runID := labeledOutputValue(t, startOut, "run_id")
+	if runID == "" {
 		t.Fatalf("start output = %q, want run id", startOut)
+	}
+	claimed, err := remote.store.ClaimRun(context.Background(), workflow.RunID(runID), 0)
+	if err != nil {
+		t.Fatalf("ClaimRun for resume command: %v", err)
+	}
+	if err := remote.store.InterruptRunGeneration(context.Background(), workflow.RunID(runID), claimed.Generation, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRunGeneration for resume command: %v", err)
+	}
+	resumeOut, resumeErr, code := runWorkflowRootCommand("task", "resume", "--project", binding.ProjectID, shortID)
+	if code != 0 {
+		t.Fatalf("task resume exit=%d stderr=%q", code, resumeErr)
+	}
+	if labeledOutputValue(t, resumeOut, "run_id") != runID {
+		t.Fatalf("resume output = %q, want run id %s", resumeOut, runID)
 	}
 
 	cancelOut, cancelErr, code := runWorkflowRootCommand("task", "cancel", "--project", binding.ProjectID, "--reason", "test", shortID)
@@ -192,11 +208,34 @@ func TestWorkflowAndTaskCommandsUseWorkflowAPI(t *testing.T) {
 		t.Fatalf("cancel output = %q, want task id", cancelOut)
 	}
 
-	for _, action := range []string{"move", "approve", "resume"} {
-		_, unsupportedErr, unsupportedCode := runWorkflowRootCommand("task", action)
-		if unsupportedCode == 0 || !strings.Contains(unsupportedErr, "not implemented yet") {
-			t.Fatalf("task %s code=%d stderr=%q, want unsupported", action, unsupportedCode, unsupportedErr)
-		}
+	if _, resumeErr, resumeCode := runWorkflowRootCommand("task", "resume"); resumeCode != 2 || !strings.Contains(resumeErr, "requires <short-id-or-task-id>") {
+		t.Fatalf("task resume validation code=%d stderr=%q, want task requirement", resumeCode, resumeErr)
+	}
+	if _, approveErr, approveCode := runWorkflowRootCommand("task", "approve"); approveCode != 2 || !strings.Contains(approveErr, "requires <transition-id>") {
+		t.Fatalf("task approve validation code=%d stderr=%q, want transition id requirement", approveCode, approveErr)
+	}
+	if _, moveErr, moveCode := runWorkflowRootCommand("task", "move"); moveCode != 2 || !strings.Contains(moveErr, "requires <short-id-or-task-id> <target-node-id>") {
+		t.Fatalf("task move validation code=%d stderr=%q, want task and target requirement", moveCode, moveErr)
+	}
+}
+
+func TestWriteTaskDetailIncludesParallelBranchIDs(t *testing.T) {
+	var stdout bytes.Buffer
+	writeTaskDetail(&stdout, serverapi.WorkflowTaskDetail{
+		Summary: serverapi.WorkflowTaskSummary{ID: "task-1", ShortID: "WOR-1", WorkflowID: "workflow-1", Title: "Task"},
+		Placements: []serverapi.WorkflowPlacement{{
+			ID:                        "placement-1",
+			TaskID:                    "task-1",
+			NodeID:                    "node-impl-a",
+			State:                     "active",
+			ParallelBatchTransitionID: "transition-split",
+			ParallelBranchEdgeID:      "edge-split-a",
+		}},
+	})
+
+	output := stdout.String()
+	if !strings.Contains(output, "placement-1\tnode-impl-a\tactive\ttransition-split\tedge-split-a") {
+		t.Fatalf("task detail output = %q, want parallel batch and branch ids", output)
 	}
 }
 
@@ -269,7 +308,7 @@ func newWorkflowCommandLoopback(t *testing.T) (config.App, metadata.Binding, *wo
 	if err != nil {
 		t.Fatalf("workflowsvc.New: %v", err)
 	}
-	remote := &workflowCommandLoopbackRemote{WorkflowClient: client.NewLoopbackWorkflowClient(service), cfg: cfg, binding: binding}
+	remote := &workflowCommandLoopbackRemote{WorkflowClient: client.NewLoopbackWorkflowClient(service), cfg: cfg, binding: binding, store: store}
 	return cfg, binding, remote
 }
 

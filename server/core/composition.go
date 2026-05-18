@@ -27,6 +27,7 @@ import (
 	"builder/server/sessionview"
 	"builder/server/storagemigration"
 	"builder/server/updatestatus"
+	"builder/server/workflow"
 	"builder/server/workflowrunner"
 	"builder/server/workflowscheduler"
 	"builder/server/workflowstore"
@@ -152,7 +153,7 @@ func NewWithContext(ctx context.Context, cfg config.App, authSupport serverboots
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: runtime starter: %w", err)
 	}
-	workflowScheduler, err = workflowscheduler.New(workflowStore, workflowRuntimeStarter, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency})
+	workflowScheduler, err = workflowscheduler.New(workflowStore, workflowRuntimeStarter, workflowscheduler.Config{Concurrency: cfg.Settings.Workflow.Concurrency}, workflowscheduler.WithPendingAskResolver(runtimePendingAskResolver{prompts: runtimeRegistry}))
 	if err != nil {
 		cleanupNewFailure()
 		return nil, fmt.Errorf("workflow bundle: scheduler: %w", err)
@@ -230,4 +231,22 @@ func (e taskWorktreeEnsurer) EnsureTaskWorktree(ctx context.Context, taskID stri
 	}
 	_, err := e.service.EnsureTaskWorktree(ctx, worktree.EnsureTaskWorktreeRequest{TaskID: taskID})
 	return err
+}
+
+type runtimePendingAskResolver struct {
+	prompts interface {
+		ListPendingPrompts(sessionID string) []registry.PendingPromptSnapshot
+	}
+}
+
+func (r runtimePendingAskResolver) CanRehydrate(_ context.Context, sessionID string, _ workflow.RunID, askID string) (bool, error) {
+	if r.prompts == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(askID) == "" {
+		return false, nil
+	}
+	for _, item := range r.prompts.ListPendingPrompts(sessionID) {
+		if item.Request.ID == askID && !item.Request.Approval {
+			return true, nil
+		}
+	}
+	return false, nil
 }

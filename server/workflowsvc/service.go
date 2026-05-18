@@ -232,6 +232,20 @@ func (s *Service) StartWorkflowTask(ctx context.Context, req serverapi.WorkflowT
 	return serverapi.WorkflowTaskStartResponse{TransitionID: started.TransitionID, PlacementID: string(started.PlacementID), RunID: string(started.RunID)}, nil
 }
 
+func (s *Service) ResumeWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskResumeRequest) (serverapi.WorkflowTaskResumeResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskResumeResponse{}, err
+	}
+	resumed, err := s.store.ResumeTaskRun(ctx, workflow.TaskID(req.TaskID))
+	if err != nil {
+		return serverapi.WorkflowTaskResumeResponse{}, err
+	}
+	if s.schedulerWake != nil {
+		s.schedulerWake.Notify()
+	}
+	return serverapi.WorkflowTaskResumeResponse{RunID: string(resumed.ID), PlacementID: string(resumed.PlacementID), NodeID: string(resumed.NodeID), Generation: resumed.Generation, SessionID: resumed.SessionID}, nil
+}
+
 func (s *Service) StartTaskAutomation(ctx context.Context, taskID string) (workflowstore.StartTaskResult, error) {
 	if s.taskWorktrees != nil {
 		if err := s.store.ValidateTaskStart(ctx, workflow.TaskID(taskID)); err != nil {
@@ -249,6 +263,34 @@ func (s *Service) StartTaskAutomation(ctx context.Context, taskID string) (workf
 		s.schedulerWake.Notify()
 	}
 	return started, nil
+}
+
+func (s *Service) ApproveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskApproveRequest) (serverapi.WorkflowTaskApproveResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskApproveResponse{}, err
+	}
+	approved, err := s.store.ApproveTransition(ctx, workflow.TransitionID(req.TransitionID))
+	if err != nil {
+		return serverapi.WorkflowTaskApproveResponse{}, err
+	}
+	if s.schedulerWake != nil {
+		s.schedulerWake.Notify()
+	}
+	return serverapi.WorkflowTaskApproveResponse{TransitionID: string(approved.TransitionID), State: approved.State, PlacementIDs: placementIDs(approved.PlacementIDs), RunIDs: runIDs(approved.RunIDs)}, nil
+}
+
+func (s *Service) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskMoveRequest) (serverapi.WorkflowTaskMoveResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowTaskMoveResponse{}, err
+	}
+	moved, err := s.store.ManualMoveTask(ctx, workflowstore.ManualMoveRequest{TaskID: workflow.TaskID(req.TaskID), TargetNodeID: workflow.NodeID(req.TargetNodeID), OutputValues: req.OutputValues, Commentary: req.Commentary, Actor: "user"})
+	if err != nil {
+		return serverapi.WorkflowTaskMoveResponse{}, err
+	}
+	if s.schedulerWake != nil {
+		s.schedulerWake.Notify()
+	}
+	return serverapi.WorkflowTaskMoveResponse{TransitionID: string(moved.TransitionID), State: moved.State, PlacementIDs: placementIDs(moved.PlacementIDs), RunIDs: runIDs(moved.RunIDs)}, nil
 }
 
 func (s *Service) CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error {
@@ -358,6 +400,22 @@ func outputRequirements(in []serverapi.WorkflowOutputRequirement) []workflow.Out
 	out := make([]workflow.OutputRequirement, 0, len(in))
 	for _, requirement := range in {
 		out = append(out, workflow.OutputRequirement{FieldName: requirement.FieldName})
+	}
+	return out
+}
+
+func placementIDs(in []workflow.PlacementID) []string {
+	out := make([]string, 0, len(in))
+	for _, id := range in {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+func runIDs(in []workflow.RunID) []string {
+	out := make([]string, 0, len(in))
+	for _, id := range in {
+		out = append(out, string(id))
 	}
 	return out
 }

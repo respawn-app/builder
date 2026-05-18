@@ -40,6 +40,8 @@ const (
 type RuntimeStore interface {
 	GetRunStartContext(context.Context, workflow.RunID) (workflowstore.RunStartContext, error)
 	AttachRunSession(context.Context, workflow.RunID, int64, string) error
+	SetRunWaitingAsk(context.Context, workflow.RunID, int64, string) error
+	ClearRunWaitingAsk(context.Context, workflow.RunID, int64, string) error
 	CompleteRun(context.Context, workflowstore.CompleteRunRequest) (workflowstore.CompleteRunResult, error)
 	RecordProtocolViolation(context.Context, workflowstore.RecordProtocolViolationRequest) (workflowstore.RecordProtocolViolationResult, error)
 	InterruptRun(context.Context, workflow.RunID, string, string) error
@@ -53,6 +55,7 @@ type TaskWorktreeEnsurer interface {
 type RuntimeEventRegistry interface {
 	runtimewire.RuntimeRegistry
 	PublishRuntimeEvent(sessionID string, evt runtime.Event)
+	AwaitPromptResponse(ctx context.Context, sessionID string, req askquestion.Request) (askquestion.Response, error)
 }
 
 type Starter struct {
@@ -248,18 +251,82 @@ func (s *Starter) planSession(ctx context.Context, input workflowstore.RunStartC
 			return s.metadata, nil
 		},
 	}
-	plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, ForceNewSession: true})
+	if strings.TrimSpace(input.Run.SessionID) != "" {
+		plan, err := planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.Run.SessionID})
+		if err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+		if err := plan.Store.EnsureDurable(); err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+		return plan, nil, nil
+	}
+	var plan launch.SessionPlan
+	switch input.ContextMode {
+	case "", workflow.ContextModeNewSession:
+		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, ForceNewSession: true})
+	case workflow.ContextModeContinueSession:
+		if strings.TrimSpace(input.SourceSessionID) == "" {
+			return launch.SessionPlan{}, nil, errors.New("continue_session requires a source session")
+		}
+		if strings.TrimSpace(input.SourceNode.SubagentRole) != strings.TrimSpace(input.Node.SubagentRole) {
+			return launch.SessionPlan{}, nil, fmt.Errorf("continue_session requires same subagent role: source %q target %q", input.SourceNode.SubagentRole, input.Node.SubagentRole)
+		}
+		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: input.SourceSessionID})
+	case workflow.ContextModeCompactAndContinueSession:
+		if strings.TrimSpace(input.SourceSessionID) == "" {
+			return launch.SessionPlan{}, nil, errors.New("compact_and_continue_session requires a source session")
+		}
+		plan, err = planner.PlanSession(ctx, launch.SessionRequest{Mode: launch.ModeHeadless, ForceNewSession: true})
+	default:
+		return launch.SessionPlan{}, nil, fmt.Errorf("unsupported workflow context mode %q", input.ContextMode)
+	}
 	if err != nil {
 		return launch.SessionPlan{}, nil, err
 	}
-	plan, warnings, err := launch.ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: input.Node.SubagentRole}, auth.EmptyState())
-	if err != nil {
-		return launch.SessionPlan{}, nil, err
+	warnings := []string{}
+	if input.ContextMode == "" || input.ContextMode == workflow.ContextModeNewSession || input.ContextMode == workflow.ContextModeCompactAndContinueSession {
+		plan, warnings, err = launch.ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{AgentRole: input.Node.SubagentRole}, auth.EmptyState())
+		if err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+	}
+	if input.ContextMode == workflow.ContextModeCompactAndContinueSession {
+		if err := plan.Store.SetParentSessionID(input.SourceSessionID); err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
+		if err := appendWorkflowCompactContinuation(plan.Store, input); err != nil {
+			return launch.SessionPlan{}, nil, err
+		}
 	}
 	if err := plan.Store.EnsureDurable(); err != nil {
 		return launch.SessionPlan{}, nil, err
 	}
 	return plan, warnings, nil
+}
+
+func appendWorkflowCompactContinuation(store *session.Store, input workflowstore.RunStartContext) error {
+	if store == nil {
+		return errors.New("compact continuation session store is required")
+	}
+	lines := []string{
+		"Workflow compacted continuation context.",
+		"Source run: " + string(input.SourceRunID),
+		"Source session: " + strings.TrimSpace(input.SourceSessionID),
+		"Target node: " + string(input.Node.Key),
+	}
+	if len(input.InputValues) > 0 {
+		lines = append(lines, "Bound transition inputs:")
+		for _, value := range workflowInputValues(input.InputValues) {
+			lines = append(lines, "- "+value.Name+": "+value.Value)
+		}
+	}
+	_, err := store.AppendEvent("workflow-compact-continuation", "message", llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeCompactionSummary,
+		Content:     strings.Join(lines, "\n"),
+	})
+	return err
 }
 
 func (s *Starter) validateRole(role string) error {
@@ -324,14 +391,26 @@ func (s *Starter) run(ctx context.Context, req workflowscheduler.StartRunRequest
 		return
 	}
 	defer func() { _ = wiring.Close() }()
-	if wiring.AskBroker != nil {
-		wiring.AskBroker.SetAskHandler(func(askquestion.Request) (askquestion.Response, error) {
-			return askquestion.Response{}, errors.New("workflow questions are not wired until Slice 9")
-		})
-	}
 	var runtimeRegistry runtimewire.RuntimeRegistry
 	if s.runtimes != nil {
 		runtimeRegistry = s.runtimes
+	}
+	if wiring.AskBroker != nil && s.runtimes != nil {
+		sessionID := plan.Store.Meta().SessionID
+		wiring.AskBroker.SetAskHandler(func(askReq askquestion.Request) (askquestion.Response, error) {
+			if err := s.store.SetRunWaitingAsk(context.Background(), req.RunID, req.Generation, askReq.ID); err != nil {
+				return askquestion.Response{}, err
+			}
+			resp, askErr := s.runtimes.AwaitPromptResponse(ctx, sessionID, askReq)
+			if clearErr := s.store.ClearRunWaitingAsk(context.Background(), req.RunID, req.Generation, askReq.ID); clearErr != nil && askErr == nil {
+				return askquestion.Response{}, clearErr
+			}
+			return resp, askErr
+		})
+	} else if wiring.AskBroker != nil {
+		wiring.AskBroker.SetAskHandler(func(askquestion.Request) (askquestion.Response, error) {
+			return askquestion.Response{}, errors.New("workflow questions require runtime registry")
+		})
 	}
 	registration := runtimewire.RegisterSessionRuntime(plan.Store.Meta().SessionID, wiring.Engine, runtimeRegistry, s.backgroundRouter)
 	defer registration.Close()
@@ -363,9 +442,6 @@ func (s *Starter) finish(runID workflow.RunID, generation int64) {
 func workflowRuntimeEnabledTools(enabled []toolspec.ID) []toolspec.ID {
 	out := make([]toolspec.ID, 0, len(enabled))
 	for _, id := range enabled {
-		if id == toolspec.ToolAskQuestion {
-			continue
-		}
 		out = append(out, id)
 	}
 	return out
@@ -396,6 +472,8 @@ func BuildNodePrompt(input workflowstore.RunStartContext, mode config.WorkflowCo
 		NodeId:          string(input.Node.ID),
 		NodeKey:         string(input.Node.Key),
 		NodeDisplayName: strings.TrimSpace(input.Node.DisplayName),
+		ContextMode:     string(input.ContextMode),
+		SourceSessionID: strings.TrimSpace(input.SourceSessionID),
 		CompletionMode:  string(mode),
 		OutputFields:    workflowOutputFields(input.Node.OutputFields),
 		Transitions:     workflowTransitions(input.TransitionOptions, input.TransitionIDs),

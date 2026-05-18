@@ -32,7 +32,7 @@ func writeRootUsage(fs *flag.FlagSet) {
 		"  builder session-id",
 		"  builder goal <show|set|pause|resume|clear|complete>",
 		"  builder workflow <create|list|node|edge|link|unlink|default|validate|inspect>",
-		"  builder task <create|start|list|show|cancel|comment>",
+		"  builder task <create|start|resume|approve|move|list|show|cancel|comment>",
 		"  builder project [path]",
 		"  builder project list",
 		"  builder project create --path <server-path> --name <project-name>",
@@ -136,7 +136,7 @@ func writeGoalUsage(fs *flag.FlagSet) {
 		"  builder goal pause [--session <id>]",
 		"  builder goal resume [--session <id>]",
 		"  builder goal clear [--session <id>]",
-		"  builder goal complete [--session <id>]",
+		"  builder goal complete [--session <id>] [--confirm]",
 	)
 	writeHelpSection(out, "What This Does:",
 		"  Manage the live runtime goal for a session.",
@@ -144,6 +144,12 @@ func writeGoalUsage(fs *flag.FlagSet) {
 		"  Agent shell commands may set the first goal, but cannot overwrite or otherwise mutate an existing goal.",
 		"  Outside Builder shell commands, pass --session <id>.",
 	)
+}
+
+func writeGoalCommandUsage(fs *flag.FlagSet) {
+	writeGoalUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
 }
 
 func writeWorkflowUsage(fs *flag.FlagSet) {
@@ -168,6 +174,12 @@ func writeWorkflowUsage(fs *flag.FlagSet) {
 		"  Use `workflow create`, add nodes/edges, link a workflow to a project, then create/start tasks with `builder task`.",
 		"  Workflow references may be exact workflow ids or exact workflow names.",
 	)
+}
+
+func writeWorkflowCreateUsage(fs *flag.FlagSet) {
+	writeWorkflowUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
 }
 
 func writeWorkflowNodeAddUsage(fs *flag.FlagSet) {
@@ -202,6 +214,9 @@ func writeTaskUsage(fs *flag.FlagSet) {
 	writeHelpSection(out, "Usage of builder task:",
 		"  builder task create --title <title> --body <body> [--workflow <workflow>] [--project <project>]",
 		"  builder task start <short-id-or-task-id>",
+		"  builder task resume <short-id-or-task-id>",
+		"  builder task approve <transition-id>",
+		"  builder task move <short-id-or-task-id> <target-node-id> [--output name=value]",
 		"  builder task list [--project <project>]",
 		"  builder task show <short-id-or-task-id>",
 		"  builder task cancel <short-id-or-task-id> [--reason <text>]",
@@ -223,6 +238,24 @@ func writeTaskCreateUsage(fs *flag.FlagSet) {
 }
 
 func writeTaskStartUsage(fs *flag.FlagSet) {
+	writeTaskUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeTaskResumeUsage(fs *flag.FlagSet) {
+	writeTaskUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeTaskApproveUsage(fs *flag.FlagSet) {
+	writeTaskUsage(fs)
+	writeHelpSection(fs.Output(), "Flags:")
+	fs.PrintDefaults()
+}
+
+func writeTaskMoveUsage(fs *flag.FlagSet) {
 	writeTaskUsage(fs)
 	writeHelpSection(fs.Output(), "Flags:")
 	fs.PrintDefaults()

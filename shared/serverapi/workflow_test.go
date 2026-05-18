@@ -58,6 +58,9 @@ func TestWorkflowTaskAndCommentRequestValidation(t *testing.T) {
 	if err := (WorkflowTaskStartRequest{TaskID: "task-1"}).Validate(); err != nil {
 		t.Fatalf("valid task start rejected: %v", err)
 	}
+	if err := (WorkflowTaskResumeRequest{TaskID: "task-1"}).Validate(); err != nil {
+		t.Fatalf("valid task resume rejected: %v", err)
+	}
 	if err := (WorkflowTaskCommentAddRequest{TaskID: "task-1", Body: "comment", Author: "user"}).Validate(); err != nil {
 		t.Fatalf("valid comment add rejected: %v", err)
 	}

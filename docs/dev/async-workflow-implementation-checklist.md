@@ -6,21 +6,21 @@ Do not treat this as a replacement for the spec. If spec and checklist conflict,
 
 ## Working Rules
 
-- [ ] Work one slice at a time, in order, unless Nikita explicitly changes priority.
-- [ ] Use TDD for production behavior: write failing tests first, implement, refactor.
-- [ ] Keep each slice buildable before moving to the next slice.
-- [ ] Commit after each completed slice or stable sub-slice.
-- [ ] Do not run real-provider workflow QA without explicit Nikita approval.
-- [ ] Use fake model/runtime adapters for automated workflow runtime tests.
-- [ ] Keep CLI as internal harness/agent surface, not Nikita's manual QA surface.
-- [ ] Treat workflow API/read-model DTOs as mutable before Builder 2.0.
-- [ ] Keep POC GUI integration behind a thin adapter layer.
-- [ ] Never load full `events.jsonl` in workflow code or tests.
-- [ ] Update `docs/dev/decisions.md` when a new locked product/architecture decision is made.
-- [ ] When a slice changes a locked decision, update `docs/dev/decisions.md` first, then this checklist/spec.
-- [ ] Avoid staging unrelated user changes; inspect `git status --short` before every commit.
-- [ ] Use this checklist as the handoff contract during implementation; do not invent parallel task trackers.
-- [ ] Mark checklist items incrementally while implementing so handoffs resume from exact state.
+- [x] Work one slice at a time, in order, unless Nikita explicitly changes priority.
+- [x] Use TDD for production behavior: write failing tests first, implement, refactor.
+- [x] Keep each slice buildable before moving to the next slice.
+- [x] Commit after each completed slice or stable sub-slice.
+- [x] Do not run real-provider workflow QA without explicit Nikita approval.
+- [x] Use fake model/runtime adapters for automated workflow runtime tests.
+- [x] Keep CLI as internal harness/agent surface, not Nikita's manual QA surface.
+- [x] Treat workflow API/read-model DTOs as mutable before Builder 2.0.
+- [x] Keep POC GUI integration behind a thin adapter layer.
+- [x] Never load full `events.jsonl` in workflow code or tests.
+- [x] Update `docs/dev/decisions.md` when a new locked product/architecture decision is made.
+- [x] When a slice changes a locked decision, update `docs/dev/decisions.md` first, then this checklist/spec.
+- [x] Avoid staging unrelated user changes; inspect `git status --short` before every commit.
+- [x] Use this checklist as the handoff contract during implementation; do not invent parallel task trackers.
+- [x] Mark checklist items incrementally while implementing so handoffs resume from exact state.
 
 ## Repo Path Assumptions
 
@@ -773,10 +773,12 @@ Goal: one executable workflow node can run asynchronously through scheduler/sess
 
 ### 8.4 Nikita Approval Gate
 
-- [ ] Ask Nikita before any real-provider smoke test.
-- [ ] If approved, define exact provider/model, max expected cost, and stop condition.
-- [ ] Prefer POC GUI for Nikita-led QA when available.
-- [ ] If no GUI exists yet, keep real-provider QA optional and do not block backend progress.
+- [x] Ask Nikita before any real-provider smoke test.
+- [x] If approved, define exact provider/model, max expected cost, and stop condition.
+- [x] Prefer POC GUI for Nikita-led QA when available.
+- [x] If no GUI exists yet, keep real-provider QA optional and do not block backend progress.
+
+Gate note: Nikita confirmed after PR #262 stack that the Slice 8 real-provider smoke already ran and 8.4 is cleared. No GUI exists yet, so backend progress is unblocked for Slices 9-13.
 
 ## Slice 9: Question Pause And Resume
 
@@ -784,27 +786,29 @@ Goal: workflow runs use existing `ask_question` source of truth for pause/resume
 
 ### 9.1 Red Tests
 
-- [ ] Add test workflow run calls `ask_question`.
-- [ ] Add test run state becomes `waiting_for_question`.
-- [ ] Add test answer resumes same run/session.
-- [ ] Add test resumed run completes with workflow completion.
-- [ ] Add restart/reconciliation test with pending ask using Slice 6 rehydration boundary.
-- [ ] Add failure test for missing/unrehydratable pending ask becoming interrupted if not already covered in Slice 6.
+- [x] Add test workflow run calls `ask_question`.
+- [x] Add test run state becomes `waiting_for_question`.
+- [x] Add test answer resumes same run/session.
+- [x] Add test resumed run completes with workflow completion.
+- [x] Add restart/reconciliation test with pending ask using Slice 6 rehydration boundary.
+- [x] Add failure test for missing/unrehydratable pending ask becoming interrupted if not already covered in Slice 6.
 
 ### 9.2 Implementation
 
-- [ ] Wire ask pause state from runtime to workflow run state.
-- [ ] Rehydrate pending ask on startup through the `PendingAskResolver` path proven in Slice 6.
-- [ ] If infra fails proof, pause slice and design durable ask persistence upgrade as SSOT.
-- [ ] Do not create shadow task-question projection table.
-- [ ] Derive any task question view from source-of-truth ask state.
+- [x] Wire ask pause state from runtime to workflow run state.
+- [x] Rehydrate pending ask on startup through the `PendingAskResolver` path proven in Slice 6.
+- [x] If infra fails proof, pause slice and design durable ask persistence upgrade as SSOT.
+- [x] Do not create shadow task-question projection table.
+- [x] Derive any task question view from source-of-truth ask state.
+
+Slice 9 note: workflow runs now store only the active `waiting_ask_id` pointer while the ask itself remains source-of-truth in the live prompt registry/`ask_question` flow. Scheduler rehydrates live pending asks through `PendingAskResolver`; if the ask is missing after restart, the run interrupts with `workflow_pending_ask_unavailable`.
 
 ### 9.3 Verification
 
-- [ ] Run ask/workflow tests.
-- [ ] Run `./scripts/test.sh ./server/tools/askquestion/... ./server/runtime/... ./server/workflow/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message matching implemented path.
+- [x] Run ask/workflow tests.
+- [x] Run `./scripts/test.sh ./server/tools/askquestion/... ./server/runtime/... ./server/workflow/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message matching implemented path.
 
 ## Slice 10: Context-Preservation Modes
 
@@ -812,29 +816,29 @@ Goal: edge context modes work and enforce role/session contract constraints.
 
 ### 10.1 Red Tests
 
-- [ ] Add test `new_session` creates separate session.
-- [ ] Add test same-role `continue_session` appends/continues source session.
-- [ ] Add test same-role `continue_session` keeps immutable persisted session setup when current role config drifted.
-- [ ] Add test cross-role `continue_session` rejected before scheduler start.
-- [ ] Add test `compact_and_continue_session` creates compacted continuation input.
-- [ ] Add test compact mode can cross roles.
-- [ ] Add test prior transcript history remains immutable.
-- [ ] Add test cache-sensitive session setup is not mutated.
+- [x] Add test `new_session` creates separate session.
+- [x] Add test same-role `continue_session` appends/continues source session.
+- [x] Add test same-role `continue_session` keeps immutable persisted session setup when current role config drifted.
+- [x] Add test cross-role `continue_session` rejected before scheduler start.
+- [x] Add test `compact_and_continue_session` creates compacted continuation input.
+- [x] Add test compact mode can cross roles.
+- [x] Add test prior transcript history remains immutable.
+- [x] Add test cache-sensitive session setup is not mutated.
 
 ### 10.2 Implementation
 
-- [ ] Implement edge context mode selection in scheduler/runtime adapter.
-- [ ] Implement same-role check for `continue_session`; do not require current role config to match immutable session setup.
-- [ ] Implement new-session context injection.
-- [ ] Implement compact-then-continue path using existing compaction primitives.
-- [ ] Persist context mode used in transition edge snapshot/run metadata.
+- [x] Implement edge context mode selection in scheduler/runtime adapter.
+- [x] Implement same-role check for `continue_session`; do not require current role config to match immutable session setup.
+- [x] Implement new-session context injection.
+- [x] Implement compact-then-continue path using existing compaction primitives.
+- [x] Persist context mode used in transition edge snapshot/run metadata.
 
 ### 10.3 Verification
 
-- [ ] Run context mode tests.
-- [ ] Run `./scripts/test.sh ./server/workflowruntime/... ./server/runtime/... ./server/session/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow context modes`.
+- [x] Run context mode tests.
+- [x] Run `./scripts/test.sh ./server/workflowruntime/... ./server/runtime/... ./server/session/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message like `feat: add workflow context modes`.
 
 ## Slice 11: Approvals And Manual Moves
 
@@ -842,38 +846,38 @@ Goal: edge approval and manual override transitions are durable, validated, and 
 
 ### 11.1 Red Tests
 
-- [ ] Add test edge requiring approval creates pending transition after source completion.
-- [ ] Add test approval by task transition row ID starts stored target edge snapshot.
-- [ ] Add test duplicate approval is idempotent.
-- [ ] Add test multi-edge transition group waits as a whole when any edge requires approval.
-- [ ] Add test graph edit after pending approval does not alter approved behavior.
-- [ ] Add test rejection path marks pending transition rejected.
-- [ ] Add test forward manual move validates supplied output values.
-- [ ] Add test backward manual move reuses stored output values when valid.
-- [ ] Add test missing required output rejected.
-- [ ] Add test continuation-required manual move rejected without valid source session.
-- [ ] Add test executable manual target pauses before automation and requires explicit approval.
+- [x] Add test edge requiring approval creates pending transition after source completion.
+- [x] Add test approval by task transition row ID starts stored target edge snapshot.
+- [x] Add test duplicate approval is idempotent.
+- [x] Add test multi-edge transition group waits as a whole when any edge requires approval.
+- [x] Add test graph edit after pending approval does not alter approved behavior.
+- [x] Add test rejection path marks pending transition rejected.
+- [x] Add test forward manual move validates supplied output values.
+- [x] Add test backward manual move reuses stored output values when valid.
+- [x] Add test missing required output rejected.
+- [x] Add test continuation-required manual move rejected without valid source session.
+- [x] Add test executable manual target pauses before automation and requires explicit approval.
 
 ### 11.2 Implementation
 
-- [ ] Persist pending approval transition and edge snapshots.
-- [ ] Ensure every applied transition stores transition-edge snapshots; approvals only change pending/approval behavior.
-- [ ] Add approval service method by task transition row ID.
-- [ ] Make approval idempotent and apply the whole transition group when any selected edge requires approval.
-- [ ] Add rejection/cancel service method if needed by UI/CLI.
-- [ ] Implement manual move validation against edge/equivalent metadata.
-- [ ] Implement output value reuse for backward moves.
-- [ ] Implement explicit approve-before-automation for executable manual target.
-- [ ] Update CLI/API/read models for pending approvals.
-- [ ] Replace Slice 4 unsupported `builder task move` placeholder with working manual move command.
-- [ ] Replace Slice 4 unsupported `builder task approve` placeholder with working approval command.
+- [x] Persist pending approval transition and edge snapshots.
+- [x] Ensure every applied transition stores transition-edge snapshots; approvals only change pending/approval behavior.
+- [x] Add approval service method by task transition row ID.
+- [x] Make approval idempotent and apply the whole transition group when any selected edge requires approval.
+- [x] Add rejection/cancel service method if needed by UI/CLI.
+- [x] Implement manual move validation against edge/equivalent metadata.
+- [x] Implement output value reuse for backward moves.
+- [x] Implement explicit approve-before-automation for executable manual target.
+- [x] Update CLI/API/read models for pending approvals.
+- [x] Replace Slice 4 unsupported `builder task move` placeholder with working manual move command.
+- [x] Replace Slice 4 unsupported `builder task approve` placeholder with working approval command.
 
 ### 11.3 Verification
 
-- [ ] Run approval/manual move tests.
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowsvc/... ./server/workflowview/... ./cli/builder/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow approvals`.
+- [x] Run approval/manual move tests.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowsvc/... ./server/workflowview/... ./cli/builder/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message like `feat: add workflow approvals`.
 
 ## Slice 12: Fan-Out, Parallel Branches, And Joins
 
@@ -881,42 +885,42 @@ Goal: transition groups can create parallel branch placements and join nodes can
 
 ### 12.1 Red Tests
 
-- [ ] Add test multi-edge transition group creates one placement per edge.
-- [ ] Add test parallel branch placements share `parallel_batch_transition_id`.
-- [ ] Add test each branch carries `parallel_branch_edge_id`.
-- [ ] Add test task can have multiple active placements only for explicit fan-out.
-- [ ] Add test branches complete in any order.
-- [ ] Add test static derivation finds one unambiguous nearest common join.
-- [ ] Add test ambiguous nearest common join topology rejected.
-- [ ] Add test nested fan-out before join rejected.
-- [ ] Add test cycle before join rejected.
-- [ ] Add test terminal before join rejected.
-- [ ] Add test join waits until all expected branch identities arrive.
-- [ ] Add test duplicate branch arrival is idempotently ignored or rejected.
-- [ ] Add test missing branch keeps join waiting.
-- [ ] Add test deterministic aggregate ordering by branch identity/source node.
-- [ ] Add test joined aggregate binds into next node input.
-- [ ] Add test terminal branch does not accidentally satisfy unrelated join.
+- [x] Add test multi-edge transition group creates one placement per edge.
+- [x] Add test parallel branch placements share `parallel_batch_transition_id`.
+- [x] Add test each branch carries `parallel_branch_edge_id`.
+- [x] Add test task can have multiple active placements only for explicit fan-out.
+- [x] Add test branches complete in any order.
+- [x] Add test static derivation finds one unambiguous nearest common join.
+- [x] Add test ambiguous nearest common join topology rejected.
+- [x] Add test nested fan-out before join rejected.
+- [x] Add test cycle before join rejected.
+- [x] Add test terminal before join rejected.
+- [x] Add test join waits until all expected branch identities arrive.
+- [x] Add test duplicate branch arrival is idempotently ignored or rejected.
+- [x] Add test missing branch keeps join waiting.
+- [x] Add test deterministic aggregate ordering by branch identity/source node.
+- [x] Add test joined aggregate binds into next node input.
+- [x] Add test terminal branch does not accidentally satisfy unrelated join.
 
 ### 12.2 Implementation
 
-- [ ] Implement fan-out transition application.
-- [ ] Implement static join derivation validation for multi-edge transition groups.
-- [ ] Persist parallel batch and branch edge identity on placements.
-- [ ] Use persisted transition-edge snapshot rows from the accepted fan-out transition as join expected wait set.
-- [ ] Implement join readiness query against expected fan-out edge set.
-- [ ] Reject or explicitly pause manual moves into/out of active parallel batches until dedicated UX exists.
-- [ ] Implement deterministic aggregation format.
-- [ ] Implement join auto-transition through outgoing transition group.
-- [ ] Update board/task read models for multiple active placements.
-- [ ] Update CLI/API output for branch placements.
+- [x] Implement fan-out transition application.
+- [x] Implement static join derivation validation for multi-edge transition groups.
+- [x] Persist parallel batch and branch edge identity on placements.
+- [x] Use persisted transition-edge snapshot rows from the accepted fan-out transition as join expected wait set.
+- [x] Implement join readiness query against expected fan-out edge set.
+- [x] Reject or explicitly pause manual moves into/out of active parallel batches until dedicated UX exists.
+- [x] Implement deterministic aggregation format.
+- [x] Implement join auto-transition through outgoing transition group.
+- [x] Update board/task read models for multiple active placements.
+- [x] Update CLI/API output for branch placements.
 
 ### 12.3 Verification
 
-- [ ] Run fan-out/join tests.
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowview/... ./server/metadata/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: add workflow fanout joins`.
+- [x] Run fan-out/join tests.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowview/... ./server/metadata/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message like `feat: add workflow fanout joins`.
 
 ## Slice 13: Recovery, Observability, And Hardening
 
@@ -924,41 +928,41 @@ Goal: operationally usable workflow backend ready for GUI-driven QA.
 
 ### 13.1 Red Tests
 
-- [ ] Add restart test for runnable work rebuild.
-- [ ] Add restart test for orphaned started run becoming interrupted.
-- [ ] Add restart test for interrupted run staying interrupted.
-- [ ] Add restart test for waiting-for-question.
-- [ ] Add restart test for pending approval.
-- [ ] Add test canceled task remains unscheduled after restart.
-- [ ] Add test resume interrupted run continues same session/run/worktree.
-- [ ] Add test scheduling validation blocker records interrupted reason metadata.
-- [ ] Add test user cancel records interrupted outcome with cancel reason.
-- [ ] Add test runtime error records interrupted outcome with error reason.
-- [ ] Add test role drift at scheduling time.
-- [ ] Add test role drift at resume time.
-- [ ] Add test CLI/API surfaces stable error code.
+- [x] Add restart test for runnable work rebuild.
+- [x] Add restart test for orphaned started run becoming interrupted.
+- [x] Add restart test for interrupted run staying interrupted.
+- [x] Add restart test for waiting-for-question.
+- [x] Add restart test for pending approval.
+- [x] Add test canceled task remains unscheduled after restart.
+- [x] Add test resume interrupted run continues same session/run/worktree.
+- [x] Add test scheduling validation blocker records interrupted reason metadata.
+- [x] Add test user cancel records interrupted outcome with cancel reason.
+- [x] Add test runtime error records interrupted outcome with error reason.
+- [x] Add test role drift at scheduling time.
+- [x] Add test role drift at resume time.
+- [x] Add test CLI/API surfaces stable error code.
 
 ### 13.2 Implementation
 
-- [ ] Implement resume service and CLI.
-- [ ] Implement task cancellation service and CLI with task-level cancellation metadata.
-- [ ] Implement cancel-as-interrupted service behavior for active runs.
-- [ ] Implement runtime-error interruption transitions.
-- [ ] Add structured logs around scheduler runnable selection.
-- [ ] Add structured logs around run completion.
-- [ ] Add structured logs around transition application.
-- [ ] Add structured logs around validation blockers.
-- [ ] Add structured logs around workflow runtime errors.
-- [ ] Add role-drift validation at scheduling and resume.
-- [ ] Update read models for interrupted states and interruption reasons.
-- [ ] Update docs/dev decisions if new locked decisions emerged.
+- [x] Implement resume service and CLI.
+- [x] Implement task cancellation service and CLI with task-level cancellation metadata.
+- [x] Implement cancel-as-interrupted service behavior for active runs.
+- [x] Implement runtime-error interruption transitions.
+- [x] Add structured logs around scheduler runnable selection.
+- [x] Add structured logs around run completion.
+- [x] Add structured logs around transition application.
+- [x] Add structured logs around validation blockers.
+- [x] Add structured logs around workflow runtime errors.
+- [x] Add role-drift validation at scheduling and resume.
+- [x] Update read models for interrupted states and interruption reasons.
+- [x] Update docs/dev decisions if new locked decisions emerged.
 
 ### 13.3 Verification
 
-- [ ] Run full workflow package tests.
-- [ ] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowview/... ./server/metadata/... ./cli/builder/...`.
-- [ ] Run `./scripts/build.sh --output ./bin/builder`.
-- [ ] Commit slice with message like `feat: harden workflow recovery`.
+- [x] Run full workflow package tests.
+- [x] Run `./scripts/test.sh ./server/workflow/... ./server/workflowstore/... ./server/workflowsvc/... ./server/workflowscheduler/... ./server/workflowruntime/... ./server/workflowview/... ./server/metadata/... ./cli/builder/...`.
+- [x] Run `./scripts/build.sh --output ./bin/builder`.
+- [x] Commit slice with message like `feat: harden workflow recovery`.
 
 ## GUI/POC Integration Checkpoints
 
@@ -974,12 +978,12 @@ These are coordination points for Nikita's parallel GUI POC. Backend API shapes 
 
 Run when all intended workflow slices for release are complete.
 
-- [ ] Run full test suite through `./scripts/test.sh`.
-- [ ] Run release build through `./scripts/build.sh --output ./bin/builder`.
-- [ ] Run no-LLM coding-agent smoke check from fresh persistence root.
-- [ ] Run GUI/POC fake-runtime smoke if available.
-- [ ] Run real-provider smoke only if Nikita explicitly approves.
-- [ ] Verify docs and decisions are up to date.
-- [ ] Verify no unrelated user changes are staged.
-- [ ] Verify task/workflow code never reads full `events.jsonl`.
-- [ ] Verify all new business logic has tests.
+- [x] Run full test suite through `./scripts/test.sh`.
+- [x] Run release build through `./scripts/build.sh --output ./bin/builder`.
+- [x] Run no-LLM coding-agent smoke check from fresh persistence root.
+- [x] Run GUI/POC fake-runtime smoke if available.
+- [x] Run real-provider smoke only if Nikita explicitly approves.
+- [x] Verify docs and decisions are up to date.
+- [x] Verify no unrelated user changes are staged.
+- [x] Verify task/workflow code never reads full `events.jsonl`.
+- [x] Verify all new business logic has tests.

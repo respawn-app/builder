@@ -250,6 +250,43 @@ type WorkflowTaskStartResponse struct {
 	RunID        string `json:"run_id"`
 }
 
+type WorkflowTaskResumeRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+type WorkflowTaskResumeResponse struct {
+	RunID       string `json:"run_id"`
+	PlacementID string `json:"placement_id"`
+	NodeID      string `json:"node_id"`
+	Generation  int64  `json:"generation"`
+	SessionID   string `json:"session_id,omitempty"`
+}
+
+type WorkflowTaskApproveRequest struct {
+	TransitionID string `json:"transition_id"`
+}
+
+type WorkflowTaskApproveResponse struct {
+	TransitionID string   `json:"transition_id"`
+	State        string   `json:"state"`
+	PlacementIDs []string `json:"placement_ids,omitempty"`
+	RunIDs       []string `json:"run_ids,omitempty"`
+}
+
+type WorkflowTaskMoveRequest struct {
+	TaskID       string            `json:"task_id"`
+	TargetNodeID string            `json:"target_node_id"`
+	OutputValues map[string]string `json:"output_values,omitempty"`
+	Commentary   string            `json:"commentary,omitempty"`
+}
+
+type WorkflowTaskMoveResponse struct {
+	TransitionID string   `json:"transition_id"`
+	State        string   `json:"state"`
+	PlacementIDs []string `json:"placement_ids,omitempty"`
+	RunIDs       []string `json:"run_ids,omitempty"`
+}
+
 type WorkflowTaskCancelRequest struct {
 	TaskID string `json:"task_id"`
 	Reason string `json:"reason,omitempty"`
@@ -338,10 +375,12 @@ type WorkflowTaskDetail struct {
 }
 
 type WorkflowPlacement struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
-	NodeID string `json:"node_id"`
-	State  string `json:"state"`
+	ID                        string `json:"id"`
+	TaskID                    string `json:"task_id"`
+	NodeID                    string `json:"node_id"`
+	State                     string `json:"state"`
+	ParallelBatchTransitionID string `json:"parallel_batch_transition_id,omitempty"`
+	ParallelBranchEdgeID      string `json:"parallel_branch_edge_id,omitempty"`
 }
 
 type WorkflowRun struct {
@@ -355,6 +394,7 @@ type WorkflowRun struct {
 	CompletedAtUnixMs   int64  `json:"completed_at_unix_ms"`
 	InterruptedAtUnixMs int64  `json:"interrupted_at_unix_ms"`
 	InterruptionReason  string `json:"interruption_reason,omitempty"`
+	WaitingAskID        string `json:"waiting_ask_id,omitempty"`
 }
 
 type WorkflowTaskTransition struct {
@@ -508,6 +548,21 @@ func (r WorkflowTaskCreateRequest) Validate() error {
 
 func (r WorkflowTaskStartRequest) Validate() error {
 	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskResumeRequest) Validate() error {
+	return validateRequired("task_id", r.TaskID)
+}
+
+func (r WorkflowTaskApproveRequest) Validate() error {
+	return validateRequired("transition_id", r.TransitionID)
+}
+
+func (r WorkflowTaskMoveRequest) Validate() error {
+	if err := validateRequired("task_id", r.TaskID); err != nil {
+		return err
+	}
+	return validateRequired("target_node_id", r.TargetNodeID)
 }
 
 func (r WorkflowTaskCancelRequest) Validate() error {

@@ -166,6 +166,76 @@ func TestSchedulerDoesNotScheduleCanceledOrInterruptedTasks(t *testing.T) {
 	}
 }
 
+func TestSchedulerRestartKeepsInterruptedRunInterrupted(t *testing.T) {
+	ctx := context.Background()
+	store, binding, _ := newSchedulerTestStore(t)
+	workflowID := createSchedulerValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	interrupted := createAndStartSchedulerTask(t, ctx, store, binding.ProjectID)
+	if err := store.InterruptRun(ctx, interrupted.RunID, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRun: %v", err)
+	}
+	starter := &recordingStarter{}
+	restarted, err := New(store, starter, Config{Concurrency: 5})
+	if err != nil {
+		t.Fatalf("New restarted: %v", err)
+	}
+
+	if err := restarted.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if err := restarted.Process(ctx); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if started := starter.requests(); len(started) != 0 {
+		t.Fatalf("restarted scheduler started interrupted run: %+v", started)
+	}
+	runs, err := store.ListRuns(ctx, interrupted.TaskID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if runs[0].InterruptedAt == 0 || runs[0].InterruptionReason != "manual" {
+		t.Fatalf("interrupted run changed after restart: %+v", runs[0])
+	}
+}
+
+func TestSchedulerRestartKeepsPendingApprovalUnscheduled(t *testing.T) {
+	ctx := context.Background()
+	store, binding, _ := newSchedulerTestStore(t)
+	workflowID := createSchedulerApprovalWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	started := createAndStartSchedulerTask(t, ctx, store, binding.ProjectID)
+	if _, err := store.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		t.Fatalf("CompleteRun pending approval: %v", err)
+	}
+	starter := &recordingStarter{}
+	restarted, err := New(store, starter, Config{Concurrency: 5})
+	if err != nil {
+		t.Fatalf("New restarted: %v", err)
+	}
+
+	if err := restarted.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if err := restarted.Process(ctx); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if startedRuns := starter.requests(); len(startedRuns) != 0 {
+		t.Fatalf("restarted scheduler started pending approval target: %+v", startedRuns)
+	}
+	transitions, err := store.ListTransitions(ctx, started.TaskID)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if len(transitions) != 2 || transitions[1].State != "pending_approval" {
+		t.Fatalf("transitions after restart = %+v, want pending approval preserved", transitions)
+	}
+}
+
 func TestSchedulerActiveOwnershipIsMemoryOnly(t *testing.T) {
 	ctx := context.Background()
 	store, binding, _ := newSchedulerTestStore(t)
@@ -447,6 +517,32 @@ func createSchedulerValidWorkflow(t *testing.T, ctx context.Context, store *work
 		t.Fatalf("AddEdge done: %v", err)
 	}
 	return created.ID
+}
+
+func createSchedulerApprovalWorkflow(t *testing.T, ctx context.Context, store *workflowstore.Store) workflow.WorkflowID {
+	t.Helper()
+	workflowID := createSchedulerValidWorkflow(t, ctx, store)
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	doneEdge := workflow.EdgeID("")
+	for _, edge := range def.Edges {
+		if edge.Key == "done" {
+			doneEdge = edge.ID
+			break
+		}
+	}
+	if doneEdge == "" {
+		t.Fatalf("done edge missing in %+v", def.Edges)
+	}
+	if err := store.DeleteEdge(ctx, doneEdge); err != nil {
+		t.Fatalf("DeleteEdge done: %v", err)
+	}
+	if _, err := store.AddEdge(ctx, workflowstore.EdgeRecord{ID: doneEdge, WorkflowID: workflowID, TransitionGroupID: workflow.TransitionGroupID("group-done-" + string(workflowID)), Key: "done", TargetNodeID: schedulerNodeByKind(t, def, workflow.NodeKindTerminal).ID, ContextMode: workflow.ContextModeNewSession, RequiresApproval: true, OutputRequirements: []workflow.OutputRequirement{{FieldName: "summary"}}}); err != nil {
+		t.Fatalf("Update approval edge: %v", err)
+	}
+	return workflowID
 }
 
 type schedulerStartedTask struct {
