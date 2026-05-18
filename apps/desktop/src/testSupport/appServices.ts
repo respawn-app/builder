@@ -5,11 +5,15 @@ import { FakeRpcTransport, type FakeRoute } from "../api/fakeTransport";
 import { createGuiLogger } from "../app/logging";
 import type { AppServices } from "../app/services";
 
-export type TestAppServices = AppServices & Readonly<{
-  transport: FakeRpcTransport;
-}>;
+export type TestAppServices = AppServices &
+  Readonly<{
+    transport: FakeRpcTransport;
+  }>;
 
-export function createTestServices(routes: readonly FakeRoute[], nativeBridge = createBrowserNativeBridge()): TestAppServices {
+export function createTestServices(
+  routes: readonly FakeRoute[],
+  nativeBridge = createBrowserNativeBridge(),
+): TestAppServices {
   const transport = new FakeRpcTransport(routes);
   return {
     api: new BuilderApiClient(transport),
@@ -27,18 +31,11 @@ export const startupRoutes: readonly FakeRoute[] = [
       ready: true,
       server_id: "server-1",
       server_version: "1.3.0",
+      server_build: "1.3.0",
       protocol_version: "2",
       auth_ready: true,
       auth_required: true,
       endpoint: "ws://127.0.0.1:53082/rpc",
-    },
-  },
-  {
-    method: "server.capabilities.get",
-    result: {
-      capabilities: [{ id: "workflow.board", available: true, required_for_mvp: true }],
-      server_version: "1.3.0",
-      protocol_version: "2",
     },
   },
   {

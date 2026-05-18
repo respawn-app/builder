@@ -23,10 +23,22 @@ import {
   workspaceSummarySchema,
 } from "./common";
 
-const boardGroupsSchema = z.array(boardGroupSchema).nullish().transform((value) => value ?? []);
-const boardColumnsSchema = z.array(boardColumnSchema).nullish().transform((value) => value ?? []);
-const boardCardsSchema = z.array(boardCardSchema).nullish().transform((value) => value ?? []);
-const workflowPickerSchema = z.array(workflowPickerItemSchema).nullish().transform((value) => value ?? []);
+const boardGroupsSchema = z
+  .array(boardGroupSchema)
+  .nullish()
+  .transform((value) => value ?? []);
+const boardColumnsSchema = z
+  .array(boardColumnSchema)
+  .nullish()
+  .transform((value) => value ?? []);
+const boardCardsSchema = z
+  .array(boardCardSchema)
+  .nullish()
+  .transform((value) => value ?? []);
+const workflowPickerSchema = z
+  .array(workflowPickerItemSchema)
+  .nullish()
+  .transform((value) => value ?? []);
 
 export const workflowBoardSchema: z.ZodType<WorkflowBoard> = z
   .object({
@@ -99,10 +111,10 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
       managed_worktree: z.object({ root_path: z.string().optional().default("") }).nullish(),
       status: taskStatusSchema,
       actions: taskActionsSchema,
-      attention: z.array(attentionItemSchema).optional().default([]),
-      runs: z.array(runSchema).optional().default([]),
-      transitions: z.array(transitionSchema).optional().default([]),
-      comments: z.array(commentSchema).optional().default([]),
+      attention: z.array(attentionItemSchema).nullish().transform(emptyArray),
+      runs: z.array(runSchema).nullish().transform(emptyArray),
+      transitions: z.array(transitionSchema).nullish().transform(emptyArray),
+      comments: z.array(commentSchema).nullish().transform(emptyArray),
     }),
   })
   .transform((value) => ({
@@ -112,6 +124,7 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
     projectName: value.task.project.display_name,
     workflowID: value.task.summary.workflow_id,
     workflowName: value.task.workflow.name,
+    workflowGraphRevision: value.task.workflow.graphRevision,
     title: value.task.summary.title,
     body: value.task.body,
     sourceWorkspace: value.task.source_workspace,
@@ -127,6 +140,10 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
     done: value.task.summary.done,
     canceledAt: value.task.summary.canceled_at_unix_ms,
   }));
+
+function emptyArray<T>(value: T[] | null | undefined): T[] {
+  return value ?? [];
+}
 
 export const activityPageSchema: z.ZodType<ActivityPage> = z
   .object({

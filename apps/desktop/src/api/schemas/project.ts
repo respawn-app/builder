@@ -1,9 +1,16 @@
 import { z } from "zod";
 
-import type { BindingPlan, ProjectPage, WorkspaceList } from "../models";
+import type {
+  BindingPlan,
+  ProjectEdit,
+  ProjectMutationResponse,
+  ProjectPage,
+  WorkspaceList,
+  WorkspaceUnlinkResponse,
+} from "../models";
 import { projectBindingSchema, workspaceSummarySchema } from "./common";
 
-const projectSummarySchema = z
+export const projectSummarySchema = z
   .object({
     project_id: z.string(),
     project_key: z.string(),
@@ -50,11 +57,64 @@ export const workspaceListSchema: z.ZodType<WorkspaceList> = z
     project_id: z.string(),
     workspaces: z.array(workspaceSummarySchema),
     default_workspace_id: z.string(),
+    next_page_token: z.string().optional().default(""),
   })
   .transform((value) => ({
     projectID: value.project_id,
     workspaces: value.workspaces,
     defaultWorkspaceID: value.default_workspace_id,
+    nextPageToken: value.next_page_token,
+  }));
+
+export const projectEditSchema: z.ZodType<ProjectEdit> = z
+  .object({
+    project_id: z.string(),
+    project_key: z.string(),
+    display_name: z.string(),
+    default_workspace_id: z.string(),
+    workspaces: z.array(workspaceSummarySchema),
+    next_page_token: z.string().optional().default(""),
+  })
+  .transform((value) => ({
+    projectID: value.project_id,
+    projectKey: value.project_key,
+    displayName: value.display_name,
+    defaultWorkspaceID: value.default_workspace_id,
+    workspaces: value.workspaces,
+    nextPageToken: value.next_page_token,
+  }));
+
+export const projectMutationResponseSchema: z.ZodType<ProjectMutationResponse> = z
+  .object({
+    project: projectSummarySchema,
+  })
+  .transform((value) => ({
+    project: value.project,
+  }));
+
+export const workspaceUnlinkResponseSchema: z.ZodType<WorkspaceUnlinkResponse> = z
+  .object({
+    project_id: z.string(),
+    workspace_id: z.string(),
+    unlinked: z.boolean(),
+    blockers: z
+      .array(
+        z.object({
+          code: z.string(),
+          message: z.string(),
+          count: z.number().optional().default(0),
+        }),
+      )
+      .optional()
+      .default([]),
+    project: projectSummarySchema.nullish(),
+  })
+  .transform((value) => ({
+    projectID: value.project_id,
+    workspaceID: value.workspace_id,
+    unlinked: value.unlinked,
+    blockers: value.blockers,
+    project: value.project ?? null,
   }));
 
 export const bindingPlanSchema: z.ZodType<BindingPlan> = z

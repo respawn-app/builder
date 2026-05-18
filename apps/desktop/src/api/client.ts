@@ -8,17 +8,27 @@ import type {
   BindingPlan,
   PendingAsk,
   ProjectBinding,
+  ProjectEdit,
+  ProjectMutationResponse,
   ProjectPage,
-  ServerCapabilities,
   ServerReadiness,
   TaskComment,
   TaskDetail,
   TeleportTarget,
   WorkflowBoard,
   WorkspaceList,
+  WorkspaceUnlinkResponse,
 } from "./models";
-import { bindingPlanSchema, projectCreateSchema, projectPageSchema, workspaceListSchema } from "./schemas/project";
-import { capabilitiesSchema, readinessSchema } from "./schemas/status";
+import {
+  bindingPlanSchema,
+  projectCreateSchema,
+  projectEditSchema,
+  projectMutationResponseSchema,
+  projectPageSchema,
+  workspaceListSchema,
+  workspaceUnlinkResponseSchema,
+} from "./schemas/project";
+import { readinessSchema } from "./schemas/status";
 import {
   activityPageSchema,
   attentionPageSchema,
@@ -40,14 +50,10 @@ export class BuilderApiClient {
   }
 
   async getReadiness(): Promise<ServerReadiness> {
-    return parse("server.readiness.get", readinessSchema, await this.transport.call("server.readiness.get", emptyJsonObject));
-  }
-
-  async getCapabilities(): Promise<ServerCapabilities> {
     return parse(
-      "server.capabilities.get",
-      capabilitiesSchema,
-      await this.transport.call("server.capabilities.get", emptyJsonObject),
+      "server.readiness.get",
+      readinessSchema,
+      await this.transport.call("server.readiness.get", emptyJsonObject),
     );
   }
 
@@ -59,11 +65,27 @@ export class BuilderApiClient {
     );
   }
 
-  async listWorkspaces(projectID: string): Promise<WorkspaceList> {
+  async listWorkspaces(projectID: string, pageToken = ""): Promise<WorkspaceList> {
     return parse(
       "project.workspace.list",
       workspaceListSchema,
-      await this.transport.call("project.workspace.list", { project_id: projectID }),
+      await this.transport.call("project.workspace.list", {
+        project_id: projectID,
+        page_size: 100,
+        page_token: pageToken,
+      }),
+    );
+  }
+
+  async getProjectEdit(projectID: string, pageToken = ""): Promise<ProjectEdit> {
+    return parse(
+      "project.edit.get",
+      projectEditSchema,
+      await this.transport.call("project.edit.get", {
+        project_id: projectID,
+        page_size: 100,
+        page_token: pageToken,
+      }),
     );
   }
 
@@ -75,11 +97,19 @@ export class BuilderApiClient {
     );
   }
 
-  async createProject(displayName: string, projectKey: string, workspaceRoot: string): Promise<ProjectBinding> {
+  async createProject(
+    displayName: string,
+    projectKey: string,
+    workspaceRoot: string,
+  ): Promise<ProjectBinding> {
     return parse(
       "project.create",
       projectCreateSchema,
-      await this.transport.call("project.create", { display_name: displayName, project_key: projectKey, workspace_root: workspaceRoot }),
+      await this.transport.call("project.create", {
+        display_name: displayName,
+        project_key: projectKey,
+        workspace_root: workspaceRoot,
+      }),
     );
   }
 
@@ -87,11 +117,47 @@ export class BuilderApiClient {
     return parse(
       "project.attachWorkspace",
       projectCreateSchema,
-      await this.transport.call("project.attachWorkspace", { project_id: projectID, workspace_root: workspaceRoot }),
+      await this.transport.call("project.attachWorkspace", {
+        project_id: projectID,
+        workspace_root: workspaceRoot,
+      }),
     );
   }
 
-  async getBoard(projectID: string, workflowID: string): Promise<WorkflowBoard> {
+  async updateProject(projectID: string, displayName: string): Promise<ProjectMutationResponse> {
+    return parse(
+      "project.update",
+      projectMutationResponseSchema,
+      await this.transport.call("project.update", { project_id: projectID, display_name: displayName }),
+    );
+  }
+
+  async setDefaultWorkspace(
+    projectID: string,
+    workspaceID: string,
+  ): Promise<ProjectMutationResponse> {
+    return parse(
+      "project.defaultWorkspace.set",
+      projectMutationResponseSchema,
+      await this.transport.call("project.defaultWorkspace.set", {
+        project_id: projectID,
+        workspace_id: workspaceID,
+      }),
+    );
+  }
+
+  async unlinkWorkspace(projectID: string, workspaceID: string): Promise<WorkspaceUnlinkResponse> {
+    return parse(
+      "project.unlinkWorkspace",
+      workspaceUnlinkResponseSchema,
+      await this.transport.call("project.unlinkWorkspace", {
+        project_id: projectID,
+        workspace_id: workspaceID,
+      }),
+    );
+  }
+
+  async getBoard(projectID: string, workflowID: string, pageToken = ""): Promise<WorkflowBoard> {
     return parse(
       "workflow.board.get",
       workflowBoardSchema,
@@ -101,8 +167,8 @@ export class BuilderApiClient {
           project_id: projectID,
           workflow_id: workflowID.length > 0 ? workflowID : undefined,
           done_preview_limit: 5,
-          page_size: 300,
-          page_token: "",
+          page_size: 100,
+          page_token: pageToken,
         }),
       ),
     );
@@ -114,7 +180,11 @@ export class BuilderApiClient {
       attentionPageSchema,
       await this.transport.call(
         "workflow.attention.list",
-        compactJsonObject({ project_id: projectID.length > 0 ? projectID : undefined, page_size: 40, page_token: pageToken }),
+        compactJsonObject({
+          project_id: projectID.length > 0 ? projectID : undefined,
+          page_size: 40,
+          page_token: pageToken,
+        }),
       ),
     );
   }
@@ -159,11 +229,18 @@ export class BuilderApiClient {
   }
 
   async moveTask(taskID: string, targetNodeID: string): Promise<void> {
-    await this.transport.call("workflow.task.move", { task_id: taskID, target_node_id: targetNodeID, output_values: {} });
+    await this.transport.call("workflow.task.move", {
+      task_id: taskID,
+      target_node_id: targetNodeID,
+      output_values: {},
+    });
   }
 
   async interruptTask(taskID: string, runID: string): Promise<void> {
-    await this.transport.call("workflow.task.interrupt", compactJsonObject({ task_id: taskID, run_id: runID }));
+    await this.transport.call(
+      "workflow.task.interrupt",
+      compactJsonObject({ task_id: taskID, run_id: runID }),
+    );
   }
 
   async resumeTask(taskID: string, runID: string): Promise<void> {
@@ -179,14 +256,22 @@ export class BuilderApiClient {
   }
 
   async getTask(taskID: string): Promise<TaskDetail> {
-    return parse("workflow.task.get", taskDetailSchema, await this.transport.call("workflow.task.get", { task_id: taskID }));
+    return parse(
+      "workflow.task.get",
+      taskDetailSchema,
+      await this.transport.call("workflow.task.get", { task_id: taskID }),
+    );
   }
 
   async listTaskActivity(taskID: string, pageToken: string): Promise<ActivityPage> {
     return parse(
       "workflow.task.activity.list",
       activityPageSchema,
-      await this.transport.call("workflow.task.activity.list", { task_id: taskID, page_size: 40, page_token: pageToken }),
+      await this.transport.call("workflow.task.activity.list", {
+        task_id: taskID,
+        page_size: 40,
+        page_token: pageToken,
+      }),
     );
   }
 
@@ -221,19 +306,30 @@ export class BuilderApiClient {
   }
 
   async listPendingAsks(sessionID: string): Promise<readonly PendingAsk[]> {
-    return parse("ask.listPendingBySession", pendingAskListSchema, await this.transport.call("ask.listPendingBySession", { SessionID: sessionID }));
+    return parse(
+      "ask.listPendingBySession",
+      pendingAskListSchema,
+      await this.transport.call("ask.listPendingBySession", { SessionID: sessionID }),
+    );
   }
 
   async getTeleportTarget(taskID: string, runID: string): Promise<TeleportTarget> {
     return parse(
       "workflow.task.teleportTarget.get",
       teleportTargetSchema,
-      await this.transport.call("workflow.task.teleportTarget.get", compactJsonObject({ task_id: taskID, run_id: runID })),
+      await this.transport.call(
+        "workflow.task.teleportTarget.get",
+        compactJsonObject({ task_id: taskID, run_id: runID }),
+      ),
     );
   }
 
   subscribeProject(projectID: string, afterSequence: number, handler: RpcEventHandler): RpcSubscription {
-    return this.transport.subscribe("workflow.subscribeProject", { project_id: projectID, after_sequence: afterSequence }, handler);
+    return this.transport.subscribe(
+      "workflow.subscribeProject",
+      { project_id: projectID, after_sequence: afterSequence },
+      handler,
+    );
   }
 }
 

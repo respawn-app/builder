@@ -59,6 +59,9 @@ export function createGuiLogger(nativeBridge: NativeBridge): GuiLogger {
 
 function redactContext(context: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
   return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => [key, sensitiveKeys.has(key.toLowerCase()) ? redactedValue : value]),
+    Object.entries(context).map(([key, value]) => [
+      key,
+      sensitiveKeys.has(key.toLowerCase()) ? redactedValue : value,
+    ]),
   );
 }

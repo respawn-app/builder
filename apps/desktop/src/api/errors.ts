@@ -38,8 +38,30 @@ export class StartupConfigurationError extends Error {
 }
 
 export function errorMessage(error: unknown): string {
+  if (typeof error === "string") {
+    return normalizeMessage(error);
+  }
   if (error instanceof Error) {
-    return error.message;
+    return normalizeMessage(error.message);
+  }
+  if (hasStringMessage(error)) {
+    return normalizeMessage(error.message);
+  }
+  if (isObject(error)) {
+    return normalizeMessage(JSON.stringify(error));
   }
   return "Unknown error";
+}
+
+function normalizeMessage(message: string): string {
+  const trimmed = message.trim();
+  return trimmed.length > 0 ? trimmed : "Unknown error";
+}
+
+function hasStringMessage(error: unknown): error is Readonly<{ message: string }> {
+  return isObject(error) && typeof error.message === "string";
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
 }

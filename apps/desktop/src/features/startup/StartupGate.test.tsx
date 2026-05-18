@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../../App";
 import { StartupConfigurationError } from "../../api/errors";
@@ -14,7 +14,9 @@ describe("StartupGate", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Builder service unreachable" }, { timeout: 4_000 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Builder service unreachable" }, { timeout: 4_000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText("connection refused")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Projects" })).not.toBeInTheDocument();
   });
@@ -33,7 +35,15 @@ describe("StartupGate", () => {
               auth_ready: false,
               auth_required: true,
               endpoint: "ws://127.0.0.1:53082/rpc",
-              causes: [{ code: "auth", severity: "error", summary: "Auth required", next_action: "Run builder auth login", diagnostic_id: "diag-1" }],
+              causes: [
+                {
+                  code: "auth",
+                  severity: "error",
+                  summary: "Auth required",
+                  next_action: "Run builder auth login",
+                  diagnostic_id: "diag-1",
+                },
+              ],
             },
           },
         ])}
@@ -49,40 +59,82 @@ describe("StartupGate", () => {
     render(
       <App
         services={createTestServices([
-          { method: "server.readiness.get", result: {}, error: new StartupConfigurationError("invalid Builder config") },
+          {
+            method: "server.readiness.get",
+            result: {},
+            error: new StartupConfigurationError("invalid Builder config"),
+          },
         ])}
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Startup blocked" }, { timeout: 4_000 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Startup blocked" }, { timeout: 4_000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText("invalid Builder config")).toBeInTheDocument();
     expect(screen.queryByText("Run `builder service install`, then retry.")).not.toBeInTheDocument();
   });
 
-  it("blocks app when required capability is unavailable", async () => {
+  it("does not call removed backend capabilities route before showing app content", async () => {
+    const services = createTestServices(startupRoutes);
+
+    render(
+      <App services={services} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    expect(services.transport.calls.map((call) => call.method)).not.toContain("server.capabilities.get");
+  });
+
+  it("keeps disconnected status non-dismissible until reconnect", async () => {
+    const services = createTestServices(startupRoutes);
+
+    render(<App services={services} />);
+
+    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+
+    act(() => {
+      services.transport.connection.set("disconnected", "closed");
+    });
+
+    expect(await screen.findByText("Server disconnected. Cached data remains visible; mutations are disabled.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+
+    act(() => {
+      services.transport.connection.set("connected");
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Server disconnected. Cached data remains visible; mutations are disabled.")).not.toBeInTheDocument();
+    });
+  });
+
+  it("blocks feature surfaces when server protocol does not match desktop protocol", async () => {
     render(
       <App
         services={createTestServices([
-          startupRoutes[0] ?? failTest("readiness route missing"),
           {
-            method: "server.capabilities.get",
+            method: "server.readiness.get",
             result: {
-              capabilities: [
-                { id: "workflow.board", available: false, reason: "workflow board disabled", required_for_mvp: true },
-              ],
+              ready: true,
+              server_id: "server-1",
               server_version: "1.3.0",
-              protocol_version: "2",
+              protocol_version: "1",
+              auth_ready: true,
+              auth_required: true,
+              endpoint: "ws://127.0.0.1:53082/rpc",
             },
           },
         ])}
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Required capability unavailable" })).toBeInTheDocument();
-    expect(screen.getByText("workflow board disabled")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Update Builder" })).toBeInTheDocument();
+    expect(screen.getByText(/Client protocol 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Server protocol 1/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Update Builder CLI\/service and desktop app from the same build/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Projects" })).not.toBeInTheDocument();
   });
 });
-
-function failTest(message: string): never {
-  throw new Error(message);
-}

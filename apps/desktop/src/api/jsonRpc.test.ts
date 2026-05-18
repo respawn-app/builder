@@ -82,17 +82,21 @@ describe("JsonRpcWebSocketTransport", () => {
     const transport = createJsonRpcTransport("ws://127.0.0.1:53082/rpc");
     const events: string[] = [];
 
-    transport.subscribe("workflow.subscribeProject", { project_id: "project-1", after_sequence: 10 }, {
-      onEvent(method) {
-        events.push(method);
+    transport.subscribe(
+      "workflow.subscribeProject",
+      { project_id: "project-1", after_sequence: 10 },
+      {
+        onEvent(method) {
+          events.push(method);
+        },
+        onComplete() {
+          return;
+        },
+        onError(error) {
+          throw error;
+        },
       },
-      onComplete() {
-        return;
-      },
-      onError(error) {
-        throw error;
-      },
-    });
+    );
 
     const socket = sockets[0] ?? failTest("subscription socket missing");
     socket.open();
@@ -102,7 +106,9 @@ describe("JsonRpcWebSocketTransport", () => {
     expect(frame(socket, 1)).toMatchObject({ method: "workflow.subscribeProject" });
 
     ack(socket, 1);
-    socket.receive(JSON.stringify({ jsonrpc: "2.0", method: "workflow.project.event", params: { sequence: 11 } }));
+    socket.receive(
+      JSON.stringify({ jsonrpc: "2.0", method: "workflow.project.event", params: { sequence: 11 } }),
+    );
     await flushPromises();
 
     expect(events).toEqual(["workflow.project.event"]);
@@ -111,17 +117,21 @@ describe("JsonRpcWebSocketTransport", () => {
   it("reopens subscription socket after unexpected close", async () => {
     const transport = createJsonRpcTransport("ws://127.0.0.1:53082/rpc");
     const errors: string[] = [];
-    const subscription = transport.subscribe("workflow.subscribeProject", { project_id: "project-1", after_sequence: 10 }, {
-      onEvent() {
-        return;
+    const subscription = transport.subscribe(
+      "workflow.subscribeProject",
+      { project_id: "project-1", after_sequence: 10 },
+      {
+        onEvent() {
+          return;
+        },
+        onComplete() {
+          return;
+        },
+        onError(error) {
+          errors.push(error.message);
+        },
       },
-      onComplete() {
-        return;
-      },
-      onError(error) {
-        errors.push(error.message);
-      },
-    });
+    );
 
     const firstSocket = sockets[0] ?? failTest("subscription socket missing");
     firstSocket.open();
@@ -162,12 +172,14 @@ function frame(socket: MockWebSocket, sentIndex: number): SentFrame {
 }
 
 function isSentFrame(value: unknown): value is SentFrame {
-  return typeof value === "object"
-    && value !== null
-    && "id" in value
-    && "method" in value
-    && typeof value.id === "string"
-    && typeof value.method === "string";
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "method" in value &&
+    typeof value.id === "string" &&
+    typeof value.method === "string"
+  );
 }
 
 async function flushPromises(): Promise<void> {

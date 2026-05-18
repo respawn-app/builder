@@ -27,6 +27,7 @@ export function StartupGate({ children }: StartupGateProps): ReactElement {
       tone: "warning",
       title: t("app.reconnecting"),
       body: t("app.disconnected"),
+      dismissible: false,
     });
   }, [connection.phase, dismiss, push, t]);
 
@@ -36,7 +37,12 @@ export function StartupGate({ children }: StartupGateProps): ReactElement {
 
   if (startup.kind === "error") {
     return (
-      <ErrorState body={startup.body} onRetry={startup.retry} retryLabel={t("app.retry")} title={t(startup.titleKey)}>
+      <ErrorState
+        body={startup.body}
+        onRetry={startup.retry}
+        retryLabel={t("app.retry")}
+        title={t(startup.titleKey)}
+      >
         {startup.titleKey === "startup.unreachableTitle" ? <p>{t("startup.unreachableBody")}</p> : null}
       </ErrorState>
     );

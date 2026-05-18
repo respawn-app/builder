@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 export type AppNavigation = Readonly<{
   openHome(): void;
   openProject(projectID: string, workflowID?: string): void;
+  openProjectEdit(projectID: string): void;
   openTask(taskID: string): void;
   openProjectTask(projectID: string, workflowID: string, taskID: string): void;
   closeProjectTask(projectID: string, workflowID: string): void;
@@ -20,6 +21,9 @@ export function useAppNavigation(): AppNavigation {
         params: { projectId: projectID },
         search: { workflowId: workflowID, taskId: "", resumeRunId: "" },
       });
+    },
+    openProjectEdit(projectID) {
+      void navigate({ to: "/projects/$projectId/edit", params: { projectId: projectID } });
     },
     openTask(taskID) {
       void navigate({ to: "/tasks/$taskId", params: { taskId: taskID } });

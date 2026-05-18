@@ -12,6 +12,7 @@
         "@hookform/resolvers",
         "@tanstack/react-query",
         "@tanstack/react-router",
+        "@tanstack/react-virtual",
         "@tauri-apps/api",
         "i18next",
         "lucide-react",
@@ -26,6 +27,7 @@
       ],
       "devDependencies": [
         "@eslint/js",
+        "@tailwindcss/vite",
         "@tauri-apps/cli",
         "@testing-library/jest-dom",
         "@testing-library/react",
@@ -40,6 +42,7 @@
         "eslint-plugin-react-refresh",
         "eslint-plugin-testing-library",
         "jsdom",
+        "tailwindcss",
         "typescript",
         "typescript-eslint",
         "vite",

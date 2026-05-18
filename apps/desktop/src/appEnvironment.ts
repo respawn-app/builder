@@ -9,11 +9,14 @@ import { createGuiLogger } from "./app/logging";
 import type { AppServices } from "./app/services";
 
 const defaultServerEndpoint = "ws://127.0.0.1:53082/rpc";
+const builderThemeAttribute = "data-builder-theme";
 
 export async function createDefaultAppServices(): Promise<AppServices> {
   const nativeBridge = createAutoNativeBridge();
   const logger = createGuiLogger(nativeBridge);
-  const context = await nativeBridge.builder.resolveContext().catch((error: unknown) => new StartupConfigurationError(errorMessage(error)));
+  const context = await nativeBridge.builder
+    .resolveContext()
+    .catch((error: unknown) => new StartupConfigurationError(errorMessage(error)));
   if (context instanceof Error) {
     await logger.append("error", "Builder native context resolution failed.", { error: context.message });
     return {
@@ -23,6 +26,7 @@ export async function createDefaultAppServices(): Promise<AppServices> {
       nativeBridge,
     };
   }
+  applyConfiguredTheme(context.theme);
   const endpoint = context.serverEndpoint.length > 0 ? context.serverEndpoint : defaultServerEndpoint;
   const api = new BuilderApiClient(createJsonRpcTransport(endpoint));
   return {
@@ -31,6 +35,17 @@ export async function createDefaultAppServices(): Promise<AppServices> {
     logger,
     nativeBridge,
   };
+}
+
+export function applyConfiguredTheme(theme: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.setAttribute(builderThemeAttribute, theme);
+    return;
+  }
+  document.documentElement.removeAttribute(builderThemeAttribute);
 }
 
 class BootstrapErrorTransport implements RpcTransport {

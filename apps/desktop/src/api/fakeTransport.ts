@@ -4,14 +4,16 @@ import type { RpcSubscription, RpcTransport } from "./transport";
 
 export type FakeRoute = Readonly<{
   method: string;
-  result: unknown;
+  result?: unknown;
   error?: Error;
+  handler?: (params: JsonValue, callIndex: number) => unknown;
 }>;
 
 export class FakeRpcTransport implements RpcTransport {
   readonly connection = new ConnectionStore();
   readonly calls: Readonly<{ method: string; params: JsonValue }>[] = [];
   #routes = new Map<string, FakeRoute>();
+  #callCounts = new Map<string, number>();
 
   constructor(routes: readonly FakeRoute[]) {
     for (const route of routes) {
@@ -28,6 +30,11 @@ export class FakeRpcTransport implements RpcTransport {
     }
     if (route.error !== undefined) {
       throw route.error;
+    }
+    const callIndex = this.#callCounts.get(method) ?? 0;
+    this.#callCounts.set(method, callIndex + 1);
+    if (route.handler !== undefined) {
+      return route.handler(params, callIndex);
     }
     return route.result;
   }

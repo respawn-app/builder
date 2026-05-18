@@ -10,24 +10,12 @@ export type ServerReadiness = Readonly<{
   ready: boolean;
   serverID: string;
   serverVersion: string;
+  serverBuild: string;
   protocolVersion: string;
   authReady: boolean;
   authRequired: boolean;
   endpoint: string;
   causes: readonly ServerCause[];
-}>;
-
-export type ServerCapability = Readonly<{
-  id: string;
-  available: boolean;
-  reason: string;
-  requiredForMvp: boolean;
-}>;
-
-export type ServerCapabilities = Readonly<{
-  capabilities: readonly ServerCapability[];
-  serverVersion: string;
-  protocolVersion: string;
 }>;
 
 export type WorkspaceSummary = Readonly<{
@@ -64,6 +52,34 @@ export type WorkspaceList = Readonly<{
   projectID: string;
   workspaces: readonly WorkspaceSummary[];
   defaultWorkspaceID: string;
+  nextPageToken: string;
+}>;
+
+export type ProjectEdit = Readonly<{
+  projectID: string;
+  projectKey: string;
+  displayName: string;
+  defaultWorkspaceID: string;
+  workspaces: readonly WorkspaceSummary[];
+  nextPageToken: string;
+}>;
+
+export type ProjectMutationResponse = Readonly<{
+  project: ProjectSummary;
+}>;
+
+export type WorkspaceUnlinkBlocker = Readonly<{
+  code: string;
+  message: string;
+  count: number;
+}>;
+
+export type WorkspaceUnlinkResponse = Readonly<{
+  projectID: string;
+  workspaceID: string;
+  unlinked: boolean;
+  blockers: readonly WorkspaceUnlinkBlocker[];
+  project: ProjectSummary | null;
 }>;
 
 export type ProjectBinding = Readonly<{
@@ -127,6 +143,7 @@ export type TaskActions = Readonly<{
   canCancel: boolean;
   needsDetailForInterrupt: boolean;
   needsDetailForResume: boolean;
+  manualMoveTargetNodeIDs: readonly string[];
 }>;
 
 export type BoardCard = Readonly<{
@@ -146,6 +163,7 @@ export type BoardColumn = Readonly<{
   id: string;
   key: string;
   name: string;
+  assigneeRole: string;
   groupID: string;
   sortOrder: number;
   isBacklog: boolean;
@@ -256,6 +274,7 @@ export type TaskDetail = Readonly<{
   projectName: string;
   workflowID: string;
   workflowName: string;
+  workflowGraphRevision: number;
   title: string;
   body: string;
   sourceWorkspace: WorkspaceSummary;

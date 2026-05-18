@@ -4,10 +4,12 @@ import { useMemo } from "react";
 import { I18nextProvider } from "react-i18next";
 
 import { appI18n, initializeI18n } from "../i18n/setup";
+import { useReconnectRefresh } from "./connectionRefresh";
 import { createAppQueryClient } from "./queryClient";
 import type { AppServices } from "./services";
 import { AppServicesProvider } from "./servicesContext";
 import { StatusProvider } from "./statusStore";
+import { useTaskDetailMutationInvalidator } from "./taskDetailInvalidation";
 
 void initializeI18n();
 
@@ -23,9 +25,23 @@ export function AppProviders({ services, children }: AppProvidersProps) {
     <I18nextProvider i18n={appI18n}>
       <QueryClientProvider client={queryClient}>
         <AppServicesProvider services={services}>
-          <StatusProvider>{children}</StatusProvider>
+          <StatusProvider>
+            <ReconnectRefresh />
+            <TaskDetailMutationInvalidator />
+            {children}
+          </StatusProvider>
         </AppServicesProvider>
       </QueryClientProvider>
     </I18nextProvider>
   );
+}
+
+function TaskDetailMutationInvalidator() {
+  useTaskDetailMutationInvalidator();
+  return null;
+}
+
+function ReconnectRefresh() {
+  useReconnectRefresh();
+  return null;
 }

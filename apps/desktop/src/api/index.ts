@@ -11,9 +11,9 @@ export type {
   BoardGroup,
   PendingAsk,
   ProjectBinding,
+  ProjectEdit,
+  ProjectMutationResponse,
   ProjectSummary,
-  ServerCapabilities,
-  ServerCapability,
   ServerReadiness,
   TaskComment,
   TaskDetail,
@@ -23,4 +23,6 @@ export type {
   WorkflowBoard,
   WorkflowPickerItem,
   WorkspaceSummary,
+  WorkspaceUnlinkBlocker,
+  WorkspaceUnlinkResponse,
 } from "./models";

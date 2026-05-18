@@ -12,5 +12,7 @@ export function stringRecordToJson(value: Readonly<Record<string, string>>): Jso
 }
 
 export function compactJsonObject(value: Readonly<Record<string, JsonValue | undefined>>): JsonObject {
-  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, JsonValue] => entry[1] !== undefined));
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, JsonValue] => entry[1] !== undefined),
+  );
 }

@@ -83,7 +83,10 @@ export const workflowPickerItemSchema: z.ZodType<WorkflowPickerItem> = z
     graph_revision: z.number(),
     is_project_default: z.boolean(),
     valid_for_task_creation: z.boolean(),
-    validation_errors: z.array(validationErrorSchema).nullish().transform((value) => value ?? []),
+    validation_errors: z
+      .array(validationErrorSchema)
+      .nullish()
+      .transform((value) => value ?? []),
   })
   .transform((value) => ({
     id: value.workflow_id,
@@ -123,6 +126,7 @@ export const taskActionsSchema: z.ZodType<TaskActions> = z
     can_cancel: z.boolean(),
     needs_detail_for_interrupt: z.boolean(),
     needs_detail_for_resume: z.boolean(),
+    manual_move_target_node_ids: stringList,
   })
   .transform((value) => ({
     canStart: value.can_start,
@@ -133,6 +137,7 @@ export const taskActionsSchema: z.ZodType<TaskActions> = z
     canCancel: value.can_cancel,
     needsDetailForInterrupt: value.needs_detail_for_interrupt,
     needsDetailForResume: value.needs_detail_for_resume,
+    manualMoveTargetNodeIDs: value.manual_move_target_node_ids,
   }));
 
 export const boardColumnSchema: z.ZodType<BoardColumn> = z
@@ -141,6 +146,7 @@ export const boardColumnSchema: z.ZodType<BoardColumn> = z
       node_id: z.string(),
       key: z.string(),
       display_name: z.string(),
+      assignee_role: emptyString,
     }),
     group_id: emptyString,
     sort_order: z.number(),
@@ -152,6 +158,7 @@ export const boardColumnSchema: z.ZodType<BoardColumn> = z
     id: value.node.node_id,
     key: value.node.key,
     name: value.node.display_name,
+    assigneeRole: value.node.assignee_role,
     groupID: value.group_id,
     sortOrder: value.sort_order,
     isBacklog: value.is_backlog,
@@ -294,7 +301,10 @@ export const transitionEdgeSchema: z.ZodType<TransitionEdge> = z
     target_node_display_name: emptyString,
     state: z.string(),
     requires_approval: z.boolean(),
-    output_requirements: z.array(z.object({ field_name: z.string() })).optional().default([]),
+    output_requirements: z
+      .array(z.object({ field_name: z.string() }))
+      .optional()
+      .default([]),
   })
   .transform((value) => ({
     id: value.id,
