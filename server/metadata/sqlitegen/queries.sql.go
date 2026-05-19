@@ -2517,6 +2517,7 @@ SELECT
             JOIN tasks comment_tasks ON comment_tasks.id = tc.task_id
             WHERE comment_tasks.project_id = p.id
         ), 0),
+        COALESCE((SELECT MAX(s.updated_at_unix_ms) FROM sessions s WHERE s.project_id = p.id AND s.launch_visible <> 0), 0),
         COALESCE((SELECT MAX(pwl.updated_at_unix_ms) FROM project_workflow_links pwl WHERE pwl.project_id = p.id AND pwl.unlinked_at_unix_ms = 0), 0)
     ) AS INTEGER) AS latest_activity_unix_ms,
     CAST((SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS INTEGER) AS task_count,
