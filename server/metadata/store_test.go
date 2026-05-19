@@ -935,6 +935,13 @@ func TestInsertWorkspaceBindingAllowsSameCanonicalRootAcrossProjects(t *testing.
 	if err != nil {
 		t.Fatalf("insertWorkspaceBinding winner: %v", err)
 	}
+	duplicateInProject, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "", filepath.Base(canonicalRoot), winner.ProjectID, "workspace-duplicate", now, true)
+	if err != nil {
+		t.Fatalf("insertWorkspaceBinding duplicate in project: %v", err)
+	}
+	if duplicateInProject.WorkspaceID != winner.WorkspaceID {
+		t.Fatalf("duplicate in project workspace id = %q, want %q", duplicateInProject.WorkspaceID, winner.WorkspaceID)
+	}
 	second, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "", filepath.Base(canonicalRoot), "project-second", "workspace-second", now, true)
 	if err != nil {
 		t.Fatalf("insertWorkspaceBinding second: %v", err)

@@ -39,7 +39,12 @@ function combineBoardPages(pages: readonly WorkflowBoard[]): WorkflowBoard {
   };
 }
 
-export function useProjectBoardSubscription(projectID: string, workflowID: string, latestSequence: number) {
+export function useProjectBoardSubscription(
+  projectID: string,
+  boardQueryWorkflowID: string,
+  selectedWorkflowID: string,
+  latestSequence: number,
+) {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   const connection = useConnectionSnapshot();
@@ -49,7 +54,10 @@ export function useProjectBoardSubscription(projectID: string, workflowID: strin
       return;
     }
     async function refresh(): Promise<void> {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, workflowID) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) });
+      if (selectedWorkflowID !== boardQueryWorkflowID) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) });
+      }
       await queryClient.invalidateQueries({ queryKey: queryKeys.attention("") });
       await queryClient.invalidateQueries({ queryKey: queryKeys.attention(projectID) });
     }
@@ -67,20 +75,35 @@ export function useProjectBoardSubscription(projectID: string, workflowID: strin
     return () => {
       subscription.close();
     };
-  }, [api, connection.generation, connection.phase, latestSequence, projectID, queryClient, workflowID]);
+  }, [
+    api,
+    boardQueryWorkflowID,
+    connection.generation,
+    connection.phase,
+    latestSequence,
+    projectID,
+    queryClient,
+    selectedWorkflowID,
+  ]);
 
   useEffect(() => {
     if (connection.phase === "connected") {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, workflowID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) });
+      if (selectedWorkflowID !== boardQueryWorkflowID) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) });
+      }
     }
-  }, [connection.generation, connection.phase, projectID, queryClient, workflowID]);
+  }, [boardQueryWorkflowID, connection.generation, connection.phase, projectID, queryClient, selectedWorkflowID]);
 }
 
-export function useBoardTaskActions(projectID: string, workflowID: string) {
+export function useBoardTaskActions(projectID: string, boardQueryWorkflowID: string, selectedWorkflowID: string) {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   async function refresh(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, workflowID) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) });
+    if (selectedWorkflowID !== boardQueryWorkflowID) {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) });
+    }
   }
   return {
     start: useMutation({

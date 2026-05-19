@@ -27,6 +27,7 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
   const board = boardQuery.data;
   useProjectBoardSubscription(
     projectId,
+    workflowId,
     board?.selectedWorkflow.id ?? workflowId,
     board?.latestEventSequence ?? 0,
   );
@@ -51,6 +52,7 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
   return (
     <BoardContent
       board={board}
+      boardQueryWorkflowId={workflowId}
       hasMoreCards={boardQuery.hasNextPage}
       isLoadingMoreCards={boardQuery.isFetchingNextPage}
       onLoadMoreCards={() => void boardQuery.fetchNextPage()}
@@ -62,6 +64,7 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
 
 function BoardContent({
   board,
+  boardQueryWorkflowId,
   hasMoreCards,
   isLoadingMoreCards,
   onLoadMoreCards,
@@ -69,6 +72,7 @@ function BoardContent({
   resumeRunId,
 }: Readonly<{
   board: WorkflowBoard;
+  boardQueryWorkflowId: string;
   hasMoreCards: boolean;
   isLoadingMoreCards: boolean;
   onLoadMoreCards: () => void;
@@ -81,7 +85,7 @@ function BoardContent({
   const navigation = useAppNavigation();
   const openTaskDetail = useOpenTaskDetail();
   const connection = useConnectionSnapshot();
-  const actions = useBoardTaskActions(board.projectID, board.selectedWorkflow.id);
+  const actions = useBoardTaskActions(board.projectID, boardQueryWorkflowId, board.selectedWorkflow.id);
   const actionsDisabled = connection.phase !== "connected";
   const activeColumns = useMemo(
     () => board.columns.filter((column) => !column.isBacklog && !column.isDone),

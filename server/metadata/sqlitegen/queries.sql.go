@@ -2341,7 +2341,7 @@ INSERT INTO workspaces (
     ?8,
     ?9
 )
-ON CONFLICT(id) DO NOTHING
+ON CONFLICT(project_id, canonical_root_path) DO NOTHING
 `
 
 type InsertWorkspaceBindingParams struct {

@@ -206,7 +206,7 @@ export function createBrowserNativeBridge(): NativeBridge {
     },
     links: {
       async openExternal(url: string): Promise<void> {
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.open(validateExternalUrl(url), "_blank", "noopener,noreferrer");
       },
     },
     terminal: {

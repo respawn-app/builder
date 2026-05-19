@@ -1310,7 +1310,7 @@ INSERT INTO workspaces (
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(updated_at_unix_ms)
 )
-ON CONFLICT(id) DO NOTHING;
+ON CONFLICT(project_id, canonical_root_path) DO NOTHING;
 
 -- name: UpdateWorkspaceBindingCanonicalRoot :execrows
 UPDATE workspaces

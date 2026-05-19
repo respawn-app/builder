@@ -199,6 +199,27 @@ describe("BoardRoute", () => {
     expect(screen.getByRole("button", { name: "Create task" })).not.toBeDisabled();
   });
 
+  it("refreshes the visible default board route on reconnect", async () => {
+    window.history.pushState(null, "", "/projects/project-1");
+    const services = createTestServices([...startupRoutes, { method: "workflow.board.get", result: boardResponse }]);
+
+    render(<App services={services} />);
+
+    expect(await screen.findByRole("heading", { name: "Project" })).toBeInTheDocument();
+    const initialDefaultBoardFetches = defaultBoardFetchCount(services.transport.calls);
+
+    act(() => {
+      services.transport.connection.set("disconnected", "closed");
+    });
+    act(() => {
+      services.transport.connection.set("connected");
+    });
+
+    await waitFor(() => {
+      expect(defaultBoardFetchCount(services.transport.calls)).toBeGreaterThan(initialDefaultBoardFetches);
+    });
+  });
+
   it("opens a pin-capable board menu with primary board actions and workflow selection", async () => {
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
     const services = createTestServices([...startupRoutes, { method: "workflow.board.get", result: boardResponse }]);
@@ -349,6 +370,16 @@ function setScrollMetrics(
   Object.defineProperty(element, "clientHeight", { configurable: true, value: metrics.clientHeight });
   Object.defineProperty(element, "scrollHeight", { configurable: true, value: metrics.scrollHeight });
   Object.defineProperty(element, "scrollTop", { configurable: true, value: metrics.scrollTop });
+}
+
+function defaultBoardFetchCount(calls: Readonly<{ method: string; params: JsonValue }>[]): number {
+  return calls.filter(
+    (call) =>
+      call.method === "workflow.board.get" &&
+      isObject(call.params) &&
+      call.params.project_id === "project-1" &&
+      !("workflow_id" in call.params),
+  ).length;
 }
 
 function installStorage(name: "localStorage" | "sessionStorage"): void {
