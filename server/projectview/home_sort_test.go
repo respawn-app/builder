@@ -14,7 +14,7 @@ import (
 func TestMetadataServiceSortsProjectHomeByLatestTaskActivityOrEdit(t *testing.T) {
 	ctx := context.Background()
 	store, _, older := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -148,7 +148,7 @@ INSERT INTO task_comments (
 func BenchmarkMetadataServiceListProjectHomeSummaries(b *testing.B) {
 	ctx := context.Background()
 	store, _, first := newProjectViewMetadataStore(b)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		b.Fatalf("NewMetadataService: %v", err)
 	}
@@ -235,7 +235,7 @@ type projectHomeActivityFixture struct {
 func newProjectHomeActivityFixture(t *testing.T, ctx context.Context) projectHomeActivityFixture {
 	t.Helper()
 	store, _, older := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
