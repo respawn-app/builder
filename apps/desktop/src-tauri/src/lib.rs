@@ -48,7 +48,8 @@ async fn select_directory(app: tauri::AppHandle, title: String) -> Result<Option
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     validate_external_url(&url)?;
-    run_command(Command::new("open").arg(url), "open external link")
+    tauri_plugin_opener::open_url(url, None::<&str>)
+        .map_err(|error| format!("Open external link failed: {error}"))
 }
 
 #[tauri::command]

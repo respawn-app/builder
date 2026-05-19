@@ -126,7 +126,7 @@ function ProjectCreateForm({
           handleUppercaseProjectKeyChange(event, keyField);
         }}
       />
-      <TextInput disabled label={t("home.workspaceRoot")} {...form.register("workspaceRoot")} />
+      <TextInput label={t("home.workspaceRoot")} readOnly {...form.register("workspaceRoot")} />
       {creationError !== null ? (
         <p className="m-0 text-[var(--color-error)]">{projectCreateErrorMessage(creationError, draft)}</p>
       ) : null}

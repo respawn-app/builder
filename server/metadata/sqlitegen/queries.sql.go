@@ -2756,7 +2756,7 @@ FROM workspaces w
 LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
 WHERE w.project_id = ?1
 GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
-ORDER BY w.created_at_unix_ms DESC, w.rowid DESC
+ORDER BY w.is_primary DESC, w.created_at_unix_ms DESC, w.rowid DESC
 LIMIT ?3
 OFFSET ?2
 `
