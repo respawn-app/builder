@@ -7,15 +7,12 @@ import type { NativeProjectBinding } from "@builder/desktop-native-bridge";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 
-const slidingWindowPageLimit = 5;
-
 export function useProjectPages() {
   const { api } = useAppServices();
   return useInfiniteQuery({
     queryKey: queryKeys.projects,
     queryFn: async ({ pageParam }) => api.listProjects(pageParam),
     initialPageParam: "",
-    maxPages: slidingWindowPageLimit,
     getNextPageParam: (lastPage) => (lastPage.nextPageToken.length > 0 ? lastPage.nextPageToken : undefined),
   });
 }
@@ -26,7 +23,6 @@ export function useGlobalAttentionPages() {
     queryKey: queryKeys.attention(""),
     queryFn: async ({ pageParam }) => api.listAttention("", pageParam),
     initialPageParam: "",
-    maxPages: slidingWindowPageLimit,
     getNextPageParam: (lastPage) => (lastPage.nextPageToken.length > 0 ? lastPage.nextPageToken : undefined),
   });
 }
