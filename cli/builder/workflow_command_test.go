@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/prompts"
 	"builder/server/metadata"
 	"builder/server/workflow"
 	"builder/server/workflowstore"
@@ -14,6 +15,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 )
 
 type workflowCommandLoopbackRemote struct {
@@ -271,6 +273,92 @@ func TestWorkflowEditCommandsUpdateNodeAndEdgeMetadata(t *testing.T) {
 		if !strings.Contains(inspectOut, want) {
 			t.Fatalf("inspect output = %q, want %q", inspectOut, want)
 		}
+	}
+}
+
+func TestTaskHumanOnlyActionsAreDeniedInsideBuilderSession(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-agent")
+	previous := workflowCommandRemoteOpener
+	workflowCommandRemoteOpener = func(context.Context, string) (config.App, workflowCommandRemote, error) {
+		t.Fatal("human-only task command opened workflow remote")
+		return config.App{}, nil, nil
+	}
+	defer func() {
+		workflowCommandRemoteOpener = previous
+	}()
+
+	for _, args := range [][]string{
+		{"task", "start", "TASK-1"},
+		{"task", "cancel", "TASK-1"},
+		{"task", "resume", "TASK-1"},
+		{"task", "approve", "transition-1"},
+		{"task", "move", "TASK-1", "node-1"},
+		{"task", "comment", "delete", "comment-1"},
+	} {
+		stdout, stderr, code := runWorkflowRootCommand(args...)
+		if code != 1 {
+			t.Fatalf("%v exit = %d stderr=%q", args, code, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("%v stdout = %q, want empty", args, stdout)
+		}
+		if stderr != prompts.WorkflowHumanOnlyTaskActionDeniedPrompt+"\n" {
+			t.Fatalf("%v stderr = %q, want denied prompt", args, stderr)
+		}
+	}
+}
+
+func TestTaskSafeActionsRemainAvailableInsideBuilderSession(t *testing.T) {
+	t.Setenv(sessionenv.BuilderSessionID, "session-agent")
+	_, binding, remote := newWorkflowCommandLoopback(t)
+	restore := replaceWorkflowCommandRemoteOpener(t, remote.cfg, remote)
+	defer restore()
+
+	workflowOut, workflowErr, code := runWorkflowRootCommand("workflow", "create", "Safe Task Workflow")
+	if code != 0 {
+		t.Fatalf("workflow create exit=%d stderr=%q", code, workflowErr)
+	}
+	workflowID := labeledOutputValue(t, workflowOut, "workflow_id")
+	if workflowID == "" {
+		t.Fatalf("workflow create output = %q", workflowOut)
+	}
+	if _, nodeErr, code := runWorkflowRootCommand("workflow", "node", "add", workflowID, "--key", "implement", "--kind", "agent", "--agent", "workflow-test", "--prompt", "Do work"); code != 0 {
+		t.Fatalf("workflow node add exit=%d stderr=%q", code, nodeErr)
+	}
+	if _, edgeErr, code := runWorkflowRootCommand("workflow", "edge", "add", workflowID, "--from", "backlog", "--transition", "start", "--edge-key", "start", "--to", "implement", "--context", "new_session"); code != 0 {
+		t.Fatalf("workflow start edge add exit=%d stderr=%q", code, edgeErr)
+	}
+	if _, edgeErr, code := runWorkflowRootCommand("workflow", "edge", "add", workflowID, "--from", "implement", "--transition", "done", "--edge-key", "done", "--to", "done", "--context", "new_session"); code != 0 {
+		t.Fatalf("workflow done edge add exit=%d stderr=%q", code, edgeErr)
+	}
+	if _, linkErr, code := runWorkflowRootCommand("workflow", "link", binding.ProjectID, workflowID, "--default"); code != 0 {
+		t.Fatalf("workflow link exit=%d stderr=%q", code, linkErr)
+	}
+
+	taskOut, taskErr, code := runWorkflowRootCommand("task", "create", "--title", "Safe Task", "--body", "Body", "--workflow", workflowID, "--project", binding.ProjectID)
+	if code != 0 {
+		t.Fatalf("task create exit=%d stderr=%q", code, taskErr)
+	}
+	shortID := labeledOutputValue(t, taskOut, "short_id")
+	if shortID == "" {
+		t.Fatalf("task create output = %q", taskOut)
+	}
+	if _, listErr, code := runWorkflowRootCommand("task", "list", "--project", binding.ProjectID); code != 0 {
+		t.Fatalf("task list exit=%d stderr=%q", code, listErr)
+	}
+	if _, showErr, code := runWorkflowRootCommand("task", "show", "--project", binding.ProjectID, shortID); code != 0 {
+		t.Fatalf("task show exit=%d stderr=%q", code, showErr)
+	}
+	commentOut, commentErr, code := runWorkflowRootCommand("task", "comment", "add", "--project", binding.ProjectID, "--body", "note", shortID)
+	if code != 0 {
+		t.Fatalf("task comment add exit=%d stderr=%q", code, commentErr)
+	}
+	commentID := labeledOutputValue(t, commentOut, "comment_id")
+	if commentID == "" {
+		t.Fatalf("task comment add output = %q", commentOut)
+	}
+	if _, replaceErr, code := runWorkflowRootCommand("task", "comment", "replace", "--body", "edited", commentID); code != 0 {
+		t.Fatalf("task comment replace exit=%d stderr=%q", code, replaceErr)
 	}
 }
 

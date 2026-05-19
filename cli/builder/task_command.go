@@ -6,10 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"builder/prompts"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/sessionenv"
 )
 
 func taskSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -122,6 +125,9 @@ func taskStartSubcommand(args []string, stdout io.Writer, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "task start requires <short-id-or-task-id>")
 		return 2
 	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
+	}
 	cfg, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -233,6 +239,9 @@ func taskCancelSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintln(stderr, "task cancel requires <short-id-or-task-id>")
 		return 2
 	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
+	}
 	cfg, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -270,6 +279,9 @@ func taskResumeSubcommand(args []string, stdout io.Writer, stderr io.Writer) int
 	if len(positionals) != 1 {
 		fmt.Fprintln(stderr, "task resume requires <short-id-or-task-id>")
 		return 2
+	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
 	}
 	cfg, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
@@ -311,6 +323,9 @@ func taskApproveSubcommand(args []string, stdout io.Writer, stderr io.Writer) in
 	if len(positionals) != 1 {
 		fmt.Fprintln(stderr, "task approve requires <transition-id>")
 		return 2
+	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
 	}
 	_, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
@@ -354,6 +369,9 @@ func taskMoveSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(positionals) != 2 {
 		fmt.Fprintln(stderr, "task move requires <short-id-or-task-id> <target-node-id>")
 		return 2
+	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
 	}
 	cfg, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
@@ -574,6 +592,9 @@ func taskCommentDeleteSubcommand(args []string, stdout io.Writer, stderr io.Writ
 		fmt.Fprintln(stderr, "task comment delete requires <comment-id>")
 		return 2
 	}
+	if denyAgentHumanOnlyTaskAction(stderr) {
+		return 1
+	}
 	_, remote, err := workflowOpen(context.Background(), ".")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -588,6 +609,14 @@ func taskCommentDeleteSubcommand(args []string, stdout io.Writer, stderr io.Writ
 	}
 	fmt.Fprintf(stdout, "deleted_comment_id\t%s\n", positionals[0])
 	return 0
+}
+
+func denyAgentHumanOnlyTaskAction(stderr io.Writer) bool {
+	if _, ok := sessionenv.LookupBuilderSessionID(os.LookupEnv); !ok {
+		return false
+	}
+	fmt.Fprintln(stderr, prompts.WorkflowHumanOnlyTaskActionDeniedPrompt)
+	return true
 }
 
 func workflowBoardForProject(ctx context.Context, cfg config.App, remote workflowCommandRemote, projectRef string) (serverapi.WorkflowBoard, error) {

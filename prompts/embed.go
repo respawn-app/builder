@@ -131,6 +131,9 @@ var WorkflowStructuredOutputModePrompt string
 //go:embed workflow/node_context.md
 var WorkflowNodeContextPrompt string
 
+//go:embed workflow/human_only_task_action_denied.md
+var WorkflowHumanOnlyTaskActionDeniedPrompt string
+
 //go:embed worktree_mode_prompt.md
 var WorktreeModePrompt string
 
