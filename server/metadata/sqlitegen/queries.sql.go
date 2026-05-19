@@ -1207,40 +1207,6 @@ func (q *Queries) GetWorkflowNodeGroupByKey(ctx context.Context, arg GetWorkflow
 	return i, err
 }
 
-const getWorkspaceBindingByCanonicalRoot = `-- name: GetWorkspaceBindingByCanonicalRoot :one
-SELECT
-    p.id AS project_id,
-    p.display_name AS project_display_name,
-    p.project_key,
-    w.id AS workspace_id,
-    w.canonical_root_path AS workspace_root
-FROM workspaces w
-JOIN projects p ON p.id = w.project_id
-WHERE w.canonical_root_path = ?1
-LIMIT 1
-`
-
-type GetWorkspaceBindingByCanonicalRootRow struct {
-	ProjectID          string
-	ProjectDisplayName string
-	ProjectKey         string
-	WorkspaceID        string
-	WorkspaceRoot      string
-}
-
-func (q *Queries) GetWorkspaceBindingByCanonicalRoot(ctx context.Context, canonicalRootPath string) (GetWorkspaceBindingByCanonicalRootRow, error) {
-	row := q.db.QueryRowContext(ctx, getWorkspaceBindingByCanonicalRoot, canonicalRootPath)
-	var i GetWorkspaceBindingByCanonicalRootRow
-	err := row.Scan(
-		&i.ProjectID,
-		&i.ProjectDisplayName,
-		&i.ProjectKey,
-		&i.WorkspaceID,
-		&i.WorkspaceRoot,
-	)
-	return i, err
-}
-
 const getWorkspaceBindingByID = `-- name: GetWorkspaceBindingByID :one
 SELECT
     p.id AS project_id,
@@ -3825,6 +3791,56 @@ func (q *Queries) ListWorkflows(ctx context.Context) ([]Workflow, error) {
 			&i.CreatedAtUnixMs,
 			&i.UpdatedAtUnixMs,
 			&i.MetadataJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceBindingsByCanonicalRoot = `-- name: ListWorkspaceBindingsByCanonicalRoot :many
+SELECT
+    p.id AS project_id,
+    p.display_name AS project_display_name,
+    p.project_key,
+    w.id AS workspace_id,
+    w.canonical_root_path AS workspace_root
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+WHERE w.canonical_root_path = ?1
+ORDER BY p.created_at_unix_ms ASC, p.rowid ASC, w.created_at_unix_ms ASC, w.rowid ASC
+`
+
+type ListWorkspaceBindingsByCanonicalRootRow struct {
+	ProjectID          string
+	ProjectDisplayName string
+	ProjectKey         string
+	WorkspaceID        string
+	WorkspaceRoot      string
+}
+
+func (q *Queries) ListWorkspaceBindingsByCanonicalRoot(ctx context.Context, canonicalRootPath string) ([]ListWorkspaceBindingsByCanonicalRootRow, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkspaceBindingsByCanonicalRoot, canonicalRootPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspaceBindingsByCanonicalRootRow
+	for rows.Next() {
+		var i ListWorkspaceBindingsByCanonicalRootRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.ProjectDisplayName,
+			&i.ProjectKey,
+			&i.WorkspaceID,
+			&i.WorkspaceRoot,
 		); err != nil {
 			return nil, err
 		}

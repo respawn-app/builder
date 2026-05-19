@@ -963,8 +963,8 @@ func TestInsertWorkspaceBindingAllowsSameCanonicalRootAcrossProjects(t *testing.
 	if workspaceCount != 2 {
 		t.Fatalf("workspace count = %d, want 2", workspaceCount)
 	}
-	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); err != nil {
-		t.Fatalf("EnsureWorkspaceBinding after duplicate-path inserts: %v", err)
+	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceBindingAmbiguous) {
+		t.Fatalf("EnsureWorkspaceBinding after duplicate-path inserts error = %v, want ErrWorkspaceBindingAmbiguous", err)
 	}
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects WHERE id = ?", winner.ProjectID).Scan(&projectCount); err != nil {
 		t.Fatalf("count winner project: %v", err)

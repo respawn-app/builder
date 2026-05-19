@@ -2,6 +2,7 @@ package projectview
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -610,6 +611,43 @@ func TestMetadataServicePlansInteractiveLocalUnboundWorkspace(t *testing.T) {
 	}
 	if len(plan.Projects) != 1 || plan.Projects[0].ProjectID != binding.ProjectID {
 		t.Fatalf("plan projects = %+v, want registered project %q", plan.Projects, binding.ProjectID)
+	}
+}
+
+func TestMetadataServicePlansAmbiguousDuplicateWorkspaceBinding(t *testing.T) {
+	store, cfg, first := newProjectViewMetadataStore(t)
+	second, err := store.CreateProjectForWorkspace(context.Background(), cfg.WorkspaceRoot, "second")
+	if err != nil {
+		t.Fatalf("CreateProjectForWorkspace second: %v", err)
+	}
+	svc, err := NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	if _, err := svc.ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: cfg.WorkspaceRoot}); !errors.Is(err, serverapi.ErrWorkspaceBindingAmbiguous) {
+		t.Fatalf("ResolveProjectPath duplicate binding error = %v, want ErrWorkspaceBindingAmbiguous", err)
+	}
+	plan, err := svc.PlanWorkspaceBinding(context.Background(), serverapi.ProjectBindingPlanRequest{Path: cfg.WorkspaceRoot, Mode: serverapi.ProjectBindingPlanModeInteractive})
+	if err != nil {
+		t.Fatalf("PlanWorkspaceBinding interactive duplicate: %v", err)
+	}
+	if plan.Kind != serverapi.ProjectBindingPlanKindServerWorkspaceSelection {
+		t.Fatalf("interactive plan kind = %q, want %q", plan.Kind, serverapi.ProjectBindingPlanKindServerWorkspaceSelection)
+	}
+	if len(plan.Projects) != 2 {
+		t.Fatalf("interactive plan projects = %+v, want two projects", plan.Projects)
+	}
+	if plan.CanonicalRoot != first.CanonicalRoot || second.CanonicalRoot != first.CanonicalRoot {
+		t.Fatalf("duplicate canonical roots = %q/%q, want %q", first.CanonicalRoot, second.CanonicalRoot, cfg.WorkspaceRoot)
+	}
+
+	plan, err = svc.PlanWorkspaceBinding(context.Background(), serverapi.ProjectBindingPlanRequest{Path: cfg.WorkspaceRoot, Mode: serverapi.ProjectBindingPlanModeHeadless})
+	if err != nil {
+		t.Fatalf("PlanWorkspaceBinding headless duplicate: %v", err)
+	}
+	if plan.Kind != serverapi.ProjectBindingPlanKindHeadlessRemoteAmbiguous {
+		t.Fatalf("headless plan kind = %q, want %q", plan.Kind, serverapi.ProjectBindingPlanKindHeadlessRemoteAmbiguous)
 	}
 }
 

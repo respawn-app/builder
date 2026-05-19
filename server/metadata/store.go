@@ -422,19 +422,22 @@ func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string
 	if err != nil {
 		return Binding{}, err
 	}
-	row, err := s.queries.GetWorkspaceBindingByCanonicalRoot(ctx, canonicalRoot)
-	if err == nil {
-		return Binding{
-			ProjectID:       row.ProjectID,
-			ProjectKey:      row.ProjectKey,
-			ProjectName:     row.ProjectDisplayName,
-			WorkspaceID:     row.WorkspaceID,
-			CanonicalRoot:   row.WorkspaceRoot,
-			WorkspaceName:   filepath.Base(row.WorkspaceRoot),
-			WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
-		}, nil
+	rows, err := s.queries.ListWorkspaceBindingsByCanonicalRoot(ctx, canonicalRoot)
+	if err != nil {
+		return Binding{}, err
 	}
-	return Binding{}, fmt.Errorf("lookup workspace binding: %w", err)
+	switch len(rows) {
+	case 0:
+		return Binding{}, sql.ErrNoRows
+	case 1:
+		return bindingFromCanonicalRootRow(rows[0]), nil
+	default:
+		projectIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			projectIDs = append(projectIDs, row.ProjectID)
+		}
+		return Binding{}, serverapi.WorkspaceBindingAmbiguousError{CanonicalRoot: canonicalRoot, ProjectIDs: projectIDs}
+	}
 }
 
 func (s *Store) CreateProjectForWorkspace(ctx context.Context, workspaceRoot string, projectName string) (Binding, error) {
@@ -911,21 +914,23 @@ func (s *Store) registerWorkspaceBindingConverged(ctx context.Context, canonical
 		return Binding{}, fmt.Errorf("acquire workspace registration lock: %w", err)
 	}
 	q := s.queries.WithTx(tx)
-	if row, err := q.GetWorkspaceBindingByCanonicalRoot(ctx, canonicalRoot); err == nil {
+	rows, err := q.ListWorkspaceBindingsByCanonicalRoot(ctx, canonicalRoot)
+	if err != nil {
+		return Binding{}, fmt.Errorf("lookup workspace binding: %w", err)
+	}
+	switch len(rows) {
+	case 0:
+	case 1:
 		if err := tx.Commit(); err != nil {
 			return Binding{}, fmt.Errorf("commit workspace registration lookup tx: %w", err)
 		}
-		return Binding{
-			ProjectID:       row.ProjectID,
-			ProjectKey:      row.ProjectKey,
-			ProjectName:     row.ProjectDisplayName,
-			WorkspaceID:     row.WorkspaceID,
-			CanonicalRoot:   row.WorkspaceRoot,
-			WorkspaceName:   filepath.Base(row.WorkspaceRoot),
-			WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
-		}, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return Binding{}, fmt.Errorf("lookup workspace binding: %w", err)
+		return bindingFromCanonicalRootRow(rows[0]), nil
+	default:
+		projectIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			projectIDs = append(projectIDs, row.ProjectID)
+		}
+		return Binding{}, serverapi.WorkspaceBindingAmbiguousError{CanonicalRoot: canonicalRoot, ProjectIDs: projectIDs}
 	}
 
 	now := time.Now().UTC()
@@ -973,6 +978,18 @@ func (s *Store) registerWorkspaceBindingConverged(ctx context.Context, canonical
 		WorkspaceName:   displayName,
 		WorkspaceStatus: availabilityForPath(canonicalRoot),
 	}, nil
+}
+
+func bindingFromCanonicalRootRow(row sqlitegen.ListWorkspaceBindingsByCanonicalRootRow) Binding {
+	return Binding{
+		ProjectID:       row.ProjectID,
+		ProjectKey:      row.ProjectKey,
+		ProjectName:     row.ProjectDisplayName,
+		WorkspaceID:     row.WorkspaceID,
+		CanonicalRoot:   row.WorkspaceRoot,
+		WorkspaceName:   filepath.Base(row.WorkspaceRoot),
+		WorkspaceStatus: availabilityForPath(row.WorkspaceRoot),
+	}
 }
 
 func requireExistingDirectory(path string) error {

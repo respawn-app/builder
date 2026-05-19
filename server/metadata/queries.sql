@@ -1,4 +1,4 @@
--- name: GetWorkspaceBindingByCanonicalRoot :one
+-- name: ListWorkspaceBindingsByCanonicalRoot :many
 SELECT
     p.id AS project_id,
     p.display_name AS project_display_name,
@@ -8,7 +8,7 @@ SELECT
 FROM workspaces w
 JOIN projects p ON p.id = w.project_id
 WHERE w.canonical_root_path = sqlc.arg(canonical_root_path)
-LIMIT 1;
+ORDER BY p.created_at_unix_ms ASC, p.rowid ASC, w.created_at_unix_ms ASC, w.rowid ASC;
 
 -- name: GetWorkspaceBindingByProjectAndCanonicalRoot :one
 SELECT
