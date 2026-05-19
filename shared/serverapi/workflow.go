@@ -530,14 +530,15 @@ type WorkflowTaskStatus struct {
 }
 
 type WorkflowTaskActions struct {
-	CanStart                bool   `json:"can_start"`
-	CanInterrupt            bool   `json:"can_interrupt"`
-	InterruptRunID          string `json:"interrupt_run_id,omitempty"`
-	CanResume               bool   `json:"can_resume"`
-	ResumeRunID             string `json:"resume_run_id,omitempty"`
-	CanCancel               bool   `json:"can_cancel"`
-	NeedsDetailForInterrupt bool   `json:"needs_detail_for_interrupt"`
-	NeedsDetailForResume    bool   `json:"needs_detail_for_resume"`
+	CanStart                bool     `json:"can_start"`
+	CanInterrupt            bool     `json:"can_interrupt"`
+	InterruptRunID          string   `json:"interrupt_run_id,omitempty"`
+	CanResume               bool     `json:"can_resume"`
+	ResumeRunID             string   `json:"resume_run_id,omitempty"`
+	CanCancel               bool     `json:"can_cancel"`
+	NeedsDetailForInterrupt bool     `json:"needs_detail_for_interrupt"`
+	NeedsDetailForResume    bool     `json:"needs_detail_for_resume"`
+	ManualMoveTargetNodeIDs []string `json:"manual_move_target_node_ids,omitempty"`
 }
 
 type WorkflowProjectSubscribeRequest struct {

@@ -14,5 +14,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tokio = { version = "1", features = ["sync"] }
+toml = "0.9"

@@ -12,8 +12,10 @@
         "@hookform/resolvers",
         "@tanstack/react-query",
         "@tanstack/react-router",
+        "@tanstack/react-virtual",
         "@tauri-apps/api",
         "i18next",
+        "lucide-react",
         "react",
         "react-dom",
         "react-hook-form",
@@ -25,6 +27,7 @@
       ],
       "devDependencies": [
         "@eslint/js",
+        "@tailwindcss/vite",
         "@tauri-apps/cli",
         "@testing-library/jest-dom",
         "@testing-library/react",
@@ -39,6 +42,7 @@
         "eslint-plugin-react-refresh",
         "eslint-plugin-testing-library",
         "jsdom",
+        "tailwindcss",
         "typescript",
         "typescript-eslint",
         "vite",
@@ -46,6 +50,7 @@
       ]
     },
     "@builder/desktop-native-bridge": {
+      "dependencies": ["@tauri-apps/api", "@tauri-apps/plugin-clipboard-manager"],
       "devDependencies": ["typescript", "vitest"]
     }
   }

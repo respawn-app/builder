@@ -90,11 +90,6 @@ func (c *Remote) GetServerReadiness(ctx context.Context, req serverapi.ServerRea
 	return resp, c.callUnscoped(ctx, protocol.MethodServerReadinessGet, req, &resp)
 }
 
-func (c *Remote) GetServerCapabilities(ctx context.Context, req serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error) {
-	var resp serverapi.ServerCapabilitiesResponse
-	return resp, c.callUnscoped(ctx, protocol.MethodServerCapabilitiesGet, req, &resp)
-}
-
 func (c *Remote) ProjectID() string {
 	if c == nil {
 		return ""
@@ -156,9 +151,29 @@ func (c *Remote) CreateProject(ctx context.Context, req serverapi.ProjectCreateR
 	return resp, c.callUnscoped(ctx, protocol.MethodProjectCreate, req, &resp)
 }
 
+func (c *Remote) GetProjectEdit(ctx context.Context, req serverapi.ProjectEditGetRequest) (serverapi.ProjectEditGetResponse, error) {
+	var resp serverapi.ProjectEditGetResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectEditGet, req, &resp)
+}
+
+func (c *Remote) UpdateProject(ctx context.Context, req serverapi.ProjectUpdateRequest) (serverapi.ProjectUpdateResponse, error) {
+	var resp serverapi.ProjectUpdateResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectUpdate, req, &resp)
+}
+
+func (c *Remote) SetDefaultWorkspace(ctx context.Context, req serverapi.ProjectDefaultWorkspaceSetRequest) (serverapi.ProjectDefaultWorkspaceSetResponse, error) {
+	var resp serverapi.ProjectDefaultWorkspaceSetResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectSetDefaultWorkspace, req, &resp)
+}
+
 func (c *Remote) ListProjectWorkspaces(ctx context.Context, req serverapi.ProjectWorkspaceListRequest) (serverapi.ProjectWorkspaceListResponse, error) {
 	var resp serverapi.ProjectWorkspaceListResponse
 	return resp, c.callUnscoped(ctx, protocol.MethodProjectWorkspaceList, req, &resp)
+}
+
+func (c *Remote) UnlinkWorkspaceFromProject(ctx context.Context, req serverapi.ProjectWorkspaceUnlinkRequest) (serverapi.ProjectWorkspaceUnlinkResponse, error) {
+	var resp serverapi.ProjectWorkspaceUnlinkResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectUnlinkWorkspace, req, &resp)
 }
 
 func (c *Remote) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {

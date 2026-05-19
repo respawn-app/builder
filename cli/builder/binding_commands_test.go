@@ -579,7 +579,6 @@ func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
 
 	assertRebindError([]string{"session-missing", targetWorkspace}, session.ErrSessionNotFound.Error())
 	assertRebindError([]string{sess.Meta().SessionID, missingWorkspace}, "does not exist")
-	assertRebindError([]string{sess.Meta().SessionID, otherWorkspace}, "already bound")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

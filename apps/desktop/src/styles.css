@@ -1,101 +1,233 @@
+@import "tailwindcss";
+
 :root {
-  color: #f4f4f5;
-  background: #0b0c0f;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  --font-header:
+    Montserrat, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-main:
+    Montserrat, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Monaspace Neon", "SFMono-Regular", Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --radius-x: 18px;
+  --radius-xl: 24px;
+  --motion-fast: 140ms ease;
+  --motion-normal: 400ms ease;
+  --motion-expressive: 700ms ease;
+  --color-island-0: rgba(18, 16, 14, 0.78);
+  --color-island-1: rgba(255, 255, 255, 0.04);
+  --color-island-2: rgba(255, 255, 255, 0.08);
+  --color-island-3: rgba(25, 32, 44, 0.9);
+  --color-outline: rgba(255, 255, 255, 0.12);
+  --color-on-island: #f5f7fb;
+  --color-on-background: var(--color-on-island);
+  --color-primary: #8bb5ff;
+  --color-on-primary: #061222;
+  --color-secondary: #aeb8c7;
+  --color-on-secondary: #061222;
+  --color-warning: #ffd37a;
+  --color-on-warning: #061222;
+  --color-success: #7ee2ad;
+  --color-on-success: #061222;
+  --color-error: #ff8f8f;
+  --color-on-error: #061222;
+  --shadow-island-0: 0 24px 70px rgba(0, 0, 0, 0.32);
+  --shadow-island-1: 0 16px 48px rgba(0, 0, 0, 0.24);
+  --shadow-island-2: 0 24px 70px rgba(0, 0, 0, 0.32);
+  --shadow-island-3: 0 32px 90px rgba(0, 0, 0, 0.38);
+  --window-glass-tint: rgba(12, 15, 20, 0.34);
+  --native-titlebar-height: 38px;
+  --native-traffic-light-cluster-width: 74px;
+  --native-home-link-left-default: var(--space-4);
+  --native-home-link-left-macos: calc(
+    var(--native-traffic-light-cluster-width) + var(--native-home-link-left-default)
+  );
+  color: var(--color-on-island);
+  color-scheme: dark;
+  background: transparent;
+  font-family: var(--font-main);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
-  box-sizing: border-box;
+@theme inline {
+  --font-sans: var(--font-main);
+  --font-mono: var(--font-mono);
 }
 
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-island-0: rgba(255, 255, 255, 0.78);
+    --color-island-1: rgba(255, 255, 255, 0.68);
+    --color-island-2: rgba(255, 255, 255, 0.82);
+    --color-island-3: rgba(255, 255, 255, 0.92);
+    --color-outline: rgba(21, 30, 46, 0.12);
+    --color-on-island: #111827;
+    --color-primary: #155eef;
+    --color-on-primary: #f8fbff;
+    --color-secondary: #536171;
+    --color-on-secondary: #f8fbff;
+    --color-warning: #a15c07;
+    --color-on-warning: #f8fbff;
+    --color-success: #067647;
+    --color-on-success: #f8fbff;
+    --color-error: #b42318;
+    --color-on-error: #f8fbff;
+    --window-glass-tint: rgba(238, 243, 251, 0.42);
+    color-scheme: light;
+  }
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
+:root[data-builder-theme="light"] {
+  --color-island-0: rgba(255, 255, 255, 0.78);
+  --color-island-1: rgba(255, 255, 255, 0.68);
+  --color-island-2: rgba(255, 255, 255, 0.82);
+  --color-island-3: rgba(255, 255, 255, 0.92);
+  --color-outline: rgba(21, 30, 46, 0.12);
+  --color-on-island: #111827;
+  --color-primary: #155eef;
+  --color-on-primary: #f8fbff;
+  --color-secondary: #536171;
+  --color-on-secondary: #f8fbff;
+  --color-warning: #a15c07;
+  --color-on-warning: #f8fbff;
+  --color-success: #067647;
+  --color-on-success: #f8fbff;
+  --color-error: #b42318;
+  --color-on-error: #f8fbff;
+  --window-glass-tint: rgba(238, 243, 251, 0.42);
+  color-scheme: light;
 }
 
-.shell {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 48px;
+:root[data-builder-theme="dark"] {
+  --color-island-0: rgba(18, 16, 14, 0.78);
+  --color-island-1: rgba(255, 255, 255, 0.04);
+  --color-island-2: rgba(255, 255, 255, 0.08);
+  --color-island-3: rgba(25, 32, 44, 0.9);
+  --color-outline: rgba(255, 255, 255, 0.12);
+  --color-on-island: #f5f7fb;
+  --color-primary: #8bb5ff;
+  --color-on-primary: #061222;
+  --color-secondary: #aeb8c7;
+  --color-on-secondary: #061222;
+  --color-warning: #ffd37a;
+  --color-on-warning: #061222;
+  --color-success: #7ee2ad;
+  --color-on-success: #061222;
+  --color-error: #ff8f8f;
+  --color-on-error: #061222;
+  --window-glass-tint: rgba(12, 15, 20, 0.34);
+  color-scheme: dark;
 }
 
-.hero {
-  width: min(760px, 100%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 28px;
-  padding: 40px;
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms ease;
+    --motion-normal: 0ms ease;
+    --motion-expressive: 0ms ease;
+  }
+}
+
+@keyframes board-menu-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes surface-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-width: 320px;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+@utility app-region-drag {
+  -webkit-app-region: drag;
+}
+
+@utility app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@utility island-glass {
+  border: 1px solid var(--color-outline);
+  background: var(--color-island-0);
+  box-shadow: var(--shadow-island-0);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+@utility window-glass-fill {
   background:
-    radial-gradient(circle at top left, rgba(92, 142, 255, 0.16), transparent 36rem),
-    rgba(255, 255, 255, 0.04);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+    radial-gradient(
+      circle at 12% 0%,
+      color-mix(in srgb, var(--color-primary) 22%, transparent),
+      transparent 42%
+    ),
+    var(--window-glass-tint);
 }
 
-.eyebrow {
-  margin: 0 0 12px;
-  color: #9ca3af;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+@utility contain-strict {
+  contain: strict;
 }
 
-h1 {
-  margin: 0;
-  font-size: clamp(2.25rem, 6vw, 4.5rem);
-  line-height: 0.96;
-}
+@utility hide-scrollbar {
+  scrollbar-width: none;
 
-.summary {
-  max-width: 60ch;
-  margin: 24px 0 0;
-  color: #d4d4d8;
-  font-size: 1.05rem;
-  line-height: 1.7;
-}
-
-.facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  margin: 32px 0 0;
-}
-
-.facts div {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.facts dt {
-  color: #a1a1aa;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.facts dd {
-  margin: 8px 0 0;
-  color: #f4f4f5;
-  font-weight: 700;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }

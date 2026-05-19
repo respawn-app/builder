@@ -295,7 +295,7 @@ func TestServiceTaskStartEnsuresTaskWorktreeBeforeRun(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsUnlinkedWorkflowAndInvalidDefault(t *testing.T) {
+func TestServiceAllowsInvalidDefaultBacklogButRejectsUnlinkedWorkflow(t *testing.T) {
 	ctx := context.Background()
 	service, binding := newWorkflowServiceTestService(t)
 	unlinked, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Unlinked"})
@@ -308,8 +308,12 @@ func TestServiceRejectsUnlinkedWorkflowAndInvalidDefault(t *testing.T) {
 	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: unlinked.Workflow.ID, Default: true}); err != nil {
 		t.Fatalf("LinkWorkflowToProject invalid default: %v", err)
 	}
-	if _, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"}); err == nil || !strings.Contains(err.Error(), "workflow validation failed") {
-		t.Fatalf("expected invalid default workflow error, got %v", err)
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask invalid default backlog: %v", err)
+	}
+	if _, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID}); err == nil || !strings.Contains(err.Error(), "workflow validation failed") {
+		t.Fatalf("expected invalid default workflow start error, got %v", err)
 	}
 }
 
@@ -655,9 +659,16 @@ func TestServiceWorkflowProjectSubscriptionReplaysEvents(t *testing.T) {
 		t.Fatalf("SubscribeWorkflowProject: %v", err)
 	}
 	defer func() { _ = sub.Close() }()
-	event, err := sub.Next(ctx)
-	if err != nil {
-		t.Fatalf("subscription Next: %v", err)
+	var event serverapi.WorkflowProjectEvent
+	for range 5 {
+		next, err := sub.Next(ctx)
+		if err != nil {
+			t.Fatalf("subscription Next: %v", err)
+		}
+		if next.ProjectID == binding.ProjectID && next.WorkflowID == created.Workflow.ID && next.Resource == "workflow_link" {
+			event = next
+			break
+		}
 	}
 	if event.Sequence == 0 || event.ProjectID != binding.ProjectID || event.WorkflowID != created.Workflow.ID || event.Resource != "workflow_link" {
 		t.Fatalf("event = %+v, want workflow link event", event)

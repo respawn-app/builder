@@ -10,7 +10,6 @@ import (
 
 type ServerStatusClient interface {
 	GetServerReadiness(ctx context.Context, req serverapi.ServerReadinessRequest) (serverapi.ServerReadinessResponse, error)
-	GetServerCapabilities(ctx context.Context, req serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error)
 }
 
 type loopbackServerStatusClient struct {
@@ -26,11 +25,4 @@ func (c *loopbackServerStatusClient) GetServerReadiness(ctx context.Context, req
 		return serverapi.ServerReadinessResponse{}, errors.New("server status service is required")
 	}
 	return c.service.GetServerReadiness(ctx, req)
-}
-
-func (c *loopbackServerStatusClient) GetServerCapabilities(ctx context.Context, req serverapi.ServerCapabilitiesRequest) (serverapi.ServerCapabilitiesResponse, error) {
-	if c == nil || c.service == nil {
-		return serverapi.ServerCapabilitiesResponse{}, errors.New("server status service is required")
-	}
-	return c.service.GetServerCapabilities(ctx, req)
 }

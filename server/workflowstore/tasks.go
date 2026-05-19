@@ -124,10 +124,6 @@ func (s *Store) CreateTask(ctx context.Context, req CreateTaskRequest) (TaskReco
 	if err != nil {
 		return TaskRecord{}, err
 	}
-	validation := workflow.ValidateDefinition(def, workflow.ValidationOptions{Context: workflow.ValidationContextTaskCreation, RoleResolver: s.roleResolver})
-	if validation.HasBlockingErrors() {
-		return TaskRecord{}, fmt.Errorf("workflow validation failed: %v", validation.Codes())
-	}
 	startNode, err := startNode(def)
 	if err != nil {
 		return TaskRecord{}, err
@@ -147,7 +143,11 @@ func (s *Store) CreateTask(ctx context.Context, req CreateTaskRequest) (TaskReco
 	}
 	seq := allocated.NextTaskSeq - 1
 	shortID := fmt.Sprintf("%s-%d", strings.TrimSpace(allocated.ProjectKey), seq)
-	if err := q.InsertTask(ctx, sqlitegen.InsertTaskParams{ID: taskID, ProjectID: req.ProjectID, ProjectWorkflowLinkID: link.ID, WorkflowID: link.WorkflowID, WorkflowRevisionSeen: wf.GraphRevision, TaskSeq: seq, ShortID: shortID, Title: title, Body: body, SourceUrl: strings.TrimSpace(req.SourceURL), SourceWorkspaceID: sql.NullString{String: sourceWorkspaceID, Valid: sourceWorkspaceID != ""}, ManagedWorktreeID: sql.NullString{}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, MetadataJson: "{}"}); err != nil {
+	metadataJSON, err := taskMetadataWithSourceWorkspaceSnapshot(ctx, q, "{}", sourceWorkspaceID)
+	if err != nil {
+		return TaskRecord{}, err
+	}
+	if err := q.InsertTask(ctx, sqlitegen.InsertTaskParams{ID: taskID, ProjectID: req.ProjectID, ProjectWorkflowLinkID: link.ID, WorkflowID: link.WorkflowID, WorkflowRevisionSeen: wf.GraphRevision, TaskSeq: seq, ShortID: shortID, Title: title, Body: body, SourceUrl: strings.TrimSpace(req.SourceURL), SourceWorkspaceID: sql.NullString{String: sourceWorkspaceID, Valid: sourceWorkspaceID != ""}, ManagedWorktreeID: sql.NullString{}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, MetadataJson: metadataJSON}); err != nil {
 		return TaskRecord{}, fmt.Errorf("insert task: %w", err)
 	}
 	if err := q.InsertTaskNodePlacement(ctx, sqlitegen.InsertTaskNodePlacementParams{ID: placementID, TaskID: taskID, NodeID: string(startNode.ID), State: "active", CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
@@ -209,7 +209,11 @@ func (s *Store) UpdateTask(ctx context.Context, req UpdateTaskRequest) (TaskReco
 	if err != nil {
 		return TaskRecord{}, err
 	}
-	updated, err := q.UpdateTaskEditableFields(ctx, sqlitegen.UpdateTaskEditableFieldsParams{ID: task.ID, Title: title, Body: body, SourceWorkspaceID: sql.NullString{String: sourceWorkspaceID, Valid: sourceWorkspaceID != ""}, UpdatedAtUnixMs: now})
+	metadataJSON, err := taskMetadataWithSourceWorkspaceSnapshot(ctx, q, task.MetadataJson, sourceWorkspaceID)
+	if err != nil {
+		return TaskRecord{}, err
+	}
+	updated, err := q.UpdateTaskEditableFields(ctx, sqlitegen.UpdateTaskEditableFieldsParams{ID: task.ID, Title: title, Body: body, SourceWorkspaceID: sql.NullString{String: sourceWorkspaceID, Valid: sourceWorkspaceID != ""}, MetadataJson: metadataJSON, UpdatedAtUnixMs: now})
 	if err != nil {
 		return TaskRecord{}, fmt.Errorf("update task: %w", err)
 	}
@@ -290,6 +294,30 @@ func resolveTaskSourceWorkspaceWithQueries(ctx context.Context, q *sqlitegen.Que
 		}
 	}
 	return "", fmt.Errorf("project %q has no source workspace", trimmedProjectID)
+}
+
+func taskMetadataWithSourceWorkspaceSnapshot(ctx context.Context, q *sqlitegen.Queries, currentMetadata string, sourceWorkspaceID string) (string, error) {
+	payload := map[string]any{}
+	if strings.TrimSpace(currentMetadata) != "" {
+		if err := unmarshalJSON(currentMetadata, &payload); err != nil {
+			return "", fmt.Errorf("decode task metadata json: %w", err)
+		}
+	}
+	trimmedWorkspaceID := strings.TrimSpace(sourceWorkspaceID)
+	if trimmedWorkspaceID == "" {
+		delete(payload, "source_workspace_snapshot")
+		return marshalJSON(payload)
+	}
+	workspace, err := q.GetWorkspaceByID(ctx, trimmedWorkspaceID)
+	if err != nil {
+		return "", fmt.Errorf("source workspace snapshot %q: %w", trimmedWorkspaceID, err)
+	}
+	payload["source_workspace_snapshot"] = map[string]string{
+		"workspace_id": workspace.ID,
+		"display_name": workspace.DisplayName,
+		"root_path":    workspace.CanonicalRootPath,
+	}
+	return marshalJSON(payload)
 }
 
 func (s *Store) StartTask(ctx context.Context, taskID workflow.TaskID) (StartTaskResult, error) {

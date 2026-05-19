@@ -98,7 +98,8 @@ export default tseslint.config(
             ...tauriImportRestriction.paths,
             {
               name: "@builder/desktop-native-bridge",
-              message: "Components must use app services or feature hooks instead of importing NativeBridge directly.",
+              message:
+                "Components must use app services or feature hooks instead of importing NativeBridge directly.",
             },
           ],
         },

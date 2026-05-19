@@ -5,6 +5,7 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -188,9 +189,18 @@ func TestAttachWorkspaceToProjectAllowsNestedPathAsSeparateWorkspace(t *testing.
 		t.Fatalf("nested attach root = %q, want %q", resolved.CanonicalRoot, canonicalNested)
 	}
 
-	_, err = store.AttachWorkspaceToProject(context.Background(), otherBinding.ProjectID, nested)
-	if err == nil || !strings.Contains(err.Error(), "already bound") {
-		t.Fatalf("expected exact-root conflict on second nested attach, got %v", err)
+	sharedPath, err := store.AttachWorkspaceToProject(context.Background(), otherBinding.ProjectID, nested)
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject shared path into other project: %v", err)
+	}
+	if sharedPath.ProjectID != otherBinding.ProjectID {
+		t.Fatalf("shared path project id = %q, want %q", sharedPath.ProjectID, otherBinding.ProjectID)
+	}
+	if sharedPath.WorkspaceID == resolved.WorkspaceID {
+		t.Fatalf("shared path workspace id reused across projects: %+v", sharedPath)
+	}
+	if sharedPath.CanonicalRoot != canonicalNested {
+		t.Fatalf("shared path root = %q, want %q", sharedPath.CanonicalRoot, canonicalNested)
 	}
 
 	projects, err := store.ListProjects(context.Background())
@@ -200,6 +210,175 @@ func TestAttachWorkspaceToProjectAllowsNestedPathAsSeparateWorkspace(t *testing.
 	if len(projects) != 2 {
 		t.Fatalf("project count = %d, want 2", len(projects))
 	}
+}
+
+func TestUnlinkProjectWorkspaceBlocksUnsafeStates(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	attached, err := store.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+
+	defaultBlockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, binding.WorkspaceID)
+	if err != nil {
+		t.Fatalf("UnlinkProjectWorkspace default: %v", err)
+	}
+	assertWorkspaceUnlinkBlocker(t, defaultBlockers, "default_workspace")
+
+	now := time.Now().UTC().UnixMilli()
+	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
+	execSeed(t, store.db, "active source task", `INSERT INTO tasks (id, project_id, project_workflow_link_id, workflow_id, workflow_revision_seen, task_seq, short_id, title, body, source_workspace_id, created_at_unix_ms, updated_at_unix_ms, metadata_json)
+VALUES ('task-active-workspace', ?, 'link-1', 'workflow-1', 1, 1, 'BLD-1', 'Active', '', ?, ?, ?, json_object('source_workspace_snapshot', json_object('workspace_id', ?, 'display_name', ?, 'root_path', ?)))`, binding.ProjectID, attached.WorkspaceID, now, now, attached.WorkspaceID, attached.WorkspaceName, attached.CanonicalRoot)
+	execSeed(t, store.db, "active source placement", `INSERT INTO task_node_placements (id, task_id, node_id, state, created_at_unix_ms, updated_at_unix_ms)
+VALUES ('placement-active-workspace', 'task-active-workspace', 'node-agent', 'active', ?, ?)`, now, now)
+
+	activeTaskBlockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, attached.WorkspaceID)
+	if err != nil {
+		t.Fatalf("UnlinkProjectWorkspace active task: %v", err)
+	}
+	assertWorkspaceUnlinkBlocker(t, activeTaskBlockers, "non_terminal_tasks")
+
+	execSeed(t, store.db, "complete active source placement", `UPDATE task_node_placements SET state = 'completed' WHERE id = 'placement-active-workspace'`)
+	execSeed(t, store.db, "pending approval transition", `INSERT INTO task_transitions (id, task_id, source_placement_id, source_node_id, transition_group_id, transition_id, workflow_revision_seen, actor, state, output_values_json, created_at_unix_ms)
+VALUES ('transition-pending-workspace', 'task-active-workspace', 'placement-active-workspace', 'node-agent', 'group-done', 'done', 1, 'agent', 'pending_approval', '{}', ?)`, now)
+	pendingApprovalBlockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, attached.WorkspaceID)
+	if err != nil {
+		t.Fatalf("UnlinkProjectWorkspace pending approval transition: %v", err)
+	}
+	assertWorkspaceUnlinkBlocker(t, pendingApprovalBlockers, "non_terminal_tasks")
+}
+
+func TestUnlinkProjectWorkspacePreservesTerminalHistory(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	attached, err := store.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	seedWorkflowGraph(t, store.db, binding.ProjectID, now)
+	execSeed(t, store.db, "terminal source task", `INSERT INTO tasks (id, project_id, project_workflow_link_id, workflow_id, workflow_revision_seen, task_seq, short_id, title, body, source_workspace_id, created_at_unix_ms, updated_at_unix_ms, metadata_json)
+VALUES ('task-terminal-workspace', ?, 'link-1', 'workflow-1', 1, 1, 'BLD-1', 'Terminal', '', ?, ?, ?, json_object('source_workspace_snapshot', json_object('workspace_id', ?, 'display_name', ?, 'root_path', ?)))`, binding.ProjectID, attached.WorkspaceID, now, now, attached.WorkspaceID, attached.WorkspaceName, attached.CanonicalRoot)
+	execSeed(t, store.db, "terminal source placement", `INSERT INTO task_node_placements (id, task_id, node_id, state, created_at_unix_ms, updated_at_unix_ms)
+VALUES ('placement-terminal-workspace', 'task-terminal-workspace', 'node-done', 'active', ?, ?)`, now, now)
+	execSeed(t, store.db, "historical workspace session", `INSERT INTO sessions (id, project_id, workspace_id, artifact_relpath, name, first_prompt_preview, input_draft, parent_session_id, created_at_unix_ms, updated_at_unix_ms, last_sequence, model_request_count, in_flight_step, agents_injected, launch_visible, cwd_relpath, continuation_json, locked_json, usage_state_json, metadata_json)
+VALUES ('session-terminal-workspace', ?, ?, 'sessions/session-terminal-workspace', 'Historical', '', '', '', ?, ?, 0, 1, 0, 0, 1, '.', '{}', '{}', '{}', json_object('workspace_root', ?, 'workspace_container', ?))`, binding.ProjectID, attached.WorkspaceID, now, now, attached.CanonicalRoot, attached.WorkspaceName)
+
+	blockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, attached.WorkspaceID)
+	if err != nil {
+		t.Fatalf("UnlinkProjectWorkspace: %v", err)
+	}
+	if len(blockers) != 0 {
+		t.Fatalf("unlink blockers = %+v, want none", blockers)
+	}
+	if _, err := store.GetWorkspaceByID(ctx, attached.WorkspaceID); err == nil {
+		t.Fatalf("workspace %q still exists after unlink", attached.WorkspaceID)
+	}
+	var taskCount int
+	var sourceWorkspaceID sql.NullString
+	var metadataJSON string
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*), source_workspace_id, metadata_json FROM tasks WHERE id = 'task-terminal-workspace'`).Scan(&taskCount, &sourceWorkspaceID, &metadataJSON); err != nil {
+		t.Fatalf("scan preserved task: %v", err)
+	}
+	if taskCount != 1 || sourceWorkspaceID.Valid || !strings.Contains(metadataJSON, attached.CanonicalRoot) {
+		t.Fatalf("preserved task count/source/metadata = %d/%v/%s", taskCount, sourceWorkspaceID, metadataJSON)
+	}
+	record, err := store.ResolvePersistedSession(ctx, "session-terminal-workspace")
+	if err != nil {
+		t.Fatalf("ResolvePersistedSession after unlink: %v", err)
+	}
+	if record.Meta.WorkspaceRoot != attached.CanonicalRoot || record.Meta.WorkspaceContainer != attached.WorkspaceName {
+		t.Fatalf("session workspace snapshot = %q/%q, want %q/%q", record.Meta.WorkspaceRoot, record.Meta.WorkspaceContainer, attached.CanonicalRoot, attached.WorkspaceName)
+	}
+}
+
+func TestProjectWorkspaceMutationsRecordProjectEvents(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	attached, err := store.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	if err := store.UpdateProjectDisplayName(ctx, binding.ProjectID, "Events"); err != nil {
+		t.Fatalf("UpdateProjectDisplayName: %v", err)
+	}
+	if err := store.SetProjectDefaultWorkspace(ctx, binding.ProjectID, attached.WorkspaceID); err != nil {
+		t.Fatalf("SetProjectDefaultWorkspace attached: %v", err)
+	}
+	if err := store.SetProjectDefaultWorkspace(ctx, binding.ProjectID, binding.WorkspaceID); err != nil {
+		t.Fatalf("SetProjectDefaultWorkspace original: %v", err)
+	}
+	if blockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, attached.WorkspaceID); err != nil {
+		t.Fatalf("UnlinkProjectWorkspace: %v", err)
+	} else if len(blockers) != 0 {
+		t.Fatalf("unlink blockers = %+v, want none", blockers)
+	}
+	latest, err := store.LatestWorkflowEventSequence(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("LatestWorkflowEventSequence: %v", err)
+	}
+	if latest < 6 {
+		t.Fatalf("latest project event sequence = %d, want attach/register/update/default/unlink events", latest)
+	}
+}
+
+func assertWorkspaceUnlinkBlocker(t *testing.T, blockers []serverapi.ProjectWorkspaceUnlinkBlocker, code string) {
+	t.Helper()
+	for _, blocker := range blockers {
+		if blocker.Code == code {
+			return
+		}
+	}
+	t.Fatalf("blockers = %+v, want code %q", blockers, code)
 }
 
 func TestRebindWorkspacePreservesWorkspaceIdentity(t *testing.T) {
@@ -289,6 +468,7 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 	home := t.TempDir()
 	oldWorkspace := t.TempDir()
 	otherWorkspace := t.TempDir()
+	projectWorkspace := t.TempDir()
 	missingWorkspace := filepath.Join(t.TempDir(), "missing")
 	t.Setenv("HOME", home)
 
@@ -314,6 +494,10 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterWorkspaceBinding otherWorkspace: %v", err)
 	}
+	_, err = store.AttachWorkspaceToProject(context.Background(), oldBinding.ProjectID, projectWorkspace)
+	if err != nil {
+		t.Fatalf("AttachWorkspaceToProject projectWorkspace: %v", err)
+	}
 
 	if _, err := store.RebindWorkspace(context.Background(), filepath.Join(t.TempDir(), "unknown-old"), otherWorkspace); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("RebindWorkspace unknown old error = %v, want ErrWorkspaceNotRegistered", err)
@@ -321,7 +505,7 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 	if _, err := store.RebindWorkspace(context.Background(), oldWorkspace, missingWorkspace); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("RebindWorkspace missing new error = %v, want does not exist", err)
 	}
-	if _, err := store.RebindWorkspace(context.Background(), oldWorkspace, otherWorkspace); err == nil || !strings.Contains(err.Error(), "already bound") {
+	if _, err := store.RebindWorkspace(context.Background(), oldWorkspace, projectWorkspace); err == nil || !strings.Contains(err.Error(), "already bound") {
 		t.Fatalf("RebindWorkspace bound new error = %v, want already bound", err)
 	}
 	resolved, err := store.EnsureWorkspaceBinding(context.Background(), oldWorkspace)
@@ -330,6 +514,76 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 	}
 	if resolved.WorkspaceID != oldBinding.WorkspaceID {
 		t.Fatalf("resolved workspace id after failed rebinds = %q, want %q", resolved.WorkspaceID, oldBinding.WorkspaceID)
+	}
+}
+
+func TestRebindWorkspaceAllowsTargetPathUsedByAnotherProject(t *testing.T) {
+	home := t.TempDir()
+	oldWorkspace := t.TempDir()
+	sharedTarget := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load oldWorkspace: %v", err)
+	}
+	targetCfg, err := config.Load(sharedTarget, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load sharedTarget: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	oldBinding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding oldWorkspace: %v", err)
+	}
+	targetBinding, err := store.RegisterWorkspaceBinding(context.Background(), targetCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding sharedTarget: %v", err)
+	}
+	rebound, err := store.RebindWorkspace(context.Background(), oldWorkspace, sharedTarget)
+	if err != nil {
+		t.Fatalf("RebindWorkspace shared target: %v", err)
+	}
+	if rebound.WorkspaceID != oldBinding.WorkspaceID {
+		t.Fatalf("rebound workspace id = %q, want %q", rebound.WorkspaceID, oldBinding.WorkspaceID)
+	}
+	if rebound.ProjectID != oldBinding.ProjectID {
+		t.Fatalf("rebound project id = %q, want %q", rebound.ProjectID, oldBinding.ProjectID)
+	}
+	if rebound.ProjectID == targetBinding.ProjectID {
+		t.Fatalf("rebound project reused target project: %+v target %+v", rebound, targetBinding)
+	}
+}
+
+func TestRebindWorkspaceRejectsAmbiguousOldPath(t *testing.T) {
+	home := t.TempDir()
+	oldWorkspace := t.TempDir()
+	newWorkspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load oldWorkspace: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if _, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterWorkspaceBinding oldWorkspace: %v", err)
+	}
+	if _, err := store.CreateProjectForWorkspace(context.Background(), cfg.WorkspaceRoot, "second"); err != nil {
+		t.Fatalf("CreateProjectForWorkspace duplicate: %v", err)
+	}
+	if _, err := store.RebindWorkspace(context.Background(), oldWorkspace, newWorkspace); !errors.Is(err, serverapi.ErrWorkspaceBindingAmbiguous) {
+		t.Fatalf("RebindWorkspace duplicate old error = %v, want ErrWorkspaceBindingAmbiguous", err)
 	}
 }
 
@@ -698,8 +952,7 @@ func TestRebindWorkspaceNormalizesUniqueConflictRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterWorkspaceBinding oldWorkspace: %v", err)
 	}
-	otherBinding, err := storeA.RegisterWorkspaceBinding(ctx, otherCfg.WorkspaceRoot)
-	if err != nil {
+	if _, err := storeA.RegisterWorkspaceBinding(ctx, otherCfg.WorkspaceRoot); err != nil {
 		t.Fatalf("RegisterWorkspaceBinding otherWorkspace: %v", err)
 	}
 	started := make(chan struct{})
@@ -716,7 +969,7 @@ func TestRebindWorkspaceNormalizesUniqueConflictRace(t *testing.T) {
 		errCh <- err
 	}()
 	<-started
-	if _, err := storeB.AttachWorkspaceToProject(ctx, otherBinding.ProjectID, newWorkspace); err != nil {
+	if _, err := storeB.AttachWorkspaceToProject(ctx, oldBinding.ProjectID, newWorkspace); err != nil {
 		close(release)
 		t.Fatalf("AttachWorkspaceToProject competing bind: %v", err)
 	}
@@ -736,12 +989,12 @@ func TestRebindWorkspaceNormalizesUniqueConflictRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureWorkspaceBinding newWorkspace after race: %v", err)
 	}
-	if newResolved.ProjectID != otherBinding.ProjectID {
-		t.Fatalf("new workspace project id after race = %q, want %q", newResolved.ProjectID, otherBinding.ProjectID)
+	if newResolved.ProjectID != oldBinding.ProjectID {
+		t.Fatalf("new workspace project id after race = %q, want %q", newResolved.ProjectID, oldBinding.ProjectID)
 	}
 }
 
-func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
+func TestInsertWorkspaceBindingAllowsSameCanonicalRootAcrossProjects(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -765,29 +1018,36 @@ func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insertWorkspaceBinding winner: %v", err)
 	}
-	loser, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "", filepath.Base(canonicalRoot), "project-loser", "workspace-loser", now, true)
+	duplicateInProject, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "", filepath.Base(canonicalRoot), winner.ProjectID, "workspace-duplicate", now, true)
 	if err != nil {
-		t.Fatalf("insertWorkspaceBinding loser: %v", err)
+		t.Fatalf("insertWorkspaceBinding duplicate in project: %v", err)
 	}
-	if loser.ProjectID != winner.ProjectID || loser.WorkspaceID != winner.WorkspaceID {
-		t.Fatalf("conflict recovery mismatch: got %+v want %+v", loser, winner)
+	if duplicateInProject.WorkspaceID != winner.WorkspaceID {
+		t.Fatalf("duplicate in project workspace id = %q, want %q", duplicateInProject.WorkspaceID, winner.WorkspaceID)
+	}
+	second, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "", filepath.Base(canonicalRoot), "project-second", "workspace-second", now, true)
+	if err != nil {
+		t.Fatalf("insertWorkspaceBinding second: %v", err)
+	}
+	if second.ProjectID == winner.ProjectID || second.WorkspaceID == winner.WorkspaceID {
+		t.Fatalf("second binding reused winner identity: got %+v winner %+v", second, winner)
 	}
 	var projectCount int
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&projectCount); err != nil {
 		t.Fatalf("count projects: %v", err)
 	}
-	if projectCount != 1 {
-		t.Fatalf("project count = %d, want 1", projectCount)
+	if projectCount != 2 {
+		t.Fatalf("project count = %d, want 2", projectCount)
 	}
 	var workspaceCount int
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workspaces").Scan(&workspaceCount); err != nil {
 		t.Fatalf("count workspaces: %v", err)
 	}
-	if workspaceCount != 1 {
-		t.Fatalf("workspace count = %d, want 1", workspaceCount)
+	if workspaceCount != 2 {
+		t.Fatalf("workspace count = %d, want 2", workspaceCount)
 	}
-	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); err != nil {
-		t.Fatalf("EnsureWorkspaceBinding after conflict recovery: %v", err)
+	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceBindingAmbiguous) {
+		t.Fatalf("EnsureWorkspaceBinding after duplicate-path inserts error = %v, want ErrWorkspaceBindingAmbiguous", err)
 	}
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects WHERE id = ?", winner.ProjectID).Scan(&projectCount); err != nil {
 		t.Fatalf("count winner project: %v", err)
@@ -795,8 +1055,12 @@ func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
 	if projectCount != 1 {
 		t.Fatalf("winner project unexpectedly deleted")
 	}
-	if _, err := store.lookupWorkspaceBinding(ctx, canonicalRoot); err != nil {
-		t.Fatalf("lookupWorkspaceBinding: %v", err)
+	var duplicatePathCount int
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workspaces WHERE canonical_root_path = ?", canonicalRoot).Scan(&duplicatePathCount); err != nil {
+		t.Fatalf("count duplicate canonical roots: %v", err)
+	}
+	if duplicatePathCount != 2 {
+		t.Fatalf("duplicate path count = %d, want 2", duplicatePathCount)
 	}
 }
 

@@ -1,0 +1,36 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+
+import { queryKeys } from "./queryKeys";
+import { useConnectionSnapshot } from "./useConnectionSnapshot";
+
+export function useReconnectRefresh() {
+  const connection = useConnectionSnapshot();
+  const queryClient = useQueryClient();
+  const sawDisconnectRef = useRef(false);
+
+  useEffect(() => {
+    if (connection.phase === "disconnected") {
+      sawDisconnectRef.current = true;
+      return;
+    }
+    if (connection.phase !== "connected" || !sawDisconnectRef.current) {
+      return;
+    }
+    sawDisconnectRef.current = false;
+    void refreshVisibleQueries(queryClient);
+  }, [connection.generation, connection.phase, queryClient]);
+}
+
+async function refreshVisibleQueries(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allAttention }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allBoards }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allProjectEdits }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allWorkspaces }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allTasks }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allActivity }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.allPendingAsks }),
+  ]);
+}

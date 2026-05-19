@@ -41,7 +41,7 @@ type RuntimeLease struct {
 type Session struct {
 	ID                 string
 	ProjectID          string
-	WorkspaceID        string
+	WorkspaceID        sql.NullString
 	WorktreeID         sql.NullString
 	ArtifactRelpath    string
 	Name               string
@@ -54,12 +54,12 @@ type Session struct {
 	ModelRequestCount  int64
 	InFlightStep       int64
 	AgentsInjected     int64
+	LaunchVisible      int64
 	CwdRelpath         string
 	ContinuationJson   string
 	LockedJson         string
 	UsageStateJson     string
 	MetadataJson       string
-	LaunchVisible      int64
 }
 
 type Task struct {
