@@ -192,6 +192,7 @@ function BoardContent({
       </div>
       <NewTaskDialog
         board={board}
+        boardQueryWorkflowID={boardQueryWorkflowId}
         onClose={() => {
           setNewTaskOpen(false);
         }}

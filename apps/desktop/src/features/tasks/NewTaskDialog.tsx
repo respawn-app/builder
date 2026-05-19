@@ -20,15 +20,16 @@ type NewTaskFormValues = z.output<typeof newTaskSchema>;
 
 export type NewTaskDialogProps = Readonly<{
   board: WorkflowBoard;
+  boardQueryWorkflowID: string;
   open: boolean;
   onClose: () => void;
 }>;
 
-export function NewTaskDialog({ board, open, onClose }: NewTaskDialogProps) {
+export function NewTaskDialog({ board, boardQueryWorkflowID, open, onClose }: NewTaskDialogProps) {
   const { t } = useTranslation();
   const connection = useConnectionSnapshot();
   const workspaces = useWorkspaces(board.projectID);
-  const createTask = useCreateTask(board.projectID, board.selectedWorkflow.id);
+  const createTask = useCreateTask(board.projectID, boardQueryWorkflowID, board.selectedWorkflow.id);
   const defaultWorkspaceID = workspaces.data?.defaultWorkspaceID ?? "";
   const workspaceItems = workspaces.data?.workspaces ?? [];
   const initialWorkspaceID = initialSourceWorkspaceID(defaultWorkspaceID, workspaceItems);

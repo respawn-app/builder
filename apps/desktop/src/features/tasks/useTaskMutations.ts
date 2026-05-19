@@ -13,13 +13,16 @@ export function useWorkspaces(projectID: string) {
   });
 }
 
-export function useCreateTask(projectID: string, workflowID: string) {
+export function useCreateTask(projectID: string, boardQueryWorkflowID: string, selectedWorkflowID: string) {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: TaskMutationInput) => api.createTask(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, workflowID) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) });
+      if (selectedWorkflowID !== boardQueryWorkflowID) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) });
+      }
     },
   });
 }
