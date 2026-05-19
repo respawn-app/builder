@@ -40,6 +40,7 @@ export type NativeCapabilityState = Readonly<{
   updater: boolean;
   windowControls: boolean;
   windowDrag: boolean;
+  dialogWindows: boolean;
   projectCreationWindow: boolean;
   taskDetailWindow: boolean;
   macosVibrancy: boolean;
@@ -190,6 +191,7 @@ const unavailableCapabilities: NativeCapabilityState = {
   updater: false,
   windowControls: false,
   windowDrag: false,
+  dialogWindows: false,
   projectCreationWindow: false,
   taskDetailWindow: false,
   macosVibrancy: false,
@@ -532,6 +534,7 @@ function createTauriCapabilities(platform: NativePlatform): NativeCapabilityStat
     updater: false,
     windowControls: false,
     windowDrag: true,
+    dialogWindows: true,
     projectCreationWindow: true,
     taskDetailWindow: true,
     macosVibrancy: false,

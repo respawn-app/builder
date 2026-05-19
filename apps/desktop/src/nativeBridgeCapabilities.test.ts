@@ -11,6 +11,7 @@ describe("native bridge capabilities", () => {
     expect(bridge.capabilities.directories.select).toBe(false);
     expect(bridge.capabilities.links.openExternal).toBe(false);
     expect(bridge.capabilities.terminal.launchBuilderSession).toBe(false);
+    expect(bridge.capabilities.dialogWindows).toBe(false);
     expect(bridge.capabilities.projectCreationWindow).toBe(false);
     expect(bridge.capabilities.taskDetailWindow).toBe(false);
     await expect(bridge.builder.resolvePlatform()).resolves.toBe("browser");
@@ -29,6 +30,7 @@ describe("native bridge capabilities", () => {
     expect(bridge.capabilities.links.openExternal).toBe(true);
     expect(bridge.capabilities.logging.localFile).toBe(true);
     expect(bridge.capabilities.windowDrag).toBe(true);
+    expect(bridge.capabilities.dialogWindows).toBe(true);
     expect(bridge.capabilities.projectCreationWindow).toBe(true);
     expect(bridge.capabilities.taskDetailWindow).toBe(true);
     expect(bridge.capabilities.notifications.basic).toBe(false);

@@ -41,6 +41,7 @@ export function HomeRoute() {
   const projectCreationDialog = useNativeDialogFallback<ProjectDraft>({
     errorNoticeID: "project-create-window-error",
     errorTitle: t("home.projectCreateWindowError"),
+    nativeAvailable: nativeBridge.capabilities.projectCreationWindow,
     openNative: async (nextDraft) => {
       await nativeBridge.projectCreation.openWindow(nextDraft);
     },

@@ -122,6 +122,7 @@ function ProjectEditContent({
   const unlinkDialog = useNativeDialogFallback<WorkspaceUnlinkTarget>({
     errorNoticeID: "workspace-unlink-window-error",
     errorTitle: t("projectEdit.unlinkWindowError"),
+    nativeAvailable: nativeBridge.capabilities.dialogWindows,
     openNative: async (target) => {
       await nativeBridge.dialogs.openWindow(
         workspaceUnlinkWindowOptions(target, t("projectEdit.unlinkTitle")),

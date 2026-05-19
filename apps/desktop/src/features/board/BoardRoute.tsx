@@ -106,6 +106,7 @@ function BoardContent({
   const newTaskDialog = useNativeDialogFallback({
     errorNoticeID: "new-task-window-error",
     errorTitle: t("task.newWindowError"),
+    nativeAvailable: nativeBridge.capabilities.dialogWindows,
     openNative: async () => {
       await nativeBridge.dialogs.openWindow(
         newTaskWindowOptions({

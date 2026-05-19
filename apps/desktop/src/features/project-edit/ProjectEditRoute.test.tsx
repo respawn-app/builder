@@ -460,6 +460,10 @@ function nativeDialogBridge(opened: NativeDialogWindowOptions[]): NativeBridge {
   const base = createBrowserNativeBridge();
   return {
     ...base,
+    capabilities: {
+      ...base.capabilities,
+      dialogWindows: true,
+    },
     dialogs: {
       async openWindow(options): Promise<void> {
         opened.push(options);
@@ -472,6 +476,10 @@ function rejectingNativeDialogBridge(opened: NativeDialogWindowOptions[]): Nativ
   const base = createBrowserNativeBridge();
   return {
     ...base,
+    capabilities: {
+      ...base.capabilities,
+      dialogWindows: true,
+    },
     dialogs: {
       async openWindow(options): Promise<void> {
         opened.push(options);
