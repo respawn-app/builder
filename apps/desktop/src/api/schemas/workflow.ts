@@ -123,7 +123,12 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
       workflow: workflowPickerItemSchema,
       body: emptyString,
       source_workspace: workspaceSummarySchema,
-      managed_worktree: z.object({ root_path: z.string().optional().default("") }).nullish(),
+      managed_worktree: z
+        .object({
+          canonical_root: z.string().optional().default(""),
+          root_path: z.string().optional().default(""),
+        })
+        .nullish(),
       status: taskStatusSchema,
       actions: taskActionsSchema,
       attention: z.array(attentionItemSchema).nullish().transform(emptyArray),
@@ -149,7 +154,7 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
     comments: value.task.comments.filter((comment) => comment.deletedAt === 0),
     runs: value.task.runs,
     transitions: value.task.transitions,
-    worktreePath: value.task.managed_worktree?.root_path ?? "",
+    worktreePath: value.task.managed_worktree?.canonical_root || value.task.managed_worktree?.root_path || "",
     createdAt: value.task.summary.created_at_unix_ms,
     updatedAt: value.task.summary.updated_at_unix_ms,
     done: value.task.summary.done,

@@ -132,6 +132,7 @@ export type NativeBuilderContext = Readonly<{
   persistenceRoot: string;
   platform: NativePlatform;
   theme: NativeBuilderTheme;
+  homePath: string;
 }>;
 
 export type NativeProjectCreationDraft = Readonly<{
@@ -201,14 +202,31 @@ const taskDetailWindowLabel = "native-dialog-task-detail";
 const taskDetailOpenEvent = "builder://task-detail-open";
 const taskDetailChangedEvent = "builder://task-detail-changed";
 export const taskDetailContentMaxWidthPx = 1200;
-export const taskDetailDialogHorizontalPaddingPx = 32;
+export const taskDetailDialogHorizontalPaddingPx = 16;
 export const nativeDialogWindowHorizontalInsetPx = 16;
 export const taskDetailDialogOuterMaxWidthPx =
   taskDetailContentMaxWidthPx + taskDetailDialogHorizontalPaddingPx;
-export const taskDetailNativeWindowInitialWidthPx =
-  taskDetailDialogOuterMaxWidthPx + nativeDialogWindowHorizontalInsetPx;
+export const taskDetailNativeWindowInitialWidthPx = 840;
 const workspaceUnlinkRequestEvent = "builder://workspace-unlink-request";
 const projectWorkspaceChangedEvent = "builder://project-workspace-changed";
+
+export function taskDetailNativeDialogWindowOptions(
+  target: NativeTaskDetailTarget,
+): NativeDialogWindowOptions {
+  return {
+    initialHeight: 760,
+    initialWidth: taskDetailNativeWindowInitialWidthPx,
+    label: taskDetailWindowLabel,
+    maximizable: true,
+    params: {
+      resumeRunId: target.resumeRunId,
+      taskId: target.taskId,
+    },
+    resizable: true,
+    route: "/native-dialog/task-detail",
+    title: "Task",
+  };
+}
 
 declare global {
   interface Window {
@@ -267,6 +285,7 @@ export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = 
           persistenceRoot: "",
           platform: capabilities.platform,
           theme: "auto",
+          homePath: "",
         };
       },
     },
@@ -442,19 +461,7 @@ export function createTauriNativeBridge(platform: NativePlatform = "unknown"): N
           return;
         }
         try {
-          await openNativeDialogWindow({
-            initialHeight: 760,
-            initialWidth: taskDetailNativeWindowInitialWidthPx,
-            label: taskDetailWindowLabel,
-            maximizable: true,
-            params: {
-              resumeRunId: target.resumeRunId,
-              taskId: target.taskId,
-            },
-            resizable: true,
-            route: "/native-dialog/task-detail",
-            title: "Task",
-          });
+          await openNativeDialogWindow(taskDetailNativeDialogWindowOptions(target));
         } catch (cause) {
           const raced = await WebviewWindow.getByLabel(taskDetailWindowLabel);
           if (raced !== null) {

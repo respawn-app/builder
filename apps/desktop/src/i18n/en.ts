@@ -161,6 +161,8 @@ export const englishResources = {
       noInbox: "No current Inbox blockers.",
       addComment: "Add comment",
       editComment: "Edit comment",
+      submitComment: "Submit comment",
+      saveComment: "Save comment",
       deleteComment: "Delete comment",
       commentBody: "Comment",
       activity: "Activity",

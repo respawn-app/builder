@@ -8,6 +8,9 @@ export type NativeDialogWindowProps = Readonly<{
   children: ReactNode;
   fitToContent?: boolean;
   contentMaxWidth?: string;
+  contentPadding?: "none" | "chrome";
+  showHeader?: boolean;
+  surface?: "island" | "transparent";
 }>;
 
 export function NativeDialogWindow({
@@ -15,6 +18,9 @@ export function NativeDialogWindow({
   children,
   fitToContent = true,
   contentMaxWidth = "var(--content-max-width-dialog)",
+  contentPadding = "none",
+  showHeader = true,
+  surface = "island",
 }: NativeDialogWindowProps) {
   const { logger, nativeBridge } = useAppServices();
   const shellRef = useRef<HTMLElement | null>(null);
@@ -60,7 +66,10 @@ export function NativeDialogWindow({
   return (
     <main
       className={cx(
-        "window-glass-fill grid p-[var(--native-titlebar-height)_var(--space-2)_var(--space-2)]",
+        "window-glass-fill grid",
+        contentPadding === "chrome"
+          ? "pt-[var(--native-titlebar-height)]"
+          : "p-[var(--native-titlebar-height)_var(--space-2)_var(--space-2)]",
         fitToContent ? "w-max" : "h-screen w-screen",
       )}
       ref={shellRef}
@@ -73,20 +82,36 @@ export function NativeDialogWindow({
         aria-label={title}
         aria-modal="true"
         className={cx(
-          "app-region-no-drag island-glass grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-4)]",
+          "app-region-no-drag grid min-h-0 gap-[var(--space-3)]",
+          surface === "island" && "island-glass rounded-[var(--radius-xl)] p-[var(--space-4)]",
+          surface === "transparent" && "bg-transparent p-0 shadow-none",
+          showHeader ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]",
           fitToContent ? "w-max" : "h-full",
         )}
         role="dialog"
       >
         <div
-          className="mx-auto grid h-full min-h-0 w-full gap-[var(--space-3)] grid-rows-[auto_minmax(0,1fr)]"
+          className={cx(
+            "mx-auto grid h-full min-h-0 w-full gap-[var(--space-3)]",
+            showHeader ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]",
+          )}
           data-testid="native-dialog-content"
           style={{ maxWidth: contentMaxWidth }}
         >
-          <header className="min-w-0">
-            <h1 className="m-0 text-[1.15rem] font-bold">{title}</h1>
-          </header>
-          <div className="min-h-0 overflow-auto hide-scrollbar">{children}</div>
+          {showHeader ? (
+            <header className="min-w-0">
+              <h1 className="m-0 text-[1.15rem] font-bold">{title}</h1>
+            </header>
+          ) : null}
+          <div
+            className={cx(
+              "min-h-0 overflow-auto hide-scrollbar",
+              contentPadding === "chrome" && "px-[var(--space-2)] pb-[var(--space-2)] pt-0",
+            )}
+            data-testid="native-dialog-scrollport"
+          >
+            {children}
+          </div>
         </div>
       </section>
     </main>

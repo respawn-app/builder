@@ -20,9 +20,9 @@ export function StandaloneTaskRoute({ taskId }: StandaloneTaskRouteProps) {
   const { t } = useTranslation();
   const navigation = useAppNavigation();
   return (
-    <section className="island-glass grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-4)] rounded-[var(--radius-xl)] p-[var(--space-4)]">
-      <header className="flex items-center justify-between gap-[var(--space-3)]">
-        <h1 className="m-0 text-[1.25rem]">{t("task.title")}</h1>
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-4)] p-[var(--space-2)]">
+      <header className="flex items-center justify-end gap-[var(--space-3)]">
+        <h1 className="sr-only">{t("task.title")}</h1>
         <Button onClick={() => void navigation.openHome()} variant="ghost">
           {t("app.backHome")}
         </Button>
@@ -38,8 +38,15 @@ export function TaskDetailWindowRoute({ resumeRunId, taskId }: TaskDetailWindowR
   const target = useNativeTaskDetailTarget(taskId, resumeRunId);
 
   return (
-    <NativeDialogWindow contentMaxWidth={taskDetailContentMaxWidth} fitToContent={false} title={t("task.title")}>
-      <div className="h-full min-h-0 w-full min-w-0">
+    <NativeDialogWindow
+      contentMaxWidth={taskDetailContentMaxWidth}
+      contentPadding="chrome"
+      fitToContent={false}
+      showHeader={false}
+      surface="transparent"
+      title={t("task.title")}
+    >
+      <div className="min-h-full w-full min-w-0">
         <TaskDetailSurface
           enabled
           onMutated={() => {
