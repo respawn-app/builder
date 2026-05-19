@@ -7,8 +7,8 @@ import { Badge, Button, Spinner } from "../../ui";
 import {
   type BoardCardDragPayload,
   type BoardColumnDropState,
-  boardDragTypeCanStart,
-  boardDragTypeManualTarget,
+  boardCardDragPayloadType,
+  encodeBoardCardDragPayload,
 } from "./BoardDragTypes";
 
 export type KanbanColumnProps = Readonly<{
@@ -180,19 +180,15 @@ function TaskCard({
       onClick={onClick}
       onDragEnd={onDragEnd}
       onDragStart={(event) => {
-        event.dataTransfer.setData("text/task-id", card.id);
-        event.dataTransfer.effectAllowed = "move";
-        if (card.actions.canStart) {
-          event.dataTransfer.setData(boardDragTypeCanStart, "1");
-        }
-        for (const nodeID of card.actions.manualMoveTargetNodeIDs) {
-          event.dataTransfer.setData(boardDragTypeManualTarget(nodeID), "1");
-        }
-        onDragStart({
+        const payload = {
           taskID: card.id,
           canStart: card.actions.canStart,
           manualMoveTargetNodeIDs: card.actions.manualMoveTargetNodeIDs,
-        });
+        };
+        event.dataTransfer.setData("text/task-id", card.id);
+        event.dataTransfer.setData(boardCardDragPayloadType, encodeBoardCardDragPayload(payload));
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart(payload);
       }}
       onKeyDown={(event) => {
         activateCardFromKeyboard(event, onClick);

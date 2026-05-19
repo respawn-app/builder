@@ -5,6 +5,7 @@ import { beforeAll, vi } from "vitest";
 import type { BoardCard, BoardColumn } from "../../api";
 import { appI18n, initializeI18n } from "../../i18n/setup";
 import { KanbanColumn } from "./BoardColumns";
+import { boardCardDragPayloadType, decodeBoardCardDragPayload } from "./BoardDragTypes";
 
 describe("KanbanColumn", () => {
   beforeAll(async () => {
@@ -187,6 +188,11 @@ describe("KanbanColumn", () => {
     fireEvent.dragStart(renderedCard, { dataTransfer });
 
     expect(dataTransfer.getData("text/task-id")).toBe("task-1");
+    expect(decodeBoardCardDragPayload(dataTransfer.getData(boardCardDragPayloadType))).toEqual({
+      taskID: "task-1",
+      canStart: false,
+      manualMoveTargetNodeIDs: [],
+    });
     expect(onCardDragStart).toHaveBeenCalledWith({
       taskID: "task-1",
       canStart: false,

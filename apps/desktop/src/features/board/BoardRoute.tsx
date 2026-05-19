@@ -21,8 +21,8 @@ import { KanbanGroup } from "./BoardColumns";
 import {
   type BoardCardDragPayload,
   type BoardColumnDropState,
-  boardDragTypeCanStart,
-  boardDragTypeManualTarget,
+  boardCardDragPayloadType,
+  decodeBoardCardDragPayload,
 } from "./BoardDragTypes";
 import { boardSections } from "./BoardModel";
 import "./board.css";
@@ -316,27 +316,7 @@ function dropAllowed(
 }
 
 function dragPayloadFromDataTransfer(dataTransfer: DataTransfer): BoardCardDragPayload | null {
-  const taskID = dataTransfer.getData("text/task-id");
-  if (taskID.length === 0) {
-    return null;
-  }
-  const types = Array.from(dataTransfer.types);
-  return {
-    taskID,
-    canStart: types.includes(boardDragTypeCanStart),
-    manualMoveTargetNodeIDs: types
-      .map((type) => manualTargetNodeIDFromDragType(type))
-      .filter((nodeID): nodeID is string => nodeID !== null),
-  };
-}
-
-function manualTargetNodeIDFromDragType(type: string): string | null {
-  const prefix = boardDragTypeManualTarget("");
-  if (!type.startsWith(prefix)) {
-    return null;
-  }
-  const nodeID = type.slice(prefix.length);
-  return nodeID.length > 0 ? nodeID : null;
+  return decodeBoardCardDragPayload(dataTransfer.getData(boardCardDragPayloadType));
 }
 
 function WorkflowValidationIssues({ workflow }: Readonly<{ workflow: WorkflowPickerItem }>) {
