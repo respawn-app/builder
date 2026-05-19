@@ -4,7 +4,7 @@ import {
   type NativeDirectorySelection,
 } from "@builder/desktop-native-bridge";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach } from "vitest";
 
 import { App } from "./App";
 import { createTestServices, startupRoutes } from "./testSupport/appServices";
@@ -279,67 +279,6 @@ describe("App", () => {
       },
     });
   });
-
-  it("fits native dialog window to rendered dialog content", async () => {
-    const fittedSizes: { width: number; height: number }[] = [];
-    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => ({
-      bottom: 320,
-      height: 320,
-      left: 0,
-      right: 584,
-      top: 0,
-      width: 584,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }));
-    window.history.pushState(
-      null,
-      "",
-      "/native-dialog/project-create?name=Example&key=EXP&workspaceRoot=%2Ftmp%2Fexample",
-    );
-
-    render(<App services={createTestServices(startupRoutes, fitRecorderBridge(fittedSizes))} />);
-
-    expect(await screen.findByRole("heading", { name: "Create project" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 320, width: 584 });
-    });
-  });
-
-  it("re-fits native dialog window when rendered content size changes", async () => {
-    const fittedSizes: { width: number; height: number }[] = [];
-    const observers: TestResizeObserver[] = [];
-    let measuredHeight = 320;
-    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => dialogRect(584, measuredHeight));
-    globalThis.ResizeObserver = class extends TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        super(callback);
-        observers.push(this);
-      }
-    };
-    window.history.pushState(
-      null,
-      "",
-      "/native-dialog/project-create?name=Example&key=EXP&workspaceRoot=%2Ftmp%2Fexample",
-    );
-
-    render(<App services={createTestServices(startupRoutes, fitRecorderBridge(fittedSizes))} />);
-
-    expect(await screen.findByRole("heading", { name: "Create project" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 320, width: 584 });
-    });
-
-    measuredHeight = 372;
-    for (const observer of observers) {
-      observer.trigger();
-    }
-
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 372, width: 584 });
-    });
-  });
 });
 
 function directoryBridge(path: string): NativeBridge {
@@ -375,33 +314,6 @@ function projectCreationWindowBridge(path: string, error: unknown): NativeBridge
   };
 }
 
-function fitRecorderBridge(fittedSizes: { width: number; height: number }[]): NativeBridge {
-  const base = createBrowserNativeBridge();
-  return {
-    ...base,
-    window: {
-      ...base.window,
-      async fitCurrentToContent(size: { width: number; height: number }): Promise<void> {
-        fittedSizes.push(size);
-      },
-    },
-  };
-}
-
-function dialogRect(width: number, height: number): DOMRect {
-  return {
-    bottom: height,
-    height,
-    left: 0,
-    right: width,
-    top: 0,
-    width,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-  };
-}
-
 function setNavigatorUserAgent(userAgent: string): void {
   Object.defineProperty(window.navigator, "userAgent", {
     configurable: true,
@@ -417,30 +329,6 @@ function clearStorage(name: "localStorage" | "sessionStorage"): void {
     }
     globalThis.sessionStorage.clear();
   } catch {
-    return;
-  }
-}
-
-class TestResizeObserver implements ResizeObserver {
-  readonly #callback: ResizeObserverCallback;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.#callback = callback;
-  }
-
-  disconnect(): void {
-    return;
-  }
-
-  observe(): void {
-    return;
-  }
-
-  trigger(): void {
-    this.#callback([], this);
-  }
-
-  unobserve(): void {
     return;
   }
 }

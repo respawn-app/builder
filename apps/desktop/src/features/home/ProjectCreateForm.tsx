@@ -83,7 +83,7 @@ export function ProjectCreateWindowRoute({ draft }: Readonly<{ draft: ProjectDra
         workspaceRoot: values.workspaceRoot,
       });
       await nativeBridge.projectCreation.notifyCreated({ projectID: binding.projectID });
-      navigation.openProject(binding.projectID);
+      void navigation.openProject(binding.projectID);
       await nativeBridge.window.closeCurrent();
     } catch (error) {
       push({
