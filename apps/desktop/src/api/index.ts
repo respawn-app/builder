@@ -21,6 +21,7 @@ export type {
   TaskTransition,
   TeleportTarget,
   WorkflowBoard,
+  WorkflowOutputField,
   WorkflowPickerItem,
   WorkspaceSummary,
   WorkspaceUnlinkBlocker,

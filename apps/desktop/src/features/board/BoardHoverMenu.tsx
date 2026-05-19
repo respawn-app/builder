@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "re
 import { useTranslation } from "react-i18next";
 
 import type { WorkflowBoard, WorkflowPickerItem } from "../../api";
-import { useAppNavigation } from "../../app/navigation";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "../../ui";
 import { cx } from "../../ui/classes";
 
@@ -13,11 +12,11 @@ export type BoardHoverMenuProps = Readonly<{
     board: WorkflowBoard;
     canCreateTask: boolean;
     onNewTask: () => void;
+    onWorkflowSelect: (workflowID: string) => void;
 }>;
 
-export function BoardHoverMenu({ board, canCreateTask, onNewTask }: BoardHoverMenuProps) {
+export function BoardHoverMenu({ board, canCreateTask, onNewTask, onWorkflowSelect }: BoardHoverMenuProps) {
     const { t } = useTranslation();
-    const navigation = useAppNavigation();
     const menuRef = useRef<HTMLDivElement | null>(null);
     const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hovered, setHovered] = useState(false);
@@ -114,7 +113,7 @@ export function BoardHoverMenu({ board, canCreateTask, onNewTask }: BoardHoverMe
                             <WorkflowOption
                                 key={workflow.id}
                                 onSelect={() => {
-                                    void navigation.openProject(board.projectID, workflow.id);
+                                    onWorkflowSelect(workflow.id);
                                 }}
                                 workflow={workflow}
                             />

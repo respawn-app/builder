@@ -330,10 +330,12 @@ type WorkflowTaskApproveResponse struct {
 }
 
 type WorkflowTaskMoveRequest struct {
-	TaskID       string            `json:"task_id"`
-	TargetNodeID string            `json:"target_node_id"`
-	OutputValues map[string]string `json:"output_values,omitempty"`
-	Commentary   string            `json:"commentary,omitempty"`
+	TaskID           string            `json:"task_id"`
+	TargetNodeID     string            `json:"target_node_id"`
+	OutputValues     map[string]string `json:"output_values,omitempty"`
+	Commentary       string            `json:"commentary,omitempty"`
+	AllowMissingEdge bool              `json:"allow_missing_edge,omitempty"`
+	AutoApprove      bool              `json:"auto_approve,omitempty"`
 }
 
 type WorkflowTaskMoveResponse struct {
@@ -518,12 +520,14 @@ type WorkflowBoardColumn struct {
 }
 
 type WorkflowBoardNodeSummary struct {
-	NodeID       string `json:"node_id"`
-	Key          string `json:"key"`
-	Kind         string `json:"kind"`
-	DisplayName  string `json:"display_name"`
-	AssigneeRole string `json:"assignee_role,omitempty"`
-	SortOrder    int    `json:"sort_order"`
+	NodeID                 string                `json:"node_id"`
+	Key                    string                `json:"key"`
+	Kind                   string                `json:"kind"`
+	DisplayName            string                `json:"display_name"`
+	AssigneeRole           string                `json:"assignee_role,omitempty"`
+	SortOrder              int                   `json:"sort_order"`
+	OutputFields           []WorkflowOutputField `json:"output_fields,omitempty"`
+	TransitionOutputFields []WorkflowOutputField `json:"transition_output_fields,omitempty"`
 }
 
 type WorkflowBoardTaskCard struct {

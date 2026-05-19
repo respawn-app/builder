@@ -115,6 +115,11 @@ export type WorkflowValidationError = Readonly<{
   blocksContext: boolean;
 }>;
 
+export type WorkflowOutputField = Readonly<{
+  name: string;
+  description: string;
+}>;
+
 export type WorkflowPickerItem = Readonly<{
   id: string;
   name: string;
@@ -162,8 +167,11 @@ export type BoardCard = Readonly<{
 export type BoardColumn = Readonly<{
   id: string;
   key: string;
+  kind: string;
   name: string;
   assigneeRole: string;
+  outputFields: readonly WorkflowOutputField[];
+  transitionOutputFields: readonly WorkflowOutputField[];
   groupID: string;
   sortOrder: number;
   isBacklog: boolean;

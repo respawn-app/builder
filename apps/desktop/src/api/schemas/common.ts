@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Shared API schema mappers stay colocated with shared DTO model types. */
 import { z } from "zod";
 
 import type {
@@ -12,6 +13,7 @@ import type {
   TaskStatus,
   TaskTransition,
   TransitionEdge,
+  WorkflowOutputField,
   WorkflowPickerItem,
   WorkflowValidationError,
   WorkspaceSummary,
@@ -77,6 +79,13 @@ export const validationErrorSchema: z.ZodType<WorkflowValidationError> = z
     edgeID: value.edge_id,
     blocksContext: value.blocks_context,
   }));
+
+export const workflowOutputFieldSchema: z.ZodType<WorkflowOutputField> = z
+  .object({
+    name: z.string(),
+    description: emptyString,
+  })
+  .transform((value) => ({ name: value.name, description: value.description }));
 
 export const workflowPickerItemSchema: z.ZodType<WorkflowPickerItem> = z
   .object({
@@ -148,8 +157,17 @@ export const boardColumnSchema: z.ZodType<BoardColumn> = z
     node: z.object({
       node_id: z.string(),
       key: z.string(),
+      kind: emptyString,
       display_name: z.string(),
       assignee_role: emptyString,
+      output_fields: z
+        .array(workflowOutputFieldSchema)
+        .nullish()
+        .transform((value) => value ?? []),
+      transition_output_fields: z
+        .array(workflowOutputFieldSchema)
+        .nullish()
+        .transform((value) => value ?? []),
     }),
     group_id: emptyString,
     sort_order: z.number(),
@@ -160,8 +178,11 @@ export const boardColumnSchema: z.ZodType<BoardColumn> = z
   .transform((value) => ({
     id: value.node.node_id,
     key: value.node.key,
+    kind: value.node.kind,
     name: value.node.display_name,
     assigneeRole: value.node.assignee_role,
+    outputFields: value.node.output_fields,
+    transitionOutputFields: value.node.transition_output_fields,
     groupID: value.group_id,
     sortOrder: value.sort_order,
     isBacklog: value.is_backlog,

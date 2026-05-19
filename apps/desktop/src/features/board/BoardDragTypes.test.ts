@@ -7,6 +7,8 @@ describe("board card drag payloads", () => {
     const payload = {
       taskID: "task-1",
       canStart: true,
+      activeNodeIDs: ["backlog"],
+      statusKind: "backlog",
       manualMoveTargetNodeIDs: ["node-review", "node-done"],
     };
 

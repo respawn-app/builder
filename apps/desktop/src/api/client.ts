@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- RPC client methods are intentionally centralized by transport boundary. */
 import { type z } from "zod";
 
 import { ContractError } from "./errors";
@@ -134,10 +135,7 @@ export class BuilderApiClient {
     );
   }
 
-  async setDefaultWorkspace(
-    projectID: string,
-    workspaceID: string,
-  ): Promise<ProjectMutationResponse> {
+  async setDefaultWorkspace(projectID: string, workspaceID: string): Promise<ProjectMutationResponse> {
     return parse(
       "project.defaultWorkspace.set",
       projectMutationResponseSchema,
@@ -249,12 +247,17 @@ export class BuilderApiClient {
     await this.transport.call("workflow.task.start", { task_id: taskID });
   }
 
-  async moveTask(taskID: string, targetNodeID: string): Promise<void> {
-    await this.transport.call("workflow.task.move", {
-      task_id: taskID,
-      target_node_id: targetNodeID,
-      output_values: {},
-    });
+  async moveTask(input: TaskMoveInput): Promise<void> {
+    await this.transport.call(
+      "workflow.task.move",
+      compactJsonObject({
+        task_id: input.taskID,
+        target_node_id: input.targetNodeID,
+        output_values: input.outputValues ?? {},
+        allow_missing_edge: input.allowMissingEdge,
+        auto_approve: input.autoApprove,
+      }),
+    );
   }
 
   async interruptTask(taskID: string, runID: string): Promise<void> {
@@ -366,7 +369,15 @@ export type TaskEditInput = Readonly<{
   taskID: string;
   title: string;
   body: string;
-  sourceWorkspaceID: string;
+  sourceWorkspaceID?: string | undefined;
+}>;
+
+export type TaskMoveInput = Readonly<{
+  taskID: string;
+  targetNodeID: string;
+  outputValues?: Readonly<Record<string, string>>;
+  allowMissingEdge?: boolean;
+  autoApprove?: boolean;
 }>;
 
 export type QuestionAnswerInput = Readonly<{

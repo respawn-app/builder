@@ -227,7 +227,12 @@ export function HoverMenuBoard() {
           <StateChip icon={<Workflow aria-hidden="true" size={16} />}>New task disabled/enabled</StateChip>
         </div>
       </div>
-      <BoardHoverMenu board={mockBoard} canCreateTask onNewTask={() => undefined} />
+      <BoardHoverMenu
+        board={mockBoard}
+        canCreateTask
+        onNewTask={() => undefined}
+        onWorkflowSelect={() => undefined}
+      />
     </div>
   );
 }

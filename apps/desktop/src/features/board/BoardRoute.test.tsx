@@ -169,21 +169,34 @@ describe("BoardRoute", () => {
     });
   });
 
-  it("shows a toast when dropping a card on a blocked target", async () => {
+  it("accepts an override drop on a red-outlined target", async () => {
     window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
-    const services = createTestServices([...startupRoutes, ...boardRoutes()]);
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(),
+      { method: "workflow.task.move", result: {} },
+    ]);
 
     render(<App services={services} />);
 
     const card = await screen.findByRole("article", { name: "Write focused tests" });
     const dataTransfer = new TestDataTransfer();
+    const doneColumn = screen.getByRole("listitem", { name: "Done" });
     fireEvent.dragStart(card, { dataTransfer });
-    fireEvent.drop(screen.getByRole("listitem", { name: "Done" }), { dataTransfer });
+    expect(doneColumn).toHaveAttribute("data-drop-state", "blocked");
+    fireEvent.drop(doneColumn, { dataTransfer });
 
-    expect(await screen.findByText("Task drop ignored")).toBeInTheDocument();
-    expect(screen.getByText("This card cannot be dropped here.")).toBeInTheDocument();
-    expect(services.transport.calls.some((call) => call.method === "workflow.task.start")).toBe(false);
-    expect(services.transport.calls.some((call) => call.method === "workflow.task.move")).toBe(false);
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.move",
+        params: {
+          task_id: "task-1",
+          target_node_id: "done",
+          output_values: {},
+          allow_missing_edge: true,
+        },
+      });
+    });
   });
 
   it("loads node card pages only after columns become visible", async () => {
@@ -355,7 +368,7 @@ describe("BoardRoute", () => {
             groups: [],
             columns: [
               {
-                node: { node_id: "backlog", key: "backlog", display_name: "Backlog" },
+                node: { node_id: "backlog", key: "backlog", kind: "start", display_name: "Backlog" },
                 group_id: "",
                 sort_order: 0,
                 is_backlog: true,
@@ -363,7 +376,7 @@ describe("BoardRoute", () => {
                 task_count: 0,
               },
               {
-                node: { node_id: "done", key: "done", display_name: "Done" },
+                node: { node_id: "done", key: "done", kind: "terminal", display_name: "Done" },
                 group_id: "",
                 sort_order: 1,
                 is_backlog: false,
@@ -684,6 +697,171 @@ describe("BoardRoute", () => {
       expect(services.transport.calls).toContainEqual({
         method: "workflow.task.move",
         params: { task_id: "task-1", target_node_id: "done", output_values: {} },
+      });
+    });
+  });
+
+  it("moves a Done card back to Backlog without confirmation", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const doneCard = doneBoardCard();
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(
+        {
+          board: {
+            ...boardResponse.board,
+            columns: boardResponse.board.columns.map((column) =>
+              column.is_done ? { ...column, task_count: 1 } : column,
+            ),
+          },
+        },
+        {
+          backlog: { cards: [] },
+          "node-1": { cards: [] },
+          done: { cards: [doneCard] },
+        },
+      ),
+      { method: "workflow.task.move", result: {} },
+    ]);
+
+    render(<App services={services} />);
+
+    const card = await screen.findByRole("article", { name: "Write focused tests" });
+    expect(card).toHaveAttribute("draggable", "true");
+    const dataTransfer = new TestDataTransfer();
+    fireEvent.dragStart(card, { dataTransfer });
+    fireEvent.drop(screen.getByRole("listitem", { name: "Backlog" }), { dataTransfer });
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.move",
+        params: {
+          task_id: "task-1",
+          target_node_id: "backlog",
+          output_values: {},
+          allow_missing_edge: true,
+        },
+      });
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("confirms a Done rollback that starts an agent", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const doneCard = doneBoardCard();
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes(
+        {
+          board: {
+            ...boardResponse.board,
+            columns: boardResponse.board.columns.map((column) =>
+              column.is_done ? { ...column, task_count: 1 } : column,
+            ),
+          },
+        },
+        {
+          backlog: { cards: [] },
+          "node-1": { cards: [] },
+          done: { cards: [doneCard] },
+        },
+      ),
+      { method: "workflow.task.move", result: {} },
+    ]);
+
+    render(<App services={services} />);
+
+    const card = await screen.findByRole("article", { name: "Write focused tests" });
+    const implementColumn = screen.getByRole("listitem", { name: "Implement" });
+    const dataTransfer = new TestDataTransfer();
+    fireEvent.dragStart(card, { dataTransfer });
+    expect(implementColumn).toHaveAttribute("data-drop-state", "blocked");
+    fireEvent.drop(implementColumn, { dataTransfer });
+
+    const dialog = await screen.findByRole("dialog", { name: "Rollback and start the agent?" });
+    expect(within(dialog).getByText("Code and task changes are not rolled back")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(services.transport.calls.some((call) => call.method === "workflow.task.move")).toBe(false);
+
+    fireEvent.dragStart(card, { dataTransfer: new TestDataTransfer() });
+    fireEvent.drop(implementColumn, { dataTransfer: new TestDataTransfer() });
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback and start agent" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.move",
+        params: {
+          task_id: "task-1",
+          target_node_id: "node-1",
+          output_values: {},
+          auto_approve: true,
+        },
+      });
+    });
+  });
+
+  it("collects missing inputs before an override drop that starts an agent", async () => {
+    window.history.pushState(null, "", "/projects/project-1?workflowId=workflow-1");
+    const codeReviewColumn = {
+      node: {
+        node_id: "node-2",
+        key: "code_review",
+        kind: "agent",
+        display_name: "Code review",
+        assignee_role: "reviewer",
+        transition_output_fields: [{ name: "summary", description: "Prior work summary." }],
+      },
+      group_id: "group-1",
+      sort_order: 2,
+      is_backlog: false,
+      is_done: false,
+      task_count: 0,
+    };
+    const services = createTestServices([
+      ...startupRoutes,
+      ...boardRoutes({
+        board: {
+          ...boardResponse.board,
+          groups: [
+            {
+              ...firstBoardGroup(),
+              node_ids: ["node-1", "node-2"],
+            },
+          ],
+          columns: [boardColumnAt(0), boardColumnAt(1), codeReviewColumn, boardColumnAt(2)],
+        },
+      }),
+      { method: "workflow.task.move", result: {} },
+    ]);
+
+    render(<App services={services} />);
+
+    const card = await screen.findByRole("article", { name: "Write focused tests" });
+    const codeReview = screen.getByRole("listitem", { name: "Code review" });
+    const dataTransfer = new TestDataTransfer();
+    fireEvent.dragStart(card, { dataTransfer });
+    expect(codeReview).toHaveAttribute("data-drop-state", "blocked");
+    fireEvent.drop(codeReview, { dataTransfer });
+
+    const dialog = await screen.findByRole("dialog", { name: "Submit missing inputs" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(services.transport.calls.some((call) => call.method === "workflow.task.move")).toBe(false);
+
+    fireEvent.dragStart(card, { dataTransfer: new TestDataTransfer() });
+    fireEvent.drop(codeReview, { dataTransfer: new TestDataTransfer() });
+    fireEvent.change(await screen.findByLabelText("summary"), { target: { value: "Replacement summary" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit and start agent" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "workflow.task.move",
+        params: {
+          task_id: "task-1",
+          target_node_id: "node-2",
+          output_values: { summary: "Replacement summary" },
+          allow_missing_edge: true,
+          auto_approve: true,
+        },
       });
     });
   });
@@ -1255,7 +1433,7 @@ const boardResponse = {
     groups: [{ group_id: "group-1", key: "core", display_name: "Core", sort_order: 1, node_ids: ["node-1"] }],
     columns: [
       {
-        node: { node_id: "backlog", key: "backlog", display_name: "Backlog" },
+        node: { node_id: "backlog", key: "backlog", kind: "start", display_name: "Backlog" },
         group_id: "",
         sort_order: 0,
         is_backlog: true,
@@ -1263,7 +1441,13 @@ const boardResponse = {
         task_count: 1,
       },
       {
-        node: { node_id: "node-1", key: "implement", display_name: "Implement", assignee_role: "coder" },
+        node: {
+          node_id: "node-1",
+          key: "implement",
+          kind: "agent",
+          display_name: "Implement",
+          assignee_role: "coder",
+        },
         group_id: "group-1",
         sort_order: 1,
         is_backlog: false,
@@ -1271,7 +1455,7 @@ const boardResponse = {
         task_count: 0,
       },
       {
-        node: { node_id: "done", key: "done", display_name: "Done" },
+        node: { node_id: "done", key: "done", kind: "terminal", display_name: "Done" },
         group_id: "",
         sort_order: 99,
         is_backlog: false,
@@ -1293,6 +1477,42 @@ function firstBoardCard(): (typeof boardResponse.board.cards)[number] {
     throw new Error("board response test fixture has no cards");
   }
   return card;
+}
+
+function firstBoardGroup(): (typeof boardResponse.board.groups)[number] {
+  const group = boardResponse.board.groups[0];
+  if (group === undefined) {
+    throw new Error("board response test fixture has no groups");
+  }
+  return group;
+}
+
+function boardColumnAt(index: number): (typeof boardResponse.board.columns)[number] {
+  const column = boardResponse.board.columns[index];
+  if (column === undefined) {
+    throw new Error(`board response test fixture has no column at ${index.toString()}`);
+  }
+  return column;
+}
+
+function doneBoardCard(): (typeof boardResponse.board.cards)[number] {
+  const card = firstBoardCard();
+  return {
+    ...card,
+    active_node_ids: ["done"],
+    actions: {
+      ...card.actions,
+      can_start: false,
+      manual_move_target_node_ids: [],
+    },
+    status: {
+      ...card.status,
+      kind: "done",
+      label: "Done",
+      native_state: "terminal",
+      node_ids: ["done"],
+    },
+  };
 }
 
 function nativeDialogBridge(opened: NativeDialogWindowOptions[]): NativeBridge {

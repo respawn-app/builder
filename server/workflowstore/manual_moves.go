@@ -55,6 +55,12 @@ func (s *Store) ManualMoveTask(ctx context.Context, req ManualMoveRequest) (Manu
 		if err != nil {
 			return ManualMoveResult{}, err
 		}
+		if !ok && targetNode.Kind == workflow.NodeKindStart {
+			group, edge, ok = startResetManualMoveContract(sourceNode, targetNode)
+		}
+		if !ok && req.AllowMissingEdge {
+			group, edge, ok = missingEdgeManualMoveContract(def, sourceNode, targetNode)
+		}
 		if !ok {
 			return ManualMoveResult{}, fmt.Errorf("no workflow edge from %s to %s", sourceNode.Key, targetNode.Key)
 		}
@@ -93,7 +99,7 @@ func (s *Store) ManualMoveTask(ctx context.Context, req ManualMoveRequest) (Manu
 		transitionState = "pending_approval"
 		edgeState = "pending"
 	}
-	if transitionState == "pending_approval" && sourceRunID == "" {
+	if transitionState == "pending_approval" && sourceRunID == "" && !req.AllowMissingEdge {
 		return ManualMoveResult{}, errors.New("manual move requiring approval needs a source run")
 	}
 	outputValuesJSON, err := marshalJSON(outputValues)
@@ -167,6 +173,66 @@ func terminalArchiveManualMoveContract(sourceNode workflow.Node, targetNode work
 		OutputRequirements: nil,
 	}
 	return group, edge, true
+}
+
+func startResetManualMoveContract(sourceNode workflow.Node, targetNode workflow.Node) (workflow.TransitionGroup, workflow.Edge, bool) {
+	group := workflow.TransitionGroup{
+		ID:           "",
+		SourceNodeID: sourceNode.ID,
+		TransitionID: "manual_start",
+		DisplayName:  "Move to Backlog",
+	}
+	edge := workflow.Edge{
+		ID:                 "",
+		Key:                "manual_start",
+		TargetNodeID:       targetNode.ID,
+		ContextMode:        workflow.ContextModeNewSession,
+		RequiresApproval:   false,
+		InputBindings:      nil,
+		OutputRequirements: nil,
+	}
+	return group, edge, true
+}
+
+func missingEdgeManualMoveContract(def workflow.Definition, sourceNode workflow.Node, targetNode workflow.Node) (workflow.TransitionGroup, workflow.Edge, bool) {
+	group := workflow.TransitionGroup{
+		ID:           "",
+		SourceNodeID: sourceNode.ID,
+		TransitionID: "manual_override",
+		DisplayName:  "Manual Override",
+	}
+	edge := workflow.Edge{
+		ID:                 "",
+		Key:                "manual_override",
+		TargetNodeID:       targetNode.ID,
+		ContextMode:        workflow.ContextModeNewSession,
+		RequiresApproval:   false,
+		InputBindings:      nil,
+		OutputRequirements: targetTransitionOutputRequirements(def, targetNode.ID),
+	}
+	return group, edge, true
+}
+
+func targetTransitionOutputRequirements(def workflow.Definition, targetNodeID workflow.NodeID) []workflow.OutputRequirement {
+	seen := map[string]bool{}
+	requirements := []workflow.OutputRequirement{}
+	for _, edge := range def.Edges {
+		if edge.TargetNodeID != targetNodeID {
+			continue
+		}
+		for _, binding := range edge.InputBindings {
+			if binding.Source != workflow.BindingSourceTransitionOutput {
+				continue
+			}
+			field := strings.TrimSpace(binding.Field)
+			if field == "" || seen[field] {
+				continue
+			}
+			seen[field] = true
+			requirements = append(requirements, workflow.OutputRequirement{FieldName: field})
+		}
+	}
+	return requirements
 }
 
 func (s *Store) latestRunForPlacement(ctx context.Context, placementID workflow.PlacementID) (workflow.RunID, string, error) {

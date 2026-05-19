@@ -426,9 +426,15 @@ func (s *Service) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTa
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowTaskMoveResponse{}, err
 	}
-	moved, err := s.store.ManualMoveTask(ctx, workflowstore.ManualMoveRequest{TaskID: workflow.TaskID(req.TaskID), TargetNodeID: workflow.NodeID(req.TargetNodeID), OutputValues: req.OutputValues, Commentary: req.Commentary, Actor: "user"})
+	moved, err := s.store.ManualMoveTask(ctx, workflowstore.ManualMoveRequest{TaskID: workflow.TaskID(req.TaskID), TargetNodeID: workflow.NodeID(req.TargetNodeID), OutputValues: req.OutputValues, Commentary: req.Commentary, Actor: "user", AllowMissingEdge: req.AllowMissingEdge})
 	if err != nil {
 		return serverapi.WorkflowTaskMoveResponse{}, err
+	}
+	if req.AutoApprove && moved.State == "pending_approval" {
+		moved, err = s.store.ApproveTransition(ctx, moved.TransitionID)
+		if err != nil {
+			return serverapi.WorkflowTaskMoveResponse{}, err
+		}
 	}
 	if s.schedulerWake != nil {
 		s.schedulerWake.Notify()

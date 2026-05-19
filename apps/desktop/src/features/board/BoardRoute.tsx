@@ -1,5 +1,6 @@
-import type { DragEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+/* eslint-disable max-lines -- Board route coordinates data, drag/drop, and board-level dialogs. */
+import type { DragEvent, SyntheticEvent } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { BoardColumn, WorkflowBoard, WorkflowPickerItem } from "../../api";
@@ -25,6 +26,13 @@ import {
   boardCardDragPayloadType,
   decodeBoardCardDragPayload,
 } from "./BoardDragTypes";
+import {
+  classifyDrop,
+  missingInputValues,
+  type PendingDrop,
+  type PendingMissingInputDrop,
+} from "./BoardDropActions";
+import { MissingInputsDialog, RollbackStartDialog } from "./BoardDropDialogs";
 import { boardSections } from "./BoardModel";
 import "./board.css";
 import { useBoard, useBoardTaskActions, useProjectBoardSubscription } from "./useBoardData";
@@ -38,13 +46,29 @@ export type BoardRouteProps = Readonly<{
 
 export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId }: BoardRouteProps) {
   const { t } = useTranslation();
+  const { push } = useStatusController();
+  const reportBoardLoadError = useCallback(
+    (error: unknown) => {
+      push({
+        id: "board-load-error",
+        tone: "danger",
+        title: t("board.loadFailed"),
+        body: errorMessage(error),
+        dismissible: false,
+      });
+    },
+    [push, t],
+  );
   const boardQuery = useBoard(projectId, workflowId);
   const board = boardQuery.data;
   useProjectBoardSubscription(
     projectId,
     workflowId,
-    board?.selectedWorkflow.id ?? workflowId,
-    board?.latestEventSequence ?? 0,
+    {
+      latestSequence: board?.latestEventSequence ?? 0,
+      onBackgroundError: reportBoardLoadError,
+      selectedWorkflowID: board?.selectedWorkflow.id ?? workflowId,
+    },
   );
 
   if (boardQuery.isPending) {
@@ -55,7 +79,7 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
       <ErrorState
         body={errorMessage(boardQuery.error)}
         chromePadding
-        onRetry={() => void boardQuery.refetch()}
+        onRetry={() => void boardQuery.refetch().catch(reportBoardLoadError)}
         reveal={false}
         retryLabel={t("app.retry")}
         title={t("states.error")}
@@ -90,6 +114,8 @@ function BoardContent({
   const { t } = useTranslation();
   const [workflowIssuesCollapsed, setWorkflowIssuesCollapsed] = useState(false);
   const [activeDrag, setActiveDrag] = useState<BoardCardDragPayload | null>(null);
+  const [rollbackDrop, setRollbackDrop] = useState<PendingDrop | null>(null);
+  const [missingInputDrop, setMissingInputDrop] = useState<PendingMissingInputDrop | null>(null);
   const activeDragRef = useRef<BoardCardDragPayload | null>(null);
   const { push } = useStatusController();
   const navigation = useAppNavigation();
@@ -99,6 +125,7 @@ function BoardContent({
   const connection = useConnectionSnapshot();
   const actions = useBoardTaskActions(board.projectID, boardQueryWorkflowID, board.selectedWorkflow.id);
   const actionsDisabled = connection.phase !== "connected";
+
   const activeColumns = useMemo(
     () => board.columns.filter((column) => !column.isBacklog && !column.isDone),
     [board.columns],
@@ -128,6 +155,19 @@ function BoardContent({
       />
     ),
   });
+  const reportActionError = useCallback(
+    (id: string, title: string, error: unknown) => {
+      const body = errorMessage(error);
+      push({ id, tone: "danger", title, body, dismissible: false });
+    },
+    [push],
+  );
+  const reportCardsLoadError = useCallback(
+    (error: unknown) => {
+      reportActionError("board-cards-load-error", t("board.cardsLoadFailed"), error);
+    },
+    [reportActionError, t],
+  );
 
   function dropTask(event: DragEvent<HTMLElement>, column: BoardColumn): void {
     event.preventDefault();
@@ -142,19 +182,33 @@ function BoardContent({
       reportRejectedDrop();
       return;
     }
-    if (!dropAllowed(column, dragPayload, firstActive?.id)) {
-      reportRejectedDrop();
-      return;
-    }
-    if (dragPayload.canStart && column.id === firstActive?.id) {
+    const dropAction = classifyDrop(column, dragPayload, firstActive?.id);
+    if (dropAction.kind === "start") {
       void actions.start.mutateAsync(dragPayload.taskID).catch(reportStartError);
       return;
     }
-    if (dragPayload.manualMoveTargetNodeIDs.includes(column.id)) {
-      void actions.move
-        .mutateAsync({ taskID: dragPayload.taskID, targetNodeID: column.id })
-        .catch(reportMoveError);
+    if (dropAction.kind === "move") {
+      const moveInput = {
+        taskID: dragPayload.taskID,
+        targetNodeID: column.id,
+        ...(dropAction.allowMissingEdge === undefined
+          ? {}
+          : { allowMissingEdge: dropAction.allowMissingEdge }),
+        ...(dropAction.autoApprove === undefined ? {} : { autoApprove: dropAction.autoApprove }),
+      };
+      void actions.move.mutateAsync(moveInput).catch(reportMoveError);
+      return;
     }
+    if (dropAction.kind === "confirmRollback") {
+      setRollbackDrop({ taskID: dragPayload.taskID, targetColumn: column });
+      return;
+    }
+    setMissingInputDrop({
+      taskID: dragPayload.taskID,
+      targetColumn: column,
+      fields: column.transitionOutputFields,
+      values: missingInputValues(column.transitionOutputFields),
+    });
   }
 
   function interruptTask(taskID: string, runID: string): void {
@@ -181,10 +235,6 @@ function BoardContent({
     reportActionError("board-resume-error", t("board.resumeFailed"), error);
   }
 
-  function reportActionError(id: string, title: string, error: unknown): void {
-    push({ id, tone: "danger", title, body: errorMessage(error) });
-  }
-
   function reportRejectedDrop(): void {
     push({
       id: "board-drop-rejected",
@@ -206,8 +256,68 @@ function BoardContent({
     return canStartHere || manualTargets.has(column.id) ? "allowed" : "blocked";
   }
 
+  function confirmRollbackDrop(): void {
+    if (rollbackDrop === null) {
+      return;
+    }
+    const drop = rollbackDrop;
+    setRollbackDrop(null);
+    void actions.move
+      .mutateAsync({ taskID: drop.taskID, targetNodeID: drop.targetColumn.id, autoApprove: true })
+      .catch(reportMoveError);
+  }
+
+  function submitMissingInputDrop(event: SyntheticEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (missingInputDrop === null) {
+      return;
+    }
+    const drop = missingInputDrop;
+    setMissingInputDrop(null);
+    void actions.move
+      .mutateAsync({
+        taskID: drop.taskID,
+        targetNodeID: drop.targetColumn.id,
+        outputValues: drop.values,
+        allowMissingEdge: true,
+        autoApprove: drop.targetColumn.kind === "agent",
+      })
+      .catch(reportMoveError);
+  }
+
+  function reportNavigationError(error: unknown): void {
+    reportActionError("board-navigation-error", t("board.navigationFailed"), error);
+  }
+
+  function reportCreateTaskError(error: unknown): void {
+    reportActionError("board-new-task-error", t("task.newWindowError"), error);
+  }
+
+  function openTask(taskID: string): void {
+    try {
+      openTaskDetail(taskID, "", () => {
+        void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID).catch(reportNavigationError);
+      });
+    } catch (error) {
+      reportNavigationError(error);
+    }
+  }
+
+  function closeTask(): void {
+    void navigation.closeProjectTask(board.projectID, board.selectedWorkflow.id).catch(reportNavigationError);
+  }
+
+  function selectWorkflow(workflowID: string): void {
+    void navigation.openProject(board.projectID, workflowID).catch(reportNavigationError);
+  }
+
+  function openNewTask(): void {
+    void newTaskDialog.open(undefined).catch(reportCreateTaskError);
+  }
+
   return (
-    <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto" ref={scrollportRef} role="list">
+    <div className="relative h-full min-h-0 min-w-0 w-full">
+      <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto" ref={scrollportRef} role="list">
       <div
         className="flex h-full min-h-0 w-max min-w-full gap-[var(--space-2)] px-[var(--space-2)] pb-[var(--space-2)]"
         data-testid="board-column-rail"
@@ -223,12 +333,7 @@ function BoardContent({
                   dropState={columnDropState(column)}
                   isFirstActive={column.id === firstActive?.id}
                   key={column.id}
-                  onCardClick={(taskID) => {
-                    openTaskDetail(taskID, "", () => {
-                      void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
-                    });
-                  }}
-                  onDropTask={dropTask}
+                  onCardClick={openTask}
                   onCardDragEnd={() => {
                     activeDragRef.current = null;
                     setActiveDrag(null);
@@ -237,6 +342,8 @@ function BoardContent({
                     activeDragRef.current = payload;
                     setActiveDrag(payload);
                   }}
+                  onCardsLoadError={reportCardsLoadError}
+                  onDropTask={dropTask}
                   onInterruptTask={interruptTask}
                   onResumeTask={resumeTask}
                   scrollportRef={scrollportRef}
@@ -251,12 +358,7 @@ function BoardContent({
               dropState={columnDropState(section.column)}
               isFirstActive={section.column.id === firstActive?.id}
               key={section.id}
-              onCardClick={(taskID) => {
-                openTaskDetail(taskID, "", () => {
-                  void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
-                });
-              }}
-              onDropTask={dropTask}
+              onCardClick={openTask}
               onCardDragEnd={() => {
                 activeDragRef.current = null;
                 setActiveDrag(null);
@@ -265,6 +367,8 @@ function BoardContent({
                 activeDragRef.current = payload;
                 setActiveDrag(payload);
               }}
+              onCardsLoadError={reportCardsLoadError}
+              onDropTask={dropTask}
               onInterruptTask={interruptTask}
               onResumeTask={resumeTask}
               scrollportRef={scrollportRef}
@@ -272,13 +376,31 @@ function BoardContent({
           ),
         )}
       </div>
+      </div>
       <TaskDetailDialog
-        onClose={() => {
-          void navigation.closeProjectTask(board.projectID, board.selectedWorkflow.id);
-        }}
+        onClose={closeTask}
         open={selectedTaskId.length > 0}
         resumeRunId={resumeRunId}
         taskId={selectedTaskId}
+      />
+      <RollbackStartDialog
+        onClose={() => {
+          setRollbackDrop(null);
+        }}
+        onConfirm={confirmRollbackDrop}
+        open={rollbackDrop !== null}
+      />
+      <MissingInputsDialog
+        drop={missingInputDrop}
+        onClose={() => {
+          setMissingInputDrop(null);
+        }}
+        onSubmit={submitMissingInputDrop}
+        onValueChange={(fieldName, value) => {
+          setMissingInputDrop((current) =>
+            current === null ? null : { ...current, values: { ...current.values, [fieldName]: value } },
+          );
+        }}
       />
       {!board.selectedWorkflow.validForTaskCreation ? (
         <FloatingNoticeIsland
@@ -296,24 +418,12 @@ function BoardContent({
       <BoardHoverMenu
         board={board}
         canCreateTask={connection.phase === "connected"}
-        onNewTask={() => {
-          void newTaskDialog.open(undefined);
-        }}
+        onNewTask={openNewTask}
+        onWorkflowSelect={selectWorkflow}
       />
       {newTaskDialog.fallback}
     </div>
   );
-}
-
-function dropAllowed(
-  column: BoardColumn,
-  dragPayload: BoardCardDragPayload,
-  firstActiveColumnID: string | undefined,
-): boolean {
-  if (dragPayload.canStart && column.id === firstActiveColumnID) {
-    return true;
-  }
-  return dragPayload.manualMoveTargetNodeIDs.includes(column.id);
 }
 
 function dragPayloadFromDataTransfer(dataTransfer: DataTransfer): BoardCardDragPayload | null {

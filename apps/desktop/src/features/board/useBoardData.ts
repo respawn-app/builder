@@ -28,12 +28,16 @@ export function useBoardNodeCards(projectID: string, workflowID: string, nodeID:
 export function useProjectBoardSubscription(
   projectID: string,
   boardQueryWorkflowID: string,
-  selectedWorkflowID: string,
-  latestSequence: number,
+  input: Readonly<{
+    latestSequence: number;
+    selectedWorkflowID: string;
+    onBackgroundError?: (error: unknown) => void;
+  }>,
 ) {
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   const connection = useConnectionSnapshot();
+  const { latestSequence, onBackgroundError, selectedWorkflowID } = input;
 
   useEffect(() => {
     if (projectID.length === 0 || connection.phase !== "connected") {
@@ -52,13 +56,13 @@ export function useProjectBoardSubscription(
     }
     const subscription = api.subscribeProject(projectID, latestSequence, {
       onEvent() {
-        void refresh();
+        void refresh().catch(onBackgroundError);
       },
       onComplete() {
         return;
       },
       onError() {
-        void refresh();
+        void refresh().catch(onBackgroundError);
       },
     });
     return () => {
@@ -70,6 +74,7 @@ export function useProjectBoardSubscription(
     connection.generation,
     connection.phase,
     latestSequence,
+    onBackgroundError,
     projectID,
     queryClient,
     selectedWorkflowID,
@@ -79,17 +84,24 @@ export function useProjectBoardSubscription(
     if (projectID.length === 0 || connection.phase !== "connected") {
       return;
     }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) });
+    void queryClient
+      .invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) })
+      .catch(onBackgroundError);
     if (selectedWorkflowID !== boardQueryWorkflowID) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) });
+      void queryClient
+        .invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) })
+        .catch(onBackgroundError);
     }
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.boardNodeCardsRoot(projectID, selectedWorkflowID),
-    });
+    void queryClient
+      .invalidateQueries({
+        queryKey: queryKeys.boardNodeCardsRoot(projectID, selectedWorkflowID),
+      })
+      .catch(onBackgroundError);
   }, [
     boardQueryWorkflowID,
     connection.generation,
     connection.phase,
+    onBackgroundError,
     projectID,
     queryClient,
     selectedWorkflowID,
@@ -118,8 +130,15 @@ export function useBoardTaskActions(
       onSuccess: refresh,
     }),
     move: useMutation({
-      mutationFn: async (input: Readonly<{ taskID: string; targetNodeID: string }>) =>
-        api.moveTask(input.taskID, input.targetNodeID),
+      mutationFn: async (
+        input: Readonly<{
+          taskID: string;
+          targetNodeID: string;
+          outputValues?: Readonly<Record<string, string>>;
+          allowMissingEdge?: boolean;
+          autoApprove?: boolean;
+        }>,
+      ) => api.moveTask(input),
       onSuccess: refresh,
     }),
     interrupt: useMutation({

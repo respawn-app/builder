@@ -674,6 +674,14 @@ func workflowNodeByID(def serverapi.WorkflowDefinition) map[string]serverapi.Wor
 	return out
 }
 
+func workflowTransitionGroupByID(def serverapi.WorkflowDefinition) map[string]serverapi.WorkflowTransitionGroup {
+	out := make(map[string]serverapi.WorkflowTransitionGroup, len(def.TransitionGroups))
+	for _, group := range def.TransitionGroups {
+		out[group.ID] = group
+	}
+	return out
+}
+
 func workflowPickerItem(def serverapi.WorkflowDefinition, link sqlitegen.ProjectWorkflowLink, validation *workflow.ValidationResult) serverapi.WorkflowPickerItem {
 	item := serverapi.WorkflowPickerItem{WorkflowID: def.Workflow.ID, DisplayName: def.Workflow.Name, Description: def.Workflow.Description, GraphRevision: def.Workflow.GraphRevision, IsProjectDefault: link.ID != "" && link.IsDefault != 0, ValidForTaskCreation: true, UnlinkedAtUnixMs: link.UnlinkedAtUnixMs}
 	if validation != nil {
@@ -1579,7 +1587,16 @@ func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardCol
 	columns := make([]serverapi.WorkflowBoardColumn, 0, len(def.Nodes))
 	for index, node := range def.Nodes {
 		columns = append(columns, serverapi.WorkflowBoardColumn{
-			Node:      serverapi.WorkflowBoardNodeSummary{NodeID: node.ID, Key: node.Key, Kind: node.Kind, DisplayName: node.DisplayName, AssigneeRole: node.SubagentRole, SortOrder: index},
+			Node: serverapi.WorkflowBoardNodeSummary{
+				NodeID:                 node.ID,
+				Key:                    node.Key,
+				Kind:                   node.Kind,
+				DisplayName:            node.DisplayName,
+				AssigneeRole:           node.SubagentRole,
+				SortOrder:              index,
+				OutputFields:           node.OutputFields,
+				TransitionOutputFields: boardTransitionOutputFields(def, node.ID),
+			},
 			GroupID:   node.GroupID,
 			SortOrder: index,
 			IsBacklog: node.Kind == string(workflow.NodeKindStart),
@@ -1587,6 +1604,45 @@ func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardCol
 		})
 	}
 	return columns
+}
+
+func boardTransitionOutputFields(def serverapi.WorkflowDefinition, targetNodeID string) []serverapi.WorkflowOutputField {
+	nodesByID := workflowNodeByID(def)
+	groupsByID := workflowTransitionGroupByID(def)
+	fields := make([]serverapi.WorkflowOutputField, 0)
+	seen := map[string]bool{}
+	for _, edge := range def.Edges {
+		if edge.TargetNodeID != targetNodeID {
+			continue
+		}
+		sourceOutputFields := map[string]serverapi.WorkflowOutputField{}
+		if group, ok := groupsByID[edge.TransitionGroupID]; ok {
+			if sourceNode, ok := nodesByID[group.SourceNodeID]; ok {
+				for _, field := range sourceNode.OutputFields {
+					name := strings.TrimSpace(field.Name)
+					if name != "" {
+						sourceOutputFields[name] = field
+					}
+				}
+			}
+		}
+		for _, binding := range edge.InputBindings {
+			if binding.Source != string(workflow.BindingSourceTransitionOutput) {
+				continue
+			}
+			name := strings.TrimSpace(binding.Field)
+			if name == "" || seen[name] {
+				continue
+			}
+			field := sourceOutputFields[name]
+			if strings.TrimSpace(field.Name) == "" {
+				field = serverapi.WorkflowOutputField{Name: name}
+			}
+			fields = append(fields, field)
+			seen[name] = true
+		}
+	}
+	return fields
 }
 
 func (s *Service) taskCard(ctx context.Context, task sqlitegen.Task, placements []sqlitegen.TaskNodePlacement, def serverapi.WorkflowDefinition, nodeKinds map[string]workflow.NodeKind, sourceWorkspace serverapi.ProjectWorkspaceSummary) (serverapi.WorkflowBoardTaskCard, bool, error) {

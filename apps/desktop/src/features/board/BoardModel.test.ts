@@ -14,9 +14,12 @@ const backlogColumn: BoardColumn = {
   isBacklog: true,
   isDone: false,
   key: "backlog",
+  kind: "start",
   name: "Backlog",
+  outputFields: [],
   sortOrder: 0,
   taskCount: 1,
+  transitionOutputFields: [],
 };
 
 const activeColumn: BoardColumn = {
@@ -26,9 +29,12 @@ const activeColumn: BoardColumn = {
   isBacklog: false,
   isDone: false,
   key: "implement",
+  kind: "agent",
   name: "Implement",
+  outputFields: [],
   sortOrder: 1,
   taskCount: 1,
+  transitionOutputFields: [],
 };
 
 const doneColumn: BoardColumn = {
@@ -38,9 +44,12 @@ const doneColumn: BoardColumn = {
   isBacklog: false,
   isDone: true,
   key: "done",
+  kind: "terminal",
   name: "Done",
+  outputFields: [],
   sortOrder: 2,
   taskCount: 0,
+  transitionOutputFields: [],
 };
 
 const board: WorkflowBoard = {
