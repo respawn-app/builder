@@ -52,7 +52,7 @@ func TestBoardAndTaskDetailUseDurableWorkflowMetadataOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
-	if len(board.WorkflowPicker) != 1 || len(board.Cards) != 0 || len(board.DonePreview) != 0 || board.NextPageToken != "" {
+	if len(board.WorkflowPicker) != 1 || len(board.Cards) != 0 || len(board.DonePreview) != 1 || board.NextPageToken != "" {
 		t.Fatalf("board = %+v", board)
 	}
 	if len(board.Columns) < 2 || board.Columns[0].Node.Kind != string(workflow.NodeKindStart) {
@@ -388,8 +388,8 @@ func TestBoardColumnTaskCountsUseFullSelectedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
-	if len(board.Cards) != 0 || board.NextPageToken != "" {
-		t.Fatalf("metadata board returned cards = %+v next=%q", board.Cards, board.NextPageToken)
+	if len(board.Cards) != 1 || board.NextPageToken == "" {
+		t.Fatalf("legacy board page = %+v next=%q, want one card with next page", board.Cards, board.NextPageToken)
 	}
 	backlogCount := 0
 	for _, column := range board.Columns {

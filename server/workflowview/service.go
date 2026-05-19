@@ -55,6 +55,18 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	if strings.TrimSpace(projectID) == "" {
 		return serverapi.WorkflowBoard{}, errors.New("project_id is required")
 	}
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = 100
+	}
+	offset, err := parseOffsetPageToken(req.PageToken)
+	if err != nil {
+		return serverapi.WorkflowBoard{}, err
+	}
+	donePreviewLimit := req.DonePreviewLimit
+	if donePreviewLimit == 0 {
+		donePreviewLimit = 20
+	}
 	links, err := s.queries.ListProjectWorkflowLinks(ctx, projectID)
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
@@ -67,6 +79,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
 	}
+	primaryWorkspace, workspacesByID := boardProjectWorkspaceSummaries(project)
 	placementsByTaskID, err := s.boardPlacementsByTask(ctx, tasks)
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
@@ -138,6 +151,31 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 	groups := boardGroups(def)
 	columns := boardColumns(def)
 	applyColumnTaskCountsFromPlacements(columns, tasks, placementsByTaskID, selected.WorkflowID, def, nodeKinds)
+	cards := make([]serverapi.WorkflowBoardTaskCard, 0)
+	doneCards := make([]serverapi.WorkflowBoardTaskCard, 0)
+	donePreview := make([]serverapi.WorkflowBoardTaskCard, 0)
+	for _, task := range tasks {
+		if task.WorkflowID != selected.WorkflowID {
+			continue
+		}
+		card, done, err := s.taskCard(ctx, task, effectiveBoardPlacementsForTask(task, placementsByTaskID[task.ID], def, nodeKinds), def, nodeKinds, sourceWorkspaceForTask(task, workspacesByID, primaryWorkspace))
+		if err != nil {
+			return serverapi.WorkflowBoard{}, err
+		}
+		if done {
+			doneCards = append(doneCards, card)
+			if len(donePreview) < donePreviewLimit {
+				donePreview = append(donePreview, card)
+			}
+			continue
+		}
+		cards = append(cards, card)
+	}
+	nextPageToken := ""
+	if len(cards) > offset+pageSize {
+		nextPageToken = strconv.Itoa(offset + pageSize)
+	}
+	cards = pageCards(cards, offset, pageSize)
 	latestSequence, err := s.latestEventSequence(ctx, projectID)
 	if err != nil {
 		return serverapi.WorkflowBoard{}, err
@@ -149,6 +187,10 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 		WorkflowPicker:      picker,
 		Groups:              groups,
 		Columns:             columns,
+		Cards:               cards,
+		DonePreview:         donePreview,
+		HasHiddenDoneCards:  len(doneCards) > len(donePreview),
+		NextPageToken:       nextPageToken,
 		GeneratedAtUnixMs:   time.Now().UTC().UnixMilli(),
 		LatestEventSequence: latestSequence,
 	}
@@ -183,7 +225,19 @@ func (s *Service) ListBoardNodeCards(ctx context.Context, req serverapi.Workflow
 	if err != nil {
 		return serverapi.WorkflowBoardNodeCardsListResponse{}, err
 	}
-	tasks, err := s.queries.ListTasksByProject(ctx, projectID)
+	cursorSet := int64(0)
+	if cursor.hasValue {
+		cursorSet = 1
+	}
+	tasks, err := s.queries.ListBoardNodeTasks(ctx, sqlitegen.ListBoardNodeTasksParams{
+		ProjectID:             projectID,
+		WorkflowID:            workflowID,
+		CursorSet:             cursorSet,
+		CursorUpdatedAtUnixMs: cursor.updatedAtUnixMs,
+		CursorTaskID:          cursor.taskID,
+		NodeID:                nodeID,
+		LimitRows:             int64(pageSize + 1),
+	})
 	if err != nil {
 		return serverapi.WorkflowBoardNodeCardsListResponse{}, err
 	}
@@ -191,33 +245,12 @@ func (s *Service) ListBoardNodeCards(ctx context.Context, req serverapi.Workflow
 	if err != nil {
 		return serverapi.WorkflowBoardNodeCardsListResponse{}, err
 	}
-	primaryWorkspace := serverapi.ProjectWorkspaceSummary{}
-	workspacesByID := map[string]serverapi.ProjectWorkspaceSummary{}
-	for _, workspace := range project.Workspaces {
-		dto := projectWorkspaceSummary(workspace)
-		workspacesByID[dto.WorkspaceID] = dto
-		if workspace.IsPrimary {
-			primaryWorkspace = dto
-		}
-	}
+	primaryWorkspace, workspacesByID := boardProjectWorkspaceSummaries(project)
 	placementsByTaskID, err := s.boardPlacementsByTask(ctx, tasks)
 	if err != nil {
 		return serverapi.WorkflowBoardNodeCardsListResponse{}, err
 	}
-	candidates := make([]sqlitegen.Task, 0)
-	for _, task := range tasks {
-		if task.WorkflowID != workflowID {
-			continue
-		}
-		if !taskBelongsToBoardNode(task, placementsByTaskID[task.ID], def, nodeKinds, nodeID) {
-			continue
-		}
-		if cursor.hasValue && !boardNodeCardIsAfterCursor(task, cursor) {
-			continue
-		}
-		candidates = append(candidates, task)
-	}
-	sortBoardNodeTasks(candidates)
+	candidates := tasks
 	hasNext := len(candidates) > pageSize
 	if hasNext {
 		candidates = candidates[:pageSize]
@@ -1425,6 +1458,19 @@ func projectBoardProject(project clientui.ProjectOverview) serverapi.ProjectBoar
 
 func projectWorkspaceSummary(workspace clientui.ProjectWorkspaceSummary) serverapi.ProjectWorkspaceSummary {
 	return serverapi.ProjectWorkspaceSummary{WorkspaceID: workspace.WorkspaceID, DisplayName: workspace.DisplayName, RootPath: workspace.RootPath, Availability: string(workspace.Availability), IsPrimary: workspace.IsPrimary, UpdatedAtUnixMs: workspace.UpdatedAt.UnixMilli()}
+}
+
+func boardProjectWorkspaceSummaries(project clientui.ProjectOverview) (serverapi.ProjectWorkspaceSummary, map[string]serverapi.ProjectWorkspaceSummary) {
+	primaryWorkspace := serverapi.ProjectWorkspaceSummary{}
+	workspacesByID := map[string]serverapi.ProjectWorkspaceSummary{}
+	for _, workspace := range project.Workspaces {
+		dto := projectWorkspaceSummary(workspace)
+		workspacesByID[dto.WorkspaceID] = dto
+		if workspace.IsPrimary {
+			primaryWorkspace = dto
+		}
+	}
+	return primaryWorkspace, workspacesByID
 }
 
 func sourceWorkspaceForTask(task sqlitegen.Task, workspacesByID map[string]serverapi.ProjectWorkspaceSummary, fallback serverapi.ProjectWorkspaceSummary) serverapi.ProjectWorkspaceSummary {

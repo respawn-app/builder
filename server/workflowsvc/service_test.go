@@ -631,7 +631,7 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkflowBoard: %v", err)
 	}
-	if len(board.Board.Cards) != 0 || len(board.Board.Columns) == 0 {
+	if len(board.Board.Cards) != 1 || len(board.Board.Columns) == 0 {
 		t.Fatalf("board = %+v", board.Board)
 	}
 	backlogNodeID := ""
