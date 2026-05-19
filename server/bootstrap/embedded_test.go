@@ -109,10 +109,7 @@ func TestResolveConfigUsesWorkspaceContainer(t *testing.T) {
 	if plan.Config.Settings.Model != loaded.Settings.Model {
 		t.Fatalf("resolved config model = %q, want %q", plan.Config.Settings.Model, loaded.Settings.Model)
 	}
-	if plan.ContainerDir == "" {
-		t.Fatal("expected container dir")
-	}
-	if _, err := os.Stat(filepath.Dir(plan.ContainerDir)); err != nil {
-		t.Fatalf("expected sessions root to exist: %v", err)
+	if plan.ContainerDir != "" {
+		t.Fatalf("container dir = %q, want empty before project binding", plan.ContainerDir)
 	}
 }
