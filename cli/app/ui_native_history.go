@@ -161,7 +161,6 @@ func (m *uiModel) resetNativeHistoryState() {
 func (m *uiModel) resetNativeStreamingState() {
 	m.nativeStreamingController = newNativeAssistantStreamController(m.theme, m.nativeReplayRenderWidth())
 	m.nativeStreamingTail = nil
-	m.nativeStreamingUnflushedStable = nil
 	m.nativeStreamingStableFlushSequence = 0
 	m.nativeStreamingText = ""
 	m.nativeStreamingStepID = ""
@@ -191,9 +190,9 @@ func (m *uiModel) syncNativeStreamingScrollback() tea.Cmd {
 	m.nativeStreamingText = m.nativeStreamingController.source
 	m.nativeStreamingWidth = width
 	m.nativeStreamingFlushedLineCount = m.nativeStreamingController.enqueuedStableLineCount
-	if len(update.stable) > 0 {
-		m.nativeStreamingUnflushedStable = append(m.nativeStreamingUnflushedStable, update.stable...)
-	}
+	// Stable lines are now owned by native scrollback once a flush is scheduled.
+	// Keeping them in the mutable live tail lets a final commit render the same
+	// prefix again if terminal output and runtime events interleave.
 	m.nativeStreamingTail = m.nativeStreamingLiveTail(update.tail)
 	if len(update.stable) == 0 {
 		return nil
@@ -269,13 +268,7 @@ func (m *uiModel) nativeStreamingFinalizeLines(stable []tui.TranscriptProjection
 }
 
 func (m *uiModel) nativeStreamingLiveTail(tail []tui.TranscriptProjectionLine) []tui.TranscriptProjectionLine {
-	if len(m.nativeStreamingUnflushedStable) == 0 {
-		return cloneNativeStreamProjectionLines(tail)
-	}
-	lines := make([]tui.TranscriptProjectionLine, 0, len(m.nativeStreamingUnflushedStable)+len(tail))
-	lines = append(lines, m.nativeStreamingUnflushedStable...)
-	lines = append(lines, tail...)
-	return lines
+	return cloneNativeStreamProjectionLines(tail)
 }
 
 func (m *uiModel) emitNativeProjectionLinesAfterEntry(projection tui.TranscriptProjection, entryIndex int) tea.Cmd {

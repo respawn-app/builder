@@ -217,14 +217,14 @@ func (m *uiModel) handleNativeHistoryFlush(msg nativeHistoryFlushMsg) tea.Cmd {
 		current = next
 	}
 	ackSequence := m.nativeStreamingStableFlushAckSequence()
-	if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {
-		m.waitRuntimeEventAfterFlushSequence = 0
-		cmds = append(cmds, m.waitRuntimeEventCmd())
-	}
 	if ackSequence != 0 {
 		cmds = append(cmds, func() tea.Msg {
 			return nativeStreamingStableFlushAckMsg{Sequence: ackSequence}
 		})
+	}
+	if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {
+		m.waitRuntimeEventAfterFlushSequence = 0
+		cmds = append(cmds, m.waitRuntimeEventCmd())
 	}
 	return sequenceCmds(cmds...)
 }
@@ -240,7 +240,6 @@ func (m *uiModel) ackNativeStreamingStableFlush(sequence uint64) {
 	if sequence == 0 || m.nativeStreamingStableFlushSequence == 0 || sequence < m.nativeStreamingStableFlushSequence {
 		return
 	}
-	m.nativeStreamingUnflushedStable = nil
 	m.nativeStreamingStableFlushSequence = 0
 	m.nativeStreamingTail = m.nativeStreamingController.Tail()
 }
