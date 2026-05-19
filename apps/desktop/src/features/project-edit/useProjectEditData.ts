@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { NativeBridge, NativeWorkspaceUnlinkTarget } from "@builder/desktop-native-bridge";
 
 import type { ProjectBinding } from "../../api";
+import { errorMessage } from "../../api/errors";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 
@@ -66,21 +67,27 @@ export function useProjectWorkspaceUnlinkRequests(
   nativeBridge: NativeBridge,
   handler: (target: NativeWorkspaceUnlinkTarget) => void,
 ) {
+  const { logger } = useAppServices();
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | null = null;
-    void nativeBridge.projectWorkspace.onUnlinkRequested(handler).then((nextUnlisten) => {
-      if (active) {
-        unlisten = nextUnlisten;
-        return;
-      }
-      nextUnlisten();
-    });
+    void nativeBridge.projectWorkspace
+      .onUnlinkRequested(handler)
+      .then((nextUnlisten) => {
+        if (active) {
+          unlisten = nextUnlisten;
+          return;
+        }
+        nextUnlisten();
+      })
+      .catch((error: unknown) => {
+        void logger.append("warn", "Workspace unlink event listener failed.", { error: errorMessage(error) });
+      });
     return () => {
       active = false;
       unlisten?.();
     };
-  }, [handler, nativeBridge.projectWorkspace]);
+  }, [handler, logger, nativeBridge.projectWorkspace]);
 }
 
 async function invalidateProjectEditQueries(

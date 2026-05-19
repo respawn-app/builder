@@ -13,6 +13,10 @@ describe("native bridge capabilities", () => {
     expect(bridge.capabilities.terminal.launchBuilderSession).toBe(false);
     expect(bridge.capabilities.projectCreationWindow).toBe(false);
     expect(bridge.capabilities.taskDetailWindow).toBe(false);
+    await expect(bridge.builder.resolvePlatform()).resolves.toBe("browser");
+    await expect(createBrowserNativeBridge({ platform: "macos" }).builder.resolvePlatform()).resolves.toBe(
+      "macos",
+    );
     await expect(bridge.clipboard.readText()).rejects.toThrow("Native clipboard is unavailable");
   });
 

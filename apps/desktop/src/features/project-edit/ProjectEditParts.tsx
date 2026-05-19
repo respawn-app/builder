@@ -1,5 +1,5 @@
 import type { NativeBridge } from "@builder/desktop-native-bridge";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link2Off, Save, Star, Unlink } from "lucide-react";
 
@@ -171,11 +171,8 @@ export function WorkspaceUnlinkFallbackDialog({
   );
 }
 
-export function WorkspaceUnlinkWindowRoute({
-  projectID,
-  workspaceID,
-  rootPath,
-}: WorkspaceUnlinkTarget) {
+export function WorkspaceUnlinkWindowRoute({ projectID, workspaceID, rootPath }: WorkspaceUnlinkTarget) {
+  const [submitting, setSubmitting] = useState(false);
   const { t } = useTranslation();
   const { nativeBridge } = useAppServices();
   const { push } = useStatusController();
@@ -184,11 +181,15 @@ export function WorkspaceUnlinkWindowRoute({
     <NativeDialogWindow title={t("projectEdit.unlinkTitle")}>
       <WorkspaceUnlinkContent
         className="w-[calc(var(--workspace-unlink-dialog-width)-(var(--space-2)*2)-(var(--space-4)*2))]"
-        disabled={false}
+        disabled={submitting}
         onCancel={() => {
           void nativeBridge.window.closeCurrent();
         }}
         onConfirm={() => {
+          if (submitting) {
+            return;
+          }
+          setSubmitting(true);
           void confirmNativeWorkspaceUnlink(nativeBridge, target, (message) => {
             push({
               body: message,
@@ -196,6 +197,7 @@ export function WorkspaceUnlinkWindowRoute({
               title: t("projectEdit.unlinkWindowError"),
               tone: "danger",
             });
+            setSubmitting(false);
           });
         }}
         rootPath={rootPath}

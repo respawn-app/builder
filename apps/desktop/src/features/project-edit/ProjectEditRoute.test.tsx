@@ -77,13 +77,17 @@ describe("ProjectEditRoute", () => {
     expect(screen.getByRole("button", { name: "Make /tmp/project the default workspace" })).not.toHaveClass(
       "border-[var(--color-outline)]",
     );
-    expect(screen.getByRole("button", { name: "Make /tmp/project the default workspace" }).className).not.toContain("hover:");
+    expect(
+      screen.getByRole("button", { name: "Make /tmp/project the default workspace" }).className,
+    ).not.toContain("hover:");
     expect(screen.getByRole("button", { name: "Make /tmp/project the default workspace" })).toHaveClass(
       "text-[var(--color-secondary)]",
       "opacity-100",
     );
     fireEvent.click(screen.getByRole("button", { name: "Make /tmp/project the default workspace" }));
-    expect(services.transport.calls.filter((call) => call.method === "project.defaultWorkspace.set")).toHaveLength(1);
+    expect(
+      services.transport.calls.filter((call) => call.method === "project.defaultWorkspace.set"),
+    ).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Unlink /tmp/project" }).className).not.toContain("hover:");
   });
 
@@ -224,7 +228,7 @@ describe("ProjectEditRoute", () => {
   it("keeps rendered native workspace unlink dialog at 400px for long paths", async () => {
     const fittedSizes: { width: number; height: number }[] = [];
     const rootPath = "/tmp/project-alt/with/a/very/long/path/that/needs/readable/wrapping";
-    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => dialogRect(400, 300));
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => dialogRect(400, 300));
     window.history.pushState(
       null,
       "",
@@ -331,7 +335,10 @@ describe("ProjectEditRoute", () => {
   });
 
   it("does not render a local Back control", async () => {
-    const services = createTestServices([...startupRoutes, { method: "project.edit.get", result: projectEditResponse }]);
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "project.edit.get", result: projectEditResponse },
+    ]);
 
     render(<App services={services} />);
 

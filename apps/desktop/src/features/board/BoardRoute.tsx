@@ -146,10 +146,11 @@ function BoardContent({
   }
 
   return (
-    <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto" role="list">
+    <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto">
       <div
         className="flex h-full min-h-0 w-max min-w-full gap-[var(--space-3)] px-[var(--space-2)] pb-[var(--space-2)]"
         data-testid="board-column-rail"
+        role="list"
       >
         {sections.map((section) =>
           section.kind === "group" ? (

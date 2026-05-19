@@ -69,6 +69,7 @@ export type NativeBridge = Readonly<{
     append(entry: NativeLogEntry): Promise<void>;
   }>;
   builder: Readonly<{
+    resolvePlatform(): Promise<NativePlatform>;
     resolveContext(): Promise<NativeBuilderContext>;
   }>;
   window: Readonly<{
@@ -241,6 +242,9 @@ export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = 
       },
     },
     builder: {
+      async resolvePlatform(): Promise<NativePlatform> {
+        return capabilities.platform;
+      },
       async resolveContext(): Promise<NativeBuilderContext> {
         return {
           serverEndpoint: "ws://127.0.0.1:53082/rpc",
@@ -341,6 +345,9 @@ export function createTauriNativeBridge(platform: NativePlatform = "unknown"): N
       },
     },
     builder: {
+      async resolvePlatform(): Promise<NativePlatform> {
+        return normalizeNativePlatform(await invoke<string>("resolve_native_platform"));
+      },
       async resolveContext(): Promise<NativeBuilderContext> {
         return invoke<NativeBuilderContext>("resolve_builder_context");
       },
@@ -452,6 +459,13 @@ export function createAutoNativeBridge(platform: NativePlatform = "unknown"): Na
 
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined;
+}
+
+function normalizeNativePlatform(platform: string): NativePlatform {
+  if (platform === "linux" || platform === "macos" || platform === "windows") {
+    return platform;
+  }
+  return "unknown";
 }
 
 function validateExternalUrl(url: string): string {

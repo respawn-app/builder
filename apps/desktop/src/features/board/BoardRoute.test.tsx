@@ -99,8 +99,9 @@ describe("BoardRoute", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
     expect(screen.getByTestId("route-transition-frame")).toHaveClass("min-w-0", "w-full");
-    expect(screen.getByRole("list")).toHaveClass("min-w-0", "w-full", "overflow-x-auto");
-    expect(screen.getByRole("list")).not.toHaveClass(
+    expect(screen.getByRole("list")).toHaveAttribute("data-testid", "board-column-rail");
+    expect(screen.getByTestId("board-column-rail")).toHaveClass("min-w-full", "w-max");
+    expect(screen.getByTestId("board-column-rail")).not.toHaveClass(
       "hide-scrollbar",
       "overflow-y-hidden",
       "pb-[var(--shadow-bleed-island)]",

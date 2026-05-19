@@ -16,25 +16,25 @@ let productionContextMenuGuardInstalled = false;
 export async function createDefaultAppServices(): Promise<AppServices> {
   installProductionContextMenuGuard(import.meta.env.PROD);
   applyNativeDialogThemeOverride();
-  const bootstrapNativeBridge = createAutoNativeBridge();
-  const bootstrapLogger = createGuiLogger(bootstrapNativeBridge);
-  const context = await bootstrapNativeBridge.builder
+  const bootstrapNativeBridge = createAutoNativeBridge("unknown");
+  const platform = await bootstrapNativeBridge.builder.resolvePlatform().catch(() => "unknown" as const);
+  const nativeBridge = createAutoNativeBridge(platform);
+  const logger = createGuiLogger(nativeBridge);
+  const context = await nativeBridge.builder
     .resolveContext()
     .catch((error: unknown) => new StartupConfigurationError(errorMessage(error)));
   if (context instanceof Error) {
-    await bootstrapLogger.append("error", "Builder native context resolution failed.", {
+    await logger.append("error", "Builder native context resolution failed.", {
       error: context.message,
     });
     return {
       api: new BuilderApiClient(new BootstrapErrorTransport(context)),
       debugThemeOverrideEnabled: import.meta.env.DEV,
       endpoint: defaultServerEndpoint,
-      logger: bootstrapLogger,
-      nativeBridge: bootstrapNativeBridge,
+      logger,
+      nativeBridge,
     };
   }
-  const nativeBridge = createAutoNativeBridge(context.platform);
-  const logger = createGuiLogger(nativeBridge);
   applyConfiguredTheme(context.theme);
   applyNativeDialogThemeOverride();
   const endpoint = context.serverEndpoint.length > 0 ? context.serverEndpoint : defaultServerEndpoint;

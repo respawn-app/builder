@@ -29,6 +29,11 @@ fn resolve_builder_context() -> Result<BuilderNativeContext, String> {
 }
 
 #[tauri::command]
+fn resolve_native_platform() -> String {
+    builder_platform().to_string()
+}
+
+#[tauri::command]
 async fn select_directory(app: tauri::AppHandle, title: String) -> Result<Option<String>, String> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -100,6 +105,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             resolve_builder_context,
+            resolve_native_platform,
             select_directory,
             open_external_url,
             launch_builder_session,
