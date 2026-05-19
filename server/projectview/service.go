@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"builder/server/metadata"
@@ -17,11 +16,8 @@ import (
 )
 
 type Service struct {
-	metadata     *metadata.Store
-	projectID    string
-	containerDir string
-	syncOnce     sync.Once
-	syncErr      error
+	metadata  *metadata.Store
+	projectID string
 }
 
 const (
@@ -31,11 +27,11 @@ const (
 	maxWorkspacePageSize       = 100
 )
 
-func NewMetadataService(metadataStore *metadata.Store, projectID string, containerDir string) (*Service, error) {
+func NewMetadataService(metadataStore *metadata.Store, projectID string) (*Service, error) {
 	if metadataStore == nil {
 		return nil, errors.New("metadata store is required")
 	}
-	return &Service{metadata: metadataStore, projectID: strings.TrimSpace(projectID), containerDir: strings.TrimSpace(containerDir)}, nil
+	return &Service{metadata: metadataStore, projectID: strings.TrimSpace(projectID)}, nil
 }
 
 func (s *Service) ProjectID() string {
@@ -48,9 +44,6 @@ func (s *Service) ProjectID() string {
 func (s *Service) ListProjects(ctx context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	if s == nil {
 		return serverapi.ProjectListResponse{}, errors.New("project service is required")
-	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectListResponse{}, err
 	}
 	projects, err := s.metadata.ListProjects(ctx)
 	if err != nil {
@@ -75,9 +68,6 @@ func (s *Service) ListProjectHome(ctx context.Context, req serverapi.ProjectHome
 	}
 	if s == nil {
 		return serverapi.ProjectHomeListResponse{}, errors.New("project service is required")
-	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectHomeListResponse{}, err
 	}
 	pageSize := req.PageSize
 	if pageSize == 0 {
@@ -225,9 +215,6 @@ func (s *Service) UpdateProject(ctx context.Context, req serverapi.ProjectUpdate
 	if s == nil {
 		return serverapi.ProjectUpdateResponse{}, errors.New("project service is required")
 	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectUpdateResponse{}, err
-	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectUpdateResponse{}, err
 	}
@@ -250,9 +237,6 @@ func (s *Service) GetProjectEdit(ctx context.Context, req serverapi.ProjectEditG
 	}
 	if s == nil {
 		return serverapi.ProjectEditGetResponse{}, errors.New("project service is required")
-	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectEditGetResponse{}, err
 	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectEditGetResponse{}, err
@@ -290,9 +274,6 @@ func (s *Service) SetDefaultWorkspace(ctx context.Context, req serverapi.Project
 	if s == nil {
 		return serverapi.ProjectDefaultWorkspaceSetResponse{}, errors.New("project service is required")
 	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
-	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectDefaultWorkspaceSetResponse{}, err
 	}
@@ -315,9 +296,6 @@ func (s *Service) UnlinkWorkspaceFromProject(ctx context.Context, req serverapi.
 	}
 	if s == nil {
 		return serverapi.ProjectWorkspaceUnlinkResponse{}, errors.New("project service is required")
-	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
 	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectWorkspaceUnlinkResponse{}, err
@@ -385,9 +363,6 @@ func (s *Service) ListProjectWorkspaces(ctx context.Context, req serverapi.Proje
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectWorkspaceListResponse{}, err
 	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectWorkspaceListResponse{}, err
-	}
 	pageSize := req.PageSize
 	if pageSize == 0 {
 		pageSize = defaultWorkspacePageSize
@@ -435,9 +410,6 @@ func (s *Service) AttachWorkspaceToProject(ctx context.Context, req serverapi.Pr
 	if s == nil {
 		return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("project service is required")
 	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectAttachWorkspaceResponse{}, err
-	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectAttachWorkspaceResponse{}, err
 	}
@@ -466,9 +438,6 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 	if err := req.Validate(); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
 	}
-	if err := s.syncMetadata(ctx); err != nil {
-		return serverapi.ProjectGetOverviewResponse{}, err
-	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
 	}
@@ -481,9 +450,6 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 
 func (s *Service) ListSessionsByProject(ctx context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
 	if err := req.Validate(); err != nil {
-		return serverapi.SessionListByProjectResponse{}, err
-	}
-	if err := s.syncMetadata(ctx); err != nil {
 		return serverapi.SessionListByProjectResponse{}, err
 	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
@@ -549,16 +515,6 @@ func projectBindingFromMetadata(binding metadata.Binding) serverapi.ProjectBindi
 		WorkspaceName:   binding.WorkspaceName,
 		WorkspaceStatus: binding.WorkspaceStatus,
 	}
-}
-
-func (s *Service) syncMetadata(ctx context.Context) error {
-	if s == nil || s.metadata == nil || strings.TrimSpace(s.containerDir) == "" {
-		return nil
-	}
-	s.syncOnce.Do(func() {
-		s.syncErr = s.metadata.SyncLegacyContainer(context.WithoutCancel(ctx), s.containerDir)
-	})
-	return s.syncErr
 }
 
 var _ servicecontract.ProjectViewService = (*Service)(nil)

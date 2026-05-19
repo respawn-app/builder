@@ -38,7 +38,7 @@ func TestEnsureInteractiveProjectBindingBindsRegisteredWorkspaceWithoutPrompt(t 
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsUnknownWorkspace(
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestEnsureInteractiveProjectBindingCreatesProjectForUnknownWorkspace(t *tes
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProjec
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *te
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -683,7 +683,7 @@ func TestEnsureInteractiveProjectBindingFormatsMissingBoundProjectError(t *testi
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *t
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestEnsureInteractiveProjectBindingFormatsInaccessibleBoundProjectError(t *
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := projectview.NewMetadataService(store, "", "")
+	service, err := projectview.NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}

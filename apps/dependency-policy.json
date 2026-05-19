@@ -16,6 +16,7 @@
         "@tauri-apps/api",
         "i18next",
         "lucide-react",
+        "sonner",
         "react",
         "react-dom",
         "react-hook-form",
@@ -31,6 +32,7 @@
         "@tauri-apps/cli",
         "@testing-library/jest-dom",
         "@testing-library/react",
+        "@testing-library/user-event",
         "@types/node",
         "@types/react",
         "@types/react-dom",
@@ -50,7 +52,10 @@
       ]
     },
     "@builder/desktop-native-bridge": {
-      "dependencies": ["@tauri-apps/api", "@tauri-apps/plugin-clipboard-manager"],
+      "dependencies": [
+        "@tauri-apps/api",
+        "@tauri-apps/plugin-clipboard-manager"
+      ],
       "devDependencies": ["typescript", "vitest"]
     }
   }

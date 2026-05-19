@@ -1,17 +1,23 @@
 import type { DragEvent } from "react";
-import { useMemo, useRef, useState, type FocusEvent } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { BoardColumn, WorkflowBoard, WorkflowPickerItem } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { useAppNavigation } from "../../app/navigation";
+import { useAppServices } from "../../app/useAppServices";
 import { useConnectionSnapshot } from "../../app/useConnectionSnapshot";
-import { Badge, EmptyState, ErrorState } from "../../ui";
+import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
+import { useWindowChromeTitle } from "../../app/windowChromeTitle";
+import { EmptyState, ErrorState, FloatingNoticeIsland } from "../../ui";
 import { TaskDetailDialog } from "../task-detail/TaskDetailDialog";
 import { useOpenTaskDetail } from "../task-detail/useOpenTaskDetail";
-import { NewTaskDialog } from "../tasks/NewTaskDialog";
+import { NewTaskFallbackDialog } from "../tasks/NewTaskDialog";
+import { newTaskWindowOptions } from "../tasks/newTaskWindowOptions";
+import { BoardHoverMenu } from "./BoardHoverMenu";
 import { KanbanColumn, KanbanGroup } from "./BoardColumns";
 import { boardSections, cardsForColumn } from "./BoardModel";
+import "./board.css";
 import { useBoard, useBoardTaskActions, useProjectBoardSubscription } from "./useBoardData";
 
 export type BoardRouteProps = Readonly<{
@@ -40,6 +46,7 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
       <ErrorState
         body={errorMessage(boardQuery.error)}
         onRetry={() => void boardQuery.refetch()}
+        reveal={false}
         retryLabel={t("app.retry")}
         title={t("states.error")}
       />
@@ -80,9 +87,10 @@ function BoardContent({
   resumeRunId: string;
 }>) {
   const { t } = useTranslation();
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [doneExpanded, setDoneExpanded] = useState(false);
+  const [workflowIssuesCollapsed, setWorkflowIssuesCollapsed] = useState(false);
   const navigation = useAppNavigation();
+  const { nativeBridge } = useAppServices();
   const openTaskDetail = useOpenTaskDetail();
   const connection = useConnectionSnapshot();
   const actions = useBoardTaskActions(board.projectID, boardQueryWorkflowId, board.selectedWorkflow.id);
@@ -93,12 +101,40 @@ function BoardContent({
   );
   const sections = useMemo(() => boardSections(board), [board]);
   const firstActive = activeColumns[0];
+  const canToggleDone = board.hasHiddenDoneCards;
+  useWindowChromeTitle(board.selectedWorkflow.name || board.projectName);
+  const newTaskDialog = useNativeDialogFallback({
+    errorNoticeID: "new-task-window-error",
+    errorTitle: t("task.newWindowError"),
+    nativeAvailable: nativeBridge.capabilities.dialogWindows,
+    openNative: async () => {
+      await nativeBridge.dialogs.openWindow(
+        newTaskWindowOptions({
+          projectID: board.projectID,
+          title: t("task.newTitle"),
+          workflowID: board.selectedWorkflow.id,
+        }),
+      );
+    },
+    renderFallback: (_payload, close) => (
+      <NewTaskFallbackDialog
+        boardQueryWorkflowID={boardQueryWorkflowId}
+        onClose={close}
+        projectID={board.projectID}
+        workflowID={board.selectedWorkflow.id}
+      />
+    ),
+  });
 
   function dropTask(event: DragEvent<HTMLElement>, column: BoardColumn): void {
     event.preventDefault();
     const taskID = event.dataTransfer.getData("text/task-id");
     const card = board.cards.find((candidate) => candidate.id === taskID);
-    if (taskID.length === 0 || connection.phase !== "connected" || !board.selectedWorkflow.validForTaskCreation) {
+    if (
+      taskID.length === 0 ||
+      connection.phase !== "connected" ||
+      !board.selectedWorkflow.validForTaskCreation
+    ) {
       return;
     }
     if (card?.actions.canStart === true && column.id === firstActive?.id) {
@@ -111,38 +147,19 @@ function BoardContent({
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-[var(--space-4)]">
-      <header className="flex flex-wrap items-start justify-between gap-[var(--space-4)]">
-        <div>
-          <p className="m-0 text-[0.72rem] font-extrabold uppercase tracking-[0.16em] text-[var(--color-secondary)]">
-            {board.projectKey}
-          </p>
-          <h1 className="my-[var(--space-1)] text-[1.6rem]">{board.projectName}</h1>
-          <p className="m-0 text-[var(--color-secondary)]">
-            {board.selectedWorkflow.validForTaskCreation ? t("board.dragStart") : t("board.invalidWorkflow")}
-          </p>
-          {!board.selectedWorkflow.validForTaskCreation ? (
-            <WorkflowValidationIssues workflow={board.selectedWorkflow} />
-          ) : null}
-        </div>
-        <BoardMenu
-          board={board}
-          canCreateTask={connection.phase === "connected"}
-          onNewTask={() => {
-            setNewTaskOpen(true);
-          }}
-        />
-      </header>
+    <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto">
       <div
-        className="flex min-h-0 gap-[var(--space-3)] overflow-x-auto overflow-y-hidden pb-[var(--space-2)] hide-scrollbar"
+        className="flex h-full min-h-0 w-max min-w-full gap-[var(--space-3)] px-[var(--space-2)] pb-[var(--space-2)]"
+        data-testid="board-column-rail"
         role="list"
       >
         {sections.map((section) =>
           section.kind === "group" ? (
             <KanbanGroup
-              board={board}
               actionsDisabled={actionsDisabled}
+              board={board}
               canRunTasks={board.selectedWorkflow.validForTaskCreation}
+              canToggleDone={canToggleDone}
               columns={section.columns}
               doneExpanded={doneExpanded}
               firstActiveColumnID={firstActive?.id ?? ""}
@@ -152,7 +169,7 @@ function BoardContent({
               key={section.id}
               onCardClick={(taskID) => {
                 openTaskDetail(taskID, "", () => {
-                  navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
+                  void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
                 });
               }}
               onDropTask={dropTask}
@@ -165,18 +182,19 @@ function BoardContent({
             />
           ) : (
             <KanbanColumn
-              cards={cardsForColumn(board, section.column, doneExpanded)}
               actionsDisabled={actionsDisabled}
               canRunTasks={board.selectedWorkflow.validForTaskCreation}
+              canToggleDone={canToggleDone}
+              cards={cardsForColumn(board, section.column, doneExpanded)}
               column={section.column}
               doneExpanded={doneExpanded}
               hasMoreCards={hasMoreCards}
-              isLoadingMoreCards={isLoadingMoreCards}
               isFirstActive={section.column.id === firstActive?.id}
+              isLoadingMoreCards={isLoadingMoreCards}
               key={section.id}
               onCardClick={(taskID) => {
                 openTaskDetail(taskID, "", () => {
-                  navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
+                  void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID);
                 });
               }}
               onDropTask={dropTask}
@@ -190,22 +208,35 @@ function BoardContent({
           ),
         )}
       </div>
-      <NewTaskDialog
-        board={board}
-        boardQueryWorkflowID={boardQueryWorkflowId}
-        onClose={() => {
-          setNewTaskOpen(false);
-        }}
-        open={newTaskOpen}
-      />
       <TaskDetailDialog
         onClose={() => {
-          navigation.closeProjectTask(board.projectID, board.selectedWorkflow.id);
+          void navigation.closeProjectTask(board.projectID, board.selectedWorkflow.id);
         }}
         open={selectedTaskId.length > 0}
         resumeRunId={resumeRunId}
         taskId={selectedTaskId}
       />
+      {!board.selectedWorkflow.validForTaskCreation ? (
+        <FloatingNoticeIsland
+          collapsed={workflowIssuesCollapsed}
+          collapseLabel={t("app.collapse")}
+          expandLabel={t("app.expand")}
+          onCollapsedChange={setWorkflowIssuesCollapsed}
+          positionClassName="right-[var(--space-4)] bottom-[var(--space-4)]"
+          title={t("board.workflowIssues")}
+          tone="danger"
+        >
+          <WorkflowValidationIssues workflow={board.selectedWorkflow} />
+        </FloatingNoticeIsland>
+      ) : null}
+      <BoardHoverMenu
+        board={board}
+        canCreateTask={connection.phase === "connected"}
+        onNewTask={() => {
+          void newTaskDialog.open(undefined);
+        }}
+      />
+      {newTaskDialog.fallback}
     </div>
   );
 }
@@ -217,128 +248,12 @@ function WorkflowValidationIssues({ workflow }: Readonly<{ workflow: WorkflowPic
       ? workflow.validationErrors.map((issue) => issue.message)
       : [t("board.invalidWorkflowUnknown")];
   return (
-    <ul className="m-0 mt-[var(--space-2)] grid max-w-[56ch] gap-[var(--space-1)] pl-[var(--space-4)] text-sm text-[var(--color-secondary)]">
+    <ul className="workflow-issues-list m-0 grid max-w-[72ch] list-none gap-[var(--space-1)] p-0 text-sm leading-snug text-[var(--color-on-island)]">
       {messages.map((message) => (
-        <li key={message}>{message}</li>
+        <li className="relative pl-[1.2rem]" key={message}>
+          <span>{message}</span>
+        </li>
       ))}
     </ul>
-  );
-}
-
-function BoardMenu({
-  board,
-  canCreateTask,
-  onNewTask,
-}: Readonly<{ board: WorkflowBoard; canCreateTask: boolean; onNewTask: () => void }>) {
-  const { t } = useTranslation();
-  const navigation = useAppNavigation();
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const visible = open || pinned;
-  const closeIfUnpinned = (): void => {
-    if (!pinned) {
-      setOpen(false);
-    }
-  };
-  function closeWhenFocusLeaves(event: FocusEvent<HTMLDivElement>): void {
-    if (event.relatedTarget instanceof Node && menuRef.current?.contains(event.relatedTarget)) {
-      return;
-    }
-    closeIfUnpinned();
-  }
-
-  return (
-    <div
-      className="app-region-no-drag relative"
-      onBlur={closeWhenFocusLeaves}
-      onFocus={() => {
-        setOpen(true);
-      }}
-      onMouseEnter={() => {
-        setOpen(true);
-      }}
-      onMouseLeave={closeIfUnpinned}
-      ref={menuRef}
-    >
-      <button
-        aria-expanded={visible}
-        aria-haspopup="menu"
-        className="rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[14px] py-[10px] text-[var(--color-on-island)]"
-        onClick={() => {
-          setOpen((current) => !current);
-        }}
-        type="button"
-      >
-        {t("board.menu")}: {board.selectedWorkflow.name}
-      </button>
-      {visible ? (
-        <div
-          className="island-glass absolute right-0 top-[calc(100%+8px)] z-20 grid min-w-72 origin-top-right animate-[board-menu-reveal_var(--motion-fast)] gap-[var(--space-2)] rounded-[var(--radius-l)] p-[var(--space-2)]"
-          role="menu"
-        >
-          <BoardMenuAction
-            label={t("app.home")}
-            onClick={() => {
-              navigation.openHome();
-            }}
-          />
-          <BoardMenuAction
-            label={t("home.attentionPane")}
-            onClick={() => {
-              navigation.openHome();
-            }}
-          />
-          <BoardMenuAction disabled={!canCreateTask} label={t("board.newTask")} onClick={onNewTask} />
-          <BoardMenuAction
-            label={pinned ? t("board.unpinMenu") : t("board.pinMenu")}
-            onClick={() => {
-              setPinned((current) => !current);
-              setOpen(true);
-            }}
-          />
-          <div className="h-px bg-[var(--color-outline)]" role="presentation" />
-          <p className="m-0 px-[var(--space-2)] text-[0.72rem] font-extrabold uppercase tracking-[0.16em] text-[var(--color-secondary)]">
-            {t("board.workflowPicker")}
-          </p>
-          {board.workflows.map((workflow) => (
-            <WorkflowOption board={board} key={workflow.id} workflow={workflow} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-
-  function WorkflowOption({ workflow }: Readonly<{ board: WorkflowBoard; workflow: WorkflowPickerItem }>) {
-    return (
-      <button
-        className="grid gap-[var(--space-1)] rounded-[var(--radius-m)] border border-transparent bg-transparent p-[var(--space-2)] text-left text-[var(--color-on-island)]"
-        onClick={() => {
-          navigation.openProject(board.projectID, workflow.id);
-        }}
-        type="button"
-      >
-        <strong>{workflow.name}</strong>
-        {workflow.isProjectDefault ? <Badge tone="info">{t("board.defaultWorkflow")}</Badge> : null}
-      </button>
-    );
-  }
-}
-
-function BoardMenuAction({
-  disabled = false,
-  label,
-  onClick,
-}: Readonly<{ disabled?: boolean; label: string; onClick: () => void }>) {
-  return (
-    <button
-      className="rounded-[var(--radius-m)] border border-transparent bg-transparent p-[var(--space-2)] text-left text-[var(--color-on-island)] disabled:cursor-not-allowed disabled:opacity-55"
-      disabled={disabled}
-      onClick={onClick}
-      role="menuitem"
-      type="button"
-    >
-      {label}
-    </button>
   );
 }

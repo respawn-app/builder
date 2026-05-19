@@ -196,6 +196,7 @@ func (s *Service) GetBoard(ctx context.Context, req serverapi.WorkflowBoardReque
 		Columns:             columns,
 		Cards:               cards,
 		DonePreview:         donePreview,
+		HasHiddenDoneCards:  false,
 		NextPageToken:       nextPageToken,
 		GeneratedAtUnixMs:   time.Now().UTC().UnixMilli(),
 		LatestEventSequence: latestSequence,

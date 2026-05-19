@@ -3,8 +3,8 @@ import {
   type NativeBridge,
   type NativeDirectorySelection,
 } from "@builder/desktop-native-bridge";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach } from "vitest";
 
 import { App } from "./App";
 import { createTestServices, startupRoutes } from "./testSupport/appServices";
@@ -14,21 +14,20 @@ describe("App", () => {
     HTMLElement.prototype,
   );
   const originalResizeObserver = globalThis.ResizeObserver;
-  const originalUserAgent = window.navigator.userAgent;
 
   beforeEach(() => {
     window.history.pushState(null, "", "/");
     clearStorage("localStorage");
     clearStorage("sessionStorage");
+    document.documentElement.removeAttribute("data-builder-theme");
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     globalThis.ResizeObserver = originalResizeObserver;
-    setNavigatorUserAgent(originalUserAgent);
   });
 
   afterEach(() => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     globalThis.ResizeObserver = originalResizeObserver;
-    setNavigatorUserAgent(originalUserAgent);
+    document.documentElement.removeAttribute("data-builder-theme");
   });
 
   it("renders the startup-gated home shell", async () => {
@@ -42,21 +41,69 @@ describe("App", () => {
     render(<App services={createTestServices(startupRoutes)} />);
 
     expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
-    expect(screen.getByTestId("app-shell-content")).toHaveClass("app-region-no-drag", "min-h-0");
+    expect(screen.getByTestId("app-shell-content")).toHaveClass(
+      "app-region-no-drag",
+      "min-h-0",
+      "min-w-0",
+      "w-full",
+      "overflow-visible",
+    );
     expect(screen.getByTestId("app-shell-content")).not.toHaveClass("island-glass");
+    expect(screen.getByTestId("route-transition-frame")).toHaveClass(
+      "route-transition-frame",
+      "h-full",
+      "min-h-0",
+      "min-w-0",
+      "w-full",
+      "p-[var(--space-2)]",
+    );
     expect(screen.getByTestId("home-route-root")).toHaveClass("h-full", "min-h-0");
     expect(screen.getByTestId("home-route-root").className).not.toContain("p-[var(--space-4)]");
     expect(screen.getByTestId("home-pane-grid")).toHaveClass("gap-[var(--space-2)]");
     expect(screen.getByTestId("home-pane-grid").className).not.toContain("gap-[var(--space-4)]");
+    expect(screen.queryByTestId("app-chrome-history-buttons")).not.toBeInTheDocument();
   });
 
   it("keeps the macOS home chrome link offset tied to the native titlebar tokens", async () => {
-    setNavigatorUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0)");
+    render(
+      <App services={createTestServices(startupRoutes, createBrowserNativeBridge({ platform: "macos" }))} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByTestId("app-chrome-navigation")).toHaveClass(
+      "left-[var(--native-home-link-left-macos)]",
+    );
+  });
+
+  it("shows browser-backed history controls as a contiguous macOS chrome row", async () => {
+    window.history.replaceState({ __TSR_index: 1, __TSR_key: "current", key: "current" }, "", "/");
+
+    render(
+      <App services={createTestServices(startupRoutes, createBrowserNativeBridge({ platform: "macos" }))} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    const chromeNavigation = screen.getByTestId("app-chrome-navigation");
+    const historyButtons = within(chromeNavigation).getByTestId("app-chrome-history-buttons");
+    expect(chromeNavigation).toHaveClass("flex", "h-6", "left-[var(--native-home-link-left-macos)]");
+    expect(within(chromeNavigation).getByLabelText("Home")).toHaveClass("h-6", "w-6");
+    expect(historyButtons).toHaveClass("grid", "grid-cols-2");
+    expect(historyButtons).toHaveAttribute("data-placement", "after-home");
+    expect(within(historyButtons).getByLabelText("Back")).toBeEnabled();
+    expect(within(historyButtons).getByLabelText("Forward")).toBeDisabled();
+  });
+
+  it("places history controls before Home on non-macOS chrome", async () => {
+    window.history.replaceState({ __TSR_index: 1, __TSR_key: "current", key: "current" }, "", "/");
 
     render(<App services={createTestServices(startupRoutes)} />);
 
     expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Home")).toHaveClass("left-[var(--native-home-link-left-macos)]");
+    const chromeNavigation = screen.getByTestId("app-chrome-navigation");
+    const historyButtons = within(chromeNavigation).getByTestId("app-chrome-history-buttons");
+    expect(chromeNavigation).toHaveClass("right-[var(--space-4)]");
+    expect(historyButtons).toHaveAttribute("data-placement", "before-home");
+    expect(within(historyButtons).getByLabelText("Back")).toBeEnabled();
   });
 
   it("renders workflow validation blockers with wrapping inbox metadata", async () => {
@@ -229,67 +276,6 @@ describe("App", () => {
       },
     });
   });
-
-  it("fits native dialog window to rendered dialog content", async () => {
-    const fittedSizes: { width: number; height: number }[] = [];
-    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => ({
-      bottom: 320,
-      height: 320,
-      left: 0,
-      right: 584,
-      top: 0,
-      width: 584,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }));
-    window.history.pushState(
-      null,
-      "",
-      "/native-dialog/project-create?name=Example&key=EXP&workspaceRoot=%2Ftmp%2Fexample",
-    );
-
-    render(<App services={createTestServices(startupRoutes, fitRecorderBridge(fittedSizes))} />);
-
-    expect(await screen.findByRole("heading", { name: "Create project" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 320, width: 584 });
-    });
-  });
-
-  it("re-fits native dialog window when rendered content size changes", async () => {
-    const fittedSizes: { width: number; height: number }[] = [];
-    const observers: TestResizeObserver[] = [];
-    let measuredHeight = 320;
-    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => dialogRect(584, measuredHeight));
-    globalThis.ResizeObserver = class extends TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        super(callback);
-        observers.push(this);
-      }
-    };
-    window.history.pushState(
-      null,
-      "",
-      "/native-dialog/project-create?name=Example&key=EXP&workspaceRoot=%2Ftmp%2Fexample",
-    );
-
-    render(<App services={createTestServices(startupRoutes, fitRecorderBridge(fittedSizes))} />);
-
-    expect(await screen.findByRole("heading", { name: "Create project" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 320, width: 584 });
-    });
-
-    measuredHeight = 372;
-    for (const observer of observers) {
-      observer.trigger();
-    }
-
-    await waitFor(() => {
-      expect(fittedSizes).toContainEqual({ height: 372, width: 584 });
-    });
-  });
 });
 
 function directoryBridge(path: string): NativeBridge {
@@ -325,40 +311,6 @@ function projectCreationWindowBridge(path: string, error: unknown): NativeBridge
   };
 }
 
-function fitRecorderBridge(fittedSizes: { width: number; height: number }[]): NativeBridge {
-  const base = createBrowserNativeBridge();
-  return {
-    ...base,
-    window: {
-      ...base.window,
-      async fitCurrentToContent(size: { width: number; height: number }): Promise<void> {
-        fittedSizes.push(size);
-      },
-    },
-  };
-}
-
-function dialogRect(width: number, height: number): DOMRect {
-  return {
-    bottom: height,
-    height,
-    left: 0,
-    right: width,
-    top: 0,
-    width,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-  };
-}
-
-function setNavigatorUserAgent(userAgent: string): void {
-  Object.defineProperty(window.navigator, "userAgent", {
-    configurable: true,
-    value: userAgent,
-  });
-}
-
 function clearStorage(name: "localStorage" | "sessionStorage"): void {
   try {
     if (name === "localStorage") {
@@ -367,30 +319,6 @@ function clearStorage(name: "localStorage" | "sessionStorage"): void {
     }
     globalThis.sessionStorage.clear();
   } catch {
-    return;
-  }
-}
-
-class TestResizeObserver implements ResizeObserver {
-  readonly #callback: ResizeObserverCallback;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.#callback = callback;
-  }
-
-  disconnect(): void {
-    return;
-  }
-
-  observe(): void {
-    return;
-  }
-
-  trigger(): void {
-    this.#callback([], this);
-  }
-
-  unobserve(): void {
     return;
   }
 }

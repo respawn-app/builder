@@ -34,7 +34,7 @@ func TestServiceListsSingleProjectAndSessions(t *testing.T) {
 		t.Fatalf("persist second session meta: %v", err)
 	}
 
-	svc, err := NewMetadataService(store, binding.ProjectID, "")
+	svc, err := NewMetadataService(store, binding.ProjectID)
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestServiceListsSingleProjectAndSessions(t *testing.T) {
 
 func TestServiceRejectsUnknownProjectID(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, binding.ProjectID, "")
+	svc, err := NewMetadataService(store, binding.ProjectID)
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestMetadataServiceSupportsWildcardAndScopedProjectListing(t *testing.T) {
 		t.Fatalf("RegisterWorkspaceBinding B: %v", err)
 	}
 
-	wildcard, err := NewMetadataService(store, "", "")
+	wildcard, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService wildcard: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestMetadataServiceSupportsWildcardAndScopedProjectListing(t *testing.T) {
 		t.Fatalf("expected wildcard metadata service to list both projects, got %+v", projects.Projects)
 	}
 
-	scoped, err := NewMetadataService(store, bindingA.ProjectID, "")
+	scoped, err := NewMetadataService(store, bindingA.ProjectID)
 	if err != nil {
 		t.Fatalf("NewMetadataService scoped: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestMetadataServiceSupportsWildcardAndScopedProjectListing(t *testing.T) {
 func TestMetadataServiceCreatesProjectWithExplicitKey(t *testing.T) {
 	store, _, _ := newProjectViewMetadataStore(t)
 	workspace := t.TempDir()
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestMetadataServiceCreatesProjectWithExplicitKey(t *testing.T) {
 
 func TestMetadataServiceRejectsInvalidAndDuplicateProjectKeys(t *testing.T) {
 	store, _, _ := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestMetadataServiceRejectsInvalidAndDuplicateProjectKeys(t *testing.T) {
 
 func TestMetadataServiceCreatesProjectWithoutExplicitKey(t *testing.T) {
 	store, _, _ := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMetadataServiceListsProjectWorkspacesForGUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestMetadataServicePaginatesProjectWorkspacesForGUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject second: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestMetadataServicePaginatesProjectWorkspacesForGUI(t *testing.T) {
 
 func TestMetadataServiceUpdatesProjectNameForEditPage(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestMetadataServiceUpdatesProjectNameForEditPage(t *testing.T) {
 
 func TestMetadataServiceRejectsInvalidProjectEditNames(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestMetadataServiceSetsDefaultWorkspaceForEditPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestMetadataServiceUnlinksWorkspaceForEditPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestMetadataServiceGetsProjectEditForGUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestMetadataServiceGetsProjectEditForGUI(t *testing.T) {
 
 func TestMetadataServiceListsProjectHomeForGUI(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestMetadataServiceListsProjectHomeForGUI(t *testing.T) {
 
 func TestMetadataServiceListsScopedProjectHomeBeforePagination(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	unscoped, err := NewMetadataService(store, "", "")
+	unscoped, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService unscoped: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestMetadataServiceListsScopedProjectHomeBeforePagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	scoped, err := NewMetadataService(store, binding.ProjectID, "")
+	scoped, err := NewMetadataService(store, binding.ProjectID)
 	if err != nil {
 		t.Fatalf("NewMetadataService scoped: %v", err)
 	}
@@ -580,7 +580,7 @@ func TestMetadataServiceResolveProjectPathLeavesNestedDirectoryUnbound(t *testin
 		t.Fatalf("RegisterWorkspaceBinding: %v", err)
 	}
 
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestMetadataServiceResolveProjectPathLeavesNestedDirectoryUnbound(t *testin
 func TestMetadataServicePlansInteractiveLocalUnboundWorkspace(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
 	workspace := t.TempDir()
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestMetadataServicePlansAmbiguousDuplicateWorkspaceBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProjectForWorkspace second: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -653,7 +653,7 @@ func TestMetadataServicePlansAmbiguousDuplicateWorkspaceBinding(t *testing.T) {
 
 func TestMetadataServicePlansHeadlessSingleRemoteWorkspace(t *testing.T) {
 	store, _, binding := newProjectViewMetadataStore(t)
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestMetadataServicePlansHeadlessAmbiguousRemoteWorkspaces(t *testing.T) {
 	if _, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, t.TempDir()); err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
 	}
-	svc, err := NewMetadataService(store, "", "")
+	svc, err := NewMetadataService(store, "")
 	if err != nil {
 		t.Fatalf("NewMetadataService: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestMetadataServicePlansHeadlessAmbiguousRemoteWorkspaces(t *testing.T) {
 	}
 }
 
-func newProjectViewMetadataStore(t *testing.T) (*metadata.Store, config.App, metadata.Binding) {
+func newProjectViewMetadataStore(t testing.TB) (*metadata.Store, config.App, metadata.Binding) {
 	t.Helper()
 	home := t.TempDir()
 	workspace := t.TempDir()

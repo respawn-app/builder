@@ -648,28 +648,42 @@ func workflowDisplayNameFromKey(key string) string {
 }
 
 func sortedWorkflowTasks(board serverapi.WorkflowBoard) []serverapi.WorkflowTaskSummary {
-	seen := map[string]serverapi.WorkflowTaskSummary{}
-	for _, card := range board.Cards {
-		seen[card.TaskID] = serverapi.WorkflowTaskSummary{
-			ID:            card.TaskID,
-			ProjectID:     board.ProjectID,
-			WorkflowID:    card.WorkflowID,
-			ShortID:       card.ShortID,
-			Title:         card.Title,
-			Done:          card.Status.Kind == "done",
-			ActiveNodeIDs: append([]string(nil), card.ActiveNodeIDs...),
+	return sortedWorkflowTasksFromCards(board, nil)
+}
+
+func workflowTasksForProject(ctx context.Context, cfg config.App, remote workflowCommandRemote, projectRef string) ([]serverapi.WorkflowTaskSummary, string, error) {
+	board, err := workflowBoardForProject(ctx, cfg, remote, projectRef)
+	if err != nil {
+		return nil, "", err
+	}
+	for pageToken := strings.TrimSpace(board.NextPageToken); pageToken != ""; {
+		rpcCtx, cancel := workflowRPCContext(ctx)
+		resp, err := remote.GetWorkflowBoard(rpcCtx, serverapi.WorkflowBoardRequest{
+			ProjectID:  board.ProjectID,
+			WorkflowID: board.SelectedWorkflow.WorkflowID,
+			PageSize:   200,
+			PageToken:  pageToken,
+		})
+		cancel()
+		if err != nil {
+			return nil, "", err
 		}
+		board.Cards = append(board.Cards, resp.Board.Cards...)
+		pageToken = strings.TrimSpace(resp.Board.NextPageToken)
+	}
+	return sortedWorkflowTasks(board), board.ProjectID, nil
+}
+
+func sortedWorkflowTasksFromCards(board serverapi.WorkflowBoard, cards []serverapi.WorkflowBoardTaskCard) []serverapi.WorkflowTaskSummary {
+	seen := map[string]serverapi.WorkflowTaskSummary{}
+	for _, card := range cards {
+		seen[card.TaskID] = workflowTaskSummaryFromCard(board.ProjectID, card)
+	}
+	for _, card := range board.Cards {
+		seen[card.TaskID] = workflowTaskSummaryFromCard(board.ProjectID, card)
 	}
 	for _, card := range board.DonePreview {
-		seen[card.TaskID] = serverapi.WorkflowTaskSummary{
-			ID:            card.TaskID,
-			ProjectID:     board.ProjectID,
-			WorkflowID:    card.WorkflowID,
-			ShortID:       card.ShortID,
-			Title:         card.Title,
-			Done:          card.Status.Kind == "done",
-			ActiveNodeIDs: append([]string(nil), card.ActiveNodeIDs...),
-		}
+		seen[card.TaskID] = workflowTaskSummaryFromCard(board.ProjectID, card)
 	}
 	for _, workflow := range board.Workflows {
 		for _, task := range workflow.Tasks {
@@ -687,6 +701,21 @@ func sortedWorkflowTasks(board serverapi.WorkflowBoard) []serverapi.WorkflowTask
 		return tasks[i].ShortID < tasks[j].ShortID
 	})
 	return tasks
+}
+
+func workflowTaskSummaryFromCard(projectID string, card serverapi.WorkflowBoardTaskCard) serverapi.WorkflowTaskSummary {
+	return serverapi.WorkflowTaskSummary{
+		ID:                card.TaskID,
+		ProjectID:         projectID,
+		WorkflowID:        card.WorkflowID,
+		ShortID:           card.ShortID,
+		Title:             card.Title,
+		BodyPreview:       card.BodyPreview,
+		SourceWorkspaceID: card.SourceWorkspace.WorkspaceID,
+		UpdatedAtUnixMs:   card.UpdatedAtUnixMs,
+		Done:              card.Status.Kind == "done",
+		ActiveNodeIDs:     append([]string(nil), card.ActiveNodeIDs...),
+	}
 }
 
 func pathExists(path string) bool {

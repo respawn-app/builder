@@ -1,7 +1,9 @@
+/* eslint-disable max-lines -- Project edit integration tests keep representative workspace fixtures local. */
 import {
   createBrowserNativeBridge,
   type NativeBridge,
   type NativeDirectorySelection,
+  type NativeDialogWindowOptions,
 } from "@builder/desktop-native-bridge";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -26,7 +28,7 @@ describe("ProjectEditRoute", () => {
     }
   });
 
-  it("renders project identity, validates/saves name, and saves default workspace explicitly", async () => {
+  it("renders project identity, validates/saves name, and saves default workspace from row star", async () => {
     const services = createTestServices([
       ...startupRoutes,
       { method: "project.edit.get", result: projectEditResponse },
@@ -36,12 +38,23 @@ describe("ProjectEditRoute", () => {
 
     render(<App services={services} />);
 
-    expect(await screen.findByRole("heading", { name: "Project edit" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workspaces" })).toHaveClass("font-bold");
+    expect(screen.getByTestId("route-transition-frame")).toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("app-chrome-title")).toHaveTextContent("Project");
+    expect(screen.queryByRole("heading", { name: "Project edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Files stay on disk")).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("PROJ")).toBeDisabled();
+    expect(screen.queryByLabelText("Default workspace")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: " Project " } });
     expect(screen.getByText("Remove whitespace at start or end.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save name" })).toHaveClass(
+      "aspect-square",
+      "self-stretch",
+      "rounded-full",
+    );
 
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Renamed Project" } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
@@ -53,8 +66,7 @@ describe("ProjectEditRoute", () => {
       });
     });
 
-    fireEvent.change(screen.getByLabelText("Default workspace"), { target: { value: "workspace-2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make /tmp/project-alt the default workspace" }));
 
     await waitFor(() => {
       expect(services.transport.calls).toContainEqual({
@@ -62,6 +74,21 @@ describe("ProjectEditRoute", () => {
         params: { project_id: "project-1", workspace_id: "workspace-2" },
       });
     });
+    expect(screen.getByRole("button", { name: "Make /tmp/project the default workspace" })).not.toHaveClass(
+      "border-[var(--color-outline)]",
+    );
+    expect(
+      screen.getByRole("button", { name: "Make /tmp/project the default workspace" }).className,
+    ).not.toContain("hover:");
+    expect(screen.getByRole("button", { name: "Make /tmp/project the default workspace" })).toHaveClass(
+      "text-[var(--color-secondary)]",
+      "opacity-100",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Make /tmp/project the default workspace" }));
+    expect(
+      services.transport.calls.filter((call) => call.method === "project.defaultWorkspace.set"),
+    ).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Unlink /tmp/project" }).className).not.toContain("hover:");
   });
 
   it("uses Home pencil entry for edit route and shows duplicate attach info without mutation", async () => {
@@ -90,11 +117,14 @@ describe("ProjectEditRoute", () => {
     render(<App services={services} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit Project" }));
-    expect(await screen.findByRole("heading", { name: "Project edit" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workspaces" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Attach workspace" }));
 
     expect(await screen.findByText("Workspace is already linked to this project.")).toBeInTheDocument();
+    expect(screen.getByTestId("sonner-test-surface")).toContainElement(
+      screen.getByText("Workspace is already linked to this project."),
+    );
     expect(services.transport.calls.some((call) => call.method === "project.attachWorkspace")).toBe(false);
   });
 
@@ -156,12 +186,214 @@ describe("ProjectEditRoute", () => {
     render(<App services={services} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
-    expect(screen.getByRole("heading", { name: "Unlink workspace?" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Unlink workspace?" })).toBeInTheDocument();
     expect(screen.getByText(/completed history remains readable/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlink workspace" })).toHaveClass(
+      "border-[var(--color-error)]",
+      "text-[var(--color-error)]",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Unlink workspace" }));
 
     expect(await screen.findByText("Workspace cannot be unlinked yet.")).toBeInTheDocument();
     expect(screen.getByText("1 active task still uses this workspace.")).toBeInTheDocument();
+  });
+
+  it("opens workspace unlink in a native dialog when native dialogs are available", async () => {
+    const opened: NativeDialogWindowOptions[] = [];
+    const services = createTestServices(
+      [...startupRoutes, { method: "project.edit.get", result: projectEditResponse }],
+      nativeDialogBridge(opened),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
+
+    await waitFor(() => {
+      expect(opened).toHaveLength(1);
+    });
+    expect(screen.queryByRole("dialog", { name: "Unlink workspace?" })).not.toBeInTheDocument();
+    expect(opened[0]).toMatchObject({
+      initialWidth: 400,
+      route: "/native-dialog/workspace-unlink",
+      title: "Unlink workspace?",
+      params: {
+        projectID: "project-1",
+        workspaceID: "workspace-2",
+        rootPath: "/tmp/project-alt",
+      },
+    });
+  });
+
+  it("keeps rendered native workspace unlink dialog at 400px for long paths", async () => {
+    const fittedSizes: { width: number; height: number }[] = [];
+    const rootPath = "/tmp/project-alt/with/a/very/long/path/that/needs/readable/wrapping";
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => dialogRect(400, 300));
+    window.history.pushState(
+      null,
+      "",
+      `/native-dialog/workspace-unlink?projectID=project-1&workspaceID=workspace-2&rootPath=${encodeURIComponent(rootPath)}`,
+    );
+    const services = createTestServices([], nativeDialogFitBridge(fittedSizes));
+
+    render(<App services={services} />);
+
+    expect(await screen.findByRole("dialog", { name: "Unlink workspace?" })).toBeInTheDocument();
+    expect(screen.getByText(rootPath)).toHaveClass("break-words");
+    expect(services.transport.calls.map((call) => call.method)).not.toContain("server.readiness.get");
+    await waitFor(() => {
+      expect(fittedSizes).toContainEqual({ height: 300, width: 400 });
+    });
+  });
+
+  it("keeps the native workspace unlink dialog open when the server returns blockers", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/workspace-unlink?projectID=project-1&workspaceID=workspace-2&rootPath=%2Ftmp%2Fproject-alt",
+    );
+    let closeCount = 0;
+    const services = createTestServices(
+      [
+        {
+          method: "project.unlinkWorkspace",
+          result: {
+            project_id: "project-1",
+            workspace_id: "workspace-2",
+            unlinked: false,
+            blockers: [
+              {
+                code: "active_tasks",
+                message: "1 active task still uses this workspace.",
+                count: 1,
+              },
+            ],
+          },
+        },
+      ],
+      nativeWindowCloseBridge(() => {
+        closeCount += 1;
+      }),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unlink workspace" }));
+
+    expect(await screen.findByText("Workspace cannot be unlinked yet.")).toBeInTheDocument();
+    expect(screen.getByText("1 active task still uses this workspace.")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Unlink workspace?" })).toBeInTheDocument();
+    expect(closeCount).toBe(0);
+    expect(services.transport.calls).toContainEqual({
+      method: "project.unlinkWorkspace",
+      params: { project_id: "project-1", workspace_id: "workspace-2" },
+    });
+  });
+
+  it("closes the native workspace unlink dialog only after unlink succeeds", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/workspace-unlink?projectID=project-1&workspaceID=workspace-2&rootPath=%2Ftmp%2Fproject-alt",
+    );
+    let closeCount = 0;
+    const changedProjects: string[] = [];
+    const services = createTestServices(
+      [
+        {
+          method: "project.unlinkWorkspace",
+          result: {
+            project_id: "project-1",
+            workspace_id: "workspace-2",
+            unlinked: true,
+            blockers: [],
+          },
+        },
+      ],
+      nativeWindowCloseBridge(
+        () => {
+          closeCount += 1;
+        },
+        (projectID) => {
+          changedProjects.push(projectID);
+        },
+      ),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unlink workspace" }));
+
+    await waitFor(() => {
+      expect(closeCount).toBe(1);
+    });
+    expect(changedProjects).toEqual(["project-1"]);
+    expect(services.transport.calls).toContainEqual({
+      method: "project.unlinkWorkspace",
+      params: { project_id: "project-1", workspace_id: "workspace-2" },
+    });
+  });
+
+  it("shows a toast when native workspace unlink confirmation fails", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/native-dialog/workspace-unlink?projectID=project-1&workspaceID=workspace-2&rootPath=%2Ftmp%2Fproject-alt",
+    );
+    const services = createTestServices([
+      {
+        method: "project.unlinkWorkspace",
+        error: new Error("server refused unlink"),
+      },
+    ]);
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unlink workspace" }));
+
+    expect(await screen.findByText("Workspace unlink window failed")).toBeInTheDocument();
+    expect(screen.getByText("server refused unlink")).toBeInTheDocument();
+    expect(services.transport.calls.map((call) => call.method)).not.toContain("server.readiness.get");
+  });
+
+  it("falls back to inline workspace unlink when native dialog open fails", async () => {
+    const opened: NativeDialogWindowOptions[] = [];
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "project.edit.get", result: projectEditResponse },
+        {
+          method: "project.unlinkWorkspace",
+          result: {
+            project_id: "project-1",
+            workspace_id: "workspace-2",
+            unlinked: true,
+            blockers: [],
+          },
+        },
+      ],
+      rejectingNativeDialogBridge(opened),
+    );
+
+    render(<App services={services} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unlink /tmp/project-alt" }));
+
+    await waitFor(() => {
+      expect(opened).toHaveLength(1);
+    });
+    expect(screen.getByText("Workspace unlink window failed")).toBeInTheDocument();
+    expect(screen.getByText("Native dialog windows are unavailable in this shell.")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Unlink workspace?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Unlink workspace" }));
+
+    await waitFor(() => {
+      expect(services.transport.calls).toContainEqual({
+        method: "project.unlinkWorkspace",
+        params: { project_id: "project-1", workspace_id: "workspace-2" },
+      });
+    });
+    expect(await screen.findByText("Workspace unlinked.")).toBeInTheDocument();
   });
 
   it("requests next project edit workspace page through infinite scroll", async () => {
@@ -195,15 +427,16 @@ describe("ProjectEditRoute", () => {
     });
   });
 
-  it("uses Home fallback when Back has no route history", async () => {
-    Object.defineProperty(window.history, "length", { configurable: true, value: 1 });
-    const services = createTestServices([...startupRoutes, { method: "project.edit.get", result: projectEditResponse }]);
+  it("does not render a local Back control", async () => {
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "project.edit.get", result: projectEditResponse },
+    ]);
 
     render(<App services={services} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Back" }));
-
-    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workspaces" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 });
 
@@ -220,6 +453,88 @@ function directoryBridge(path: string): NativeBridge {
         return { path };
       },
     },
+  };
+}
+
+function nativeDialogBridge(opened: NativeDialogWindowOptions[]): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      dialogWindows: true,
+    },
+    dialogs: {
+      async openWindow(options): Promise<void> {
+        opened.push(options);
+      },
+    },
+  };
+}
+
+function rejectingNativeDialogBridge(opened: NativeDialogWindowOptions[]): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      dialogWindows: true,
+    },
+    dialogs: {
+      async openWindow(options): Promise<void> {
+        opened.push(options);
+        throw new Error("Native dialog windows are unavailable in this shell.");
+      },
+    },
+  };
+}
+
+function nativeDialogFitBridge(fittedSizes: { width: number; height: number }[]): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    window: {
+      ...base.window,
+      async fitCurrentToContent(size: { width: number; height: number }): Promise<void> {
+        fittedSizes.push(size);
+      },
+    },
+  };
+}
+
+function nativeWindowCloseBridge(
+  onClose: () => void,
+  onChanged: (projectID: string) => void = () => undefined,
+): NativeBridge {
+  const base = createBrowserNativeBridge();
+  return {
+    ...base,
+    window: {
+      ...base.window,
+      async closeCurrent(): Promise<void> {
+        onClose();
+      },
+    },
+    projectWorkspace: {
+      ...base.projectWorkspace,
+      async notifyChanged(event): Promise<void> {
+        onChanged(event.projectID);
+      },
+    },
+  };
+}
+
+function dialogRect(width: number, height: number): DOMRect {
+  return {
+    bottom: height,
+    height,
+    left: 0,
+    right: width,
+    top: 0,
+    width,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
   };
 }
 
