@@ -254,6 +254,15 @@ VALUES ('placement-active-workspace', 'task-active-workspace', 'node-agent', 'ac
 		t.Fatalf("UnlinkProjectWorkspace active task: %v", err)
 	}
 	assertWorkspaceUnlinkBlocker(t, activeTaskBlockers, "non_terminal_tasks")
+
+	execSeed(t, store.db, "complete active source placement", `UPDATE task_node_placements SET state = 'completed' WHERE id = 'placement-active-workspace'`)
+	execSeed(t, store.db, "pending approval transition", `INSERT INTO task_transitions (id, task_id, source_placement_id, source_node_id, transition_group_id, transition_id, workflow_revision_seen, actor, state, output_values_json, created_at_unix_ms)
+VALUES ('transition-pending-workspace', 'task-active-workspace', 'placement-active-workspace', 'node-agent', 'group-done', 'done', 1, 'agent', 'pending_approval', '{}', ?)`, now)
+	pendingApprovalBlockers, err := store.UnlinkProjectWorkspace(ctx, binding.ProjectID, attached.WorkspaceID)
+	if err != nil {
+		t.Fatalf("UnlinkProjectWorkspace pending approval transition: %v", err)
+	}
+	assertWorkspaceUnlinkBlocker(t, pendingApprovalBlockers, "non_terminal_tasks")
 }
 
 func TestUnlinkProjectWorkspacePreservesTerminalHistory(t *testing.T) {

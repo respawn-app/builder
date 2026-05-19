@@ -313,13 +313,24 @@ func (q *Queries) CountNonTerminalTasksByProjectWorkflowLink(ctx context.Context
 const countNonTerminalTasksBySourceWorkspace = `-- name: CountNonTerminalTasksBySourceWorkspace :one
 SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count
 FROM tasks t
-JOIN task_node_placements p
-    ON p.task_id = t.id
-    AND p.state IN ('active', 'waiting_approval')
-JOIN workflow_nodes n ON n.id = p.node_id
 WHERE t.source_workspace_id = ?1
   AND t.canceled_at_unix_ms = 0
-  AND n.kind != 'terminal'
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM task_node_placements p
+          JOIN workflow_nodes n ON n.id = p.node_id
+          WHERE p.task_id = t.id
+            AND p.state IN ('active', 'waiting_approval')
+            AND n.kind != 'terminal'
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM task_transitions tt
+          WHERE tt.task_id = t.id
+            AND tt.state = 'pending_approval'
+      )
+  )
 `
 
 func (q *Queries) CountNonTerminalTasksBySourceWorkspace(ctx context.Context, workspaceID sql.NullString) (int64, error) {
