@@ -18,6 +18,26 @@ describe("classifyDrop", () => {
       ),
     ).toEqual({ kind: "move" });
   });
+
+  it("rejects source-less moves into join columns", () => {
+    expect(
+      classifyDrop(
+        { ...baseColumn, kind: "join", transitionOutputFields: [{ name: "summary", description: "Summary" }] },
+        { ...baseDragPayload, activeNodeIDs: [], statusKind: "backlog" },
+        undefined,
+      ),
+    ).toEqual({ kind: "reject" });
+  });
+
+  it("allows explicit manual targets for join columns", () => {
+    expect(
+      classifyDrop(
+        { ...baseColumn, id: "node-join", kind: "join" },
+        { ...baseDragPayload, activeNodeIDs: [], manualMoveTargetNodeIDs: ["node-join"], statusKind: "backlog" },
+        undefined,
+      ),
+    ).toEqual({ kind: "move" });
+  });
 });
 
 const baseDragPayload: BoardCardDragPayload = {

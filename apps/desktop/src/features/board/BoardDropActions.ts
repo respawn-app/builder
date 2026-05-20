@@ -5,7 +5,8 @@ export type BoardDropAction =
   | Readonly<{ kind: "start" }>
   | Readonly<{ kind: "move"; allowMissingEdge?: boolean; autoApprove?: boolean }>
   | Readonly<{ kind: "confirmRollback" }>
-  | Readonly<{ kind: "missingInput" }>;
+  | Readonly<{ kind: "missingInput" }>
+  | Readonly<{ kind: "reject" }>;
 
 export type PendingDrop = Readonly<{
   taskID: string;
@@ -29,6 +30,9 @@ export function classifyDrop(
   }
   if (dragPayload.manualMoveTargetNodeIDs.includes(column.id)) {
     return { kind: "move" };
+  }
+  if (column.kind === "join" && dragPayload.activeNodeIDs.length === 0) {
+    return { kind: "reject" };
   }
   if (column.isBacklog) {
     return { kind: "move", allowMissingEdge: true };

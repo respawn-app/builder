@@ -204,6 +204,10 @@ function BoardContent({
       setRollbackDrop({ taskID: dragPayload.taskID, targetColumn: column });
       return;
     }
+    if (dropAction.kind === "reject") {
+      reportRejectedDrop();
+      return;
+    }
     setMissingInputDrop({
       taskID: dragPayload.taskID,
       targetColumn: column,
