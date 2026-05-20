@@ -737,7 +737,7 @@ func TestCompleteRunCreatesPendingApprovalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	if result.State != "pending_approval" || len(result.PlacementIDs) != 0 || len(result.RunIDs) != 0 {
+	if result.State != "pending_approval" || !result.RequiresApproval || len(result.PlacementIDs) != 0 || len(result.RunIDs) != 0 {
 		t.Fatalf("completion result = %+v, want pending approval without target placement/run", result)
 	}
 	transitions, err := store.ListTransitions(ctx, task.ID)

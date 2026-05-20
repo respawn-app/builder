@@ -940,6 +940,9 @@ func ensureWorkflowNodeID(ctx context.Context, q *sqlitegen.Queries, workflowID 
 	}
 	row, err := q.GetWorkflowNode(ctx, trimmedNodeID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow node %q not found: %w", trimmedNodeID, sql.ErrNoRows)
+		}
 		return fmt.Errorf("resolve workflow node %q: %w", trimmedNodeID, err)
 	}
 	if row.WorkflowID != strings.TrimSpace(workflowID) {
@@ -956,6 +959,9 @@ func ensureWorkflowTransitionGroupID(ctx context.Context, tx *sql.Tx, workflowID
 	var rowWorkflowID string
 	err := tx.QueryRowContext(ctx, `SELECT workflow_id FROM workflow_transition_groups WHERE id = ? LIMIT 1`, trimmedGroupID).Scan(&rowWorkflowID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow transition group %q not found: %w", trimmedGroupID, sql.ErrNoRows)
+		}
 		return fmt.Errorf("resolve workflow transition group %q: %w", trimmedGroupID, err)
 	}
 	if rowWorkflowID != strings.TrimSpace(workflowID) {

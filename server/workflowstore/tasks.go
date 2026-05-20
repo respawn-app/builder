@@ -571,7 +571,7 @@ WHERE id = ?
 	if err := q.InsertTaskTransition(ctx, sqlitegen.InsertTaskTransitionParams{ID: transitionID, TaskID: run.TaskID, SourceRunID: sql.NullString{String: run.ID, Valid: true}, SourcePlacementID: sql.NullString{String: run.PlacementID, Valid: true}, SourceNodeID: sql.NullString{String: string(snapshot.Node.ID), Valid: true}, SourceNodeKey: string(snapshot.Node.Key), SourceNodeDisplayName: snapshot.Node.DisplayName, TransitionGroupID: sql.NullString{String: string(group.ID), Valid: true}, TransitionID: group.TransitionID, TransitionDisplayName: group.DisplayName, WorkflowRevisionSeen: snapshot.WorkflowRevisionSeen, Actor: actor, State: transitionState, Commentary: strings.TrimSpace(req.Commentary), OutputValuesJson: outputValuesJSON, CreatedAtUnixMs: now, AppliedAtUnixMs: appliedAt}); err != nil {
 		return CompleteRunResult{}, fmt.Errorf("insert completion transition: %w", err)
 	}
-	result := CompleteRunResult{TransitionID: workflow.TransitionID(transitionID), State: transitionState}
+	result := CompleteRunResult{TransitionID: workflow.TransitionID(transitionID), State: transitionState, RequiresApproval: requiresApproval}
 	for _, edge := range group.Edges {
 		if requiresApproval {
 			if err := insertTransitionEdgeSnapshot(ctx, q, transitionID, snapshot.WorkflowRevisionSeen, edge, "", "pending"); err != nil {
