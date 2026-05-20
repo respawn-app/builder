@@ -91,25 +91,34 @@ WHERE id = ?`, id).Scan(&taskID, &sourceRunID, &state, &revision)
 	if len(edges) == 0 {
 		return CompleteRunResult{}, errors.New("pending approval has no edge snapshots")
 	}
-	if !sourceRunID.Valid || strings.TrimSpace(sourceRunID.String) == "" {
-		return CompleteRunResult{}, errors.New("pending approval has no source run")
-	}
-	sourceRun, err := s.queries.GetTaskRun(ctx, sourceRunID.String)
-	if err != nil {
-		return CompleteRunResult{}, err
-	}
+	hasSourceRun := sourceRunID.Valid && strings.TrimSpace(sourceRunID.String) != ""
+	sourceRun := sqlitegen.TaskRun{}
 	sourceSnapshot := runStartSnapshot{}
-	if err := unmarshalJSON(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
-		return CompleteRunResult{}, err
+	if hasSourceRun {
+		sourceRun, err = s.queries.GetTaskRun(ctx, sourceRunID.String)
+		if err != nil {
+			return CompleteRunResult{}, err
+		}
+		if err := unmarshalJSON(sourceRun.RunStartSnapshotJson, &sourceSnapshot); err != nil {
+			return CompleteRunResult{}, err
+		}
 	}
 	var fallbackDef workflow.Definition
 	var fallbackWorkflow WorkflowRecord
-	if !sourceSnapshot.hasFullGraphContract() {
+	if !hasSourceRun || !sourceSnapshot.hasFullGraphContract() {
 		for _, edge := range edges {
 			if workflow.NodeKind(edge.TargetNodeKind) != workflow.NodeKindAgent {
 				continue
 			}
-			fallbackDef, fallbackWorkflow, err = s.GetDefinition(ctx, sourceSnapshot.WorkflowID)
+			workflowID := sourceSnapshot.WorkflowID
+			if !hasSourceRun {
+				task, taskErr := s.queries.GetTask(ctx, taskID)
+				if taskErr != nil {
+					return CompleteRunResult{}, taskErr
+				}
+				workflowID = workflow.WorkflowID(task.WorkflowID)
+			}
+			fallbackDef, fallbackWorkflow, err = s.GetDefinition(ctx, workflowID)
 			if err != nil {
 				return CompleteRunResult{}, err
 			}
@@ -158,6 +167,9 @@ WHERE id = ? AND state = 'pending_approval'`, now, id)
 			return CompleteRunResult{}, err
 		}
 		if targetEdge.TargetNode.Kind == workflow.NodeKindJoin {
+			if !hasSourceRun {
+				return CompleteRunResult{}, errors.New("pending approval to join has no source run")
+			}
 			if _, err := tx.ExecContext(ctx, `
 UPDATE task_transition_edges
 SET state = 'applied'
@@ -187,9 +199,13 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 			continue
 		}
 		targetRunID := prefixedID("run")
-		targetSnapshot, foundSnapshot, err := sourceSnapshot.forNode(targetEdge.TargetNode)
-		if err != nil {
-			return CompleteRunResult{}, err
+		targetSnapshot := runStartSnapshot{}
+		foundSnapshot := false
+		if hasSourceRun {
+			targetSnapshot, foundSnapshot, err = sourceSnapshot.forNode(targetEdge.TargetNode)
+			if err != nil {
+				return CompleteRunResult{}, err
+			}
 		}
 		if !foundSnapshot {
 			targetSnapshot, err = newRunStartSnapshot(fallbackDef, fallbackWorkflow, targetEdge.TargetNode.ID)

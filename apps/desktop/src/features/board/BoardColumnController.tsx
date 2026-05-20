@@ -1,4 +1,10 @@
-import { useMemo, useState, type DragEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+  type RefObject,
+} from "react";
 
 import type { BoardColumn, WorkflowBoard } from "../../api";
 import { KanbanColumn } from "./BoardColumns";
@@ -16,6 +22,7 @@ export type BoardColumnControllerProps = Readonly<{
   onCardClick: (taskID: string) => void;
   onCardDragEnd: () => void;
   onCardDragStart: (payload: BoardCardDragPayload) => void;
+  onCardsLoadError: (error: unknown) => void;
   onDropTask: (event: DragEvent<HTMLElement>, column: BoardColumn) => void;
   onInterruptTask: (taskID: string, runID: string) => void;
   onResumeTask: (taskID: string, runID: string) => void;
@@ -31,6 +38,7 @@ export function BoardColumnController({
   onCardClick,
   onCardDragEnd,
   onCardDragStart,
+  onCardsLoadError,
   onDropTask,
   onInterruptTask,
   onResumeTask,
@@ -46,6 +54,12 @@ export function BoardColumnController({
   );
   const columnVM = useMemo(() => toKanbanColumnVM(column), [column]);
   const cardVMs = useMemo(() => cards.map(toKanbanCardVM), [cards]);
+
+  useEffect(() => {
+    if (cardsQuery.isError) {
+      onCardsLoadError(cardsQuery.error);
+    }
+  }, [cardsQuery.error, cardsQuery.isError, onCardsLoadError]);
 
   return (
     <KanbanColumn

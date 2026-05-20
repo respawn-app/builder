@@ -2,6 +2,7 @@ package workflowsvc
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -116,8 +117,16 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 	if started.RunID == "" {
 		t.Fatalf("start response = %+v", started)
 	}
-	if _, err := service.UpdateWorkflowTask(ctx, serverapi.WorkflowTaskUpdateRequest{TaskID: created.Task.ID, Title: "Too late", SourceWorkspaceID: binding.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "automation starts") {
-		t.Fatalf("UpdateWorkflowTask after start error = %v", err)
+	startedBody := "Started details"
+	startedUpdate, err := service.UpdateWorkflowTask(ctx, serverapi.WorkflowTaskUpdateRequest{TaskID: created.Task.ID, Title: "Started title", Body: &startedBody})
+	if err != nil {
+		t.Fatalf("UpdateWorkflowTask after start: %v", err)
+	}
+	if startedUpdate.Task.Title != "Started title" || startedUpdate.Task.BodyPreview != "Started details" || startedUpdate.Task.SourceWorkspaceID != binding.WorkspaceID {
+		t.Fatalf("started update = %+v", startedUpdate.Task)
+	}
+	if _, err := service.UpdateWorkflowTask(ctx, serverapi.WorkflowTaskUpdateRequest{TaskID: created.Task.ID, Title: "Too late", SourceWorkspaceID: source.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "source workspace after automation starts") {
+		t.Fatalf("UpdateWorkflowTask source after start error = %v", err)
 	}
 	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
 	if err != nil {
@@ -389,6 +398,119 @@ func TestServiceStartTaskAutomationNotifiesScheduler(t *testing.T) {
 	}
 	if notifier.count != 1 {
 		t.Fatalf("scheduler notifications = %d, want 1", notifier.count)
+	}
+}
+
+func TestServiceMoveTaskAutoApprovesMissingEdgeOverrideAndStartsAgent(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceChainedWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	implementID := workflowServiceNodeIDByKey(t, def.Definition, "implement")
+	notifier := &recordingSchedulerNotifier{}
+	service.schedulerWake = notifier
+
+	moved, err := service.MoveWorkflowTask(ctx, serverapi.WorkflowTaskMoveRequest{TaskID: task.Task.ID, TargetNodeID: implementID, AllowMissingEdge: true, AutoApprove: true, OutputValues: map[string]string{"summary": "replacement"}})
+	if err != nil {
+		t.Fatalf("MoveWorkflowTask: %v", err)
+	}
+	if moved.State != "approved" || len(moved.PlacementIDs) != 1 || len(moved.RunIDs) != 1 {
+		t.Fatalf("auto-approved override = %+v, want approved placement and run", moved)
+	}
+	if notifier.count != 1 {
+		t.Fatalf("scheduler notifications = %d, want 1", notifier.count)
+	}
+	runs, err := service.store.ListRuns(ctx, workflow.TaskID(task.Task.ID))
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 || string(runs[0].NodeID) != implementID || runs[0].AutomationRequestedAt == 0 {
+		t.Fatalf("runs after auto-approved override = %+v, want requested implement automation", runs)
+	}
+}
+
+func TestServiceMoveTaskAutoApproveSurfacesCommittedPendingMoveWhenApprovalFails(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceChainedWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	implementID := workflowServiceNodeIDByKey(t, def.Definition, "implement")
+	service.approve = func(context.Context, workflow.TransitionID) (workflowstore.CompleteRunResult, error) {
+		return workflowstore.CompleteRunResult{}, errors.New("approval failed")
+	}
+
+	moved, err := service.MoveWorkflowTask(ctx, serverapi.WorkflowTaskMoveRequest{TaskID: task.Task.ID, TargetNodeID: implementID, AllowMissingEdge: true, AutoApprove: true, OutputValues: map[string]string{"summary": "replacement"}})
+	if err != nil {
+		t.Fatalf("MoveWorkflowTask: %v", err)
+	}
+	if moved.State != "pending_approval" || moved.TransitionID == "" || moved.ApprovalError != "approval failed" {
+		t.Fatalf("partial auto-approve response = %+v, want pending move with approval error", moved)
+	}
+	transitions, err := service.store.ListTransitions(ctx, workflow.TaskID(task.Task.ID))
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if len(transitions) != 1 || transitions[0].State != "pending_approval" {
+		t.Fatalf("committed transition = %+v, want pending approval", transitions)
+	}
+}
+
+func TestServiceMoveTaskAutoApproveDoesNotBypassApprovalGatedEdge(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	agentID := workflowServiceNodeIDByKey(t, def.Definition, "agent")
+	var startEdge serverapi.WorkflowEdge
+	for _, edge := range def.Definition.Edges {
+		if edge.Key == "start" {
+			startEdge = edge
+			break
+		}
+	}
+	if startEdge.ID == "" {
+		t.Fatalf("missing start edge in %+v", def.Definition.Edges)
+	}
+	if _, err := service.store.UpdateEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID(startEdge.ID), WorkflowID: workflow.WorkflowID(workflowID), TransitionGroupID: workflow.TransitionGroupID(startEdge.TransitionGroupID), Key: workflow.ModelKey(startEdge.Key), TargetNodeID: workflow.NodeID(startEdge.TargetNodeID), RequiresApproval: true, ContextMode: workflow.ContextMode(startEdge.ContextMode), InputBindings: inputBindings(startEdge.InputBindings), OutputRequirements: outputRequirements(startEdge.OutputRequirements)}); err != nil {
+		t.Fatalf("enable start edge approval: %v", err)
+	}
+
+	moved, err := service.MoveWorkflowTask(ctx, serverapi.WorkflowTaskMoveRequest{TaskID: task.Task.ID, TargetNodeID: agentID, AllowMissingEdge: true, AutoApprove: true})
+	if err != nil {
+		t.Fatalf("MoveWorkflowTask: %v", err)
+	}
+	if moved.State != "pending_approval" || len(moved.PlacementIDs) != 0 || len(moved.RunIDs) != 0 || moved.ApprovalError != "" {
+		t.Fatalf("approval-gated move = %+v, want pending approval without automation", moved)
 	}
 }
 
@@ -748,10 +870,13 @@ func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T)
 
 func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 	ctx := context.Background()
-	service, _ := newWorkflowServiceTestService(t)
+	service, binding := newWorkflowServiceTestService(t)
 	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: created.Workflow.ID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
 	}
 	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: created.Workflow.ID})
 	if err != nil {
@@ -768,13 +893,13 @@ func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 	if _, err := service.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: created.Workflow.ID, EdgeID: "edge-start-events", TransitionGroupID: "group-start-events", Key: "start", TargetNodeID: doneID, ContextMode: "new_session"}); err != nil {
 		t.Fatalf("AddWorkflowEdge: %v", err)
 	}
-	events, err := service.store.ListWorkflowEventsAfter(ctx, "", 0, 100)
+	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
 	if err != nil {
 		t.Fatalf("ListWorkflowEventsAfter: %v", err)
 	}
 	actions := map[string]bool{}
 	for _, event := range events {
-		if event.WorkflowID == created.Workflow.ID {
+		if event.ProjectID == binding.ProjectID && event.WorkflowID == created.Workflow.ID {
 			actions[event.Action] = true
 		}
 	}
@@ -859,6 +984,50 @@ func createWorkflowServiceValidWorkflow(t *testing.T, ctx context.Context, servi
 	return created.Workflow.ID
 }
 
+func createWorkflowServiceChainedWorkflow(t *testing.T, ctx context.Context, service *Service) string {
+	t.Helper()
+	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Chained Workflow"})
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: created.Workflow.ID})
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	startID := workflowServiceNodeIDByKind(t, def.Definition, "start")
+	doneID := workflowServiceNodeIDByKind(t, def.Definition, "terminal")
+	planID := "node-plan-" + created.Workflow.ID
+	implementID := "node-implement-" + created.Workflow.ID
+	if _, err := service.AddWorkflowNode(ctx, serverapi.WorkflowNodeAddRequest{WorkflowID: created.Workflow.ID, NodeID: planID, Key: "plan", Kind: "agent", DisplayName: "Plan", SubagentRole: "coder", PromptTemplate: "Plan work.", OutputFields: []serverapi.WorkflowOutputField{{Name: "summary", Description: "Summary."}}}); err != nil {
+		t.Fatalf("AddWorkflowNode plan: %v", err)
+	}
+	if _, err := service.AddWorkflowNode(ctx, serverapi.WorkflowNodeAddRequest{WorkflowID: created.Workflow.ID, NodeID: implementID, Key: "implement", Kind: "agent", DisplayName: "Implement", SubagentRole: "coder", PromptTemplate: "Implement {{.Inputs.prior_summary}}.", OutputFields: []serverapi.WorkflowOutputField{{Name: "summary", Description: "Summary."}}}); err != nil {
+		t.Fatalf("AddWorkflowNode implement: %v", err)
+	}
+	startGroup := "group-start-" + created.Workflow.ID
+	nextGroup := "group-next-" + created.Workflow.ID
+	doneGroup := "group-done-" + created.Workflow.ID
+	if _, err := service.AddWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupAddRequest{WorkflowID: created.Workflow.ID, GroupID: startGroup, SourceNodeID: startID, TransitionID: "start", DisplayName: "Start"}); err != nil {
+		t.Fatalf("AddWorkflowTransitionGroup start: %v", err)
+	}
+	if _, err := service.AddWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupAddRequest{WorkflowID: created.Workflow.ID, GroupID: nextGroup, SourceNodeID: planID, TransitionID: "next", DisplayName: "Next"}); err != nil {
+		t.Fatalf("AddWorkflowTransitionGroup next: %v", err)
+	}
+	if _, err := service.AddWorkflowTransitionGroup(ctx, serverapi.WorkflowTransitionGroupAddRequest{WorkflowID: created.Workflow.ID, GroupID: doneGroup, SourceNodeID: implementID, TransitionID: "done", DisplayName: "Done"}); err != nil {
+		t.Fatalf("AddWorkflowTransitionGroup done: %v", err)
+	}
+	if _, err := service.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: created.Workflow.ID, EdgeID: "edge-start-" + created.Workflow.ID, TransitionGroupID: startGroup, Key: "start", TargetNodeID: planID, ContextMode: "new_session"}); err != nil {
+		t.Fatalf("AddWorkflowEdge start: %v", err)
+	}
+	if _, err := service.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: created.Workflow.ID, EdgeID: "edge-next-" + created.Workflow.ID, TransitionGroupID: nextGroup, Key: "next", TargetNodeID: implementID, ContextMode: "new_session", InputBindings: []serverapi.WorkflowInputBinding{{Name: "prior_summary", Source: "transition_output", Field: "summary"}}, OutputRequirements: []serverapi.WorkflowOutputRequirement{{FieldName: "summary"}}}); err != nil {
+		t.Fatalf("AddWorkflowEdge next: %v", err)
+	}
+	if _, err := service.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: created.Workflow.ID, EdgeID: "edge-done-" + created.Workflow.ID, TransitionGroupID: doneGroup, Key: "done", TargetNodeID: doneID, ContextMode: "new_session", OutputRequirements: []serverapi.WorkflowOutputRequirement{{FieldName: "summary"}}}); err != nil {
+		t.Fatalf("AddWorkflowEdge done: %v", err)
+	}
+	return created.Workflow.ID
+}
+
 func workflowServiceNodeIDByKind(t *testing.T, def serverapi.WorkflowDefinition, kind string) string {
 	t.Helper()
 	for _, node := range def.Nodes {
@@ -867,6 +1036,17 @@ func workflowServiceNodeIDByKind(t *testing.T, def serverapi.WorkflowDefinition,
 		}
 	}
 	t.Fatalf("missing node kind %q in %+v", kind, def.Nodes)
+	return ""
+}
+
+func workflowServiceNodeIDByKey(t *testing.T, def serverapi.WorkflowDefinition, key string) string {
+	t.Helper()
+	for _, node := range def.Nodes {
+		if node.Key == key {
+			return node.ID
+		}
+	}
+	t.Fatalf("missing node key %q in %+v", key, def.Nodes)
 	return ""
 }
 

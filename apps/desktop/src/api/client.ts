@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- RPC client methods are intentionally centralized by transport boundary. */
 import { type z } from "zod";
 
 import { ContractError } from "./errors";
@@ -8,6 +9,7 @@ import type {
   BindingPlan,
   BoardNodeCardsPage,
   PendingAsk,
+  ProjectWorkflowLink,
   ProjectBinding,
   ProjectEdit,
   ProjectMutationResponse,
@@ -17,6 +19,8 @@ import type {
   TaskDetail,
   TeleportTarget,
   WorkflowBoard,
+  WorkflowDefinition,
+  WorkflowValidation,
   WorkspaceList,
   WorkspaceUnlinkResponse,
 } from "./models";
@@ -36,11 +40,15 @@ import {
   boardNodeCardsPageSchema,
   commentAddResponseSchema,
   pendingAskListSchema,
+  projectWorkflowLinksSchema,
   taskCreateResponseSchema,
+  taskMoveResponseSchema,
   taskDetailSchema,
   taskUpdateResponseSchema,
   teleportTargetSchema,
   workflowBoardSchema,
+  workflowDefinitionSchema,
+  workflowValidationSchema,
 } from "./schemas/workflow";
 import type { RpcEventHandler, RpcSubscription, RpcTransport } from "./transport";
 
@@ -134,10 +142,7 @@ export class BuilderApiClient {
     );
   }
 
-  async setDefaultWorkspace(
-    projectID: string,
-    workspaceID: string,
-  ): Promise<ProjectMutationResponse> {
+  async setDefaultWorkspace(projectID: string, workspaceID: string): Promise<ProjectMutationResponse> {
     return parse(
       "project.defaultWorkspace.set",
       projectMutationResponseSchema,
@@ -170,6 +175,30 @@ export class BuilderApiClient {
           workflow_id: workflowID.length > 0 ? workflowID : undefined,
         }),
       ),
+    );
+  }
+
+  async getWorkflow(workflowID: string): Promise<WorkflowDefinition> {
+    return parse(
+      "workflow.get",
+      workflowDefinitionSchema,
+      await this.transport.call("workflow.get", { workflow_id: workflowID }),
+    );
+  }
+
+  async validateWorkflow(workflowID: string, mode: "draft" | "task_creation" | "execution"): Promise<WorkflowValidation> {
+    return parse(
+      "workflow.validate",
+      workflowValidationSchema,
+      await this.transport.call("workflow.validate", { workflow_id: workflowID, mode }),
+    );
+  }
+
+  async listProjectWorkflowLinks(projectID: string): Promise<readonly ProjectWorkflowLink[]> {
+    return parse(
+      "workflow.listProjectLinks",
+      projectWorkflowLinksSchema,
+      await this.transport.call("workflow.listProjectLinks", { project_id: projectID }),
     );
   }
 
@@ -249,12 +278,24 @@ export class BuilderApiClient {
     await this.transport.call("workflow.task.start", { task_id: taskID });
   }
 
-  async moveTask(taskID: string, targetNodeID: string): Promise<void> {
-    await this.transport.call("workflow.task.move", {
-      task_id: taskID,
-      target_node_id: targetNodeID,
-      output_values: {},
-    });
+  async moveTask(input: TaskMoveInput): Promise<void> {
+    const response = parse(
+      "workflow.task.move",
+      taskMoveResponseSchema,
+      await this.transport.call(
+        "workflow.task.move",
+        compactJsonObject({
+          task_id: input.taskID,
+          target_node_id: input.targetNodeID,
+          output_values: input.outputValues ?? {},
+          allow_missing_edge: input.allowMissingEdge,
+          auto_approve: input.autoApprove,
+        }),
+      ),
+    );
+    if (response.approvalError.length > 0) {
+      throw new Error(response.approvalError);
+    }
   }
 
   async interruptTask(taskID: string, runID: string): Promise<void> {
@@ -366,7 +407,15 @@ export type TaskEditInput = Readonly<{
   taskID: string;
   title: string;
   body: string;
-  sourceWorkspaceID: string;
+  sourceWorkspaceID?: string | undefined;
+}>;
+
+export type TaskMoveInput = Readonly<{
+  taskID: string;
+  targetNodeID: string;
+  outputValues?: Readonly<Record<string, string>>;
+  allowMissingEdge?: boolean;
+  autoApprove?: boolean;
 }>;
 
 export type QuestionAnswerInput = Readonly<{

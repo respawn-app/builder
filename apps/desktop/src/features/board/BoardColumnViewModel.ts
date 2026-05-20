@@ -19,6 +19,8 @@ export type KanbanCardVM = Readonly<{
   title: string;
   bodyPreview: string;
   updatedAt: number;
+  activeNodeIDs: readonly string[];
+  statusKind: string;
   sourceWorkspaceName: string;
   actions: Readonly<{
     canInterrupt: boolean;
@@ -54,6 +56,8 @@ export function toKanbanCardVM(card: BoardCard): KanbanCardVM {
     title: card.title,
     bodyPreview: card.bodyPreview,
     updatedAt: card.updatedAt,
+    activeNodeIDs: card.activeNodeIDs,
+    statusKind: card.status.kind,
     sourceWorkspaceName: card.sourceWorkspace.name,
     actions: {
       canInterrupt: card.actions.canInterrupt,

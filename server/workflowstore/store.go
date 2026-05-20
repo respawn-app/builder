@@ -330,6 +330,69 @@ func (s *Store) AddNode(ctx context.Context, node NodeRecord) (int64, error) {
 	return revision, nil
 }
 
+func (s *Store) UpdateNode(ctx context.Context, node NodeRecord) (int64, error) {
+	if strings.TrimSpace(string(node.ID)) == "" {
+		return 0, errors.New("node id is required")
+	}
+	if strings.TrimSpace(string(node.WorkflowID)) == "" {
+		return 0, errors.New("workflow id is required")
+	}
+	outputFields, err := marshalJSON(node.OutputFields)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	groupID, err := resolveWorkflowNodeGroupID(ctx, q, string(node.WorkflowID), node.GroupID, node.GroupKey)
+	if err != nil {
+		return 0, err
+	}
+	updated, err := tx.ExecContext(ctx, `
+UPDATE workflow_nodes
+SET
+    node_key = ?,
+    kind = ?,
+    display_name = ?,
+    subagent_role = ?,
+    prompt_template = ?,
+    output_fields_json = ?,
+    group_id = ?
+WHERE id = ?
+  AND workflow_id = ?`,
+		string(node.Key),
+		string(node.Kind),
+		strings.TrimSpace(node.DisplayName),
+		strings.TrimSpace(node.SubagentRole),
+		strings.TrimSpace(node.PromptTemplate),
+		outputFields,
+		nullableString(groupID),
+		string(node.ID),
+		string(node.WorkflowID),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("update workflow node: %w", err)
+	}
+	count, err := updated.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if count != 1 {
+		return 0, sql.ErrNoRows
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(node.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
 func (s *Store) AddNodeGroup(ctx context.Context, group NodeGroupRecord) (NodeGroupRecord, int64, error) {
 	if strings.TrimSpace(string(group.WorkflowID)) == "" {
 		return NodeGroupRecord{}, 0, errors.New("workflow id is required")
@@ -508,8 +571,61 @@ func (s *Store) AddTransitionGroup(ctx context.Context, group TransitionGroupRec
 	if group.ID == "" {
 		group.ID = workflow.TransitionGroupID(prefixedID("group"))
 	}
+	if err := ensureWorkflowNodeID(ctx, q, string(group.WorkflowID), group.SourceNodeID); err != nil {
+		return 0, err
+	}
 	if err := q.InsertWorkflowTransitionGroup(ctx, sqlitegen.InsertWorkflowTransitionGroupParams{ID: string(group.ID), WorkflowID: string(group.WorkflowID), SourceNodeID: string(group.SourceNodeID), TransitionID: strings.TrimSpace(string(group.TransitionID)), DisplayName: strings.TrimSpace(group.DisplayName), SortOrder: 100, MetadataJson: "{}"}); err != nil {
 		return 0, fmt.Errorf("insert transition group: %w", err)
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(group.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
+func (s *Store) UpdateTransitionGroup(ctx context.Context, group TransitionGroupRecord) (int64, error) {
+	if strings.TrimSpace(string(group.ID)) == "" {
+		return 0, errors.New("transition group id is required")
+	}
+	if strings.TrimSpace(string(group.WorkflowID)) == "" {
+		return 0, errors.New("workflow id is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	if err := ensureWorkflowNodeID(ctx, q, string(group.WorkflowID), group.SourceNodeID); err != nil {
+		return 0, err
+	}
+	updated, err := tx.ExecContext(ctx, `
+UPDATE workflow_transition_groups
+SET
+    source_node_id = ?,
+    transition_id = ?,
+    display_name = ?
+WHERE id = ?
+  AND workflow_id = ?`,
+		string(group.SourceNodeID),
+		strings.TrimSpace(string(group.TransitionID)),
+		strings.TrimSpace(group.DisplayName),
+		string(group.ID),
+		string(group.WorkflowID),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("update transition group: %w", err)
+	}
+	count, err := updated.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if count != 1 {
+		return 0, sql.ErrNoRows
 	}
 	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(group.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
 	if err != nil {
@@ -539,8 +655,83 @@ func (s *Store) AddEdge(ctx context.Context, edge EdgeRecord) (int64, error) {
 	if edge.ID == "" {
 		edge.ID = workflow.EdgeID(prefixedID("edge"))
 	}
+	if err := ensureWorkflowTransitionGroupID(ctx, tx, string(edge.WorkflowID), edge.TransitionGroupID); err != nil {
+		return 0, err
+	}
+	if err := ensureWorkflowNodeID(ctx, q, string(edge.WorkflowID), edge.TargetNodeID); err != nil {
+		return 0, err
+	}
 	if err := q.InsertWorkflowEdge(ctx, sqlitegen.InsertWorkflowEdgeParams{ID: string(edge.ID), WorkflowID: string(edge.WorkflowID), TransitionGroupID: string(edge.TransitionGroupID), EdgeKey: string(edge.Key), TargetNodeID: string(edge.TargetNodeID), RequiresApproval: boolToInt64(edge.RequiresApproval), ContextMode: string(edge.ContextMode), InputBindingsJson: inputs, OutputRequirementsJson: requirements, SortOrder: 100, MetadataJson: "{}"}); err != nil {
 		return 0, fmt.Errorf("insert workflow edge: %w", err)
+	}
+	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(edge.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
+	if err != nil {
+		return 0, fmt.Errorf("increment graph revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
+func (s *Store) UpdateEdge(ctx context.Context, edge EdgeRecord) (int64, error) {
+	if strings.TrimSpace(string(edge.ID)) == "" {
+		return 0, errors.New("edge id is required")
+	}
+	if strings.TrimSpace(string(edge.WorkflowID)) == "" {
+		return 0, errors.New("workflow id is required")
+	}
+	inputs, err := marshalJSON(edge.InputBindings)
+	if err != nil {
+		return 0, err
+	}
+	requirements, err := marshalJSON(edge.OutputRequirements)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	if err := ensureWorkflowTransitionGroupID(ctx, tx, string(edge.WorkflowID), edge.TransitionGroupID); err != nil {
+		return 0, err
+	}
+	if err := ensureWorkflowNodeID(ctx, q, string(edge.WorkflowID), edge.TargetNodeID); err != nil {
+		return 0, err
+	}
+	updated, err := tx.ExecContext(ctx, `
+UPDATE workflow_edges
+SET
+    transition_group_id = ?,
+    edge_key = ?,
+    target_node_id = ?,
+    requires_approval = ?,
+    context_mode = ?,
+    input_bindings_json = ?,
+    output_requirements_json = ?
+WHERE id = ?
+  AND workflow_id = ?`,
+		string(edge.TransitionGroupID),
+		string(edge.Key),
+		string(edge.TargetNodeID),
+		boolToInt64(edge.RequiresApproval),
+		string(edge.ContextMode),
+		inputs,
+		requirements,
+		string(edge.ID),
+		string(edge.WorkflowID),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("update workflow edge: %w", err)
+	}
+	count, err := updated.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if count != 1 {
+		return 0, sql.ErrNoRows
 	}
 	revision, err := q.IncrementWorkflowGraphRevision(ctx, sqlitegen.IncrementWorkflowGraphRevisionParams{ID: string(edge.WorkflowID), UpdatedAtUnixMs: s.now().UnixMilli()})
 	if err != nil {
@@ -740,6 +931,43 @@ func resolveWorkflowNodeGroupID(ctx context.Context, q *sqlitegen.Queries, workf
 		return "", err
 	}
 	return row.ID, nil
+}
+
+func ensureWorkflowNodeID(ctx context.Context, q *sqlitegen.Queries, workflowID string, nodeID workflow.NodeID) error {
+	trimmedNodeID := strings.TrimSpace(string(nodeID))
+	if trimmedNodeID == "" {
+		return errors.New("workflow node id is required")
+	}
+	row, err := q.GetWorkflowNode(ctx, trimmedNodeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow node %q not found: %w", trimmedNodeID, sql.ErrNoRows)
+		}
+		return fmt.Errorf("resolve workflow node %q: %w", trimmedNodeID, err)
+	}
+	if row.WorkflowID != strings.TrimSpace(workflowID) {
+		return fmt.Errorf("workflow node %q belongs to workflow %q, not %q", trimmedNodeID, row.WorkflowID, strings.TrimSpace(workflowID))
+	}
+	return nil
+}
+
+func ensureWorkflowTransitionGroupID(ctx context.Context, tx *sql.Tx, workflowID string, groupID workflow.TransitionGroupID) error {
+	trimmedGroupID := strings.TrimSpace(string(groupID))
+	if trimmedGroupID == "" {
+		return errors.New("workflow transition group id is required")
+	}
+	var rowWorkflowID string
+	err := tx.QueryRowContext(ctx, `SELECT workflow_id FROM workflow_transition_groups WHERE id = ? LIMIT 1`, trimmedGroupID).Scan(&rowWorkflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow transition group %q not found: %w", trimmedGroupID, sql.ErrNoRows)
+		}
+		return fmt.Errorf("resolve workflow transition group %q: %w", trimmedGroupID, err)
+	}
+	if rowWorkflowID != strings.TrimSpace(workflowID) {
+		return fmt.Errorf("workflow transition group %q belongs to workflow %q, not %q", trimmedGroupID, rowWorkflowID, strings.TrimSpace(workflowID))
+	}
+	return nil
 }
 
 func prefixedID(prefix string) string {

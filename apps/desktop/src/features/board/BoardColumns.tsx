@@ -79,11 +79,11 @@ export function KanbanColumn({
       data-drop-state={dropState}
       ref={columnRef}
       onDragOver={(event) => {
-        if (dropState === "idle") {
+        if (dropState === "idle" && !hasBoardCardDragData(event.dataTransfer)) {
           return;
         }
         event.preventDefault();
-        event.dataTransfer.dropEffect = dropState === "allowed" ? "move" : "none";
+        event.dataTransfer.dropEffect = "move";
       }}
       onDrop={(event) => {
         onDropTask(event);
@@ -172,8 +172,14 @@ function TaskCard({
   onResume: (runID: string) => void;
 }>) {
   const { t } = useTranslation();
-  const canDrag =
-    !actionsDisabled && (card.actions.canStart || card.actions.manualMoveTargetNodeIDs.length > 0);
+  const canDrag = !actionsDisabled && card.statusKind !== "canceled";
+  const dragPayload = {
+    taskID: card.id,
+    canStart: card.actions.canStart,
+    activeNodeIDs: card.activeNodeIDs,
+    statusKind: card.statusKind,
+    manualMoveTargetNodeIDs: card.actions.manualMoveTargetNodeIDs,
+  };
   return (
     <article
       aria-label={card.title}
@@ -186,15 +192,11 @@ function TaskCard({
           event.preventDefault();
           return;
         }
-        const payload = {
-          taskID: card.id,
-          canStart: card.actions.canStart,
-          manualMoveTargetNodeIDs: card.actions.manualMoveTargetNodeIDs,
-        };
         event.dataTransfer.setData("text/task-id", card.id);
-        event.dataTransfer.setData(boardCardDragPayloadType, encodeBoardCardDragPayload(payload));
+        event.dataTransfer.setData("text/plain", card.id);
+        event.dataTransfer.setData(boardCardDragPayloadType, encodeBoardCardDragPayload(dragPayload));
         event.dataTransfer.effectAllowed = "move";
-        onDragStart(payload);
+        onDragStart(dragPayload);
       }}
       onKeyDown={(event) => {
         activateCardFromKeyboard(event, onClick);
@@ -229,6 +231,11 @@ function TaskCard({
       </div>
     </article>
   );
+}
+
+function hasBoardCardDragData(dataTransfer: DataTransfer): boolean {
+  const types = Array.from(dataTransfer.types);
+  return types.includes(boardCardDragPayloadType) || types.includes("text/task-id");
 }
 
 function activateCardFromKeyboard(event: KeyboardEvent<HTMLElement>, onClick: () => void): void {

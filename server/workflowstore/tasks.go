@@ -90,18 +90,20 @@ type RecordProtocolViolationResult struct {
 }
 
 type CompleteRunResult struct {
-	TransitionID workflow.TransitionID
-	State        string
-	PlacementIDs []workflow.PlacementID
-	RunIDs       []workflow.RunID
+	TransitionID     workflow.TransitionID
+	State            string
+	PlacementIDs     []workflow.PlacementID
+	RunIDs           []workflow.RunID
+	RequiresApproval bool
 }
 
 type ManualMoveRequest struct {
-	TaskID       workflow.TaskID
-	TargetNodeID workflow.NodeID
-	OutputValues map[string]string
-	Commentary   string
-	Actor        string
+	TaskID           workflow.TaskID
+	TargetNodeID     workflow.NodeID
+	OutputValues     map[string]string
+	Commentary       string
+	Actor            string
+	AllowMissingEdge bool
 }
 
 type ManualMoveResult = CompleteRunResult
@@ -178,40 +180,42 @@ func (s *Store) UpdateTask(ctx context.Context, req UpdateTaskRequest) (TaskReco
 	if err != nil {
 		return TaskRecord{}, err
 	}
-	if task.CanceledAtUnixMs != 0 {
-		return TaskRecord{}, fmt.Errorf("cannot edit canceled task")
-	}
 	body := task.Body
 	if req.Body != nil {
 		body = strings.TrimSpace(*req.Body)
 	}
-	if task.ManagedWorktreeID.Valid && strings.TrimSpace(task.ManagedWorktreeID.String) != "" {
-		return TaskRecord{}, fmt.Errorf("cannot edit task after automation starts")
-	}
-	runCount, err := q.CountTaskRunsByTask(ctx, task.ID)
-	if err != nil {
-		return TaskRecord{}, err
-	}
-	if runCount != 0 {
-		return TaskRecord{}, fmt.Errorf("cannot edit task after automation starts")
-	}
-	if _, err := q.GetActiveStartPlacementForTask(ctx, task.ID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return TaskRecord{}, fmt.Errorf("cannot edit task after automation starts")
+	currentSourceWorkspaceID := strings.TrimSpace(task.SourceWorkspaceID.String)
+	sourceWorkspaceID := currentSourceWorkspaceID
+	metadataJSON := task.MetadataJson
+	requestedSourceWorkspaceID := strings.TrimSpace(req.SourceWorkspaceID)
+	if requestedSourceWorkspaceID != "" && requestedSourceWorkspaceID != currentSourceWorkspaceID {
+		if task.CanceledAtUnixMs != 0 {
+			return TaskRecord{}, fmt.Errorf("cannot edit source workspace for canceled task")
 		}
-		return TaskRecord{}, err
-	}
-	sourceWorkspaceID := strings.TrimSpace(req.SourceWorkspaceID)
-	if sourceWorkspaceID == "" {
-		sourceWorkspaceID = strings.TrimSpace(task.SourceWorkspaceID.String)
-	}
-	sourceWorkspaceID, err = resolveTaskSourceWorkspaceWithQueries(ctx, q, task.ProjectID, sourceWorkspaceID)
-	if err != nil {
-		return TaskRecord{}, err
-	}
-	metadataJSON, err := taskMetadataWithSourceWorkspaceSnapshot(ctx, q, task.MetadataJson, sourceWorkspaceID)
-	if err != nil {
-		return TaskRecord{}, err
+		if task.ManagedWorktreeID.Valid && strings.TrimSpace(task.ManagedWorktreeID.String) != "" {
+			return TaskRecord{}, fmt.Errorf("cannot edit source workspace after automation starts")
+		}
+		runCount, err := q.CountTaskRunsByTask(ctx, task.ID)
+		if err != nil {
+			return TaskRecord{}, err
+		}
+		if runCount != 0 {
+			return TaskRecord{}, fmt.Errorf("cannot edit source workspace after automation starts")
+		}
+		if _, err := q.GetActiveStartPlacementForTask(ctx, task.ID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return TaskRecord{}, fmt.Errorf("cannot edit source workspace after automation starts")
+			}
+			return TaskRecord{}, err
+		}
+		sourceWorkspaceID, err = resolveTaskSourceWorkspaceWithQueries(ctx, q, task.ProjectID, requestedSourceWorkspaceID)
+		if err != nil {
+			return TaskRecord{}, err
+		}
+		metadataJSON, err = taskMetadataWithSourceWorkspaceSnapshot(ctx, q, task.MetadataJson, sourceWorkspaceID)
+		if err != nil {
+			return TaskRecord{}, err
+		}
 	}
 	updated, err := q.UpdateTaskEditableFields(ctx, sqlitegen.UpdateTaskEditableFieldsParams{ID: task.ID, Title: title, Body: body, SourceWorkspaceID: sql.NullString{String: sourceWorkspaceID, Valid: sourceWorkspaceID != ""}, MetadataJson: metadataJSON, UpdatedAtUnixMs: now})
 	if err != nil {
@@ -567,7 +571,7 @@ WHERE id = ?
 	if err := q.InsertTaskTransition(ctx, sqlitegen.InsertTaskTransitionParams{ID: transitionID, TaskID: run.TaskID, SourceRunID: sql.NullString{String: run.ID, Valid: true}, SourcePlacementID: sql.NullString{String: run.PlacementID, Valid: true}, SourceNodeID: sql.NullString{String: string(snapshot.Node.ID), Valid: true}, SourceNodeKey: string(snapshot.Node.Key), SourceNodeDisplayName: snapshot.Node.DisplayName, TransitionGroupID: sql.NullString{String: string(group.ID), Valid: true}, TransitionID: group.TransitionID, TransitionDisplayName: group.DisplayName, WorkflowRevisionSeen: snapshot.WorkflowRevisionSeen, Actor: actor, State: transitionState, Commentary: strings.TrimSpace(req.Commentary), OutputValuesJson: outputValuesJSON, CreatedAtUnixMs: now, AppliedAtUnixMs: appliedAt}); err != nil {
 		return CompleteRunResult{}, fmt.Errorf("insert completion transition: %w", err)
 	}
-	result := CompleteRunResult{TransitionID: workflow.TransitionID(transitionID), State: transitionState}
+	result := CompleteRunResult{TransitionID: workflow.TransitionID(transitionID), State: transitionState, RequiresApproval: requiresApproval}
 	for _, edge := range group.Edges {
 		if requiresApproval {
 			if err := insertTransitionEdgeSnapshot(ctx, q, transitionID, snapshot.WorkflowRevisionSeen, edge, "", "pending"); err != nil {

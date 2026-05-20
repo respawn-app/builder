@@ -1,4 +1,11 @@
-import { createBrowserNativeBridge, createTauriNativeBridge } from "@builder/desktop-native-bridge";
+import {
+  createBrowserNativeBridge,
+  createTauriNativeBridge,
+  taskDetailContentMaxWidthPx,
+  taskDetailDialogHorizontalPaddingPx,
+  taskDetailNativeDialogWindowOptions,
+  taskDetailNativeWindowInitialWidthPx,
+} from "@builder/desktop-native-bridge";
 
 import tauriDefaultCapability from "../src-tauri/capabilities/default.json";
 
@@ -63,6 +70,19 @@ describe("native bridge capabilities", () => {
       "core:window:allow-start-dragging",
     ].forEach((permission) => {
       expect(permissions.has(permission)).toBe(true);
+    });
+  });
+
+  it("uses the compact task detail native dialog default width", () => {
+    expect(taskDetailContentMaxWidthPx).toBe(1200);
+    expect(taskDetailDialogHorizontalPaddingPx).toBe(16);
+    expect(taskDetailNativeWindowInitialWidthPx).toBe(840);
+    expect(taskDetailNativeDialogWindowOptions({ resumeRunId: "run-1", taskId: "task-1" })).toMatchObject({
+      initialHeight: 760,
+      initialWidth: 840,
+      params: { resumeRunId: "run-1", taskId: "task-1" },
+      route: "/native-dialog/task-detail",
+      title: "Task",
     });
   });
 });

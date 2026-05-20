@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { TaskComment } from "../../api";
 import { formatRelativeTime } from "../../app/formatters";
-import { Button, MarkdownText, TextArea, VirtualizedInfiniteList } from "../../ui";
+import { Button, MarkdownText, Spinner } from "../../ui";
+import { fieldInputClassName } from "../../ui/Field";
+import { cx } from "../../ui/classes";
+import { fieldLabelClassName } from "../../ui/fieldStyles";
 import type { useTaskMutations } from "./useTaskDetailData";
 
 export function Comments({
@@ -20,6 +24,7 @@ export function Comments({
   const { t } = useTranslation();
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<Readonly<{ id: string; body: string }> | null>(null);
+  const commentBody = editing?.body ?? body;
 
   async function submit(): Promise<void> {
     if (editing === null) {
@@ -33,26 +38,40 @@ export function Comments({
 
   return (
     <section className="grid gap-[var(--space-3)]">
-      <h3>{t("task.comments")}</h3>
-      <TextArea
-        label={editing === null ? t("task.addComment") : t("task.editComment")}
-        onChange={(event) => {
-          if (editing === null) {
-            setBody(event.target.value);
-            return;
-          }
-          setEditing({ id: editing.id, body: event.target.value });
-        }}
-        rows={3}
-        value={editing?.body ?? body}
-      />
-      <Button
-        disabled={disabled || (editing?.body ?? body).trim().length === 0}
-        onClick={() => void submit()}
-        variant="primary"
-      >
-        {editing === null ? t("task.addComment") : t("task.save")}
-      </Button>
+      <div className="grid gap-[var(--space-3)]">
+        <label className={fieldLabelClassName} htmlFor="task-comment-body">
+          {editing === null ? t("task.addComment") : t("task.editComment")}
+        </label>
+        <div className="grid" data-testid="task-comment-input-frame">
+          <textarea
+            className={cx(fieldInputClassName, "col-start-1 row-start-1 block min-h-[88px] resize-y pb-0")}
+            disabled={disabled}
+            id="task-comment-body"
+            onChange={(event) => {
+              if (disabled) {
+                return;
+              }
+              if (editing === null) {
+                setBody(event.target.value);
+                return;
+              }
+              setEditing({ id: editing.id, body: event.target.value });
+            }}
+            value={commentBody}
+          />
+          <Button
+            aria-label={editing === null ? t("task.submitComment") : t("task.saveComment")}
+            className="col-start-1 row-start-1 grid h-9 w-9 place-items-center self-end justify-self-end rounded-full !p-0"
+            data-testid="task-comment-save"
+            disabled={disabled || commentBody.trim().length === 0}
+            onClick={() => void submit()}
+            style={{ marginBottom: "var(--space-2)", marginRight: "var(--space-2)" }}
+            variant="primary"
+          >
+            <Save aria-hidden="true" size={18} strokeWidth={1.8} />
+          </Button>
+        </div>
+      </div>
       {comments.map((comment) => (
         <article
           className="grid gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)]"
@@ -94,21 +113,61 @@ export function ActivityFeed({
   onLoadMore: () => void;
 }>) {
   const { t } = useTranslation();
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const lastLoadMoreItemsLengthRef = useRef(-1);
+
+  useEffect(() => {
+    if (!hasNextPage || isFetchingNextPage || lastLoadMoreItemsLengthRef.current === items.length) {
+      return undefined;
+    }
+    const sentinel = sentinelRef.current;
+    if (sentinel === null) {
+      return undefined;
+    }
+    const loadMore = () => {
+      lastLoadMoreItemsLengthRef.current = items.length;
+      onLoadMore();
+    };
+    if (typeof IntersectionObserver === "undefined") {
+      loadMore();
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        if (lastLoadMoreItemsLengthRef.current === items.length) {
+          return;
+        }
+        loadMore();
+      }
+    });
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasNextPage, isFetchingNextPage, items.length, onLoadMore]);
+
   return (
-    <section className="grid gap-[var(--space-3)]">
-      <VirtualizedInfiniteList
-        className="h-[min(520px,56vh)] min-h-0 overflow-auto px-[var(--space-1)] hide-scrollbar contain-strict [-webkit-overflow-scrolling:touch]"
-        empty={<p>{t("task.noActivityTitle")}</p>}
-        estimateSize={() => 76}
-        getItemKey={(item) => item.id}
-        hasNextPage={hasNextPage}
-        header={<h3>{t("task.activity")}</h3>}
-        isFetchingNextPage={isFetchingNextPage}
-        items={items}
-        loadingLabel={t("app.loadingMore")}
-        onLoadMore={onLoadMore}
-        renderItem={(item) => <ActivityRow item={item} />}
-      />
+    <section className="grid gap-[var(--space-3)]" aria-label={t("task.activity")}>
+      {items.length === 0 ? (
+        <p className="m-0 text-[var(--color-muted)]">{t("task.noActivityTitle")}</p>
+      ) : null}
+      {items.map((item) => (
+        <ActivityRow item={item} key={item.id} />
+      ))}
+      <div
+        aria-label={isFetchingNextPage ? t("app.loadingMore") : undefined}
+        aria-live="polite"
+        className="grid min-h-10 place-items-center"
+        ref={sentinelRef}
+        role={isFetchingNextPage ? "status" : undefined}
+      >
+        {isFetchingNextPage ? (
+          <>
+            <Spinner size="sm" />
+            <span className="sr-only">{t("app.loadingMore")}</span>
+          </>
+        ) : null}
+      </div>
     </section>
   );
 }

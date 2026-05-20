@@ -260,7 +260,7 @@ func TestTaskCreatePersistsSourceWorkspaceAndOptionalBody(t *testing.T) {
 	}
 }
 
-func TestTaskUpdateEditsBacklogFieldsUntilAutomationStarts(t *testing.T) {
+func TestTaskUpdateEditsTitleAndBodyAfterAutomationStarts(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createValidWorkflow(t, ctx, store)
@@ -294,9 +294,16 @@ func TestTaskUpdateEditsBacklogFieldsUntilAutomationStarts(t *testing.T) {
 	if _, err := store.StartTask(ctx, task.ID); err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
-	tooLateBody := "body"
-	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: "Too late", Body: &tooLateBody, SourceWorkspaceID: source.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "cannot edit task after automation starts") {
-		t.Fatalf("UpdateTask after start error = %v", err)
+	startedBody := " updated after start "
+	startedUpdate, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: " After start ", Body: &startedBody})
+	if err != nil {
+		t.Fatalf("UpdateTask after start: %v", err)
+	}
+	if startedUpdate.Title != "After start" || startedUpdate.Body != "updated after start" || startedUpdate.SourceWorkspaceID != source.WorkspaceID {
+		t.Fatalf("after-start update = %+v", startedUpdate)
+	}
+	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: "Move source", SourceWorkspaceID: binding.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "source workspace after automation starts") {
+		t.Fatalf("UpdateTask source workspace after start error = %v", err)
 	}
 
 	canceled, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Canceled"})
@@ -306,8 +313,16 @@ func TestTaskUpdateEditsBacklogFieldsUntilAutomationStarts(t *testing.T) {
 	if err := store.CancelTask(ctx, canceled.ID, "stop"); err != nil {
 		t.Fatalf("CancelTask: %v", err)
 	}
-	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: canceled.ID, Title: "Too late", Body: &tooLateBody, SourceWorkspaceID: binding.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "canceled") {
-		t.Fatalf("UpdateTask canceled error = %v", err)
+	canceledBody := "canceled body"
+	canceledUpdate, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: canceled.ID, Title: "Canceled renamed", Body: &canceledBody})
+	if err != nil {
+		t.Fatalf("UpdateTask canceled title/body: %v", err)
+	}
+	if canceledUpdate.Title != "Canceled renamed" || canceledUpdate.Body != "canceled body" {
+		t.Fatalf("canceled update = %+v", canceledUpdate)
+	}
+	if _, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: canceled.ID, Title: "Canceled source", SourceWorkspaceID: source.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "source workspace for canceled task") {
+		t.Fatalf("UpdateTask canceled source error = %v", err)
 	}
 }
 
@@ -722,7 +737,7 @@ func TestCompleteRunCreatesPendingApprovalTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	if result.State != "pending_approval" || len(result.PlacementIDs) != 0 || len(result.RunIDs) != 0 {
+	if result.State != "pending_approval" || !result.RequiresApproval || len(result.PlacementIDs) != 0 || len(result.RunIDs) != 0 {
 		t.Fatalf("completion result = %+v, want pending approval without target placement/run", result)
 	}
 	transitions, err := store.ListTransitions(ctx, task.ID)
@@ -1478,6 +1493,67 @@ func TestManualMoveToTerminalArchivesWithoutOutputValues(t *testing.T) {
 	}
 }
 
+func TestManualMoveFromTerminalToStartResetsTaskToBacklog(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	start := nodeByKind(t, def, workflow.NodeKindStart)
+
+	moved, err := store.ManualMoveTask(ctx, ManualMoveRequest{TaskID: task.ID, TargetNodeID: start.ID})
+	if err != nil {
+		t.Fatalf("ManualMoveTask reset: %v", err)
+	}
+	if moved.State != "applied" || len(moved.PlacementIDs) != 1 || len(moved.RunIDs) != 0 {
+		t.Fatalf("reset move = %+v, want applied start placement without automation", moved)
+	}
+	placements, err := store.ListPlacements(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPlacements: %v", err)
+	}
+	if len(placements) != 4 || placements[2].State != "completed" || placements[3].NodeID != start.ID || placements[3].State != "active" {
+		t.Fatalf("reset placements = %+v, want active start placement after completed terminal", placements)
+	}
+	runs, err := store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs after reset = %+v, want no new automation", runs)
+	}
+	restarted, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask after reset: %v", err)
+	}
+	if restarted.RunID == "" || restarted.RunID == started.RunID {
+		t.Fatalf("restart result = %+v, want second run", restarted)
+	}
+	runs, err = store.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListRuns after restart: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs after restart = %+v, want second automation run", runs)
+	}
+}
+
 func TestManualMoveBackwardReusesStoredOutputValues(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -1515,6 +1591,114 @@ func TestManualMoveBackwardReusesStoredOutputValues(t *testing.T) {
 	}
 	if len(transitions) != 3 || transitions[2].OutputValues["summary"] != "reused" {
 		t.Fatalf("backward transition outputs = %+v, want reused summary", transitions)
+	}
+}
+
+func TestManualMoveMissingEdgeOverrideValidatesTargetInputFields(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	impl := nodeByKey(t, def, "implement")
+
+	_, err = store.ManualMoveTask(ctx, ManualMoveRequest{TaskID: task.ID, TargetNodeID: impl.ID, AllowMissingEdge: true})
+	var validationErr CompletionValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("ManualMoveTask missing inputs error = %T %v, want CompletionValidationError", err, err)
+	}
+	if len(validationErr.Issues) != 1 || validationErr.Issues[0].Field != "summary" {
+		t.Fatalf("validation issues = %+v, want required summary", validationErr.Issues)
+	}
+	placements, err := store.ListPlacements(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPlacements: %v", err)
+	}
+	if len(placements) != 1 || placements[0].State != "active" {
+		t.Fatalf("placements after rejected missing-edge move = %+v, want original backlog placement", placements)
+	}
+}
+
+func TestManualMoveMissingEdgeOverrideWithInputsCreatesPendingAgentTransition(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	impl := nodeByKey(t, def, "implement")
+
+	moved, err := store.ManualMoveTask(ctx, ManualMoveRequest{TaskID: task.ID, TargetNodeID: impl.ID, AllowMissingEdge: true, OutputValues: map[string]string{"summary": "replacement"}})
+	if err != nil {
+		t.Fatalf("ManualMoveTask missing edge override: %v", err)
+	}
+	if moved.State != "pending_approval" || len(moved.PlacementIDs) != 0 || len(moved.RunIDs) != 0 {
+		t.Fatalf("missing-edge move = %+v, want pending approval before agent automation", moved)
+	}
+	transitions, err := store.ListTransitions(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if len(transitions) != 1 || transitions[0].OutputValues["summary"] != "replacement" {
+		t.Fatalf("missing-edge transition outputs = %+v, want replacement summary", transitions)
+	}
+	var inputBindingsJSON string
+	var outputRequirementsJSON string
+	if err := store.db.QueryRowContext(ctx, `
+SELECT input_bindings_json, output_requirements_json
+FROM task_transition_edges
+WHERE task_transition_id = ?
+LIMIT 1`, string(transitions[0].ID)).Scan(&inputBindingsJSON, &outputRequirementsJSON); err != nil {
+		t.Fatalf("select transition edge snapshot: %v", err)
+	}
+	inputBindings := []workflow.InputBinding{}
+	if err := unmarshalJSON(inputBindingsJSON, &inputBindings); err != nil {
+		t.Fatalf("unmarshal input bindings: %v", err)
+	}
+	outputRequirements := []workflow.OutputRequirement{}
+	if err := unmarshalJSON(outputRequirementsJSON, &outputRequirements); err != nil {
+		t.Fatalf("unmarshal output requirements: %v", err)
+	}
+	if len(inputBindings) != 1 || inputBindings[0].Name != "prior_summary" || inputBindings[0].Field != "summary" {
+		t.Fatalf("input bindings = %+v, want prior_summary from summary", inputBindings)
+	}
+	if len(outputRequirements) != 1 || outputRequirements[0].FieldName != "summary" {
+		t.Fatalf("output requirements = %+v, want summary", outputRequirements)
+	}
+}
+
+func TestTargetTransitionInputBindingsKeepSameInputNameWithDifferentFields(t *testing.T) {
+	bindings := targetTransitionInputBindings(workflow.Definition{
+		Edges: []workflow.Edge{
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "summary"}}},
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "details"}}},
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "summary"}}},
+		},
+	}, "node-target")
+
+	if len(bindings) != 2 || bindings[0].Field != "summary" || bindings[1].Field != "details" {
+		t.Fatalf("target transition input bindings = %+v, want same input name with both fields", bindings)
+	}
+	requirements := outputRequirementsFromTransitionInputBindings(bindings)
+	if len(requirements) != 2 || requirements[0].FieldName != "summary" || requirements[1].FieldName != "details" {
+		t.Fatalf("output requirements = %+v, want summary and details", requirements)
 	}
 }
 
@@ -2158,6 +2342,46 @@ func TestResumeTaskRunRejectsRoleDrift(t *testing.T) {
 	}
 }
 
+func TestResumeTaskRunAllowsDefaultAgentRoleWithoutResolver(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	def, _, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	agent := nodeByKey(t, def, "agent")
+	if _, err := store.UpdateNode(ctx, NodeRecord{ID: agent.ID, WorkflowID: workflowID, Key: agent.Key, Kind: agent.Kind, DisplayName: agent.DisplayName, SubagentRole: workflow.DefaultAgentRole, PromptTemplate: agent.PromptTemplate, OutputFields: agent.OutputFields}); err != nil {
+		t.Fatalf("UpdateNode default role: %v", err)
+	}
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.ClaimRun(ctx, started.RunID, 0); err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	if err := store.InterruptRun(ctx, started.RunID, "manual", "{}"); err != nil {
+		t.Fatalf("InterruptRun: %v", err)
+	}
+	store.roleResolver = workflow.StaticRoleResolver{}
+
+	resumed, err := store.ResumeTaskRun(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ResumeTaskRun default role: %v", err)
+	}
+	if resumed.ID != started.RunID || resumed.InterruptedAt != 0 || resumed.StartedAt != 0 {
+		t.Fatalf("resumed run = %+v, want default-role run requeued", resumed)
+	}
+}
+
 func TestResumeTaskRunCanResumeInterruptedWaitingAskRun(t *testing.T) {
 	ctx := context.Background()
 	store, binding, cfg := newTestStoreWithConfig(t)
@@ -2461,6 +2685,34 @@ func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
 	}
 	if _, err := store.queries.GetWorkflowEdge(ctx, "edge-unused"); err == nil {
 		t.Fatalf("unused edge still exists after guarded delete")
+	}
+}
+
+func TestWorkflowGraphUpdatesRejectCrossWorkflowReferences(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	firstWorkflowID := createValidWorkflow(t, ctx, store)
+	secondWorkflowID := createValidWorkflow(t, ctx, store)
+	firstDef, _, err := store.GetDefinition(ctx, firstWorkflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition first: %v", err)
+	}
+	secondDef, _, err := store.GetDefinition(ctx, secondWorkflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition second: %v", err)
+	}
+	firstAgent := nodeByKey(t, firstDef, "agent")
+	secondAgent := nodeByKey(t, secondDef, "agent")
+	secondDone := nodeByKind(t, secondDef, workflow.NodeKindTerminal)
+
+	if _, err := store.UpdateTransitionGroup(ctx, TransitionGroupRecord{ID: workflow.TransitionGroupID("group-done-" + string(firstWorkflowID)), WorkflowID: firstWorkflowID, SourceNodeID: secondAgent.ID, TransitionID: "done", DisplayName: "Done"}); err == nil || !strings.Contains(err.Error(), "belongs to workflow") {
+		t.Fatalf("UpdateTransitionGroup cross-workflow error = %v, want workflow mismatch", err)
+	}
+	if _, err := store.UpdateEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-done-" + string(firstWorkflowID)), WorkflowID: firstWorkflowID, TransitionGroupID: workflow.TransitionGroupID("group-done-" + string(secondWorkflowID)), Key: "done", TargetNodeID: firstAgent.ID, ContextMode: workflow.ContextModeNewSession}); err == nil || !strings.Contains(err.Error(), "belongs to workflow") {
+		t.Fatalf("UpdateEdge cross-workflow group error = %v, want workflow mismatch", err)
+	}
+	if _, err := store.UpdateEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-done-" + string(firstWorkflowID)), WorkflowID: firstWorkflowID, TransitionGroupID: workflow.TransitionGroupID("group-done-" + string(firstWorkflowID)), Key: "done", TargetNodeID: secondDone.ID, ContextMode: workflow.ContextModeNewSession}); err == nil || !strings.Contains(err.Error(), "belongs to workflow") {
+		t.Fatalf("UpdateEdge cross-workflow target error = %v, want workflow mismatch", err)
 	}
 }
 

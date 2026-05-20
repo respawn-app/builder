@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { TaskDetail } from "../../api";
+import type { TaskDetail, TeleportTarget } from "../../api";
 import { errorMessage } from "../../api/errors";
+import { formatHomeRelativePath } from "../../app/formatters";
 import { useAppServices } from "../../app/useAppServices";
 import { Button } from "../../ui";
 
@@ -30,12 +31,21 @@ export function RunsTab({ detail, disabled }: Readonly<{ detail: TaskDetail; dis
 
 function TelemetryBox({ detail }: Readonly<{ detail: TaskDetail }>) {
   const { t } = useTranslation();
+  const { homePath, nativeBridge } = useAppServices();
+  const worktreePathLabel = formatHomeRelativePath(
+    detail.worktreePath,
+    homePath,
+    nativeBridge.capabilities.platform,
+  );
   return (
     <section className="grid gap-[var(--space-2)] rounded-[var(--radius-l)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)]">
       <h3 className="m-0">{t("task.telemetry")}</h3>
       {detail.worktreePath.length > 0 ? (
         <p className="m-0">
-          <strong>{t("task.worktree")}</strong> <span className="font-mono">{detail.worktreePath}</span>
+          <strong>{t("task.worktree")}</strong>{" "}
+          <span className="font-mono" title={detail.worktreePath}>
+            {worktreePathLabel}
+          </span>
         </p>
       ) : null}
       <p className="m-0">
@@ -59,7 +69,7 @@ function TeleportBox({ detail, disabled }: Readonly<{ detail: TaskDetail; disabl
     }
     await nativeBridge.terminal.launchBuilderSession({
       sessionId: target.sessionID,
-      cwd: teleportCwd(detail.worktreePath, target.cwdRelpath),
+      cwd: teleportCwd(teleportRoot(detail, target), target.cwdRelpath),
     });
   }
 
@@ -92,4 +102,8 @@ function teleportCwd(worktreePath: string, cwdRelpath: string): string {
     return worktreePath;
   }
   return `${worktreePath}/${cwdRelpath}`;
+}
+
+function teleportRoot(detail: TaskDetail, target: TeleportTarget): string {
+  return target.worktreeID.length > 0 ? detail.worktreePath : detail.sourceWorkspace.rootPath;
 }

@@ -135,7 +135,7 @@ describe("KanbanColumn", () => {
     expect(onCardClick).toHaveBeenCalledWith("task-1");
   });
 
-  it("does not start dragging cards without start or move targets", () => {
+  it("starts override drags for active cards without start or move targets", () => {
     const onCardDragStart = vi.fn();
     const onCardClick = vi.fn();
 
@@ -171,21 +171,64 @@ describe("KanbanColumn", () => {
 
     const dataTransfer = new TestDataTransfer();
     const renderedCard = screen.getByRole("article", { name: "Task" });
-    expect(renderedCard).toHaveAttribute("draggable", "false");
+    expect(renderedCard).toHaveAttribute("draggable", "true");
     expect(screen.getByRole("listitem", { name: "Backlog" })).toHaveAttribute("data-drop-state", "blocked");
 
     fireEvent.dragStart(renderedCard, { dataTransfer });
 
-    expect(dataTransfer.getData("text/task-id")).toBe("");
-    expect(decodeBoardCardDragPayload(dataTransfer.getData(boardCardDragPayloadType))).toBeNull();
-    expect(onCardDragStart).not.toHaveBeenCalled();
+    expect(dataTransfer.getData("text/task-id")).toBe("task-1");
+    expect(decodeBoardCardDragPayload(dataTransfer.getData(boardCardDragPayloadType))).toEqual({
+      taskID: "task-1",
+      canStart: false,
+      activeNodeIDs: ["backlog"],
+      statusKind: "backlog",
+      manualMoveTargetNodeIDs: [],
+    });
+    expect(onCardDragStart).toHaveBeenCalledTimes(1);
     expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it("accepts board-card dragover before drop-state rerenders from idle", () => {
+    render(
+      <I18nextProvider i18n={appI18n}>
+        <KanbanColumn
+          actionsDisabled={false}
+          cards={[]}
+          column={column}
+          dropState="idle"
+          hasMoreCards={false}
+          isFirstActive={false}
+          isLoadingMoreCards={false}
+          onCardClick={() => undefined}
+          onCardDragEnd={() => undefined}
+          onCardDragStart={() => undefined}
+          onDropTask={() => undefined}
+          onInterruptTask={() => undefined}
+          onLoadMoreCards={() => undefined}
+          onResumeTask={() => undefined}
+        />
+      </I18nextProvider>,
+    );
+
+    const dataTransfer = new TestDataTransfer();
+    dataTransfer.setData(boardCardDragPayloadType, "{}");
+    const event = createCancelableDragEvent("dragover", dataTransfer);
+
+    screen.getByRole("listitem", { name: "Backlog" }).dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe("move");
   });
 });
 
 class TestDataTransfer {
   readonly #values = new Map<string, string>();
   effectAllowed = "all";
+  dropEffect = "none";
+
+  get types(): readonly string[] {
+    return [...this.#values.keys()];
+  }
 
   setData(type: string, value: string): void {
     this.#values.set(type, value);
@@ -196,6 +239,12 @@ class TestDataTransfer {
   }
 }
 
+function createCancelableDragEvent(type: string, dataTransfer: TestDataTransfer): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+  return event;
+}
+
 const column: KanbanColumnVM = {
   assigneeRole: "",
   id: "backlog",
@@ -204,6 +253,7 @@ const column: KanbanColumnVM = {
 };
 
 const card: KanbanCardVM = {
+  activeNodeIDs: ["backlog"],
   actions: {
     canInterrupt: false,
     canResume: false,
@@ -216,6 +266,7 @@ const card: KanbanCardVM = {
   id: "task-1",
   shortID: "T-1",
   sourceWorkspaceName: "Main",
+  statusKind: "backlog",
   title: "Task",
   updatedAt: Date.UTC(2026, 0, 1),
 };

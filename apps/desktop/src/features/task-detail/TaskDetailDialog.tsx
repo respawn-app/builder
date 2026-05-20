@@ -21,9 +21,12 @@ export function TaskDetailDialog({ taskId, open, resumeRunId, onClose, onMutated
   return (
     <Dialog
       className="h-[min(860px,calc(100vh-32px))] w-[calc(100vw-32px)]"
+      chrome="floating-close"
       closeLabel={t("app.close")}
+      contentPadding="chrome"
       onClose={onClose}
       open={open}
+      surface="transparent"
       style={{ maxWidth: taskDetailDialogOuterMaxWidth }}
       title={t("task.title")}
     >

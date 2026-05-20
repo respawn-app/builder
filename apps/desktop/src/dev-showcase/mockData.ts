@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Showcase fixtures keep representative board/workflow data in one place. */
 import type {
   BoardCard,
   BoardColumn,
@@ -20,7 +21,12 @@ export const inventoryCards = [
 ] as const;
 
 export const mockNotices = [
-  { body: "Static data loaded from dev showcase mocks.", id: "notice-info", title: "Showcase ready", tone: "info" as const },
+  {
+    body: "Static data loaded from dev showcase mocks.",
+    id: "notice-info",
+    title: "Showcase ready",
+    tone: "info" as const,
+  },
   {
     actionLabel: "Retry",
     body: "Disconnected mutation states are visible without breaking layout.",
@@ -29,8 +35,18 @@ export const mockNotices = [
     title: "Read-only",
     tone: "warning" as const,
   },
-  { body: "Task moved through the preview workflow.", id: "notice-success", title: "Task updated", tone: "success" as const },
-  { body: "Mutation failed; inspect logs or retry from the task detail.", id: "notice-danger", title: "Action failed", tone: "danger" as const },
+  {
+    body: "Task moved through the preview workflow.",
+    id: "notice-success",
+    title: "Task updated",
+    tone: "success" as const,
+  },
+  {
+    body: "Mutation failed; inspect logs or retry from the task detail.",
+    id: "notice-danger",
+    title: "Action failed",
+    tone: "danger" as const,
+  },
 ] as const;
 
 export const mockWorkspaces: readonly WorkspaceSummary[] = [
@@ -66,15 +82,54 @@ export const mockUnlinkBlockers: readonly WorkspaceUnlinkBlocker[] = [
 ];
 
 export const mockProjectRows = [
-  { attention: 3, key: "BLDR", name: "Builder Desktop", path: "/Users/nek/Developer/builder-cli", tasks: 42, valid: true, workflow: "MVP workflow" },
-  { attention: 1, key: "DOCS", name: "Docs Refresh", path: "/Users/nek/Developer/builder-cli/docs", tasks: 12, valid: true, workflow: "Docs workflow" },
-  { attention: 0, key: "OLD", name: "Archived Prototype", path: "/tmp/builder-old", tasks: 8, valid: false, workflow: "Invalid workflow" },
+  {
+    attention: 3,
+    key: "BLDR",
+    name: "Builder Desktop",
+    path: "/Users/nek/Developer/builder-cli",
+    tasks: 42,
+    valid: true,
+    workflow: "MVP workflow",
+  },
+  {
+    attention: 1,
+    key: "DOCS",
+    name: "Docs Refresh",
+    path: "/Users/nek/Developer/builder-cli/docs",
+    tasks: 12,
+    valid: true,
+    workflow: "Docs workflow",
+  },
+  {
+    attention: 0,
+    key: "OLD",
+    name: "Archived Prototype",
+    path: "/tmp/builder-old",
+    tasks: 8,
+    valid: false,
+    workflow: "Invalid workflow",
+  },
 ] as const;
 
 export const mockAttentionRows = [
-  { kind: "question", message: "Need choose first visible preview surface.", shortId: "BLDR-104", title: "Add UI showcase board" },
-  { kind: "approval", message: "Approve move from Design to Implementation.", shortId: "BLDR-103", title: "Review approval inbox" },
-  { kind: "validation_blocker", message: "Workflow graph has missing edge target.", shortId: "", title: "Invalid workflow" },
+  {
+    kind: "question",
+    message: "Need choose first visible preview surface.",
+    shortId: "BLDR-104",
+    title: "Add UI showcase board",
+  },
+  {
+    kind: "approval",
+    message: "Approve move from Design to Implementation.",
+    shortId: "BLDR-103",
+    title: "Review approval inbox",
+  },
+  {
+    kind: "validation_blocker",
+    message: "Workflow graph has missing edge target.",
+    shortId: "",
+    title: "Invalid workflow",
+  },
 ] as const;
 
 const statuses = {
@@ -103,26 +158,143 @@ const mockWorkflows: readonly WorkflowPickerItem[] = [
 
 const mockGroups: readonly BoardGroup[] = [
   { id: "group-intake", key: "intake", name: "Intake", nodeIDs: ["node-backlog"], sortOrder: 0 },
-  { id: "group-delivery", key: "delivery", name: "Delivery", nodeIDs: ["node-design", "node-build", "node-review"], sortOrder: 1 },
+  {
+    id: "group-delivery",
+    key: "delivery",
+    name: "Delivery",
+    nodeIDs: ["node-design", "node-build", "node-review"],
+    sortOrder: 1,
+  },
   { id: "group-done", key: "done", name: "Archive", nodeIDs: ["node-done"], sortOrder: 2 },
 ];
 
 const mockColumns: readonly BoardColumn[] = [
-  column({ groupID: "group-intake", id: "node-backlog", isBacklog: true, isDone: false, key: "backlog", name: "Backlog", sortOrder: 0, taskCount: 5 }),
-  column({ assigneeRole: "planner", groupID: "group-delivery", id: "node-design", isBacklog: false, isDone: false, key: "design", name: "Design", sortOrder: 1, taskCount: 3 }),
-  column({ assigneeRole: "builder", groupID: "group-delivery", id: "node-build", isBacklog: false, isDone: false, key: "build", name: "Implementation", sortOrder: 2, taskCount: 4 }),
-  column({ assigneeRole: "reviewer", groupID: "group-delivery", id: "node-review", isBacklog: false, isDone: false, key: "review", name: "Review", sortOrder: 3, taskCount: 2 }),
-  column({ groupID: "group-done", id: "node-done", isBacklog: false, isDone: true, key: "done", name: "Done", sortOrder: 4, taskCount: 8 }),
+  column({
+    groupID: "group-intake",
+    id: "node-backlog",
+    isBacklog: true,
+    isDone: false,
+    key: "backlog",
+    name: "Backlog",
+    sortOrder: 0,
+    taskCount: 5,
+  }),
+  column({
+    assigneeRole: "planner",
+    groupID: "group-delivery",
+    id: "node-design",
+    isBacklog: false,
+    isDone: false,
+    key: "design",
+    name: "Design",
+    sortOrder: 1,
+    taskCount: 3,
+  }),
+  column({
+    assigneeRole: "builder",
+    groupID: "group-delivery",
+    id: "node-build",
+    isBacklog: false,
+    isDone: false,
+    key: "build",
+    name: "Implementation",
+    sortOrder: 2,
+    taskCount: 4,
+  }),
+  column({
+    assigneeRole: "reviewer",
+    groupID: "group-delivery",
+    id: "node-review",
+    isBacklog: false,
+    isDone: false,
+    key: "review",
+    name: "Review",
+    sortOrder: 3,
+    taskCount: 2,
+  }),
+  column({
+    groupID: "group-done",
+    id: "node-done",
+    isBacklog: false,
+    isDone: true,
+    key: "done",
+    name: "Done",
+    sortOrder: 4,
+    taskCount: 8,
+  }),
 ];
 
 const mockCards: readonly BoardCard[] = [
-  card({ actions: taskActions.start, activeNodeIDs: ["node-backlog"], bodyPreview: "Capture primitives, cards, panes, task detail, and board interactions.", id: "task-1", minutesAgo: 2, shortID: "BLDR-101", status: statuses.backlog, title: "Inventory desktop UI components" }),
-  card({ actions: taskActions.running, activeNodeIDs: ["node-design"], bodyPreview: "Keep workflow picker accessible by hover, focus, and pin states.", id: "task-2", minutesAgo: 12, shortID: "BLDR-102", status: statuses.running, title: "Prototype hover menu states" }),
-  card({ actions: taskActions.waiting, activeNodeIDs: ["node-build"], bodyPreview: "Approval card should include transition snapshot and target nodes.", id: "task-3", minutesAgo: 24, shortID: "BLDR-103", status: statuses.approval, title: "Review approval inbox" }),
-  card({ actions: taskActions.waiting, activeNodeIDs: ["node-review"], bodyPreview: "Question card exercises suggestions, recommended choice, and freeform answer.", id: "task-4", minutesAgo: 36, shortID: "BLDR-104", status: statuses.question, title: "Answer model clarification" }),
-  card({ actions: taskActions.resume, activeNodeIDs: ["node-review"], bodyPreview: "Interrupted task exposes resume control.", id: "task-5", minutesAgo: 48, shortID: "BLDR-105", status: statuses.interrupted, title: "Resume interrupted run" }),
-  card({ actions: taskActions.done, activeNodeIDs: ["node-done"], bodyPreview: "Completed proof remains visible through the regular Done node card stream.", id: "task-6", minutesAgo: 70, shortID: "BLDR-090", status: statuses.done, title: "Capture dark proof" }),
-  card({ actions: taskActions.done, activeNodeIDs: ["node-done"], bodyPreview: "Older done task appears through Done pagination when needed.", id: "task-7", minutesAgo: 120, shortID: "BLDR-089", status: statuses.done, title: "Compact board screenshot" }),
+  card({
+    actions: taskActions.start,
+    activeNodeIDs: ["node-backlog"],
+    bodyPreview: "Capture primitives, cards, panes, task detail, and board interactions.",
+    id: "task-1",
+    minutesAgo: 2,
+    shortID: "BLDR-101",
+    status: statuses.backlog,
+    title: "Inventory desktop UI components",
+  }),
+  card({
+    actions: taskActions.running,
+    activeNodeIDs: ["node-design"],
+    bodyPreview: "Keep workflow picker accessible by hover, focus, and pin states.",
+    id: "task-2",
+    minutesAgo: 12,
+    shortID: "BLDR-102",
+    status: statuses.running,
+    title: "Prototype hover menu states",
+  }),
+  card({
+    actions: taskActions.waiting,
+    activeNodeIDs: ["node-build"],
+    bodyPreview: "Approval card should include transition snapshot and target nodes.",
+    id: "task-3",
+    minutesAgo: 24,
+    shortID: "BLDR-103",
+    status: statuses.approval,
+    title: "Review approval inbox",
+  }),
+  card({
+    actions: taskActions.waiting,
+    activeNodeIDs: ["node-review"],
+    bodyPreview: "Question card exercises suggestions, recommended choice, and freeform answer.",
+    id: "task-4",
+    minutesAgo: 36,
+    shortID: "BLDR-104",
+    status: statuses.question,
+    title: "Answer model clarification",
+  }),
+  card({
+    actions: taskActions.resume,
+    activeNodeIDs: ["node-review"],
+    bodyPreview: "Interrupted task exposes resume control.",
+    id: "task-5",
+    minutesAgo: 48,
+    shortID: "BLDR-105",
+    status: statuses.interrupted,
+    title: "Resume interrupted run",
+  }),
+  card({
+    actions: taskActions.done,
+    activeNodeIDs: ["node-done"],
+    bodyPreview: "Completed proof remains visible through the regular Done node card stream.",
+    id: "task-6",
+    minutesAgo: 70,
+    shortID: "BLDR-090",
+    status: statuses.done,
+    title: "Capture dark proof",
+  }),
+  card({
+    actions: taskActions.done,
+    activeNodeIDs: ["node-done"],
+    bodyPreview: "Older done task appears through Done pagination when needed.",
+    id: "task-7",
+    minutesAgo: 120,
+    shortID: "BLDR-089",
+    status: statuses.done,
+    title: "Compact board screenshot",
+  }),
 ];
 
 export const mockBoardNodeCards: Readonly<Record<string, readonly BoardCard[]>> = {
@@ -165,7 +337,12 @@ function workspace(
   };
 }
 
-function workflow(id: string, name: string, isProjectDefault: boolean, validForTaskCreation: boolean): WorkflowPickerItem {
+function workflow(
+  id: string,
+  name: string,
+  isProjectDefault: boolean,
+  validForTaskCreation: boolean,
+): WorkflowPickerItem {
   return {
     description: `${name} preview`,
     graphRevision: 7,
@@ -175,24 +352,46 @@ function workflow(id: string, name: string, isProjectDefault: boolean, validForT
     validForTaskCreation,
     validationErrors: validForTaskCreation
       ? []
-      : [{ blocksContext: true, code: "missing_target", edgeID: "edge-1", message: "Missing target node.", nodeID: "node-x" }],
+      : [
+          {
+            blocksContext: true,
+            code: "missing_target",
+            edgeID: "edge-1",
+            message: "Missing target node.",
+            nodeID: "node-x",
+            relatedIDs: [],
+            transitionGroupID: "",
+            workflowID: id,
+          },
+        ],
   };
 }
 
-function column(input: Omit<BoardColumn, "assigneeRole"> & Readonly<{ assigneeRole?: string }>): BoardColumn {
-  return { ...input, assigneeRole: input.assigneeRole ?? "" };
+function column(
+  input: Omit<BoardColumn, "assigneeRole" | "kind" | "outputFields" | "transitionOutputFields"> &
+    Readonly<{ assigneeRole?: string; kind?: string }>,
+): BoardColumn {
+  return {
+    ...input,
+    assigneeRole: input.assigneeRole ?? "",
+    kind: input.kind ?? (input.isBacklog ? "start" : input.isDone ? "terminal" : "agent"),
+    outputFields: [],
+    transitionOutputFields: [],
+  };
 }
 
-function card(input: Readonly<{
-  actions: TaskActions;
-  activeNodeIDs: readonly string[];
-  bodyPreview: string;
-  id: string;
-  minutesAgo: number;
-  shortID: string;
-  status: TaskStatus;
-  title: string;
-}>): BoardCard {
+function card(
+  input: Readonly<{
+    actions: TaskActions;
+    activeNodeIDs: readonly string[];
+    bodyPreview: string;
+    id: string;
+    minutesAgo: number;
+    shortID: string;
+    status: TaskStatus;
+    title: string;
+  }>,
+): BoardCard {
   return {
     actions: input.actions,
     activeNodeIDs: input.activeNodeIDs,

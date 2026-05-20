@@ -4,18 +4,16 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "../../ui";
 import { cx } from "../../ui/classes";
 
-export type DetailTab = "comments" | "activity" | "runs";
+export type DetailTab = "comments" | "activity";
 
 export function TaskTabs({
   activityCount,
   commentCount,
-  runCount,
   selected,
   onSelect,
 }: Readonly<{
   activityCount: number;
   commentCount: number;
-  runCount: number;
   selected: DetailTab;
   onSelect: (tab: DetailTab) => void;
 }>) {
@@ -38,15 +36,6 @@ export function TaskTabs({
         }}
       >
         {t("task.activity")}
-      </TabButton>
-      <TabButton
-        count={runCount}
-        selected={selected === "runs"}
-        onClick={() => {
-          onSelect("runs");
-        }}
-      >
-        {t("task.runs")}
       </TabButton>
       <span className="sr-only">{t("task.activityCount", { count: activityCount })}</span>
     </div>
