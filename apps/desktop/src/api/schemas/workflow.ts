@@ -219,6 +219,14 @@ export const workflowValidationSchema: z.ZodType<WorkflowValidation> = z
     errors: value.errors,
   }));
 
+export const taskMoveResponseSchema = z
+  .object({
+    approval_error: emptyString,
+  })
+  .transform((value) => ({
+    approvalError: value.approval_error,
+  }));
+
 export const projectWorkflowLinksSchema: z.ZodType<readonly ProjectWorkflowLink[]> = z
   .object({
     links: z

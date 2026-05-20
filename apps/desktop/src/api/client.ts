@@ -42,6 +42,7 @@ import {
   pendingAskListSchema,
   projectWorkflowLinksSchema,
   taskCreateResponseSchema,
+  taskMoveResponseSchema,
   taskDetailSchema,
   taskUpdateResponseSchema,
   teleportTargetSchema,
@@ -278,16 +279,23 @@ export class BuilderApiClient {
   }
 
   async moveTask(input: TaskMoveInput): Promise<void> {
-    await this.transport.call(
+    const response = parse(
       "workflow.task.move",
-      compactJsonObject({
-        task_id: input.taskID,
-        target_node_id: input.targetNodeID,
-        output_values: input.outputValues ?? {},
-        allow_missing_edge: input.allowMissingEdge,
-        auto_approve: input.autoApprove,
-      }),
+      taskMoveResponseSchema,
+      await this.transport.call(
+        "workflow.task.move",
+        compactJsonObject({
+          task_id: input.taskID,
+          target_node_id: input.targetNodeID,
+          output_values: input.outputValues ?? {},
+          allow_missing_edge: input.allowMissingEdge,
+          auto_approve: input.autoApprove,
+        }),
+      ),
     );
+    if (response.approvalError.length > 0) {
+      throw new Error(response.approvalError);
+    }
   }
 
   async interruptTask(taskID: string, runID: string): Promise<void> {

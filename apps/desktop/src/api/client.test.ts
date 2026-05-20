@@ -42,6 +42,16 @@ describe("BuilderApiClient", () => {
     await expect(client.getReadiness()).rejects.toBeInstanceOf(ContractError);
   });
 
+  it("surfaces workflow move auto-approval failures returned in successful responses", async () => {
+    const client = new BuilderApiClient(
+      new FakeRpcTransport([{ method: "workflow.task.move", result: { approval_error: "approval failed" } }]),
+    );
+
+    await expect(
+      client.moveTask({ taskID: "task-1", targetNodeID: "node-1", allowMissingEdge: true, autoApprove: true }),
+    ).rejects.toThrow("approval failed");
+  });
+
   it("normalizes empty workflow board metadata and node-card slices returned as null by Go JSON", async () => {
     const client = new BuilderApiClient(
       new FakeRpcTransport([

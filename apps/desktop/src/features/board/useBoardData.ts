@@ -144,7 +144,9 @@ export function useBoardTaskActions(
           autoApprove?: boolean;
         }>,
       ) => api.moveTask(input),
-      onSuccess: refresh,
+      onSettled: async () => {
+        await refresh();
+      },
     }),
     interrupt: useMutation({
       mutationFn: async (input: Readonly<{ taskID: string; runID: string }>) =>

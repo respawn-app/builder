@@ -227,10 +227,11 @@ func targetTransitionInputBindings(def workflow.Definition, targetNodeID workflo
 			}
 			name := strings.TrimSpace(binding.Name)
 			field := strings.TrimSpace(binding.Field)
-			if name == "" || field == "" || seen[name] {
+			key := name + "\x00" + field
+			if name == "" || field == "" || seen[key] {
 				continue
 			}
-			seen[name] = true
+			seen[key] = true
 			bindings = append(bindings, workflow.InputBinding{Name: name, Source: workflow.BindingSourceTransitionOutput, Field: field})
 		}
 	}

@@ -1684,6 +1684,24 @@ LIMIT 1`, string(transitions[0].ID)).Scan(&inputBindingsJSON, &outputRequirement
 	}
 }
 
+func TestTargetTransitionInputBindingsKeepSameInputNameWithDifferentFields(t *testing.T) {
+	bindings := targetTransitionInputBindings(workflow.Definition{
+		Edges: []workflow.Edge{
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "summary"}}},
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "details"}}},
+			{TargetNodeID: "node-target", InputBindings: []workflow.InputBinding{{Name: "prior", Source: workflow.BindingSourceTransitionOutput, Field: "summary"}}},
+		},
+	}, "node-target")
+
+	if len(bindings) != 2 || bindings[0].Field != "summary" || bindings[1].Field != "details" {
+		t.Fatalf("target transition input bindings = %+v, want same input name with both fields", bindings)
+	}
+	requirements := outputRequirementsFromTransitionInputBindings(bindings)
+	if len(requirements) != 2 || requirements[0].FieldName != "summary" || requirements[1].FieldName != "details" {
+		t.Fatalf("output requirements = %+v, want summary and details", requirements)
+	}
+}
+
 func TestManualMoveContinueSessionRequiresSourceSession(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
