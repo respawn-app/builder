@@ -383,10 +383,11 @@ type WorkflowTaskMoveRequest struct {
 }
 
 type WorkflowTaskMoveResponse struct {
-	TransitionID string   `json:"transition_id"`
-	State        string   `json:"state"`
-	PlacementIDs []string `json:"placement_ids,omitempty"`
-	RunIDs       []string `json:"run_ids,omitempty"`
+	TransitionID  string   `json:"transition_id"`
+	State         string   `json:"state"`
+	PlacementIDs  []string `json:"placement_ids,omitempty"`
+	RunIDs        []string `json:"run_ids,omitempty"`
+	ApprovalError string   `json:"approval_error,omitempty"`
 }
 
 type WorkflowTaskCancelRequest struct {

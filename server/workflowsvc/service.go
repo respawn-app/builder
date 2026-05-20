@@ -25,6 +25,7 @@ type Service struct {
 	runtimeCancel taskRuntimeCanceler
 	schedulerWake schedulerNotifier
 	prompts       pendingPromptResponder
+	approve       transitionApprover
 	questionMemo  *requestmemo.Memo[taskQuestionAnswerMemoRequest, struct{}]
 }
 
@@ -43,6 +44,8 @@ type taskRuntimeRunCanceler interface {
 type schedulerNotifier interface {
 	Notify()
 }
+
+type transitionApprover func(ctx context.Context, transitionID workflow.TransitionID) (workflowstore.CompleteRunResult, error)
 
 type pendingPromptResponder interface {
 	SubmitPromptResponse(sessionID string, resp askquestion.Response, err error) error
@@ -98,7 +101,7 @@ func New(store *workflowstore.Store, view *workflowview.Service, roleResolver wo
 	if view == nil {
 		return nil, errors.New("workflow view is required")
 	}
-	service := &Service{store: store, view: view, roleResolver: roleResolver, questionMemo: requestmemo.New[taskQuestionAnswerMemoRequest, struct{}]()}
+	service := &Service{store: store, view: view, roleResolver: roleResolver, approve: store.ApproveTransition, questionMemo: requestmemo.New[taskQuestionAnswerMemoRequest, struct{}]()}
 	for _, opt := range opts {
 		opt(service)
 	}
@@ -462,7 +465,7 @@ func (s *Service) ApproveWorkflowTask(ctx context.Context, req serverapi.Workflo
 	if transitionID == "" {
 		transitionID = strings.TrimSpace(req.TransitionID)
 	}
-	approved, err := s.store.ApproveTransition(ctx, workflow.TransitionID(transitionID))
+	approved, err := s.approve(ctx, workflow.TransitionID(transitionID))
 	if err != nil {
 		return serverapi.WorkflowTaskApproveResponse{}, err
 	}
@@ -483,10 +486,13 @@ func (s *Service) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTa
 	if err != nil {
 		return serverapi.WorkflowTaskMoveResponse{}, err
 	}
+	approvalError := ""
 	if req.AutoApprove && moved.State == "pending_approval" {
-		moved, err = s.store.ApproveTransition(ctx, moved.TransitionID)
-		if err != nil {
-			return serverapi.WorkflowTaskMoveResponse{}, err
+		approved, approveErr := s.approve(ctx, moved.TransitionID)
+		if approveErr != nil {
+			approvalError = approveErr.Error()
+		} else {
+			moved = approved
 		}
 	}
 	if s.schedulerWake != nil {
@@ -495,7 +501,7 @@ func (s *Service) MoveWorkflowTask(ctx context.Context, req serverapi.WorkflowTa
 	if detail, detailErr := s.view.GetTask(ctx, req.TaskID); detailErr == nil {
 		s.publishWorkflowEvent(ctx, detail.Summary.ProjectID, detail.Summary.WorkflowID, "task", "moved", req.TaskID, string(moved.TransitionID))
 	}
-	return serverapi.WorkflowTaskMoveResponse{TransitionID: string(moved.TransitionID), State: moved.State, PlacementIDs: placementIDs(moved.PlacementIDs), RunIDs: runIDs(moved.RunIDs)}, nil
+	return serverapi.WorkflowTaskMoveResponse{TransitionID: string(moved.TransitionID), State: moved.State, PlacementIDs: placementIDs(moved.PlacementIDs), RunIDs: runIDs(moved.RunIDs), ApprovalError: approvalError}, nil
 }
 
 func (s *Service) CancelWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCancelRequest) error {

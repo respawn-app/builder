@@ -2,6 +2,7 @@ package workflowsvc
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -435,6 +436,42 @@ func TestServiceMoveTaskAutoApprovesMissingEdgeOverrideAndStartsAgent(t *testing
 	}
 	if len(runs) != 1 || string(runs[0].NodeID) != implementID || runs[0].AutomationRequestedAt == 0 {
 		t.Fatalf("runs after auto-approved override = %+v, want requested implement automation", runs)
+	}
+}
+
+func TestServiceMoveTaskAutoApproveSurfacesCommittedPendingMoveWhenApprovalFails(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceChainedWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	def, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("GetWorkflow: %v", err)
+	}
+	implementID := workflowServiceNodeIDByKey(t, def.Definition, "implement")
+	service.approve = func(context.Context, workflow.TransitionID) (workflowstore.CompleteRunResult, error) {
+		return workflowstore.CompleteRunResult{}, errors.New("approval failed")
+	}
+
+	moved, err := service.MoveWorkflowTask(ctx, serverapi.WorkflowTaskMoveRequest{TaskID: task.Task.ID, TargetNodeID: implementID, AllowMissingEdge: true, AutoApprove: true, OutputValues: map[string]string{"summary": "replacement"}})
+	if err != nil {
+		t.Fatalf("MoveWorkflowTask: %v", err)
+	}
+	if moved.State != "pending_approval" || moved.TransitionID == "" || moved.ApprovalError != "approval failed" {
+		t.Fatalf("partial auto-approve response = %+v, want pending move with approval error", moved)
+	}
+	transitions, err := service.store.ListTransitions(ctx, workflow.TaskID(task.Task.ID))
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	if len(transitions) != 1 || transitions[0].State != "pending_approval" {
+		t.Fatalf("committed transition = %+v, want pending approval", transitions)
 	}
 }
 
