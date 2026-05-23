@@ -309,6 +309,12 @@ func openResolvedRegularFile(path string) (*os.File, os.FileInfo, error) {
 		}
 		return nil, nil, fmt.Errorf("path %q changed while opening; retry the tool call", path)
 	}
+	if err := setReadBlocking(file); err != nil {
+		if closeErr := file.Close(); closeErr != nil {
+			return nil, nil, fmt.Errorf("set file blocking mode at %q: %v; close file: %w", path, err, closeErr)
+		}
+		return nil, nil, fmt.Errorf("set file blocking mode at %q: %v", path, err)
+	}
 	return file, info, nil
 }
 

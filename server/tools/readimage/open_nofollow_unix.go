@@ -14,3 +14,7 @@ func openReadOnlyNoFollow(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(fd), path), nil
 }
+
+func setReadBlocking(file *os.File) error {
+	return syscall.SetNonblock(int(file.Fd()), false)
+}
