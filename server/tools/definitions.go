@@ -113,7 +113,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             toolspec.ToolViewImage,
 		Aliases:        []string{"read_image"},
-		Description:    "View a local image or PDF file by path. You will see PDFs as images (not OCR/text).",
+		Description:    "View a local image, still GIF, or PDF file by path. Images may be compressed before model input unless raw=true. You will see PDFs as images (not OCR/text).",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderViewImage,
@@ -132,6 +132,10 @@ var catalogEntries = []CatalogEntry{
     "path": {
       "type": "string",
       "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root."
+    },
+    "raw": {
+      "type": "boolean",
+      "description": "Whether to bypass image compression and postprocessing. Defaults to false. The file size cap still applies."
     }
   }
 }`),

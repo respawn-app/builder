@@ -214,11 +214,9 @@ func TestCall_OversizedFileReturnsCompressionGuidance(t *testing.T) {
 	workspace := t.TempDir()
 	oversized := make([]byte, int(maxFileSizeBytes)+1)
 
-	for _, name := range []string{"huge.png", "huge.pdf"} {
-		path := filepath.Join(workspace, name)
-		if err := os.WriteFile(path, oversized, 0o644); err != nil {
-			t.Fatalf("write oversized file %q: %v", name, err)
-		}
+	path := filepath.Join(workspace, "huge.pdf")
+	if err := os.WriteFile(path, oversized, 0o644); err != nil {
+		t.Fatalf("write oversized pdf: %v", err)
 	}
 
 	tool, err := New(workspace, true)
@@ -226,35 +224,30 @@ func TestCall_OversizedFileReturnsCompressionGuidance(t *testing.T) {
 		t.Fatalf("new tool: %v", err)
 	}
 
-	for _, name := range []string{"huge.png", "huge.pdf"} {
-		name := name
-		t.Run(name, func(t *testing.T) {
-			result, callErr := tool.Call(context.Background(), tools.Call{
-				ID:    "call-oversized",
-				Name:  toolspec.ToolViewImage,
-				Input: json.RawMessage(`{"path":"` + name + `"}`),
-			})
-			if callErr != nil {
-				t.Fatalf("call: %v", callErr)
-			}
-			if !result.IsError {
-				t.Fatalf("expected tool error result for oversized file")
-			}
-			errMessage := toolError(t, result)
-			if !strings.Contains(errMessage, "max supported size is 512000 bytes (500 KiB)") {
-				t.Fatalf("expected size limit in error, got %q", errMessage)
-			}
-			if !strings.Contains(errMessage, "compress the image or PDF and try again") {
-				t.Fatalf("expected compression guidance in error, got %q", errMessage)
-			}
-		})
+	result, err := tool.Call(context.Background(), tools.Call{
+		ID:    "call-oversized",
+		Name:  toolspec.ToolViewImage,
+		Input: json.RawMessage(`{"path":"huge.pdf"}`),
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected tool error result for oversized file")
+	}
+	errMessage := toolError(t, result)
+	if !strings.Contains(errMessage, "max supported size is 819200 bytes (800 KiB)") {
+		t.Fatalf("expected size limit in error, got %q", errMessage)
+	}
+	if !strings.Contains(errMessage, "compress the image or PDF and try again") {
+		t.Fatalf("expected compression guidance in error, got %q", errMessage)
 	}
 }
 
 func TestCall_FileSizeBoundary(t *testing.T) {
 	workspace := t.TempDir()
-	exactPath := filepath.Join(workspace, "exact.png")
-	oversizedPath := filepath.Join(workspace, "oversized.png")
+	exactPath := filepath.Join(workspace, "exact.pdf")
+	oversizedPath := filepath.Join(workspace, "oversized.pdf")
 
 	if err := os.WriteFile(exactPath, make([]byte, int(maxFileSizeBytes)), 0o644); err != nil {
 		t.Fatalf("write exact-size file: %v", err)
@@ -271,7 +264,7 @@ func TestCall_FileSizeBoundary(t *testing.T) {
 	exactResult, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-exact-size",
 		Name:  toolspec.ToolViewImage,
-		Input: json.RawMessage(`{"path":"exact.png"}`),
+		Input: json.RawMessage(`{"path":"exact.pdf"}`),
 	})
 	if err != nil {
 		t.Fatalf("exact-size call: %v", err)
@@ -283,7 +276,7 @@ func TestCall_FileSizeBoundary(t *testing.T) {
 	oversizedResult, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-oversized-size",
 		Name:  toolspec.ToolViewImage,
-		Input: json.RawMessage(`{"path":"oversized.png"}`),
+		Input: json.RawMessage(`{"path":"oversized.pdf"}`),
 	})
 	if err != nil {
 		t.Fatalf("oversized call: %v", err)

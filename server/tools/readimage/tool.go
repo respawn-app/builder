@@ -1,11 +1,17 @@
 package readimage
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -18,9 +24,13 @@ import (
 	"builder/server/tools"
 	patchtool "builder/server/tools/patch"
 	"builder/shared/toolspec"
+	"github.com/deepteams/webp"
 )
 
-const maxFileSizeBytes int64 = 500 << 10
+const maxFileSizeBytes int64 = 800 << 10
+const maxOriginalRasterSizeBytes int64 = 10 << 20
+const minOptimizationSizeBytes int64 = 100 << 10
+const maxDecodedPixels int64 = 16_000_000
 
 const outsideWorkspaceRejectionInstruction = "If it's essential to the task, ask the user to place the file inside the workspace root."
 
@@ -74,6 +84,7 @@ func WithOutsideWorkspaceAuditLogger(logger OutsideWorkspaceAuditLogger) Option 
 
 type input struct {
 	Path string `json:"path"`
+	Raw  bool   `json:"raw,omitempty"`
 }
 
 type contentItem struct {
@@ -135,24 +146,41 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
 
-	info, err := os.Stat(resolvedPath)
+	file, info, err := openResolvedRegularFile(resolvedPath)
 	if err != nil {
-		return tools.ErrorResult(c, fmt.Sprintf("unable to locate file at %q: %v", resolvedPath, err)), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
-	if !info.Mode().IsRegular() {
-		return tools.ErrorResult(c, fmt.Sprintf("path %q is not a regular file", resolvedPath)), nil
+	defer file.Close()
+	if isPDFPath(resolvedPath) && info.Size() > maxFileSizeBytes {
+		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, info.Size())), nil
 	}
-	if info.Size() > maxFileSizeBytes {
-		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (500 KiB). compress the image or PDF and try again", resolvedPath, info.Size(), maxFileSizeBytes)), nil
+	if in.Raw && info.Size() > maxFileSizeBytes {
+		return tools.ErrorResult(c, rawAttachmentSizeError(resolvedPath, info.Size())), nil
+	}
+	if info.Size() > maxOriginalRasterSizeBytes {
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max readable size is %d bytes (10 MiB). resize or compress the image or PDF and try again", resolvedPath, info.Size(), maxOriginalRasterSizeBytes)), nil
 	}
 
-	data, err := os.ReadFile(resolvedPath)
+	data, err := readLimitedFile(file, maxOriginalRasterSizeBytes)
 	if err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("unable to read file at %q: %v", resolvedPath, err)), nil
 	}
+	if isPDFPath(resolvedPath) && int64(len(data)) > maxFileSizeBytes {
+		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, int64(len(data)))), nil
+	}
+	if in.Raw && int64(len(data)) > maxFileSizeBytes {
+		return tools.ErrorResult(c, rawAttachmentSizeError(resolvedPath, int64(len(data)))), nil
+	}
 	mimeType := detectFileMIME(resolvedPath, data)
+	contentData, contentMIME, prepareErr := prepareFileForAttachment(resolvedPath, mimeType, data, in.Raw)
+	if prepareErr != nil {
+		return tools.ErrorResult(c, prepareErr.Error()), nil
+	}
+	if int64(len(contentData)) > maxFileSizeBytes {
+		return tools.ErrorResult(c, maxAttachmentSizeError(resolvedPath, int64(len(contentData)))), nil
+	}
 
-	items, buildErr := buildContentItemsForFile(resolvedPath, mimeType, data)
+	items, buildErr := buildContentItemsForFile(resolvedPath, contentMIME, contentData)
 	if buildErr != nil {
 		return tools.ErrorResult(c, buildErr.Error()), nil
 	}
@@ -250,6 +278,48 @@ func normalizeMIME(raw string) string {
 	return strings.ToLower(main)
 }
 
+func openResolvedRegularFile(path string) (*os.File, os.FileInfo, error) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stat path at %q: %v", path, err)
+	}
+	if !pathInfo.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("path %q is not a regular file", path)
+	}
+	file, err := openReadOnlyNoFollow(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to locate file at %q: %v", path, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, fmt.Errorf("stat file at %q: %v", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, nil, fmt.Errorf("path %q is not a regular file", path)
+	}
+	if !os.SameFile(pathInfo, info) {
+		file.Close()
+		return nil, nil, fmt.Errorf("path %q changed while opening; retry the tool call", path)
+	}
+	return file, info, nil
+}
+
+func readLimitedFile(file *os.File, limit int64) ([]byte, error) {
+	if limit < 0 {
+		return nil, errors.New("read limit must be non-negative")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("file exceeds max readable size of %d bytes (10 MiB)", limit)
+	}
+	return data, nil
+}
+
 func readImageOutsideWorkspaceApprovalFailed(req patchtool.OutsideWorkspaceRequest, err error) error {
 	path := readImageOutsideWorkspacePath(req)
 	reason := strings.TrimSpace(err.Error())
@@ -299,7 +369,7 @@ func readImageOutsideWorkspacePath(req patchtool.OutsideWorkspaceRequest) string
 }
 
 func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem, error) {
-	if mimeType == "application/pdf" || strings.EqualFold(filepath.Ext(path), ".pdf") {
+	if mimeType == "application/pdf" || isPDFPath(path) {
 		filename := filepath.Base(path)
 		if strings.TrimSpace(filename) == "" {
 			filename = "document.pdf"
@@ -323,4 +393,141 @@ func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem
 	}
 
 	return nil, fmt.Errorf("unsupported file type at %q: expected an image or PDF", path)
+}
+
+func prepareFileForAttachment(path, mimeType string, data []byte, raw bool) ([]byte, string, error) {
+	if mimeType == "application/pdf" || isPDFPath(path) {
+		return data, "application/pdf", nil
+	}
+
+	if !strings.HasPrefix(mimeType, "image/") {
+		return data, mimeType, nil
+	}
+	img, decodedMIME, err := decodeSupportedRasterImage(path, data)
+	if err != nil {
+		return data, mimeType, err
+	}
+	if raw || int64(len(data)) < minOptimizationSizeBytes {
+		return data, decodedMIME, nil
+	}
+
+	optimized, optimizedMIME, ok := optimizeRasterImage(img)
+	if !ok || len(optimized) >= len(data) {
+		return data, decodedMIME, nil
+	}
+	return optimized, optimizedMIME, nil
+}
+
+func decodeSupportedRasterImage(path string, data []byte) (image.Image, string, error) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot attach image at %q: unable to decode image: %v", path, err)
+	}
+	mimeType, ok := mimeTypeForImageFormat(format)
+	if !ok {
+		return nil, "", fmt.Errorf("cannot attach image at %q: unsupported image format %q", path, format)
+	}
+	if _, ok := supportedImageMIMEs[mimeType]; !ok {
+		return nil, "", fmt.Errorf("cannot attach image at %q: unsupported image format %q", path, mimeType)
+	}
+	if err := validateDecodedDimensions(path, cfg.Width, cfg.Height); err != nil {
+		return nil, "", err
+	}
+	switch mimeType {
+	case "image/gif":
+		img, err := decodeStillGIF(path, data)
+		if err != nil {
+			return nil, "", err
+		}
+		return img, mimeType, nil
+	case "image/webp":
+		if err := validateStillWebP(path, data); err != nil {
+			return nil, "", err
+		}
+	}
+	img, decodedFormat, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot attach image at %q: unable to decode image: %v", path, err)
+	}
+	decodedMIME, ok := mimeTypeForImageFormat(decodedFormat)
+	if !ok {
+		return nil, "", fmt.Errorf("cannot attach image at %q: unsupported image format %q", path, decodedFormat)
+	}
+	return img, decodedMIME, nil
+}
+
+func decodeStillGIF(path string, data []byte) (image.Image, error) {
+	frames, err := countGIFFrames(data, 2)
+	if err != nil {
+		return nil, fmt.Errorf("cannot attach GIF at %q: %v", path, err)
+	}
+	if frames != 1 {
+		return nil, fmt.Errorf("cannot attach GIF at %q: animated GIFs are not supported; use a still image or PDF", path)
+	}
+	img, err := gif.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("cannot attach GIF at %q: %v", path, err)
+	}
+	return img, nil
+}
+
+func validateStillWebP(path string, data []byte) error {
+	features, err := webp.GetFeatures(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("cannot attach WebP at %q: %v", path, err)
+	}
+	if features.HasAnimation {
+		return fmt.Errorf("cannot attach WebP at %q: animated WebP images are not supported; use a still image or PDF", path)
+	}
+	return nil
+}
+
+func validateDecodedDimensions(path string, width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("cannot attach image at %q: invalid image dimensions %dx%d", path, width, height)
+	}
+	pixels := int64(width) * int64(height)
+	if pixels > maxDecodedPixels {
+		return fmt.Errorf("cannot attach image at %q: decoded image dimensions %dx%d exceed the supported pixel limit of %d", path, width, height, maxDecodedPixels)
+	}
+	return nil
+}
+
+func mimeTypeForImageFormat(format string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "png":
+		return "image/png", true
+	case "jpeg":
+		return "image/jpeg", true
+	case "gif":
+		return "image/gif", true
+	case "webp":
+		return "image/webp", true
+	default:
+		return "", false
+	}
+}
+
+func optimizeRasterImage(img image.Image) ([]byte, string, bool) {
+	if img == nil {
+		return nil, "", false
+	}
+	var out bytes.Buffer
+	opts := webp.OptionsForPreset(webp.PresetPicture, 80)
+	if err := webp.Encode(&out, img, opts); err != nil {
+		return nil, "", false
+	}
+	return out.Bytes(), "image/webp", true
+}
+
+func maxAttachmentSizeError(path string, size int64) string {
+	return fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (800 KiB). compress the image or PDF and try again", path, size, maxFileSizeBytes)
+}
+
+func rawAttachmentSizeError(path string, size int64) string {
+	return maxAttachmentSizeError(path, size) + ". raw=true bypasses compression and postprocessing, but the 800 KiB cap still applies; retry without raw=true to allow optimization"
+}
+
+func isPDFPath(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), ".pdf")
 }
