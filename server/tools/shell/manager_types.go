@@ -295,9 +295,11 @@ func (p *processEntry) closeOnExit(exitCode int, state string) Snapshot {
 	p.exitCode = &exitCode
 	p.state = state
 	stdin, log := p.detachResourcesLocked()
-	snapshot := p.snapshotLocked()
 	p.mu.Unlock()
 	closeDetachedResources(stdin, log)
+	p.mu.Lock()
+	snapshot := p.snapshotLocked()
+	p.mu.Unlock()
 	p.signal()
 	return snapshot
 }

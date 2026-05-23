@@ -373,10 +373,22 @@ func (m *Manager) InlineOutput(id string, maxChars int) (string, string, error) 
 	if err != nil {
 		return "", "", err
 	}
-	snapshot := entry.snapshot()
-	preview, _, _, err := readBackgroundSummaryFromFile(snapshot.LogPath, normalizeOutputChars(maxChars), BackgroundOutputDefault, !snapshot.RawOutput)
-	if err != nil {
-		return "", "", err
+	deadline := time.Now().Add(2 * logWriterFlushDelay)
+	for {
+		snapshot := entry.snapshot()
+		preview, _, _, err := readBackgroundSummaryFromFile(snapshot.LogPath, normalizeOutputChars(maxChars), BackgroundOutputDefault, !snapshot.RawOutput)
+		if err != nil {
+			return "", "", err
+		}
+		if strings.TrimSpace(preview) != "" {
+			return preview, snapshot.LogPath, nil
+		}
+		if strings.TrimSpace(snapshot.RecentOutput) != "" {
+			return snapshot.RecentOutput, snapshot.LogPath, nil
+		}
+		if !snapshot.Running || time.Now().After(deadline) {
+			return preview, snapshot.LogPath, nil
+		}
+		time.Sleep(logWriterFlushDelay / 2)
 	}
-	return preview, entry.snapshot().LogPath, nil
 }
