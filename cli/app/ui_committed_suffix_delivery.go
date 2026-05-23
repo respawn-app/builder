@@ -22,6 +22,25 @@ func shouldDeliverCommittedRuntimeEventFromSuffix(m *uiModel, evt clientui.Event
 	return true
 }
 
+func suffixSessionChanged(m *uiModel, suffix clientui.CommittedTranscriptSuffix) bool {
+	if m == nil || suffix.SessionID == "" || m.sessionID == "" {
+		return false
+	}
+	return suffix.SessionID != m.sessionID
+}
+
+func committedTranscriptSuffixStartsAfterDeliveryCursor(m *uiModel, suffix clientui.CommittedTranscriptSuffix) bool {
+	if m == nil {
+		return false
+	}
+	expectedStart := committedTranscriptTailEnd(m)
+	suffix = m.trimCommittedTranscriptSuffixToDeliveryCursor(suffix)
+	if suffix.NextEntryCount <= suffix.StartEntryCount || suffix.StartEntryCount <= expectedStart {
+		return false
+	}
+	return suffix.StartEntryCount > loadedTranscriptTailEnd(m)
+}
+
 func committedTranscriptSuffixRequestForEvent(m *uiModel, evt clientui.Event) clientui.CommittedTranscriptSuffixRequest {
 	after := committedTranscriptTailEnd(m)
 	limit := clientui.DefaultCommittedTranscriptSuffixLimit
@@ -68,6 +87,17 @@ func committedOngoingLocalFrontierEnd(m *uiModel) int {
 	return m.transcriptBaseOffset + len(committedTranscriptEntriesForApp(m.transcriptEntries))
 }
 
+func loadedTranscriptTailEnd(m *uiModel) int {
+	if m == nil {
+		return 0
+	}
+	end := m.transcriptBaseOffset + len(m.transcriptEntries)
+	if end < 0 {
+		return 0
+	}
+	return end
+}
+
 func (m *uiModel) truncatePendingOngoingTailBeforeSuffix(startEntryCount int) {
 	if m == nil {
 		return
@@ -110,7 +140,13 @@ func (m *uiModel) applyCommittedTranscriptSuffixAppend(suffix clientui.Committed
 	page := transcriptPageFromCommittedTranscriptSuffix(suffix)
 	entries := transcriptEntriesFromPage(page)
 	expectedStart := committedTranscriptTailEnd(m)
+	if page.Offset > expectedStart && page.Offset <= loadedTranscriptTailEnd(m) {
+		expectedStart = page.Offset
+	}
 	if page.Offset != expectedStart {
+		if page.Offset > expectedStart {
+			return m.requestRuntimeCommittedGapSync()
+		}
 		m.runtimeAdapter().applyAuthoritativeOngoingTailPage(page, entries, false)
 		if m.view.Mode() == tui.ModeOngoing {
 			m.forwardToView(tui.SetConversationMsg{

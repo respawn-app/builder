@@ -250,7 +250,10 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 }
 
 func (m *uiModel) handleRuntimeCommittedTranscriptSuffixRefreshed(msg runtimeCommittedTranscriptSuffixRefreshedMsg) tea.Cmd {
-	if msg.token != m.runtimeCommittedSuffixToken {
+	if msg.token <= 0 {
+		return nil
+	}
+	if suffixSessionChanged(m, msg.suffix) {
 		return nil
 	}
 	if msg.err != nil {
@@ -259,6 +262,9 @@ func (m *uiModel) handleRuntimeCommittedTranscriptSuffixRefreshed(msg runtimeCom
 		return m.requestRuntimeCommittedConversationSync()
 	}
 	m.observeRuntimeRequestResult(nil)
+	if committedTranscriptSuffixStartsAfterDeliveryCursor(m, msg.suffix) {
+		return m.requestRuntimeCommittedGapSync()
+	}
 	applyCmd := m.applyCommittedTranscriptSuffixAppend(msg.suffix)
 	if !msg.suffix.HasMore {
 		return applyCmd
