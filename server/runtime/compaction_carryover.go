@@ -63,7 +63,8 @@ func (c compactionCarryoverCoordinator) postCompactionMessages(mode compactionMo
 	}
 	if mode == compactionModeHandoff {
 		if req := e.pendingHandoffRequestSnapshot(); req != nil {
-			if futureMessage := handoffFutureAgentMessage(req.futureAgentMessage); strings.TrimSpace(futureMessage.Content) != "" {
+			if strings.TrimSpace(req.futureAgentMessage) != "" {
+				futureMessage := handoffFutureAgentMessage(req.futureAgentMessage)
 				out = append(out, postCompactionMessage{
 					message:                  futureMessage,
 					pendingHandoffFutureText: req.futureAgentMessage,
