@@ -197,6 +197,11 @@ func TestBoardAndTaskDetailProjectParallelBranchPlacements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
+	for _, column := range board.Columns {
+		if column.Node.Kind == string(workflow.NodeKindJoin) || column.Node.Key == "join" {
+			t.Fatalf("board columns include hidden join node: %+v", board.Columns)
+		}
+	}
 	branchColumn := workflowViewColumnByKey(t, board, "impl_a")
 	branchPage, err := view.ListBoardNodeCards(ctx, serverapi.WorkflowBoardNodeCardsListRequest{ProjectID: binding.ProjectID, WorkflowID: string(workflowID), NodeID: branchColumn.Node.NodeID}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
@@ -227,6 +232,28 @@ func TestBoardAndTaskDetailProjectParallelBranchPlacements(t *testing.T) {
 	}
 	if detailBranchPlacements != 2 {
 		t.Fatalf("detail placements = %+v, want two branch placements with batch/branch ids", detail.Placements)
+	}
+}
+
+func TestBoardGroupsHideJoinNodesAndJoinOnlyGroups(t *testing.T) {
+	def := serverapi.WorkflowDefinition{
+		NodeGroups: []serverapi.WorkflowNodeGroup{
+			{GroupID: "group-visible", GroupKey: "visible", DisplayName: "Visible", SortOrder: 1},
+			{GroupID: "group-join-only", GroupKey: "join_only", DisplayName: "Join Only", SortOrder: 2},
+		},
+		Nodes: []serverapi.WorkflowNode{
+			{ID: "node-agent", GroupID: "group-visible", Kind: string(workflow.NodeKindAgent)},
+			{ID: "node-join-visible-group", GroupID: "group-visible", Kind: string(workflow.NodeKindJoin)},
+			{ID: "node-join-only", GroupID: "group-join-only", Kind: string(workflow.NodeKindJoin)},
+		},
+	}
+
+	groups := boardGroups(def)
+	if len(groups) != 1 || groups[0].GroupID != "group-visible" {
+		t.Fatalf("groups = %+v, want only visible group", groups)
+	}
+	if len(groups[0].NodeIDs) != 1 || groups[0].NodeIDs[0] != "node-agent" {
+		t.Fatalf("visible group node ids = %+v, want agent only", groups[0].NodeIDs)
 	}
 }
 

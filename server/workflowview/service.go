@@ -1588,9 +1588,12 @@ func boardGroups(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardGrou
 	for _, group := range def.NodeGroups {
 		dto := serverapi.WorkflowBoardGroup{GroupID: group.GroupID, Key: group.GroupKey, DisplayName: group.DisplayName, SortOrder: group.SortOrder}
 		for _, node := range def.Nodes {
-			if node.GroupID == group.GroupID {
+			if node.GroupID == group.GroupID && boardVisibleNodeKind(node.Kind) {
 				dto.NodeIDs = append(dto.NodeIDs, node.ID)
 			}
+		}
+		if len(dto.NodeIDs) == 0 {
+			continue
 		}
 		groups = append(groups, dto)
 	}
@@ -1600,6 +1603,9 @@ func boardGroups(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardGrou
 func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardColumn {
 	columns := make([]serverapi.WorkflowBoardColumn, 0, len(def.Nodes))
 	for index, node := range def.Nodes {
+		if !boardVisibleNodeKind(node.Kind) {
+			continue
+		}
 		columns = append(columns, serverapi.WorkflowBoardColumn{
 			Node: serverapi.WorkflowBoardNodeSummary{
 				NodeID:                 node.ID,
@@ -1618,6 +1624,10 @@ func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardCol
 		})
 	}
 	return columns
+}
+
+func boardVisibleNodeKind(kind string) bool {
+	return workflow.NodeKind(kind) != workflow.NodeKindJoin
 }
 
 func boardTransitionOutputFields(def serverapi.WorkflowDefinition, targetNodeID string) []serverapi.WorkflowOutputField {
