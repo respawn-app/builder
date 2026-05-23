@@ -1,12 +1,14 @@
 package prompts
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 const (
-	HandoffFutureAgentMessagePrefix = `The previous agent also left an additional message: "`
-	HandoffFutureAgentMessageSuffix = `"`
+	HandoffFutureAgentMessagePrefix = `The previous agent also left an additional message: `
 )
 
 func FormatHandoffFutureAgentMessage(content string) string {
-	return HandoffFutureAgentMessagePrefix + strings.TrimSpace(content) + HandoffFutureAgentMessageSuffix
+	return HandoffFutureAgentMessagePrefix + strconv.Quote(strings.TrimSpace(content))
 }
