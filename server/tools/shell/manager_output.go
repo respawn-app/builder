@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 )
 
 type outputSubscription struct {
@@ -52,6 +53,7 @@ func (s *outputSubscription) Next(ctx context.Context) (OutputChunk, error) {
 			return OutputChunk{}, io.EOF
 		case <-notify:
 		case <-doneCh:
+		case <-time.After(logWriterFlushDelay):
 		}
 	}
 }

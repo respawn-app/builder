@@ -145,7 +145,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		logPath:        logPath,
 		cmd:            cmd,
 		stdin:          stdin,
-		logFile:        logFile,
+		log:            newAsyncLogWriter(logFile),
 		running:        true,
 		stdinOpen:      req.KeepStdinOpen,
 		notify:         make(chan struct{}, 1),
@@ -158,7 +158,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
-		_ = logFile.Close()
+		entry.mu.Lock()
+		stdin, log := entry.detachResourcesLocked()
+		entry.mu.Unlock()
+		closeDetachedResources(stdin, log)
 		m.releaseEntry(id)
 		return ExecResult{}, fmt.Errorf("start process: %w", err)
 	}
@@ -170,7 +173,10 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 				gracePeriod = closeGracePeriod
 			}
 			_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(gracePeriod))
-			_ = logFile.Close()
+			entry.mu.Lock()
+			stdin, log := entry.detachResourcesLocked()
+			entry.mu.Unlock()
+			closeDetachedResources(stdin, log)
 			m.releaseEntry(id)
 			return ExecResult{}, fmt.Errorf("close stdin: %w", err)
 		}
@@ -182,6 +188,15 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if m.closed {
 		m.mu.Unlock()
 		_ = killManagedProcess(cmd.Process)
+		gracePeriod := m.closeGracePeriod
+		if gracePeriod <= 0 {
+			gracePeriod = closeGracePeriod
+		}
+		_, _ = m.collectUntil(context.Background(), entry, time.Now().Add(gracePeriod))
+		entry.mu.Lock()
+		stdin, log := entry.detachResourcesLocked()
+		entry.mu.Unlock()
+		closeDetachedResources(stdin, log)
 		return ExecResult{}, errors.New("background shell manager is closed")
 	}
 	m.entries[id] = entry
@@ -217,6 +232,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 		m.releaseEntry(id)
 		return result, nil
 	}
+	_ = deprioritizeManagedProcess(cmd.Process)
 	processed, err := m.applyPostprocessing(ctx, entry, string(output), nil, true, maxOutputChars)
 	if err != nil {
 		return ExecResult{}, err
@@ -283,7 +299,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	warning := ""
 	var processed postprocess.Result
 	if snapshot.Backgrounded && snapshot.ExitCode != nil && !entry.completionNoticeConsumed() {
-		fullOutput, readErr := readOutputFile(snapshot.LogPath)
+		fullOutput, readErr := readOutputFileLimited(snapshot.LogPath, maxFullLogPostprocessBytes)
 		if readErr == nil {
 			processed, err = m.applyPostprocessing(ctx, entry, fullOutput, snapshot.ExitCode, true, maxOutputChars)
 			if err != nil {
@@ -291,7 +307,14 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 			}
 			consumedCompletion = true
 		} else {
-			warning = appendWarning(warning, fmt.Sprintf("failed to read full output log: %v", readErr))
+			preview, _, _, previewErr := readBackgroundSummaryFromFile(snapshot.LogPath, maxOutputChars, BackgroundOutputDefault, !snapshot.RawOutput)
+			if previewErr == nil {
+				processed = postprocess.Result{Output: preview}
+				consumedCompletion = true
+				warning = appendWarning(warning, fmt.Sprintf("full output log skipped: %v", readErr))
+			} else {
+				warning = appendWarning(warning, fmt.Sprintf("failed to read full output log: %v", readErr))
+			}
 		}
 	}
 	if !consumedCompletion {
@@ -351,7 +374,7 @@ func (m *Manager) InlineOutput(id string, maxChars int) (string, string, error) 
 		return "", "", err
 	}
 	snapshot := entry.snapshot()
-	preview, _, err := readPreviewFromFile(snapshot.LogPath, normalizeOutputChars(maxChars), !snapshot.RawOutput)
+	preview, _, _, err := readBackgroundSummaryFromFile(snapshot.LogPath, normalizeOutputChars(maxChars), BackgroundOutputDefault, !snapshot.RawOutput)
 	if err != nil {
 		return "", "", err
 	}
