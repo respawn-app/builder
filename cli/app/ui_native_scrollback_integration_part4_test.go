@@ -5,10 +5,13 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 	"builder/shared/transcript"
 	"bytes"
+	"context"
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -567,8 +570,8 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 		t.Fatalf("expected bounded streamed line visibility under redraw pressure, got line1=%d line2=%d output=%q", line1Count, line2Count, normalizedOutput(raw))
 	}
 	normalized := normalizedOutput(raw)
-	if strings.Index(normalized, "line1") > strings.Index(normalized, "line2") {
-		t.Fatalf("expected streamed line order preserved, got %q", normalized)
+	if strings.LastIndex(normalized, "line1") > strings.LastIndex(normalized, "line2") {
+		t.Fatalf("expected final streamed line order preserved, got %q", normalized)
 	}
 	for _, line := range strings.Split(plain, "\n") {
 		if strings.Count(line, statusStateCircleGlyph+statusLineSpinnerSeparator) > 1 {
@@ -885,6 +888,78 @@ func TestRuntimeContinuityRecoveryReplaysOngoingScrollbackAndLaterAssistantAppen
 	}
 	if strings.Contains(detail, "before") {
 		t.Fatalf("expected detail mode to exclude stale assistant tail after continuity recovery, got %q", detail)
+	}
+}
+
+func TestNativeOngoingScrollbackContinuesAfterTransientActivityResubscribeTimeout(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{
+		{evt: clientui.Event{
+			Sequence:                   1,
+			Kind:                       clientui.EventAssistantMessage,
+			CommittedTranscriptChanged: true,
+			TranscriptRevision:         1,
+			CommittedEntryCount:        1,
+			CommittedEntryStartSet:     true,
+			TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "before disconnect", Phase: string(llm.MessagePhaseFinal)}},
+		}},
+		{err: io.EOF},
+	}}
+	recovered := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{
+		Sequence:                   2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         2,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "after reconnect", Phase: string(llm.MessagePhaseFinal)}},
+	}}}}
+	subscribeCalls := 0
+	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
+		subscribeCalls++
+		if subscribeCalls == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return recovered, nil
+	}, func() bool { return false }, nil)
+	defer stopRuntimeEvents()
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(&runtimeControlFakeClient{sessionView: clientui.RuntimeSessionView{SessionID: "session-1"}}, runtimeEvents, closedAskEvents())
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "initial activity emitted", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "before disconnect")
+	})
+	waitForTestCondition(t, 2*time.Second, "activity after reconnect emitted", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "before disconnect", "after reconnect")
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if subscribeCalls != 2 {
+		t.Fatalf("subscribe calls = %d, want 2", subscribeCalls)
+	}
+	if got := strings.Count(normalizedOutput(out.String()), "after reconnect"); got != 1 {
+		t.Fatalf("after reconnect emitted %d times in %q", got, normalizedOutput(out.String()))
 	}
 }
 

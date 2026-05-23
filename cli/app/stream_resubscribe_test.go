@@ -113,6 +113,68 @@ func TestStartSessionActivityEventsEmitsExplicitGapWhenInitialStreamDropsWithout
 	}
 }
 
+func TestStartSessionActivityEventsKeepsResubscribingAfterTransientSubscribeTimeout(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 41, Kind: clientui.EventAssistantDelta, AssistantDelta: "before drop"}}, {err: io.EOF}}}
+	recovered := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Sequence: 42, Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "after reconnect"}}}}}}
+	subscribeCalls := 0
+	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
+		subscribeCalls++
+		if subscribeCalls == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return recovered, nil
+	}, func() bool { return false }, nil)
+	defer stop()
+
+	first := waitSessionActivityEvent(t, events)
+	if first.AssistantDelta != "before drop" {
+		t.Fatalf("unexpected initial event: %+v", first)
+	}
+	reconnected := waitSessionActivityEvent(t, events)
+	if reconnected.Kind != clientui.EventAssistantMessage || len(reconnected.TranscriptEntries) != 1 || reconnected.TranscriptEntries[0].Text != "after reconnect" {
+		t.Fatalf("unexpected reconnected event: %+v", reconnected)
+	}
+	if subscribeCalls != 2 {
+		t.Fatalf("subscribe calls = %d, want 2", subscribeCalls)
+	}
+}
+
+func TestStartSessionActivityEventsStopsRetryingWhenParentContextCancelsDuringResubscribe(t *testing.T) {
+	useFastStreamResubscribeDelays(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	initial := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{err: io.EOF}}}
+	subscribeCalled := make(chan struct{})
+	events, stop := startSessionActivityEvents(ctx, initial, func(context.Context, uint64) (serverapi.SessionActivitySubscription, error) {
+		select {
+		case <-subscribeCalled:
+		default:
+			close(subscribeCalled)
+		}
+		return nil, context.DeadlineExceeded
+	}, func() bool { return false }, nil)
+	defer stop()
+
+	select {
+	case <-subscribeCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resubscribe attempt")
+	}
+	cancel()
+
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("expected session activity channel to close after parent cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session activity retry loop to stop after parent cancellation")
+	}
+}
+
 func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *testing.T) {
 	useFastStreamResubscribeDelays(t)
 	ctx, cancel := context.WithCancel(context.Background())

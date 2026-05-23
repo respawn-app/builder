@@ -15,6 +15,7 @@ import (
 	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -560,6 +561,224 @@ func TestUserMessageFlushedAdvancesDeliveryCursorBeforeFollowingSuffix(t *testin
 	}
 	if req.Limit != 1 {
 		t.Fatalf("following suffix limit = %d, want 1", req.Limit)
+	}
+}
+
+func TestCommittedSuffixResponsesAcceptOlderRangeAfterNewerRequestIssued(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.runtimeCommittedSuffixToken = 2
+
+	firstCmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 1,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 0, Limit: 1},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            2,
+			CommittedEntryCount: 2,
+			StartEntryCount:     0,
+			NextEntryCount:      1,
+			Entries:             []clientui.ChatEntry{{Role: "user", Text: "message1"}},
+		},
+	})
+	secondCmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 2,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 1, Limit: 1},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            3,
+			CommittedEntryCount: 2,
+			StartEntryCount:     1,
+			NextEntryCount:      2,
+			Entries:             []clientui.ChatEntry{{Role: "system", Text: "Fast mode enabled"}},
+		},
+	})
+
+	flushText := normalizedOutput(collectNativeHistoryFlushText(append(collectCmdMessages(t, firstCmd), collectCmdMessages(t, secondCmd)...)))
+	if !containsInOrder(flushText, "message1", "Fast mode enabled") {
+		t.Fatalf("expected stale older suffix and newer suffix in order, got %q", flushText)
+	}
+	if strings.Count(flushText, "message1") != 1 {
+		t.Fatalf("expected message1 once in permanent output, got %q", flushText)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 2 || loaded[0].Text != "message1" || loaded[1].Text != "Fast mode enabled" {
+		t.Fatalf("loaded transcript = %+v, want message then toggle", loaded)
+	}
+}
+
+func TestCommittedSuffixStaleErrorDoesNotRequestFullTranscriptSync(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     3,
+			Offset:       0,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "user", Text: "message1"},
+				{Role: "system", Text: "Fast mode enabled"},
+			},
+		},
+	}
+	client := newUIRuntimeClientWithReads("session-1", reads, sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil)))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.runtimeCommittedSuffixToken = 2
+
+	cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 1,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 0, Limit: 1},
+		err:   errors.New("stale timeout"),
+	})
+	if cmd != nil {
+		t.Fatalf("stale suffix error produced command: %+v", collectCmdMessages(t, cmd))
+	}
+	if reads.pageCount.Load() != 0 {
+		t.Fatalf("stale suffix error requested full transcript sync")
+	}
+}
+
+func TestCommittedSuffixStaleHasMoreDoesNotRequestFollowUp(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}},
+	}
+	client := newUIRuntimeClientWithReads("session-1", reads, sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil)))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.runtimeCommittedSuffixToken = 2
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(2, 3)
+
+	cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 1,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 0, Limit: 1},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            2,
+			CommittedEntryCount: 3,
+			StartEntryCount:     0,
+			NextEntryCount:      1,
+			HasMore:             true,
+			Entries:             []clientui.ChatEntry{{Role: "user", Text: "stale message"}},
+		},
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeCommittedTranscriptSuffixRefreshedMsg); ok {
+			t.Fatalf("stale no-op suffix requested follow-up page: %+v", msg)
+		}
+	}
+}
+
+func TestFutureCommittedSuffixDoesNotReplaceMissingPrefix(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     3,
+			Offset:       0,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "user", Text: "message1"},
+				{Role: "system", Text: "Fast mode enabled"},
+			},
+		},
+	}
+	client := newUIRuntimeClientWithReads("session-1", reads, sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil)))
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.runtimeCommittedSuffixToken = 2
+
+	cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 2,
+		req:   clientui.CommittedTranscriptSuffixRequest{AfterEntryCount: 1, Limit: 1},
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-1",
+			Revision:            3,
+			CommittedEntryCount: 2,
+			StartEntryCount:     1,
+			NextEntryCount:      2,
+			Entries:             []clientui.ChatEntry{{Role: "system", Text: "Fast mode enabled"}},
+		},
+	})
+
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok && strings.Contains(stripANSIText(flush.Text), "Fast mode enabled") {
+			t.Fatalf("future suffix was emitted before missing prefix recovery: %q", stripANSIText(flush.Text))
+		}
+	}
+	foundHydration := false
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			foundHydration = true
+		}
+	}
+	if !foundHydration {
+		t.Fatalf("expected future suffix gap to request transcript recovery, got %+v", msgs)
+	}
+	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 0 {
+		t.Fatalf("future suffix replaced missing prefix in loaded transcript: %+v", loaded)
+	}
+}
+
+func TestCommittedSuffixResponseFromPreviousSessionIsIgnored(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.sessionID = "session-current"
+	m.runtimeCommittedSuffixToken = 1
+
+	cmd := m.handleRuntimeCommittedTranscriptSuffixRefreshed(runtimeCommittedTranscriptSuffixRefreshedMsg{
+		token: 1,
+		suffix: clientui.CommittedTranscriptSuffix{
+			SessionID:           "session-previous",
+			Revision:            2,
+			CommittedEntryCount: 1,
+			StartEntryCount:     0,
+			NextEntryCount:      1,
+			Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "previous session answer"}},
+		},
+	})
+
+	if cmd != nil {
+		t.Fatalf("previous-session suffix produced command: %+v", collectCmdMessages(t, cmd))
+	}
+	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 0 {
+		t.Fatalf("previous-session suffix mutated transcript: %+v", loaded)
+	}
+}
+
+func TestCommittedSuffixAppendUsesLoadedTailWhenDeliveryCursorLags(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: tui.TranscriptRoleUser, Text: "prompt", Committed: true}}
+	m.transcriptTotalEntries = 1
+	m.ongoingCommittedDelivery = newOngoingCommittedDeliveryCursor(0, 1)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, TotalEntries: 1})
+
+	cmd := m.applyCommittedTranscriptSuffixAppend(clientui.CommittedTranscriptSuffix{
+		Revision:            2,
+		CommittedEntryCount: 2,
+		StartEntryCount:     1,
+		NextEntryCount:      2,
+		Entries:             []clientui.ChatEntry{{Role: "assistant", Text: "answer"}},
+	})
+
+	flushText := normalizedOutput(collectNativeHistoryFlushText(collectCmdMessages(t, cmd)))
+	if !containsInOrder(flushText, "prompt", "answer") {
+		t.Fatalf("expected loaded prefix and suffix in permanent output, got %q", flushText)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 2 || loaded[0].Text != "prompt" || loaded[1].Text != "answer" {
+		t.Fatalf("loaded transcript = %+v, want prompt then answer", loaded)
+	}
+	if got := m.ongoingCommittedDelivery.lastAppliedCommittedEntryCount; got != 2 {
+		t.Fatalf("delivery cursor applied count = %d, want 2", got)
 	}
 }
 

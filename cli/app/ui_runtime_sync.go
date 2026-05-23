@@ -250,21 +250,41 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 }
 
 func (m *uiModel) handleRuntimeCommittedTranscriptSuffixRefreshed(msg runtimeCommittedTranscriptSuffixRefreshedMsg) tea.Cmd {
-	if msg.token != m.runtimeCommittedSuffixToken {
+	if msg.token <= 0 {
+		return nil
+	}
+	if suffixSessionChanged(m, msg.suffix) {
 		return nil
 	}
 	if msg.err != nil {
+		if msg.token < m.runtimeCommittedSuffixToken {
+			return nil
+		}
 		m.observeRuntimeRequestResult(msg.err)
 		m.logf("ui.runtime.committed_suffix err=%q after_entry_count=%d limit=%d", msg.err.Error(), msg.req.AfterEntryCount, msg.req.Limit)
 		return m.requestRuntimeCommittedConversationSync()
 	}
 	m.observeRuntimeRequestResult(nil)
+	if committedTranscriptSuffixStartsAfterDeliveryCursor(m, msg.suffix) {
+		return m.requestRuntimeCommittedGapSync()
+	}
+	staleResponse := msg.token < m.runtimeCommittedSuffixToken
+	trimmedSuffix := m.trimCommittedTranscriptSuffixToDeliveryCursor(msg.suffix)
 	applyCmd := m.applyCommittedTranscriptSuffixAppend(msg.suffix)
-	if !msg.suffix.HasMore {
+	hasMore := msg.suffix.HasMore
+	nextEntryCount := msg.suffix.NextEntryCount
+	if staleResponse {
+		hasMore = trimmedSuffix.HasMore
+		nextEntryCount = trimmedSuffix.NextEntryCount
+		if trimmedSuffix.NextEntryCount <= trimmedSuffix.StartEntryCount {
+			return applyCmd
+		}
+	}
+	if !hasMore {
 		return applyCmd
 	}
 	nextReq := clientui.NormalizeCommittedTranscriptSuffixRequest(clientui.CommittedTranscriptSuffixRequest{
-		AfterEntryCount: msg.suffix.NextEntryCount,
+		AfterEntryCount: nextEntryCount,
 		Limit:           msg.req.Limit,
 	})
 	return sequenceCmds(applyCmd, m.requestRuntimeCommittedTranscriptSuffix(nextReq))
