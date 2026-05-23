@@ -633,7 +633,7 @@ func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.
 		if err := workflowjson.UnmarshalString(edge.OutputRequirementsJson, &requirements); err != nil {
 			return serverapi.WorkflowDefinition{}, nil, err
 		}
-		def.Edges = append(def.Edges, serverapi.WorkflowEdge{ID: edge.ID, WorkflowID: edge.WorkflowID, TransitionGroupID: edge.TransitionGroupID, Key: edge.EdgeKey, TargetNodeID: edge.TargetNodeID, RequiresApproval: edge.RequiresApproval != 0, ContextMode: edge.ContextMode, InputBindings: inputs, OutputRequirements: requirements})
+		def.Edges = append(def.Edges, serverapi.WorkflowEdge{ID: edge.ID, WorkflowID: edge.WorkflowID, TransitionGroupID: edge.TransitionGroupID, Key: edge.EdgeKey, TargetNodeID: edge.TargetNodeID, RequiresApproval: edge.RequiresApproval != 0, ContextMode: edge.ContextMode, ContextSource: apiContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(edge.ContextSourceKind), NodeKey: workflow.ModelKey(edge.ContextSourceNodeKey)}), InputBindings: inputs, OutputRequirements: requirements})
 	}
 	return def, nodeKinds, nil
 }
@@ -1666,7 +1666,7 @@ func definitionForValidation(def serverapi.WorkflowDefinition) workflow.Definiti
 		for _, requirement := range edge.OutputRequirements {
 			requirements = append(requirements, workflow.OutputRequirement{FieldName: requirement.FieldName})
 		}
-		out.Edges = append(out.Edges, workflow.Edge{WorkflowID: workflow.WorkflowID(edge.WorkflowID), ID: workflow.EdgeID(edge.ID), Key: workflow.ModelKey(edge.Key), TransitionGroupID: workflow.TransitionGroupID(edge.TransitionGroupID), TargetNodeID: workflow.NodeID(edge.TargetNodeID), RequiresApproval: edge.RequiresApproval, ContextMode: workflow.ContextMode(edge.ContextMode), InputBindings: inputs, OutputRequirements: requirements})
+		out.Edges = append(out.Edges, workflow.Edge{WorkflowID: workflow.WorkflowID(edge.WorkflowID), ID: workflow.EdgeID(edge.ID), Key: workflow.ModelKey(edge.Key), TransitionGroupID: workflow.TransitionGroupID(edge.TransitionGroupID), TargetNodeID: workflow.NodeID(edge.TargetNodeID), RequiresApproval: edge.RequiresApproval, ContextMode: workflow.ContextMode(edge.ContextMode), ContextSource: workflow.CanonicalContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(edge.ContextSource.Kind), NodeKey: workflow.ModelKey(edge.ContextSource.NodeKey)}), InputBindings: inputs, OutputRequirements: requirements})
 	}
 	return out
 }
@@ -2067,6 +2067,11 @@ func boardNodeCardsPageToken(projectID string, workflowID string, nodeID string,
 		return ""
 	}
 	return base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func apiContextSource(in workflow.ContextSource) serverapi.WorkflowContextSource {
+	source := workflow.CanonicalContextSource(in)
+	return serverapi.WorkflowContextSource{Kind: string(source.Kind), NodeKey: string(source.NodeKey)}
 }
 
 func boardNodeCardIsAfterCursor(task sqlitegen.TaskRecord, cursor boardNodeCardsPageCursor) bool {

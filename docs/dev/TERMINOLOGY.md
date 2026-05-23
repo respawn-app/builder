@@ -75,6 +75,7 @@ An edge configures:
 - target node;
 - whether transition needs human approval or another manual interaction;
 - context-preservation mode for the next node;
+- context source for continuation modes;
 - input/output bindings between prior node output, task metadata, and next node prompt/context;
 - routing condition or decision mapping;
 - join/aggregation requirements when multiple inbound branches must complete.
@@ -102,6 +103,10 @@ Per-edge transition policy that decides how the next node receives execution con
 - `new_session`: start a blank Builder session and inject previous node output plus task metadata.
 - `continue_session`: continue the previous Builder session with a new prompt/goal and bound metadata.
 - `compact_and_continue_session`: compact the previous session first, then continue with a new prompt/goal and bound metadata.
+
+### Context Source
+
+Per-edge continuation policy that decides which earlier run supplies the source session for `continue_session` or `compact_and_continue_session`. The default is `immediate_source`, meaning the run that produced the selected transition. `node:<node_key>` selects the latest completed run for a guaranteed-prior agent node while keeping input bindings tied to the immediate transition output.
 
 ### Run
 

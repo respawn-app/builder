@@ -217,11 +217,11 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		targetMetadataJSON, err := marshalJSON(map[string]string{
-			"context_mode":      string(targetEdge.ContextMode),
-			"source_run_id":     sourceRun.ID,
-			"source_session_id": strings.TrimSpace(sourceRun.SessionID.String),
-		})
+		source, err := s.resolveContextSourceRun(ctx, tx, taskID, now, &sourceRun, sourceSnapshot, targetEdge)
+		if err != nil {
+			return CompleteRunResult{}, err
+		}
+		targetMetadataJSON, err := targetRunMetadata(targetEdge, source)
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
@@ -334,6 +334,12 @@ func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRec
 	if err := unmarshalJSON(edge.OutputRequirementsJson, &requirements); err != nil {
 		return edgeContractSnapshot{}, err
 	}
+	metadata := workflowRunMetadata{}
+	if strings.TrimSpace(edge.MetadataJson) != "" {
+		if err := unmarshalJSON(edge.MetadataJson, &metadata); err != nil {
+			return edgeContractSnapshot{}, err
+		}
+	}
 	return edgeContractSnapshot{
 		ID:  workflow.EdgeID(edge.WorkflowEdgeID.String),
 		Key: workflow.ModelKey(edge.EdgeKey),
@@ -344,6 +350,7 @@ func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRec
 			Kind:        workflow.NodeKind(edge.TargetNodeKind),
 		},
 		ContextMode:        workflow.ContextMode(edge.ContextMode),
+		ContextSource:      workflow.CanonicalContextSource(metadata.ContextSource),
 		RequiresApproval:   edge.RequiresApproval != 0,
 		InputBindings:      inputs,
 		OutputRequirements: requirements,
@@ -351,6 +358,10 @@ func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRec
 }
 
 func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, transitionID string, edge edgeContractSnapshot, targetPlacementID string, state string) error {
+	metadataJSON, err := marshalJSON(workflowRunMetadata{ContextSource: workflow.CanonicalContextSource(edge.ContextSource)})
+	if err != nil {
+		return err
+	}
 	if err := q.InsertTaskTransitionEdge(ctx, sqlitegen.InsertTaskTransitionEdgeParams{
 		ID:                     prefixedID("transition-edge"),
 		TaskTransitionID:       transitionID,
@@ -366,7 +377,7 @@ func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, tra
 		RequiresApproval:       boolToInt64(edge.RequiresApproval),
 		InputBindingsJson:      mustInputBindingsJSON(edge.InputBindings),
 		OutputRequirementsJson: mustOutputRequirementsJSON(edge.OutputRequirements),
-		MetadataJson:           "{}",
+		MetadataJson:           metadataJSON,
 	}); err != nil {
 		return fmt.Errorf("insert transition edge snapshot: %w", err)
 	}

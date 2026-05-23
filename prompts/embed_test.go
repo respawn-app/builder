@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -39,6 +40,95 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptPlaceholder(t *testing.T) 
 	}
 	if !strings.Contains(rendered, defaultPrompt) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected default prompt placeholder rendered, got %q", rendered)
+	}
+}
+
+func TestCustomSystemPromptResolvesDefaultSystemPromptSectionPlaceholders(t *testing.T) {
+	rendered, err := RenderCustomSystemPrompt(strings.Join([]string{
+		"{{.DefaultSystemPromptPersonality}}",
+		"{{.DefaultSystemPromptHarnessWorkflowAutonomy}}",
+		"{{.DefaultSystemPromptAmbiguityAndOutputQuality}}",
+		"{{.DefaultSystemPromptFinalAnswerAndFormatting}}",
+		"{{.DefaultSystemPromptDelegation}}",
+	}, "\n---\n"), false, SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: 123,
+		EditingToolName:              "patch",
+	})
+	if err != nil {
+		t.Fatalf("RenderCustomSystemPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"autonomous coding agent named Builder",
+		"Your agentic environment",
+		"Product ambiguity and planning",
+		"Final answer instructions",
+		selfcmd.RunCommandPrefix(),
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected section prompt to contain %q, got %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected section placeholders rendered, got %q", rendered)
+	}
+}
+
+func TestBaseSystemPromptAssemblesDefaultSections(t *testing.T) {
+	rendered := BaseSystemPrompt(SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: 123,
+		EditingToolName:              "patch",
+	})
+	for _, want := range []string{
+		"autonomous coding agent named Builder",
+		"Your agentic environment",
+		"Product ambiguity and planning",
+		"Final answer instructions",
+		"Delegating work",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected base prompt to contain %q, got %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "{{") {
+		t.Fatalf("expected base prompt placeholders rendered, got %q", rendered)
+	}
+}
+
+func TestBaseSystemPromptMatchesLegacyMonolithGolden(t *testing.T) {
+	// Temporary migration guard: remove this golden after the sectionized prompt
+	// ships and no longer needs byte-for-byte protection against split drift.
+	args := SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: 123,
+		EditingToolName:              "patch",
+	}
+	golden, err := os.ReadFile("testdata/system_prompt_legacy_golden.md")
+	if err != nil {
+		t.Fatalf("read legacy system prompt golden: %v", err)
+	}
+	renderedGolden, err := renderNamedTemplate("legacy system prompt golden", string(golden), systemPromptRuntimeTemplateData{
+		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
+		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
+		EditingToolName:              args.EditingToolName,
+	})
+	if err != nil {
+		t.Fatalf("render legacy system prompt golden: %v", err)
+	}
+	rendered := BaseSystemPrompt(args)
+	if rendered != renderedGolden {
+		t.Fatalf("assembled system prompt differs from legacy golden\n--- assembled ---\n%s\n--- legacy ---\n%s", rendered, renderedGolden)
+	}
+}
+
+func TestDefaultSystemPromptAssemblyCannotReferenceFullDefaultPrompt(t *testing.T) {
+	_, err := renderSystemPromptTemplateErr("{{.DefaultSystemPrompt}}", SystemPromptTemplateArgs{
+		EstimatedToolCallsForContext: 123,
+		EditingToolName:              "patch",
+	}, "")
+	if err == nil {
+		t.Fatal("expected default system prompt assembly to reject DefaultSystemPrompt recursion")
+	}
+	if !strings.Contains(err.Error(), "DefaultSystemPrompt") {
+		t.Fatalf("expected error to mention DefaultSystemPrompt, got %v", err)
 	}
 }
 

@@ -631,11 +631,11 @@ WHERE id = ?
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		targetMetadataJSON, err := marshalJSON(map[string]string{
-			"context_mode":      string(edge.ContextMode),
-			"source_run_id":     run.ID,
-			"source_session_id": strings.TrimSpace(run.SessionID.String),
-		})
+		source, err := s.resolveContextSourceRun(ctx, tx, run.TaskID, now, &run, snapshot, edge)
+		if err != nil {
+			return CompleteRunResult{}, err
+		}
+		targetMetadataJSON, err := targetRunMetadata(edge, source)
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
