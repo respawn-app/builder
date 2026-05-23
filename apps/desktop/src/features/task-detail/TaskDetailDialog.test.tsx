@@ -243,7 +243,9 @@ describe("TaskDetailDialog", () => {
 
     render(<App services={services} />);
 
-    expect(await screen.findByRole("button", { name: new RegExp(`Interrupt ${longRunID}`, "u") })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: new RegExp(`Interrupt ${longRunID}`, "u") }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("task-detail-body-split")).not.toHaveClass("items-start");
     expect(screen.getByTestId("task-description-save")).not.toHaveClass("absolute");
     expect(screen.getByTestId("task-description-save").parentElement).toBe(
@@ -314,7 +316,6 @@ describe("TaskDetailDialog", () => {
             ],
             next_page_token: "",
             generated_at_unix_ms: 1,
-            latest_event_sequence: 1,
           },
         },
       ],
@@ -341,7 +342,6 @@ describe("TaskDetailDialog", () => {
             items: callIndex === 0 ? [attentionResponseItem] : [],
             next_page_token: "",
             generated_at_unix_ms: callIndex + 1,
-            latest_event_sequence: callIndex + 1,
           }),
         },
       ],
@@ -530,7 +530,6 @@ const attentionBase = {
   task_short_id: "T-1",
   task_title: "Resolve blocker",
   occurred_at_unix_ms: 1,
-  latest_event_sequence: 1,
 };
 
 const attentionResponseItem = {
@@ -631,7 +630,6 @@ const taskDetailResponse = {
         task_id: "task-1",
         body: "Existing comment",
         author: "GUI",
-        deleted_at_unix_ms: 0,
         created_at_unix_ms: 1,
         updated_at_unix_ms: 1,
       },
@@ -686,7 +684,6 @@ const commentAddResponse = {
     task_id: "task-1",
     body: "Fresh comment",
     author: "GUI",
-    deleted_at_unix_ms: 0,
     created_at_unix_ms: 4,
     updated_at_unix_ms: 4,
   },

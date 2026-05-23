@@ -136,3 +136,37 @@ func TestWorkflowProjectLinkRequestValidation(t *testing.T) {
 		t.Fatalf("empty project id error = %v", err)
 	}
 }
+
+func TestWorkflowDeleteRequestValidation(t *testing.T) {
+	if err := (WorkflowDeletePreviewRequest{WorkflowID: "workflow-1"}).Validate(); err != nil {
+		t.Fatalf("valid delete preview rejected: %v", err)
+	}
+	if err := (WorkflowDeletePreviewRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "workflow_id") {
+		t.Fatalf("empty delete preview workflow id error = %v", err)
+	}
+	if err := (WorkflowDeleteRequest{
+		WorkflowID:            "workflow-1",
+		Confirmed:             true,
+		ExpectedGraphRevision: 1,
+		ExpectedProjectCount:  1,
+		ExpectedLinkCount:     1,
+		ExpectedTaskCount:     1,
+	}).Validate(); err != nil {
+		t.Fatalf("valid delete request rejected: %v", err)
+	}
+	if err := (WorkflowDeleteRequest{}).Validate(); err == nil || !strings.Contains(err.Error(), "workflow_id") {
+		t.Fatalf("empty delete workflow id error = %v", err)
+	}
+	if err := (WorkflowDeleteRequest{WorkflowID: "workflow-1", ExpectedGraphRevision: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "expected_graph_revision") {
+		t.Fatalf("negative graph revision error = %v", err)
+	}
+	if err := (WorkflowDeleteRequest{WorkflowID: "workflow-1", ExpectedProjectCount: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "expected_project_count") {
+		t.Fatalf("negative project count error = %v", err)
+	}
+	if err := (WorkflowDeleteRequest{WorkflowID: "workflow-1", ExpectedLinkCount: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "expected_link_count") {
+		t.Fatalf("negative link count error = %v", err)
+	}
+	if err := (WorkflowDeleteRequest{WorkflowID: "workflow-1", ExpectedTaskCount: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "expected_task_count") {
+		t.Fatalf("negative task count error = %v", err)
+	}
+}

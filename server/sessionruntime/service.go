@@ -791,7 +791,7 @@ func (s *Service) createRuntimeLease(ctx context.Context, sessionID string, requ
 	if s == nil || s.metadataStore == nil {
 		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
 	}
-	return s.metadataStore.CreateRuntimeLease(ctx, sessionID, requestID)
+	return s.metadataStore.CreateRuntimeLease(ctx, sessionID)
 }
 
 func (s *Service) validateRuntimeLease(ctx context.Context, sessionID string, leaseID string) (metadata.RuntimeLeaseRecord, error) {

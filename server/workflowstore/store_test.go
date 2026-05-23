@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"builder/server/metadata"
 	"builder/server/session"
@@ -109,6 +110,58 @@ func TestAddNodeRejectsNodeGroupFromDifferentWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflowEventPublisherNormalizesAndDispatchesEvents(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	store.now = func() time.Time { return time.UnixMilli(1234).UTC() }
+	if err := store.PublishWorkflowEvent(ctx, WorkflowEventRecord{Action: "created"}); err == nil || !strings.Contains(err.Error(), "event resource") {
+		t.Fatalf("missing resource error = %v", err)
+	}
+	if err := store.PublishWorkflowEvent(ctx, WorkflowEventRecord{Resource: "task"}); err == nil || !strings.Contains(err.Error(), "event action") {
+		t.Fatalf("missing action error = %v", err)
+	}
+	if err := store.PublishWorkflowEvent(ctx, WorkflowEventRecord{Resource: "task", Action: "created"}); err != nil {
+		t.Fatalf("PublishWorkflowEvent with default no-op sink: %v", err)
+	}
+
+	sink := &recordingWorkflowEventPublisher{}
+	store.SetWorkflowEventPublisher(sink)
+	changedIDs := []string{"task-1"}
+	if err := store.PublishWorkflowEvent(ctx, WorkflowEventRecord{
+		ProjectID:  " project-1 ",
+		WorkflowID: " workflow-1 ",
+		Resource:   " task ",
+		Action:     " updated ",
+		ChangedIDs: changedIDs,
+	}); err != nil {
+		t.Fatalf("PublishWorkflowEvent: %v", err)
+	}
+	changedIDs[0] = "mutated"
+	if len(sink.records) != 1 {
+		t.Fatalf("published records = %+v, want one", sink.records)
+	}
+	record := sink.records[0]
+	if record.ProjectID != "project-1" || record.WorkflowID != "workflow-1" || record.Resource != "task" || record.Action != "updated" || record.OccurredAtUnixMs != 1234 {
+		t.Fatalf("published record = %+v, want normalized fields and default timestamp", record)
+	}
+	if len(record.ChangedIDs) != 1 || record.ChangedIDs[0] != "task-1" {
+		t.Fatalf("changed ids = %+v, want defensive copy", record.ChangedIDs)
+	}
+	store.SetWorkflowEventPublisher(nil)
+	if err := store.PublishWorkflowEvent(ctx, WorkflowEventRecord{Resource: "task", Action: "deleted"}); err != nil {
+		t.Fatalf("PublishWorkflowEvent after nil publisher reset: %v", err)
+	}
+}
+
+type recordingWorkflowEventPublisher struct {
+	records []WorkflowEventRecord
+}
+
+func (p *recordingWorkflowEventPublisher) PublishWorkflowEvent(_ context.Context, record WorkflowEventRecord) error {
+	p.records = append(p.records, record)
+	return nil
+}
+
 func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
@@ -168,7 +221,7 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	if err := store.ReplaceComment(ctx, comment.ID, "updated"); err != nil {
 		t.Fatalf("ReplaceComment: %v", err)
 	}
-	comments, err := store.ListComments(ctx, task.ID, false)
+	comments, err := store.ListComments(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("ListComments: %v", err)
 	}
@@ -178,7 +231,7 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	if err := store.DeleteComment(ctx, comment.ID); err != nil {
 		t.Fatalf("DeleteComment: %v", err)
 	}
-	comments, err = store.ListComments(ctx, task.ID, false)
+	comments, err = store.ListComments(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("ListComments visible: %v", err)
 	}
@@ -1433,7 +1486,17 @@ func TestApprovalUsesStoredEdgeSnapshotAfterGraphEdit(t *testing.T) {
 	if _, err := store.AddNode(ctx, NodeRecord{ID: archiveID, WorkflowID: workflowID, Key: "archive", Kind: workflow.NodeKindTerminal, DisplayName: "Archive"}); err != nil {
 		t.Fatalf("AddNode archive: %v", err)
 	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE workflow_edges SET target_node_id = ? WHERE workflow_id = ? AND edge_key = 'done'`, string(archiveID), string(workflowID)); err != nil {
+	if _, err := store.db.ExecContext(ctx, `
+UPDATE workflow_edges
+SET target_node_id = ?
+WHERE edge_key = 'done'
+  AND EXISTS (
+      SELECT 1
+      FROM workflow_transition_groups tg
+      JOIN workflow_nodes source ON source.id = tg.source_node_id
+      WHERE tg.id = workflow_edges.transition_group_id
+        AND source.workflow_id = ?
+  )`, string(archiveID), string(workflowID)); err != nil {
 		t.Fatalf("edit workflow edge target: %v", err)
 	}
 
@@ -2061,7 +2124,7 @@ func TestCompleteRunRejectsStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestRunStartContextHandlesMissingInputEdgeAndMalformedJSON(t *testing.T) {
+func TestRunStartContextHandlesMissingInputEdgeAndRejectsNonArrayInputJSON(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createValidWorkflow(t, ctx, store)
@@ -2086,19 +2149,16 @@ func TestRunStartContextHandlesMissingInputEdgeAndMalformedJSON(t *testing.T) {
 	if len(input.InputValues) != 0 {
 		t.Fatalf("input values without input edge = %+v, want empty", input.InputValues)
 	}
-	taskWithMalformedInputs, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task 2", Body: "Body"})
+	taskWithInvalidInputs, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task 2", Body: "Body"})
 	if err != nil {
 		t.Fatalf("CreateTask malformed inputs: %v", err)
 	}
-	startedMalformedInputs, err := store.StartTask(ctx, taskWithMalformedInputs.ID)
+	startedInvalidInputs, err := store.StartTask(ctx, taskWithInvalidInputs.ID)
 	if err != nil {
 		t.Fatalf("StartTask malformed inputs: %v", err)
 	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE task_transition_edges SET input_bindings_json = '{}' WHERE target_placement_id = ?`, string(startedMalformedInputs.PlacementID)); err != nil {
-		t.Fatalf("corrupt transition edge inputs: %v", err)
-	}
-	if _, err := store.GetRunStartContext(ctx, startedMalformedInputs.RunID); err == nil {
-		t.Fatalf("expected malformed transition edge input bindings error")
+	if _, err := store.db.ExecContext(ctx, `UPDATE task_transition_edges SET input_bindings_json = '{}' WHERE target_placement_id = ?`, string(startedInvalidInputs.PlacementID)); err == nil {
+		t.Fatalf("expected non-array transition edge input bindings to be rejected")
 	}
 	taskWithJoinInputs, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task 3", Body: "Body"})
 	if err != nil {
@@ -2532,7 +2592,7 @@ func TestTaskCreateAllowsInvalidWorkflowBacklogButRejectsUnlinkedWorkflow(t *tes
 	}
 }
 
-func TestProjectWorkflowUnlinkGuardsActiveAndDefaultLinks(t *testing.T) {
+func TestProjectWorkflowUnlinkHardDeletesUnusedLinksAndBlocksTaskReferences(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createValidWorkflow(t, ctx, store)
@@ -2550,11 +2610,11 @@ func TestProjectWorkflowUnlinkGuardsActiveAndDefaultLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkWorkflow spare: %v", err)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, link.ID, ""); err == nil || !strings.Contains(err.Error(), "replacement default") {
-		t.Fatalf("expected replacement default guard, got %v", err)
-	}
-	if err := store.UnlinkProjectWorkflow(ctx, link.ID, "missing-link"); err == nil || !strings.Contains(err.Error(), "replacement default") {
+	if _, err := store.UnlinkProjectWorkflow(ctx, link.ID, "missing-link"); err == nil || !strings.Contains(err.Error(), "replacement default") {
 		t.Fatalf("expected invalid replacement default guard, got %v", err)
+	}
+	if _, err := store.UnlinkProjectWorkflow(ctx, link.ID, link.ID); err == nil || !strings.Contains(err.Error(), "replacement default") {
+		t.Fatalf("expected self replacement default guard, got %v", err)
 	}
 	links, err := store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
 	if err != nil {
@@ -2563,10 +2623,24 @@ func TestProjectWorkflowUnlinkGuardsActiveAndDefaultLinks(t *testing.T) {
 	if len(links) != 3 || !links[0].IsDefault {
 		t.Fatalf("links after invalid replacement = %+v, want original default preserved", links)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, spareLink.ID, ""); err != nil {
+	blockedDefault, err := store.UnlinkProjectWorkflow(ctx, link.ID, "")
+	if err != nil {
+		t.Fatalf("unlink default without replacement should return typed blocker, got error: %v", err)
+	}
+	if blockedDefault.Unlinked || !hasProjectWorkflowUnlinkBlocker(blockedDefault.Blockers, "default_replacement_required", 2) {
+		t.Fatalf("blocked default unlink = %+v, want replacement-required blocker", blockedDefault)
+	}
+	links, err = store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after missing replacement: %v", err)
+	}
+	if len(links) != 3 || !links[0].IsDefault {
+		t.Fatalf("links after missing replacement = %+v, want original default preserved", links)
+	}
+	if result, err := store.UnlinkProjectWorkflow(ctx, spareLink.ID, ""); err != nil || !result.Unlinked {
 		t.Fatalf("unlink unused non-default link should physically delete: %v", err)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, link.ID, otherLink.ID); err != nil {
+	if result, err := store.UnlinkProjectWorkflow(ctx, link.ID, otherLink.ID); err != nil || !result.Unlinked {
 		t.Fatalf("unlink default with valid replacement: %v", err)
 	}
 	links, err = store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
@@ -2581,15 +2655,19 @@ func TestProjectWorkflowUnlinkGuardsActiveAndDefaultLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, link.ID, ""); err == nil || !strings.Contains(err.Error(), "non-terminal") {
-		t.Fatalf("expected non-terminal unlink guard, got %v", err)
+	blocked, err := store.UnlinkProjectWorkflow(ctx, link.ID, "")
+	if err != nil {
+		t.Fatalf("task reference unlink guard should return typed blockers, got error: %v", err)
+	}
+	if blocked.Unlinked || !hasProjectWorkflowUnlinkBlocker(blocked.Blockers, "task_references", 1) {
+		t.Fatalf("blocked unlink = %+v, want task reference blocker", blocked)
 	}
 	if _, err := store.StartTask(ctx, task.ID); err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
 }
 
-func TestProjectWorkflowUnlinkSoftDisablesTerminalHistory(t *testing.T) {
+func TestProjectWorkflowUnlinkBlocksTerminalTaskHistory(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createValidWorkflow(t, ctx, store)
@@ -2608,19 +2686,489 @@ func TestProjectWorkflowUnlinkSoftDisablesTerminalHistory(t *testing.T) {
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	if err := store.UnlinkProjectWorkflow(ctx, link.ID, ""); err != nil {
-		t.Fatalf("UnlinkProjectWorkflow terminal history: %v", err)
+	blocked, err := store.UnlinkProjectWorkflow(ctx, link.ID, "")
+	if err != nil {
+		t.Fatalf("terminal task history unlink guard should return typed blockers, got error: %v", err)
+	}
+	if blocked.Unlinked || !hasProjectWorkflowUnlinkBlocker(blocked.Blockers, "task_references", 1) {
+		t.Fatalf("blocked unlink = %+v, want terminal task history blocker", blocked)
 	}
 	links, err := store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
 	if err != nil {
 		t.Fatalf("ListProjectWorkflowLinks: %v", err)
 	}
-	if len(links) != 1 || links[0].ID != link.ID || links[0].UnlinkedAtUnixMs == 0 || links[0].IsDefault {
-		t.Fatalf("links after soft unlink = %+v", links)
+	if len(links) != 1 || links[0].ID != link.ID || !links[0].IsDefault {
+		t.Fatalf("links after blocked unlink = %+v", links)
 	}
 	if _, err := store.queries.GetTask(ctx, string(task.ID)); err != nil {
 		t.Fatalf("task history should remain readable after soft unlink: %v", err)
 	}
+}
+
+func hasProjectWorkflowUnlinkBlocker(blockers []ProjectWorkflowUnlinkBlocker, code string, count int) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code && blocker.Count == count {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWorkflowDeletePreviewAndConfirmedApplyDeleteDatabaseRows(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	impact, err := store.PreviewWorkflowDelete(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete: %v", err)
+	}
+	if impact.WorkflowID != workflowID || impact.GraphRevision != 6 || impact.ProjectCount != 1 || impact.LinkCount != 1 || impact.TaskCount != 1 || impact.ActiveRunCount != 0 || impact.RunnableRunCount != 0 || impact.BlockedTaskCount != 0 {
+		t.Fatalf("delete impact = %+v, want one linked project/link/task and no run blockers", impact)
+	}
+
+	unconfirmed, err := store.DeleteWorkflow(ctx, WorkflowDeleteRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("DeleteWorkflow unconfirmed: %v", err)
+	}
+	if unconfirmed.Deleted || !hasWorkflowDeleteBlocker(unconfirmed.Blockers, "confirmation_required", 1) {
+		t.Fatalf("unconfirmed delete result = %+v, want confirmation blocker", unconfirmed)
+	}
+
+	cleanup, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(impact, true))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow cleanup: %v", err)
+	}
+	if cleanup.Deleted || !hasWorkflowDeleteBlocker(cleanup.Blockers, "artifact_cleanup_unsupported", 1) {
+		t.Fatalf("cleanup delete result = %+v, want unsupported cleanup blocker", cleanup)
+	}
+
+	deleted, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(impact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow confirmed: %v", err)
+	}
+	if !deleted.Deleted || len(deleted.Blockers) != 0 {
+		t.Fatalf("confirmed delete result = %+v, want deletion without blockers", deleted)
+	}
+	if _, err := store.queries.GetTask(ctx, string(task.ID)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetTask after workflow delete = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := store.queries.GetWorkflow(ctx, string(workflowID)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetWorkflow after workflow delete = %v, want sql.ErrNoRows", err)
+	}
+	links, err := store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after workflow delete: %v", err)
+	}
+	if len(links) != 0 {
+		t.Fatalf("links after workflow delete = %+v, want none", links)
+	}
+	var nodeCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_nodes WHERE workflow_id = ?`, string(workflowID)).Scan(&nodeCount); err != nil {
+		t.Fatalf("count workflow nodes after delete: %v", err)
+	}
+	if nodeCount != 0 {
+		t.Fatalf("workflow node count after delete = %d, want 0", nodeCount)
+	}
+}
+
+func TestWorkflowDeleteBlocksRunnableAndActiveRuns(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+
+	runnableImpact, err := store.PreviewWorkflowDelete(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete runnable: %v", err)
+	}
+	if runnableImpact.RunnableRunCount != 1 || runnableImpact.ActiveRunCount != 0 || runnableImpact.BlockedTaskCount != 1 {
+		t.Fatalf("runnable impact = %+v, want one runnable blocked task", runnableImpact)
+	}
+	runnableDelete, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(runnableImpact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow runnable: %v", err)
+	}
+	if runnableDelete.Deleted || !hasWorkflowDeleteBlocker(runnableDelete.Blockers, "runnable_runs", 1) {
+		t.Fatalf("runnable delete result = %+v, want runnable_runs blocker", runnableDelete)
+	}
+
+	if _, err := store.ClaimRun(ctx, started.RunID, 0); err != nil {
+		t.Fatalf("ClaimRun: %v", err)
+	}
+	activeImpact, err := store.PreviewWorkflowDelete(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete active: %v", err)
+	}
+	if activeImpact.ActiveRunCount != 1 || activeImpact.RunnableRunCount != 0 || activeImpact.BlockedTaskCount != 1 {
+		t.Fatalf("active impact = %+v, want one active blocked task", activeImpact)
+	}
+	activeDelete, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(activeImpact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow active: %v", err)
+	}
+	if activeDelete.Deleted || !hasWorkflowDeleteBlocker(activeDelete.Blockers, "active_runs", 1) {
+		t.Fatalf("active delete result = %+v, want active_runs blocker", activeDelete)
+	}
+}
+
+func TestWorkflowDeleteBlocksDefaultReplacementAndDetectsImpactChanges(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	defaultWorkflowID := createValidWorkflow(t, ctx, store)
+	defaultLink, err := store.LinkWorkflow(ctx, binding.ProjectID, defaultWorkflowID, true)
+	if err != nil {
+		t.Fatalf("LinkWorkflow default: %v", err)
+	}
+	replacementWorkflowID := createValidWorkflow(t, ctx, store)
+	replacementLink, err := store.LinkWorkflow(ctx, binding.ProjectID, replacementWorkflowID, false)
+	if err != nil {
+		t.Fatalf("LinkWorkflow replacement: %v", err)
+	}
+
+	defaultImpact, err := store.PreviewWorkflowDelete(ctx, defaultWorkflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete default: %v", err)
+	}
+	if defaultImpact.DefaultReplacementProjectCount != 1 {
+		t.Fatalf("default impact = %+v, want one project requiring replacement default", defaultImpact)
+	}
+	blockedDefault, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(defaultImpact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow default: %v", err)
+	}
+	if blockedDefault.Deleted || !hasWorkflowDeleteBlocker(blockedDefault.Blockers, "default_replacement_required", 1) {
+		t.Fatalf("default delete result = %+v, want default replacement blocker", blockedDefault)
+	}
+	links, err := store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after default blocker: %v", err)
+	}
+	if len(links) != 2 || links[0].ID != defaultLink.ID || !links[0].IsDefault {
+		t.Fatalf("links after default blocker = %+v, want original default preserved", links)
+	}
+
+	if _, err := store.SetDefaultProjectWorkflowLink(ctx, binding.ProjectID, replacementWorkflowID); err != nil {
+		t.Fatalf("SetDefaultProjectWorkflowLink: %v", err)
+	}
+	deleteableImpact, err := store.PreviewWorkflowDelete(ctx, defaultWorkflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete after replacement: %v", err)
+	}
+	if deleteableImpact.DefaultReplacementProjectCount != 0 {
+		t.Fatalf("deleteable impact = %+v, want no replacement blocker", deleteableImpact)
+	}
+	deleted, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(deleteableImpact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow after replacement: %v", err)
+	}
+	if !deleted.Deleted || len(deleted.Blockers) != 0 {
+		t.Fatalf("delete after replacement = %+v, want deletion", deleted)
+	}
+	links, err = store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectWorkflowLinks after delete: %v", err)
+	}
+	if len(links) != 1 || links[0].ID != replacementLink.ID || !links[0].IsDefault {
+		t.Fatalf("links after deleting old default = %+v, want replacement default preserved", links)
+	}
+
+	staleWorkflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, staleWorkflowID, false); err != nil {
+		t.Fatalf("LinkWorkflow stale: %v", err)
+	}
+	staleImpact, err := store.PreviewWorkflowDelete(ctx, staleWorkflowID)
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete stale: %v", err)
+	}
+	if _, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: staleWorkflowID, Title: "Stale", Body: "Body"}); err != nil {
+		t.Fatalf("CreateTask stale: %v", err)
+	}
+	staleDelete, err := store.DeleteWorkflow(ctx, confirmedWorkflowDeleteRequest(staleImpact, false))
+	if err != nil {
+		t.Fatalf("DeleteWorkflow stale: %v", err)
+	}
+	if staleDelete.Deleted || !hasWorkflowDeleteBlocker(staleDelete.Blockers, "impact_changed", 1) || staleDelete.Impact.TaskCount != 1 {
+		t.Fatalf("stale delete result = %+v, want impact_changed with refreshed task count", staleDelete)
+	}
+}
+
+func confirmedWorkflowDeleteRequest(impact WorkflowDeleteImpact, cleanupArtifacts bool) WorkflowDeleteRequest {
+	return WorkflowDeleteRequest{
+		WorkflowID:            impact.WorkflowID,
+		Confirmed:             true,
+		ExpectedGraphRevision: impact.GraphRevision,
+		ExpectedProjectCount:  impact.ProjectCount,
+		ExpectedLinkCount:     impact.LinkCount,
+		ExpectedTaskCount:     impact.TaskCount,
+		CleanupArtifacts:      cleanupArtifacts,
+	}
+}
+
+func hasWorkflowDeleteBlocker(blockers []WorkflowDeleteBlocker, code string, count int64) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code && blocker.Count == count {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWorkflowGraphSaveAppliesExpectedRevisionAndRemovalConfirmation(t *testing.T) {
+	ctx := context.Background()
+	store, _ := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	def, record, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+
+	unconfirmed := workflowGraphSaveRequestFromDefinition(workflowID, record.GraphRevision, false, def)
+	unconfirmed.Edges = removeWorkflowGraphSaveEdge(unconfirmed.Edges, workflow.EdgeID("edge-done-"+string(workflowID)))
+	unconfirmed.TransitionGroups = removeWorkflowGraphSaveTransitionGroupByID(unconfirmed.TransitionGroups, workflow.TransitionGroupID("group-done-"+string(workflowID)))
+	blocked, err := store.SaveWorkflowGraph(ctx, unconfirmed)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph unconfirmed: %v", err)
+	}
+	if blocked.Saved || workflowGraphSaveBlockerCount(blocked.Blockers, "confirmation_required") != 2 {
+		t.Fatalf("unconfirmed graph save = %+v, want confirmation blocker for one removed edge and transition group", blocked)
+	}
+	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
+		t.Fatalf("GetDefinition after unconfirmed save: %v", err)
+	} else if unchanged.GraphRevision != record.GraphRevision {
+		t.Fatalf("graph revision after unconfirmed save = %d, want %d", unchanged.GraphRevision, record.GraphRevision)
+	}
+
+	confirmed := unconfirmed
+	confirmed.Confirmed = true
+	saved, err := store.SaveWorkflowGraph(ctx, confirmed)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph confirmed: %v", err)
+	}
+	if !saved.Saved || len(saved.Blockers) != 0 || saved.GraphRevision != record.GraphRevision+1 {
+		t.Fatalf("confirmed graph save = %+v, want single revision bump", saved)
+	}
+	updatedDef, updatedRecord, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition after confirmed save: %v", err)
+	}
+	if updatedRecord.GraphRevision != record.GraphRevision+1 || len(updatedDef.Edges) != len(def.Edges)-1 {
+		t.Fatalf("updated graph = revision %d edges %d, want revision %d edges %d", updatedRecord.GraphRevision, len(updatedDef.Edges), record.GraphRevision+1, len(def.Edges)-1)
+	}
+
+	stale := workflowGraphSaveRequestFromDefinition(workflowID, record.GraphRevision, true, updatedDef)
+	staleResult, err := store.SaveWorkflowGraph(ctx, stale)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph stale: %v", err)
+	}
+	if staleResult.Saved || workflowGraphSaveBlockerCount(staleResult.Blockers, "graph_revision_changed") != updatedRecord.GraphRevision {
+		t.Fatalf("stale graph save = %+v, want current revision blocker", staleResult)
+	}
+}
+
+func TestWorkflowGraphSaveBlocksRemovedTaskReferences(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createValidWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	def, record, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+
+	edgeRemoval := workflowGraphSaveRequestFromDefinition(workflowID, record.GraphRevision, true, def)
+	edgeRemoval.Edges = removeWorkflowGraphSaveEdge(edgeRemoval.Edges, workflow.EdgeID("edge-done-"+string(workflowID)))
+	edgeRemoval.TransitionGroups = removeWorkflowGraphSaveTransitionGroupByID(edgeRemoval.TransitionGroups, workflow.TransitionGroupID("group-done-"+string(workflowID)))
+	edgeBlocked, err := store.SaveWorkflowGraph(ctx, edgeRemoval)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph edge removal: %v", err)
+	}
+	if edgeBlocked.Saved || workflowGraphSaveBlockerCount(edgeBlocked.Blockers, "edge_task_references") == 0 {
+		t.Fatalf("edge removal graph save = %+v, want edge task-reference blocker", edgeBlocked)
+	}
+
+	nodeRemoval := workflowGraphSaveRequestFromDefinition(workflowID, record.GraphRevision, true, def)
+	agentID := workflow.NodeID("node-agent-" + string(workflowID))
+	nodeRemoval.Nodes = removeWorkflowGraphSaveNode(nodeRemoval.Nodes, agentID)
+	nodeRemoval.TransitionGroups = removeWorkflowGraphSaveTransitionGroupsTouchingNode(def, nodeRemoval.TransitionGroups, agentID)
+	nodeRemoval.Edges = removeWorkflowGraphSaveEdgesTouchingNode(def, nodeRemoval.Edges, agentID)
+	nodeBlocked, err := store.SaveWorkflowGraph(ctx, nodeRemoval)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph node removal: %v", err)
+	}
+	if nodeBlocked.Saved || workflowGraphSaveBlockerCount(nodeBlocked.Blockers, "node_task_references") == 0 {
+		t.Fatalf("node removal graph save = %+v, want node task-reference blocker", nodeBlocked)
+	}
+	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
+		t.Fatalf("GetDefinition after blocked graph saves: %v", err)
+	} else if unchanged.GraphRevision != record.GraphRevision {
+		t.Fatalf("graph revision after blocked graph saves = %d, want %d", unchanged.GraphRevision, record.GraphRevision)
+	}
+}
+
+func TestWorkflowGraphSaveBlocksRemovedParallelBranchEdgeReferences(t *testing.T) {
+	ctx := context.Background()
+	store, binding := newTestStore(t)
+	workflowID := createFanoutJoinWorkflow(t, ctx, store)
+	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := store.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	result, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}})
+	if err != nil {
+		t.Fatalf("CompleteRun split: %v", err)
+	}
+	def, record, err := store.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	removedEdgeID := workflow.EdgeID("edge-split-a-" + string(workflowID))
+	req := workflowGraphSaveRequestFromDefinition(workflowID, record.GraphRevision, true, def)
+	req.Edges = removeWorkflowGraphSaveEdge(req.Edges, removedEdgeID)
+	blocked, err := store.SaveWorkflowGraph(ctx, req)
+	if err != nil {
+		t.Fatalf("SaveWorkflowGraph parallel branch edge removal: %v", err)
+	}
+	if blocked.Saved || workflowGraphSaveBlockerCount(blocked.Blockers, "edge_task_references") == 0 {
+		t.Fatalf("parallel branch edge removal = %+v, want edge task-reference blocker", blocked)
+	}
+	var branchEdgeID sql.NullString
+	if err := store.db.QueryRowContext(ctx, `SELECT parallel_branch_edge_id FROM task_node_placements WHERE id = ?`, string(result.PlacementIDs[0])).Scan(&branchEdgeID); err != nil {
+		t.Fatalf("query branch placement edge after blocked graph save: %v", err)
+	}
+	if !branchEdgeID.Valid || branchEdgeID.String == "" {
+		t.Fatalf("branch placement edge after blocked graph save = %+v, want preserved reference", branchEdgeID)
+	}
+	if _, unchanged, err := store.GetDefinition(ctx, workflowID); err != nil {
+		t.Fatalf("GetDefinition after blocked parallel branch save: %v", err)
+	} else if unchanged.GraphRevision != record.GraphRevision {
+		t.Fatalf("graph revision after blocked parallel branch save = %d, want %d", unchanged.GraphRevision, record.GraphRevision)
+	}
+}
+
+func workflowGraphSaveRequestFromDefinition(workflowID workflow.WorkflowID, revision int64, confirmed bool, def workflow.Definition) WorkflowGraphSaveRequest {
+	req := WorkflowGraphSaveRequest{WorkflowID: workflowID, ExpectedGraphRevision: revision, Confirmed: confirmed}
+	for _, node := range def.Nodes {
+		req.Nodes = append(req.Nodes, NodeRecord{ID: node.ID, WorkflowID: workflowID, Key: node.Key, Kind: node.Kind, DisplayName: node.DisplayName, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, OutputFields: node.OutputFields})
+	}
+	for _, group := range def.TransitionGroups {
+		req.TransitionGroups = append(req.TransitionGroups, TransitionGroupRecord{ID: group.ID, WorkflowID: workflowID, SourceNodeID: group.SourceNodeID, TransitionID: group.TransitionID, DisplayName: group.DisplayName})
+	}
+	for _, edge := range def.Edges {
+		req.Edges = append(req.Edges, EdgeRecord{ID: edge.ID, WorkflowID: workflowID, TransitionGroupID: edge.TransitionGroupID, Key: edge.Key, TargetNodeID: edge.TargetNodeID, ContextMode: edge.ContextMode, RequiresApproval: edge.RequiresApproval, InputBindings: edge.InputBindings, OutputRequirements: edge.OutputRequirements})
+	}
+	return req
+}
+
+func removeWorkflowGraphSaveNode(nodes []NodeRecord, nodeID workflow.NodeID) []NodeRecord {
+	filtered := make([]NodeRecord, 0, len(nodes))
+	for _, node := range nodes {
+		if node.ID != nodeID {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+
+func removeWorkflowGraphSaveTransitionGroupsTouchingNode(def workflow.Definition, groups []TransitionGroupRecord, nodeID workflow.NodeID) []TransitionGroupRecord {
+	touching := map[workflow.TransitionGroupID]bool{}
+	for _, group := range def.TransitionGroups {
+		if group.SourceNodeID == nodeID {
+			touching[group.ID] = true
+		}
+	}
+	for _, edge := range def.Edges {
+		if edge.TargetNodeID == nodeID {
+			touching[edge.TransitionGroupID] = true
+		}
+	}
+	filtered := make([]TransitionGroupRecord, 0, len(groups))
+	for _, group := range groups {
+		if !touching[group.ID] {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
+}
+
+func removeWorkflowGraphSaveTransitionGroupByID(groups []TransitionGroupRecord, groupID workflow.TransitionGroupID) []TransitionGroupRecord {
+	filtered := make([]TransitionGroupRecord, 0, len(groups))
+	for _, group := range groups {
+		if group.ID != groupID {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
+}
+
+func removeWorkflowGraphSaveEdge(edges []EdgeRecord, edgeID workflow.EdgeID) []EdgeRecord {
+	filtered := make([]EdgeRecord, 0, len(edges))
+	for _, edge := range edges {
+		if edge.ID != edgeID {
+			filtered = append(filtered, edge)
+		}
+	}
+	return filtered
+}
+
+func removeWorkflowGraphSaveEdgesTouchingNode(def workflow.Definition, edges []EdgeRecord, nodeID workflow.NodeID) []EdgeRecord {
+	sourceByGroup := map[workflow.TransitionGroupID]workflow.NodeID{}
+	for _, group := range def.TransitionGroups {
+		sourceByGroup[group.ID] = group.SourceNodeID
+	}
+	filtered := make([]EdgeRecord, 0, len(edges))
+	for _, edge := range edges {
+		if edge.TargetNodeID != nodeID && sourceByGroup[edge.TransitionGroupID] != nodeID {
+			filtered = append(filtered, edge)
+		}
+	}
+	return filtered
+}
+
+func workflowGraphSaveBlockerCount(blockers []WorkflowGraphSaveBlocker, code string) int64 {
+	for _, blocker := range blockers {
+		if blocker.Code == code {
+			return blocker.Count
+		}
+	}
+	return 0
 }
 
 func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
@@ -2659,9 +3207,6 @@ func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
 		t.Fatalf("GetDefinition: %v", err)
 	}
 	done := nodeByKind(t, def, workflow.NodeKindTerminal)
-	if err := store.ArchiveNode(ctx, done.ID); err != nil {
-		t.Fatalf("ArchiveNode terminal history: %v", err)
-	}
 	if err := store.DeleteNode(ctx, done.ID); err == nil || !strings.Contains(err.Error(), "task history") {
 		t.Fatalf("expected terminal physical delete guard, got %v", err)
 	}
@@ -2982,7 +3527,17 @@ WHERE id = ?`, string(placementID)).Scan(&batchID, &branchID); err != nil {
 
 func requireApprovalOnWorkflowEdge(t *testing.T, ctx context.Context, store *Store, workflowID workflow.WorkflowID, edgeKey string) {
 	t.Helper()
-	result, err := store.db.ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = ?`, string(workflowID), edgeKey)
+	result, err := store.db.ExecContext(ctx, `
+UPDATE workflow_edges
+SET requires_approval = 1
+WHERE edge_key = ?
+  AND EXISTS (
+      SELECT 1
+      FROM workflow_transition_groups tg
+      JOIN workflow_nodes source ON source.id = tg.source_node_id
+      WHERE tg.id = workflow_edges.transition_group_id
+        AND source.workflow_id = ?
+  )`, edgeKey, string(workflowID))
 	if err != nil {
 		t.Fatalf("require approval on edge %s: %v", edgeKey, err)
 	}

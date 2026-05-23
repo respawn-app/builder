@@ -85,10 +85,9 @@ type ProjectHomeListRequest struct {
 }
 
 type ProjectHomeListResponse struct {
-	Projects            []ProjectHomeSummary `json:"projects"`
-	NextPageToken       string               `json:"next_page_token"`
-	GeneratedAtUnixMs   int64                `json:"generated_at_unix_ms"`
-	LatestEventSequence int64                `json:"latest_event_sequence"`
+	Projects          []ProjectHomeSummary `json:"projects"`
+	NextPageToken     string               `json:"next_page_token"`
+	GeneratedAtUnixMs int64                `json:"generated_at_unix_ms"`
 }
 
 type ProjectHomeSummary struct {

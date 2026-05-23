@@ -3,11 +3,8 @@ package workflowsvc
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"builder/server/requestmemo"
 	askquestion "builder/server/tools/askquestion"
@@ -24,6 +21,7 @@ type Service struct {
 	taskWorktrees taskWorktreeEnsurer
 	runtimeCancel taskRuntimeCanceler
 	schedulerWake schedulerNotifier
+	events        *workflowProjectEventBroker
 	prompts       pendingPromptResponder
 	approve       transitionApprover
 	questionMemo  *requestmemo.Memo[taskQuestionAnswerMemoRequest, struct{}]
@@ -61,13 +59,6 @@ type taskQuestionAnswerMemoRequest struct {
 	FreeformAnswer       string
 }
 
-type workflowProjectSubscription struct {
-	store        *workflowstore.Store
-	projectID    string
-	nextSequence int64
-	closed       atomic.Bool
-}
-
 type Option func(*Service)
 
 func WithTaskWorktreeEnsurer(ensurer taskWorktreeEnsurer) Option {
@@ -101,7 +92,9 @@ func New(store *workflowstore.Store, view *workflowview.Service, roleResolver wo
 	if view == nil {
 		return nil, errors.New("workflow view is required")
 	}
-	service := &Service{store: store, view: view, roleResolver: roleResolver, approve: store.ApproveTransition, questionMemo: requestmemo.New[taskQuestionAnswerMemoRequest, struct{}]()}
+	events := newWorkflowProjectEventBroker()
+	store.SetWorkflowEventPublisher(events)
+	service := &Service{store: store, view: view, roleResolver: roleResolver, events: events, approve: store.ApproveTransition, questionMemo: requestmemo.New[taskQuestionAnswerMemoRequest, struct{}]()}
 	for _, opt := range opts {
 		opt(service)
 	}
@@ -120,8 +113,8 @@ func (s *Service) CreateWorkflow(ctx context.Context, req serverapi.WorkflowCrea
 }
 
 func (s *Service) publishWorkflowEvent(ctx context.Context, projectID string, workflowID string, resource string, action string, changedIDs ...string) {
-	if _, err := s.store.RecordWorkflowEvent(ctx, workflowstore.WorkflowEventRecord{ProjectID: projectID, WorkflowID: workflowID, Resource: resource, Action: action, ChangedIDs: changedIDs}); err != nil {
-		slog.Warn("record workflow event failed", "project_id", strings.TrimSpace(projectID), "workflow_id", strings.TrimSpace(workflowID), "resource", strings.TrimSpace(resource), "action", strings.TrimSpace(action), "changed_ids", changedIDs, "error", err)
+	if err := s.store.PublishWorkflowEvent(ctx, workflowstore.WorkflowEventRecord{ProjectID: projectID, WorkflowID: workflowID, Resource: resource, Action: action, ChangedIDs: changedIDs}); err != nil {
+		slog.Warn("publish workflow event failed", "project_id", strings.TrimSpace(projectID), "workflow_id", strings.TrimSpace(workflowID), "resource", strings.TrimSpace(resource), "action", strings.TrimSpace(action), "changed_ids", changedIDs, "error", err)
 	}
 }
 
@@ -149,6 +142,7 @@ func (s *Service) UpdateWorkflow(ctx context.Context, req serverapi.WorkflowUpda
 	if err := s.store.UpdateWorkflowInfo(ctx, workflow.WorkflowID(req.WorkflowID), req.Name, req.Description); err != nil {
 		return serverapi.WorkflowGetResponse{}, err
 	}
+	s.publishLinkedWorkflowEvent(ctx, req.WorkflowID, "workflow", "updated", req.WorkflowID)
 	return s.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: req.WorkflowID})
 }
 
@@ -203,7 +197,7 @@ func (s *Service) AddWorkflowNodeGroup(ctx context.Context, req serverapi.Workfl
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowNodeGroupResponse{}, err
 	}
-	group, revision, err := s.store.AddNodeGroup(ctx, workflowstore.NodeGroupRecord{ID: req.GroupID, WorkflowID: workflow.WorkflowID(req.WorkflowID), Key: workflow.ModelKey(req.GroupKey), DisplayName: req.DisplayName, SortOrder: int64(req.SortOrder), MetadataJSON: req.MetadataJSON})
+	group, revision, err := s.store.AddNodeGroup(ctx, workflowstore.NodeGroupRecord{ID: req.GroupID, WorkflowID: workflow.WorkflowID(req.WorkflowID), Key: workflow.ModelKey(req.GroupKey), DisplayName: req.DisplayName, SortOrder: int64(req.SortOrder)})
 	if err != nil {
 		return serverapi.WorkflowNodeGroupResponse{}, err
 	}
@@ -215,7 +209,7 @@ func (s *Service) UpdateWorkflowNodeGroup(ctx context.Context, req serverapi.Wor
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowNodeGroupResponse{}, err
 	}
-	group, revision, err := s.store.UpdateNodeGroup(ctx, workflowstore.NodeGroupRecord{ID: req.GroupID, WorkflowID: workflow.WorkflowID(req.WorkflowID), Key: workflow.ModelKey(req.GroupKey), DisplayName: req.DisplayName, SortOrder: int64(req.SortOrder), MetadataJSON: req.MetadataJSON})
+	group, revision, err := s.store.UpdateNodeGroup(ctx, workflowstore.NodeGroupRecord{ID: req.GroupID, WorkflowID: workflow.WorkflowID(req.WorkflowID), Key: workflow.ModelKey(req.GroupKey), DisplayName: req.DisplayName, SortOrder: int64(req.SortOrder)})
 	if err != nil {
 		return serverapi.WorkflowNodeGroupResponse{}, err
 	}
@@ -321,19 +315,66 @@ func (s *Service) SetDefaultProjectWorkflowLink(ctx context.Context, req servera
 	return serverapi.WorkflowSetDefaultProjectLinkResponse{Link: projectWorkflowLink(link)}, nil
 }
 
-func (s *Service) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error {
+func (s *Service) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) (serverapi.WorkflowUnlinkProjectResponse, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return serverapi.WorkflowUnlinkProjectResponse{}, err
 	}
-	link, err := s.store.GetProjectWorkflowLink(ctx, req.LinkID)
+	result, err := s.store.UnlinkProjectWorkflow(ctx, req.LinkID, req.ReplacementDefaultLinkID)
+	resp := workflowUnlinkProjectResponse(result)
 	if err != nil {
-		return err
+		return resp, err
 	}
-	if err := s.store.UnlinkProjectWorkflow(ctx, req.LinkID, req.ReplacementDefaultLinkID); err != nil {
-		return err
+	if result.Unlinked {
+		s.publishWorkflowEvent(ctx, result.ProjectID, string(result.WorkflowID), "workflow_link", "unlinked", req.LinkID)
 	}
-	s.publishWorkflowEvent(ctx, link.ProjectID, string(link.WorkflowID), "workflow_link", "unlinked", req.LinkID)
-	return nil
+	return resp, nil
+}
+
+func (s *Service) PreviewWorkflowDelete(ctx context.Context, req serverapi.WorkflowDeletePreviewRequest) (serverapi.WorkflowDeletePreviewResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowDeletePreviewResponse{}, err
+	}
+	impact, err := s.store.PreviewWorkflowDelete(ctx, workflow.WorkflowID(req.WorkflowID))
+	if err != nil {
+		return serverapi.WorkflowDeletePreviewResponse{}, err
+	}
+	return serverapi.WorkflowDeletePreviewResponse{Impact: workflowDeleteImpact(impact)}, nil
+}
+
+func (s *Service) DeleteWorkflow(ctx context.Context, req serverapi.WorkflowDeleteRequest) (serverapi.WorkflowDeleteResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.WorkflowDeleteResponse{}, err
+	}
+	links, err := s.store.ListWorkflowProjectLinks(ctx, workflow.WorkflowID(req.WorkflowID))
+	if err != nil {
+		return serverapi.WorkflowDeleteResponse{}, err
+	}
+	result, err := s.store.DeleteWorkflow(ctx, workflowstore.WorkflowDeleteRequest{
+		WorkflowID:            workflow.WorkflowID(req.WorkflowID),
+		Confirmed:             req.Confirmed,
+		ExpectedGraphRevision: req.ExpectedGraphRevision,
+		ExpectedProjectCount:  req.ExpectedProjectCount,
+		ExpectedLinkCount:     req.ExpectedLinkCount,
+		ExpectedTaskCount:     req.ExpectedTaskCount,
+		CleanupArtifacts:      req.CleanupArtifacts,
+	})
+	if err != nil {
+		return serverapi.WorkflowDeleteResponse{}, err
+	}
+	resp := workflowDeleteResponse(result)
+	if !resp.Deleted {
+		return resp, nil
+	}
+	seen := map[string]bool{}
+	for _, link := range links {
+		projectID := strings.TrimSpace(link.ProjectID)
+		if projectID == "" || seen[projectID] {
+			continue
+		}
+		seen[projectID] = true
+		s.publishWorkflowEvent(ctx, projectID, req.WorkflowID, "workflow", "deleted", req.WorkflowID)
+	}
+	return resp, nil
 }
 
 func (s *Service) ValidateWorkflow(ctx context.Context, req serverapi.WorkflowValidateRequest) (serverapi.WorkflowValidateResponse, error) {
@@ -598,7 +639,7 @@ func (s *Service) ListWorkflowTaskComments(ctx context.Context, req serverapi.Wo
 	if err := req.Validate(); err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
 	}
-	comments, err := s.store.ListComments(ctx, workflow.TaskID(req.TaskID), req.IncludeDeleted)
+	comments, err := s.store.ListComments(ctx, workflow.TaskID(req.TaskID))
 	if err != nil {
 		return serverapi.WorkflowTaskCommentListResponse{}, err
 	}
@@ -675,7 +716,7 @@ func (s *Service) SubscribeWorkflowProject(ctx context.Context, req serverapi.Wo
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	return &workflowProjectSubscription{store: s.store, projectID: strings.TrimSpace(req.ProjectID), nextSequence: req.AfterSequence + 1}, nil
+	return s.events.Subscribe(strings.TrimSpace(req.ProjectID))
 }
 
 func (s *Service) GetWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {
@@ -694,53 +735,49 @@ func workflowRecord(row workflowstore.WorkflowRecord) serverapi.WorkflowRecord {
 }
 
 func workflowNodeGroup(row workflowstore.NodeGroupRecord) serverapi.WorkflowNodeGroup {
-	return serverapi.WorkflowNodeGroup{GroupID: row.ID, WorkflowID: string(row.WorkflowID), GroupKey: string(row.Key), DisplayName: row.DisplayName, SortOrder: int(row.SortOrder), MetadataJSON: row.MetadataJSON}
-}
-
-func (s *workflowProjectSubscription) Next(ctx context.Context) (serverapi.WorkflowProjectEvent, error) {
-	if s == nil || s.store == nil {
-		return serverapi.WorkflowProjectEvent{}, errors.New("workflow project subscription is required")
-	}
-	for {
-		if s.closed.Load() {
-			return serverapi.WorkflowProjectEvent{}, io.EOF
-		}
-		events, err := s.store.ListWorkflowEventsAfter(ctx, s.projectID, s.nextSequence-1, 1)
-		if err != nil {
-			return serverapi.WorkflowProjectEvent{}, err
-		}
-		if len(events) > 0 {
-			event := events[0]
-			s.nextSequence = event.Sequence + 1
-			return workflowProjectEvent(event), nil
-		}
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return serverapi.WorkflowProjectEvent{}, ctx.Err()
-		case <-timer.C:
-		}
-	}
-}
-
-func (s *workflowProjectSubscription) Close() error {
-	if s != nil {
-		s.closed.Store(true)
-	}
-	return nil
-}
-
-func workflowProjectEvent(row workflowstore.WorkflowEventRecord) serverapi.WorkflowProjectEvent {
-	return serverapi.WorkflowProjectEvent{Sequence: row.Sequence, ProjectID: row.ProjectID, WorkflowID: row.WorkflowID, Resource: row.Resource, Action: row.Action, ChangedIDs: row.ChangedIDs, OccurredAtUnixMs: row.OccurredAtUnixMs}
+	return serverapi.WorkflowNodeGroup{GroupID: row.ID, WorkflowID: string(row.WorkflowID), GroupKey: string(row.Key), DisplayName: row.DisplayName, SortOrder: int(row.SortOrder)}
 }
 
 func projectWorkflowLink(row workflowstore.ProjectWorkflowLinkRecord) serverapi.ProjectWorkflowLink {
-	return serverapi.ProjectWorkflowLink{ID: row.ID, ProjectID: row.ProjectID, WorkflowID: string(row.WorkflowID), Default: row.IsDefault, UnlinkedAtUnixMs: row.UnlinkedAtUnixMs}
+	return serverapi.ProjectWorkflowLink{ID: row.ID, ProjectID: row.ProjectID, WorkflowID: string(row.WorkflowID), Default: row.IsDefault}
+}
+
+func workflowUnlinkProjectResponse(result workflowstore.ProjectWorkflowUnlinkResult) serverapi.WorkflowUnlinkProjectResponse {
+	resp := serverapi.WorkflowUnlinkProjectResponse{LinkID: result.LinkID, Unlinked: result.Unlinked}
+	for _, blocker := range result.Blockers {
+		dto := serverapi.WorkflowUnlinkProjectBlocker{Code: blocker.Code, Message: blocker.Message, Count: blocker.Count}
+		for _, task := range blocker.Tasks {
+			dto.Tasks = append(dto.Tasks, serverapi.WorkflowUnlinkTaskReference{TaskID: string(task.TaskID), ShortID: task.ShortID, Title: task.Title})
+		}
+		resp.Blockers = append(resp.Blockers, dto)
+	}
+	return resp
+}
+
+func workflowDeleteResponse(result workflowstore.WorkflowDeleteResult) serverapi.WorkflowDeleteResponse {
+	resp := serverapi.WorkflowDeleteResponse{Deleted: result.Deleted, Impact: workflowDeleteImpact(result.Impact)}
+	for _, blocker := range result.Blockers {
+		resp.Blockers = append(resp.Blockers, serverapi.WorkflowDeleteBlocker{Code: blocker.Code, Message: blocker.Message, Count: blocker.Count})
+	}
+	return resp
+}
+
+func workflowDeleteImpact(impact workflowstore.WorkflowDeleteImpact) serverapi.WorkflowDeleteImpact {
+	return serverapi.WorkflowDeleteImpact{
+		WorkflowID:                     string(impact.WorkflowID),
+		GraphRevision:                  impact.GraphRevision,
+		ProjectCount:                   impact.ProjectCount,
+		LinkCount:                      impact.LinkCount,
+		DefaultReplacementProjectCount: impact.DefaultReplacementProjectCount,
+		TaskCount:                      impact.TaskCount,
+		ActiveRunCount:                 impact.ActiveRunCount,
+		RunnableRunCount:               impact.RunnableRunCount,
+		BlockedTaskCount:               impact.BlockedTaskCount,
+	}
 }
 
 func commentRecord(row workflowstore.CommentRecord) serverapi.WorkflowTaskComment {
-	return serverapi.WorkflowTaskComment{ID: row.ID, TaskID: string(row.TaskID), Body: row.Body, Author: row.Author, AuthorID: row.AuthorID, DeletedAt: row.DeletedAt, CreatedAtUnixMs: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return serverapi.WorkflowTaskComment{ID: row.ID, TaskID: string(row.TaskID), Body: row.Body, Author: row.Author, AuthorID: row.AuthorID, CreatedAtUnixMs: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 func (s *Service) taskIdentityForComment(ctx context.Context, commentID string) (taskID string, projectID string, workflowID string, err error) {

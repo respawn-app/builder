@@ -109,6 +109,9 @@ func TestWorkflowAndTaskCommandsUseWorkflowAPI(t *testing.T) {
 	if linkID == "" {
 		t.Fatalf("link output = %q, want link id", linkOut)
 	}
+	if got := labeledOutputValue(t, linkOut, "default"); got != "true" {
+		t.Fatalf("link default output = %q, want true; output=%q", got, linkOut)
+	}
 
 	defaultOut, defaultErr, code := runWorkflowRootCommand("workflow", "default", binding.ProjectID, workflowID)
 	if code != 0 {

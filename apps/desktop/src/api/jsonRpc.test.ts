@@ -81,11 +81,15 @@ describe("JsonRpcWebSocketTransport", () => {
   it("installs subscription event listener before subscribe ack can race with first event", async () => {
     const transport = createJsonRpcTransport("ws://127.0.0.1:53082/rpc");
     const events: string[] = [];
+    const opens: string[] = [];
 
     transport.subscribe(
       "workflow.subscribeProject",
-      { project_id: "project-1", after_sequence: 10 },
+      { project_id: "project-1" },
       {
+        onOpen() {
+          opens.push("open");
+        },
         onEvent(method) {
           events.push(method);
         },
@@ -105,13 +109,18 @@ describe("JsonRpcWebSocketTransport", () => {
     await waitForSent(socket, 2);
     expect(frame(socket, 1)).toMatchObject({ method: "workflow.subscribeProject" });
 
-    ack(socket, 1);
     socket.receive(
-      JSON.stringify({ jsonrpc: "2.0", method: "workflow.project.event", params: { sequence: 11 } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workflow.project",
+        params: { event: { project_id: "project-1" } },
+      }),
     );
+    ack(socket, 1);
     await flushPromises();
 
-    expect(events).toEqual(["workflow.project.event"]);
+    expect(opens).toEqual(["open"]);
+    expect(events).toEqual(["workflow.project"]);
   });
 
   it("reopens subscription socket after unexpected close", async () => {
@@ -119,7 +128,7 @@ describe("JsonRpcWebSocketTransport", () => {
     const errors: string[] = [];
     const subscription = transport.subscribe(
       "workflow.subscribeProject",
-      { project_id: "project-1", after_sequence: 10 },
+      { project_id: "project-1" },
       {
         onEvent() {
           return;

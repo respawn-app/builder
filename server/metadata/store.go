@@ -53,13 +53,9 @@ type Binding struct {
 // Do not add active/released state here: whether a session runtime is active is
 // process-local state owned by sessionruntime.Service and RuntimeRegistry.
 type RuntimeLeaseRecord struct {
-	LeaseID      string
-	SessionID    string
-	RequestID    string
-	CreatedAt    time.Time
-	AcquiredAt   time.Time
-	ClientID     string
-	MetadataJSON string
+	LeaseID   string
+	SessionID string
+	CreatedAt time.Time
 }
 
 type WorktreeRecord struct {
@@ -308,11 +304,8 @@ func (s *Store) UpsertWorktreeRecord(ctx context.Context, record WorktreeRecord)
 	if strings.TrimSpace(record.WorkspaceID) == "" {
 		return errors.New("workspace id is required")
 	}
-	if strings.TrimSpace(record.DisplayName) == "" {
-		return errors.New("worktree display name is required")
-	}
-	if strings.TrimSpace(record.Availability) == "" {
-		return errors.New("worktree availability is required")
+	if strings.TrimSpace(record.CanonicalRoot) == "" {
+		return errors.New("worktree canonical root is required")
 	}
 	now := time.Now().UTC()
 	createdAt := record.CreatedAt
@@ -331,9 +324,6 @@ func (s *Store) UpsertWorktreeRecord(ctx context.Context, record WorktreeRecord)
 		ID:                strings.TrimSpace(record.ID),
 		WorkspaceID:       strings.TrimSpace(record.WorkspaceID),
 		CanonicalRootPath: canonicalRoot,
-		DisplayName:       strings.TrimSpace(record.DisplayName),
-		Availability:      strings.TrimSpace(record.Availability),
-		IsMain:            boolToInt64(record.IsMain),
 		BuilderManaged:    boolToInt64(record.BuilderManaged),
 		CreatedBranch:     boolToInt64(record.CreatedBranch),
 		OriginSessionID:   strings.TrimSpace(record.OriginSessionID),
@@ -529,9 +519,6 @@ func (s *Store) UpdateProjectDisplayName(ctx context.Context, projectID string, 
 	if updated == 0 {
 		return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
 	}
-	if err := recordProjectEventWithQueries(ctx, q, trimmedProjectID, "project", "update", []string{trimmedProjectID}, now); err != nil {
-		return err
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit project display name tx: %w", err)
 	}
@@ -567,25 +554,16 @@ func (s *Store) SetProjectDefaultWorkspace(ctx context.Context, projectID string
 	defer func() { _ = tx.Rollback() }()
 	q := s.queries.WithTx(tx)
 	now := time.Now().UTC().UnixMilli()
-	if _, err := q.ClearProjectPrimaryWorkspaces(ctx, sqlitegen.ClearProjectPrimaryWorkspacesParams{
-		ProjectID:       trimmedProjectID,
-		UpdatedAtUnixMs: now,
-	}); err != nil {
-		return fmt.Errorf("clear project primary workspaces: %w", err)
-	}
-	updated, err := q.SetProjectWorkspacePrimary(ctx, sqlitegen.SetProjectWorkspacePrimaryParams{
-		ProjectID:       trimmedProjectID,
+	updatedProject, err := q.SetProjectPrimaryWorkspace(ctx, sqlitegen.SetProjectPrimaryWorkspaceParams{
 		WorkspaceID:     trimmedWorkspaceID,
 		UpdatedAtUnixMs: now,
+		ProjectID:       trimmedProjectID,
 	})
 	if err != nil {
-		return fmt.Errorf("set project workspace primary: %w", err)
+		return fmt.Errorf("set project primary workspace: %w", err)
 	}
-	if updated == 0 {
-		return fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
-	}
-	if err := recordProjectEventWithQueries(ctx, q, trimmedProjectID, "workspace", "set_default", []string{trimmedWorkspaceID}, now); err != nil {
-		return err
+	if updatedProject == 0 {
+		return fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, trimmedProjectID)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit default workspace tx: %w", err)
@@ -653,9 +631,6 @@ func (s *Store) UnlinkProjectWorkspace(ctx context.Context, projectID string, wo
 	if rows == 0 {
 		return nil, fmt.Errorf("%w: %q", serverapi.ErrWorkspaceNotRegistered, trimmedWorkspaceID)
 	}
-	if err := recordProjectEventWithQueries(ctx, q, trimmedProjectID, "workspace", "unlink", []string{trimmedWorkspaceID}, time.Now().UTC().UnixMilli()); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit workspace unlink tx: %w", err)
 	}
@@ -673,7 +648,11 @@ func workspaceUnlinkBlockersWithQueries(ctx context.Context, q *sqlitegen.Querie
 			blockers = append(blockers, serverapi.ProjectWorkspaceUnlinkBlocker{Code: code, Message: message, Count: int(count)})
 		}
 	}
-	if workspace.IsPrimary != 0 {
+	primaryWorkspaceID, err := q.GetProjectPrimaryWorkspaceID(ctx, strings.TrimSpace(projectID))
+	if err != nil {
+		return nil, fmt.Errorf("get project primary workspace: %w", err)
+	}
+	if strings.TrimSpace(primaryWorkspaceID) == strings.TrimSpace(workspace.ID) {
 		blockers = append(blockers, serverapi.ProjectWorkspaceUnlinkBlocker{Code: "default_workspace", Message: "Workspace is the project default workspace."})
 	}
 	workspaceCount, err := q.CountProjectWorkspaces(ctx, strings.TrimSpace(projectID))
@@ -773,8 +752,6 @@ func (s *Store) RebindWorkspace(ctx context.Context, oldWorkspaceRoot string, ne
 	rows, err := q.UpdateWorkspaceBindingCanonicalRoot(ctx, sqlitegen.UpdateWorkspaceBindingCanonicalRootParams{
 		ID:                oldWorkspace.ID,
 		CanonicalRootPath: newCanonicalRoot,
-		DisplayName:       filepath.Base(newCanonicalRoot),
-		Availability:      availabilityForPath(newCanonicalRoot),
 		UpdatedAtUnixMs:   now,
 	})
 	if err != nil {
@@ -800,8 +777,6 @@ func (s *Store) RebindWorkspace(ctx context.Context, oldWorkspaceRoot string, ne
 		updatedRows, updateErr := q.UpdateWorktreeCanonicalRoot(ctx, sqlitegen.UpdateWorktreeCanonicalRootParams{
 			ID:                worktree.ID,
 			CanonicalRootPath: newWorktreeRoot,
-			DisplayName:       filepath.Base(newWorktreeRoot),
-			Availability:      availabilityForPath(newWorktreeRoot),
 			UpdatedAtUnixMs:   now,
 		})
 		if updateErr != nil {
@@ -976,17 +951,22 @@ func (s *Store) registerWorkspaceBindingConverged(ctx context.Context, canonical
 		ID:                workspaceID,
 		ProjectID:         projectID,
 		CanonicalRootPath: canonicalRoot,
-		DisplayName:       displayName,
-		Availability:      availabilityForPath(canonicalRoot),
-		IsPrimary:         1,
 		GitMetadataJson:   "{}",
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
 	}); err != nil {
 		return Binding{}, fmt.Errorf("insert workspace binding: %w", err)
 	}
-	if err := recordProjectEventWithQueries(ctx, q, projectID, "workspace", "attach", []string{workspaceID}, now.UnixMilli()); err != nil {
-		return Binding{}, err
+	updatedProject, err := q.SetProjectPrimaryWorkspace(ctx, sqlitegen.SetProjectPrimaryWorkspaceParams{
+		WorkspaceID:     workspaceID,
+		UpdatedAtUnixMs: now.UnixMilli(),
+		ProjectID:       projectID,
+	})
+	if err != nil {
+		return Binding{}, fmt.Errorf("set project primary workspace: %w", err)
+	}
+	if updatedProject == 0 {
+		return Binding{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, projectID)
 	}
 	if err := tx.Commit(); err != nil {
 		return Binding{}, fmt.Errorf("commit workspace registration tx: %w", err)
@@ -1196,7 +1176,7 @@ SET project_key = ?, updated_at_unix_ms = ?
 WHERE id = ?
   AND (
     project_key = ?
-    OR NOT EXISTS (SELECT 1 FROM tasks WHERE project_id = ?)
+    OR NOT EXISTS (SELECT 1 FROM task_records WHERE project_id = ?)
   )`, normalizedKey, time.Now().UTC().UnixMilli(), trimmedProjectID, normalizedKey, trimmedProjectID)
 	if err != nil {
 		if isSQLiteUniqueConstraint(err) {
@@ -1366,9 +1346,6 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		ID:                workspaceID,
 		ProjectID:         projectID,
 		CanonicalRootPath: canonicalRoot,
-		DisplayName:       workspaceDisplayName,
-		Availability:      availabilityForPath(canonicalRoot),
-		IsPrimary:         boolToInt64(isPrimary),
 		GitMetadataJson:   "{}",
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
@@ -1388,8 +1365,18 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		}
 		return Binding{}, fmt.Errorf("insert workspace binding: canonical root %q conflict was not recoverable", canonicalRoot)
 	}
-	if err := recordProjectEventWithQueries(ctx, q, projectID, "workspace", "attach", []string{workspaceID}, now.UnixMilli()); err != nil {
-		return Binding{}, err
+	if isPrimary {
+		updatedProject, err := q.SetProjectPrimaryWorkspace(ctx, sqlitegen.SetProjectPrimaryWorkspaceParams{
+			WorkspaceID:     workspaceID,
+			UpdatedAtUnixMs: now.UnixMilli(),
+			ProjectID:       projectID,
+		})
+		if err != nil {
+			return Binding{}, fmt.Errorf("set project primary workspace: %w", err)
+		}
+		if updatedProject == 0 {
+			return Binding{}, fmt.Errorf("%w: %q", serverapi.ErrProjectNotFound, projectID)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Binding{}, fmt.Errorf("commit workspace binding tx: %w", err)
@@ -1414,31 +1401,6 @@ func (s *Store) recoverWorkspaceBindingAfterCanonicalRootConflict(ctx context.Co
 		return Binding{}, false
 	}
 	return binding, true
-}
-
-func (s *Store) recordProjectEvent(ctx context.Context, projectID string, resource string, action string, changedIDs []string, occurredAtUnixMs int64) error {
-	if s == nil || s.queries == nil {
-		return errors.New("metadata store is required")
-	}
-	return recordProjectEventWithQueries(ctx, s.queries, projectID, resource, action, changedIDs, occurredAtUnixMs)
-}
-
-func recordProjectEventWithQueries(ctx context.Context, q *sqlitegen.Queries, projectID string, resource string, action string, changedIDs []string, occurredAtUnixMs int64) error {
-	changedIDsJSON, err := marshalJSON(changedIDs)
-	if err != nil {
-		return err
-	}
-	if _, err := q.InsertWorkflowEvent(ctx, sqlitegen.InsertWorkflowEventParams{
-		ProjectID:        strings.TrimSpace(projectID),
-		WorkflowID:       "",
-		Resource:         strings.TrimSpace(resource),
-		Action:           strings.TrimSpace(action),
-		ChangedIdsJson:   changedIDsJSON,
-		OccurredAtUnixMs: occurredAtUnixMs,
-	}); err != nil {
-		return fmt.Errorf("record project event: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]clientui.ProjectSummary, error) {
@@ -1481,17 +1443,6 @@ func (s *Store) ListProjectHomeSummaries(ctx context.Context, projectID string, 
 	return out, nil
 }
 
-func (s *Store) LatestWorkflowEventSequence(ctx context.Context, projectID string) (int64, error) {
-	if s == nil || s.queries == nil {
-		return 0, errors.New("metadata store is required")
-	}
-	value, err := s.queries.GetLatestWorkflowEventSequence(ctx, strings.TrimSpace(projectID))
-	if err != nil {
-		return 0, err
-	}
-	return int64FromStoredValue(value), nil
-}
-
 func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clientui.ProjectOverview, error) {
 	if s == nil || s.queries == nil {
 		return clientui.ProjectOverview{}, errors.New("metadata store is required")
@@ -1528,7 +1479,7 @@ func (s *Store) ListProjectWorkspaces(ctx context.Context, projectID string) ([]
 	}
 	out := make([]clientui.ProjectWorkspaceSummary, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.DisplayName, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
+		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
 	}
 	return out, nil
 }
@@ -1553,7 +1504,7 @@ func (s *Store) ListProjectWorkspacesPage(ctx context.Context, projectID string,
 	}
 	out := make([]clientui.ProjectWorkspaceSummary, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.DisplayName, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
+		out = append(out, projectWorkspaceSummaryFromRow(row.ID, row.RootPath, row.IsPrimary != 0, row.SessionCount, row.LatestActivityUnixMs))
 	}
 	return out, nil
 }
@@ -1600,33 +1551,23 @@ func (s *Store) SessionBelongsToProject(ctx context.Context, sessionID string, p
 	return strings.TrimSpace(row.ProjectID) == strings.TrimSpace(projectID), nil
 }
 
-func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, requestID string) (RuntimeLeaseRecord, error) {
+func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string) (RuntimeLeaseRecord, error) {
 	if s == nil || s.queries == nil {
 		return RuntimeLeaseRecord{}, errors.New("metadata store is required")
 	}
 	now := time.Now().UTC()
 	record := RuntimeLeaseRecord{
-		LeaseID:    "lease-" + uuid.NewString(),
-		SessionID:  strings.TrimSpace(sessionID),
-		RequestID:  strings.TrimSpace(requestID),
-		CreatedAt:  now,
-		AcquiredAt: now,
-		ClientID:   "",
+		LeaseID:   "lease-" + uuid.NewString(),
+		SessionID: strings.TrimSpace(sessionID),
+		CreatedAt: now,
 	}
 	if record.SessionID == "" {
 		return RuntimeLeaseRecord{}, errors.New("session id is required")
 	}
-	if record.RequestID == "" {
-		return RuntimeLeaseRecord{}, errors.New("request id is required")
-	}
 	if err := s.queries.InsertRuntimeLease(ctx, sqlitegen.InsertRuntimeLeaseParams{
-		ID:               record.LeaseID,
-		SessionID:        record.SessionID,
-		ClientID:         record.ClientID,
-		RequestID:        record.RequestID,
-		CreatedAtUnixMs:  record.CreatedAt.UnixMilli(),
-		AcquiredAtUnixMs: record.AcquiredAt.UnixMilli(),
-		MetadataJson:     "{}",
+		ID:              record.LeaseID,
+		SessionID:       record.SessionID,
+		CreatedAtUnixMs: record.CreatedAt.UnixMilli(),
 	}); err != nil {
 		return RuntimeLeaseRecord{}, fmt.Errorf("insert runtime lease: %w", err)
 	}
@@ -1780,6 +1721,26 @@ func availabilityForPath(path string) string {
 	return "available"
 }
 
+func availabilityForOptionalPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	return availabilityForPath(trimmed)
+}
+
+func displayNameForPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	base := filepath.Base(filepath.Clean(trimmed))
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	return base
+}
+
 func boolToInt64(v bool) int64 {
 	if v {
 		return 1
@@ -1920,10 +1881,10 @@ func projectSummaryFromRow(projectID string, projectKey string, displayName stri
 	}
 }
 
-func projectWorkspaceSummaryFromRow(workspaceID string, displayName string, rootPath string, isPrimary bool, sessionCount int64, latestActivityUnixMs int64) clientui.ProjectWorkspaceSummary {
+func projectWorkspaceSummaryFromRow(workspaceID string, rootPath string, isPrimary bool, sessionCount int64, latestActivityUnixMs int64) clientui.ProjectWorkspaceSummary {
 	return clientui.ProjectWorkspaceSummary{
 		WorkspaceID:  workspaceID,
-		DisplayName:  displayName,
+		DisplayName:  displayNameForPath(rootPath),
 		RootPath:     rootPath,
 		Availability: clientui.ProjectAvailability(availabilityForPath(rootPath)),
 		IsPrimary:    isPrimary,
@@ -1939,7 +1900,7 @@ func projectHomeSummaryFromRow(row sqlitegen.ListProjectHomeSummariesRow) server
 		DisplayName: row.DisplayName,
 		PrimaryWorkspace: serverapi.ProjectWorkspaceSummary{
 			WorkspaceID:     row.PrimaryWorkspaceID,
-			DisplayName:     row.PrimaryWorkspaceDisplayName,
+			DisplayName:     displayNameForPath(row.PrimaryWorkspaceRootPath),
 			RootPath:        row.PrimaryWorkspaceRootPath,
 			Availability:    availabilityForPath(row.PrimaryWorkspaceRootPath),
 			IsPrimary:       true,
@@ -1977,6 +1938,10 @@ func sessionExecutionTargetFromRow(row sqlitegen.GetSessionExecutionTargetByIDRo
 	if row.WorktreeID.Valid {
 		worktreeID = row.WorktreeID.String
 	}
+	workspaceName := displayNameForPath(row.WorkspaceRoot)
+	if strings.TrimSpace(row.WorkspaceID) == "" && strings.TrimSpace(row.WorkspaceSnapshotName) != "" {
+		workspaceName = strings.TrimSpace(row.WorkspaceSnapshotName)
+	}
 	baseRoot := strings.TrimSpace(row.WorkspaceRoot)
 	if strings.TrimSpace(row.WorktreeRoot) != "" {
 		baseRoot = strings.TrimSpace(row.WorktreeRoot)
@@ -1985,13 +1950,13 @@ func sessionExecutionTargetFromRow(row sqlitegen.GetSessionExecutionTargetByIDRo
 	effectiveWorkdir := effectiveWorkdirWithinRoot(baseRoot, cwdRelpath)
 	return clientui.SessionExecutionTarget{
 		WorkspaceID:           row.WorkspaceID,
-		WorkspaceName:         row.WorkspaceName,
+		WorkspaceName:         workspaceName,
 		WorkspaceRoot:         row.WorkspaceRoot,
-		WorkspaceAvailability: row.WorkspaceAvailability,
+		WorkspaceAvailability: availabilityForOptionalPath(row.WorkspaceRoot),
 		WorktreeID:            worktreeID,
-		WorktreeName:          row.WorktreeName,
+		WorktreeName:          displayNameForPath(row.WorktreeRoot),
 		WorktreeRoot:          row.WorktreeRoot,
-		WorktreeAvailability:  row.WorktreeAvailability,
+		WorktreeAvailability:  availabilityForOptionalPath(row.WorktreeRoot),
 		CwdRelpath:            cwdRelpath,
 		EffectiveWorkdir:      effectiveWorkdir,
 	}
@@ -1999,31 +1964,27 @@ func sessionExecutionTargetFromRow(row sqlitegen.GetSessionExecutionTargetByIDRo
 
 func runtimeLeaseRecordFromRow(row sqlitegen.RuntimeLease) RuntimeLeaseRecord {
 	return RuntimeLeaseRecord{
-		LeaseID:      row.ID,
-		SessionID:    row.SessionID,
-		RequestID:    row.RequestID,
-		CreatedAt:    timeFromStoredTimestamp(row.CreatedAtUnixMs),
-		AcquiredAt:   timeFromStoredTimestamp(row.AcquiredAtUnixMs),
-		ClientID:     row.ClientID,
-		MetadataJSON: row.MetadataJson,
+		LeaseID:   row.ID,
+		SessionID: row.SessionID,
+		CreatedAt: timeFromStoredTimestamp(row.CreatedAtUnixMs),
 	}
 }
 
 func worktreeRecordFromModel(row sqlitegen.Worktree) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.DisplayName, row.Availability, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, false, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
 }
 
 func worktreeRecordFromListRow(row sqlitegen.ListWorktreesByWorkspaceIDRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.DisplayName, row.Availability, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
 }
 
-func worktreeRecordFromParts(id string, workspaceID string, canonicalRoot string, displayName string, availability string, isMain bool, builderManaged bool, createdBranch bool, originSessionID string, gitMetadataJSON string, createdAtUnixMs int64, updatedAtUnixMs int64) WorktreeRecord {
+func worktreeRecordFromParts(id string, workspaceID string, canonicalRoot string, isMain bool, builderManaged bool, createdBranch bool, originSessionID string, gitMetadataJSON string, createdAtUnixMs int64, updatedAtUnixMs int64) WorktreeRecord {
 	return WorktreeRecord{
 		ID:              id,
 		WorkspaceID:     workspaceID,
 		CanonicalRoot:   canonicalRoot,
-		DisplayName:     displayName,
-		Availability:    availability,
+		DisplayName:     displayNameForPath(canonicalRoot),
+		Availability:    availabilityForOptionalPath(canonicalRoot),
 		IsMain:          isMain,
 		BuilderManaged:  builderManaged,
 		CreatedBranch:   createdBranch,
@@ -2035,11 +1996,11 @@ func worktreeRecordFromParts(id string, workspaceID string, canonicalRoot string
 }
 
 func worktreeRecordFromGetByIDRow(row sqlitegen.GetWorktreeByIDRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.DisplayName, row.Availability, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
 }
 
 func worktreeRecordFromGetByCanonicalRootRow(row sqlitegen.GetWorktreeByCanonicalRootRow) WorktreeRecord {
-	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.DisplayName, row.Availability, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
+	return worktreeRecordFromParts(row.ID, row.WorkspaceID, row.CanonicalRootPath, row.IsMain != 0, row.BuilderManaged != 0, row.CreatedBranch != 0, row.OriginSessionID, row.GitMetadataJson, row.CreatedAtUnixMs, row.UpdatedAtUnixMs)
 }
 
 func normalizeSessionCwdRelpath(value string) string {

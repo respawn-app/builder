@@ -29,7 +29,6 @@ export function useProjectBoardSubscription(
   projectID: string,
   boardQueryWorkflowID: string,
   input: Readonly<{
-    latestSequence: number;
     selectedWorkflowID: string;
     onBackgroundError?: (error: unknown) => void;
   }>,
@@ -37,10 +36,13 @@ export function useProjectBoardSubscription(
   const { api } = useAppServices();
   const queryClient = useQueryClient();
   const connection = useConnectionSnapshot();
-  const { latestSequence, onBackgroundError, selectedWorkflowID } = input;
-  const consumeBackgroundError = useCallback((error: unknown): void => {
-    onBackgroundError?.(error);
-  }, [onBackgroundError]);
+  const { onBackgroundError, selectedWorkflowID } = input;
+  const consumeBackgroundError = useCallback(
+    (error: unknown): void => {
+      onBackgroundError?.(error);
+    },
+    [onBackgroundError],
+  );
 
   useEffect(() => {
     if (projectID.length === 0 || connection.phase !== "connected") {
@@ -57,7 +59,10 @@ export function useProjectBoardSubscription(
       await queryClient.invalidateQueries({ queryKey: queryKeys.attention("") });
       await queryClient.invalidateQueries({ queryKey: queryKeys.attention(projectID) });
     }
-    const subscription = api.subscribeProject(projectID, latestSequence, {
+    const subscription = api.subscribeProject(projectID, {
+      onOpen() {
+        void refresh().catch(consumeBackgroundError);
+      },
       onEvent() {
         void refresh().catch(consumeBackgroundError);
       },
@@ -73,35 +78,6 @@ export function useProjectBoardSubscription(
     };
   }, [
     api,
-    boardQueryWorkflowID,
-    connection.generation,
-    connection.phase,
-    latestSequence,
-    consumeBackgroundError,
-    onBackgroundError,
-    projectID,
-    queryClient,
-    selectedWorkflowID,
-  ]);
-
-  useEffect(() => {
-    if (projectID.length === 0 || connection.phase !== "connected") {
-      return;
-    }
-    void queryClient
-      .invalidateQueries({ queryKey: queryKeys.board(projectID, boardQueryWorkflowID) })
-      .catch(consumeBackgroundError);
-    if (selectedWorkflowID !== boardQueryWorkflowID) {
-      void queryClient
-        .invalidateQueries({ queryKey: queryKeys.board(projectID, selectedWorkflowID) })
-        .catch(consumeBackgroundError);
-    }
-    void queryClient
-      .invalidateQueries({
-        queryKey: queryKeys.boardNodeCardsRoot(projectID, selectedWorkflowID),
-      })
-      .catch(consumeBackgroundError);
-  }, [
     boardQueryWorkflowID,
     connection.generation,
     connection.phase,

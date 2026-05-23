@@ -7,7 +7,7 @@ import (
 	"builder/server/workflow"
 )
 
-func runRecordFromTaskRun(row sqlitegen.TaskRun) RunRecord {
+func runRecordFromTaskRun(row sqlitegen.TaskRunRecord) RunRecord {
 	return RunRecord{
 		ID:                    workflow.RunID(row.ID),
 		TaskID:                workflow.TaskID(row.TaskID),
@@ -26,7 +26,26 @@ func runRecordFromTaskRun(row sqlitegen.TaskRun) RunRecord {
 	}
 }
 
-func taskRecordFromTask(row sqlitegen.Task) TaskRecord {
+func runRecordFromClaimedTaskRun(row sqlitegen.ClaimWorkflowRunRow) RunRecord {
+	return RunRecord{
+		ID:                    workflow.RunID(row.ID),
+		TaskID:                workflow.TaskID(row.TaskID),
+		PlacementID:           workflow.PlacementID(row.PlacementID),
+		NodeID:                workflow.NodeID(row.NodeID),
+		SessionID:             row.SessionID.String,
+		Generation:            row.RunGeneration,
+		AutomationRequestedAt: row.AutomationRequestedAtUnixMs,
+		StartedAt:             row.StartedAtUnixMs,
+		CompletedAt:           row.CompletedAtUnixMs,
+		InterruptedAt:         row.InterruptedAtUnixMs,
+		InterruptionReason:    row.InterruptionReason,
+		WaitingAskID:          row.WaitingAskID,
+		FinalAnswerViolations: row.FinalAnswerViolationCount,
+		InvalidCompletions:    row.InvalidCompletionCount,
+	}
+}
+
+func taskRecordFromTask(row sqlitegen.TaskRecord) TaskRecord {
 	return TaskRecord{
 		ID:                workflow.TaskID(row.ID),
 		ProjectID:         row.ProjectID,

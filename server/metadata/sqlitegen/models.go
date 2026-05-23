@@ -9,33 +9,38 @@ import (
 )
 
 type Project struct {
-	ID              string
-	DisplayName     string
-	CreatedAtUnixMs int64
-	UpdatedAtUnixMs int64
-	MetadataJson    string
-	ProjectKey      string
-	NextTaskSeq     int64
+	ID                           string
+	DisplayName                  string
+	CreatedAtUnixMs              int64
+	UpdatedAtUnixMs              int64
+	MetadataJson                 string
+	ProjectKey                   string
+	NextTaskSeq                  int64
+	DefaultProjectWorkflowLinkID string
+	PrimaryWorkspaceID           string
 }
 
 type ProjectWorkflowLink struct {
-	ID               string
-	ProjectID        string
-	WorkflowID       string
-	IsDefault        int64
-	UnlinkedAtUnixMs int64
-	CreatedAtUnixMs  int64
-	UpdatedAtUnixMs  int64
+	ID              string
+	ProjectID       string
+	WorkflowID      string
+	CreatedAtUnixMs int64
+	UpdatedAtUnixMs int64
+}
+
+type ProjectWorkflowLinkRecord struct {
+	ID              string
+	ProjectID       string
+	WorkflowID      string
+	IsDefault       int64
+	CreatedAtUnixMs int64
+	UpdatedAtUnixMs int64
 }
 
 type RuntimeLease struct {
-	ID               string
-	SessionID        string
-	ClientID         string
-	RequestID        string
-	CreatedAtUnixMs  int64
-	AcquiredAtUnixMs int64
-	MetadataJson     string
+	ID              string
+	SessionID       string
+	CreatedAtUnixMs int64
 }
 
 type Session struct {
@@ -64,9 +69,7 @@ type Session struct {
 
 type Task struct {
 	ID                    string
-	ProjectID             string
 	ProjectWorkflowLinkID string
-	WorkflowID            string
 	WorkflowRevisionSeen  int64
 	TaskSeq               int64
 	ShortID               string
@@ -88,11 +91,8 @@ type TaskComment struct {
 	Body            string
 	AuthorKind      string
 	AuthorID        string
-	SourceRunID     sql.NullString
 	CreatedAtUnixMs int64
 	UpdatedAtUnixMs int64
-	DeletedAtUnixMs int64
-	MetadataJson    string
 }
 
 type TaskNodePlacement struct {
@@ -100,14 +100,66 @@ type TaskNodePlacement struct {
 	TaskID                    string
 	NodeID                    string
 	State                     string
-	CreatedByTransitionID     sql.NullString
 	ParallelBatchTransitionID sql.NullString
 	ParallelBranchEdgeID      sql.NullString
 	CreatedAtUnixMs           int64
 	UpdatedAtUnixMs           int64
 }
 
+type TaskNodePlacementRecord struct {
+	ID                        string
+	TaskID                    string
+	NodeID                    string
+	State                     string
+	CreatedByTransitionID     string
+	ParallelBatchTransitionID sql.NullString
+	ParallelBranchEdgeID      sql.NullString
+	CreatedAtUnixMs           int64
+	UpdatedAtUnixMs           int64
+}
+
+type TaskRecord struct {
+	ID                    string
+	ProjectID             string
+	ProjectWorkflowLinkID string
+	WorkflowID            string
+	WorkflowRevisionSeen  int64
+	TaskSeq               int64
+	ShortID               string
+	Title                 string
+	Body                  string
+	SourceUrl             string
+	SourceWorkspaceID     sql.NullString
+	ManagedWorktreeID     sql.NullString
+	CanceledAtUnixMs      int64
+	CancellationReason    string
+	CreatedAtUnixMs       int64
+	UpdatedAtUnixMs       int64
+	MetadataJson          string
+}
+
 type TaskRun struct {
+	ID                          string
+	PlacementID                 string
+	SessionID                   sql.NullString
+	RunGeneration               int64
+	WorkflowRevisionSeen        int64
+	AutomationRequestedAtUnixMs int64
+	CreatedAtUnixMs             int64
+	UpdatedAtUnixMs             int64
+	StartedAtUnixMs             int64
+	CompletedAtUnixMs           int64
+	InterruptedAtUnixMs         int64
+	InterruptionReason          string
+	InterruptionDetailJson      string
+	WaitingAskID                string
+	FinalAnswerViolationCount   int64
+	InvalidCompletionCount      int64
+	RunStartSnapshotJson        string
+	MetadataJson                string
+}
+
+type TaskRunRecord struct {
 	ID                          string
 	TaskID                      string
 	PlacementID                 string
@@ -135,10 +187,8 @@ type TaskTransition struct {
 	TaskID                string
 	SourceRunID           sql.NullString
 	SourcePlacementID     sql.NullString
-	SourceNodeID          sql.NullString
 	SourceNodeKey         string
 	SourceNodeDisplayName string
-	TransitionGroupID     sql.NullString
 	TransitionID          string
 	TransitionDisplayName string
 	WorkflowRevisionSeen  int64
@@ -151,6 +201,24 @@ type TaskTransition struct {
 }
 
 type TaskTransitionEdge struct {
+	ID                     string
+	TaskTransitionID       string
+	WorkflowEdgeID         sql.NullString
+	EdgeKey                string
+	TargetNodeID           sql.NullString
+	TargetNodeKey          string
+	TargetNodeDisplayName  string
+	TargetNodeKind         string
+	TargetPlacementID      sql.NullString
+	State                  string
+	ContextMode            string
+	RequiresApproval       int64
+	InputBindingsJson      string
+	OutputRequirementsJson string
+	MetadataJson           string
+}
+
+type TaskTransitionEdgeRecord struct {
 	ID                     string
 	TaskTransitionID       string
 	WorkflowEdgeID         sql.NullString
@@ -169,6 +237,26 @@ type TaskTransitionEdge struct {
 	MetadataJson           string
 }
 
+type TaskTransitionRecord struct {
+	ID                    string
+	TaskID                string
+	SourceRunID           sql.NullString
+	SourcePlacementID     sql.NullString
+	SourceNodeID          sql.NullString
+	SourceNodeKey         string
+	SourceNodeDisplayName string
+	TransitionGroupID     sql.NullString
+	TransitionID          string
+	TransitionDisplayName string
+	WorkflowRevisionSeen  int64
+	Actor                 string
+	State                 string
+	Commentary            string
+	OutputValuesJson      string
+	CreatedAtUnixMs       int64
+	AppliedAtUnixMs       int64
+}
+
 type Workflow struct {
 	ID              string
 	Name            string
@@ -176,12 +264,10 @@ type Workflow struct {
 	GraphRevision   int64
 	CreatedAtUnixMs int64
 	UpdatedAtUnixMs int64
-	MetadataJson    string
 }
 
 type WorkflowEdge struct {
 	ID                     string
-	WorkflowID             string
 	TransitionGroupID      string
 	EdgeKey                string
 	TargetNodeID           string
@@ -190,17 +276,6 @@ type WorkflowEdge struct {
 	InputBindingsJson      string
 	OutputRequirementsJson string
 	SortOrder              int64
-	MetadataJson           string
-}
-
-type WorkflowEvent struct {
-	Sequence         int64
-	ProjectID        string
-	WorkflowID       string
-	Resource         string
-	Action           string
-	ChangedIdsJson   string
-	OccurredAtUnixMs int64
 }
 
 type WorkflowNode struct {
@@ -212,37 +287,30 @@ type WorkflowNode struct {
 	SubagentRole     string
 	PromptTemplate   string
 	OutputFieldsJson string
-	SortOrder        int64
-	MetadataJson     string
 	GroupID          sql.NullString
+	SortOrder        int64
 }
 
 type WorkflowNodeGroup struct {
-	ID           string
-	WorkflowID   string
-	GroupKey     string
-	DisplayName  string
-	SortOrder    int64
-	MetadataJson string
+	ID          string
+	WorkflowID  string
+	GroupKey    string
+	DisplayName string
+	SortOrder   int64
 }
 
 type WorkflowTransitionGroup struct {
 	ID           string
-	WorkflowID   string
 	SourceNodeID string
 	TransitionID string
 	DisplayName  string
 	SortOrder    int64
-	MetadataJson string
 }
 
 type Workspace struct {
 	ID                string
 	ProjectID         string
 	CanonicalRootPath string
-	DisplayName       string
-	Availability      string
-	IsPrimary         int64
 	GitMetadataJson   string
 	CreatedAtUnixMs   int64
 	UpdatedAtUnixMs   int64
@@ -252,13 +320,10 @@ type Worktree struct {
 	ID                string
 	WorkspaceID       string
 	CanonicalRootPath string
-	DisplayName       string
-	Availability      string
-	IsMain            int64
-	GitMetadataJson   string
-	CreatedAtUnixMs   int64
-	UpdatedAtUnixMs   int64
 	BuilderManaged    int64
 	CreatedBranch     int64
 	OriginSessionID   string
+	GitMetadataJson   string
+	CreatedAtUnixMs   int64
+	UpdatedAtUnixMs   int64
 }

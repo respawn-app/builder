@@ -309,7 +309,6 @@ export const mockBoard: WorkflowBoard = {
   columns: mockColumns,
   generatedAt: now,
   groups: mockGroups,
-  latestEventSequence: 42,
   projectID: "project-builder",
   projectKey: "BLDR",
   projectName: "Builder Desktop",

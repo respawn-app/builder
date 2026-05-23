@@ -275,8 +275,19 @@ func (c *Remote) SetDefaultProjectWorkflowLink(ctx context.Context, req serverap
 	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowSetDefaultProjectLink, req, &resp)
 }
 
-func (c *Remote) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error {
-	return c.callUnscoped(ctx, protocol.MethodWorkflowUnlinkProject, req, &struct{}{})
+func (c *Remote) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) (serverapi.WorkflowUnlinkProjectResponse, error) {
+	var resp serverapi.WorkflowUnlinkProjectResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowUnlinkProject, req, &resp)
+}
+
+func (c *Remote) PreviewWorkflowDelete(ctx context.Context, req serverapi.WorkflowDeletePreviewRequest) (serverapi.WorkflowDeletePreviewResponse, error) {
+	var resp serverapi.WorkflowDeletePreviewResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowDeletePreview, req, &resp)
+}
+
+func (c *Remote) DeleteWorkflow(ctx context.Context, req serverapi.WorkflowDeleteRequest) (serverapi.WorkflowDeleteResponse, error) {
+	var resp serverapi.WorkflowDeleteResponse
+	return resp, c.callUnscoped(ctx, protocol.MethodWorkflowDelete, req, &resp)
 }
 
 func (c *Remote) ValidateWorkflow(ctx context.Context, req serverapi.WorkflowValidateRequest) (serverapi.WorkflowValidateResponse, error) {

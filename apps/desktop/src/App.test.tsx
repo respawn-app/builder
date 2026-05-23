@@ -129,12 +129,10 @@ describe("App", () => {
                   task_transition_id: "",
                   message: 'Workflow "Default nodes" is invalid for task start',
                   occurred_at_unix_ms: 1,
-                  latest_event_sequence: 1,
                 },
               ],
               next_page_token: "",
               generated_at_unix_ms: 1,
-              latest_event_sequence: 1,
             },
           },
         ])}

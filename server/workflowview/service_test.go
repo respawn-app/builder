@@ -310,7 +310,7 @@ func TestBoardSelectsWorkflowAndReturnsPickerAndGroups(t *testing.T) {
 	}
 }
 
-func TestBoardPickerRetainsUnlinkedWorkflowState(t *testing.T) {
+func TestBoardPickerShowsOnlyActiveWorkflowLinks(t *testing.T) {
 	ctx := context.Background()
 	store, workflowStore, binding := newWorkflowViewTestStore(t)
 	view, err := New(store)
@@ -321,23 +321,12 @@ func TestBoardPickerRetainsUnlinkedWorkflowState(t *testing.T) {
 	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, defaultWorkflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow default: %v", err)
 	}
-	unlinkedWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
-	unlinkedLink, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, unlinkedWorkflowID, false)
+	removedWorkflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	removedLink, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, removedWorkflowID, false)
 	if err != nil {
-		t.Fatalf("LinkWorkflow unlinked: %v", err)
+		t.Fatalf("LinkWorkflow removed: %v", err)
 	}
-	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, WorkflowID: unlinkedWorkflowID, Title: "Historical", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask historical: %v", err)
-	}
-	started, err := workflowStore.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask historical: %v", err)
-	}
-	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
-		t.Fatalf("CompleteRun historical: %v", err)
-	}
-	if err := workflowStore.UnlinkProjectWorkflow(ctx, unlinkedLink.ID, ""); err != nil {
+	if result, err := workflowStore.UnlinkProjectWorkflow(ctx, removedLink.ID, ""); err != nil || !result.Unlinked {
 		t.Fatalf("UnlinkProjectWorkflow: %v", err)
 	}
 
@@ -345,15 +334,15 @@ func TestBoardPickerRetainsUnlinkedWorkflowState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
-	var unlinked serverapi.WorkflowPickerItem
+	var removed serverapi.WorkflowPickerItem
 	for _, item := range board.WorkflowPicker {
-		if item.WorkflowID == string(unlinkedWorkflowID) {
-			unlinked = item
+		if item.WorkflowID == string(removedWorkflowID) {
+			removed = item
 			break
 		}
 	}
-	if unlinked.WorkflowID == "" || unlinked.UnlinkedAtUnixMs == 0 || unlinked.ValidForTaskCreation {
-		t.Fatalf("unlinked picker item = %+v", unlinked)
+	if removed.WorkflowID != "" {
+		t.Fatalf("removed workflow should not be in picker, got %+v", removed)
 	}
 }
 
@@ -380,20 +369,14 @@ func TestTaskDetailPrefersActiveWorkflowLink(t *testing.T) {
 	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	if err := workflowStore.UnlinkProjectWorkflow(ctx, link.ID, ""); err != nil {
-		t.Fatalf("UnlinkProjectWorkflow: %v", err)
-	}
-	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow relink: %v", err)
-	}
-
 	detail, err := view.GetTask(ctx, string(task.ID))
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if detail.Workflow.UnlinkedAtUnixMs != 0 || !detail.Workflow.IsProjectDefault || !detail.Workflow.ValidForTaskCreation {
+	if detail.Workflow.WorkflowID != string(workflowID) || !detail.Workflow.IsProjectDefault || !detail.Workflow.ValidForTaskCreation {
 		t.Fatalf("workflow link = %+v, want active default link", detail.Workflow)
 	}
+	_ = link
 }
 
 func TestBoardColumnTaskCountsUseFullSelectedWorkflow(t *testing.T) {
@@ -809,7 +792,7 @@ func TestTaskDetailProjectsGuiIdentityWorktreeStatusActionsAndAttention(t *testi
 		t.Fatalf("CreateTask: %v", err)
 	}
 	worktreeID := "worktree-detail"
-	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), DisplayName: "Task worktree", Availability: "available", BuilderManaged: 1, CreatedBranch: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 2}); err != nil {
+	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), BuilderManaged: 1, CreatedBranch: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 2}); err != nil {
 		t.Fatalf("UpsertWorktree: %v", err)
 	}
 	if _, err := store.Queries().UpdateTaskManagedWorktree(ctx, sqlitegen.UpdateTaskManagedWorktreeParams{ID: string(task.ID), ManagedWorktreeID: sql.NullString{String: worktreeID, Valid: true}, UpdatedAtUnixMs: 3}); err != nil {
@@ -955,7 +938,17 @@ func TestTaskActivityProjectsApprovalSnapshots(t *testing.T) {
 	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
-	if _, err := store.DB().ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = 'done'`, string(workflowID)); err != nil {
+	if _, err := store.DB().ExecContext(ctx, `
+UPDATE workflow_edges
+SET requires_approval = 1
+WHERE edge_key = 'done'
+  AND EXISTS (
+      SELECT 1
+      FROM workflow_transition_groups tg
+      JOIN workflow_nodes source ON source.id = tg.source_node_id
+      WHERE tg.id = workflow_edges.transition_group_id
+        AND source.workflow_id = ?
+  )`, string(workflowID)); err != nil {
 		t.Fatalf("require approval: %v", err)
 	}
 	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
@@ -1025,7 +1018,7 @@ func TestTaskTeleportTargetReturnsIdentifiersOrUnavailableReason(t *testing.T) {
 		t.Fatalf("missing run target = %+v", missingRun)
 	}
 	worktreeID := "worktree-teleport"
-	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), DisplayName: "Task worktree", Availability: "available", BuilderManaged: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 1}); err != nil {
+	if err := store.Queries().UpsertWorktree(ctx, sqlitegen.UpsertWorktreeParams{ID: worktreeID, WorkspaceID: binding.WorkspaceID, CanonicalRootPath: t.TempDir(), BuilderManaged: 1, GitMetadataJson: "{}", CreatedAtUnixMs: 1, UpdatedAtUnixMs: 1}); err != nil {
 		t.Fatalf("UpsertWorktree: %v", err)
 	}
 	if _, err := store.Queries().UpdateTaskManagedWorktree(ctx, sqlitegen.UpdateTaskManagedWorktreeParams{ID: string(task.ID), ManagedWorktreeID: sql.NullString{String: worktreeID, Valid: true}, UpdatedAtUnixMs: 2}); err != nil {
@@ -1066,7 +1059,17 @@ func TestAttentionListProjectsApprovalQuestionAndInterruptedRun(t *testing.T) {
 	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
-	if _, err := store.DB().ExecContext(ctx, `UPDATE workflow_edges SET requires_approval = 1 WHERE workflow_id = ? AND edge_key = 'done'`, string(workflowID)); err != nil {
+	if _, err := store.DB().ExecContext(ctx, `
+UPDATE workflow_edges
+SET requires_approval = 1
+WHERE edge_key = 'done'
+  AND EXISTS (
+      SELECT 1
+      FROM workflow_transition_groups tg
+      JOIN workflow_nodes source ON source.id = tg.source_node_id
+      WHERE tg.id = workflow_edges.transition_group_id
+        AND source.workflow_id = ?
+  )`, string(workflowID)); err != nil {
 		t.Fatalf("require approval: %v", err)
 	}
 	approvalTask, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Approval", Body: "Body"})

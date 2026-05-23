@@ -62,15 +62,10 @@ export function BoardRoute({ projectId, workflowId, selectedTaskId, resumeRunId 
   );
   const boardQuery = useBoard(projectId, workflowId);
   const board = boardQuery.data;
-  useProjectBoardSubscription(
-    projectId,
-    workflowId,
-    {
-      latestSequence: board?.latestEventSequence ?? 0,
-      onBackgroundError: reportBoardLoadError,
-      selectedWorkflowID: board?.selectedWorkflow.id ?? workflowId,
-    },
-  );
+  useProjectBoardSubscription(projectId, workflowId, {
+    onBackgroundError: reportBoardLoadError,
+    selectedWorkflowID: board?.selectedWorkflow.id ?? workflowId,
+  });
 
   if (boardQuery.isPending) {
     return <p>{t("states.loading")}</p>;
@@ -301,7 +296,9 @@ function BoardContent({
   function openTask(taskID: string): void {
     try {
       openTaskDetail(taskID, "", () => {
-        void navigation.openProjectTask(board.projectID, board.selectedWorkflow.id, taskID).catch(reportNavigationError);
+        void navigation
+          .openProjectTask(board.projectID, board.selectedWorkflow.id, taskID)
+          .catch(reportNavigationError);
       });
     } catch (error) {
       reportNavigationError(error);
@@ -327,64 +324,64 @@ function BoardContent({
   return (
     <div className="relative h-full min-h-0 min-w-0 w-full">
       <div className="h-full min-h-0 min-w-0 w-full overflow-x-auto" ref={scrollportRef} role="list">
-      <div
-        className="flex h-full min-h-0 w-max min-w-full gap-[var(--space-2)] px-[var(--space-2)] pb-[var(--space-2)]"
-        data-testid="board-column-rail"
-      >
-        {sections.map((section) =>
-          section.kind === "group" ? (
-            <KanbanGroup group={toKanbanGroupVM(section.group)} key={section.id}>
-              {section.columns.map((column) => (
-                <BoardColumnController
-                  actionsDisabled={actionsDisabled}
-                  board={board}
-                  column={column}
-                  dropState={columnDropState(column)}
-                  isFirstActive={column.id === firstActive?.id}
-                  key={column.id}
-                  onCardClick={openTask}
-                  onCardDragEnd={() => {
-                    activeDragRef.current = null;
-                    setActiveDrag(null);
-                  }}
-                  onCardDragStart={(payload) => {
-                    activeDragRef.current = payload;
-                    setActiveDrag(payload);
-                  }}
-                  onCardsLoadError={reportCardsLoadError}
-                  onDropTask={dropTask}
-                  onInterruptTask={interruptTask}
-                  onResumeTask={resumeTask}
-                  scrollportRef={scrollportRef}
-                />
-              ))}
-            </KanbanGroup>
-          ) : (
-            <BoardColumnController
-              actionsDisabled={actionsDisabled}
-              board={board}
-              column={section.column}
-              dropState={columnDropState(section.column)}
-              isFirstActive={section.column.id === firstActive?.id}
-              key={section.id}
-              onCardClick={openTask}
-              onCardDragEnd={() => {
-                activeDragRef.current = null;
-                setActiveDrag(null);
-              }}
-              onCardDragStart={(payload) => {
-                activeDragRef.current = payload;
-                setActiveDrag(payload);
-              }}
-              onCardsLoadError={reportCardsLoadError}
-              onDropTask={dropTask}
-              onInterruptTask={interruptTask}
-              onResumeTask={resumeTask}
-              scrollportRef={scrollportRef}
-            />
-          ),
-        )}
-      </div>
+        <div
+          className="flex h-full min-h-0 w-max min-w-full gap-[var(--space-2)] px-[var(--space-2)] pb-[var(--space-2)]"
+          data-testid="board-column-rail"
+        >
+          {sections.map((section) =>
+            section.kind === "group" ? (
+              <KanbanGroup group={toKanbanGroupVM(section.group)} key={section.id}>
+                {section.columns.map((column) => (
+                  <BoardColumnController
+                    actionsDisabled={actionsDisabled}
+                    board={board}
+                    column={column}
+                    dropState={columnDropState(column)}
+                    isFirstActive={column.id === firstActive?.id}
+                    key={column.id}
+                    onCardClick={openTask}
+                    onCardDragEnd={() => {
+                      activeDragRef.current = null;
+                      setActiveDrag(null);
+                    }}
+                    onCardDragStart={(payload) => {
+                      activeDragRef.current = payload;
+                      setActiveDrag(payload);
+                    }}
+                    onCardsLoadError={reportCardsLoadError}
+                    onDropTask={dropTask}
+                    onInterruptTask={interruptTask}
+                    onResumeTask={resumeTask}
+                    scrollportRef={scrollportRef}
+                  />
+                ))}
+              </KanbanGroup>
+            ) : (
+              <BoardColumnController
+                actionsDisabled={actionsDisabled}
+                board={board}
+                column={section.column}
+                dropState={columnDropState(section.column)}
+                isFirstActive={section.column.id === firstActive?.id}
+                key={section.id}
+                onCardClick={openTask}
+                onCardDragEnd={() => {
+                  activeDragRef.current = null;
+                  setActiveDrag(null);
+                }}
+                onCardDragStart={(payload) => {
+                  activeDragRef.current = payload;
+                  setActiveDrag(payload);
+                }}
+                onCardsLoadError={reportCardsLoadError}
+                onDropTask={dropTask}
+                onInterruptTask={interruptTask}
+                onResumeTask={resumeTask}
+                scrollportRef={scrollportRef}
+              />
+            ),
+          )}
+        </div>
       </div>
       <TaskDetailDialog
         onClose={closeTask}

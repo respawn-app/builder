@@ -141,9 +141,9 @@ func TestBeginMutationReacquiresWorkspaceLockWhenSessionWorkspaceChanges(t *test
 	if err != nil {
 		t.Fatalf("config.Load second workspace: %v", err)
 	}
-	secondBinding, err := env.store.RegisterWorkspaceBinding(env.ctx, secondCfg.WorkspaceRoot)
+	secondBinding, err := env.store.AttachWorkspaceToProject(env.ctx, env.binding.ProjectID, secondCfg.WorkspaceRoot)
 	if err != nil {
-		t.Fatalf("RegisterWorkspaceBinding second workspace: %v", err)
+		t.Fatalf("AttachWorkspaceToProject second workspace: %v", err)
 	}
 	secondSession := createServiceTestSession(t, env.store, secondCfg, secondBinding)
 

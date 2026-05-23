@@ -75,7 +75,7 @@ export function KanbanColumn({
   return (
     <section
       aria-label={column.name}
-      className={`island-glass board-column-drop-${dropState} grid h-full min-h-0 w-[min(480px,80vw)] shrink-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-3)] align-top`}
+      className={`island-glass board-column-drop-${dropState} grid h-full min-h-0 w-[min(420px,80vw)] shrink-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[var(--space-3)] rounded-[var(--radius-xl)] p-[var(--space-3)] align-top`}
       data-drop-state={dropState}
       ref={columnRef}
       onDragOver={(event) => {

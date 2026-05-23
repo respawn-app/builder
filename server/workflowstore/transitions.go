@@ -56,7 +56,7 @@ func (s *Store) TaskIdentityForTransition(ctx context.Context, transitionID work
 	err = s.db.QueryRowContext(ctx, `
 SELECT t.id, t.project_id, t.workflow_id
 FROM task_transitions tt
-JOIN tasks t ON t.id = tt.task_id
+JOIN task_records t ON t.id = tt.task_id
 WHERE tt.id = ?
 LIMIT 1`, id).Scan(&taskID, &projectID, &workflowID)
 	return taskID, projectID, workflowID, err
@@ -92,7 +92,7 @@ WHERE id = ?`, id).Scan(&taskID, &sourceRunID, &state, &revision)
 		return CompleteRunResult{}, errors.New("pending approval has no edge snapshots")
 	}
 	hasSourceRun := sourceRunID.Valid && strings.TrimSpace(sourceRunID.String) != ""
-	sourceRun := sqlitegen.TaskRun{}
+	sourceRun := sqlitegen.TaskRunRecord{}
 	sourceSnapshot := runStartSnapshot{}
 	if hasSourceRun {
 		sourceRun, err = s.queries.GetTaskRun(ctx, sourceRunID.String)
@@ -185,7 +185,7 @@ WHERE id = ? AND state = 'pending'`, edge.ID); err != nil {
 			continue
 		}
 		targetPlacementID := prefixedID("placement")
-		if err := q.InsertTaskNodePlacement(ctx, sqlitegen.InsertTaskNodePlacementParams{ID: targetPlacementID, TaskID: taskID, NodeID: edge.TargetNodeID.String, State: "active", CreatedByTransitionID: sql.NullString{String: id, Valid: true}, ParallelBatchTransitionID: sql.NullString{String: id, Valid: len(edges) > 1}, ParallelBranchEdgeID: sql.NullString{String: edge.WorkflowEdgeID.String, Valid: len(edges) > 1 && edge.WorkflowEdgeID.Valid}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
+		if err := q.InsertTaskNodePlacement(ctx, sqlitegen.InsertTaskNodePlacementParams{ID: targetPlacementID, TaskID: taskID, NodeID: edge.TargetNodeID.String, State: "active", ParallelBatchTransitionID: sql.NullString{String: id, Valid: len(edges) > 1}, ParallelBranchEdgeID: sql.NullString{String: edge.WorkflowEdgeID.String, Valid: len(edges) > 1 && edge.WorkflowEdgeID.Valid}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
 			return CompleteRunResult{}, fmt.Errorf("insert approved target placement: %w", err)
 		}
 		result.PlacementIDs = append(result.PlacementIDs, workflow.PlacementID(targetPlacementID))
@@ -225,7 +225,7 @@ WHERE id = ? AND state = 'pending'`, targetPlacementID, edge.ID); err != nil {
 		if err != nil {
 			return CompleteRunResult{}, err
 		}
-		if err := q.InsertTaskRun(ctx, sqlitegen.InsertTaskRunParams{ID: targetRunID, TaskID: taskID, PlacementID: targetPlacementID, NodeID: string(targetEdge.TargetNode.ID), WorkflowRevisionSeen: targetSnapshot.WorkflowRevisionSeen, AutomationRequestedAtUnixMs: now, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, InterruptionDetailJson: "{}", RunStartSnapshotJson: targetSnapshotJSON, MetadataJson: targetMetadataJSON}); err != nil {
+		if err := q.InsertTaskRun(ctx, sqlitegen.InsertTaskRunParams{ID: targetRunID, PlacementID: targetPlacementID, WorkflowRevisionSeen: targetSnapshot.WorkflowRevisionSeen, AutomationRequestedAtUnixMs: now, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, InterruptionDetailJson: "{}", RunStartSnapshotJson: targetSnapshotJSON, MetadataJson: targetMetadataJSON}); err != nil {
 			return CompleteRunResult{}, fmt.Errorf("insert approved target run: %w", err)
 		}
 		result.RunIDs = append(result.RunIDs, workflow.RunID(targetRunID))
@@ -325,7 +325,7 @@ ORDER BY created_at_unix_ms, id`, strings.TrimSpace(edge.TargetPlacementID.Strin
 	return result, nil
 }
 
-func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdge) (edgeContractSnapshot, error) {
+func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdgeRecord) (edgeContractSnapshot, error) {
 	inputs := []workflow.InputBinding{}
 	if err := unmarshalJSON(edge.InputBindingsJson, &inputs); err != nil {
 		return edgeContractSnapshot{}, err
@@ -350,13 +350,12 @@ func edgeContractSnapshotFromTransitionEdge(edge sqlitegen.TaskTransitionEdge) (
 	}, nil
 }
 
-func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, transitionID string, revision int64, edge edgeContractSnapshot, targetPlacementID string, state string) error {
+func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, transitionID string, edge edgeContractSnapshot, targetPlacementID string, state string) error {
 	if err := q.InsertTaskTransitionEdge(ctx, sqlitegen.InsertTaskTransitionEdgeParams{
 		ID:                     prefixedID("transition-edge"),
 		TaskTransitionID:       transitionID,
 		WorkflowEdgeID:         sql.NullString{String: string(edge.ID), Valid: edge.ID != ""},
 		EdgeKey:                string(edge.Key),
-		WorkflowRevisionSeen:   revision,
 		TargetNodeID:           sql.NullString{String: string(edge.TargetNode.ID), Valid: edge.TargetNode.ID != ""},
 		TargetNodeKey:          string(edge.TargetNode.Key),
 		TargetNodeDisplayName:  edge.TargetNode.DisplayName,
@@ -365,8 +364,8 @@ func insertTransitionEdgeSnapshot(ctx context.Context, q *sqlitegen.Queries, tra
 		State:                  state,
 		ContextMode:            string(edge.ContextMode),
 		RequiresApproval:       boolToInt64(edge.RequiresApproval),
-		InputBindingsJson:      mustJSON(edge.InputBindings),
-		OutputRequirementsJson: mustJSON(edge.OutputRequirements),
+		InputBindingsJson:      mustInputBindingsJSON(edge.InputBindings),
+		OutputRequirementsJson: mustOutputRequirementsJSON(edge.OutputRequirements),
 		MetadataJson:           "{}",
 	}); err != nil {
 		return fmt.Errorf("insert transition edge snapshot: %w", err)

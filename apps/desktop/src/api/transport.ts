@@ -2,6 +2,7 @@ import type { ConnectionStore } from "./connectionStore";
 import type { JsonValue } from "./json";
 
 export type RpcEventHandler = Readonly<{
+  onOpen?(): void;
   onEvent(method: string, params: unknown): void;
   onComplete(code: number, message: string): void;
   onError(error: Error): void;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"builder/server/metadata"
 	askquestion "builder/server/tools/askquestion"
@@ -14,6 +15,37 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
+
+func nextWorkflowProjectEvent(t *testing.T, sub serverapi.WorkflowProjectSubscription) serverapi.WorkflowProjectEvent {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	event, err := sub.Next(ctx)
+	if err != nil {
+		t.Fatalf("subscription Next: %v", err)
+	}
+	return event
+}
+
+func waitWorkflowProjectActions(t *testing.T, sub serverapi.WorkflowProjectSubscription, resource string, expected ...string) []serverapi.WorkflowProjectEvent {
+	t.Helper()
+	remaining := make(map[string]bool, len(expected))
+	for _, action := range expected {
+		remaining[action] = true
+	}
+	events := make([]serverapi.WorkflowProjectEvent, 0, len(expected))
+	for attempts := 0; attempts < 10 && len(remaining) > 0; attempts++ {
+		event := nextWorkflowProjectEvent(t, sub)
+		events = append(events, event)
+		if event.Resource == resource && remaining[event.Action] {
+			delete(remaining, event.Action)
+		}
+	}
+	if len(remaining) > 0 {
+		t.Fatalf("events = %+v, missing actions %+v for resource %s", events, remaining, resource)
+	}
+	return events
+}
 
 func TestServiceCreatesValidatesLinksAndStartsDefaultWorkflowTask(t *testing.T) {
 	ctx := context.Background()
@@ -87,6 +119,11 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject source: %v", err)
 	}
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
 
 	created, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Details", SourceWorkspaceID: source.WorkspaceID})
 	if err != nil {
@@ -128,19 +165,7 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 	if _, err := service.UpdateWorkflowTask(ctx, serverapi.WorkflowTaskUpdateRequest{TaskID: created.Task.ID, Title: "Too late", SourceWorkspaceID: source.WorkspaceID}); err == nil || !strings.Contains(err.Error(), "source workspace after automation starts") {
 		t.Fatalf("UpdateWorkflowTask source after start error = %v", err)
 	}
-	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
-	if err != nil {
-		t.Fatalf("ListWorkflowEvents: %v", err)
-	}
-	actions := map[string]bool{}
-	for _, event := range events {
-		if event.Resource == "task" {
-			actions[event.Action] = true
-		}
-	}
-	if !actions["created"] || !actions["updated"] || !actions["started"] {
-		t.Fatalf("task events = %+v, want created/updated/started", events)
-	}
+	waitWorkflowProjectActions(t, sub, "task", "created", "updated", "started")
 }
 
 func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing.T) {
@@ -154,6 +179,11 @@ func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing
 	if err != nil {
 		t.Fatalf("CreateWorkflowTask: %v", err)
 	}
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
 	added, err := service.AddWorkflowTaskComment(ctx, serverapi.WorkflowTaskCommentAddRequest{TaskID: task.Task.ID, Body: "first", Author: "user", AuthorID: "nek"})
 	if err != nil {
 		t.Fatalf("AddWorkflowTaskComment: %v", err)
@@ -183,21 +213,7 @@ func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing
 			t.Fatalf("deleted comment visible in activity: %+v", activity.Items)
 		}
 	}
-	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
-	if err != nil {
-		t.Fatalf("ListWorkflowEventsAfter: %v", err)
-	}
-	actions := map[string]bool{}
-	for _, event := range events {
-		if event.Resource == "task" {
-			actions[event.Action] = true
-		}
-	}
-	for _, action := range []string{"comment_added", "comment_updated", "comment_deleted"} {
-		if !actions[action] {
-			t.Fatalf("events = %+v, missing %s", events, action)
-		}
-	}
+	waitWorkflowProjectActions(t, sub, "task", "comment_added", "comment_updated", "comment_deleted")
 }
 
 func TestServiceAnswersTaskQuestionWithoutControllerLease(t *testing.T) {
@@ -679,7 +695,7 @@ func TestServiceDefaultWorkflowResolvesWithinProjectOnly(t *testing.T) {
 	}
 }
 
-func TestServiceWorkflowUnlinkRejectsNonTerminalAndSoftDisablesTerminalHistory(t *testing.T) {
+func TestServiceWorkflowUnlinkRejectsTaskReferencesAndHardDeletesUnusedLinks(t *testing.T) {
 	ctx := context.Background()
 	service, binding := newWorkflowServiceTestService(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
@@ -691,8 +707,12 @@ func TestServiceWorkflowUnlinkRejectsNonTerminalAndSoftDisablesTerminalHistory(t
 	if err != nil {
 		t.Fatalf("CreateWorkflowTask: %v", err)
 	}
-	if err := service.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.Link.ID}); err == nil || !strings.Contains(err.Error(), "non-terminal") {
-		t.Fatalf("expected non-terminal unlink guard, got %v", err)
+	blocked, err := service.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.Link.ID})
+	if err != nil {
+		t.Fatalf("task reference unlink guard should return typed blockers, got error: %v", err)
+	}
+	if blocked.Unlinked || !hasWorkflowUnlinkBlocker(blocked.Blockers, "task_references", 1) {
+		t.Fatalf("blocked unlink = %+v, want task reference blocker", blocked)
 	}
 	started, err := service.StartWorkflowTask(ctx, serverapi.WorkflowTaskStartRequest{TaskID: task.Task.ID})
 	if err != nil {
@@ -701,30 +721,113 @@ func TestServiceWorkflowUnlinkRejectsNonTerminalAndSoftDisablesTerminalHistory(t
 	if _, err := service.store.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: workflow.RunID(started.RunID), TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	if err := service.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.Link.ID}); err != nil {
-		t.Fatalf("terminal history unlink: %v", err)
+	blocked, err = service.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.Link.ID})
+	if err != nil {
+		t.Fatalf("terminal history unlink guard should return typed blockers, got error: %v", err)
+	}
+	if blocked.Unlinked || !hasWorkflowUnlinkBlocker(blocked.Blockers, "task_references", 1) {
+		t.Fatalf("blocked unlink = %+v, want terminal history blocker", blocked)
+	}
+	unusedWorkflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	unusedLink, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: unusedWorkflowID})
+	if err != nil {
+		t.Fatalf("LinkWorkflowToProject unused: %v", err)
+	}
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+	if unlinked, err := service.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: unusedLink.Link.ID}); err != nil || !unlinked.Unlinked {
+		t.Fatalf("unused link unlink: %v", err)
 	}
 	links, err := service.store.ListProjectWorkflowLinks(ctx, binding.ProjectID)
 	if err != nil {
 		t.Fatalf("ListProjectWorkflowLinks: %v", err)
 	}
-	if len(links) != 1 || links[0].UnlinkedAtUnixMs == 0 {
-		t.Fatalf("links after unlink = %+v", links)
-	}
-	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
-	if err != nil {
-		t.Fatalf("ListWorkflowEventsAfter: %v", err)
-	}
-	var unlinkEvent workflowstore.WorkflowEventRecord
-	for _, event := range events {
-		if event.Resource == "workflow_link" && event.Action == "unlinked" {
-			unlinkEvent = event
-			break
+	for _, link := range links {
+		if link.ID == unusedLink.Link.ID {
+			t.Fatalf("unused link should be hard-deleted, links=%+v", links)
 		}
 	}
-	if unlinkEvent.ProjectID != binding.ProjectID || unlinkEvent.WorkflowID != workflowID {
+	events := waitWorkflowProjectActions(t, sub, "workflow_link", "unlinked")
+	unlinkEvent := events[len(events)-1]
+	if unlinkEvent.ProjectID != binding.ProjectID || unlinkEvent.WorkflowID != unusedWorkflowID {
 		t.Fatalf("unlink event = %+v, want project/workflow identity", unlinkEvent)
 	}
+}
+
+func TestServiceWorkflowDeletePreviewsBlocksAndPublishesDeletion(t *testing.T) {
+	ctx := context.Background()
+	service, binding := newWorkflowServiceTestService(t)
+	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
+	}
+	task, err := service.CreateWorkflowTask(ctx, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
+	if err != nil {
+		t.Fatalf("CreateWorkflowTask: %v", err)
+	}
+	preview, err := service.PreviewWorkflowDelete(ctx, serverapi.WorkflowDeletePreviewRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("PreviewWorkflowDelete: %v", err)
+	}
+	if preview.Impact.WorkflowID != workflowID || preview.Impact.ProjectCount != 1 || preview.Impact.LinkCount != 1 || preview.Impact.TaskCount != 1 {
+		t.Fatalf("delete preview = %+v, want one project/link/task", preview)
+	}
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	blocked, err := service.DeleteWorkflow(ctx, serverapi.WorkflowDeleteRequest{WorkflowID: workflowID})
+	if err != nil {
+		t.Fatalf("DeleteWorkflow unconfirmed: %v", err)
+	}
+	if blocked.Deleted || !hasWorkflowDeleteBlocker(blocked.Blockers, "confirmation_required", 1) {
+		t.Fatalf("unconfirmed delete = %+v, want confirmation blocker", blocked)
+	}
+
+	deleted, err := service.DeleteWorkflow(ctx, serverapi.WorkflowDeleteRequest{
+		WorkflowID:            workflowID,
+		Confirmed:             true,
+		ExpectedGraphRevision: preview.Impact.GraphRevision,
+		ExpectedProjectCount:  preview.Impact.ProjectCount,
+		ExpectedLinkCount:     preview.Impact.LinkCount,
+		ExpectedTaskCount:     preview.Impact.TaskCount,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorkflow confirmed: %v", err)
+	}
+	if !deleted.Deleted || len(deleted.Blockers) != 0 {
+		t.Fatalf("confirmed delete = %+v, want deleted without blockers", deleted)
+	}
+	event := nextWorkflowProjectEvent(t, sub)
+	if event.ProjectID != binding.ProjectID || event.WorkflowID != workflowID || event.Resource != "workflow" || event.Action != "deleted" || !sameStringSet(event.ChangedIDs, []string{workflowID}) {
+		t.Fatalf("event = %+v, want workflow deleted event", event)
+	}
+	if _, err := service.GetWorkflowTask(ctx, serverapi.WorkflowTaskGetRequest{TaskID: task.Task.ID}); err == nil {
+		t.Fatalf("deleted workflow task should not remain readable")
+	}
+}
+
+func hasWorkflowUnlinkBlocker(blockers []serverapi.WorkflowUnlinkProjectBlocker, code string, count int) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code && blocker.Count == count {
+			return true
+		}
+	}
+	return false
+}
+
+func hasWorkflowDeleteBlocker(blockers []serverapi.WorkflowDeleteBlocker, code string, count int64) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code && blocker.Count == count {
+			return true
+		}
+	}
+	return false
 }
 
 func TestServiceCommentsAndReadModels(t *testing.T) {
@@ -782,42 +885,32 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 	}
 }
 
-func TestServiceWorkflowProjectSubscriptionReplaysEvents(t *testing.T) {
+func TestServiceWorkflowProjectSubscriptionEmitsLiveEvents(t *testing.T) {
 	ctx := context.Background()
 	service, binding := newWorkflowServiceTestService(t)
 	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
-	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: created.Workflow.ID, Default: true}); err != nil {
-		t.Fatalf("LinkWorkflowToProject: %v", err)
-	}
 
-	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID, AfterSequence: 0})
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
 	if err != nil {
 		t.Fatalf("SubscribeWorkflowProject: %v", err)
 	}
 	defer func() { _ = sub.Close() }()
-	var event serverapi.WorkflowProjectEvent
-	for range 5 {
-		next, err := sub.Next(ctx)
-		if err != nil {
-			t.Fatalf("subscription Next: %v", err)
-		}
-		if next.ProjectID == binding.ProjectID && next.WorkflowID == created.Workflow.ID && next.Resource == "workflow_link" {
-			event = next
-			break
-		}
+	if _, err := service.LinkWorkflowToProject(ctx, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: created.Workflow.ID, Default: true}); err != nil {
+		t.Fatalf("LinkWorkflowToProject: %v", err)
 	}
-	if event.Sequence == 0 || event.ProjectID != binding.ProjectID || event.WorkflowID != created.Workflow.ID || event.Resource != "workflow_link" {
+	event := nextWorkflowProjectEvent(t, sub)
+	if event.ProjectID != binding.ProjectID || event.WorkflowID != created.Workflow.ID || event.Resource != "workflow_link" || event.Action != "linked" {
 		t.Fatalf("event = %+v, want workflow link event", event)
 	}
 	board, err := service.GetWorkflowBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID})
 	if err != nil {
 		t.Fatalf("GetWorkflowBoard: %v", err)
 	}
-	if board.Board.LatestEventSequence < event.Sequence {
-		t.Fatalf("board watermark = %d, want >= event %d", board.Board.LatestEventSequence, event.Sequence)
+	if board.Board.SelectedWorkflow.WorkflowID != created.Workflow.ID {
+		t.Fatalf("board selected workflow = %+v, want linked workflow", board.Board.SelectedWorkflow)
 	}
 }
 
@@ -836,11 +929,7 @@ func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T)
 	if err != nil {
 		t.Fatalf("StartWorkflowTask: %v", err)
 	}
-	boardBefore, err := service.GetWorkflowBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID})
-	if err != nil {
-		t.Fatalf("GetWorkflowBoard before completion: %v", err)
-	}
-	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID, AfterSequence: boardBefore.Board.LatestEventSequence})
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
 	if err != nil {
 		t.Fatalf("SubscribeWorkflowProject: %v", err)
 	}
@@ -849,10 +938,7 @@ func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T)
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
-	event, err := sub.Next(ctx)
-	if err != nil {
-		t.Fatalf("subscription Next: %v", err)
-	}
+	event := nextWorkflowProjectEvent(t, sub)
 	if event.ProjectID != binding.ProjectID || event.WorkflowID != workflowID || event.Resource != "task" || event.Action != "completed" {
 		t.Fatalf("event = %+v, want task completed event", event)
 	}
@@ -863,8 +949,8 @@ func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetWorkflowBoard after completion: %v", err)
 	}
-	if boardAfter.Board.LatestEventSequence < event.Sequence {
-		t.Fatalf("board watermark = %d, want >= event %d", boardAfter.Board.LatestEventSequence, event.Sequence)
+	if len(boardAfter.Board.DonePreview) != 1 {
+		t.Fatalf("board done preview = %+v, want completed task", boardAfter.Board.DonePreview)
 	}
 }
 
@@ -884,6 +970,14 @@ func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 	}
 	startID := workflowServiceNodeIDByKind(t, def.Definition, "start")
 	doneID := workflowServiceNodeIDByKind(t, def.Definition, "terminal")
+	sub, err := service.SubscribeWorkflowProject(ctx, serverapi.WorkflowProjectSubscribeRequest{ProjectID: binding.ProjectID})
+	if err != nil {
+		t.Fatalf("SubscribeWorkflowProject: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+	if _, err := service.UpdateWorkflow(ctx, serverapi.WorkflowUpdateRequest{WorkflowID: created.Workflow.ID, Name: "Updated Workflow"}); err != nil {
+		t.Fatalf("UpdateWorkflow: %v", err)
+	}
 	if _, err := service.AddWorkflowNode(ctx, serverapi.WorkflowNodeAddRequest{WorkflowID: created.Workflow.ID, NodeID: "node-agent-events", Key: "agent_events", Kind: "agent", DisplayName: "Agent", SubagentRole: "coder", PromptTemplate: "Do work."}); err != nil {
 		t.Fatalf("AddWorkflowNode: %v", err)
 	}
@@ -893,19 +987,9 @@ func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 	if _, err := service.AddWorkflowEdge(ctx, serverapi.WorkflowEdgeAddRequest{WorkflowID: created.Workflow.ID, EdgeID: "edge-start-events", TransitionGroupID: "group-start-events", Key: "start", TargetNodeID: doneID, ContextMode: "new_session"}); err != nil {
 		t.Fatalf("AddWorkflowEdge: %v", err)
 	}
-	events, err := service.store.ListWorkflowEventsAfter(ctx, binding.ProjectID, 0, 100)
-	if err != nil {
-		t.Fatalf("ListWorkflowEventsAfter: %v", err)
-	}
-	actions := map[string]bool{}
-	for _, event := range events {
-		if event.ProjectID == binding.ProjectID && event.WorkflowID == created.Workflow.ID {
-			actions[event.Action] = true
-		}
-	}
-	for _, action := range []string{"node_added", "transition_group_added", "edge_added"} {
-		if !actions[action] {
-			t.Fatalf("events = %+v, missing %s", events, action)
+	for _, event := range waitWorkflowProjectActions(t, sub, "workflow", "updated", "node_added", "transition_group_added", "edge_added") {
+		if event.ProjectID != binding.ProjectID || event.WorkflowID != created.Workflow.ID {
+			t.Fatalf("event = %+v, want linked project/workflow identity", event)
 		}
 	}
 }

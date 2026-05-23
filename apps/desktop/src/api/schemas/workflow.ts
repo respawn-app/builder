@@ -9,6 +9,8 @@ import type {
   TaskDetail,
   TeleportTarget,
   WorkflowBoard,
+  WorkflowDeleteImpact,
+  WorkflowDeleteResponse,
   WorkflowDefinition,
   ProjectWorkflowLink,
   WorkflowValidation,
@@ -219,6 +221,57 @@ export const workflowValidationSchema: z.ZodType<WorkflowValidation> = z
     errors: value.errors,
   }));
 
+const workflowDeleteImpactSchema: z.ZodType<WorkflowDeleteImpact> = z
+  .object({
+    workflow_id: z.string(),
+    graph_revision: z.number(),
+    project_count: z.number(),
+    link_count: z.number(),
+    default_replacement_project_count: z.number(),
+    task_count: z.number(),
+    active_run_count: z.number(),
+    runnable_run_count: z.number(),
+    blocked_task_count: z.number(),
+  })
+  .transform((value) => ({
+    workflowID: value.workflow_id,
+    graphRevision: value.graph_revision,
+    projectCount: value.project_count,
+    linkCount: value.link_count,
+    defaultReplacementProjectCount: value.default_replacement_project_count,
+    taskCount: value.task_count,
+    activeRunCount: value.active_run_count,
+    runnableRunCount: value.runnable_run_count,
+    blockedTaskCount: value.blocked_task_count,
+  }));
+
+export const workflowDeletePreviewSchema: z.ZodType<WorkflowDeleteImpact> = z
+  .object({
+    impact: workflowDeleteImpactSchema,
+  })
+  .transform((value) => value.impact);
+
+export const workflowDeleteResponseSchema: z.ZodType<WorkflowDeleteResponse> = z
+  .object({
+    deleted: z.boolean(),
+    impact: workflowDeleteImpactSchema,
+    blockers: z
+      .array(
+        z.object({
+          code: z.string(),
+          message: z.string(),
+          count: z.number(),
+        }),
+      )
+      .nullish()
+      .transform(emptyArray),
+  })
+  .transform((value) => ({
+    deleted: value.deleted,
+    impact: value.impact,
+    blockers: value.blockers,
+  }));
+
 export const taskMoveResponseSchema = z
   .object({
     approval_error: emptyString,
@@ -237,14 +290,12 @@ export const projectWorkflowLinksSchema: z.ZodType<readonly ProjectWorkflowLink[
             project_id: z.string(),
             workflow_id: z.string(),
             default: z.boolean(),
-            unlinked_at_unix_ms: z.number(),
           })
           .transform((value) => ({
             id: value.id,
             projectID: value.project_id,
             workflowID: value.workflow_id,
-            default: value.default,
-            unlinkedAt: value.unlinked_at_unix_ms,
+            isDefault: value.default,
           })),
       )
       .nullish()
@@ -265,7 +316,6 @@ export const workflowBoardSchema: z.ZodType<WorkflowBoard> = z
       groups: boardGroupsSchema,
       columns: boardColumnsSchema,
       generated_at_unix_ms: z.number(),
-      latest_event_sequence: z.number(),
     }),
   })
   .transform((value) => ({
@@ -277,7 +327,6 @@ export const workflowBoardSchema: z.ZodType<WorkflowBoard> = z
     groups: value.board.groups,
     columns: value.board.columns,
     generatedAt: value.board.generated_at_unix_ms,
-    latestEventSequence: value.board.latest_event_sequence,
   }));
 
 export const boardNodeCardsPageSchema: z.ZodType<BoardNodeCardsPage> = z
@@ -288,7 +337,6 @@ export const boardNodeCardsPageSchema: z.ZodType<BoardNodeCardsPage> = z
     cards: boardCardsSchema,
     next_page_token: z.string().optional().default(""),
     generated_at_unix_ms: z.number(),
-    latest_event_sequence: z.number(),
   })
   .transform((value) => ({
     projectID: value.project_id,
@@ -297,7 +345,6 @@ export const boardNodeCardsPageSchema: z.ZodType<BoardNodeCardsPage> = z
     cards: value.cards,
     nextPageToken: value.next_page_token,
     generatedAt: value.generated_at_unix_ms,
-    latestEventSequence: value.latest_event_sequence,
   }));
 
 export const attentionPageSchema: z.ZodType<AttentionPage> = z
@@ -305,13 +352,11 @@ export const attentionPageSchema: z.ZodType<AttentionPage> = z
     items: z.array(attentionItemSchema),
     next_page_token: z.string().optional().default(""),
     generated_at_unix_ms: z.number(),
-    latest_event_sequence: z.number(),
   })
   .transform((value) => ({
     items: value.items,
     nextPageToken: value.next_page_token,
     generatedAt: value.generated_at_unix_ms,
-    latestEventSequence: value.latest_event_sequence,
   }));
 
 export const taskDetailSchema: z.ZodType<TaskDetail> = z
@@ -362,7 +407,7 @@ export const taskDetailSchema: z.ZodType<TaskDetail> = z
     status: value.task.status,
     actions: value.task.actions,
     attention: value.task.attention,
-    comments: value.task.comments.filter((comment) => comment.deletedAt === 0),
+    comments: value.task.comments,
     runs: value.task.runs,
     transitions: value.task.transitions,
     worktreePath: firstNonEmpty(

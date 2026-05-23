@@ -17,7 +17,7 @@ func (s *Store) AddComment(ctx context.Context, taskID workflow.TaskID, body str
 	}
 	now := s.now().UnixMilli()
 	id := prefixedID("comment")
-	if err := s.queries.InsertTaskComment(ctx, sqlitegen.InsertTaskCommentParams{ID: id, TaskID: string(taskID), Body: trimmed, AuthorKind: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), SourceRunID: sql.NullString{}, CreatedAtUnixMs: now, UpdatedAtUnixMs: now, MetadataJson: "{}"}); err != nil {
+	if err := s.queries.InsertTaskComment(ctx, sqlitegen.InsertTaskCommentParams{ID: id, TaskID: string(taskID), Body: trimmed, AuthorKind: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), CreatedAtUnixMs: now, UpdatedAtUnixMs: now}); err != nil {
 		return CommentRecord{}, err
 	}
 	return CommentRecord{ID: id, TaskID: taskID, Body: trimmed, Author: strings.TrimSpace(authorKind), AuthorID: strings.TrimSpace(authorID), CreatedAt: now, UpdatedAt: now}, nil
@@ -39,8 +39,7 @@ func (s *Store) ReplaceComment(ctx context.Context, commentID string, body strin
 }
 
 func (s *Store) DeleteComment(ctx context.Context, commentID string) error {
-	now := s.now().UnixMilli()
-	updated, err := s.queries.SoftDeleteTaskComment(ctx, sqlitegen.SoftDeleteTaskCommentParams{ID: strings.TrimSpace(commentID), UpdatedAtUnixMs: now, DeletedAtUnixMs: now})
+	updated, err := s.queries.DeleteTaskComment(ctx, strings.TrimSpace(commentID))
 	if err != nil {
 		return err
 	}
@@ -54,7 +53,7 @@ func (s *Store) TaskIdentityForComment(ctx context.Context, commentID string) (t
 	row := s.metadata.DB().QueryRowContext(ctx, `
 SELECT t.id, t.project_id, t.workflow_id
 FROM task_comments c
-JOIN tasks t ON t.id = c.task_id
+JOIN task_records t ON t.id = c.task_id
 WHERE c.id = ?
 LIMIT 1`, strings.TrimSpace(commentID))
 	if scanErr := row.Scan(&taskID, &projectID, &workflowID); scanErr != nil {
@@ -63,14 +62,14 @@ LIMIT 1`, strings.TrimSpace(commentID))
 	return taskID, projectID, workflowID, nil
 }
 
-func (s *Store) ListComments(ctx context.Context, taskID workflow.TaskID, includeDeleted bool) ([]CommentRecord, error) {
-	rows, err := s.queries.ListTaskComments(ctx, sqlitegen.ListTaskCommentsParams{TaskID: string(taskID), IncludeDeleted: boolToInt64(includeDeleted)})
+func (s *Store) ListComments(ctx context.Context, taskID workflow.TaskID) ([]CommentRecord, error) {
+	rows, err := s.queries.ListTaskComments(ctx, string(taskID))
 	if err != nil {
 		return nil, err
 	}
 	out := make([]CommentRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, CommentRecord{ID: row.ID, TaskID: workflow.TaskID(row.TaskID), Body: row.Body, Author: row.AuthorKind, AuthorID: row.AuthorID, DeletedAt: row.DeletedAtUnixMs, CreatedAt: row.CreatedAtUnixMs, UpdatedAt: row.UpdatedAtUnixMs})
+		out = append(out, CommentRecord{ID: row.ID, TaskID: workflow.TaskID(row.TaskID), Body: row.Body, Author: row.AuthorKind, AuthorID: row.AuthorID, CreatedAt: row.CreatedAtUnixMs, UpdatedAt: row.UpdatedAtUnixMs})
 	}
 	return out, nil
 }

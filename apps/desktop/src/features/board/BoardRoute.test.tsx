@@ -292,7 +292,6 @@ describe("BoardRoute", () => {
               project_id: "project-1",
               workflow_id: "workflow-1",
               default: true,
-              unlinked_at_unix_ms: 0,
             },
           ],
         },
@@ -1416,7 +1415,6 @@ function boardNodeCardsResponse(
     cards,
     next_page_token: nextPageToken,
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   };
 }
 
@@ -1514,7 +1512,6 @@ const boardResponse = {
     done_preview: [],
     next_page_token: "",
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   },
 };
 

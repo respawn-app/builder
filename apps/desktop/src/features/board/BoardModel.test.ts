@@ -56,7 +56,6 @@ const board: WorkflowBoard = {
   columns: [doneColumn, activeColumn, backlogColumn],
   generatedAt: 1,
   groups: [{ id: "group-1", key: "core", name: "Core", nodeIDs: ["node-1"], sortOrder: 1 }],
-  latestEventSequence: 1,
   projectID: "project-1",
   projectKey: "PROJ",
   projectName: "Project",
