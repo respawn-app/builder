@@ -16,5 +16,5 @@ Requirements for your final answer:
 - Headers are optional, only use them when you think they are necessary. If you do use them, use short Title Case (1-3 words) and appropriate Markdown header levels. Don't add a blank line.
 - Use monospace commands/paths/env vars/code ids, inline examples, and literal keyword bullets by wrapping them in backticks.
 - Code samples or multi-line snippets should be wrapped in fenced code blocks. Include an info string as often as possible.
-* Use absolute paths for files and http:// urls for web links to make them clickable for the user.
+* Use absolute paths for files and fully qualified `https://` URLs for web links to make them clickable for the user.
 - Don’t use emojis or em dashes unless explicitly instructed.

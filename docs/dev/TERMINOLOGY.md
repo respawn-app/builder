@@ -42,7 +42,7 @@ The subagent role associated with an executable node. UI surfaces may present th
 
 ### Node
 
-A visible workflow state and Kanban column/status. Node identity is execution identity: when a task is in a node, that node determines which run behavior applies.
+A workflow graph state. Agent, start, and terminal nodes can map to user-visible workflow states or Kanban columns/statuses, while join nodes are internal merge plumbing omitted from board columns and collapsed in workflow editor visuals. Node identity is execution identity: when a task is in a node, that node determines which run behavior applies.
 
 Executable nodes configure agent-run behavior:
 

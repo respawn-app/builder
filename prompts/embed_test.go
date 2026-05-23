@@ -1,7 +1,6 @@
 package prompts
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -91,31 +90,6 @@ func TestBaseSystemPromptAssemblesDefaultSections(t *testing.T) {
 	}
 	if strings.Contains(rendered, "{{") {
 		t.Fatalf("expected base prompt placeholders rendered, got %q", rendered)
-	}
-}
-
-func TestBaseSystemPromptMatchesLegacyMonolithGolden(t *testing.T) {
-	// Temporary migration guard: remove this golden after the sectionized prompt
-	// ships and no longer needs byte-for-byte protection against split drift.
-	args := SystemPromptTemplateArgs{
-		EstimatedToolCallsForContext: 123,
-		EditingToolName:              "patch",
-	}
-	golden, err := os.ReadFile("testdata/system_prompt_legacy_golden.md")
-	if err != nil {
-		t.Fatalf("read legacy system prompt golden: %v", err)
-	}
-	renderedGolden, err := renderNamedTemplate("legacy system prompt golden", string(golden), systemPromptRuntimeTemplateData{
-		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
-		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
-		EditingToolName:              args.EditingToolName,
-	})
-	if err != nil {
-		t.Fatalf("render legacy system prompt golden: %v", err)
-	}
-	rendered := BaseSystemPrompt(args)
-	if rendered != renderedGolden {
-		t.Fatalf("assembled system prompt differs from legacy golden\n--- assembled ---\n%s\n--- legacy ---\n%s", rendered, renderedGolden)
 	}
 }
 
