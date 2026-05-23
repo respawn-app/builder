@@ -358,7 +358,7 @@ func TestActivateSessionRuntimeReplaysDuplicateRequestAfterReady(t *testing.T) {
 
 func TestActivateSessionRuntimeReissuesControllerLeaseForTakeover(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestAppendRecoveredWarningIfNeededIgnoresProviderError(t *testing.T) {
 
 func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 
 func TestReleaseSessionRuntimeClosesHandleWhenLeaseValidatedAndWaitCanceled(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseValidationFails(t *testi
 
 func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseValidated(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -667,7 +667,7 @@ func TestReleaseSessionRuntimeSucceedsWhenHandleAlreadyMissingAfterLeaseValidate
 
 func TestReleaseSessionRuntimeValidatesPersistedLeaseWhenHandleAlreadyMissing(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestReleaseSessionRuntimeValidatesPersistedLeaseWhenHandleAlreadyMissing(t 
 
 func TestReleaseSessionRuntimeRejectsMismatchedControllerLeaseWithoutClosingHandle(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
@@ -786,7 +786,7 @@ func TestRequireControllerLeaseRejectsReplacedHandleAfterReadyWait(t *testing.T)
 
 func TestRecordWorktreeTransitionPersistsPendingReminderState(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
-	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}

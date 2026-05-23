@@ -43,13 +43,11 @@ export const projectPageSchema: z.ZodType<ProjectPage> = z
     projects: z.array(projectSummarySchema),
     next_page_token: z.string().optional().default(""),
     generated_at_unix_ms: z.number(),
-    latest_event_sequence: z.number(),
   })
   .transform((value) => ({
     projects: value.projects,
     nextPageToken: value.next_page_token,
     generatedAt: value.generated_at_unix_ms,
-    latestEventSequence: value.latest_event_sequence,
   }));
 
 export const workspaceListSchema: z.ZodType<WorkspaceList> = z

@@ -46,6 +46,8 @@ const (
 	MethodWorkflowListProjectLinks              = "workflow.listProjectLinks"
 	MethodWorkflowSetDefaultProjectLink         = "workflow.setDefaultProjectLink"
 	MethodWorkflowUnlinkProject                 = "workflow.unlinkProject"
+	MethodWorkflowDeletePreview                 = "workflow.deletePreview"
+	MethodWorkflowDelete                        = "workflow.delete"
 	MethodWorkflowValidate                      = "workflow.validate"
 	MethodWorkflowTaskCreate                    = "workflow.task.create"
 	MethodWorkflowTaskUpdate                    = "workflow.task.update"
@@ -178,7 +180,6 @@ type WorkflowProjectEventParams struct {
 }
 
 type WorkflowProjectEvent struct {
-	Sequence         int64    `json:"sequence"`
 	ProjectID        string   `json:"project_id,omitempty"`
 	WorkflowID       string   `json:"workflow_id,omitempty"`
 	Resource         string   `json:"resource"`

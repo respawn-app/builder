@@ -25,7 +25,9 @@ type WorkflowClient interface {
 	LinkWorkflowToProject(ctx context.Context, req serverapi.WorkflowLinkProjectRequest) (serverapi.WorkflowLinkProjectResponse, error)
 	ListProjectWorkflowLinks(ctx context.Context, req serverapi.WorkflowListProjectLinksRequest) (serverapi.WorkflowListProjectLinksResponse, error)
 	SetDefaultProjectWorkflowLink(ctx context.Context, req serverapi.WorkflowSetDefaultProjectLinkRequest) (serverapi.WorkflowSetDefaultProjectLinkResponse, error)
-	UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error
+	UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) (serverapi.WorkflowUnlinkProjectResponse, error)
+	PreviewWorkflowDelete(ctx context.Context, req serverapi.WorkflowDeletePreviewRequest) (serverapi.WorkflowDeletePreviewResponse, error)
+	DeleteWorkflow(ctx context.Context, req serverapi.WorkflowDeleteRequest) (serverapi.WorkflowDeleteResponse, error)
 	ValidateWorkflow(ctx context.Context, req serverapi.WorkflowValidateRequest) (serverapi.WorkflowValidateResponse, error)
 	CreateWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskCreateRequest) (serverapi.WorkflowTaskCreateResponse, error)
 	UpdateWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskUpdateRequest) (serverapi.WorkflowTaskUpdateResponse, error)
@@ -170,11 +172,25 @@ func (c *loopbackWorkflowClient) SetDefaultProjectWorkflowLink(ctx context.Conte
 	return c.service.SetDefaultProjectWorkflowLink(ctx, req)
 }
 
-func (c *loopbackWorkflowClient) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) error {
+func (c *loopbackWorkflowClient) UnlinkWorkflowFromProject(ctx context.Context, req serverapi.WorkflowUnlinkProjectRequest) (serverapi.WorkflowUnlinkProjectResponse, error) {
 	if c == nil || c.service == nil {
-		return errors.New("workflow service is required")
+		return serverapi.WorkflowUnlinkProjectResponse{}, errors.New("workflow service is required")
 	}
 	return c.service.UnlinkWorkflowFromProject(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) PreviewWorkflowDelete(ctx context.Context, req serverapi.WorkflowDeletePreviewRequest) (serverapi.WorkflowDeletePreviewResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowDeletePreviewResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.PreviewWorkflowDelete(ctx, req)
+}
+
+func (c *loopbackWorkflowClient) DeleteWorkflow(ctx context.Context, req serverapi.WorkflowDeleteRequest) (serverapi.WorkflowDeleteResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.WorkflowDeleteResponse{}, errors.New("workflow service is required")
+	}
+	return c.service.DeleteWorkflow(ctx, req)
 }
 
 func (c *loopbackWorkflowClient) ValidateWorkflow(ctx context.Context, req serverapi.WorkflowValidateRequest) (serverapi.WorkflowValidateResponse, error) {

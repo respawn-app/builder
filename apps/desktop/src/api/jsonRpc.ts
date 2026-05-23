@@ -217,6 +217,7 @@ class JsonRpcWebSocketTransport implements RpcTransport {
     socket.addEventListener("message", subscriptionListener);
     try {
       await sendSocketRequest(socket, method, params, rpcRequestTimeoutMs);
+      handler.onOpen?.();
       await waitForSubscriptionEnd(socket, signal);
     } finally {
       socket.removeEventListener("message", subscriptionListener);

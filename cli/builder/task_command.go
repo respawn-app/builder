@@ -506,7 +506,6 @@ func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer
 	fs.SetOutput(stderr)
 	fs.Usage = func() { writeTaskCommentListUsage(fs) }
 	projectRef := fs.String("project", ".", "project id or path for short ids")
-	includeDeleted := fs.Bool("include-deleted", false, "include deleted comments")
 	positionals, flagArgs := takeLeadingPositionals(args, 1)
 	if err := fs.Parse(flagArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -532,13 +531,13 @@ func taskCommentListSubcommand(args []string, stdout io.Writer, stderr io.Writer
 	}
 	ctx, cancel := workflowRPCContext(context.Background())
 	defer cancel()
-	resp, err := remote.ListWorkflowTaskComments(ctx, serverapi.WorkflowTaskCommentListRequest{TaskID: taskID, IncludeDeleted: *includeDeleted})
+	resp, err := remote.ListWorkflowTaskComments(ctx, serverapi.WorkflowTaskCommentListRequest{TaskID: taskID})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	for _, comment := range resp.Comments {
-		fmt.Fprintf(stdout, "%s\t%s\t%t\t%s\n", comment.ID, comment.Author, comment.DeletedAt != 0, comment.Body)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", comment.ID, comment.Author, comment.Body)
 	}
 	return 0
 }
@@ -684,6 +683,6 @@ func writeTaskDetail(stdout io.Writer, task serverapi.WorkflowTaskDetail) {
 	}
 	fmt.Fprintln(stdout, "comments")
 	for _, comment := range task.Comments {
-		fmt.Fprintf(stdout, "%s\t%s\t%t\t%s\n", comment.ID, comment.Author, comment.DeletedAt != 0, comment.Body)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", comment.ID, comment.Author, comment.Body)
 	}
 }

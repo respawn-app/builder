@@ -53,7 +53,6 @@ export const startupRoutes: readonly FakeRoute[] = [
       projects: [],
       next_page_token: "",
       generated_at_unix_ms: 1,
-      latest_event_sequence: 1,
     },
   },
   {
@@ -62,7 +61,6 @@ export const startupRoutes: readonly FakeRoute[] = [
       items: [],
       next_page_token: "",
       generated_at_unix_ms: 1,
-      latest_event_sequence: 1,
     },
   },
 ];

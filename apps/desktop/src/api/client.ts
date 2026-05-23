@@ -19,6 +19,8 @@ import type {
   TaskDetail,
   TeleportTarget,
   WorkflowBoard,
+  WorkflowDeleteImpact,
+  WorkflowDeleteResponse,
   WorkflowDefinition,
   WorkflowValidation,
   WorkspaceList,
@@ -47,6 +49,8 @@ import {
   taskUpdateResponseSchema,
   teleportTargetSchema,
   workflowBoardSchema,
+  workflowDeletePreviewSchema,
+  workflowDeleteResponseSchema,
   workflowDefinitionSchema,
   workflowValidationSchema,
 } from "./schemas/workflow";
@@ -186,11 +190,41 @@ export class BuilderApiClient {
     );
   }
 
-  async validateWorkflow(workflowID: string, mode: "draft" | "task_creation" | "execution"): Promise<WorkflowValidation> {
+  async validateWorkflow(
+    workflowID: string,
+    mode: "draft" | "task_creation" | "execution",
+  ): Promise<WorkflowValidation> {
     return parse(
       "workflow.validate",
       workflowValidationSchema,
       await this.transport.call("workflow.validate", { workflow_id: workflowID, mode }),
+    );
+  }
+
+  async previewWorkflowDelete(workflowID: string): Promise<WorkflowDeleteImpact> {
+    return parse(
+      "workflow.deletePreview",
+      workflowDeletePreviewSchema,
+      await this.transport.call("workflow.deletePreview", { workflow_id: workflowID }),
+    );
+  }
+
+  async deleteWorkflow(input: WorkflowDeleteInput): Promise<WorkflowDeleteResponse> {
+    return parse(
+      "workflow.delete",
+      workflowDeleteResponseSchema,
+      await this.transport.call(
+        "workflow.delete",
+        compactJsonObject({
+          workflow_id: input.workflowID,
+          confirmed: input.confirmed,
+          expected_graph_revision: input.expectedGraphRevision,
+          expected_project_count: input.expectedProjectCount,
+          expected_link_count: input.expectedLinkCount,
+          expected_task_count: input.expectedTaskCount,
+          cleanup_artifacts: input.cleanupArtifacts,
+        }),
+      ),
     );
   }
 
@@ -386,12 +420,8 @@ export class BuilderApiClient {
     );
   }
 
-  subscribeProject(projectID: string, afterSequence: number, handler: RpcEventHandler): RpcSubscription {
-    return this.transport.subscribe(
-      "workflow.subscribeProject",
-      { project_id: projectID, after_sequence: afterSequence },
-      handler,
-    );
+  subscribeProject(projectID: string, handler: RpcEventHandler): RpcSubscription {
+    return this.transport.subscribe("workflow.subscribeProject", { project_id: projectID }, handler);
   }
 }
 
@@ -401,6 +431,16 @@ export type TaskMutationInput = Readonly<{
   title: string;
   body: string;
   sourceWorkspaceID: string;
+}>;
+
+export type WorkflowDeleteInput = Readonly<{
+  workflowID: string;
+  confirmed: boolean;
+  expectedGraphRevision: number;
+  expectedProjectCount: number;
+  expectedLinkCount: number;
+  expectedTaskCount: number;
+  cleanupArtifacts?: boolean;
 }>;
 
 export type TaskEditInput = Readonly<{

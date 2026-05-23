@@ -506,9 +506,6 @@ func TestMetadataServiceListsProjectHomeForGUI(t *testing.T) {
 	if firstPage.GeneratedAtUnixMs <= 0 {
 		t.Fatalf("generated_at_unix_ms = %d, want positive", firstPage.GeneratedAtUnixMs)
 	}
-	if firstPage.LatestEventSequence <= 0 {
-		t.Fatalf("latest_event_sequence = %d, want project mutation watermark", firstPage.LatestEventSequence)
-	}
 
 	secondPage, err := svc.ListProjectHome(context.Background(), serverapi.ProjectHomeListRequest{PageSize: 1, PageToken: firstPage.NextPageToken})
 	if err != nil {

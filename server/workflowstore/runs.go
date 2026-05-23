@@ -32,7 +32,7 @@ func (s *Store) ClaimRun(ctx context.Context, runID workflow.RunID, expectedGene
 	if err != nil {
 		return RunnableRunRecord{}, err
 	}
-	return RunnableRunRecord{RunRecord: runRecordFromTaskRun(row), WorkflowRevisionSeen: row.WorkflowRevisionSeen}, nil
+	return RunnableRunRecord{RunRecord: runRecordFromClaimedTaskRun(row), WorkflowRevisionSeen: row.WorkflowRevisionSeen}, nil
 }
 
 func (s *Store) InterruptRun(ctx context.Context, runID workflow.RunID, reason string, detailJSON string) error {
@@ -114,7 +114,7 @@ SELECT
     r.invalid_completion_count,
     r.run_start_snapshot_json,
     r.metadata_json
-FROM task_runs r
+FROM task_run_records r
 JOIN task_node_placements p ON p.id = r.placement_id
 JOIN workflow_nodes n ON n.id = r.node_id
 WHERE r.task_id = ?
@@ -124,14 +124,18 @@ WHERE r.task_id = ?
   AND r.interrupted_at_unix_ms = 0
   AND p.state = 'active'
   AND n.kind = 'agent'
-ORDER BY r.started_at_unix_ms DESC, r.rowid DESC`, string(taskID), trimmedRunID, trimmedRunID)
+ORDER BY r.started_at_unix_ms DESC, (
+    SELECT storage.rowid
+    FROM task_runs storage
+    WHERE storage.id = r.id
+) DESC`, string(taskID), trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
 	defer func() { _ = rows.Close() }()
 	candidates := []RunRecord{}
 	for rows.Next() {
-		var row sqlitegen.TaskRun
+		var row sqlitegen.TaskRunRecord
 		if err := rows.Scan(&row.ID, &row.TaskID, &row.PlacementID, &row.NodeID, &row.SessionID, &row.RunGeneration, &row.WorkflowRevisionSeen, &row.AutomationRequestedAtUnixMs, &row.CreatedAtUnixMs, &row.UpdatedAtUnixMs, &row.StartedAtUnixMs, &row.CompletedAtUnixMs, &row.InterruptedAtUnixMs, &row.InterruptionReason, &row.InterruptionDetailJson, &row.WaitingAskID, &row.FinalAnswerViolationCount, &row.InvalidCompletionCount, &row.RunStartSnapshotJson, &row.MetadataJson); err != nil {
 			return RunRecord{}, err
 		}
@@ -198,7 +202,7 @@ func (s *Store) ResumeTaskRunByID(ctx context.Context, taskID workflow.TaskID, r
 SELECT
     r.id,
     r.run_start_snapshot_json
-FROM task_runs r
+FROM task_run_records r
 JOIN task_node_placements p ON p.id = r.placement_id
 JOIN workflow_nodes n ON n.id = r.node_id
 WHERE r.task_id = ?
@@ -207,7 +211,11 @@ WHERE r.task_id = ?
   AND r.interrupted_at_unix_ms > 0
   AND p.state = 'active'
   AND n.kind = 'agent'
-ORDER BY r.interrupted_at_unix_ms DESC, r.rowid DESC`, string(taskID), trimmedRunID, trimmedRunID)
+ORDER BY r.interrupted_at_unix_ms DESC, (
+    SELECT storage.rowid
+    FROM task_runs storage
+    WHERE storage.id = r.id
+) DESC`, string(taskID), trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -362,10 +370,8 @@ SELECT
     te.context_mode,
     tr.source_run_id
 FROM task_node_placements p
-JOIN task_transitions tr ON tr.id = p.created_by_transition_id
-JOIN task_transition_edges te
-    ON te.task_transition_id = tr.id
-    AND te.target_placement_id = p.id
+JOIN task_transition_edges te ON te.target_placement_id = p.id
+JOIN task_transitions tr ON tr.id = te.task_transition_id
 WHERE p.id = ?
 ORDER BY te.rowid ASC
 LIMIT 1`, placementID).Scan(&contextMode, &sourceRunID)
@@ -403,10 +409,8 @@ SELECT
     tr.output_values_json,
     te.input_bindings_json
 FROM task_node_placements p
-JOIN task_transitions tr ON tr.id = p.created_by_transition_id
-JOIN task_transition_edges te
-    ON te.task_transition_id = tr.id
-    AND te.target_placement_id = p.id
+JOIN task_transition_edges te ON te.target_placement_id = p.id
+JOIN task_transitions tr ON tr.id = te.task_transition_id
 WHERE p.id = ?
 ORDER BY te.rowid ASC
 LIMIT 1`, placementID)
@@ -612,21 +616,25 @@ SELECT
     invalid_completion_count,
     run_start_snapshot_json,
     metadata_json
-FROM task_runs
+FROM task_run_records
 WHERE task_id = ?
   AND waiting_ask_id = ?
   AND (? = '' OR id = ?)
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
   AND trim(COALESCE(session_id, '')) != ''
-ORDER BY updated_at_unix_ms DESC, rowid DESC`, trimmedTaskID, trimmedAskID, trimmedRunID, trimmedRunID)
+ORDER BY updated_at_unix_ms DESC, (
+    SELECT storage.rowid
+    FROM task_runs storage
+    WHERE storage.id = task_run_records.id
+) DESC`, trimmedTaskID, trimmedAskID, trimmedRunID, trimmedRunID)
 	if err != nil {
 		return RunRecord{}, err
 	}
 	defer func() { _ = rows.Close() }()
 	matches := []RunRecord{}
 	for rows.Next() {
-		var row sqlitegen.TaskRun
+		var row sqlitegen.TaskRunRecord
 		if err := rows.Scan(&row.ID, &row.TaskID, &row.PlacementID, &row.NodeID, &row.SessionID, &row.RunGeneration, &row.WorkflowRevisionSeen, &row.AutomationRequestedAtUnixMs, &row.CreatedAtUnixMs, &row.UpdatedAtUnixMs, &row.StartedAtUnixMs, &row.CompletedAtUnixMs, &row.InterruptedAtUnixMs, &row.InterruptionReason, &row.InterruptionDetailJson, &row.WaitingAskID, &row.FinalAnswerViolationCount, &row.InvalidCompletionCount, &row.RunStartSnapshotJson, &row.MetadataJson); err != nil {
 			return RunRecord{}, err
 		}

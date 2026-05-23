@@ -566,8 +566,13 @@ func workflowUnlinkSubcommand(args []string, stdout io.Writer, stderr io.Writer)
 	}
 	ctx, cancel := workflowRPCContext(context.Background())
 	defer cancel()
-	if err := remote.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.ID}); err != nil {
+	resp, err := remote.UnlinkWorkflowFromProject(ctx, serverapi.WorkflowUnlinkProjectRequest{LinkID: link.ID})
+	if err != nil {
 		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if !resp.Unlinked {
+		writeWorkflowUnlinkBlockers(stderr, resp.Blockers)
 		return 1
 	}
 	fmt.Fprintf(stdout, "unlinked_link_id\t%s\n", link.ID)
@@ -923,11 +928,28 @@ func resolveWorkflowProjectLink(ctx context.Context, cfg config.App, remote work
 		return serverapi.ProjectWorkflowLink{}, err
 	}
 	for _, link := range resp.Links {
-		if link.WorkflowID == workflowID && link.UnlinkedAtUnixMs == 0 {
+		if link.WorkflowID == workflowID {
 			return link, nil
 		}
 	}
 	return serverapi.ProjectWorkflowLink{}, fmt.Errorf("project %s has no active link to workflow %s", projectID, workflowID)
+}
+
+func writeWorkflowUnlinkBlockers(stderr io.Writer, blockers []serverapi.WorkflowUnlinkProjectBlocker) {
+	if len(blockers) == 0 {
+		fmt.Fprintln(stderr, "workflow link was not unlinked")
+		return
+	}
+	for _, blocker := range blockers {
+		if blocker.Count > 0 {
+			fmt.Fprintf(stderr, "%s\t%s\t%d\n", blocker.Code, blocker.Message, blocker.Count)
+		} else {
+			fmt.Fprintf(stderr, "%s\t%s\n", blocker.Code, blocker.Message)
+		}
+		for _, task := range blocker.Tasks {
+			fmt.Fprintf(stderr, "task\t%s\t%s\t%s\n", task.TaskID, task.ShortID, task.Title)
+		}
+	}
 }
 
 func workflowDisplayNameFromKey(key string) string {

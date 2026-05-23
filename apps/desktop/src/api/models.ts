@@ -46,7 +46,6 @@ export type ProjectPage = Readonly<{
   projects: readonly ProjectSummary[];
   nextPageToken: string;
   generatedAt: number;
-  latestEventSequence: number;
 }>;
 
 export type WorkspaceList = Readonly<{
@@ -196,12 +195,35 @@ export type WorkflowValidation = Readonly<{
   errors: readonly WorkflowValidationError[];
 }>;
 
+export type WorkflowDeleteImpact = Readonly<{
+  workflowID: string;
+  graphRevision: number;
+  projectCount: number;
+  linkCount: number;
+  defaultReplacementProjectCount: number;
+  taskCount: number;
+  activeRunCount: number;
+  runnableRunCount: number;
+  blockedTaskCount: number;
+}>;
+
+export type WorkflowDeleteBlocker = Readonly<{
+  code: string;
+  message: string;
+  count: number;
+}>;
+
+export type WorkflowDeleteResponse = Readonly<{
+  deleted: boolean;
+  impact: WorkflowDeleteImpact;
+  blockers: readonly WorkflowDeleteBlocker[];
+}>;
+
 export type ProjectWorkflowLink = Readonly<{
   id: string;
   projectID: string;
   workflowID: string;
-  default: boolean;
-  unlinkedAt: number;
+  isDefault: boolean;
 }>;
 
 export type WorkflowPickerItem = Readonly<{
@@ -280,7 +302,6 @@ export type WorkflowBoard = Readonly<{
   groups: readonly BoardGroup[];
   columns: readonly BoardColumn[];
   generatedAt: number;
-  latestEventSequence: number;
 }>;
 
 export type BoardNodeCardsPage = Readonly<{
@@ -290,7 +311,6 @@ export type BoardNodeCardsPage = Readonly<{
   cards: readonly BoardCard[];
   nextPageToken: string;
   generatedAt: number;
-  latestEventSequence: number;
 }>;
 
 export type AttentionItem = Readonly<{
@@ -307,14 +327,12 @@ export type AttentionItem = Readonly<{
   taskTransitionID: string;
   message: string;
   occurredAt: number;
-  latestEventSequence: number;
 }>;
 
 export type AttentionPage = Readonly<{
   items: readonly AttentionItem[];
   nextPageToken: string;
   generatedAt: number;
-  latestEventSequence: number;
 }>;
 
 export type TaskComment = Readonly<{
@@ -322,7 +340,6 @@ export type TaskComment = Readonly<{
   taskID: string;
   body: string;
   author: string;
-  deletedAt: number;
   createdAt: number;
   updatedAt: number;
 }>;

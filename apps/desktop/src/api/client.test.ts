@@ -48,7 +48,12 @@ describe("BuilderApiClient", () => {
     );
 
     await expect(
-      client.moveTask({ taskID: "task-1", targetNodeID: "node-1", allowMissingEdge: true, autoApprove: true }),
+      client.moveTask({
+        taskID: "task-1",
+        targetNodeID: "node-1",
+        allowMissingEdge: true,
+        autoApprove: true,
+      }),
     ).rejects.toThrow("approval failed");
   });
 
@@ -66,7 +71,9 @@ describe("BuilderApiClient", () => {
       groups: [],
       columns: [],
     });
-    await expect(client.listBoardNodeCards("project-1", "workflow-1", "node-1", "cursor-1")).resolves.toMatchObject({
+    await expect(
+      client.listBoardNodeCards("project-1", "workflow-1", "node-1", "cursor-1"),
+    ).resolves.toMatchObject({
       projectID: "project-1",
       workflowID: "workflow-1",
       nodeID: "node-1",
@@ -161,7 +168,9 @@ describe("BuilderApiClient", () => {
       edges: [{ id: "edge-1", transitionGroupID: "tg-1", targetNodeID: "done" }],
     });
     expect(definition.nodes).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: "node-1", name: "Implement", subagentRole: "coder" })]),
+      expect.arrayContaining([
+        expect.objectContaining({ id: "node-1", name: "Implement", subagentRole: "coder" }),
+      ]),
     );
     await expect(client.validateWorkflow("workflow-1", "execution")).resolves.toMatchObject({
       valid: false,
@@ -182,8 +191,7 @@ describe("BuilderApiClient", () => {
         id: "link-1",
         projectID: "project-1",
         workflowID: "workflow-1",
-        default: true,
-        unlinkedAt: 0,
+        isDefault: true,
       },
     ]);
 
@@ -198,6 +206,57 @@ describe("BuilderApiClient", () => {
     expect(transport.calls).toContainEqual({
       method: "workflow.listProjectLinks",
       params: { project_id: "project-1" },
+    });
+  });
+
+  it("maps workflow delete preview and confirmed delete contracts", async () => {
+    const transport = new FakeRpcTransport([
+      { method: "workflow.deletePreview", result: workflowDeletePreviewResponse },
+      { method: "workflow.delete", result: workflowDeleteResponse },
+    ]);
+    const client = new BuilderApiClient(transport);
+
+    await expect(client.previewWorkflowDelete("workflow-1")).resolves.toMatchObject({
+      workflowID: "workflow-1",
+      graphRevision: 7,
+      projectCount: 1,
+      linkCount: 1,
+      defaultReplacementProjectCount: 0,
+      taskCount: 2,
+      activeRunCount: 0,
+      runnableRunCount: 1,
+      blockedTaskCount: 1,
+    });
+    await expect(
+      client.deleteWorkflow({
+        workflowID: "workflow-1",
+        confirmed: true,
+        expectedGraphRevision: 7,
+        expectedProjectCount: 1,
+        expectedLinkCount: 1,
+        expectedTaskCount: 2,
+        cleanupArtifacts: false,
+      }),
+    ).resolves.toMatchObject({
+      deleted: false,
+      blockers: [{ code: "runnable_runs", count: 1 }],
+    });
+
+    expect(transport.calls).toContainEqual({
+      method: "workflow.deletePreview",
+      params: { workflow_id: "workflow-1" },
+    });
+    expect(transport.calls).toContainEqual({
+      method: "workflow.delete",
+      params: {
+        workflow_id: "workflow-1",
+        confirmed: true,
+        expected_graph_revision: 7,
+        expected_project_count: 1,
+        expected_link_count: 1,
+        expected_task_count: 2,
+        cleanup_artifacts: false,
+      },
     });
   });
 });
@@ -221,7 +280,6 @@ const emptyBoardResponse = {
     groups: null,
     columns: null,
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   },
 };
 
@@ -232,7 +290,6 @@ const emptyBoardNodeCardsResponse = {
   cards: null,
   next_page_token: "cursor-2",
   generated_at_unix_ms: 1,
-  latest_event_sequence: 1,
 };
 
 const workspaceResponse = {
@@ -394,7 +451,28 @@ const workflowLinksResponse = {
       project_id: "project-1",
       workflow_id: "workflow-1",
       default: true,
-      unlinked_at_unix_ms: 0,
     },
   ],
+};
+
+const workflowDeleteImpactResponse = {
+  workflow_id: "workflow-1",
+  graph_revision: 7,
+  project_count: 1,
+  link_count: 1,
+  default_replacement_project_count: 0,
+  task_count: 2,
+  active_run_count: 0,
+  runnable_run_count: 1,
+  blocked_task_count: 1,
+};
+
+const workflowDeletePreviewResponse = {
+  impact: workflowDeleteImpactResponse,
+};
+
+const workflowDeleteResponse = {
+  deleted: false,
+  impact: workflowDeleteImpactResponse,
+  blockers: [{ code: "runnable_runs", message: "Workflow has runnable runs.", count: 1 }],
 };

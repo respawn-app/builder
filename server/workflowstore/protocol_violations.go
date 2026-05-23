@@ -87,7 +87,7 @@ RETURNING invalid_completion_count, interrupted_at_unix_ms`,
 	return RecordProtocolViolationResult{Count: count, Interrupted: interruptedAt != 0}, nil
 }
 
-func protocolViolationCount(run sqlitegen.TaskRun, kind ProtocolViolationKind) int64 {
+func protocolViolationCount(run sqlitegen.TaskRunRecord, kind ProtocolViolationKind) int64 {
 	switch kind {
 	case ProtocolViolationFinalAnswer:
 		return run.FinalAnswerViolationCount

@@ -281,7 +281,7 @@ func (s *remoteWorkflowProjectSubscription) Next(ctx context.Context) (serverapi
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
 			return serverapi.WorkflowProjectEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
 		}
-		return serverapi.WorkflowProjectEvent{Sequence: params.Event.Sequence, ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}, nil
+		return serverapi.WorkflowProjectEvent{ProjectID: params.Event.ProjectID, WorkflowID: params.Event.WorkflowID, Resource: params.Event.Resource, Action: params.Event.Action, ChangedIDs: params.Event.ChangedIDs, OccurredAtUnixMs: params.Event.OccurredAtUnixMs}, nil
 	case s.route.CompleteMethod:
 		var params protocol.StreamCompleteParams
 		if err := json.Unmarshal(frame.Params, &params); err != nil {

@@ -201,7 +201,7 @@ func (g *Gateway) serveWorkflowProjectSubscription(conn rpcwire.Conn, ctx contex
 			_ = sendNotification(ctx, conn, route.CompleteMethod, streamCompleteParams(err))
 			return
 		}
-		params := protocol.WorkflowProjectEventParams{Event: protocol.WorkflowProjectEvent{Sequence: evt.Sequence, ProjectID: evt.ProjectID, WorkflowID: evt.WorkflowID, Resource: evt.Resource, Action: evt.Action, ChangedIDs: evt.ChangedIDs, OccurredAtUnixMs: evt.OccurredAtUnixMs}}
+		params := protocol.WorkflowProjectEventParams{Event: protocol.WorkflowProjectEvent{ProjectID: evt.ProjectID, WorkflowID: evt.WorkflowID, Resource: evt.Resource, Action: evt.Action, ChangedIDs: evt.ChangedIDs, OccurredAtUnixMs: evt.OccurredAtUnixMs}}
 		if err := sendNotification(ctx, conn, route.EventMethod, params); err != nil {
 			return
 		}

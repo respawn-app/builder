@@ -253,7 +253,6 @@ export const attentionItemSchema: z.ZodType<AttentionItem> = z
     task_transition_id: emptyString,
     message: z.string(),
     occurred_at_unix_ms: z.number(),
-    latest_event_sequence: numberValue,
   })
   .transform((value) => ({
     id: value.id,
@@ -269,7 +268,6 @@ export const attentionItemSchema: z.ZodType<AttentionItem> = z
     taskTransitionID: value.task_transition_id,
     message: value.message,
     occurredAt: value.occurred_at_unix_ms,
-    latestEventSequence: value.latest_event_sequence,
   }));
 
 export const commentSchema: z.ZodType<TaskComment> = z
@@ -278,7 +276,6 @@ export const commentSchema: z.ZodType<TaskComment> = z
     task_id: z.string(),
     body: z.string(),
     author: z.string(),
-    deleted_at_unix_ms: numberValue,
     created_at_unix_ms: z.number(),
     updated_at_unix_ms: z.number(),
   })
@@ -287,7 +284,6 @@ export const commentSchema: z.ZodType<TaskComment> = z
     taskID: value.task_id,
     body: value.body,
     author: value.author,
-    deletedAt: value.deleted_at_unix_ms,
     createdAt: value.created_at_unix_ms,
     updatedAt: value.updated_at_unix_ms,
   }));

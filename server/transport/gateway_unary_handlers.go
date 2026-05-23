@@ -249,8 +249,18 @@ var gatewayUnaryHandlerEntries = map[string]gatewayUnaryHandler{
 		})
 	},
 	protocol.MethodWorkflowUnlinkProject: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
-		return decodeAndHandle(req, func(params serverapi.WorkflowUnlinkProjectRequest) (struct{}, error) {
-			return struct{}{}, g.deps.WorkflowClient().UnlinkWorkflowFromProject(ctx, params)
+		return decodeAndHandle(req, func(params serverapi.WorkflowUnlinkProjectRequest) (serverapi.WorkflowUnlinkProjectResponse, error) {
+			return g.deps.WorkflowClient().UnlinkWorkflowFromProject(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowDeletePreview: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowDeletePreviewRequest) (serverapi.WorkflowDeletePreviewResponse, error) {
+			return g.deps.WorkflowClient().PreviewWorkflowDelete(ctx, params)
+		})
+	},
+	protocol.MethodWorkflowDelete: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {
+		return decodeAndHandle(req, func(params serverapi.WorkflowDeleteRequest) (serverapi.WorkflowDeleteResponse, error) {
+			return g.deps.WorkflowClient().DeleteWorkflow(ctx, params)
 		})
 	},
 	protocol.MethodWorkflowValidate: func(g *Gateway, ctx context.Context, state *connectionState, req protocol.Request) protocol.Response {

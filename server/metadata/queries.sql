@@ -28,9 +28,6 @@ SELECT
     id,
     project_id,
     canonical_root_path,
-    display_name,
-    availability,
-    is_primary,
     git_metadata_json,
     created_at_unix_ms,
     updated_at_unix_ms
@@ -43,9 +40,6 @@ SELECT
     id,
     project_id,
     canonical_root_path,
-    display_name,
-    availability,
-    is_primary,
     git_metadata_json,
     created_at_unix_ms,
     updated_at_unix_ms
@@ -69,7 +63,7 @@ SELECT
     p.next_task_seq,
     CAST(COALESCE(COUNT(t.id), 0) AS INTEGER) AS task_count
 FROM projects p
-LEFT JOIN tasks t ON t.project_id = p.id
+LEFT JOIN task_records t ON t.project_id = p.id
 WHERE p.id = sqlc.arg(project_id)
 GROUP BY p.id, p.display_name, p.project_key, p.next_task_seq
 LIMIT 1;
@@ -96,16 +90,14 @@ INSERT INTO workflows (
     description,
     graph_revision,
     created_at_unix_ms,
-    updated_at_unix_ms,
-    metadata_json
+    updated_at_unix_ms
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(name),
     sqlc.arg(description),
     sqlc.arg(graph_revision),
     sqlc.arg(created_at_unix_ms),
-    sqlc.arg(updated_at_unix_ms),
-    sqlc.arg(metadata_json)
+    sqlc.arg(updated_at_unix_ms)
 );
 
 -- name: UpdateWorkflowInfo :execrows
@@ -131,8 +123,7 @@ SELECT
     description,
     graph_revision,
     created_at_unix_ms,
-    updated_at_unix_ms,
-    metadata_json
+    updated_at_unix_ms
 FROM workflows
 WHERE id = sqlc.arg(id)
 LIMIT 1;
@@ -144,8 +135,7 @@ SELECT
     description,
     graph_revision,
     created_at_unix_ms,
-    updated_at_unix_ms,
-    metadata_json
+    updated_at_unix_ms
 FROM workflows
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
 
@@ -160,8 +150,7 @@ INSERT INTO workflow_nodes (
     prompt_template,
     output_fields_json,
     group_id,
-    sort_order,
-    metadata_json
+    sort_order
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(workflow_id),
@@ -172,8 +161,7 @@ INSERT INTO workflow_nodes (
     sqlc.arg(prompt_template),
     sqlc.arg(output_fields_json),
     sqlc.narg(group_id),
-    sqlc.arg(sort_order),
-    sqlc.arg(metadata_json)
+    sqlc.arg(sort_order)
 );
 
 -- name: InsertWorkflowNodeGroup :exec
@@ -182,15 +170,13 @@ INSERT INTO workflow_node_groups (
     workflow_id,
     group_key,
     display_name,
-    sort_order,
-    metadata_json
+    sort_order
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(workflow_id),
     sqlc.arg(group_key),
     sqlc.arg(display_name),
-    sqlc.arg(sort_order),
-    sqlc.arg(metadata_json)
+    sqlc.arg(sort_order)
 );
 
 -- name: UpdateWorkflowNodeGroup :execrows
@@ -198,8 +184,7 @@ UPDATE workflow_node_groups
 SET
     group_key = sqlc.arg(group_key),
     display_name = sqlc.arg(display_name),
-    sort_order = sqlc.arg(sort_order),
-    metadata_json = sqlc.arg(metadata_json)
+    sort_order = sqlc.arg(sort_order)
 WHERE id = sqlc.arg(id)
   AND workflow_id = sqlc.arg(workflow_id);
 
@@ -214,8 +199,7 @@ SELECT
     workflow_id,
     group_key,
     display_name,
-    sort_order,
-    metadata_json
+    sort_order
 FROM workflow_node_groups
 WHERE workflow_id = sqlc.arg(workflow_id)
 ORDER BY sort_order ASC, rowid ASC;
@@ -226,8 +210,7 @@ SELECT
     workflow_id,
     group_key,
     display_name,
-    sort_order,
-    metadata_json
+    sort_order
 FROM workflow_node_groups
 WHERE workflow_id = sqlc.arg(workflow_id)
   AND group_key = sqlc.arg(group_key)
@@ -239,8 +222,7 @@ SELECT
     workflow_id,
     group_key,
     display_name,
-    sort_order,
-    metadata_json
+    sort_order
 FROM workflow_node_groups
 WHERE id = sqlc.arg(id)
 LIMIT 1;
@@ -256,8 +238,7 @@ SELECT
     prompt_template,
     output_fields_json,
     group_id,
-    sort_order,
-    metadata_json
+    sort_order
 FROM workflow_nodes
 WHERE workflow_id = sqlc.arg(workflow_id)
 ORDER BY sort_order ASC, rowid ASC;
@@ -273,16 +254,10 @@ SELECT
     prompt_template,
     output_fields_json,
     group_id,
-    sort_order,
-    metadata_json
+    sort_order
 FROM workflow_nodes
 WHERE id = sqlc.arg(id)
 LIMIT 1;
-
--- name: ArchiveWorkflowNode :execrows
-UPDATE workflow_nodes
-SET metadata_json = json_set(metadata_json, '$.archived_at_unix_ms', sqlc.arg(archived_at_unix_ms))
-WHERE id = sqlc.arg(id);
 
 -- name: DeleteWorkflowNode :execrows
 DELETE FROM workflow_nodes
@@ -296,39 +271,34 @@ WHERE group_id = sqlc.arg(group_id);
 -- name: InsertWorkflowTransitionGroup :exec
 INSERT INTO workflow_transition_groups (
     id,
-    workflow_id,
     source_node_id,
     transition_id,
     display_name,
-    sort_order,
-    metadata_json
+    sort_order
 ) VALUES (
     sqlc.arg(id),
-    sqlc.arg(workflow_id),
     sqlc.arg(source_node_id),
     sqlc.arg(transition_id),
     sqlc.arg(display_name),
-    sqlc.arg(sort_order),
-    sqlc.arg(metadata_json)
+    sqlc.arg(sort_order)
 );
 
 -- name: ListWorkflowTransitionGroups :many
 SELECT
-    id,
-    workflow_id,
-    source_node_id,
-    transition_id,
-    display_name,
-    sort_order,
-    metadata_json
-FROM workflow_transition_groups
-WHERE workflow_id = sqlc.arg(workflow_id)
-ORDER BY sort_order ASC, rowid ASC;
+    tg.id,
+    source.workflow_id AS workflow_id,
+    tg.source_node_id,
+    tg.transition_id,
+    tg.display_name,
+    tg.sort_order
+FROM workflow_transition_groups tg
+JOIN workflow_nodes source ON source.id = tg.source_node_id
+WHERE source.workflow_id = sqlc.arg(workflow_id)
+ORDER BY tg.sort_order ASC, tg.rowid ASC;
 
 -- name: InsertWorkflowEdge :exec
 INSERT INTO workflow_edges (
     id,
-    workflow_id,
     transition_group_id,
     edge_key,
     target_node_id,
@@ -336,11 +306,9 @@ INSERT INTO workflow_edges (
     context_mode,
     input_bindings_json,
     output_requirements_json,
-    sort_order,
-    metadata_json
+    sort_order
 ) VALUES (
     sqlc.arg(id),
-    sqlc.arg(workflow_id),
     sqlc.arg(transition_group_id),
     sqlc.arg(edge_key),
     sqlc.arg(target_node_id),
@@ -348,42 +316,43 @@ INSERT INTO workflow_edges (
     sqlc.arg(context_mode),
     sqlc.arg(input_bindings_json),
     sqlc.arg(output_requirements_json),
-    sqlc.arg(sort_order),
-    sqlc.arg(metadata_json)
+    sqlc.arg(sort_order)
 );
 
 -- name: ListWorkflowEdges :many
 SELECT
-    id,
-    workflow_id,
-    transition_group_id,
-    edge_key,
-    target_node_id,
-    requires_approval,
-    context_mode,
-    input_bindings_json,
-    output_requirements_json,
-    sort_order,
-    metadata_json
-FROM workflow_edges
-WHERE workflow_id = sqlc.arg(workflow_id)
-ORDER BY sort_order ASC, rowid ASC;
+    e.id,
+    source.workflow_id AS workflow_id,
+    e.transition_group_id,
+    e.edge_key,
+    e.target_node_id,
+    e.requires_approval,
+    e.context_mode,
+    e.input_bindings_json,
+    e.output_requirements_json,
+    e.sort_order
+FROM workflow_edges e
+JOIN workflow_transition_groups tg ON tg.id = e.transition_group_id
+JOIN workflow_nodes source ON source.id = tg.source_node_id
+WHERE source.workflow_id = sqlc.arg(workflow_id)
+ORDER BY e.sort_order ASC, e.rowid ASC;
 
 -- name: GetWorkflowEdge :one
 SELECT
-    id,
-    workflow_id,
-    transition_group_id,
-    edge_key,
-    target_node_id,
-    requires_approval,
-    context_mode,
-    input_bindings_json,
-    output_requirements_json,
-    sort_order,
-    metadata_json
-FROM workflow_edges
-WHERE id = sqlc.arg(id)
+    e.id,
+    source.workflow_id AS workflow_id,
+    e.transition_group_id,
+    e.edge_key,
+    e.target_node_id,
+    e.requires_approval,
+    e.context_mode,
+    e.input_bindings_json,
+    e.output_requirements_json,
+    e.sort_order
+FROM workflow_edges e
+JOIN workflow_transition_groups tg ON tg.id = e.transition_group_id
+JOIN workflow_nodes source ON source.id = tg.source_node_id
+WHERE e.id = sqlc.arg(id)
 LIMIT 1;
 
 -- name: DeleteWorkflowEdge :execrows
@@ -391,28 +360,23 @@ DELETE FROM workflow_edges
 WHERE id = sqlc.arg(id);
 
 -- name: ClearProjectDefaultWorkflowLinks :exec
-UPDATE project_workflow_links
+UPDATE projects
 SET
-    is_default = 0,
+    default_project_workflow_link_id = '',
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
-WHERE project_id = sqlc.arg(project_id)
-  AND unlinked_at_unix_ms = 0;
+WHERE id = sqlc.arg(project_id);
 
 -- name: InsertProjectWorkflowLink :exec
 INSERT INTO project_workflow_links (
     id,
     project_id,
     workflow_id,
-    is_default,
-    unlinked_at_unix_ms,
     created_at_unix_ms,
     updated_at_unix_ms
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(project_id),
     sqlc.arg(workflow_id),
-    sqlc.arg(is_default),
-    0,
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(updated_at_unix_ms)
 );
@@ -423,10 +387,9 @@ SELECT
     project_id,
     workflow_id,
     is_default,
-    unlinked_at_unix_ms,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM project_workflow_links
+FROM project_workflow_link_records
 WHERE id = sqlc.arg(id)
 LIMIT 1;
 
@@ -436,13 +399,11 @@ SELECT
     project_id,
     workflow_id,
     is_default,
-    unlinked_at_unix_ms,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM project_workflow_links
+FROM project_workflow_link_records
 WHERE project_id = sqlc.arg(project_id)
   AND is_default = 1
-  AND unlinked_at_unix_ms = 0
 LIMIT 1;
 
 -- name: GetActiveProjectWorkflowLinkByWorkflow :one
@@ -451,13 +412,11 @@ SELECT
     project_id,
     workflow_id,
     is_default,
-    unlinked_at_unix_ms,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM project_workflow_links
+FROM project_workflow_link_records
 WHERE project_id = sqlc.arg(project_id)
   AND workflow_id = sqlc.arg(workflow_id)
-  AND unlinked_at_unix_ms = 0
 LIMIT 1;
 
 -- name: ListProjectWorkflowLinks :many
@@ -466,23 +425,31 @@ SELECT
     project_id,
     workflow_id,
     is_default,
-    unlinked_at_unix_ms,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM project_workflow_links
+FROM project_workflow_link_records
 WHERE project_id = sqlc.arg(project_id)
-ORDER BY unlinked_at_unix_ms ASC, is_default DESC, created_at_unix_ms ASC;
+ORDER BY is_default DESC, created_at_unix_ms ASC, id ASC;
 
 -- name: CountActiveProjectWorkflowLinks :one
 SELECT CAST(COUNT(*) AS INTEGER) AS active_link_count
 FROM project_workflow_links
-WHERE project_id = sqlc.arg(project_id)
-  AND unlinked_at_unix_ms = 0;
+WHERE project_id = sqlc.arg(project_id);
 
 -- name: CountTasksByProjectWorkflowLink :one
 SELECT CAST(COUNT(*) AS INTEGER) AS task_count
 FROM tasks
 WHERE project_workflow_link_id = sqlc.arg(project_workflow_link_id);
+
+-- name: ListProjectWorkflowLinkTaskReferences :many
+SELECT
+    id,
+    short_id,
+    title
+FROM tasks
+WHERE project_workflow_link_id = sqlc.arg(project_workflow_link_id)
+ORDER BY updated_at_unix_ms DESC, id ASC
+LIMIT sqlc.arg(limit);
 
 -- name: CountNonTerminalTasksByProjectWorkflowLink :one
 SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count
@@ -495,21 +462,12 @@ WHERE t.project_workflow_link_id = sqlc.arg(project_workflow_link_id)
 
 -- name: CountNonTerminalTasksByWorkflow :one
 SELECT CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count
-FROM tasks t
+FROM task_records t
 JOIN task_node_placements p ON p.task_id = t.id AND p.state IN ('active', 'waiting_approval')
 JOIN workflow_nodes n ON n.id = p.node_id
 WHERE t.workflow_id = sqlc.arg(workflow_id)
   AND t.canceled_at_unix_ms = 0
   AND n.kind != 'terminal';
-
--- name: SoftUnlinkProjectWorkflowLink :execrows
-UPDATE project_workflow_links
-SET
-    is_default = 0,
-    unlinked_at_unix_ms = sqlc.arg(unlinked_at_unix_ms),
-    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
-WHERE id = sqlc.arg(id)
-  AND unlinked_at_unix_ms = 0;
 
 -- name: DeleteProjectWorkflowLink :execrows
 DELETE FROM project_workflow_links
@@ -520,24 +478,89 @@ SELECT CAST(COUNT(*) AS INTEGER) AS ref_count
 FROM (
     SELECT p.id FROM task_node_placements p WHERE p.node_id = sqlc.arg(node_id)
     UNION ALL
-    SELECT r.id FROM task_runs r WHERE r.node_id = sqlc.arg(node_id)
-    UNION ALL
-    SELECT tr.id FROM task_transitions tr WHERE tr.source_node_id = sqlc.arg(node_id)
+    SELECT tr.id FROM task_transition_records tr WHERE tr.source_node_id = sqlc.arg(node_id)
     UNION ALL
     SELECT te.id FROM task_transition_edges te WHERE te.target_node_id = sqlc.arg(node_id)
 );
 
 -- name: CountTaskEdgeReferences :one
 SELECT CAST(COUNT(*) AS INTEGER) AS ref_count
-FROM task_transition_edges
-WHERE workflow_edge_id = sqlc.arg(edge_id);
+FROM (
+    SELECT te.id FROM task_transition_edges te WHERE te.workflow_edge_id = sqlc.arg(edge_id)
+    UNION ALL
+    SELECT p.id FROM task_node_placements p WHERE p.parallel_branch_edge_id = sqlc.arg(edge_id)
+);
+
+-- name: GetWorkflowDeleteImpact :one
+SELECT
+    w.id AS workflow_id,
+    w.graph_revision,
+    CAST(COUNT(DISTINCT pwl.project_id) AS INTEGER) AS project_count,
+    CAST(COUNT(DISTINCT pwl.id) AS INTEGER) AS link_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN p.default_project_workflow_link_id = pwl.id
+          AND EXISTS (
+              SELECT 1
+              FROM project_workflow_links other
+              WHERE other.project_id = pwl.project_id
+                AND other.workflow_id != w.id
+          )
+        THEN pwl.project_id
+    END) AS INTEGER) AS default_replacement_project_count,
+    CAST(COUNT(DISTINCT t.id) AS INTEGER) AS task_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN r.started_at_unix_ms > 0
+          AND r.completed_at_unix_ms = 0
+          AND r.interrupted_at_unix_ms = 0
+          AND placement.state = 'active'
+          AND n.kind = 'agent'
+        THEN r.id
+    END) AS INTEGER) AS active_run_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN r.automation_requested_at_unix_ms > 0
+          AND r.started_at_unix_ms = 0
+          AND r.completed_at_unix_ms = 0
+          AND r.interrupted_at_unix_ms = 0
+          AND r.waiting_ask_id = ''
+          AND t.canceled_at_unix_ms = 0
+          AND placement.state = 'active'
+          AND n.kind = 'agent'
+        THEN r.id
+    END) AS INTEGER) AS runnable_run_count,
+    CAST(COUNT(DISTINCT CASE
+        WHEN (
+            r.started_at_unix_ms > 0
+            AND r.completed_at_unix_ms = 0
+            AND r.interrupted_at_unix_ms = 0
+            AND placement.state = 'active'
+            AND n.kind = 'agent'
+        )
+        OR (
+            r.automation_requested_at_unix_ms > 0
+            AND r.started_at_unix_ms = 0
+            AND r.completed_at_unix_ms = 0
+            AND r.interrupted_at_unix_ms = 0
+            AND r.waiting_ask_id = ''
+            AND t.canceled_at_unix_ms = 0
+            AND placement.state = 'active'
+            AND n.kind = 'agent'
+        )
+        THEN t.id
+    END) AS INTEGER) AS blocked_task_count
+FROM workflows w
+LEFT JOIN project_workflow_links pwl ON pwl.workflow_id = w.id
+LEFT JOIN projects p ON p.id = pwl.project_id
+LEFT JOIN task_records t ON t.project_workflow_link_id = pwl.id
+LEFT JOIN task_run_records r ON r.task_id = t.id
+LEFT JOIN task_node_placements placement ON placement.id = r.placement_id
+LEFT JOIN workflow_nodes n ON n.id = r.node_id
+WHERE w.id = sqlc.arg(workflow_id)
+GROUP BY w.id, w.graph_revision;
 
 -- name: InsertTask :exec
 INSERT INTO tasks (
     id,
-    project_id,
     project_workflow_link_id,
-    workflow_id,
     workflow_revision_seen,
     task_seq,
     short_id,
@@ -553,9 +576,7 @@ INSERT INTO tasks (
     metadata_json
 ) VALUES (
     sqlc.arg(id),
-    sqlc.arg(project_id),
     sqlc.arg(project_workflow_link_id),
-    sqlc.arg(workflow_id),
     sqlc.arg(workflow_revision_seen),
     sqlc.arg(task_seq),
     sqlc.arg(short_id),
@@ -590,7 +611,7 @@ SELECT
     created_at_unix_ms,
     updated_at_unix_ms,
     metadata_json
-FROM tasks
+FROM task_records
 WHERE id = sqlc.arg(id)
 LIMIT 1;
 
@@ -620,16 +641,24 @@ SELECT
     created_at_unix_ms,
     updated_at_unix_ms,
     metadata_json
-FROM tasks
-WHERE project_id = sqlc.arg(project_id)
-ORDER BY updated_at_unix_ms DESC, rowid DESC;
+FROM task_records
+WHERE project_workflow_link_id IN (
+    SELECT id
+    FROM project_workflow_links
+    WHERE project_workflow_links.project_id = sqlc.arg(project_id)
+)
+ORDER BY updated_at_unix_ms DESC, (
+    SELECT storage.rowid
+    FROM tasks storage
+    WHERE storage.id = task_records.id
+) DESC;
 
 -- name: ListBoardNodeTasks :many
 WITH board_node_task_ids AS (
     SELECT
         t.id
     FROM task_node_placements p
-    JOIN tasks t ON t.id = p.task_id
+    JOIN task_records t ON t.id = p.task_id
     JOIN workflow_nodes n ON n.id = p.node_id
     WHERE p.node_id = sqlc.arg(node_id)
       AND p.state IN ('active', 'waiting_approval')
@@ -642,7 +671,7 @@ WITH board_node_task_ids AS (
     UNION
     SELECT
         t.id
-    FROM tasks t
+    FROM task_records t
     WHERE t.project_id = sqlc.arg(project_id)
       AND t.workflow_id = sqlc.arg(workflow_id)
       AND t.canceled_at_unix_ms != 0
@@ -680,7 +709,7 @@ SELECT
     t.created_at_unix_ms,
     t.updated_at_unix_ms,
     t.metadata_json
-FROM tasks t
+FROM task_records t
 WHERE t.id IN (SELECT id FROM board_node_task_ids)
   AND (
     CAST(sqlc.arg(cursor_set) AS INTEGER) = 0
@@ -705,7 +734,7 @@ WHERE id = sqlc.arg(id);
 
 -- name: CountTaskRunsByTask :one
 SELECT CAST(COUNT(*) AS INTEGER) AS run_count
-FROM task_runs
+FROM task_run_records
 WHERE task_id = sqlc.arg(task_id);
 
 -- name: CountNonTerminalTasksByManagedWorktree :one
@@ -747,7 +776,6 @@ INSERT INTO task_node_placements (
     task_id,
     node_id,
     state,
-    created_by_transition_id,
     parallel_batch_transition_id,
     parallel_branch_edge_id,
     created_at_unix_ms,
@@ -757,7 +785,6 @@ INSERT INTO task_node_placements (
     sqlc.arg(task_id),
     sqlc.arg(node_id),
     sqlc.arg(state),
-    sqlc.narg(created_by_transition_id),
     sqlc.narg(parallel_batch_transition_id),
     sqlc.narg(parallel_branch_edge_id),
     sqlc.arg(created_at_unix_ms),
@@ -782,9 +809,13 @@ SELECT
     parallel_branch_edge_id,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM task_node_placements
+FROM task_node_placement_records
 WHERE task_id = sqlc.arg(task_id)
-ORDER BY created_at_unix_ms ASC, rowid ASC;
+ORDER BY created_at_unix_ms ASC, (
+    SELECT storage.rowid
+    FROM task_node_placements storage
+    WHERE storage.id = task_node_placement_records.id
+) ASC;
 
 -- name: ListTaskNodePlacementsByTasks :many
 SELECT
@@ -797,9 +828,13 @@ SELECT
     parallel_branch_edge_id,
     created_at_unix_ms,
     updated_at_unix_ms
-FROM task_node_placements
+FROM task_node_placement_records
 WHERE task_id IN (sqlc.slice('task_ids'))
-ORDER BY task_id ASC, created_at_unix_ms ASC, rowid ASC;
+ORDER BY task_id ASC, created_at_unix_ms ASC, (
+    SELECT storage.rowid
+    FROM task_node_placements storage
+    WHERE storage.id = task_node_placement_records.id
+) ASC;
 
 -- name: GetActiveStartPlacementForTask :one
 SELECT
@@ -812,7 +847,7 @@ SELECT
     p.parallel_branch_edge_id,
     p.created_at_unix_ms,
     p.updated_at_unix_ms
-FROM task_node_placements p
+FROM task_node_placement_records p
 JOIN workflow_nodes n ON n.id = p.node_id
 WHERE p.task_id = sqlc.arg(task_id)
   AND p.state = 'active'
@@ -822,9 +857,7 @@ LIMIT 1;
 -- name: InsertTaskRun :exec
 INSERT INTO task_runs (
     id,
-    task_id,
     placement_id,
-    node_id,
     session_id,
     run_generation,
     workflow_revision_seen,
@@ -843,9 +876,7 @@ INSERT INTO task_runs (
     metadata_json
 ) VALUES (
     sqlc.arg(id),
-    sqlc.arg(task_id),
     sqlc.arg(placement_id),
-    sqlc.arg(node_id),
     sqlc.narg(session_id),
     sqlc.arg(run_generation),
     sqlc.arg(workflow_revision_seen),
@@ -899,9 +930,13 @@ SELECT
     invalid_completion_count,
     run_start_snapshot_json,
     metadata_json
-FROM task_runs
+FROM task_run_records
 WHERE task_id = sqlc.arg(task_id)
-ORDER BY created_at_unix_ms ASC, rowid ASC;
+ORDER BY created_at_unix_ms ASC, (
+    SELECT storage.rowid
+    FROM task_runs storage
+    WHERE storage.id = task_run_records.id
+) ASC;
 
 -- name: GetTaskRun :one
 SELECT
@@ -925,7 +960,7 @@ SELECT
     invalid_completion_count,
     run_start_snapshot_json,
     metadata_json
-FROM task_runs
+FROM task_run_records
 WHERE id = sqlc.arg(id)
 LIMIT 1;
 
@@ -951,7 +986,7 @@ SELECT
     r.invalid_completion_count,
     r.run_start_snapshot_json,
     r.metadata_json
-FROM task_runs r
+FROM task_run_records r
 JOIN tasks t ON t.id = r.task_id
 JOIN task_node_placements p ON p.id = r.placement_id
 JOIN workflow_nodes n ON n.id = r.node_id
@@ -983,17 +1018,25 @@ WHERE task_runs.id = sqlc.arg(id)
       SELECT 1
       FROM tasks t
       JOIN task_node_placements p ON p.id = task_runs.placement_id
-      JOIN workflow_nodes n ON n.id = task_runs.node_id
-      WHERE t.id = task_runs.task_id
+      JOIN workflow_nodes n ON n.id = p.node_id
+      WHERE t.id = p.task_id
         AND t.canceled_at_unix_ms = 0
         AND p.state = 'active'
         AND n.kind = 'agent'
   )
 RETURNING
     id,
-    task_id,
+    (
+        SELECT p.task_id
+        FROM task_node_placements p
+        WHERE p.id = task_runs.placement_id
+    ) AS task_id,
     placement_id,
-    node_id,
+    (
+        SELECT p.node_id
+        FROM task_node_placements p
+        WHERE p.id = task_runs.placement_id
+    ) AS node_id,
     session_id,
     run_generation,
     workflow_revision_seen,
@@ -1033,11 +1076,15 @@ SELECT
     invalid_completion_count,
     run_start_snapshot_json,
     metadata_json
-FROM task_runs
+FROM task_run_records
 WHERE waiting_ask_id != ''
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0
-ORDER BY updated_at_unix_ms ASC, id ASC;
+ORDER BY updated_at_unix_ms ASC, (
+    SELECT storage.rowid
+    FROM task_runs storage
+    WHERE storage.id = task_run_records.id
+) ASC;
 
 -- name: InterruptWorkflowRun :execrows
 UPDATE task_runs
@@ -1071,7 +1118,12 @@ SET
     interruption_reason = sqlc.arg(interruption_reason),
     interruption_detail_json = sqlc.arg(interruption_detail_json),
     waiting_ask_id = ''
-WHERE task_id = sqlc.arg(task_id)
+WHERE EXISTS (
+      SELECT 1
+      FROM task_node_placements p
+      WHERE p.id = task_runs.placement_id
+        AND p.task_id = sqlc.arg(task_id)
+  )
   AND completed_at_unix_ms = 0
   AND interrupted_at_unix_ms = 0;
 
@@ -1089,10 +1141,8 @@ INSERT INTO task_transitions (
     task_id,
     source_run_id,
     source_placement_id,
-    source_node_id,
     source_node_key,
     source_node_display_name,
-    transition_group_id,
     transition_id,
     transition_display_name,
     workflow_revision_seen,
@@ -1107,10 +1157,8 @@ INSERT INTO task_transitions (
     sqlc.arg(task_id),
     sqlc.narg(source_run_id),
     sqlc.narg(source_placement_id),
-    sqlc.narg(source_node_id),
     sqlc.arg(source_node_key),
     sqlc.arg(source_node_display_name),
-    sqlc.narg(transition_group_id),
     sqlc.arg(transition_id),
     sqlc.arg(transition_display_name),
     sqlc.arg(workflow_revision_seen),
@@ -1141,9 +1189,13 @@ SELECT
     output_values_json,
     created_at_unix_ms,
     applied_at_unix_ms
-FROM task_transitions
+FROM task_transition_records
 WHERE task_id = sqlc.arg(task_id)
-ORDER BY created_at_unix_ms ASC, rowid ASC;
+ORDER BY created_at_unix_ms ASC, (
+    SELECT storage.rowid
+    FROM task_transitions storage
+    WHERE storage.id = task_transition_records.id
+) ASC;
 
 -- name: InsertTaskTransitionEdge :exec
 INSERT INTO task_transition_edges (
@@ -1151,7 +1203,6 @@ INSERT INTO task_transition_edges (
     task_transition_id,
     workflow_edge_id,
     edge_key,
-    workflow_revision_seen,
     target_node_id,
     target_node_key,
     target_node_display_name,
@@ -1168,7 +1219,6 @@ INSERT INTO task_transition_edges (
     sqlc.arg(task_transition_id),
     sqlc.narg(workflow_edge_id),
     sqlc.arg(edge_key),
-    sqlc.arg(workflow_revision_seen),
     sqlc.narg(target_node_id),
     sqlc.arg(target_node_key),
     sqlc.arg(target_node_display_name),
@@ -1200,9 +1250,13 @@ SELECT
     input_bindings_json,
     output_requirements_json,
     metadata_json
-FROM task_transition_edges
+FROM task_transition_edge_records
 WHERE task_transition_id = sqlc.arg(task_transition_id)
-ORDER BY rowid ASC;
+ORDER BY (
+    SELECT storage.rowid
+    FROM task_transition_edges storage
+    WHERE storage.id = task_transition_edge_records.id
+) ASC;
 
 -- name: InsertTaskComment :exec
 INSERT INTO task_comments (
@@ -1211,22 +1265,16 @@ INSERT INTO task_comments (
     body,
     author_kind,
     author_id,
-    source_run_id,
     created_at_unix_ms,
-    updated_at_unix_ms,
-    deleted_at_unix_ms,
-    metadata_json
+    updated_at_unix_ms
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(task_id),
     sqlc.arg(body),
     sqlc.arg(author_kind),
     sqlc.arg(author_id),
-    sqlc.narg(source_run_id),
     sqlc.arg(created_at_unix_ms),
-    sqlc.arg(updated_at_unix_ms),
-    0,
-    sqlc.arg(metadata_json)
+    sqlc.arg(updated_at_unix_ms)
 );
 
 -- name: UpdateTaskCommentBody :execrows
@@ -1234,16 +1282,11 @@ UPDATE task_comments
 SET
     body = sqlc.arg(body),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
-WHERE id = sqlc.arg(id)
-  AND deleted_at_unix_ms = 0;
+WHERE id = sqlc.arg(id);
 
--- name: SoftDeleteTaskComment :execrows
-UPDATE task_comments
-SET
-    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms),
-    deleted_at_unix_ms = sqlc.arg(deleted_at_unix_ms)
-WHERE id = sqlc.arg(id)
-  AND deleted_at_unix_ms = 0;
+-- name: DeleteTaskComment :execrows
+DELETE FROM task_comments
+WHERE id = sqlc.arg(id);
 
 -- name: ListTaskComments :many
 SELECT
@@ -1252,59 +1295,11 @@ SELECT
     body,
     author_kind,
     author_id,
-    source_run_id,
     created_at_unix_ms,
-    updated_at_unix_ms,
-    deleted_at_unix_ms,
-    metadata_json
+    updated_at_unix_ms
 FROM task_comments
 WHERE task_id = sqlc.arg(task_id)
-  AND (sqlc.arg(include_deleted) != 0 OR deleted_at_unix_ms = 0)
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
-
--- name: InsertWorkflowEvent :one
-INSERT INTO workflow_events (
-    project_id,
-    workflow_id,
-    resource,
-    action,
-    changed_ids_json,
-    occurred_at_unix_ms
-) VALUES (
-    sqlc.arg(project_id),
-    sqlc.arg(workflow_id),
-    sqlc.arg(resource),
-    sqlc.arg(action),
-    sqlc.arg(changed_ids_json),
-    sqlc.arg(occurred_at_unix_ms)
-)
-RETURNING sequence;
-
--- name: GetLatestWorkflowEventSequence :one
-SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER) AS sequence
-FROM workflow_events
-WHERE sqlc.arg(project_id) = ''
-   OR project_id = sqlc.arg(project_id)
-   OR project_id = '';
-
--- name: ListWorkflowEventsAfter :many
-SELECT
-    sequence,
-    project_id,
-    workflow_id,
-    resource,
-    action,
-    changed_ids_json,
-    occurred_at_unix_ms
-FROM workflow_events
-WHERE sequence > sqlc.arg(after_sequence)
-  AND (
-      sqlc.arg(project_id) = ''
-      OR project_id = sqlc.arg(project_id)
-      OR project_id = ''
-  )
-ORDER BY sequence ASC
-LIMIT sqlc.arg(limit_rows);
 
 -- name: GetWorkspaceBindingByID :one
 SELECT
@@ -1342,9 +1337,6 @@ INSERT INTO workspaces (
     id,
     project_id,
     canonical_root_path,
-    display_name,
-    availability,
-    is_primary,
     git_metadata_json,
     created_at_unix_ms,
     updated_at_unix_ms
@@ -1352,9 +1344,6 @@ INSERT INTO workspaces (
     sqlc.arg(id),
     sqlc.arg(project_id),
     sqlc.arg(canonical_root_path),
-    sqlc.arg(display_name),
-    sqlc.arg(availability),
-    sqlc.arg(is_primary),
     sqlc.arg(git_metadata_json),
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(updated_at_unix_ms)
@@ -1362,9 +1351,6 @@ INSERT INTO workspaces (
 ON CONFLICT(id) DO UPDATE SET
     project_id = excluded.project_id,
     canonical_root_path = excluded.canonical_root_path,
-    display_name = excluded.display_name,
-    availability = excluded.availability,
-    is_primary = excluded.is_primary,
     git_metadata_json = excluded.git_metadata_json,
     updated_at_unix_ms = excluded.updated_at_unix_ms;
 
@@ -1373,9 +1359,6 @@ INSERT INTO workspaces (
     id,
     project_id,
     canonical_root_path,
-    display_name,
-    availability,
-    is_primary,
     git_metadata_json,
     created_at_unix_ms,
     updated_at_unix_ms
@@ -1383,9 +1366,6 @@ INSERT INTO workspaces (
     sqlc.arg(id),
     sqlc.arg(project_id),
     sqlc.arg(canonical_root_path),
-    sqlc.arg(display_name),
-    sqlc.arg(availability),
-    sqlc.arg(is_primary),
     sqlc.arg(git_metadata_json),
     sqlc.arg(created_at_unix_ms),
     sqlc.arg(updated_at_unix_ms)
@@ -1396,8 +1376,6 @@ ON CONFLICT(project_id, canonical_root_path) DO NOTHING;
 UPDATE workspaces
 SET
     canonical_root_path = sqlc.arg(canonical_root_path),
-    display_name = sqlc.arg(display_name),
-    availability = sqlc.arg(availability),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
 WHERE id = sqlc.arg(id);
 
@@ -1414,7 +1392,7 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 
 -- name: CountActiveTaskRunsByWorkspace :one
 SELECT CAST(COUNT(DISTINCT r.id) AS INTEGER) AS run_count
-FROM task_runs r
+FROM task_run_records r
 JOIN tasks t ON t.id = r.task_id
 LEFT JOIN sessions s ON s.id = r.session_id
 WHERE r.completed_at_unix_ms = 0
@@ -1443,56 +1421,53 @@ WHERE source_workspace_id = sqlc.arg(workspace_id)
 
 -- name: ListWorktreesByWorkspaceID :many
 SELECT
-    id,
-    workspace_id,
-    canonical_root_path,
-    display_name,
-    availability,
-    is_main,
-    builder_managed,
-    created_branch,
-    origin_session_id,
-    git_metadata_json,
-    created_at_unix_ms,
-    updated_at_unix_ms
-FROM worktrees
-WHERE workspace_id = sqlc.arg(workspace_id)
-ORDER BY created_at_unix_ms ASC, rowid ASC;
+    wt.id,
+    wt.workspace_id,
+    wt.canonical_root_path,
+    CASE WHEN wt.canonical_root_path = w.canonical_root_path THEN 1 ELSE 0 END AS is_main,
+    wt.builder_managed,
+    wt.created_branch,
+    wt.origin_session_id,
+    wt.git_metadata_json,
+    wt.created_at_unix_ms,
+    wt.updated_at_unix_ms
+FROM worktrees wt
+JOIN workspaces w ON w.id = wt.workspace_id
+WHERE wt.workspace_id = sqlc.arg(workspace_id)
+ORDER BY wt.created_at_unix_ms ASC, wt.rowid ASC;
 
 -- name: GetWorktreeByID :one
 SELECT
-    id,
-    workspace_id,
-    canonical_root_path,
-    display_name,
-    availability,
-    is_main,
-    builder_managed,
-    created_branch,
-    origin_session_id,
-    git_metadata_json,
-    created_at_unix_ms,
-    updated_at_unix_ms
-FROM worktrees
-WHERE id = sqlc.arg(id)
+    wt.id,
+    wt.workspace_id,
+    wt.canonical_root_path,
+    CASE WHEN wt.canonical_root_path = w.canonical_root_path THEN 1 ELSE 0 END AS is_main,
+    wt.builder_managed,
+    wt.created_branch,
+    wt.origin_session_id,
+    wt.git_metadata_json,
+    wt.created_at_unix_ms,
+    wt.updated_at_unix_ms
+FROM worktrees wt
+JOIN workspaces w ON w.id = wt.workspace_id
+WHERE wt.id = sqlc.arg(id)
 LIMIT 1;
 
 -- name: GetWorktreeByCanonicalRoot :one
 SELECT
-    id,
-    workspace_id,
-    canonical_root_path,
-    display_name,
-    availability,
-    is_main,
-    builder_managed,
-    created_branch,
-    origin_session_id,
-    git_metadata_json,
-    created_at_unix_ms,
-    updated_at_unix_ms
-FROM worktrees
-WHERE canonical_root_path = sqlc.arg(canonical_root_path)
+    wt.id,
+    wt.workspace_id,
+    wt.canonical_root_path,
+    CASE WHEN wt.canonical_root_path = w.canonical_root_path THEN 1 ELSE 0 END AS is_main,
+    wt.builder_managed,
+    wt.created_branch,
+    wt.origin_session_id,
+    wt.git_metadata_json,
+    wt.created_at_unix_ms,
+    wt.updated_at_unix_ms
+FROM worktrees wt
+JOIN workspaces w ON w.id = wt.workspace_id
+WHERE wt.canonical_root_path = sqlc.arg(canonical_root_path)
 LIMIT 1;
 
 -- name: UpsertWorktree :exec
@@ -1500,9 +1475,6 @@ INSERT INTO worktrees (
     id,
     workspace_id,
     canonical_root_path,
-    display_name,
-    availability,
-    is_main,
     builder_managed,
     created_branch,
     origin_session_id,
@@ -1513,9 +1485,6 @@ INSERT INTO worktrees (
     sqlc.arg(id),
     sqlc.arg(workspace_id),
     sqlc.arg(canonical_root_path),
-    sqlc.arg(display_name),
-    sqlc.arg(availability),
-    sqlc.arg(is_main),
     sqlc.arg(builder_managed),
     sqlc.arg(created_branch),
     sqlc.arg(origin_session_id),
@@ -1525,9 +1494,6 @@ INSERT INTO worktrees (
 )
 ON CONFLICT(canonical_root_path) DO UPDATE SET
     workspace_id = excluded.workspace_id,
-    display_name = excluded.display_name,
-    availability = excluded.availability,
-    is_main = excluded.is_main,
     builder_managed = excluded.builder_managed,
     created_branch = excluded.created_branch,
     origin_session_id = excluded.origin_session_id,
@@ -1542,8 +1508,6 @@ WHERE id = sqlc.arg(id);
 UPDATE worktrees
 SET
     canonical_root_path = sqlc.arg(canonical_root_path),
-    display_name = sqlc.arg(display_name),
-    availability = sqlc.arg(availability),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
 WHERE id = sqlc.arg(id);
 
@@ -1635,31 +1599,29 @@ SELECT CAST(COUNT(*) AS INTEGER) AS workspace_count
 FROM workspaces
 WHERE project_id = sqlc.arg(project_id);
 
--- name: ClearProjectPrimaryWorkspaces :execrows
-UPDATE workspaces
-SET
-    is_primary = 0,
-    updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
-WHERE project_id = sqlc.arg(project_id);
+-- name: GetProjectPrimaryWorkspaceID :one
+SELECT primary_workspace_id
+FROM projects
+WHERE id = sqlc.arg(project_id)
+LIMIT 1;
 
--- name: SetProjectWorkspacePrimary :execrows
-UPDATE workspaces
+-- name: SetProjectPrimaryWorkspace :execrows
+UPDATE projects
 SET
-    is_primary = 1,
+    primary_workspace_id = sqlc.arg(workspace_id),
     updated_at_unix_ms = sqlc.arg(updated_at_unix_ms)
-WHERE project_id = sqlc.arg(project_id)
-  AND id = sqlc.arg(workspace_id);
+WHERE id = sqlc.arg(project_id);
 
 -- name: ListProjects :many
 SELECT
     p.id,
     p.display_name,
     p.project_key,
-    w.canonical_root_path AS root_path,
+    COALESCE(w.canonical_root_path, '') AS root_path,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
-JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
+LEFT JOIN workspaces w ON w.id = p.primary_workspace_id AND w.project_id = p.id
 LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 GROUP BY p.id, p.display_name, p.project_key, w.canonical_root_path, p.updated_at_unix_ms
 ORDER BY latest_activity_unix_ms DESC;
@@ -1669,48 +1631,47 @@ SELECT
     p.id AS project_id,
     p.project_key,
     p.display_name,
-    w.id AS primary_workspace_id,
-    w.display_name AS primary_workspace_display_name,
-    w.canonical_root_path AS primary_workspace_root_path,
-    w.updated_at_unix_ms AS primary_workspace_updated_at_unix_ms,
+    COALESCE(w.id, '') AS primary_workspace_id,
+    COALESCE(w.canonical_root_path, '') AS primary_workspace_root_path,
+    CAST(COALESCE(w.updated_at_unix_ms, p.updated_at_unix_ms) AS INTEGER) AS primary_workspace_updated_at_unix_ms,
     COALESCE(default_workflow.id, '') AS default_workflow_id,
     COALESCE(default_workflow.name, '') AS default_workflow_name,
     CASE WHEN default_workflow.id IS NULL THEN 0 ELSE 1 END AS default_workflow_valid,
     CAST(MAX(
         p.updated_at_unix_ms,
-        w.updated_at_unix_ms,
-        COALESCE((SELECT MAX(t.updated_at_unix_ms) FROM tasks t WHERE t.project_id = p.id), 0),
+        COALESCE(w.updated_at_unix_ms, 0),
+        COALESCE((SELECT MAX(t.updated_at_unix_ms) FROM task_records t WHERE t.project_id = p.id), 0),
         COALESCE((
             SELECT MAX(tnp.updated_at_unix_ms)
             FROM task_node_placements tnp
-            JOIN tasks placement_tasks ON placement_tasks.id = tnp.task_id
+            JOIN task_records placement_tasks ON placement_tasks.id = tnp.task_id
             WHERE placement_tasks.project_id = p.id
         ), 0),
         COALESCE((
             SELECT MAX(tr.updated_at_unix_ms)
-            FROM task_runs tr
-            JOIN tasks run_tasks ON run_tasks.id = tr.task_id
+            FROM task_run_records tr
+            JOIN task_records run_tasks ON run_tasks.id = tr.task_id
             WHERE run_tasks.project_id = p.id
         ), 0),
         COALESCE((
             SELECT MAX(MAX(tt.created_at_unix_ms, tt.applied_at_unix_ms))
             FROM task_transitions tt
-            JOIN tasks transition_tasks ON transition_tasks.id = tt.task_id
+            JOIN task_records transition_tasks ON transition_tasks.id = tt.task_id
             WHERE transition_tasks.project_id = p.id
         ), 0),
         COALESCE((
             SELECT MAX(tc.updated_at_unix_ms)
             FROM task_comments tc
-            JOIN tasks comment_tasks ON comment_tasks.id = tc.task_id
+            JOIN task_records comment_tasks ON comment_tasks.id = tc.task_id
             WHERE comment_tasks.project_id = p.id
         ), 0),
         COALESCE((SELECT MAX(s.updated_at_unix_ms) FROM sessions s WHERE s.project_id = p.id AND s.launch_visible <> 0), 0),
-        COALESCE((SELECT MAX(pwl.updated_at_unix_ms) FROM project_workflow_links pwl WHERE pwl.project_id = p.id AND pwl.unlinked_at_unix_ms = 0), 0)
+        COALESCE((SELECT MAX(pwl.updated_at_unix_ms) FROM project_workflow_links pwl WHERE pwl.project_id = p.id), 0)
     ) AS INTEGER) AS latest_activity_unix_ms,
-    CAST((SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS INTEGER) AS task_count,
+    CAST((SELECT COUNT(*) FROM task_records t WHERE t.project_id = p.id) AS INTEGER) AS task_count,
     CAST((
         SELECT COUNT(DISTINCT attention_tasks.id)
-        FROM tasks attention_tasks
+        FROM task_records attention_tasks
         WHERE attention_tasks.project_id = p.id
           AND attention_tasks.canceled_at_unix_ms = 0
           AND (
@@ -1728,7 +1689,7 @@ SELECT
               )
               OR EXISTS (
                   SELECT 1
-                  FROM task_runs tr
+                  FROM task_run_records tr
                   WHERE tr.task_id = attention_tasks.id
                     AND tr.completed_at_unix_ms = 0
                     AND (
@@ -1742,14 +1703,12 @@ SELECT
         SELECT COUNT(*)
         FROM project_workflow_links pwl
         WHERE pwl.project_id = p.id
-          AND pwl.unlinked_at_unix_ms = 0
     ) AS INTEGER) AS workflow_count
 FROM projects p
-JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
+LEFT JOIN workspaces w ON w.id = p.primary_workspace_id AND w.project_id = p.id
 LEFT JOIN project_workflow_links default_link
-    ON default_link.project_id = p.id
-   AND default_link.is_default = 1
-   AND default_link.unlinked_at_unix_ms = 0
+    ON default_link.id = p.default_project_workflow_link_id
+   AND default_link.project_id = p.id
 LEFT JOIN workflows default_workflow ON default_workflow.id = default_link.workflow_id
 WHERE (sqlc.arg(project_id) = '' OR p.id = sqlc.arg(project_id))
 ORDER BY latest_activity_unix_ms DESC, p.rowid DESC
@@ -1761,11 +1720,11 @@ SELECT
     p.id,
     p.display_name,
     p.project_key,
-    w.canonical_root_path AS root_path,
+    COALESCE(w.canonical_root_path, '') AS root_path,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
-JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
+LEFT JOIN workspaces w ON w.id = p.primary_workspace_id AND w.project_id = p.id
 LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 WHERE p.id = sqlc.arg(project_id)
 GROUP BY p.id, p.display_name, p.project_key, w.canonical_root_path, p.updated_at_unix_ms
@@ -1774,30 +1733,30 @@ LIMIT 1;
 -- name: ListProjectWorkspaces :many
 SELECT
     w.id,
-    w.display_name,
     w.canonical_root_path AS root_path,
-    w.is_primary,
+    CASE WHEN w.id = p.primary_workspace_id THEN 1 ELSE 0 END AS is_primary,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM workspaces w
+JOIN projects p ON p.id = w.project_id
 LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
 WHERE w.project_id = sqlc.arg(project_id)
-GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
-ORDER BY w.is_primary DESC, latest_activity_unix_ms DESC, w.created_at_unix_ms ASC, w.rowid ASC;
+GROUP BY w.id, w.canonical_root_path, p.primary_workspace_id, w.updated_at_unix_ms
+ORDER BY CASE WHEN w.id = p.primary_workspace_id THEN 1 ELSE 0 END DESC, latest_activity_unix_ms DESC, w.created_at_unix_ms ASC, w.rowid ASC;
 
 -- name: ListProjectWorkspacesPage :many
 SELECT
     w.id,
-    w.display_name,
     w.canonical_root_path AS root_path,
-    w.is_primary,
+    CASE WHEN w.id = p.primary_workspace_id THEN 1 ELSE 0 END AS is_primary,
     CAST(COALESCE(COUNT(s.id), 0) AS INTEGER) AS session_count,
     COALESCE(MAX(s.updated_at_unix_ms), w.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM workspaces w
+JOIN projects p ON p.id = w.project_id
 LEFT JOIN sessions s ON s.workspace_id = w.id AND s.launch_visible <> 0
 WHERE w.project_id = sqlc.arg(project_id)
-GROUP BY w.id, w.display_name, w.canonical_root_path, w.is_primary, w.updated_at_unix_ms
-ORDER BY w.is_primary DESC, w.created_at_unix_ms DESC, w.rowid DESC
+GROUP BY w.id, w.canonical_root_path, p.primary_workspace_id, w.updated_at_unix_ms
+ORDER BY CASE WHEN w.id = p.primary_workspace_id THEN 1 ELSE 0 END DESC, w.created_at_unix_ms DESC, w.rowid DESC
 LIMIT sqlc.arg(limit_rows)
 OFFSET sqlc.arg(offset_rows);
 
@@ -1841,13 +1800,10 @@ SELECT
     s.id AS session_id,
     s.project_id,
     COALESCE(s.workspace_id, '') AS workspace_id,
-    COALESCE(w.display_name, json_extract(s.metadata_json, '$.workspace_container'), '') AS workspace_name,
+    CAST(COALESCE(json_extract(s.metadata_json, '$.workspace_container'), '') AS TEXT) AS workspace_snapshot_name,
     COALESCE(w.canonical_root_path, json_extract(s.metadata_json, '$.workspace_root'), '') AS workspace_root,
-    COALESCE(w.availability, '') AS workspace_availability,
     s.worktree_id,
-    COALESCE(wt.display_name, '') AS worktree_name,
     COALESCE(wt.canonical_root_path, '') AS worktree_root,
-    COALESCE(wt.availability, '') AS worktree_availability,
     s.cwd_relpath
 FROM sessions s
 LEFT JOIN workspaces w ON w.id = s.workspace_id
@@ -1877,30 +1833,18 @@ ORDER BY updated_at_unix_ms DESC, rowid DESC;
 INSERT INTO runtime_leases (
     id,
     session_id,
-    client_id,
-    request_id,
-    created_at_unix_ms,
-    acquired_at_unix_ms,
-    metadata_json
+    created_at_unix_ms
 ) VALUES (
     sqlc.arg(id),
     sqlc.arg(session_id),
-    sqlc.arg(client_id),
-    sqlc.arg(request_id),
-    sqlc.arg(created_at_unix_ms),
-    sqlc.arg(acquired_at_unix_ms),
-    sqlc.arg(metadata_json)
+    sqlc.arg(created_at_unix_ms)
 );
 
 -- name: GetRuntimeLeaseByID :one
 SELECT
     id,
     session_id,
-    client_id,
-    request_id,
-    created_at_unix_ms,
-    acquired_at_unix_ms,
-    metadata_json
+    created_at_unix_ms
 FROM runtime_leases
 WHERE id = sqlc.arg(lease_id)
 LIMIT 1;

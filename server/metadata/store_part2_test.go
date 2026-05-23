@@ -51,12 +51,10 @@ func TestResolvePersistedSessionRejectsEscapingArtifactRelpath(t *testing.T) {
 
 func TestSessionExecutionTargetClampsEscapingCwdRelpath(t *testing.T) {
 	target := sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
-		WorkspaceID:           "workspace-1",
-		WorkspaceName:         "workspace",
-		WorkspaceRoot:         "/tmp/workspace",
-		WorkspaceAvailability: "available",
-		WorktreeRoot:          "",
-		CwdRelpath:            "../../other-project",
+		WorkspaceID:   "workspace-1",
+		WorkspaceRoot: "/tmp/workspace",
+		WorktreeRoot:  "",
+		CwdRelpath:    "../../other-project",
 	})
 	if target.CwdRelpath != "." {
 		t.Fatalf("cwd relpath = %q, want .", target.CwdRelpath)
@@ -66,12 +64,10 @@ func TestSessionExecutionTargetClampsEscapingCwdRelpath(t *testing.T) {
 	}
 
 	target = sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
-		WorkspaceID:           "workspace-1",
-		WorkspaceName:         "workspace",
-		WorkspaceRoot:         "/tmp/workspace",
-		WorkspaceAvailability: "available",
-		WorktreeRoot:          "/tmp/workspace/worktree-a",
-		CwdRelpath:            "/tmp/absolute",
+		WorkspaceID:   "workspace-1",
+		WorkspaceRoot: "/tmp/workspace",
+		WorktreeRoot:  "/tmp/workspace/worktree-a",
+		CwdRelpath:    "/tmp/absolute",
 	})
 	if target.CwdRelpath != "." {
 		t.Fatalf("absolute cwd relpath = %q, want .", target.CwdRelpath)
@@ -237,8 +233,7 @@ func TestUpsertWorktreeRecordRejectsMissingRequiredFields(t *testing.T) {
 	}{
 		{name: "id", mutate: func(record *WorktreeRecord) { record.ID = "  " }, want: "worktree id is required"},
 		{name: "workspace id", mutate: func(record *WorktreeRecord) { record.WorkspaceID = "  " }, want: "workspace id is required"},
-		{name: "display name", mutate: func(record *WorktreeRecord) { record.DisplayName = "  " }, want: "worktree display name is required"},
-		{name: "availability", mutate: func(record *WorktreeRecord) { record.Availability = "  " }, want: "worktree availability is required"},
+		{name: "canonical root", mutate: func(record *WorktreeRecord) { record.CanonicalRoot = "  " }, want: "worktree canonical root is required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -302,11 +297,11 @@ func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
 		t.Fatalf("EnsureDurable: %v", err)
 	}
 
-	lease, err := store.CreateRuntimeLease(ctx, sess.Meta().SessionID, "req-1")
+	lease, err := store.CreateRuntimeLease(ctx, sess.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
 	}
-	if lease.LeaseID == "" || lease.SessionID != sess.Meta().SessionID || lease.RequestID != "req-1" {
+	if lease.LeaseID == "" || lease.SessionID != sess.Meta().SessionID || lease.CreatedAt.IsZero() {
 		t.Fatalf("unexpected lease record: %+v", lease)
 	}
 

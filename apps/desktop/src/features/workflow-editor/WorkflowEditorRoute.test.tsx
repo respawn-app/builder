@@ -30,7 +30,9 @@ describe("WorkflowEditorRoute", () => {
       />,
     );
 
-    expect(await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
     expect(await screen.findAllByTestId("workflow-node-source-handle")).toHaveLength(2);
     expect(await screen.findAllByTestId("workflow-node-target-handle")).toHaveLength(2);
     const issues = await screen.findByRole("complementary", { name: "Workflow issues" });
@@ -76,7 +78,6 @@ const activeLinkResponse = {
       project_id: "project-1",
       workflow_id: "workflow-1",
       default: true,
-      unlinked_at_unix_ms: 0,
     },
   ],
 };
@@ -100,7 +101,6 @@ const boardResponse = {
     groups: [],
     columns: [],
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   },
 };
 

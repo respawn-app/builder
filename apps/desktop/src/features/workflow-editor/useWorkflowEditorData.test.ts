@@ -13,6 +13,13 @@ describe("shouldRefreshWorkflowEditor", () => {
     ).toBe(true);
     expect(
       shouldRefreshWorkflowEditor(
+        eventParams({ action: "updated", resource: "workflow", workflow_id: "workflow-1" }),
+        "project-1",
+        "workflow-1",
+      ),
+    ).toBe(true);
+    expect(
+      shouldRefreshWorkflowEditor(
         eventParams({ action: "node_updated", resource: "workflow", workflow_id: "workflow-2" }),
         "project-1",
         "workflow-1",

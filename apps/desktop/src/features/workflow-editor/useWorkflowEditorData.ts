@@ -26,7 +26,7 @@ export function useWorkflowEditorData(projectID: string, workflowID: string) {
     enabled: projectID.length > 0 && workflowID.length > 0,
   });
   const activeLink = linksQuery.data?.find(
-    (link) => link.projectID === projectID && link.workflowID === workflowID && link.unlinkedAt === 0,
+    (link) => link.projectID === projectID && link.workflowID === workflowID,
   );
   const linked = activeLink !== undefined;
   const workflowQuery = useQuery({
@@ -41,8 +41,7 @@ export function useWorkflowEditorData(projectID: string, workflowID: string) {
   });
 
   useEffect(() => {
-    const afterSequence = boardQuery.data?.latestEventSequence ?? 0;
-    if (projectID.length === 0 || workflowID.length === 0 || connection.phase !== "connected" || afterSequence <= 0) {
+    if (projectID.length === 0 || workflowID.length === 0 || connection.phase !== "connected") {
       return;
     }
     async function refresh(): Promise<void> {
@@ -54,7 +53,10 @@ export function useWorkflowEditorData(projectID: string, workflowID: string) {
       ]);
       push({ id: "workflow-editor-updated", tone: "neutral", title: t("workflowEditor.updated"), body: "" });
     }
-    const subscription = api.subscribeProject(projectID, afterSequence, {
+    const subscription = api.subscribeProject(projectID, {
+      onOpen() {
+        void refresh();
+      },
       onEvent(_method, params) {
         if (shouldRefreshWorkflowEditor(params, projectID, workflowID)) {
           void refresh();
@@ -70,17 +72,7 @@ export function useWorkflowEditorData(projectID: string, workflowID: string) {
     return () => {
       subscription.close();
     };
-  }, [
-    api,
-    boardQuery.data?.latestEventSequence,
-    connection.generation,
-    connection.phase,
-    projectID,
-    push,
-    queryClient,
-    t,
-    workflowID,
-  ]);
+  }, [api, connection.generation, connection.phase, projectID, push, queryClient, t, workflowID]);
 
   return {
     activeLink,
@@ -111,6 +103,7 @@ export function shouldRefreshWorkflowEditor(params: unknown, projectID: string, 
 }
 
 const workflowDefinitionActions = new Set([
+  "updated",
   "node_added",
   "node_updated",
   "node_group_added",
@@ -124,15 +117,13 @@ const workflowDefinitionActions = new Set([
 
 const workflowLinkActions = new Set(["linked", "default_changed", "unlinked"]);
 
-function workflowProjectEvent(params: unknown):
-  | Readonly<{
-      action: string;
-      changedIDs: readonly string[];
-      projectID: string;
-      resource: string;
-      workflowID: string;
-    }>
-  | null {
+function workflowProjectEvent(params: unknown): Readonly<{
+  action: string;
+  changedIDs: readonly string[];
+  projectID: string;
+  resource: string;
+  workflowID: string;
+}> | null {
   if (!isRecord(params) || !("event" in params)) {
     return null;
   }

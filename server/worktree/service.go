@@ -914,6 +914,7 @@ func worktreeGitMetadataFromRecord(worktree metadata.WorktreeRecord) (GitWorktre
 	if err := json.Unmarshal([]byte(metadataJSON), &gitMetadata); err != nil {
 		return GitWorktree{}, fmt.Errorf("decode git worktree metadata: %w", err)
 	}
+	gitMetadata.IsMain = worktree.IsMain
 	return gitMetadata, nil
 }
 

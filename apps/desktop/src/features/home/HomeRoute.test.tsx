@@ -122,7 +122,6 @@ function projectPage(projects: readonly ReturnType<typeof projectSummary>[], nex
     projects,
     next_page_token: nextPageToken,
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   };
 }
 
@@ -201,6 +200,5 @@ const boardResponse = {
     done_preview: [],
     next_page_token: "",
     generated_at_unix_ms: 1,
-    latest_event_sequence: 1,
   },
 };
