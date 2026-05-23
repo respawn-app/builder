@@ -76,13 +76,6 @@ The scope is intentionally narrow and quality-oriented.
 - GUI pagination must use infinite scroll. Do not add page-number, next/previous, "Load more", or other button-based pagination controls.
 - Use browser-client QA as the primary manual GUI QA path. Run `pnpm --dir apps/desktop dev:browser` for interactive QA, or `./scripts/capture-gui-browser-proof.sh` for agent-browser screenshot proof capture against an existing Builder server.
 
-## When designing model prompts:
-- Clearly explain **how** and **when** the model should use the tool in descriptions.
-- Write tool schemas for parameters that specify whether it's optional, what's the default value, what the parameter does, what is its format (iso date/number etc)
-- Minimize parameters, minimize required parameters even more.
-- Handle common errors and hand the error message back to the model with a clear message and an instruction, e.g. avoid "status 124", instead: "tool timed out, try specifying a larger `timeout` param or adjusting the tool call to be faster".
-- Keep frequently edited files easily accessible, like the global "system_prompt.md" or "tool_definitions.go" files.
-
 ## Commit guidelines
 Format: `<type>[!]: [description]`, `!` = breaking change (requiring migration from users of Builder).
 Use one of these types for all commits: `feat`, `fix`, `feat!`/`breaking`/`api`, `docs`,  `refactor`,  `chore`.
