@@ -48,7 +48,7 @@ export function QuestionBox({
       }}
     >
       <h3>{t("task.question")}</h3>
-      <p>{pendingAsk?.question ?? attention.message}</p>
+      {attention.message.length > 0 ? <p>{attention.message}</p> : null}
       <fieldset className="m-0 grid gap-[var(--space-2)] border-0 p-0">
         <legend className="sr-only">{t("task.optionNumber")}</legend>
         {(pendingAsk?.suggestions ?? []).map((suggestion, optionIndex) => (
