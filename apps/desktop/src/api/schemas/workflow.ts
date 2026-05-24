@@ -220,6 +220,17 @@ const workflowOutputRequirementsSchema = z
   .nullish()
   .transform(emptyArray);
 
+const workflowContextSourceSchema = z
+  .object({
+    kind: z.string().nullish().transform((value) => value ?? "immediate_source"),
+    node_key: emptyString,
+  })
+  .nullish()
+  .transform((value) => ({
+    kind: value?.kind ?? "immediate_source",
+    nodeKey: value?.node_key ?? "",
+  }));
+
 const workflowEdgesSchema = z
   .array(
     z
@@ -231,6 +242,7 @@ const workflowEdgesSchema = z
         target_node_id: z.string(),
         requires_approval: z.boolean(),
         context_mode: z.string(),
+        context_source: workflowContextSourceSchema,
         input_bindings: workflowInputBindingsSchema,
         output_requirements: workflowOutputRequirementsSchema,
       })
@@ -242,6 +254,7 @@ const workflowEdgesSchema = z
         targetNodeID: value.target_node_id,
         requiresApproval: value.requires_approval,
         contextMode: value.context_mode,
+        contextSource: value.context_source,
         inputBindings: value.input_bindings,
         outputRequirements: value.output_requirements,
       })),

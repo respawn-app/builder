@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { errorMessage } from "../../api/errors";
+import { useSidebar } from "../../app/sidebarContext";
 import { queryKeys } from "../../app/queryKeys";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
@@ -19,6 +20,7 @@ export type WorkflowEditorRouteProps = Readonly<{
 
 export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRouteProps) {
   const { t } = useTranslation();
+  const { openSidebar } = useSidebar();
   const [issuesCollapsed, setIssuesCollapsed] = useState(false);
   const data = useWorkflowEditorData(projectID, workflowID);
   const workflow = data.workflowQuery.data?.workflow;
@@ -66,7 +68,41 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
 
   return (
     <section className="h-full min-h-0 w-full" data-testid="workflow-editor-route">
-      <WorkflowGraphCanvas graph={viewState.graph} />
+      <WorkflowGraphCanvas
+        graph={viewState.graph}
+        onEdgeInspect={(edgeID) => {
+          void openSidebar({
+            kind: "workflowInspect",
+            mode: "overlay",
+            selection: { kind: "edge", edgeID },
+            workflowID,
+          });
+        }}
+        onGroupInspect={(groupID) => {
+          void openSidebar({
+            kind: "workflowInspect",
+            mode: "overlay",
+            selection: { kind: "group", groupID },
+            workflowID,
+          });
+        }}
+        onNodeInspect={(nodeID) => {
+          void openSidebar({
+            kind: "workflowInspect",
+            mode: "overlay",
+            selection: { kind: "node", nodeID },
+            workflowID,
+          });
+        }}
+        onWorkflowInspect={() => {
+          void openSidebar({
+            kind: "workflowInspect",
+            mode: "overlay",
+            selection: { kind: "workflow" },
+            workflowID,
+          });
+        }}
+      />
       <ValidationIssueIsland
         collapsed={issuesCollapsed}
         onCollapsedChange={setIssuesCollapsed}

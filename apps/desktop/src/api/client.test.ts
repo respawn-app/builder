@@ -176,7 +176,14 @@ describe("BuilderApiClient", () => {
       workflow: { id: "workflow-1", name: "Delivery", graphRevision: 7 },
       nodeGroups: [{ id: "group-1", key: "core", name: "Core", nodeIDs: [] }],
       transitionGroups: [{ id: "tg-1", sourceNodeID: "node-1", transitionID: "done" }],
-      edges: [{ id: "edge-1", transitionGroupID: "tg-1", targetNodeID: "done" }],
+      edges: [
+        {
+          contextSource: { kind: "selected_node", nodeKey: "implement" },
+          id: "edge-1",
+          targetNodeID: "done",
+          transitionGroupID: "tg-1",
+        },
+      ],
     });
     expect(definition.nodes).toEqual(
       expect.arrayContaining([
@@ -540,6 +547,10 @@ const workflowDefinitionResponse = {
         target_node_id: "done",
         requires_approval: false,
         context_mode: "new_session",
+        context_source: {
+          kind: "selected_node",
+          node_key: "implement",
+        },
         input_bindings: null,
         output_requirements: null,
       },

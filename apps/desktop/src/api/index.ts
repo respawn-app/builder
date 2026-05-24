@@ -22,6 +22,7 @@ export type {
   TaskTransition,
   TeleportTarget,
   WorkflowBoard,
+  WorkflowContextSource,
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowInputBinding,

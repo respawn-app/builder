@@ -167,6 +167,11 @@ export type WorkflowOutputRequirement = Readonly<{
   fieldName: string;
 }>;
 
+export type WorkflowContextSource = Readonly<{
+  kind: string;
+  nodeKey: string;
+}>;
+
 export type WorkflowTransitionGroup = Readonly<{
   id: string;
   workflowID: string;
@@ -183,6 +188,7 @@ export type WorkflowEdge = Readonly<{
   targetNodeID: string;
   requiresApproval: boolean;
   contextMode: string;
+  contextSource: WorkflowContextSource;
   inputBindings: readonly WorkflowInputBinding[];
   outputRequirements: readonly WorkflowOutputRequirement[];
 }>;
