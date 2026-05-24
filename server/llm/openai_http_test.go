@@ -107,6 +107,34 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	}
 }
 
+func TestItemsFromMessagesNormalizesEscapedHTMLToolArguments(t *testing.T) {
+	live := ItemsFromMessages([]Message{{
+		Role: RoleAssistant,
+		ToolCalls: []ToolCall{{
+			ID:    "call-1",
+			Name:  "shell",
+			Input: json.RawMessage(`{"cmd":"git diff --cached && git diff","literal":"\\u0026"}`),
+		}},
+	}})
+	replayed := ItemsFromMessages([]Message{{
+		Role: RoleAssistant,
+		ToolCalls: []ToolCall{{
+			ID:    "call-1",
+			Name:  "shell",
+			Input: json.RawMessage(`{"cmd":"git diff --cached \u0026\u0026 git diff","literal":"\\u0026"}`),
+		}},
+	}})
+	if len(live) != 1 || len(replayed) != 1 {
+		t.Fatalf("expected one item from each transcript, got live=%d replayed=%d", len(live), len(replayed))
+	}
+	if string(live[0].Arguments) != string(replayed[0].Arguments) {
+		t.Fatalf("arguments differ\nlive=%s\nreplayed=%s", live[0].Arguments, replayed[0].Arguments)
+	}
+	if got := string(replayed[0].Arguments); got != `{"cmd":"git diff --cached && git diff","literal":"\\u0026"}` {
+		t.Fatalf("unexpected canonical arguments: %s", got)
+	}
+}
+
 func TestBuildResponsesInput_AssistantUsesTypedMessageInput(t *testing.T) {
 	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{Role: RoleUser, Content: "u1"},

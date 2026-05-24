@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/prompts"
+	"builder/shared/jsonutil"
 	"builder/shared/textutil"
 	"builder/shared/toolspec"
 
@@ -123,10 +124,10 @@ func normalizeToolArguments(arguments string) string {
 		return "{}"
 	}
 	if json.Valid([]byte(arguments)) {
-		return arguments
+		return jsonutil.CompactNoHTMLEscape([]byte(arguments))
 	}
 	quoted, _ := json.Marshal(arguments)
-	return string(quoted)
+	return jsonutil.CompactNoHTMLEscape(quoted)
 }
 
 func normalizeToolInput(arguments string) json.RawMessage {
@@ -135,10 +136,10 @@ func normalizeToolInput(arguments string) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	if json.Valid([]byte(arguments)) {
-		return json.RawMessage(arguments)
+		return json.RawMessage(jsonutil.CompactNoHTMLEscape([]byte(arguments)))
 	}
 	quoted, _ := json.Marshal(arguments)
-	return quoted
+	return json.RawMessage(jsonutil.CompactNoHTMLEscape(quoted))
 }
 
 func outputStringFromRaw(raw json.RawMessage) string {
