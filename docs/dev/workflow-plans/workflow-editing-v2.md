@@ -1,6 +1,7 @@
 ## Checklist
 
 - [x] Recon current workflow graph viewer, workflow APIs, validation, and mutation model.
+- [x] V1 read-only inspector milestone: existing workflow definitions can be inspected from the editor through the global right sidebar; joins are visible as clickable merge diamonds; semantic node/edge colors are implemented with validation-error red overrides.
 - [ ] Workstream 1: reach shared ownership/hierarchy model from actual DB ERD.
 - [ ] Workstream 1: update product/navigation decisions for projects, workflows, tasks, and boards after hierarchy is agreed.
 - [ ] Workstream 1: decide whether `workflow_events` hard-cutover belongs before or after navigation redesign.
@@ -28,8 +29,9 @@
 - Decision: remove soft-unlink semantics from `project_workflow_links`. Project-workflow links are active membership rows only; unlink hard-deletes an unused link, and deleting/retiring a workflow deletes the workflow definition and cascades/deletes tasks through the workflow/link cleanup path. If tasks exist for an accidental link, move/delete those tasks before unlinking rather than preserving an inactive timestamp row.
 - Blocking preliminary task 1: approve the global right-side sidebar island UX/API contract before building the Link workflow intermediary flow. Contract must define destination types, result/cancel semantics, route-change auto-close, and local sidebar navigation.
 - Blocking preliminary task 2: implement the shell/sidebar provider and host from the approved contract before building the Link workflow intermediary flow. Tauri native blocking windows should not be used for this workflow UX because they are unreliable/problematic and the product direction is moving away from them.
-- Editing functionality builds on workflow editor v1, which is currently a read-only workflow definition viewer.
+- Editing functionality builds on workflow editor v1, which is currently a read-only workflow definition viewer with global-sidebar inspection for workflow metadata, groups, nodes, joins, and edges.
 - GUI remains a remote-control surface; server remains authoritative for workflow definitions, validation, persistence, project links, and events.
+- V1 editor graph semantics are locked: editor renders join nodes as small inspectable merge diamonds, board/Kanban read models still omit join columns, edge colors communicate context mode, node colors communicate node kind, and validation-error red overrides normal semantic colors only for invalid graph entities.
 - First editing release should support full graph CRUD for nodes, node groups, transition groups, and edges, including guarded delete/archive behavior.
 - Editing uses a local draft session with Save/Discard. Server mutations apply only when the user saves.
 - Canvas opens with ELK-computed layout. User may drag nodes/groups during the edit session; coordinates are kept only in memory and reset to ELK on reopen.
@@ -66,7 +68,7 @@
 
 - Schema audit should use generated latest SQLite DDL from a migrated temp DB, not hand-composed migration reading. Current reproducible method: copy only `server/metadata/migrations/*.up.sql` into a temp migration dir, run Goose against a temp SQLite DB, then inspect `sqlite_schema` / `sqlite3 .schema`. GH issue #282 tracks adding a one-line repo command for this.
 - Current route is `/projects/:projectId/workflows/:workflowId/editor` and is project-link gated. It loads project workflow links, board metadata, workflow definition, execution validation, then derives React Flow nodes/edges from ELK layout.
-- `WorkflowGraphCanvas` is deliberately read-only today: controlled `nodes`/`edges`, node drag/connect disabled, selection only, fit/zoom toolbar, no inspector or authoring state.
+- `WorkflowGraphCanvas` is deliberately read-only today: controlled `nodes`/`edges`, node drag/connect disabled, selection/click inspection only, fit/zoom/inspect toolbar, no draft or authoring state.
 - GUI API client only exposes read methods for workflow definitions/validation/project links. Server transport already has mutation routes for workflow create/update, node add/update, node group add/update/delete, transition group add/update, and edge add/update.
 - Server service publishes linked-project workflow events for add/update mutations, so editor subscription/refetch already fits the editing model. Delete/archive node and delete edge exist in `workflowstore` but are not exposed through `workflowsvc`, `serverapi`, protocol routes, or GUI client.
 - Store mutations increment graph revision per graph-affecting edit. Existing add/update requests are whole-entity replacement requests, not patch requests, so GUI must submit complete entity payloads or add dedicated patch/batch APIs.
@@ -74,6 +76,7 @@
 - Runtime/task behavior snapshots workflow graph revision into tasks/runs/transitions. Destructive graph deletion has safeguards: deleting nodes/edges is blocked when non-terminal task references exist or task history references the entity. Archiving node exists for terminal-history cases but is not exposed.
 - Node groups are persisted separately and currently used for visual grouping. Layout is not persisted; ELK recomputes deterministic topology layout on every definition/revision.
 - Workflow terminology to preserve in UI/API docs: Workflow, Workflow Draft, Graph Revision, Node, Edge, Transition Group, Transition ID, Output Requirements, Input Bindings, Join, Project Workflow Link.
+- Current V1 inspector is intentionally identity-based rather than snapshot-based: sidebar destinations carry workflow ID plus selected entity identity and resolve current `workflow.get`/`workflow.validate` React Query cache data on render. V2 edit forms should preserve this typed destination approach while swapping read-only sections for draft-backed forms.
 
 ## Schema Audit Caveats
 
