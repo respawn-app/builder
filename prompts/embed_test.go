@@ -8,14 +8,14 @@ import (
 )
 
 func TestRenderSystemPromptTemplateUsesTypedFields(t *testing.T) {
-	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderRunCommand}} edit={{.EditingToolName}}", SystemPromptTemplateArgs{
+	rendered := renderSystemPromptTemplate("calls={{.EstimatedToolCallsForContext}} cmd={{.BuilderCommand}} run edit={{.EditingToolName}}", SystemPromptTemplateArgs{
 		EstimatedToolCallsForContext: 123,
 		EditingToolName:              "edit",
 	}, "")
 	if !strings.Contains(rendered, "calls=123") {
 		t.Fatalf("expected estimated tool calls rendered, got %q", rendered)
 	}
-	expectedCmd := "cmd=" + selfcmd.RunCommandPrefix()
+	expectedCmd := "cmd=" + selfcmd.BuilderCommand() + " run"
 	if !strings.Contains(rendered, expectedCmd) || strings.Contains(rendered, "{{") {
 		t.Fatalf("expected %q in rendered output, got %q", expectedCmd, rendered)
 	}
@@ -61,7 +61,7 @@ func TestCustomSystemPromptResolvesDefaultSystemPromptSectionPlaceholders(t *tes
 		"Your agentic environment",
 		"Product ambiguity and planning",
 		"Final answer instructions",
-		selfcmd.RunCommandPrefix(),
+		selfcmd.BuilderCommand(),
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected section prompt to contain %q, got %q", want, rendered)

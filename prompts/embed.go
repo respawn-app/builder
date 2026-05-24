@@ -18,14 +18,12 @@ type SystemPromptTemplateArgs struct {
 
 type systemPromptRuntimeTemplateData struct {
 	BuilderCommand               string
-	BuilderRunCommand            string
 	EstimatedToolCallsForContext int
 	EditingToolName              string
 }
 
 type defaultSystemPromptTemplateData struct {
 	BuilderCommand                               string
-	BuilderRunCommand                            string
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPromptPersonality               string
@@ -37,7 +35,6 @@ type defaultSystemPromptTemplateData struct {
 
 type systemPromptTemplateData struct {
 	BuilderCommand                               string
-	BuilderRunCommand                            string
 	EstimatedToolCallsForContext                 int
 	EditingToolName                              string
 	DefaultSystemPrompt                          string
@@ -227,10 +224,6 @@ func BaseSystemPrompt(args SystemPromptTemplateArgs) string {
 	return rendered
 }
 
-func BuilderRunCommand() string {
-	return selfcmd.RunCommandPrefix()
-}
-
 func BuilderCommand() string {
 	return selfcmd.BuilderCommand()
 }
@@ -289,13 +282,11 @@ func RenderWorkflowTaskInstructions(args WorkflowNodeContextArgs, nodeCompletion
 	type workflowTaskInstructionsTemplateData struct {
 		WorkflowNodeContextArgs
 		BuilderCommand             string
-		BuilderRunCommand          string
 		NodeCompletionInstructions string
 	}
 	return renderNamedTemplate("workflow task instructions", WorkflowTaskInstructionsPrompt, workflowTaskInstructionsTemplateData{
 		WorkflowNodeContextArgs:    args,
 		BuilderCommand:             selfcmd.BuilderCommand(),
-		BuilderRunCommand:          selfcmd.RunCommandPrefix(),
 		NodeCompletionInstructions: strings.TrimSpace(nodeCompletionInstructions),
 	})
 }
@@ -310,13 +301,11 @@ func RenderWorkflowStructuredCompletionInstructions(workflowShortId string) (str
 
 func renderWorkflowCompletionInstructions(name string, text string, workflowShortId string) (string, error) {
 	return renderNamedTemplate(name, text, struct {
-		BuilderCommand    string
-		BuilderRunCommand string
-		WorkflowShortId   string
+		BuilderCommand  string
+		WorkflowShortId string
 	}{
-		BuilderCommand:    selfcmd.BuilderCommand(),
-		BuilderRunCommand: selfcmd.RunCommandPrefix(),
-		WorkflowShortId:   strings.TrimSpace(workflowShortId),
+		BuilderCommand:  selfcmd.BuilderCommand(),
+		WorkflowShortId: strings.TrimSpace(workflowShortId),
 	})
 }
 
@@ -380,7 +369,6 @@ func renderSystemPromptSections(args SystemPromptTemplateArgs) (systemPromptSect
 func renderSystemPromptSection(name string, text string, args SystemPromptTemplateArgs) (string, error) {
 	return renderNamedTemplate(name, text, systemPromptRuntimeTemplateData{
 		BuilderCommand:               selfcmd.BuilderCommand(),
-		BuilderRunCommand:            selfcmd.RunCommandPrefix(),
 		EstimatedToolCallsForContext: args.EstimatedToolCallsForContext,
 		EditingToolName:              strings.TrimSpace(args.EditingToolName),
 	})
@@ -393,7 +381,6 @@ func renderDefaultSystemPromptTemplateWithSections(text string, args SystemPromp
 	}
 	return renderNamedTemplate("system prompt", trimmed, defaultSystemPromptTemplateData{
 		BuilderCommand:                               selfcmd.BuilderCommand(),
-		BuilderRunCommand:                            selfcmd.RunCommandPrefix(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPromptPersonality:               strings.TrimSpace(sections.personality),
@@ -411,7 +398,6 @@ func renderSystemPromptTemplateWithSections(text string, args SystemPromptTempla
 	}
 	return renderNamedTemplate("system prompt", trimmed, systemPromptTemplateData{
 		BuilderCommand:                               selfcmd.BuilderCommand(),
-		BuilderRunCommand:                            selfcmd.RunCommandPrefix(),
 		EstimatedToolCallsForContext:                 args.EstimatedToolCallsForContext,
 		EditingToolName:                              strings.TrimSpace(args.EditingToolName),
 		DefaultSystemPrompt:                          strings.TrimSpace(defaultSystemPrompt),
