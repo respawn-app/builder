@@ -1,7 +1,7 @@
 import type { WorkflowDefinition, WorkflowNode, WorkflowTransitionGroup } from "../../api";
 
 export function fallbackLabel(fallback: string, ...candidates: readonly (string | undefined)[]): string {
-  return candidates.find((candidate) => candidate !== undefined && candidate.length > 0) ?? fallback;
+  return candidates.find((candidate) => candidate !== undefined && candidate.trim().length > 0) ?? fallback;
 }
 
 export function transitionGroupByID(

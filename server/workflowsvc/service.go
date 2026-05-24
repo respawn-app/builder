@@ -795,7 +795,11 @@ func (s *Service) SubscribeWorkflow(ctx context.Context, req serverapi.WorkflowS
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	return s.events.SubscribeWorkflow(strings.TrimSpace(req.WorkflowID))
+	workflowID := strings.TrimSpace(req.WorkflowID)
+	if _, err := s.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID}); err != nil {
+		return nil, err
+	}
+	return s.events.SubscribeWorkflow(workflowID)
 }
 
 func (s *Service) GetWorkflowTask(ctx context.Context, req serverapi.WorkflowTaskGetRequest) (serverapi.WorkflowTaskGetResponse, error) {

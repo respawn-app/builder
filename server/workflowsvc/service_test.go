@@ -1147,6 +1147,9 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 		t.Fatalf("SubscribeWorkflow: %v", err)
 	}
 	defer func() { _ = workflowSub.Close() }()
+	if _, err := service.SubscribeWorkflow(ctx, serverapi.WorkflowSubscribeRequest{WorkflowID: "workflow-missing"}); err == nil {
+		t.Fatal("SubscribeWorkflow accepted missing workflow")
+	}
 	saved, err := service.SaveWorkflowGraph(ctx, serverapi.WorkflowGraphSaveRequest{
 		WorkflowID:                 workflowID,
 		ExpectedGraphRevision:      source.Definition.Workflow.GraphRevision,
@@ -1168,7 +1171,9 @@ func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
 			t.Fatalf("event = %+v, want linked workflow event", event)
 		}
 	}
-	workflowEvent, err := workflowSub.Next(ctx)
+	eventCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	workflowEvent, err := workflowSub.Next(eventCtx)
 	if err != nil {
 		t.Fatalf("workflow subscription next: %v", err)
 	}

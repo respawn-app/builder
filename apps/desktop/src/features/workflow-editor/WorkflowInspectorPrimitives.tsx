@@ -41,10 +41,10 @@ export function ValidationDetails({
   return (
     <DetailSection title={title ?? t("workflowEditor.validationErrors")}>
       <ul className="m-0 grid gap-[var(--space-2)] p-0">
-        {errors.map((error) => (
+        {errors.map((error, index) => (
           <li
             className="list-none rounded-[var(--radius-m)] border border-[var(--color-error)] bg-[color-mix(in_srgb,var(--color-error)_12%,transparent)] p-[var(--space-2)]"
-            key={`${error.code}:${error.message}`}
+            key={validationErrorKey(error, index)}
           >
             <div className="mb-[var(--space-1)]">
               <Badge tone={error.blocksContext ? "danger" : "warning"}>{error.code}</Badge>
@@ -55,6 +55,14 @@ export function ValidationDetails({
       </ul>
     </DetailSection>
   );
+}
+
+function validationErrorKey(error: WorkflowValidationError, index: number): string {
+  const entityID = error.edgeID || error.nodeID || error.transitionGroupID || error.workflowID;
+  if (entityID.length > 0) {
+    return `${error.code}:${entityID}:${error.message}`;
+  }
+  return `${error.code}:${error.message}:${index}`;
 }
 
 export function MissingEntity({ entityID }: Readonly<{ entityID: string }>) {

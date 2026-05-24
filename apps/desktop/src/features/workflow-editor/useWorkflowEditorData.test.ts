@@ -63,6 +63,19 @@ describe("shouldRefreshWorkflowEditor", () => {
       shouldRefreshWorkflowEditor(
         eventParams({
           action: "unlinked",
+          changed_ids: ["link-2"],
+          project_id: "project-1",
+          resource: "workflow_link",
+          workflow_id: "workflow-2",
+        }),
+        "project-1",
+        "workflow-1",
+      ),
+    ).toBe(false);
+    expect(
+      shouldRefreshWorkflowEditor(
+        eventParams({
+          action: "unlinked",
           project_id: "project-2",
           resource: "workflow_link",
           workflow_id: "workflow-1",

@@ -147,7 +147,7 @@ func TestRenderWorkflowTaskInstructionsUsesCompletionModeFragment(t *testing.T) 
 	for _, want := range []string{
 		"ticket `BUI-1`",
 		"workflow `workflow-1`",
-		workflowBuilderCommand() + " task show BUI-1",
+		selfcmd.BuilderCommand() + " task show BUI-1",
 		"complete_node",
 		"actionable (Actionable)",
 		"Triage the ticket.",

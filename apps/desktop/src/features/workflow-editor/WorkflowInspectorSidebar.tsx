@@ -582,8 +582,8 @@ function OutputFields({ fields }: Readonly<{ fields: WorkflowNode["outputFields"
         <p className="m-0 text-sm text-[var(--color-muted)]">{t("workflowEditor.none")}</p>
       ) : (
         <ul className="m-0 grid gap-[var(--space-2)] p-0">
-          {fields.map((field) => (
-            <li className="list-none" key={field.name}>
+          {fields.map((field, index) => (
+            <li className="list-none" key={`${field.name}:${index}`}>
               <span className="font-mono text-sm">{field.name}</span>
               {field.description.length > 0 ? (
                 <p className="m-0 text-sm text-[var(--color-muted)]">{field.description}</p>

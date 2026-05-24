@@ -145,7 +145,7 @@ export function shouldRefreshWorkflowLink(params: unknown, projectID: string, wo
     event.resource === "workflow_link" &&
     event.projectID === projectID &&
     workflowLinkActions.has(event.action) &&
-    (event.workflowID === workflowID || event.changedIDs.length > 0)
+    (event.workflowID === workflowID || event.changedIDs.includes(workflowID))
   );
 }
 
