@@ -50,15 +50,15 @@ type WorkflowNodeContextArgs struct {
 	TaskShortId     string
 	TaskTitle       string
 	TaskBody        string
+	WorkflowId      string
+	WorkflowShortId string
 	NodeId          string
 	NodeKey         string
 	NodeDisplayName string
 	ContextMode     string
 	SourceSessionID string
 	CompletionMode  string
-	OutputFields    []WorkflowOutputField
 	Transitions     []WorkflowTransition
-	InputValues     []WorkflowInputValue
 	NodePrompt      string
 }
 
@@ -159,14 +159,14 @@ var HeadlessModePrompt string
 //go:embed headless_mode_exit_prompt.md
 var HeadlessModeExitPrompt string
 
-//go:embed workflow/tool_mode_prompt.md
-var WorkflowToolModePrompt string
+//go:embed workflow/workflow_task_instructions.md
+var WorkflowTaskInstructionsPrompt string
 
-//go:embed workflow/structured_output_mode_prompt.md
-var WorkflowStructuredOutputModePrompt string
+//go:embed workflow/tool_completion_instructions.md
+var WorkflowToolCompletionInstructionsPrompt string
 
-//go:embed workflow/node_context.md
-var WorkflowNodeContextPrompt string
+//go:embed workflow/structured_completion_instructions.md
+var WorkflowStructuredCompletionInstructionsPrompt string
 
 //go:embed workflow/human_only_task_action_denied.md
 var WorkflowHumanOnlyTaskActionDeniedPrompt string
@@ -278,8 +278,39 @@ func RenderWorktreeModeExitPrompt(branch, cwd, worktreePath, workspaceRoot strin
 	})
 }
 
-func RenderWorkflowNodeContextPrompt(args WorkflowNodeContextArgs) (string, error) {
-	return renderNamedTemplate("workflow node context", WorkflowNodeContextPrompt, args)
+func RenderWorkflowTaskInstructions(args WorkflowNodeContextArgs, nodeCompletionInstructions string) (string, error) {
+	type workflowTaskInstructionsTemplateData struct {
+		WorkflowNodeContextArgs
+		BuilderRunCommand          string
+		NodeCompletionInstructions string
+	}
+	return renderNamedTemplate("workflow task instructions", WorkflowTaskInstructionsPrompt, workflowTaskInstructionsTemplateData{
+		WorkflowNodeContextArgs:    args,
+		BuilderRunCommand:          workflowBuilderCommand(),
+		NodeCompletionInstructions: strings.TrimSpace(nodeCompletionInstructions),
+	})
+}
+
+func RenderWorkflowToolCompletionInstructions(workflowShortId string) (string, error) {
+	return renderWorkflowCompletionInstructions("workflow tool completion instructions", WorkflowToolCompletionInstructionsPrompt, workflowShortId)
+}
+
+func RenderWorkflowStructuredCompletionInstructions(workflowShortId string) (string, error) {
+	return renderWorkflowCompletionInstructions("workflow structured completion instructions", WorkflowStructuredCompletionInstructionsPrompt, workflowShortId)
+}
+
+func renderWorkflowCompletionInstructions(name string, text string, workflowShortId string) (string, error) {
+	return renderNamedTemplate(name, text, struct {
+		BuilderRunCommand string
+		WorkflowShortId   string
+	}{
+		BuilderRunCommand: workflowBuilderCommand(),
+		WorkflowShortId:   strings.TrimSpace(workflowShortId),
+	})
+}
+
+func workflowBuilderCommand() string {
+	return strings.TrimSuffix(selfcmd.RunCommandPrefix(), " run")
 }
 
 func renderSystemPromptTemplate(text string, args SystemPromptTemplateArgs, defaultSystemPrompt string) string {

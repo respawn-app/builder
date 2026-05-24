@@ -204,6 +204,7 @@ type RunnableRunRecord struct {
 type RunStartContext struct {
 	Run               RunRecord
 	Task              TaskRecord
+	Workflow          WorkflowRecord
 	Node              NodeRecord
 	ContextMode       workflow.ContextMode
 	SourceRunID       workflow.RunID

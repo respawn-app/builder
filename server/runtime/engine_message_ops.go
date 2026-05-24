@@ -85,6 +85,9 @@ func (e *Engine) appendUserMessageWithoutConversationUpdate(stepID, text string)
 }
 
 func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error {
+	if e.workflowRunActive() {
+		return nil
+	}
 	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
 	headlessActive := e.transcriptRuntimeState().HeadlessActive()
 	if e.cfg.HeadlessMode {
@@ -117,8 +120,9 @@ func (e *Engine) injectWorkflowModePromptIfNeeded(ctx context.Context, stepID st
 	if !e.workflowRunActive() {
 		return nil
 	}
+	runID := strings.TrimSpace(string(e.cfg.WorkflowRun.Contract.RunID))
 	for _, msg := range e.snapshotMessages() {
-		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeWorkflowMode {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeWorkflowMode && strings.TrimSpace(msg.SourcePath) == runID {
 			return nil
 		}
 	}
@@ -126,10 +130,14 @@ func (e *Engine) injectWorkflowModePromptIfNeeded(ctx context.Context, stepID st
 	if err != nil {
 		return err
 	}
-	message, ok := workflowModeMetaMessage(mode)
+	message, ok, renderErr := workflowModeMetaMessage(mode, e.cfg.WorkflowRun)
+	if renderErr != nil {
+		return renderErr
+	}
 	if !ok {
 		return nil
 	}
+	message.SourcePath = runID
 	return e.appendMessage(stepID, message)
 }
 
