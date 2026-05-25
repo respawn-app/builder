@@ -907,6 +907,13 @@ WHERE edge_key = 'done'
 	if byShortID.Status.Kind != "waiting_approval" || len(byShortID.Summary.ActiveNodeIDs) != 1 || byShortID.Summary.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
 		t.Fatalf("task detail by short id = %+v, want pending approval at source node %s", byShortID, sourceColumn.Node.NodeID)
 	}
+	byGlobalShortID, err := view.GetTaskByShortID(ctx, task.ShortID)
+	if err != nil {
+		t.Fatalf("GetTaskByShortID: %v", err)
+	}
+	if byGlobalShortID.Status.Kind != "waiting_approval" || len(byGlobalShortID.Summary.ActiveNodeIDs) != 1 || byGlobalShortID.Summary.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
+		t.Fatalf("task detail by global short id = %+v, want pending approval at source node %s", byGlobalShortID, sourceColumn.Node.NodeID)
+	}
 }
 
 func TestTaskDetailProjectsWaitingAskRun(t *testing.T) {
