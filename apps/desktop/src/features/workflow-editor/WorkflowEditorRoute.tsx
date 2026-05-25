@@ -350,6 +350,7 @@ function WorkflowEditorStatusIsland({
     <FloatingNoticeIsland
       collapsed={collapsed}
       collapseLabel={t("app.collapse")}
+      expandedClassName="floating-notice-expanded grid max-h-[min(400px,calc(100vh-32px))] w-[min(400px,calc(100vw-32px))] gap-[6px] overflow-y-auto overflow-x-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]"
       expandLabel={t("app.expand")}
       onCollapsedChange={setCollapsed}
       positionClassName="right-[var(--space-4)] bottom-[var(--space-4)]"
@@ -358,7 +359,25 @@ function WorkflowEditorStatusIsland({
         controller.draftValidation?.valid === false || controller.saveError.length > 0 ? "danger" : "neutral"
       }
     >
-      <div className="grid gap-[var(--space-3)]">
+      <div className="grid gap-[var(--space-3)] pt-[6px]">
+        {controller.dirty.dirty ? (
+          <div className="grid grid-cols-2 gap-[var(--space-2)]">
+            <Button className="w-full" disabled={controller.saving} onClick={onDiscard} variant="danger">
+              {t("workflowEditor.discard")}
+            </Button>
+            <Button
+              className="w-full"
+              disabled={
+                controller.saving ||
+                (controller.dirty.graphDirty && controller.draftValidation?.valid === false)
+              }
+              onClick={controller.save}
+              variant="primary"
+            >
+              {controller.saving ? t("workflowEditor.saving") : t("workflowEditor.save")}
+            </Button>
+          </div>
+        ) : null}
         {controller.state.conflict !== null ? (
           <div className="grid gap-[var(--space-2)]">
             <p className="m-0 text-sm text-[var(--color-on-island)]">{t("workflowEditor.remoteConflict")}</p>
@@ -382,30 +401,6 @@ function WorkflowEditorStatusIsland({
             </div>
           </div>
         ) : null}
-        {controller.dirty.dirty ? (
-          <div className="flex flex-wrap items-center gap-[var(--space-2)]">
-            <span className="text-sm text-[var(--color-muted)]">
-              {controller.dirty.metadataDirty && controller.dirty.graphDirty
-                ? t("workflowEditor.metadataAndGraphDirty")
-                : controller.dirty.metadataDirty
-                  ? t("workflowEditor.metadataDirty")
-                  : t("workflowEditor.graphDirty")}
-            </span>
-            <Button
-              disabled={
-                controller.saving ||
-                (controller.dirty.graphDirty && controller.draftValidation?.valid === false)
-              }
-              onClick={controller.save}
-              variant="primary"
-            >
-              {controller.saving ? t("workflowEditor.saving") : t("workflowEditor.save")}
-            </Button>
-            <Button disabled={controller.saving} onClick={onDiscard} variant="ghost">
-              {t("workflowEditor.discard")}
-            </Button>
-          </div>
-        ) : null}
         {controller.saveError.length > 0 ? (
           <p className="m-0 text-sm text-[var(--color-error)]">{controller.saveError}</p>
         ) : null}
@@ -422,12 +417,7 @@ function WorkflowEditorStatusIsland({
           <WorkflowValidationIssues errors={controller.draftValidation.errors} />
         ) : null}
         {controller.executionValidation !== null && controller.executionValidation.errors.length > 0 ? (
-          <div className="grid gap-[var(--space-2)]">
-            <p className="m-0 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
-              {t("workflowEditor.executionIssuesDoNotBlockSave")}
-            </p>
-            <WorkflowValidationIssues errors={controller.executionValidation.errors} />
-          </div>
+          <WorkflowValidationIssues errors={controller.executionValidation.errors} />
         ) : null}
       </div>
     </FloatingNoticeIsland>

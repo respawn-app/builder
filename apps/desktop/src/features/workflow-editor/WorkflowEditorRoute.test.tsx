@@ -419,7 +419,7 @@ describe("WorkflowEditorRoute", () => {
     expect(
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Workflow settings changed")).toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "Unsaved changes" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Simulate remote update" }));
     expect(
@@ -484,9 +484,28 @@ describe("WorkflowEditorRoute", () => {
     expect(
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Workflow settings changed")).toBeInTheDocument();
+    const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
+    expect(unsavedChanges).toHaveClass(
+      "max-h-[min(400px,calc(100vh-32px))]",
+      "w-[min(400px,calc(100vw-32px))]",
+      "overflow-y-auto",
+    );
+    expect(within(unsavedChanges).queryByText("Workflow settings changed")).not.toBeInTheDocument();
+    expect(within(unsavedChanges).queryByText("Workflow settings and graph changed")).not.toBeInTheDocument();
+    expect(within(unsavedChanges).queryByText("Execution issues do not block saving")).not.toBeInTheDocument();
+    const title = within(unsavedChanges).getByRole("heading", { name: "Unsaved changes" });
+    const discardButton = within(unsavedChanges).getByRole("button", { name: "Discard" });
+    const saveButton = within(unsavedChanges).getByRole("button", { name: "Save" });
+    expect(discardButton).toHaveClass("w-full");
+    expect(discardButton).toHaveStyle({ "--button-border": "var(--color-error)" });
+    expect(saveButton).toHaveClass("w-full");
+    expect(title.compareDocumentPosition(discardButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(discardButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
 
-    const saveButton = screen.getByRole("button", { name: "Save" });
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
 
@@ -498,6 +517,57 @@ describe("WorkflowEditorRoute", () => {
         workflow_id: "workflow-1",
       });
     });
+  });
+
+  it("scrolls the whole unsaved changes island when issue content exceeds the max height", async () => {
+    const manyExecutionIssues = workflowValidationResponseWithMessages(
+      Array.from({ length: 18 }, (_unused, index) => `Execution issue ${index + 1}`),
+    );
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponse },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          results: {
+            draft: { valid: true, errors: [] },
+            execution: manyExecutionIssues,
+          },
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <WorkflowMetadataEditDriver />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
+
+    expect(unsavedChanges).toHaveClass(
+      "max-h-[min(400px,calc(100vh-32px))]",
+      "overflow-y-auto",
+      "overflow-x-hidden",
+    );
+    expect(within(unsavedChanges).getByTestId("floating-notice-header").parentElement).toBe(
+      unsavedChanges,
+    );
+    expect(within(unsavedChanges).getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    expect(within(unsavedChanges).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(
+      within(unsavedChanges)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(manyExecutionIssues.errors.map((issue) => issue.message));
   });
 });
 
@@ -832,6 +902,22 @@ const invalidValidationResponse = {
     },
   ],
 };
+
+function workflowValidationResponseWithMessages(messages: readonly string[]) {
+  return {
+    valid: false,
+    errors: messages.map((message, index) => ({
+      code: "workflow.validation.invalid",
+      message,
+      workflow_id: "workflow-1",
+      node_id: "node-1",
+      transition_group_id: `tg-${index + 1}`,
+      edge_id: `edge-${index + 1}`,
+      related_ids: [],
+      blocks_context: true,
+    })),
+  };
+}
 
 const graphValidationResponse = {
   results: {
