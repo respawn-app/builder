@@ -147,10 +147,6 @@ function WorkflowDraftDetails({ controller }: Readonly<{ controller: WorkflowEdi
           label={t("workflowEditor.version")}
           value={controller.draft.workflow.version.toString()}
         />
-        <DetailRow
-          label={t("workflowEditor.version")}
-          value={controller.draft.workflow.version.toString()}
-        />
         <DetailRow label={t("workflowEditor.nodeCount")} value={controller.draft.nodes.length.toString()} />
         <DetailRow label={t("workflowEditor.edgeCount")} value={controller.draft.edges.length.toString()} />
         <DetailRow
