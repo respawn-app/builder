@@ -97,8 +97,10 @@ describe("WorkflowGraphCanvas", () => {
       "max-w-[calc(100vw-var(--space-4)*2)]",
     );
     expect(screen.getByTestId("workflow-editor-tools")).toHaveClass(
+      "fixed",
       "left-[var(--space-2)]",
       "top-[var(--space-2)]",
+      "z-30",
     );
 
     unmount();
