@@ -148,6 +148,7 @@ export const englishResources = {
             inspectNode: "Inspect node",
             copyNodeId: "Copy node ID {{id}}",
             nodeIdCopied: "Copied node ID to clipboard",
+            nodeIdCopyFailed: "Node ID copy failed",
             inspectGroup: "Inspect group",
             inspectEdge: "Inspect edge",
             legend: "Legend",

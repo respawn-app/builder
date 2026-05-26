@@ -270,14 +270,23 @@ function WorkflowNodeIDHeader({ nodeID }: Readonly<{ nodeID: string }>) {
       aria-label={t("workflowEditor.copyNodeId", { id: nodeID })}
       className="grid min-w-0 grid-cols-[minmax(0,1fr)] justify-items-end rounded-[var(--radius-s)] border border-transparent bg-transparent px-[var(--space-1)] py-[2px] font-mono text-xs text-[var(--color-muted)] outline-none hover:border-[var(--color-outline)] hover:bg-[var(--color-island-1)] focus-visible:border-[var(--color-primary)]"
       onClick={() => {
-        void copyNodeID(nodeID, nativeBridge).then(() => {
-          showStatusToast({
-            body: "",
-            id: `workflow-node-id-copied-${nodeID}`,
-            title: t("workflowEditor.nodeIdCopied"),
-            tone: "success",
+        void copyNodeID(nodeID, nativeBridge)
+          .then(() => {
+            showStatusToast({
+              body: "",
+              id: `workflow-node-id-copied-${nodeID}`,
+              title: t("workflowEditor.nodeIdCopied"),
+              tone: "success",
+            });
+          })
+          .catch(() => {
+            showStatusToast({
+              body: "",
+              id: `workflow-node-id-copy-failed-${nodeID}`,
+              title: t("workflowEditor.nodeIdCopyFailed"),
+              tone: "danger",
+            });
           });
-        });
       }}
       title={nodeID}
       type="button"

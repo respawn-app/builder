@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import type { NativeBridge, NativeWindowGlassTint } from "@builder/desktop-native-bridge";
 
+import { errorMessage } from "../api/errors";
+
 const builderThemeAttribute = "data-builder-theme";
 const windowGlassFillClassName = "window-glass-fill";
 
@@ -11,7 +13,10 @@ export function useNativeWindowGlassTintSync(nativeBridge: NativeBridge): void {
     }
 
     const syncTint = () => {
-      void nativeBridge.window.setCurrentGlassTint(readNativeWindowGlassTint()).catch(() => undefined);
+      const tint = readNativeWindowGlassTint();
+      void nativeBridge.window.setCurrentGlassTint(tint).catch((error: unknown) => {
+        logNativeGlassTintSyncError(nativeBridge, tint, error);
+      });
     };
     syncTint();
 
@@ -43,9 +48,27 @@ export function readNativeWindowGlassTint(): NativeWindowGlassTint | null {
   probe.style.pointerEvents = "none";
   probe.style.visibility = "hidden";
   document.body.append(probe);
-  const backgroundColor = getComputedStyle(probe).backgroundColor;
-  probe.remove();
-  return parseCssColorToNativeTint(backgroundColor);
+  try {
+    const backgroundColor = getComputedStyle(probe).backgroundColor;
+    return parseCssColorToNativeTint(backgroundColor);
+  } finally {
+    probe.remove();
+  }
+}
+
+function logNativeGlassTintSyncError(
+  nativeBridge: NativeBridge,
+  tint: NativeWindowGlassTint | null,
+  error: unknown,
+): void {
+  void nativeBridge.logging
+    .append({
+      context: { error: errorMessage(error), tint: JSON.stringify(tint) },
+      level: "warn",
+      message: "Native window glass tint sync failed.",
+      occurredAt: new Date().toISOString(),
+    })
+    .catch(() => undefined);
 }
 
 export function parseCssColorToNativeTint(value: string): NativeWindowGlassTint | null {

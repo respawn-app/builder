@@ -102,6 +102,8 @@ export type NativeWindowGlassTint = Readonly<{
   alpha: number;
 }>;
 
+const nativeWindowGlassTintChannels = ["red", "green", "blue", "alpha"] as const;
+
 export type NativeNotification = Readonly<{
   title: string;
   body: string;
@@ -391,6 +393,7 @@ export function createTauriNativeBridge(platform: NativePlatform = "unknown"): N
         await fitCurrentWindowToContent(size);
       },
       async setCurrentGlassTint(tint: NativeWindowGlassTint | null): Promise<void> {
+        validateNativeWindowGlassTint(tint);
         await invoke("set_native_window_glass_tint", {
           label: getCurrentWindow().label,
           tint,
@@ -504,6 +507,18 @@ function validateExternalUrl(url: string): string {
     throw new Error("External link protocol is not allowed.");
   }
   return parsed.toString();
+}
+
+function validateNativeWindowGlassTint(tint: NativeWindowGlassTint | null): void {
+  if (tint === null) {
+    return;
+  }
+  for (const channel of nativeWindowGlassTintChannels) {
+    const value = tint[channel];
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`Native glass tint ${channel} channel must be a finite number from 0 to 1.`);
+    }
+  }
 }
 
 async function retargetTaskDetailWindow(

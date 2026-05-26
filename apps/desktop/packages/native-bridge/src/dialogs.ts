@@ -96,6 +96,8 @@ async function centeredOnCurrentWindow(options: NativeDialogWindowOptions): Prom
 async function prepareNativeDialogWindow(label: string, window: WebviewWindow): Promise<void> {
   try {
     await applyNativeWindowGlass(label);
+  } catch (error) {
+    void appendDialogGlassWarning(label, error);
   } finally {
     await bringDialogToFront(window);
   }
@@ -103,6 +105,25 @@ async function prepareNativeDialogWindow(label: string, window: WebviewWindow): 
 
 async function applyNativeWindowGlass(label: string): Promise<void> {
   await invoke("apply_native_window_glass", { label });
+}
+
+async function appendDialogGlassWarning(label: string, error: unknown): Promise<void> {
+  try {
+    await invoke("append_gui_log", {
+      entry: JSON.stringify({
+        context: { error: nativeErrorMessage(error), label },
+        level: "warn",
+        message: "Native dialog glass application failed.",
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    return;
+  }
+}
+
+function nativeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function bringDialogToFront(window: WebviewWindow): Promise<void> {

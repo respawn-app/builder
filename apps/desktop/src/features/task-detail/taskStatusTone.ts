@@ -31,8 +31,10 @@ function isInterruptedOrFailed(status: TaskStatus): boolean {
 
 function isWaitingOrAttention(status: TaskStatus): boolean {
   return (
-    status.kind.startsWith("waiting") ||
-    status.nativeState.startsWith("waiting") ||
+    status.kind === "waiting_approval" ||
+    status.kind === "waiting_question" ||
+    status.nativeState === "waiting_approval" ||
+    status.nativeState === "waiting_ask" ||
     status.attentionTypes.length > 0 ||
     status.runIDs.length > 0
   );

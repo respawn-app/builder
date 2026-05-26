@@ -90,7 +90,14 @@ function TaskInboxPreview({
           </PopoverTrigger>
           <PopoverContent align="end" className="w-56" side="top">
             <strong>Cancel task?</strong>
-            <Button variant="danger">Confirm</Button>
+            <Button
+              onClick={() => {
+                onCancelExpandedChange(false);
+              }}
+              variant="danger"
+            >
+              Confirm
+            </Button>
           </PopoverContent>
         </Popover>
       </div>

@@ -11,7 +11,7 @@
 
 - Ongoing remains minimal: command start previews, file hint previews, lower-contrast syntax-highlighted shell previews, no thinking traces, no preambles, no outputs, and no diffs.
 - Ongoing preview sizing is fixed: command max 80, file max 60, soft-wrap allowed.
-- Ongoing line prefix is `> `.
+- Ongoing line prefix is `>`, followed by one space.
 - Ongoing does not own a transcript viewport or restore app-managed scroll. Native terminal scrollback owns committed history navigation.
 - Main UI startup stays in the normal buffer because ongoing-mode replay must remain visible in terminal scrollback.
 - The former `tui_alternate_screen` config is removed; legacy config keys are rejected.
