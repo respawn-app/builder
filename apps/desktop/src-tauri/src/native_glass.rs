@@ -15,6 +15,7 @@ mod platform {
     const LIQUID_GLASS_MAJOR_VERSION: isize = 26;
     const LIQUID_GLASS_EFFECT_NAME: &str = "NSGlassEffectView.clear";
     const VISUAL_EFFECT_NAME: &str = "NSVisualEffectView.underWindowBackground";
+    const ISLAND_BASE_CORNER_RADIUS: f64 = 24.0;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum NativeWindowEffect {
@@ -115,7 +116,7 @@ mod platform {
         glass_view.setAutoresizingMask(autoresizing_mask);
         glass_view.setStyle(NSGlassEffectViewStyle::Clear);
         glass_view.setTintColor(None);
-        glass_view.setCornerRadius(0.0);
+        glass_view.setCornerRadius(ISLAND_BASE_CORNER_RADIUS);
         window.setContentView(Some(&glass_view));
         content_view.setFrame(glass_view.bounds());
         content_view.setAutoresizingMask(autoresizing_mask);
