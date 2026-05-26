@@ -73,6 +73,17 @@ describe("WorkflowEditorRoute", () => {
     expect(within(legend).getByText("Starting state")).toBeInTheDocument();
     expect(within(legend).getByText("Multi-agent join")).toBeInTheDocument();
     expect(within(legend).getByText("Agent node")).toBeInTheDocument();
+    const edgeSwatches = within(legend).getAllByTestId("workflow-legend-edge-swatch");
+    expect(edgeSwatches[0]).toHaveAttribute("width", "22");
+    expect(edgeSwatches[0]).toHaveAttribute("height", "6");
+    expect(edgeSwatches[0]).toHaveAttribute("viewBox", "0 0 22 6");
+    expect(within(legend).getAllByTestId("workflow-legend-edge-line")[0]).toHaveAttribute(
+      "stroke-width",
+      "1.25",
+    );
+    const nodeSwatches = within(legend).getAllByTestId("workflow-legend-node-swatch");
+    expect(nodeSwatches[0]).toHaveClass("h-[9px]", "w-[14px]", "border");
+    expect(nodeSwatches[2]).toHaveClass("h-[10px]", "w-[10px]", "rotate-45");
   });
 
   it("opens inspectors for workflow metadata and graph entities", async () => {

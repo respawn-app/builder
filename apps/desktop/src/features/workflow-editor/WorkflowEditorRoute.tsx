@@ -330,8 +330,8 @@ function WorkflowEditorLegendIsland() {
 
 function LegendRow({ children, label }: Readonly<{ children: ReactNode; label: string }>) {
   return (
-    <div className="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-[var(--space-2)]">
-      <span className="grid h-6 place-items-center">{children}</span>
+    <div className="grid grid-cols-[26px_minmax(0,1fr)] items-center gap-[var(--space-2)]">
+      <span className="grid h-3 place-items-center">{children}</span>
       <span className="min-w-0">{label}</span>
     </div>
   );
@@ -342,18 +342,26 @@ function EdgeLegendSwatch({ tone }: Readonly<{ tone: "neutral" | "primary" | "se
     <svg
       aria-hidden="true"
       className={edgeLegendToneClassName(tone)}
+      data-testid="workflow-legend-edge-swatch"
       fill="none"
-      height="12"
-      viewBox="0 0 44 12"
-      width="44"
+      height="6"
+      viewBox="0 0 22 6"
+      width="22"
     >
-      <path d="M2 6H38" stroke="currentColor" strokeLinecap="round" strokeWidth="2.5" />
       <path
-        d="M34 2L40 6L34 10"
+        d="M1 3H19"
+        data-testid="workflow-legend-edge-line"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.25"
+      />
+      <path
+        d="M17 1L20 3L17 5"
+        data-testid="workflow-legend-edge-head"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2.5"
+        strokeWidth="1.25"
       />
     </svg>
   );
@@ -367,10 +375,11 @@ function NodeLegendSwatch({
     <span
       aria-hidden="true"
       className={cx(
-        "block h-[18px] w-[28px] rounded-[var(--radius-s)] border-2 bg-[var(--color-island-1)]",
-        shape === "diamond" && "h-[20px] w-[20px] rotate-45",
+        "block h-[9px] w-[14px] rounded-[var(--radius-s)] border bg-[var(--color-island-1)]",
+        shape === "diamond" && "h-[10px] w-[10px] rotate-45",
         nodeLegendToneClassName(tone),
       )}
+      data-testid="workflow-legend-node-swatch"
     />
   );
 }
