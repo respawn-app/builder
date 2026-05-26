@@ -371,12 +371,16 @@ function NodeLegendSwatch({
   shape = "box",
   tone,
 }: Readonly<{ shape?: "box" | "diamond"; tone: "neutral" | "primary" | "secondary" | "success" }>) {
+  const shapeClassName =
+    shape === "diamond"
+      ? "h-[15px] w-[15px] rotate-45 rounded-[2px]"
+      : "h-[9px] w-[14px] rounded-[2px]";
   return (
     <span
       aria-hidden="true"
       className={cx(
-        "block h-[9px] w-[14px] rounded-[var(--radius-s)] border bg-[var(--color-island-1)]",
-        shape === "diamond" && "h-[10px] w-[10px] rotate-45",
+        "block border bg-[var(--color-island-1)]",
+        shapeClassName,
         nodeLegendToneClassName(tone),
       )}
       data-testid="workflow-legend-node-swatch"
