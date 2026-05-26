@@ -430,7 +430,7 @@ function builderSessionCommand(runs: readonly TaskRun[]): string {
 function preferredSessionRun(runs: readonly TaskRun[]): TaskRun | null {
   const sessionRuns = runs.filter((run) => run.sessionID.trim().length > 0);
   return (
-    sessionRuns.find((run) => run.completedAt === 0 && run.interruptedAt === 0) ??
+    [...sessionRuns].reverse().find((run) => run.completedAt === 0 && run.interruptedAt === 0) ??
     sessionRuns.at(-1) ??
     null
   );

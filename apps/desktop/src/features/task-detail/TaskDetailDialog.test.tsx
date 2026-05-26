@@ -19,7 +19,7 @@ describe("TaskDetailDialog", () => {
     const services = createTestServices(
       [
         ...startupRoutes,
-        { method: "workflow.task.get", result: taskDetailResponse },
+        { method: "workflow.task.get", result: taskDetailResponseWithNewerActiveRun },
         { method: "workflow.task.activity.list", result: activityResponse },
         { method: "ask.listPendingBySession", result: pendingAskResponse },
         { method: "workflow.task.question.answer", result: {} },
@@ -100,7 +100,7 @@ describe("TaskDetailDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open in CLI" }));
     await waitFor(() => {
-      expect(copied).toEqual(["builder --session=session-1"]);
+      expect(copied).toEqual(["builder --session=session-2"]);
     });
   });
 
@@ -582,6 +582,21 @@ const taskDetailResponse = {
         author: "GUI",
         created_at_unix_ms: 1,
         updated_at_unix_ms: 1,
+      },
+    ],
+  },
+};
+
+const taskDetailResponseWithNewerActiveRun = {
+  task: {
+    ...taskDetailResponse.task,
+    runs: [
+      ...taskDetailResponse.task.runs,
+      {
+        ...taskDetailResponse.task.runs[0],
+        id: "run-2",
+        session_id: "session-2",
+        started_at_unix_ms: 2,
       },
     ],
   },

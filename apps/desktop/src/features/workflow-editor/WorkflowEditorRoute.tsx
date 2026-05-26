@@ -372,7 +372,7 @@ function NodeLegendSwatch({
 }: Readonly<{ shape?: "box" | "diamond"; tone: "neutral" | "primary" | "secondary" | "success" }>) {
   const shapeClassName =
     shape === "diamond"
-      ? "h-[15px] w-[15px] rotate-45 rounded-[2px]"
+      ? "h-[10px] w-[10px] rotate-45 rounded-[2px]"
       : "h-[9px] w-[14px] rounded-[2px]";
   return (
     <span
