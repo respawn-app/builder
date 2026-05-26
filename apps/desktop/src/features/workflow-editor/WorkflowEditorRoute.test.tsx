@@ -65,7 +65,8 @@ describe("WorkflowEditorRoute", () => {
       "floating-notice-expanded",
       "left-[var(--space-4)]",
       "bottom-[var(--space-4)]",
-      "h-[176px]",
+      "h-[204px]",
+      "pb-[var(--space-4)]",
       "border-[var(--color-outline)]",
     );
     expect(within(legend).getByText("Compact session and proceed")).toBeInTheDocument();
@@ -83,6 +84,7 @@ describe("WorkflowEditorRoute", () => {
       "stroke-width",
       "1.25",
     );
+    expect(edgeSwatches[2]).toHaveClass("text-[var(--color-muted)]");
     const nodeSwatches = within(legend).getAllByTestId("workflow-legend-node-swatch");
     expect(nodeSwatches[0]).toHaveClass("h-[9px]", "w-[14px]", "rounded-[2px]", "border");
     expect(nodeSwatches[2]).toHaveClass("h-[15px]", "w-[15px]", "rounded-[2px]", "rotate-45");

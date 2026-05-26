@@ -294,14 +294,14 @@ function WorkflowEditorLegendIsland() {
     <FloatingNoticeIsland
       collapsed={collapsed}
       collapseLabel={t("app.collapse")}
-      expandedClassName="floating-notice-expanded grid h-[176px] w-[min(300px,calc(100vw-32px))] gap-[6px] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]"
+      expandedClassName="floating-notice-expanded grid h-[204px] w-[min(300px,calc(100vw-32px))] gap-[6px] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-3)] pb-[var(--space-4)]"
       expandLabel={t("app.expand")}
       onCollapsedChange={setCollapsed}
       positionClassName="left-[var(--space-4)] bottom-[var(--space-4)]"
       title={t("workflowEditor.legend")}
       tone="neutral"
     >
-      <div className="grid gap-[var(--space-2)] pt-[6px] text-sm text-[var(--color-on-island)]">
+      <div className="grid gap-[6px] pt-[4px] text-sm leading-none text-[var(--color-on-island)]">
         <LegendRow label={t("workflowEditor.legendCompactSession")}>
           <EdgeLegendSwatch tone="secondary" />
         </LegendRow>
@@ -395,7 +395,7 @@ function edgeLegendToneClassName(tone: "neutral" | "primary" | "secondary"): str
   if (tone === "secondary") {
     return "text-[var(--color-secondary)]";
   }
-  return "text-[var(--color-outline)]";
+  return "text-[var(--color-muted)]";
 }
 
 function nodeLegendToneClassName(tone: "neutral" | "primary" | "secondary" | "success"): string {
