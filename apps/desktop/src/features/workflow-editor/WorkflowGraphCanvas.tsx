@@ -182,7 +182,10 @@ function WorkflowGraphCanvasInner({
           size={1}
           variant={BackgroundVariant.Dots}
         />
-        <div className="workflow-editor-tools island-glass app-region-no-drag absolute left-[var(--space-4)] top-[var(--space-4)] z-10 grid gap-[var(--space-1)] rounded-[var(--radius-l)] border p-[var(--space-1)] shadow-[var(--shadow-island-1)]">
+        <div
+          className="workflow-editor-tools island-glass app-region-no-drag absolute left-[var(--space-4)] top-[calc(var(--native-titlebar-height)+var(--space-4))] z-10 grid gap-[var(--space-1)] rounded-[var(--radius-l)] border p-[var(--space-1)] shadow-[var(--shadow-island-1)]"
+          data-testid="workflow-editor-tools"
+        >
           <CanvasTool label={t("workflowEditor.inspectWorkflow")} onClick={onWorkflowInspect}>
             <Info aria-hidden="true" size={18} strokeWidth={1.7} />
           </CanvasTool>

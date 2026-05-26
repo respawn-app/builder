@@ -10,7 +10,6 @@ import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { Button, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
-import { chromeContentPaddingClassName } from "../../ui/chromePadding";
 import { cx } from "../../ui/classes";
 import { WorkflowValidationIssues } from "../workflow/WorkflowValidationIssues";
 import { WorkflowGraphCanvas } from "./WorkflowGraphCanvas";
@@ -179,7 +178,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
 
   return (
     <section
-      className={`h-full min-h-0 w-full ${chromeContentPaddingClassName}`}
+      className="app-region-no-drag fixed inset-0 z-0 h-screen min-h-0 w-screen overflow-hidden"
       data-testid="workflow-editor-route"
     >
       <WorkflowGraphCanvas

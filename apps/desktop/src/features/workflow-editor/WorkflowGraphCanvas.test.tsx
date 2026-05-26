@@ -115,6 +115,9 @@ describe("WorkflowGraphCanvas", () => {
     expect(screen.getByTestId("workflow-node-metadata-tooltip")).toHaveClass(
       "max-w-[calc(100vw-var(--space-4)*2)]",
     );
+    expect(screen.getByTestId("workflow-editor-tools")).toHaveClass(
+      "top-[calc(var(--native-titlebar-height)+var(--space-4))]",
+    );
 
     unmount();
     const longNodeID = "node_0123456789abcdef0123456789abcdef";

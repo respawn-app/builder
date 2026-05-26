@@ -59,7 +59,13 @@ describe("WorkflowEditorRoute", () => {
       0,
     );
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-route")).toHaveClass(
+      "fixed",
+      "inset-0",
+      "h-screen",
+      "w-screen",
+    );
+    expect(screen.getByTestId("workflow-editor-route")).not.toHaveClass("p-[var(--space-2)]");
     const legend = screen.getByRole("complementary", { name: "Legend" });
     expect(legend).toHaveClass(
       "floating-notice-expanded",
@@ -487,7 +493,8 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
-    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("fixed", "inset-0");
+    expect(screen.getByTestId("workflow-editor-route")).not.toHaveClass("p-[var(--space-2)]");
   });
 
   it("shows and acknowledges a dirty-draft conflict when the remote workflow version changes", async () => {
