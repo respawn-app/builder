@@ -47,7 +47,6 @@
   --color-on-success: var(--color-on-background);
   --color-error: #dc2e3c;
   --color-on-error: var(--color-on-background);
-  --color-notice-collapsed-icon: #ffffff;
   --shadow-island-0: 0 4px 4px rgba(0, 0, 0, 0.20);
   --shadow-island-1: 0 4px 4px rgba(0, 0, 0, 0.24);
   --shadow-island-2: 0 8px 8px rgba(0, 0, 0, 0.32);

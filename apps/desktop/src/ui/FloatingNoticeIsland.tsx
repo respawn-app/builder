@@ -45,7 +45,7 @@ export function FloatingNoticeIsland({
             className={cx(
                 "floating-notice-morph island-glass app-region-no-drag fixed z-50 border shadow-[var(--shadow-island-1)]",
                 collapsed
-                    ? "floating-notice-collapsed grid h-12 w-12 place-items-center overflow-hidden rounded-[var(--radius-m)] p-0 text-[var(--color-notice-collapsed-icon)]"
+                    ? "floating-notice-collapsed grid h-12 w-12 place-items-center overflow-hidden rounded-[var(--radius-m)] p-0 text-[var(--color-on-error)]"
                     : expandedClasses,
                 positionClassName,
                 styles.borderClassName,
@@ -56,7 +56,7 @@ export function FloatingNoticeIsland({
             {collapsed ? (
                 <button
                     aria-label={expandLabel}
-                    className="grid h-full w-full place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent text-[var(--color-notice-collapsed-icon)]"
+                    className="grid h-full w-full place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent text-[var(--color-on-error)]"
                     onClick={() => {
                         onCollapsedChange(false);
                     }}

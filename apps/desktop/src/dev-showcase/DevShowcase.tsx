@@ -209,7 +209,7 @@ function NoticeSurfaceExamples() {
             </header>
             <p className="m-0 text-sm">Expanded floating notice, rendered in-flow for review.</p>
           </article>
-          <div className="grid h-12 w-12 place-items-center rounded-[var(--radius-m)] bg-[var(--color-error)] text-[var(--color-notice-collapsed-icon)]">
+          <div className="grid h-12 w-12 place-items-center rounded-[var(--radius-m)] bg-[var(--color-error)] text-[var(--color-on-error)]">
             <AlertTriangle aria-hidden="true" size={24} strokeWidth={1.7} />
           </div>
           <div className="grid h-12 w-12 place-items-center rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-2)]">
