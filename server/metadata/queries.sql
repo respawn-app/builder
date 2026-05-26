@@ -157,6 +157,8 @@ INSERT INTO workflow_nodes (
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -168,6 +170,8 @@ INSERT INTO workflow_nodes (
     sqlc.arg(display_name),
     sqlc.arg(subagent_role),
     sqlc.arg(prompt_template),
+    sqlc.arg(input_fields_json),
+    sqlc.arg(join_input_providers_json),
     sqlc.arg(output_fields_json),
     sqlc.narg(group_id),
     sqlc.arg(sort_order)
@@ -245,6 +249,8 @@ SELECT
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -261,6 +267,8 @@ SELECT
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -682,6 +690,53 @@ FROM task_records
 WHERE id = sqlc.arg(id)
 LIMIT 1;
 
+-- name: GetTaskByProjectShortID :one
+SELECT
+    id,
+    project_id,
+    project_workflow_link_id,
+    workflow_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    source_url,
+    source_workspace_id,
+    managed_worktree_id,
+    canceled_at_unix_ms,
+    cancellation_reason,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+FROM task_records
+WHERE project_id = sqlc.arg(project_id)
+  AND short_id = sqlc.arg(short_id)
+LIMIT 1;
+
+-- name: ListTasksByShortID :many
+SELECT
+    id,
+    project_id,
+    project_workflow_link_id,
+    workflow_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    source_url,
+    source_workspace_id,
+    managed_worktree_id,
+    canceled_at_unix_ms,
+    cancellation_reason,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+FROM task_records
+WHERE short_id = sqlc.arg(short_id)
+ORDER BY created_at_unix_ms ASC, id ASC;
+
 -- name: UpdateTaskManagedWorktree :execrows
 UPDATE tasks
 SET
@@ -735,6 +790,16 @@ WITH board_node_task_ids AS (
         t.canceled_at_unix_ms = 0
         OR n.kind = 'terminal'
       )
+    UNION
+    SELECT
+        t.id
+    FROM task_transition_records tt
+    JOIN task_records t ON t.id = tt.task_id
+    WHERE tt.source_node_id = sqlc.arg(node_id)
+      AND tt.state = 'pending_approval'
+      AND t.project_id = sqlc.arg(project_id)
+      AND t.workflow_id = sqlc.arg(workflow_id)
+      AND t.canceled_at_unix_ms = 0
     UNION
     SELECT
         t.id
@@ -902,6 +967,23 @@ ORDER BY task_id ASC, created_at_unix_ms ASC, (
     FROM task_node_placements storage
     WHERE storage.id = task_node_placement_records.id
 ) ASC;
+
+-- name: ListPendingApprovalSourcePlacementsByTasks :many
+SELECT
+    CAST(COALESCE('pending-approval:' || id, '') AS TEXT) AS id,
+    task_id,
+    COALESCE(source_node_id, '') AS node_id,
+    'waiting_approval' AS state,
+    '' AS created_by_transition_id,
+    CAST(NULL AS TEXT) AS parallel_batch_transition_id,
+    CAST(NULL AS TEXT) AS parallel_branch_edge_id,
+    created_at_unix_ms,
+    created_at_unix_ms AS updated_at_unix_ms
+FROM task_transition_records
+WHERE task_id IN (sqlc.slice('task_ids'))
+  AND state = 'pending_approval'
+  AND trim(source_node_id) != ''
+ORDER BY task_id ASC, created_at_unix_ms ASC, id ASC;
 
 -- name: GetActiveStartPlacementForTask :one
 SELECT

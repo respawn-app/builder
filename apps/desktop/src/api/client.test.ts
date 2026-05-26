@@ -17,6 +17,7 @@ describe("BuilderApiClient", () => {
           auth_ready: true,
           auth_required: false,
           endpoint: "ws://127.0.0.1:53082/rpc",
+          subagent_roles: [{ name: "default" }, { name: "coder" }],
         },
       },
       { method: "workflow.task.start", result: {} },
@@ -28,6 +29,7 @@ describe("BuilderApiClient", () => {
       serverID: "server-1",
       serverVersion: "1.3.0",
       protocolVersion: protocolVersion,
+      subagentRoles: [{ name: "default" }, { name: "coder" }],
     });
     await client.startTask("task-1");
 
@@ -173,6 +175,15 @@ describe("BuilderApiClient", () => {
 
     const definition = await client.getWorkflow("workflow-1");
     expect(definition).toMatchObject({
+      derivedWiring: {
+        edges: [
+          {
+            edgeID: "edge-1",
+            inputBindings: [{ field: "summary", name: "summary", source: "transition_output" }],
+            requiredProvisionFields: [{ description: "Summary", name: "summary" }],
+          },
+        ],
+      },
       workflow: { id: "workflow-1", name: "Delivery", version: 9 },
       nodeGroups: [{ id: "group-1", key: "core", name: "Core", nodeIDs: [] }],
       transitionGroups: [{ id: "tg-1", sourceNodeID: "node-1", transitionID: "done" }],
@@ -199,6 +210,12 @@ describe("BuilderApiClient", () => {
           nodeID: "node-1",
           transitionGroupID: "tg-1",
           edgeID: "edge-1",
+          details: {
+            fieldName: "",
+            inputName: "summary",
+            placeholder: ".Inputs.summary",
+            providerEdgeID: "",
+          },
           relatedIDs: ["edge-2"],
           blocksContext: true,
         },
@@ -382,7 +399,21 @@ describe("BuilderApiClient", () => {
       execution: workflowValidationResponse,
     };
     const transport = new FakeRpcTransport([
-      { method: "workflow.graph.validateDraft", result: { results: graphValidationResults } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          results: graphValidationResults,
+          derived_wiring: {
+            edges: [
+              {
+                edge_id: "edge-start",
+                input_bindings: [{ name: "brief", source: "transition_output", field: "brief" }],
+                required_provision_fields: [{ name: "brief", description: "Brief" }],
+              },
+            ],
+          },
+        },
+      },
       {
         method: "workflow.graph.savePreview",
         result: {
@@ -417,7 +448,19 @@ describe("BuilderApiClient", () => {
         graph: workflowGraphDraft,
         modes: ["draft", "execution"],
       }),
-    ).resolves.toMatchObject({ draft: { valid: true }, execution: { valid: false } });
+    ).resolves.toMatchObject({
+      draft: { valid: true },
+      execution: { valid: false },
+      derivedWiring: {
+        edges: [
+          {
+            edgeID: "edge-start",
+            inputBindings: [{ field: "brief", name: "brief", source: "transition_output" }],
+            requiredProvisionFields: [{ description: "Brief", name: "brief" }],
+          },
+        ],
+      },
+    });
     await expect(
       client.previewWorkflowGraphSave({
         workflowID: "workflow-1",
@@ -466,7 +509,8 @@ describe("BuilderApiClient", () => {
               key: "backlog",
               kind: "start",
               display_name: "Backlog",
-              output_fields: [],
+              input_fields: [],
+              join_input_providers: [],
             },
           ],
           transition_groups: [
@@ -486,8 +530,6 @@ describe("BuilderApiClient", () => {
               requires_approval: false,
               context_mode: "new_session",
               context_source: { kind: "immediate_source", node_key: "" },
-              input_bindings: [],
-              output_requirements: [],
             },
           ],
         },
@@ -716,6 +758,27 @@ const workflowDefinitionResponse = {
         output_requirements: null,
       },
     ],
+    derived_wiring: {
+      nodes: [
+        {
+          node_id: "node-1",
+          possible_provision_fields: [{ name: "summary", description: "Summary" }],
+        },
+      ],
+      transition_groups: [
+        {
+          transition_group_id: "tg-1",
+          required_provision_fields: [{ name: "summary", description: "Summary" }],
+        },
+      ],
+      edges: [
+        {
+          edge_id: "edge-1",
+          input_bindings: [{ name: "summary", source: "transition_output", field: "summary" }],
+          required_provision_fields: [{ name: "summary", description: "Summary" }],
+        },
+      ],
+    },
   },
 };
 
@@ -729,6 +792,10 @@ const workflowValidationResponse = {
       node_id: "node-1",
       transition_group_id: "tg-1",
       edge_id: "edge-1",
+      details: {
+        input_name: "summary",
+        placeholder: ".Inputs.summary",
+      },
       related_ids: ["edge-2"],
       blocks_context: true,
     },
@@ -795,7 +862,8 @@ const workflowGraphDraft = {
       groupKey: "",
       subagentRole: "",
       promptTemplate: "",
-      outputFields: [],
+      inputFields: [],
+      joinInputProviders: [],
     },
   ],
   transitionGroups: [
@@ -815,8 +883,6 @@ const workflowGraphDraft = {
       requiresApproval: false,
       contextMode: "new_session",
       contextSource: { kind: "immediate_source", nodeKey: "" },
-      inputBindings: [],
-      outputRequirements: [],
     },
   ],
 };

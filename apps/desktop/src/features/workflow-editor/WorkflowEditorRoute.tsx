@@ -3,13 +3,14 @@ import { useEffect, useMemo, useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
-import type { WorkflowDefinition, WorkflowValidation } from "../../api";
+import { emptyWorkflowDerivedWiring, type WorkflowDefinition, type WorkflowValidation } from "../../api";
 import { errorMessage } from "../../api/errors";
 import { useSidebar } from "../../app/sidebarContext";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { Button, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
+import { chromeContentPaddingClassName } from "../../ui/chromePadding";
 import { WorkflowValidationIssues } from "../workflow/WorkflowValidationIssues";
 import { WorkflowGraphCanvas } from "./WorkflowGraphCanvas";
 import { layoutWorkflowGraph, type WorkflowGraphLayout } from "./workflowGraphLayout";
@@ -35,7 +36,7 @@ export type WorkflowEditorRouteProps = Readonly<{
 
 export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRouteProps) {
   const { t } = useTranslation();
-  const { api } = useAppServices();
+  const { api, nativeBridge } = useAppServices();
   const { openSidebar } = useSidebar();
   const data = useWorkflowEditorData(projectID, workflowID);
   const workflow = data.workflowQuery.data?.workflow;
@@ -51,11 +52,13 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     draftState === null ? data.workflowQuery.data : workflowDefinitionFromDraft(draftState.draft);
   const draftValidationQuery = useWorkflowDraftValidationQuery(workflowID, draftState);
   const draftValidation = draftValidationQuery.data?.draft ?? null;
+  const draftDerivedWiring =
+    draftValidationQuery.data?.derivedWiring ?? draftDefinition?.derivedWiring ?? emptyWorkflowDerivedWiring;
   const executionValidation = draftValidationQuery.data?.execution ?? data.validationQuery.data ?? null;
   const layoutQuery = useWorkflowGraphLayoutQuery(
     workflowID,
     draftDefinition,
-    draftState?.version ?? 0,
+    draftState?.graphVersion ?? 0,
     draftValidation ?? executionValidation,
   );
   useWindowChromeTitle(workflow === undefined ? t("workflowEditor.title") : workflow.name);
@@ -90,6 +93,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
       dispatch,
       dirty,
       draft: fallbackDraftState.draft,
+      derivedWiring: draftDerivedWiring,
       draftValidation,
       executionValidation,
       save() {
@@ -108,6 +112,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     [
       dirty,
       draftState,
+      draftDerivedWiring,
       draftValidation,
       executionValidation,
       fallbackDraftState,
@@ -121,12 +126,13 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
 
   const viewState = workflowEditorViewState(data, layoutQuery);
   if (viewState.kind === "loading") {
-    return <LoadingState appearanceDelayMs={0} title={t("workflowEditor.loadingTitle")} />;
+    return <LoadingState appearanceDelayMs={0} chromePadding title={t("workflowEditor.loadingTitle")} />;
   }
   if (viewState.kind === "linkError") {
     return (
       <ErrorState
         body={errorMessage(viewState.error)}
+        chromePadding
         onRetry={() => void data.linksQuery.refetch()}
         retryLabel={t("app.retry")}
         title={t("workflowEditor.linkLoadFailed")}
@@ -137,6 +143,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     return (
       <ErrorState
         body={t("workflowEditor.unlinkedBody")}
+        chromePadding
         reveal={false}
         title={t("workflowEditor.unlinkedTitle")}
       />
@@ -146,6 +153,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     return (
       <ErrorState
         body={errorMessage(viewState.error)}
+        chromePadding
         onRetry={() => {
           void data.boardQuery.refetch();
           void data.workflowQuery.refetch();
@@ -159,9 +167,13 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
   }
 
   return (
-    <section className="h-full min-h-0 w-full" data-testid="workflow-editor-route">
+    <section
+      className={`h-full min-h-0 w-full ${chromeContentPaddingClassName}`}
+      data-testid="workflow-editor-route"
+    >
       <WorkflowGraphCanvas
         graph={viewState.graph}
+        onCopyText={async (value) => copyWorkflowNodeText(value, nativeBridge)}
         onEdgeInspect={(edgeID) => {
           void openSidebar({
             kind: "workflowInspect",
@@ -252,6 +264,17 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
   }
 }
 
+async function copyWorkflowNodeText(
+  value: string,
+  nativeBridge: ReturnType<typeof useAppServices>["nativeBridge"],
+): Promise<void> {
+  if (nativeBridge.capabilities.clipboard.writeText) {
+    await nativeBridge.clipboard.writeText(value);
+    return;
+  }
+  await navigator.clipboard.writeText(value);
+}
+
 function workflowEditorDraftStateReducer(
   state: WorkflowEditorDraftState | null,
   action: Parameters<typeof workflowEditorDraftReducer>[1],
@@ -305,6 +328,7 @@ function useWorkflowGraphLayoutQuery(
       return layoutWorkflowGraph(definition, validation);
     },
     enabled: definition !== undefined && validation !== null,
+    placeholderData: (previous) => previous,
   });
 }
 
@@ -330,6 +354,7 @@ function WorkflowEditorStatusIsland({
     <FloatingNoticeIsland
       collapsed={collapsed}
       collapseLabel={t("app.collapse")}
+      expandedClassName="floating-notice-expanded grid max-h-[min(400px,calc(100vh-32px))] w-[min(400px,calc(100vw-32px))] gap-[6px] overflow-y-auto overflow-x-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]"
       expandLabel={t("app.expand")}
       onCollapsedChange={setCollapsed}
       positionClassName="right-[var(--space-4)] bottom-[var(--space-4)]"
@@ -338,7 +363,25 @@ function WorkflowEditorStatusIsland({
         controller.draftValidation?.valid === false || controller.saveError.length > 0 ? "danger" : "neutral"
       }
     >
-      <div className="grid gap-[var(--space-3)]">
+      <div className="grid gap-[var(--space-3)] pt-[6px]">
+        {controller.dirty.dirty ? (
+          <div className="grid grid-cols-2 gap-[var(--space-2)]">
+            <Button className="w-full" disabled={controller.saving} onClick={onDiscard} variant="danger">
+              {t("workflowEditor.discard")}
+            </Button>
+            <Button
+              className="w-full"
+              disabled={
+                controller.saving ||
+                (controller.dirty.graphDirty && controller.draftValidation?.valid === false)
+              }
+              onClick={controller.save}
+              variant="primary"
+            >
+              {controller.saving ? t("workflowEditor.saving") : t("workflowEditor.save")}
+            </Button>
+          </div>
+        ) : null}
         {controller.state.conflict !== null ? (
           <div className="grid gap-[var(--space-2)]">
             <p className="m-0 text-sm text-[var(--color-on-island)]">{t("workflowEditor.remoteConflict")}</p>
@@ -362,30 +405,6 @@ function WorkflowEditorStatusIsland({
             </div>
           </div>
         ) : null}
-        {controller.dirty.dirty ? (
-          <div className="flex flex-wrap items-center gap-[var(--space-2)]">
-            <span className="text-sm text-[var(--color-muted)]">
-              {controller.dirty.metadataDirty && controller.dirty.graphDirty
-                ? t("workflowEditor.metadataAndGraphDirty")
-                : controller.dirty.metadataDirty
-                  ? t("workflowEditor.metadataDirty")
-                  : t("workflowEditor.graphDirty")}
-            </span>
-            <Button
-              disabled={
-                controller.saving ||
-                (controller.dirty.graphDirty && controller.draftValidation?.valid === false)
-              }
-              onClick={controller.save}
-              variant="primary"
-            >
-              {controller.saving ? t("workflowEditor.saving") : t("workflowEditor.save")}
-            </Button>
-            <Button disabled={controller.saving} onClick={onDiscard} variant="ghost">
-              {t("workflowEditor.discard")}
-            </Button>
-          </div>
-        ) : null}
         {controller.saveError.length > 0 ? (
           <p className="m-0 text-sm text-[var(--color-error)]">{controller.saveError}</p>
         ) : null}
@@ -402,12 +421,7 @@ function WorkflowEditorStatusIsland({
           <WorkflowValidationIssues errors={controller.draftValidation.errors} />
         ) : null}
         {controller.executionValidation !== null && controller.executionValidation.errors.length > 0 ? (
-          <div className="grid gap-[var(--space-2)]">
-            <p className="m-0 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
-              {t("workflowEditor.executionIssuesDoNotBlockSave")}
-            </p>
-            <WorkflowValidationIssues errors={controller.executionValidation.errors} />
-          </div>
+          <WorkflowValidationIssues errors={controller.executionValidation.errors} />
         ) : null}
       </div>
     </FloatingNoticeIsland>
@@ -421,6 +435,7 @@ function emptyWorkflowDefinition(workflowID: string): WorkflowDefinition {
     nodes: [],
     transitionGroups: [],
     workflow: { description: "", version: 1, id: workflowID, name: "" },
+    derivedWiring: emptyWorkflowDerivedWiring,
   };
 }
 

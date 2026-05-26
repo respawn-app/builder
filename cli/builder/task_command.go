@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -205,19 +206,15 @@ func taskShowSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	defer func() { _ = remote.Close() }()
-	taskID, err := resolveWorkflowTaskID(context.Background(), cfg, remote, *projectRef, positionals[0])
+	requestedProjectID, task, err := getWorkflowTaskForShow(context.Background(), cfg, remote, *projectRef, positionals[0])
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ctx, cancel := workflowRPCContext(context.Background())
-	defer cancel()
-	resp, err := remote.GetWorkflowTask(ctx, serverapi.WorkflowTaskGetRequest{TaskID: taskID})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	if requestedProjectID != "" && task.Summary.ProjectID != "" && task.Summary.ProjectID != requestedProjectID && task.Project.ProjectKey != "" {
+		fmt.Fprintf(stdout, "[Note: This task belongs to another project %s]\n", task.Project.ProjectKey)
 	}
-	writeTaskDetail(stdout, resp.Task)
+	writeTaskDetail(stdout, task)
 	return 0
 }
 
@@ -665,6 +662,77 @@ func resolveWorkflowTaskID(ctx context.Context, cfg config.App, remote workflowC
 		return "", err
 	}
 	return "", fmt.Errorf("task %q not found in project %s", trimmed, projectID)
+}
+
+func getWorkflowTaskForShow(ctx context.Context, cfg config.App, remote workflowCommandRemote, projectRef string, ref string) (string, serverapi.WorkflowTaskDetail, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", serverapi.WorkflowTaskDetail{}, errors.New("task id is required")
+	}
+	requestedProjectID := ""
+	if resolved, err := resolveWorkflowProjectID(ctx, cfg, remote, projectRef); err == nil {
+		requestedProjectID = resolved
+	} else if !strings.HasPrefix(trimmed, "task-") {
+		return "", serverapi.WorkflowTaskDetail{}, err
+	}
+	if strings.HasPrefix(trimmed, "task-") {
+		detail, err := getWorkflowTaskByID(ctx, remote, trimmed)
+		return requestedProjectID, detail, err
+	}
+	if requestedProjectID != "" {
+		detail, err := getWorkflowTaskByProjectShortID(ctx, remote, requestedProjectID, trimmed)
+		if err == nil {
+			return requestedProjectID, detail, nil
+		}
+		if !isWorkflowTaskNotFound(err) {
+			return requestedProjectID, serverapi.WorkflowTaskDetail{}, err
+		}
+	}
+	detail, err := getWorkflowTaskByShortID(ctx, remote, trimmed)
+	if err == nil {
+		return requestedProjectID, detail, nil
+	}
+	if !isWorkflowTaskNotFound(err) {
+		return requestedProjectID, serverapi.WorkflowTaskDetail{}, err
+	}
+	if requestedProjectID != "" {
+		return requestedProjectID, serverapi.WorkflowTaskDetail{}, fmt.Errorf("task %q not found in project %s", trimmed, requestedProjectID)
+	}
+	return requestedProjectID, serverapi.WorkflowTaskDetail{}, fmt.Errorf("task %q not found", trimmed)
+}
+
+func isWorkflowTaskNotFound(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, serverapi.ErrWorkflowTaskNotFound)
+}
+
+func getWorkflowTaskByID(ctx context.Context, remote workflowCommandRemote, taskID string) (serverapi.WorkflowTaskDetail, error) {
+	rpcCtx, cancel := workflowRPCContext(ctx)
+	defer cancel()
+	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{TaskID: taskID})
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	return resp.Task, nil
+}
+
+func getWorkflowTaskByProjectShortID(ctx context.Context, remote workflowCommandRemote, projectID string, shortID string) (serverapi.WorkflowTaskDetail, error) {
+	rpcCtx, cancel := workflowRPCContext(ctx)
+	defer cancel()
+	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{ProjectID: projectID, ShortID: shortID})
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	return resp.Task, nil
+}
+
+func getWorkflowTaskByShortID(ctx context.Context, remote workflowCommandRemote, shortID string) (serverapi.WorkflowTaskDetail, error) {
+	rpcCtx, cancel := workflowRPCContext(ctx)
+	defer cancel()
+	resp, err := remote.GetWorkflowTask(rpcCtx, serverapi.WorkflowTaskGetRequest{ShortID: shortID})
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	return resp.Task, nil
 }
 
 func writeTaskDetail(stdout io.Writer, task serverapi.WorkflowTaskDetail) {

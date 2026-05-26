@@ -10,6 +10,7 @@ export type FloatingNoticeIslandProps = Readonly<{
     className?: string | undefined;
     collapsed: boolean;
     collapseLabel: string;
+    expandedClassName?: string | undefined;
     expandLabel: string;
     icon?: ReactNode;
     onCollapsedChange: (collapsed: boolean) => void;
@@ -23,6 +24,7 @@ export function FloatingNoticeIsland({
     className,
     collapsed,
     collapseLabel,
+    expandedClassName,
     expandLabel,
     icon,
     onCollapsedChange,
@@ -32,16 +34,19 @@ export function FloatingNoticeIsland({
 }: FloatingNoticeIslandProps) {
     const titleID = useId();
     const styles = noticeToneStyles[tone];
+    const expandedClasses =
+        expandedClassName ??
+        "floating-notice-expanded grid h-[176px] w-[min(420px,calc(100vw-32px))] gap-[6px] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]";
 
     return (
         <aside
             aria-label={collapsed ? title : undefined}
             aria-labelledby={collapsed ? undefined : titleID}
             className={cx(
-                "floating-notice-morph island-glass app-region-no-drag fixed z-50 overflow-hidden border shadow-[var(--shadow-island-1)]",
+                "floating-notice-morph island-glass app-region-no-drag fixed z-50 border shadow-[var(--shadow-island-1)]",
                 collapsed
-                    ? "floating-notice-collapsed grid h-12 w-12 place-items-center rounded-[var(--radius-m)] p-0 text-[var(--color-notice-collapsed-icon)]"
-                    : "floating-notice-expanded grid h-[176px] w-[min(420px,calc(100vw-32px))] gap-[6px] rounded-[var(--radius-xl)] p-[var(--space-3)]",
+                    ? "floating-notice-collapsed grid h-12 w-12 place-items-center overflow-hidden rounded-[var(--radius-m)] p-0 text-[var(--color-notice-collapsed-icon)]"
+                    : expandedClasses,
                 positionClassName,
                 styles.borderClassName,
                 collapsed ? styles.collapsedClassName : undefined,

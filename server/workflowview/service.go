@@ -17,6 +17,7 @@ import (
 	"builder/server/metadata"
 	"builder/server/metadata/sqlitegen"
 	"builder/server/workflow"
+	"builder/server/workflowapi"
 	"builder/server/workflowjson"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -300,7 +301,40 @@ func (s *Service) boardPlacementsByTask(ctx context.Context, tasks []sqlitegen.T
 	for _, placement := range placements {
 		byTaskID[placement.TaskID] = append(byTaskID[placement.TaskID], placement)
 	}
+	pendingApprovalPlacements, err := s.pendingApprovalSourcePlacementsByTask(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for taskID, taskPlacements := range pendingApprovalPlacements {
+		byTaskID[taskID] = append(byTaskID[taskID], taskPlacements...)
+	}
 	return byTaskID, nil
+}
+
+func (s *Service) pendingApprovalSourcePlacementsByTask(ctx context.Context, taskIDs []string) (map[string][]sqlitegen.TaskNodePlacementRecord, error) {
+	rows, err := s.queries.ListPendingApprovalSourcePlacementsByTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	byTaskID := make(map[string][]sqlitegen.TaskNodePlacementRecord)
+	for _, row := range rows {
+		byTaskID[row.TaskID] = append(byTaskID[row.TaskID], pendingApprovalSourcePlacement(row))
+	}
+	return byTaskID, nil
+}
+
+func pendingApprovalSourcePlacement(row sqlitegen.ListPendingApprovalSourcePlacementsByTasksRow) sqlitegen.TaskNodePlacementRecord {
+	return sqlitegen.TaskNodePlacementRecord{
+		ID:                        row.ID,
+		TaskID:                    row.TaskID,
+		NodeID:                    row.NodeID,
+		State:                     row.State,
+		CreatedByTransitionID:     row.CreatedByTransitionID,
+		ParallelBatchTransitionID: row.ParallelBatchTransitionID,
+		ParallelBranchEdgeID:      row.ParallelBranchEdgeID,
+		CreatedAtUnixMs:           row.CreatedAtUnixMs,
+		UpdatedAtUnixMs:           row.UpdatedAtUnixMs,
+	}
 }
 
 func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.WorkflowTaskDetail, error) {
@@ -322,6 +356,11 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 	if err != nil {
 		return serverapi.WorkflowTaskDetail{}, err
 	}
+	pendingApprovalPlacements, err := s.pendingApprovalSourcePlacementsByTask(ctx, []string{task.ID})
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	placements = append(placements, pendingApprovalPlacements[task.ID]...)
 	runs, err := s.queries.ListTaskRuns(ctx, task.ID)
 	if err != nil {
 		return serverapi.WorkflowTaskDetail{}, err
@@ -398,6 +437,46 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (serverapi.Workflo
 		detail.Comments = append(detail.Comments, commentDTO(comment))
 	}
 	return detail, nil
+}
+
+func (s *Service) GetTaskByProjectShortID(ctx context.Context, projectID string, shortID string) (serverapi.WorkflowTaskDetail, error) {
+	if s == nil {
+		return serverapi.WorkflowTaskDetail{}, errors.New("workflow view service is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return serverapi.WorkflowTaskDetail{}, errors.New("project_id is required")
+	}
+	trimmedShortID := strings.TrimSpace(shortID)
+	if trimmedShortID == "" {
+		return serverapi.WorkflowTaskDetail{}, errors.New("short_id is required")
+	}
+	task, err := s.queries.GetTaskByProjectShortID(ctx, sqlitegen.GetTaskByProjectShortIDParams{ProjectID: trimmedProjectID, ShortID: trimmedShortID})
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	return s.GetTask(ctx, task.ID)
+}
+
+func (s *Service) GetTaskByShortID(ctx context.Context, shortID string) (serverapi.WorkflowTaskDetail, error) {
+	if s == nil {
+		return serverapi.WorkflowTaskDetail{}, errors.New("workflow view service is required")
+	}
+	trimmedShortID := strings.TrimSpace(shortID)
+	if trimmedShortID == "" {
+		return serverapi.WorkflowTaskDetail{}, errors.New("short_id is required")
+	}
+	tasks, err := s.queries.ListTasksByShortID(ctx, trimmedShortID)
+	if err != nil {
+		return serverapi.WorkflowTaskDetail{}, err
+	}
+	if len(tasks) == 0 {
+		return serverapi.WorkflowTaskDetail{}, sql.ErrNoRows
+	}
+	if len(tasks) > 1 {
+		return serverapi.WorkflowTaskDetail{}, fmt.Errorf("task short_id %q is ambiguous; use task id", trimmedShortID)
+	}
+	return s.GetTask(ctx, tasks[0].ID)
 }
 
 func (s *Service) ListTaskActivity(ctx context.Context, req serverapi.WorkflowTaskActivityListRequest) (serverapi.WorkflowTaskActivityListResponse, error) {
@@ -609,6 +688,14 @@ func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.
 	}
 	nodeKinds := map[string]workflow.NodeKind{}
 	for _, node := range nodes {
+		inputFields := []serverapi.WorkflowInputField{}
+		if err := workflowjson.UnmarshalString(node.InputFieldsJson, &inputFields); err != nil {
+			return serverapi.WorkflowDefinition{}, nil, err
+		}
+		joinProviders := []serverapi.WorkflowJoinInputProvider{}
+		if err := workflowjson.UnmarshalString(node.JoinInputProvidersJson, &joinProviders); err != nil {
+			return serverapi.WorkflowDefinition{}, nil, err
+		}
 		fields := []serverapi.WorkflowOutputField{}
 		if err := workflowjson.UnmarshalString(node.OutputFieldsJson, &fields); err != nil {
 			return serverapi.WorkflowDefinition{}, nil, err
@@ -618,7 +705,7 @@ func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.
 		if group, ok := groupByID[groupID]; ok {
 			groupKey = group.GroupKey
 		}
-		def.Nodes = append(def.Nodes, serverapi.WorkflowNode{ID: node.ID, WorkflowID: node.WorkflowID, Key: node.NodeKey, Kind: node.Kind, DisplayName: node.DisplayName, GroupID: groupID, GroupKey: groupKey, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, OutputFields: fields})
+		def.Nodes = append(def.Nodes, serverapi.WorkflowNode{ID: node.ID, WorkflowID: node.WorkflowID, Key: node.NodeKey, Kind: node.Kind, DisplayName: node.DisplayName, GroupID: groupID, GroupKey: groupKey, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, InputFields: inputFields, JoinInputProviders: joinProviders, OutputFields: fields})
 		nodeKinds[node.ID] = workflow.NodeKind(node.Kind)
 	}
 	for _, group := range groups {
@@ -635,6 +722,7 @@ func (s *Service) definition(ctx context.Context, workflowID string) (serverapi.
 		}
 		def.Edges = append(def.Edges, serverapi.WorkflowEdge{ID: edge.ID, WorkflowID: edge.WorkflowID, TransitionGroupID: edge.TransitionGroupID, Key: edge.EdgeKey, TargetNodeID: edge.TargetNodeID, RequiresApproval: edge.RequiresApproval != 0, ContextMode: edge.ContextMode, ContextSource: apiContextSource(workflow.ContextSource{Kind: workflow.ContextSourceKind(edge.ContextSourceKind), NodeKey: workflow.ModelKey(edge.ContextSourceNodeKey)}), InputBindings: inputs, OutputRequirements: requirements})
 	}
+	def.DerivedWiring = workflowapi.DerivedWiring(definitionForValidation(def))
 	return def, nodeKinds, nil
 }
 
@@ -1649,11 +1737,19 @@ func bodyPreview(body string) string {
 func definitionForValidation(def serverapi.WorkflowDefinition) workflow.Definition {
 	out := workflow.Definition{ID: workflow.WorkflowID(def.Workflow.ID), DisplayName: def.Workflow.Name}
 	for _, node := range def.Nodes {
+		inputs := make([]workflow.InputField, 0, len(node.InputFields))
+		for _, input := range node.InputFields {
+			inputs = append(inputs, workflow.InputField{Name: input.Name, Description: input.Description})
+		}
+		joinProviders := make([]workflow.JoinInputProvider, 0, len(node.JoinInputProviders))
+		for _, provider := range node.JoinInputProviders {
+			joinProviders = append(joinProviders, workflow.JoinInputProvider{InputName: provider.InputName, ProviderEdgeID: workflow.EdgeID(provider.ProviderEdgeID)})
+		}
 		fields := make([]workflow.OutputField, 0, len(node.OutputFields))
 		for _, field := range node.OutputFields {
 			fields = append(fields, workflow.OutputField{Name: field.Name, Description: field.Description})
 		}
-		out.Nodes = append(out.Nodes, workflow.Node{WorkflowID: workflow.WorkflowID(node.WorkflowID), ID: workflow.NodeID(node.ID), Key: workflow.ModelKey(node.Key), Kind: workflow.NodeKind(node.Kind), DisplayName: node.DisplayName, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, OutputFields: fields})
+		out.Nodes = append(out.Nodes, workflow.Node{WorkflowID: workflow.WorkflowID(node.WorkflowID), ID: workflow.NodeID(node.ID), Key: workflow.ModelKey(node.Key), Kind: workflow.NodeKind(node.Kind), DisplayName: node.DisplayName, SubagentRole: node.SubagentRole, PromptTemplate: node.PromptTemplate, InputFields: inputs, JoinInputProviders: joinProviders, OutputFields: fields})
 	}
 	for _, group := range def.TransitionGroups {
 		out.TransitionGroups = append(out.TransitionGroups, workflow.TransitionGroup{WorkflowID: workflow.WorkflowID(group.WorkflowID), ID: workflow.TransitionGroupID(group.ID), SourceNodeID: workflow.NodeID(group.SourceNodeID), TransitionID: workflow.TransitionID(group.TransitionID), DisplayName: group.DisplayName})
@@ -1673,11 +1769,7 @@ func definitionForValidation(def serverapi.WorkflowDefinition) workflow.Definiti
 }
 
 func validationErrors(workflowID string, errs []workflow.ValidationError) []serverapi.WorkflowValidationError {
-	out := make([]serverapi.WorkflowValidationError, 0, len(errs))
-	for _, err := range errs {
-		out = append(out, serverapi.WorkflowValidationError{Code: string(err.Code), Message: err.Message, WorkflowID: workflowID, NodeID: string(err.NodeID), TransitionGroupID: string(err.TransitionGroupID), EdgeID: string(err.EdgeID), RelatedIDs: err.RelatedIDs, BlocksContext: err.BlocksContext})
-	}
-	return out
+	return workflowapi.ValidationErrors(workflowID, errs)
 }
 
 func selectWorkflow(picker []serverapi.WorkflowPickerItem, requested string) serverapi.WorkflowPickerItem {
@@ -1719,6 +1811,7 @@ func boardGroups(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardGrou
 
 func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardColumn {
 	columns := make([]serverapi.WorkflowBoardColumn, 0, len(def.Nodes))
+	derivedNodes := workflowDerivedNodeWiringByID(def.DerivedWiring)
 	for index, node := range def.Nodes {
 		if !boardVisibleNodeKind(node.Kind) {
 			continue
@@ -1731,8 +1824,8 @@ func boardColumns(def serverapi.WorkflowDefinition) []serverapi.WorkflowBoardCol
 				DisplayName:            node.DisplayName,
 				AssigneeRole:           node.SubagentRole,
 				SortOrder:              index,
-				OutputFields:           node.OutputFields,
-				TransitionOutputFields: boardTransitionOutputFields(def, node.ID),
+				OutputFields:           derivedNodes[node.ID].PossibleProvisionFields,
+				TransitionOutputFields: boardTransitionOutputFields(node),
 			},
 			GroupID:   node.GroupID,
 			SortOrder: index,
@@ -1747,41 +1840,24 @@ func boardVisibleNodeKind(kind string) bool {
 	return workflow.NodeKind(kind) != workflow.NodeKindJoin
 }
 
-func boardTransitionOutputFields(def serverapi.WorkflowDefinition, targetNodeID string) []serverapi.WorkflowOutputField {
-	nodesByID := workflowNodeByID(def)
-	groupsByID := workflowTransitionGroupByID(def)
-	fields := make([]serverapi.WorkflowOutputField, 0)
+func workflowDerivedNodeWiringByID(derived serverapi.WorkflowDerivedWiring) map[string]serverapi.WorkflowDerivedNodeWiring {
+	byID := make(map[string]serverapi.WorkflowDerivedNodeWiring, len(derived.Nodes))
+	for _, node := range derived.Nodes {
+		byID[node.NodeID] = node
+	}
+	return byID
+}
+
+func boardTransitionOutputFields(node serverapi.WorkflowNode) []serverapi.WorkflowOutputField {
+	fields := make([]serverapi.WorkflowOutputField, 0, len(node.InputFields))
 	seen := map[string]bool{}
-	for _, edge := range def.Edges {
-		if edge.TargetNodeID != targetNodeID {
+	for _, input := range node.InputFields {
+		name := strings.TrimSpace(input.Name)
+		if name == "" || seen[name] {
 			continue
 		}
-		sourceOutputFields := map[string]serverapi.WorkflowOutputField{}
-		if group, ok := groupsByID[edge.TransitionGroupID]; ok {
-			if sourceNode, ok := nodesByID[group.SourceNodeID]; ok {
-				for _, field := range sourceNode.OutputFields {
-					name := strings.TrimSpace(field.Name)
-					if name != "" {
-						sourceOutputFields[name] = field
-					}
-				}
-			}
-		}
-		for _, binding := range edge.InputBindings {
-			if binding.Source != string(workflow.BindingSourceTransitionOutput) {
-				continue
-			}
-			name := strings.TrimSpace(binding.Field)
-			if name == "" || seen[name] {
-				continue
-			}
-			field := sourceOutputFields[name]
-			if strings.TrimSpace(field.Name) == "" {
-				field = serverapi.WorkflowOutputField{Name: name}
-			}
-			fields = append(fields, field)
-			seen[name] = true
-		}
+		seen[name] = true
+		fields = append(fields, serverapi.WorkflowOutputField{Name: name, Description: strings.TrimSpace(input.Description)})
 	}
 	return fields
 }
@@ -1908,6 +1984,7 @@ func manualMoveTargetNodeIDs(def serverapi.WorkflowDefinition, placements []sqli
 			groupIDs[group.ID] = true
 		}
 	}
+	derivedEdges := workflowDerivedEdgeWiringByID(def.DerivedWiring)
 	targets := []string{}
 	seen := map[string]bool{}
 	for _, node := range def.Nodes {
@@ -1917,7 +1994,7 @@ func manualMoveTargetNodeIDs(def serverapi.WorkflowDefinition, placements []sqli
 		}
 	}
 	for _, edge := range def.Edges {
-		if !groupIDs[edge.TransitionGroupID] || edge.RequiresApproval || len(edge.OutputRequirements) > 0 {
+		if !groupIDs[edge.TransitionGroupID] || edge.RequiresApproval || len(derivedEdges[edge.ID].RequiredProvisionFields) > 0 {
 			continue
 		}
 		if !seen[edge.TargetNodeID] {
@@ -1926,6 +2003,14 @@ func manualMoveTargetNodeIDs(def serverapi.WorkflowDefinition, placements []sqli
 		}
 	}
 	return targets
+}
+
+func workflowDerivedEdgeWiringByID(derived serverapi.WorkflowDerivedWiring) map[string]serverapi.WorkflowDerivedEdgeWiring {
+	byID := make(map[string]serverapi.WorkflowDerivedEdgeWiring, len(derived.Edges))
+	for _, edge := range derived.Edges {
+		byID[edge.EdgeID] = edge
+	}
+	return byID
 }
 
 func pageCards(cards []serverapi.WorkflowBoardTaskCard, offset int, pageSize int) []serverapi.WorkflowBoardTaskCard {

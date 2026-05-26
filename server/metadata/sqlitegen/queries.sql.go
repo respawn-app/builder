@@ -959,6 +959,61 @@ func (q *Queries) GetTask(ctx context.Context, id string) (TaskRecord, error) {
 	return i, err
 }
 
+const getTaskByProjectShortID = `-- name: GetTaskByProjectShortID :one
+SELECT
+    id,
+    project_id,
+    project_workflow_link_id,
+    workflow_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    source_url,
+    source_workspace_id,
+    managed_worktree_id,
+    canceled_at_unix_ms,
+    cancellation_reason,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+FROM task_records
+WHERE project_id = ?1
+  AND short_id = ?2
+LIMIT 1
+`
+
+type GetTaskByProjectShortIDParams struct {
+	ProjectID string
+	ShortID   string
+}
+
+func (q *Queries) GetTaskByProjectShortID(ctx context.Context, arg GetTaskByProjectShortIDParams) (TaskRecord, error) {
+	row := q.db.QueryRowContext(ctx, getTaskByProjectShortID, arg.ProjectID, arg.ShortID)
+	var i TaskRecord
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.ProjectWorkflowLinkID,
+		&i.WorkflowID,
+		&i.WorkflowRevisionSeen,
+		&i.TaskSeq,
+		&i.ShortID,
+		&i.Title,
+		&i.Body,
+		&i.SourceUrl,
+		&i.SourceWorkspaceID,
+		&i.ManagedWorktreeID,
+		&i.CanceledAtUnixMs,
+		&i.CancellationReason,
+		&i.CreatedAtUnixMs,
+		&i.UpdatedAtUnixMs,
+		&i.MetadataJson,
+	)
+	return i, err
+}
+
 const getTaskRun = `-- name: GetTaskRun :one
 SELECT
     id,
@@ -1272,6 +1327,8 @@ SELECT
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -1280,9 +1337,24 @@ WHERE id = ?1
 LIMIT 1
 `
 
-func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (WorkflowNode, error) {
+type GetWorkflowNodeRow struct {
+	ID                     string
+	WorkflowID             string
+	NodeKey                string
+	Kind                   string
+	DisplayName            string
+	SubagentRole           string
+	PromptTemplate         string
+	InputFieldsJson        string
+	JoinInputProvidersJson string
+	OutputFieldsJson       string
+	GroupID                sql.NullString
+	SortOrder              int64
+}
+
+func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (GetWorkflowNodeRow, error) {
 	row := q.db.QueryRowContext(ctx, getWorkflowNode, id)
-	var i WorkflowNode
+	var i GetWorkflowNodeRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowID,
@@ -1291,6 +1363,8 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id string) (WorkflowNode,
 		&i.DisplayName,
 		&i.SubagentRole,
 		&i.PromptTemplate,
+		&i.InputFieldsJson,
+		&i.JoinInputProvidersJson,
 		&i.OutputFieldsJson,
 		&i.GroupID,
 		&i.SortOrder,
@@ -2137,6 +2211,8 @@ INSERT INTO workflow_nodes (
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -2150,21 +2226,25 @@ INSERT INTO workflow_nodes (
     ?7,
     ?8,
     ?9,
-    ?10
+    ?10,
+    ?11,
+    ?12
 )
 `
 
 type InsertWorkflowNodeParams struct {
-	ID               string
-	WorkflowID       string
-	NodeKey          string
-	Kind             string
-	DisplayName      string
-	SubagentRole     string
-	PromptTemplate   string
-	OutputFieldsJson string
-	GroupID          sql.NullString
-	SortOrder        int64
+	ID                     string
+	WorkflowID             string
+	NodeKey                string
+	Kind                   string
+	DisplayName            string
+	SubagentRole           string
+	PromptTemplate         string
+	InputFieldsJson        string
+	JoinInputProvidersJson string
+	OutputFieldsJson       string
+	GroupID                sql.NullString
+	SortOrder              int64
 }
 
 func (q *Queries) InsertWorkflowNode(ctx context.Context, arg InsertWorkflowNodeParams) error {
@@ -2176,6 +2256,8 @@ func (q *Queries) InsertWorkflowNode(ctx context.Context, arg InsertWorkflowNode
 		arg.DisplayName,
 		arg.SubagentRole,
 		arg.PromptTemplate,
+		arg.InputFieldsJson,
+		arg.JoinInputProvidersJson,
 		arg.OutputFieldsJson,
 		arg.GroupID,
 		arg.SortOrder,
@@ -2422,6 +2504,16 @@ WITH board_node_task_ids AS (
     UNION
     SELECT
         t.id
+    FROM task_transition_records tt
+    JOIN task_records t ON t.id = tt.task_id
+    WHERE tt.source_node_id = ?5
+      AND tt.state = 'pending_approval'
+      AND t.project_id = ?6
+      AND t.workflow_id = ?7
+      AND t.canceled_at_unix_ms = 0
+    UNION
+    SELECT
+        t.id
     FROM task_records t
     WHERE t.project_id = ?6
       AND t.workflow_id = ?7
@@ -2521,6 +2613,79 @@ func (q *Queries) ListBoardNodeTasks(ctx context.Context, arg ListBoardNodeTasks
 			&i.CreatedAtUnixMs,
 			&i.UpdatedAtUnixMs,
 			&i.MetadataJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingApprovalSourcePlacementsByTasks = `-- name: ListPendingApprovalSourcePlacementsByTasks :many
+SELECT
+    CAST(COALESCE('pending-approval:' || id, '') AS TEXT) AS id,
+    task_id,
+    COALESCE(source_node_id, '') AS node_id,
+    'waiting_approval' AS state,
+    '' AS created_by_transition_id,
+    CAST(NULL AS TEXT) AS parallel_batch_transition_id,
+    CAST(NULL AS TEXT) AS parallel_branch_edge_id,
+    created_at_unix_ms,
+    created_at_unix_ms AS updated_at_unix_ms
+FROM task_transition_records
+WHERE task_id IN (/*SLICE:task_ids*/?)
+  AND state = 'pending_approval'
+  AND trim(source_node_id) != ''
+ORDER BY task_id ASC, created_at_unix_ms ASC, id ASC
+`
+
+type ListPendingApprovalSourcePlacementsByTasksRow struct {
+	ID                        string
+	TaskID                    string
+	NodeID                    string
+	State                     string
+	CreatedByTransitionID     string
+	ParallelBatchTransitionID sql.NullString
+	ParallelBranchEdgeID      sql.NullString
+	CreatedAtUnixMs           int64
+	UpdatedAtUnixMs           int64
+}
+
+func (q *Queries) ListPendingApprovalSourcePlacementsByTasks(ctx context.Context, taskIds []string) ([]ListPendingApprovalSourcePlacementsByTasksRow, error) {
+	query := listPendingApprovalSourcePlacementsByTasks
+	var queryParams []interface{}
+	if len(taskIds) > 0 {
+		for _, v := range taskIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:task_ids*/?", strings.Repeat(",?", len(taskIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:task_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingApprovalSourcePlacementsByTasksRow
+	for rows.Next() {
+		var i ListPendingApprovalSourcePlacementsByTasksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.NodeID,
+			&i.State,
+			&i.CreatedByTransitionID,
+			&i.ParallelBatchTransitionID,
+			&i.ParallelBranchEdgeID,
+			&i.CreatedAtUnixMs,
+			&i.UpdatedAtUnixMs,
 		); err != nil {
 			return nil, err
 		}
@@ -3589,6 +3754,71 @@ func (q *Queries) ListTasksByProject(ctx context.Context, projectID string) ([]T
 	return items, nil
 }
 
+const listTasksByShortID = `-- name: ListTasksByShortID :many
+SELECT
+    id,
+    project_id,
+    project_workflow_link_id,
+    workflow_id,
+    workflow_revision_seen,
+    task_seq,
+    short_id,
+    title,
+    body,
+    source_url,
+    source_workspace_id,
+    managed_worktree_id,
+    canceled_at_unix_ms,
+    cancellation_reason,
+    created_at_unix_ms,
+    updated_at_unix_ms,
+    metadata_json
+FROM task_records
+WHERE short_id = ?1
+ORDER BY created_at_unix_ms ASC, id ASC
+`
+
+func (q *Queries) ListTasksByShortID(ctx context.Context, shortID string) ([]TaskRecord, error) {
+	rows, err := q.db.QueryContext(ctx, listTasksByShortID, shortID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TaskRecord
+	for rows.Next() {
+		var i TaskRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.ProjectWorkflowLinkID,
+			&i.WorkflowID,
+			&i.WorkflowRevisionSeen,
+			&i.TaskSeq,
+			&i.ShortID,
+			&i.Title,
+			&i.Body,
+			&i.SourceUrl,
+			&i.SourceWorkspaceID,
+			&i.ManagedWorktreeID,
+			&i.CanceledAtUnixMs,
+			&i.CancellationReason,
+			&i.CreatedAtUnixMs,
+			&i.UpdatedAtUnixMs,
+			&i.MetadataJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWaitingAskWorkflowRuns = `-- name: ListWaitingAskWorkflowRuns :many
 SELECT
     id,
@@ -3788,6 +4018,8 @@ SELECT
     display_name,
     subagent_role,
     prompt_template,
+    input_fields_json,
+    join_input_providers_json,
     output_fields_json,
     group_id,
     sort_order
@@ -3796,15 +4028,30 @@ WHERE workflow_id = ?1
 ORDER BY sort_order ASC, rowid ASC
 `
 
-func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]WorkflowNode, error) {
+type ListWorkflowNodesRow struct {
+	ID                     string
+	WorkflowID             string
+	NodeKey                string
+	Kind                   string
+	DisplayName            string
+	SubagentRole           string
+	PromptTemplate         string
+	InputFieldsJson        string
+	JoinInputProvidersJson string
+	OutputFieldsJson       string
+	GroupID                sql.NullString
+	SortOrder              int64
+}
+
+func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]ListWorkflowNodesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listWorkflowNodes, workflowID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []WorkflowNode
+	var items []ListWorkflowNodesRow
 	for rows.Next() {
-		var i WorkflowNode
+		var i ListWorkflowNodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowID,
@@ -3813,6 +4060,8 @@ func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID string) ([]W
 			&i.DisplayName,
 			&i.SubagentRole,
 			&i.PromptTemplate,
+			&i.InputFieldsJson,
+			&i.JoinInputProvidersJson,
 			&i.OutputFieldsJson,
 			&i.GroupID,
 			&i.SortOrder,

@@ -273,24 +273,26 @@ type WorkflowEdge struct {
 	TargetNodeID           string
 	RequiresApproval       int64
 	ContextMode            string
-	ContextSourceKind      string
-	ContextSourceNodeKey   string
 	InputBindingsJson      string
 	OutputRequirementsJson string
 	SortOrder              int64
+	ContextSourceKind      string
+	ContextSourceNodeKey   string
 }
 
 type WorkflowNode struct {
-	ID               string
-	WorkflowID       string
-	NodeKey          string
-	Kind             string
-	DisplayName      string
-	SubagentRole     string
-	PromptTemplate   string
-	OutputFieldsJson string
-	GroupID          sql.NullString
-	SortOrder        int64
+	ID                     string
+	WorkflowID             string
+	NodeKey                string
+	Kind                   string
+	DisplayName            string
+	SubagentRole           string
+	PromptTemplate         string
+	OutputFieldsJson       string
+	GroupID                sql.NullString
+	SortOrder              int64
+	InputFieldsJson        string
+	JoinInputProvidersJson string
 }
 
 type WorkflowNodeGroup struct {

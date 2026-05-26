@@ -2,12 +2,16 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import { App } from "../../App";
 import { AppProviders } from "../../app/AppProviders";
 import { queryKeys } from "../../app/queryKeys";
+import { SidebarHost } from "../../app/sidebar";
+import { useSidebar } from "../../app/sidebarContext";
 import { SidebarProvider } from "../../app/sidebarProvider";
+import { protocolVersion } from "../../api/jsonRpcSocket";
 import { createTestServices, startupRoutes } from "../../testSupport/appServices";
 import { WorkflowEditorRoute } from "./WorkflowEditorRoute";
 import { WorkflowInspectorSidebar } from "./WorkflowInspectorSidebar";
@@ -50,10 +54,14 @@ describe("WorkflowEditorRoute", () => {
     expect(await screen.findAllByTestId("workflow-node-target-handle")).toHaveLength(3);
     const issues = await screen.findByRole("complementary", { name: "Workflow issues" });
     expect(within(issues).getAllByText("Done transition is invalid.").length).toBeGreaterThan(0);
+    expect(within(issues).getAllByText("Input: summary · Provider edge: edge-provider").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("p-[var(--space-2)]");
   });
 
-  it("opens read-only inspectors for workflow metadata and graph entities", async () => {
+  it("opens inspectors for workflow metadata and graph entities", async () => {
     window.history.pushState(null, "", "/workflows/workflow-1/editor");
     render(
       <App
@@ -75,7 +83,17 @@ describe("WorkflowEditorRoute", () => {
 
     fireEvent.click(screen.getByText("Implement"));
     const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
-    expect(within(nodeInspector).getByDisplayValue("coder")).toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Identity")).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Behavior")).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Kind")).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Group")).not.toBeInTheDocument();
+    const assignee = within(nodeInspector).getByRole("combobox", { name: "Assignee" });
+    expect(assignee).toHaveTextContent("coder");
+    fireEvent.click(assignee);
+    fireEvent.click(await within(nodeInspector).findByRole("option", { name: "reviewer" }));
+    expect(within(nodeInspector).getByRole("combobox", { name: "Assignee" })).toHaveTextContent(
+      "reviewer",
+    );
 
     const coreLabels = screen.getAllByText("Core");
     expect(coreLabels.length).toBeGreaterThan(0);
@@ -87,7 +105,254 @@ describe("WorkflowEditorRoute", () => {
     expect(await screen.findByRole("complementary", { name: "Inspect group" })).toHaveTextContent("Members");
 
     fireEvent.click(screen.getByTestId("workflow-join-diamond"));
-    expect(await screen.findByRole("complementary", { name: "Inspect node" })).toHaveTextContent("join");
+    expect(await screen.findByRole("complementary", { name: "Inspect node" })).toHaveTextContent(
+      "Join providers",
+    );
+  });
+
+  it("keeps a legacy assignee selected when it is missing from configured readiness roles", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutesWithSubagentRoles(["default", "reviewer"]),
+          { method: "workflow.get", result: workflowDefinitionResponseWithAgentRole("legacy_coder") },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByText("Implement"));
+    const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
+    const assignee = within(nodeInspector).getByRole("combobox", { name: "Assignee" });
+
+    expect(assignee).toHaveTextContent("legacy_coder");
+    expect(assignee).not.toHaveTextContent("Select assignee");
+    fireEvent.click(assignee);
+    expect(await within(nodeInspector).findByRole("option", { name: "legacy_coder" })).toBeInTheDocument();
+  });
+
+  it("edits required inputs as draggable sidebar islands with top insertion", async () => {
+    const user = userEvent.setup();
+    mockInputFieldLayout();
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByText("Implement"));
+    const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
+    const addButton = within(nodeInspector).getByRole("button", { name: "Add required input" });
+    const initialFieldTitle = within(nodeInspector).getByRole("button", { name: "summary" });
+
+    expect(addButton.compareDocumentPosition(initialFieldTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(within(nodeInspector).getByText("Required inputs")).toBeInTheDocument();
+    expect(within(nodeInspector).queryByRole("textbox", { name: "Input name" })).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Field description")).not.toBeInTheDocument();
+    expect(
+      within(nodeInspector).getByPlaceholderText("Input description"),
+    ).toHaveAccessibleName("Input description");
+    expect(within(nodeInspector).queryByText("Drag to reorder")).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Move up")).not.toBeInTheDocument();
+    expect(within(nodeInspector).queryByText("Move down")).not.toBeInTheDocument();
+    expect(within(nodeInspector).getByRole("button", { name: "Reorder input field" })).toBeInTheDocument();
+    expect(within(nodeInspector).getByRole("button", { name: "Delete field" })).toHaveTextContent("");
+    expect(within(nodeInspector).getByTestId("workflow-input-field")).toHaveClass(
+      "workflow-editor-input-field",
+    );
+
+    fireEvent.click(initialFieldTitle);
+    expect(within(nodeInspector).getByRole("textbox", { name: "Input name" })).toHaveValue("summary");
+    fireEvent.keyDown(within(nodeInspector).getByRole("textbox", { name: "Input name" }), {
+      key: "Escape",
+    });
+    expect(within(nodeInspector).getByRole("button", { name: "summary" })).toBeInTheDocument();
+
+    fireEvent.click(addButton);
+
+    const newFieldName = within(nodeInspector).getByRole("textbox", { name: "Input name" });
+    expect(inputFieldNames(nodeInspector)).toEqual(["", "summary"]);
+    expect(newFieldName).toHaveValue("");
+    expect(within(nodeInspector).getAllByRole("button", { name: "Reorder input field" })).toHaveLength(2);
+    expect(within(nodeInspector).getAllByTestId("workflow-input-field")[0]).toHaveClass(
+      "workflow-editor-input-field",
+    );
+
+    fireEvent.change(newFieldName, { target: { value: "details" } });
+    expect(within(nodeInspector).getByRole("textbox", { name: "Input name" })).toHaveValue("details");
+    expect(inputFieldNames(nodeInspector)).toEqual(["details", "summary"]);
+    fireEvent.keyDown(newFieldName, { key: "Enter" });
+
+    const dragSurfaces = within(nodeInspector).getAllByRole("button", { name: "Reorder input field" });
+    const summaryDragSurface = dragSurfaces[1] ?? dragSurfaces[0];
+    summaryDragSurface?.focus();
+    expect(summaryDragSurface).toHaveFocus();
+    await user.keyboard("[Enter][ArrowUp][Enter]");
+
+    await waitFor(() => {
+      expect(inputFieldNames(nodeInspector)).toEqual(["summary", "details"]);
+    });
+
+    const detailsDeleteButton = within(nodeInspector).getAllByRole("button", { name: "Delete field" })[1];
+    if (detailsDeleteButton === undefined) {
+      throw new Error("Expected a delete button for the reordered output field.");
+    }
+    fireEvent.click(detailsDeleteButton);
+    await waitFor(() => {
+      expect(within(nodeInspector).getAllByTestId("workflow-input-field")).toHaveLength(1);
+    });
+    expect(inputFieldNames(nodeInspector)).toEqual(["summary"]);
+  });
+
+  it("edits join provider selections from server-derived required inputs", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByTestId("workflow-join-diamond"));
+    const nodeInspector = await screen.findByRole("complementary", { name: "Inspect node" });
+    const providerSelect = within(nodeInspector).getByRole("combobox", { name: "summary" });
+
+    expect(within(nodeInspector).getByText("Join providers")).toBeInTheDocument();
+    expect(providerSelect).toHaveTextContent("Select provider");
+    fireEvent.click(providerSelect);
+    fireEvent.click(await within(nodeInspector).findByRole("option", { name: "Implement / done" }));
+
+    await waitFor(() => {
+      expect(within(nodeInspector).getByRole("combobox", { name: "summary" })).toHaveTextContent(
+        "Implement / done",
+      );
+    });
+  });
+
+  it("keeps the graph canvas mounted while workflow metadata fields update", async () => {
+    const user = userEvent.setup();
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect workflow" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect workflow" });
+
+    await user.type(within(inspector).getByLabelText("Workflow name"), "xyz");
+
+    expect(screen.getByTestId("workflow-editor-canvas")).toBe(canvas);
+    expect(screen.queryByTestId("loading-state")).not.toBeInTheDocument();
+  });
+
+  it("updates graph-backed node edits in the mounted canvas", async () => {
+    const user = userEvent.setup();
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByText("Implement"));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect node" });
+
+    await user.type(within(inspector).getByLabelText("Display name"), "x");
+
+    expect(screen.getByTestId("workflow-editor-canvas")).toBe(canvas);
+    expect(await within(canvas).findByText("Implementx")).toBeInTheDocument();
+  });
+
+  it("opens workflow inspectors with their own 35 percent screen-width default", async () => {
+    const restoreWindowWidth = mockWindowWidth(1600);
+    mockSidebarLayout(() => 1600);
+    try {
+      render(
+        <AppProviders services={createTestServices(workflowEditorRoutes())}>
+          <SidebarProvider>
+            <WorkflowEditorDraftBridgeProvider>
+              <div className="relative flex min-h-0" data-testid="app-shell-content">
+                <OpenStandardSidebar />
+                <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+                <SidebarHost />
+              </div>
+            </WorkflowEditorDraftBridgeProvider>
+          </SidebarProvider>
+        </AppProviders>,
+      );
+
+      await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+      fireEvent.click(screen.getByRole("button", { name: "Open standard sidebar" }));
+      const standardSidebar = await screen.findByRole("complementary", { name: "Settings" });
+      fireEvent.keyDown(within(standardSidebar).getByRole("separator", { name: "Resize sidebar" }), {
+        key: "Home",
+      });
+      expect(sidebarWidthStyle(standardSidebar)).toBe("360px");
+      fireEvent.click(within(standardSidebar).getByRole("button", { name: "Close" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("complementary", { name: "Settings" })).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Inspect workflow" }));
+      const workflowInspector = await screen.findByRole("complementary", { name: "Inspect workflow" });
+      expect(sidebarWidthStyle(workflowInspector)).toBe("560px");
+      fireEvent.keyDown(within(workflowInspector).getByRole("separator", { name: "Resize sidebar" }), {
+        key: "ArrowLeft",
+      });
+      expect(sidebarWidthStyle(workflowInspector)).toBe("592px");
+      fireEvent.click(within(workflowInspector).getByRole("button", { name: "Close" }));
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("complementary", { name: "Inspect workflow" }),
+        ).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Open standard sidebar" }));
+      const reopenedStandardSidebar = await screen.findByRole("complementary", { name: "Settings" });
+      expect(sidebarWidthStyle(reopenedStandardSidebar)).toBe("360px");
+      fireEvent.click(within(reopenedStandardSidebar).getByRole("button", { name: "Close" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("complementary", { name: "Settings" })).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Inspect workflow" }));
+      expect(
+        sidebarWidthStyle(await screen.findByRole("complementary", { name: "Inspect workflow" })),
+      ).toBe("592px");
+    } finally {
+      restoreWindowWidth();
+    }
   });
 
   it("renders read-only edge inspector details from cached workflow data", async () => {
@@ -100,6 +365,21 @@ describe("WorkflowEditorRoute", () => {
     expect(await screen.findByText("Context mode")).toBeInTheDocument();
     expect(screen.getByText("Compact and continue session")).toBeInTheDocument();
     expect(screen.getByText("Node: implement")).toBeInTheDocument();
+  });
+
+  it("renders read-only node inspector without kind, group, or titled identity behavior islands", async () => {
+    render(
+      <AppProviders services={createTestServices(startupRoutes)}>
+        <CachedNodeInspectorFixture />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByText("Assignee")).toBeInTheDocument();
+    expect(screen.queryByText("Identity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Behavior")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kind")).not.toBeInTheDocument();
+    expect(screen.queryByText("Group")).not.toBeInTheDocument();
+    expect(screen.getByText("coder")).toBeInTheDocument();
   });
 
   it("blocks direct access to workflows not linked to the project", async () => {
@@ -140,6 +420,7 @@ describe("WorkflowEditorRoute", () => {
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("route-transition-frame")).not.toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-route")).toHaveClass("p-[var(--space-2)]");
   });
 
   it("shows and acknowledges a dirty-draft conflict when the remote workflow version changes", async () => {
@@ -172,7 +453,7 @@ describe("WorkflowEditorRoute", () => {
     expect(
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Workflow settings changed")).toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "Unsaved changes" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Simulate remote update" }));
     expect(
@@ -237,9 +518,28 @@ describe("WorkflowEditorRoute", () => {
     expect(
       await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Workflow settings changed")).toBeInTheDocument();
+    const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
+    expect(unsavedChanges).toHaveClass(
+      "max-h-[min(400px,calc(100vh-32px))]",
+      "w-[min(400px,calc(100vw-32px))]",
+      "overflow-y-auto",
+    );
+    expect(within(unsavedChanges).queryByText("Workflow settings changed")).not.toBeInTheDocument();
+    expect(within(unsavedChanges).queryByText("Workflow settings and graph changed")).not.toBeInTheDocument();
+    expect(within(unsavedChanges).queryByText("Execution issues do not block saving")).not.toBeInTheDocument();
+    const title = within(unsavedChanges).getByRole("heading", { name: "Unsaved changes" });
+    const discardButton = within(unsavedChanges).getByRole("button", { name: "Discard" });
+    const saveButton = within(unsavedChanges).getByRole("button", { name: "Save" });
+    expect(discardButton).toHaveClass("w-full");
+    expect(discardButton).toHaveStyle({ "--button-border": "var(--color-error)" });
+    expect(saveButton).toHaveClass("w-full");
+    expect(title.compareDocumentPosition(discardButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(discardButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
 
-    const saveButton = screen.getByRole("button", { name: "Save" });
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
 
@@ -251,6 +551,55 @@ describe("WorkflowEditorRoute", () => {
         workflow_id: "workflow-1",
       });
     });
+  });
+
+  it("scrolls the whole unsaved changes island when issue content exceeds the max height", async () => {
+    const manyExecutionIssues = workflowValidationResponseWithMessages(
+      Array.from({ length: 18 }, (_unused, index) => `Execution issue ${(index + 1).toString()}`),
+    );
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponse },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          results: {
+            draft: { valid: true, errors: [] },
+            execution: manyExecutionIssues,
+          },
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <WorkflowMetadataEditDriver />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    const unsavedChanges = await screen.findByRole("complementary", { name: "Unsaved changes" });
+
+    expect(unsavedChanges).toHaveClass(
+      "max-h-[min(400px,calc(100vh-32px))]",
+      "overflow-y-auto",
+      "overflow-x-hidden",
+    );
+    expect(within(unsavedChanges).getByTestId("floating-notice-header")).toBeInTheDocument();
+    expect(within(unsavedChanges).getByRole("button", { name: "Discard" })).toBeInTheDocument();
+    expect(within(unsavedChanges).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(
+      within(unsavedChanges)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(manyExecutionIssues.errors.map((issue) => issue.message));
   });
 });
 
@@ -268,6 +617,89 @@ class MockResizeObserver implements ResizeObserver {
   }
 }
 
+function workflowEditorRoutes() {
+  return [
+    ...startupRoutes,
+    { method: "workflow.get", result: workflowDefinitionResponse },
+    { method: "workflow.validate", result: invalidValidationResponse },
+    { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+  ];
+}
+
+function startupRoutesWithSubagentRoles(roleNames: readonly string[]) {
+  return [
+    {
+      method: "server.readiness.get",
+      result: {
+        auth_ready: true,
+        auth_required: true,
+        endpoint: "ws://127.0.0.1:53082/rpc",
+        protocol_version: protocolVersion,
+        ready: true,
+        server_build: "1.3.0",
+        server_id: "server-1",
+        server_version: "1.3.0",
+        subagent_roles: roleNames.map((name) => ({ name })),
+      },
+    },
+    ...startupRoutes.filter((route) => route.method !== "server.readiness.get"),
+  ];
+}
+
+function mockWindowWidth(width: number): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  return () => {
+    if (descriptor === undefined) {
+      Reflect.deleteProperty(window, "innerWidth");
+      return;
+    }
+    Object.defineProperty(window, "innerWidth", descriptor);
+  };
+}
+
+function inputFieldNames(container: HTMLElement): readonly string[] {
+  return within(container)
+    .getAllByTestId("workflow-input-field")
+    .map((field) => field.dataset.inputFieldName ?? "");
+}
+
+function mockSidebarLayout(shellWidth: () => number): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect(
+    this: HTMLElement,
+  ) {
+    if (this.dataset.testid === "app-shell-content") {
+      return domRect({ height: 720, width: shellWidth() });
+    }
+    return domRect({ height: 720, width: 560 });
+  });
+}
+
+function mockInputFieldLayout(): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect(
+    this: HTMLElement,
+  ) {
+    if (this.dataset.testid === "workflow-input-field") {
+      return domRect({ height: 96, top: this.dataset.inputFieldName === "summary" ? 140 : 20, width: 320 });
+    }
+    return domRect({ height: 96, top: 20, width: 320 });
+  });
+}
+
+function domRect({ height, top = 0, width }: Readonly<{ height: number; top?: number; width: number }>): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left: 0,
+    right: width,
+    top,
+    width,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
+
 function CachedEdgeInspectorFixture() {
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -275,6 +707,48 @@ function CachedEdgeInspectorFixture() {
     queryClient.setQueryData(queryKeys.workflowValidation("workflow-1", "execution"), cachedValidation);
   }, [queryClient]);
   return <WorkflowInspectorSidebar selection={{ kind: "edge", edgeID: "edge-2" }} workflowID="workflow-1" />;
+}
+
+function CachedNodeInspectorFixture() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    queryClient.setQueryData(queryKeys.workflowDefinition("workflow-1"), cachedWorkflowDefinition);
+    queryClient.setQueryData(queryKeys.workflowValidation("workflow-1", "execution"), cachedValidation);
+  }, [queryClient]);
+  return <WorkflowInspectorSidebar selection={{ kind: "node", nodeID: "node-1" }} workflowID="workflow-1" />;
+}
+
+function workflowDefinitionResponseWithAgentRole(subagentRole: string) {
+  return {
+    definition: {
+      ...workflowDefinitionResponse.definition,
+      nodes: workflowDefinitionResponse.definition.nodes.map((node) =>
+        node.id === "node-1" ? { ...node, subagent_role: subagentRole } : node,
+      ),
+    },
+  };
+}
+
+function OpenStandardSidebar() {
+  const { openSidebar } = useSidebar();
+  return (
+    <button
+      onClick={() => {
+        void openSidebar({
+          content: <p>Default sidebar content</p>,
+          kind: "custom",
+          title: "Settings",
+        });
+      }}
+      type="button"
+    >
+      Open standard sidebar
+    </button>
+  );
+}
+
+function sidebarWidthStyle(sidebar: HTMLElement): string {
+  return sidebar.style.getPropertyValue("--app-sidebar-width");
 }
 
 function WorkflowConflictDriver() {
@@ -375,6 +849,7 @@ const workflowDefinitionResponse = {
         group_key: "core",
         subagent_role: "coder",
         prompt_template: "Implement the task.",
+        input_fields: [{ name: "summary", description: "Summary" }],
         output_fields: [{ name: "summary", description: "Summary" }],
       },
       {
@@ -455,13 +930,50 @@ const invalidValidationResponse = {
       node_id: "node-1",
       transition_group_id: "tg-1",
       edge_id: "edge-1",
+      details: {
+        input_name: "summary",
+        provider_edge_id: "edge-provider",
+      },
       related_ids: [],
       blocks_context: true,
     },
   ],
 };
 
+function workflowValidationResponseWithMessages(messages: readonly string[]) {
+  return {
+    valid: false,
+    errors: messages.map((message, index) => {
+      const idSuffix = (index + 1).toString();
+      return {
+      code: "workflow.validation.invalid",
+      message,
+      workflow_id: "workflow-1",
+      node_id: "node-1",
+      transition_group_id: `tg-${idSuffix}`,
+      edge_id: `edge-${idSuffix}`,
+      related_ids: [],
+      blocks_context: true,
+      };
+    }),
+  };
+}
+
 const graphValidationResponse = {
+  derived_wiring: {
+    nodes: [
+      {
+        node_id: "join",
+        join_output_fields: [{ name: "summary", description: "Summary" }],
+      },
+    ],
+    edges: [
+      {
+        edge_id: "edge-1",
+        required_provider_fields: [{ name: "summary", description: "Summary" }],
+      },
+    ],
+  },
   results: {
     draft: invalidValidationResponse,
     execution: invalidValidationResponse,
@@ -485,6 +997,7 @@ const graphSaveImpactResponse = {
 
 const cachedWorkflowDefinition = {
   workflow: { id: "workflow-1", name: "Delivery", description: "", version: 1 },
+  derivedWiring: { diagnostics: [], edges: [], nodes: [], transitionGroups: [] },
   nodeGroups: [
     { id: "group-1", workflowID: "workflow-1", key: "core", name: "Core", sortOrder: 1, nodeIDs: ["node-1"] },
   ],
@@ -499,6 +1012,8 @@ const cachedWorkflowDefinition = {
       groupKey: "core",
       subagentRole: "coder",
       promptTemplate: "Implement the task.",
+      inputFields: [{ name: "summary", description: "Summary" }],
+      joinInputProviders: [],
       outputFields: [{ name: "summary", description: "Summary" }],
     },
     {
@@ -511,6 +1026,8 @@ const cachedWorkflowDefinition = {
       groupKey: "",
       subagentRole: "",
       promptTemplate: "",
+      inputFields: [],
+      joinInputProviders: [],
       outputFields: [],
     },
     {
@@ -523,6 +1040,8 @@ const cachedWorkflowDefinition = {
       groupKey: "",
       subagentRole: "",
       promptTemplate: "",
+      inputFields: [],
+      joinInputProviders: [],
       outputFields: [],
     },
   ],
@@ -568,6 +1087,7 @@ const cachedValidation = {
       nodeID: "node-1",
       transitionGroupID: "tg-1",
       edgeID: "edge-1",
+      details: { fieldName: "", inputName: "summary", placeholder: "", providerEdgeID: "edge-provider" },
       relatedIDs: [],
       blocksContext: true,
     },

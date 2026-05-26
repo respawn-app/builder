@@ -46,7 +46,7 @@ func TestBoardAndTaskDetailUseDurableWorkflowMetadataOnly(t *testing.T) {
 	if err := workflowStore.DeleteComment(ctx, deletedComment.ID); err != nil {
 		t.Fatalf("DeleteComment: %v", err)
 	}
-	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestBoardDoesNotAdvertiseHiddenDoneCardsWithoutFetchPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("StartTask %d: %v", index, err)
 		}
-		if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+		if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 			t.Fatalf("CompleteRun %d: %v", index, err)
 		}
 	}
@@ -204,7 +204,14 @@ func TestBoardAndTaskDetailProjectParallelBranchPlacements(t *testing.T) {
 			t.Fatalf("board columns include hidden join node: %+v", board.Columns)
 		}
 	}
+	planColumn := workflowViewColumnByKey(t, board, "plan")
+	if len(planColumn.Node.OutputFields) != 1 || planColumn.Node.OutputFields[0].Name != "summary" || planColumn.Node.OutputFields[0].Description != "Plan summary." {
+		t.Fatalf("plan board output fields = %+v, want derived downstream summary", planColumn.Node.OutputFields)
+	}
 	branchColumn := workflowViewColumnByKey(t, board, "impl_a")
+	if len(branchColumn.Node.TransitionOutputFields) != 1 || branchColumn.Node.TransitionOutputFields[0].Name != "summary" || branchColumn.Node.TransitionOutputFields[0].Description != "Plan summary." {
+		t.Fatalf("branch transition output fields = %+v, want target required inputs", branchColumn.Node.TransitionOutputFields)
+	}
 	branchPage, err := view.ListBoardNodeCards(ctx, serverapi.WorkflowBoardNodeCardsListRequest{ProjectID: binding.ProjectID, WorkflowID: string(workflowID), NodeID: branchColumn.Node.NodeID}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
 		t.Fatalf("ListBoardNodeCards branch: %v", err)
@@ -395,7 +402,7 @@ func TestTaskDetailPrefersActiveWorkflowLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
-	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
 	detail, err := view.GetTask(ctx, string(task.ID))
@@ -549,7 +556,7 @@ func TestBoardNodeCardsAllowRestartAfterDoneTaskResetToBacklog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
-	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}}); err != nil {
+	if _, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
 	def, _, err := workflowStore.GetDefinition(ctx, workflowID)
@@ -637,6 +644,30 @@ func TestBoardProjectsManualMoveTargetsFromServerPermissions(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	def, _, err := workflowStore.GetDefinition(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("GetDefinition: %v", err)
+	}
+	agent := workflowViewNodeByKind(t, def, workflow.NodeKindAgent)
+	done := workflowViewNodeByKind(t, def, workflow.NodeKindTerminal)
+	reviewID := workflow.NodeID("node-review-" + string(workflowID))
+	if _, err := workflowStore.AddNode(ctx, workflowstore.NodeRecord{ID: reviewID, WorkflowID: workflowID, Key: "review", Kind: workflow.NodeKindAgent, DisplayName: "Review", SubagentRole: "coder", PromptTemplate: "Review {{.Inputs.summary}}.", InputFields: []workflow.InputField{{Name: "summary", Description: "Summary."}}}); err != nil {
+		t.Fatalf("AddNode review: %v", err)
+	}
+	reviewGroupID := workflow.TransitionGroupID("group-review-" + string(workflowID))
+	if _, err := workflowStore.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: reviewGroupID, WorkflowID: workflowID, SourceNodeID: agent.ID, TransitionID: "review", DisplayName: "Review"}); err != nil {
+		t.Fatalf("AddTransitionGroup review: %v", err)
+	}
+	if _, err := workflowStore.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-review-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: reviewGroupID, Key: "review", TargetNodeID: reviewID, ContextMode: workflow.ContextModeNewSession}); err != nil {
+		t.Fatalf("AddEdge review: %v", err)
+	}
+	reviewDoneGroupID := workflow.TransitionGroupID("group-review-done-" + string(workflowID))
+	if _, err := workflowStore.AddTransitionGroup(ctx, workflowstore.TransitionGroupRecord{ID: reviewDoneGroupID, WorkflowID: workflowID, SourceNodeID: reviewID, TransitionID: "done", DisplayName: "Done"}); err != nil {
+		t.Fatalf("AddTransitionGroup review done: %v", err)
+	}
+	if _, err := workflowStore.AddEdge(ctx, workflowstore.EdgeRecord{ID: workflow.EdgeID("edge-review-done-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: reviewDoneGroupID, Key: "done", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession}); err != nil {
+		t.Fatalf("AddEdge review done: %v", err)
+	}
 	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
@@ -647,11 +678,6 @@ func TestBoardProjectsManualMoveTargetsFromServerPermissions(t *testing.T) {
 	if _, err := workflowStore.StartTask(ctx, task.ID); err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
-	def, _, err := workflowStore.GetDefinition(ctx, workflowID)
-	if err != nil {
-		t.Fatalf("GetDefinition: %v", err)
-	}
-	done := workflowViewNodeByKind(t, def, workflow.NodeKindTerminal)
 
 	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
 	if err != nil {
@@ -667,6 +693,45 @@ func TestBoardProjectsManualMoveTargetsFromServerPermissions(t *testing.T) {
 	}
 	if got := activePage.Cards[0].Actions.ManualMoveTargetNodeIDs; len(got) != 1 || got[0] != string(done.ID) {
 		t.Fatalf("manual move targets = %+v, want %s", got, done.ID)
+	}
+}
+
+func TestManualMoveTargetsExcludeEdgesWithDerivedRequiredProvisionFields(t *testing.T) {
+	def := serverapi.WorkflowDefinition{
+		Workflow: serverapi.WorkflowRecord{ID: "workflow-1", Name: "Workflow"},
+		Nodes: []serverapi.WorkflowNode{
+			{ID: "node-agent", WorkflowID: "workflow-1", Key: "agent", Kind: string(workflow.NodeKindAgent), DisplayName: "Agent"},
+			{ID: "node-review", WorkflowID: "workflow-1", Key: "review", Kind: string(workflow.NodeKindAgent), DisplayName: "Review"},
+			{ID: "node-done", WorkflowID: "workflow-1", Key: "done", Kind: string(workflow.NodeKindTerminal), DisplayName: "Done"},
+		},
+		TransitionGroups: []serverapi.WorkflowTransitionGroup{
+			{ID: "group-agent-review", WorkflowID: "workflow-1", SourceNodeID: "node-agent", TransitionID: "review", DisplayName: "Review"},
+			{ID: "group-agent-done", WorkflowID: "workflow-1", SourceNodeID: "node-agent", TransitionID: "done", DisplayName: "Done"},
+		},
+		Edges: []serverapi.WorkflowEdge{
+			{ID: "edge-review", WorkflowID: "workflow-1", TransitionGroupID: "group-agent-review", Key: "review", TargetNodeID: "node-review"},
+			{ID: "edge-done", WorkflowID: "workflow-1", TransitionGroupID: "group-agent-done", Key: "done", TargetNodeID: "node-done"},
+		},
+		DerivedWiring: serverapi.WorkflowDerivedWiring{
+			Edges: []serverapi.WorkflowDerivedEdgeWiring{
+				{EdgeID: "edge-review", RequiredProvisionFields: []serverapi.WorkflowOutputField{{Name: "summary", Description: "Summary."}}},
+				{EdgeID: "edge-done"},
+			},
+		},
+	}
+
+	targets := manualMoveTargetNodeIDs(
+		def,
+		[]sqlitegen.TaskNodePlacementRecord{{NodeID: "node-agent", State: "active"}},
+		map[string]workflow.NodeKind{
+			"node-agent":  workflow.NodeKindAgent,
+			"node-review": workflow.NodeKindAgent,
+			"node-done":   workflow.NodeKindTerminal,
+		},
+	)
+
+	if len(targets) != 1 || targets[0] != "node-done" {
+		t.Fatalf("manual move targets = %+v, want only terminal target", targets)
 	}
 }
 
@@ -759,6 +824,95 @@ func TestInterruptedTaskStatusUsesAttentionKind(t *testing.T) {
 	}
 	if len(detail.Attention) != 1 || detail.Attention[0].Kind != attentionKindInterruptedRun || detail.Attention[0].RunID != string(started.RunID) {
 		t.Fatalf("detail attention = %+v", detail.Attention)
+	}
+}
+
+func TestPendingApprovalTaskRemainsVisibleOnSourceBoardColumn(t *testing.T) {
+	ctx := context.Background()
+	store, workflowStore, binding := newWorkflowViewTestStore(t)
+	view, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	workflowID := createWorkflowViewValidWorkflow(t, ctx, workflowStore)
+	if _, err := workflowStore.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `
+UPDATE workflow_edges
+SET requires_approval = 1
+WHERE edge_key = 'done'
+  AND EXISTS (
+      SELECT 1
+      FROM workflow_transition_groups tg
+      JOIN workflow_nodes source ON source.id = tg.source_node_id
+      WHERE tg.id = workflow_edges.transition_group_id
+        AND source.workflow_id = ?
+  )`, string(workflowID)); err != nil {
+		t.Fatalf("require approval: %v", err)
+	}
+	task, err := workflowStore.CreateTask(ctx, workflowstore.CreateTaskRequest{ProjectID: binding.ProjectID, Title: "BUI-7", Body: "Waiting approval"})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	started, err := workflowStore.StartTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	pending, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
+	if err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	if pending.State != "pending_approval" {
+		t.Fatalf("completion state = %q, want pending_approval", pending.State)
+	}
+
+	board, err := view.GetBoard(ctx, serverapi.WorkflowBoardRequest{ProjectID: binding.ProjectID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	sourceColumn := workflowViewColumnByKey(t, board, "agent")
+	if sourceColumn.TaskCount != 1 {
+		t.Fatalf("source column task count = %d, want pending approval task in source column: %+v", sourceColumn.TaskCount, board.Columns)
+	}
+	doneColumn := workflowViewColumnByKind(t, board, workflow.NodeKindTerminal)
+	if doneColumn.TaskCount != 0 {
+		t.Fatalf("done column task count = %d, want pending approval task not done yet", doneColumn.TaskCount)
+	}
+	sourcePage, err := view.ListBoardNodeCards(ctx, serverapi.WorkflowBoardNodeCardsListRequest{ProjectID: binding.ProjectID, WorkflowID: string(workflowID), NodeID: sourceColumn.Node.NodeID}, workflow.StaticRoleResolver{"coder": true})
+	if err != nil {
+		t.Fatalf("ListBoardNodeCards source: %v", err)
+	}
+	if len(sourcePage.Cards) != 1 {
+		t.Fatalf("source cards = %+v, want pending approval task", sourcePage.Cards)
+	}
+	card := sourcePage.Cards[0]
+	if card.ShortID != task.ShortID || card.Status.Kind != "waiting_approval" || len(card.Status.AttentionTypes) != 1 || card.Status.AttentionTypes[0] != "approval" {
+		t.Fatalf("pending approval card = %+v", card)
+	}
+	if len(card.ActiveNodeIDs) != 1 || card.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
+		t.Fatalf("pending approval active nodes = %+v, want source node %s", card.ActiveNodeIDs, sourceColumn.Node.NodeID)
+	}
+	detail, err := view.GetTask(ctx, string(task.ID))
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if detail.Status.Kind != "waiting_approval" || len(detail.Summary.ActiveNodeIDs) != 1 || detail.Summary.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
+		t.Fatalf("task detail = %+v, want pending approval at source node %s", detail, sourceColumn.Node.NodeID)
+	}
+	byShortID, err := view.GetTaskByProjectShortID(ctx, binding.ProjectID, task.ShortID)
+	if err != nil {
+		t.Fatalf("GetTaskByProjectShortID: %v", err)
+	}
+	if byShortID.Status.Kind != "waiting_approval" || len(byShortID.Summary.ActiveNodeIDs) != 1 || byShortID.Summary.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
+		t.Fatalf("task detail by short id = %+v, want pending approval at source node %s", byShortID, sourceColumn.Node.NodeID)
+	}
+	byGlobalShortID, err := view.GetTaskByShortID(ctx, task.ShortID)
+	if err != nil {
+		t.Fatalf("GetTaskByShortID: %v", err)
+	}
+	if byGlobalShortID.Status.Kind != "waiting_approval" || len(byGlobalShortID.Summary.ActiveNodeIDs) != 1 || byGlobalShortID.Summary.ActiveNodeIDs[0] != sourceColumn.Node.NodeID {
+		t.Fatalf("task detail by global short id = %+v, want pending approval at source node %s", byGlobalShortID, sourceColumn.Node.NodeID)
 	}
 }
 
@@ -1035,7 +1189,7 @@ WHERE edge_key = 'done'
 	if err != nil {
 		t.Fatalf("StartTask: %v", err)
 	}
-	pending, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "ship"}, Commentary: "needs approval", Actor: "agent"})
+	pending, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: started.RunID, TransitionID: "done", Commentary: "needs approval", Actor: "agent"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -1059,7 +1213,7 @@ WHERE edge_key = 'done'
 	if transition.ID == "" || transition.SourceNodeID == "" || transition.SourceNodeDisplayName != "Agent" || transition.TransitionDisplayName != "Done" || transition.WorkflowRevisionSeen == 0 || transition.Actor != "agent" || transition.Commentary != "needs approval" || transition.AppliedAtUnixMs != 0 {
 		t.Fatalf("transition snapshot = %+v", transition)
 	}
-	if len(transition.Edges) != 1 || !transition.Edges[0].RequiresApproval || transition.Edges[0].TargetNodeDisplayName == "" || len(transition.Edges[0].OutputRequirements) != 1 || transition.Edges[0].WorkflowRevisionSeen == 0 {
+	if len(transition.Edges) != 1 || !transition.Edges[0].RequiresApproval || transition.Edges[0].TargetNodeDisplayName == "" || len(transition.Edges[0].OutputRequirements) != 0 || transition.Edges[0].WorkflowRevisionSeen == 0 {
 		t.Fatalf("edge snapshot = %+v", transition.Edges)
 	}
 }
@@ -1158,7 +1312,7 @@ WHERE edge_key = 'done'
 	if err != nil {
 		t.Fatalf("StartTask approval: %v", err)
 	}
-	pendingApproval, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: approvalStarted.RunID, TransitionID: "done", OutputValues: map[string]string{"summary": "done"}})
+	pendingApproval, err := workflowStore.CompleteRun(ctx, workflowstore.CompleteRunRequest{RunID: approvalStarted.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun approval: %v", err)
 	}
@@ -1366,9 +1520,9 @@ func createWorkflowViewFanoutWorkflow(t *testing.T, ctx context.Context, store *
 	joinID := workflow.NodeID("node-join-" + string(created.ID))
 	synthID := workflow.NodeID("node-synth-" + string(created.ID))
 	for _, node := range []workflowstore.NodeRecord{
-		{ID: planID, WorkflowID: created.ID, Key: "plan", Kind: workflow.NodeKindAgent, DisplayName: "Plan", SubagentRole: "coder", PromptTemplate: "Plan.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
-		{ID: implAID, WorkflowID: created.ID, Key: "impl_a", Kind: workflow.NodeKindAgent, DisplayName: "Implement A", SubagentRole: "coder", PromptTemplate: "A.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
-		{ID: implBID, WorkflowID: created.ID, Key: "impl_b", Kind: workflow.NodeKindAgent, DisplayName: "Implement B", SubagentRole: "coder", PromptTemplate: "B.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
+		{ID: planID, WorkflowID: created.ID, Key: "plan", Kind: workflow.NodeKindAgent, DisplayName: "Plan", SubagentRole: "coder", PromptTemplate: "Plan."},
+		{ID: implAID, WorkflowID: created.ID, Key: "impl_a", Kind: workflow.NodeKindAgent, DisplayName: "Implement A", SubagentRole: "coder", PromptTemplate: "A.", InputFields: []workflow.InputField{{Name: "summary", Description: "Plan summary."}}},
+		{ID: implBID, WorkflowID: created.ID, Key: "impl_b", Kind: workflow.NodeKindAgent, DisplayName: "Implement B", SubagentRole: "coder", PromptTemplate: "B.", InputFields: []workflow.InputField{{Name: "summary", Description: "Plan summary."}}},
 		{ID: joinID, WorkflowID: created.ID, Key: "join", Kind: workflow.NodeKindJoin, DisplayName: "Join"},
 		{ID: synthID, WorkflowID: created.ID, Key: "synth", Kind: workflow.NodeKindAgent, DisplayName: "Synthesize", SubagentRole: "coder", PromptTemplate: "Synthesize.", OutputFields: []workflow.OutputField{{Name: "summary", Description: "Summary."}}},
 	} {
