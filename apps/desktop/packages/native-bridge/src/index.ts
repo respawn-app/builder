@@ -71,6 +71,7 @@ export type NativeBridge = Readonly<{
     startDragging(): Promise<void>;
     closeCurrent(): Promise<void>;
     fitCurrentToContent(size: NativeDialogContentSize): Promise<void>;
+    setCurrentGlassTint(tint: NativeWindowGlassTint | null): Promise<void>;
   }>;
   dialogs: Readonly<{
     openWindow(options: NativeDialogWindowOptions): Promise<void>;
@@ -92,6 +93,13 @@ export type NativeBridge = Readonly<{
     notifyChanged(event: NativeTaskDetailChanged): Promise<void>;
     onChanged(handler: (event: NativeTaskDetailChanged) => void): Promise<NativeUnlisten>;
   }>;
+}>;
+
+export type NativeWindowGlassTint = Readonly<{
+  red: number;
+  green: number;
+  blue: number;
+  alpha: number;
 }>;
 
 export type NativeNotification = Readonly<{
@@ -280,6 +288,9 @@ export function createBrowserNativeBridge(options: BrowserNativeBridgeOptions = 
       async fitCurrentToContent(): Promise<void> {
         return Promise.resolve();
       },
+      async setCurrentGlassTint(): Promise<void> {
+        return Promise.resolve();
+      },
     },
     dialogs: {
       async openWindow(): Promise<void> {
@@ -378,6 +389,12 @@ export function createTauriNativeBridge(platform: NativePlatform = "unknown"): N
       },
       async fitCurrentToContent(size: NativeDialogContentSize): Promise<void> {
         await fitCurrentWindowToContent(size);
+      },
+      async setCurrentGlassTint(tint: NativeWindowGlassTint | null): Promise<void> {
+        await invoke("set_native_window_glass_tint", {
+          label: getCurrentWindow().label,
+          tint,
+        });
       },
     },
     dialogs: {

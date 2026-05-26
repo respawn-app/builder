@@ -94,6 +94,15 @@ async fn apply_native_window_glass(
     native_glass::apply_to_label(app, label).await
 }
 
+#[tauri::command]
+async fn set_native_window_glass_tint(
+    app: tauri::AppHandle,
+    label: String,
+    tint: Option<native_glass::NativeGlassTint>,
+) -> Result<native_glass::NativeGlassStatus, String> {
+    native_glass::set_tint_for_label(app, label, tint).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -116,6 +125,7 @@ pub fn run() {
             open_external_url,
             append_gui_log,
             apply_native_window_glass,
+            set_native_window_glass_tint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Builder desktop application");

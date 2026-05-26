@@ -13,7 +13,7 @@ mod platform {
     use tauri::{Manager, Runtime, WebviewWindow};
 
     const LIQUID_GLASS_MAJOR_VERSION: isize = 26;
-    const LIQUID_GLASS_EFFECT_NAME: &str = "NSGlassEffectView.clear";
+    const LIQUID_GLASS_EFFECT_NAME: &str = "NSGlassEffectView.regular";
     const VISUAL_EFFECT_NAME: &str = "NSVisualEffectView.underWindowBackground";
     const ISLAND_BASE_CORNER_RADIUS: f64 = 24.0;
 
@@ -30,6 +30,15 @@ mod platform {
         Unsupported { reason: &'static str },
     }
 
+    #[derive(Clone, Copy, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct NativeGlassTint {
+        red: f64,
+        green: f64,
+        blue: f64,
+        alpha: f64,
+    }
+
     pub async fn apply_to_label<R: Runtime>(
         app: tauri::AppHandle<R>,
         label: String,
@@ -38,6 +47,17 @@ mod platform {
             .get_webview_window(&label)
             .ok_or_else(|| format!("Window '{label}' was not found."))?;
         apply_to_window(window).await
+    }
+
+    pub async fn set_tint_for_label<R: Runtime>(
+        app: tauri::AppHandle<R>,
+        label: String,
+        tint: Option<NativeGlassTint>,
+    ) -> Result<NativeGlassStatus, String> {
+        let window = app
+            .get_webview_window(&label)
+            .ok_or_else(|| format!("Window '{label}' was not found."))?;
+        set_tint_for_window(window, tint).await
     }
 
     pub fn apply_to_window_now<R: Runtime>(
@@ -63,6 +83,33 @@ mod platform {
         receiver
             .await
             .map_err(|_| "Native glass setup ended before returning a result.".to_string())?
+    }
+
+    async fn set_tint_for_window<R: Runtime>(
+        window: WebviewWindow<R>,
+        tint: Option<NativeGlassTint>,
+    ) -> Result<NativeGlassStatus, String> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let scheduled_window = window.clone();
+        scheduled_window
+            .run_on_main_thread(move || {
+                let result = set_tint_for_window_now(&window, tint);
+                let _ = sender.send(result);
+            })
+            .map_err(|error| format!("Schedule native glass tint update failed: {error}"))?;
+        receiver
+            .await
+            .map_err(|_| "Native glass tint update ended before returning a result.".to_string())?
+    }
+
+    fn set_tint_for_window_now<R: Runtime>(
+        window: &WebviewWindow<R>,
+        tint: Option<NativeGlassTint>,
+    ) -> Result<NativeGlassStatus, String> {
+        let ns_window = window
+            .ns_window()
+            .map_err(|error| format!("Resolve native window failed: {error}"))?;
+        unsafe { set_tint_for_ns_window(ns_window.cast(), tint) }
     }
 
     unsafe fn apply_to_ns_window(ns_window: *mut NSWindow) -> Result<NativeGlassStatus, String> {
@@ -102,6 +149,28 @@ mod platform {
         Ok(apply_visual_effect(window, &content_view, main_thread))
     }
 
+    unsafe fn set_tint_for_ns_window(
+        ns_window: *mut NSWindow,
+        tint: Option<NativeGlassTint>,
+    ) -> Result<NativeGlassStatus, String> {
+        if ns_window.is_null() {
+            return Err("Native window pointer is null.".to_string());
+        }
+        let window = unsafe { &*ns_window };
+        let content_view = window
+            .contentView()
+            .ok_or_else(|| "Native window does not have a content view.".to_string())?;
+        let Some(glass_view) = content_view.downcast_ref::<NSGlassEffectView>() else {
+            return Ok(NativeGlassStatus::Unsupported {
+                reason: "Native glass tint only applies to NSGlassEffectView.",
+            });
+        };
+        glass_view.setTintColor(tint.map(native_tint_color).as_deref());
+        Ok(NativeGlassStatus::Applied {
+            effect: LIQUID_GLASS_EFFECT_NAME,
+        })
+    }
+
     fn apply_liquid_glass(
         window: &NSWindow,
         content_view: &objc2_app_kit::NSView,
@@ -114,8 +183,8 @@ mod platform {
         prepare_window_for_native_blur(window);
         glass_view.setFrame(content_view.frame());
         glass_view.setAutoresizingMask(autoresizing_mask);
-        glass_view.setStyle(NSGlassEffectViewStyle::Clear);
-        glass_view.setTintColor(None);
+        glass_view.setStyle(NSGlassEffectViewStyle::Regular);
+        glass_view.setTintColor(Some(&NSColor::clearColor()));
         glass_view.setCornerRadius(ISLAND_BASE_CORNER_RADIUS);
         window.setContentView(Some(&glass_view));
         content_view.setFrame(glass_view.bounds());
@@ -125,6 +194,19 @@ mod platform {
         NativeGlassStatus::Applied {
             effect: LIQUID_GLASS_EFFECT_NAME,
         }
+    }
+
+    fn native_tint_color(tint: NativeGlassTint) -> objc2::rc::Retained<NSColor> {
+        NSColor::colorWithDeviceRed_green_blue_alpha(
+            clamp_unit(tint.red),
+            clamp_unit(tint.green),
+            clamp_unit(tint.blue),
+            clamp_unit(tint.alpha),
+        )
+    }
+
+    fn clamp_unit(value: f64) -> f64 {
+        value.clamp(0.0, 1.0)
     }
 
     fn apply_visual_effect(
@@ -225,6 +307,13 @@ mod platform {
                 Some(NativeWindowEffect::LiquidGlass),
             );
         }
+
+        #[test]
+        fn clamps_tint_channels() {
+            assert_eq!(clamp_unit(-1.0), 0.0);
+            assert_eq!(clamp_unit(0.5), 0.5);
+            assert_eq!(clamp_unit(2.0), 1.0);
+        }
     }
 }
 
@@ -238,9 +327,32 @@ mod platform {
         Unsupported { reason: &'static str },
     }
 
+    #[derive(Clone, Copy, serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct NativeGlassTint {
+        #[allow(dead_code)]
+        red: f64,
+        #[allow(dead_code)]
+        green: f64,
+        #[allow(dead_code)]
+        blue: f64,
+        #[allow(dead_code)]
+        alpha: f64,
+    }
+
     pub async fn apply_to_label<R: Runtime>(
         _app: tauri::AppHandle<R>,
         _label: String,
+    ) -> Result<NativeGlassStatus, String> {
+        Ok(NativeGlassStatus::Unsupported {
+            reason: "Native Liquid Glass is only available on macOS.",
+        })
+    }
+
+    pub async fn set_tint_for_label<R: Runtime>(
+        _app: tauri::AppHandle<R>,
+        _label: String,
+        _tint: Option<NativeGlassTint>,
     ) -> Result<NativeGlassStatus, String> {
         Ok(NativeGlassStatus::Unsupported {
             reason: "Native Liquid Glass is only available on macOS.",
@@ -250,4 +362,4 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 pub use platform::apply_to_window_now;
-pub use platform::{apply_to_label, NativeGlassStatus};
+pub use platform::{apply_to_label, set_tint_for_label, NativeGlassStatus, NativeGlassTint};
