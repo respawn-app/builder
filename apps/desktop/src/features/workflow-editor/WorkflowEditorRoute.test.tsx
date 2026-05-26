@@ -64,6 +64,7 @@ describe("WorkflowEditorRoute", () => {
       "floating-notice-expanded",
       "left-[var(--space-4)]",
       "bottom-[var(--space-4)]",
+      "h-[176px]",
       "border-[var(--color-outline)]",
     );
     expect(within(legend).getByText("Compact session and proceed")).toBeInTheDocument();
