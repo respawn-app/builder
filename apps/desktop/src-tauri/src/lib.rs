@@ -2,7 +2,10 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+
+mod native_glass;
 
 const BUILDER_CONFIG_NAME: &str = "config.toml";
 const DEFAULT_PERSISTENCE_ROOT: &str = "~/.builder";
@@ -83,18 +86,36 @@ fn append_gui_log(entry: String) -> Result<(), String> {
         .map_err(|error| format!("Write GUI log failed: {error}"))
 }
 
+#[tauri::command]
+async fn apply_native_window_glass(
+    app: tauri::AppHandle,
+    label: String,
+) -> Result<native_glass::NativeGlassStatus, String> {
+    native_glass::apply_to_label(app, label).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = native_glass::apply_to_window_now(&window) {
+                    eprintln!("Apply native window glass failed: {error}");
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             resolve_builder_context,
             resolve_native_platform,
             select_directory,
             open_external_url,
             append_gui_log,
+            apply_native_window_glass,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Builder desktop application");
@@ -225,7 +246,7 @@ fn parse_theme(value: &str, setting_name: &str) -> Result<String, String> {
 fn resolve_configured_path(value: &str) -> Result<PathBuf, String> {
     let trimmed = value.trim();
     if trimmed == "~" {
-        return Ok(home_dir()?);
+        return home_dir();
     }
     let expanded = if let Some(rest) = trimmed.strip_prefix("~/") {
         home_dir()?.join(rest)
