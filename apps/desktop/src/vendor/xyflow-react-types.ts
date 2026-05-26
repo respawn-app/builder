@@ -1,4 +1,5 @@
 import type { ComponentType, CSSProperties, ReactNode } from "react";
+import type { MouseEvent } from "react";
 
 export type XYPosition = Readonly<{ x: number; y: number }>;
 
@@ -27,6 +28,11 @@ export type Edge<Data extends Record<string, unknown> = Record<string, unknown>>
   data?: Data;
   markerEnd?: string | Readonly<{ color?: string; type: string }>;
   selected?: boolean;
+}>;
+
+export type Connection = Readonly<{
+  source: string | null;
+  target: string | null;
 }>;
 
 export type NodeProps<NodeType extends Node = Node> = Readonly<{
@@ -62,8 +68,10 @@ export declare const ReactFlow: ComponentType<
     nodesConnectable?: boolean;
     nodesDraggable?: boolean;
     nodeTypes?: NodeTypes;
+    onConnect?: (connection: Connection) => void;
     onEdgeClick?: (event: unknown, edge: Edge) => void;
     onNodeClick?: (event: unknown, node: Node) => void;
+    onNodeContextMenu?: (event: MouseEvent, node: Node) => void;
     panOnScroll?: boolean;
     proOptions?: Readonly<{ hideAttribution?: boolean }>;
     selectionOnDrag?: boolean;

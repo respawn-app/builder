@@ -2,6 +2,7 @@ import { useId, type ReactNode } from "react";
 import { Maximize2, Minus } from "lucide-react";
 
 import { cx } from "./classes";
+import { islandSurfaceClassName } from "./islandSurfaceStyles";
 
 export type FloatingNoticeTone = "danger" | "neutral";
 
@@ -43,7 +44,8 @@ export function FloatingNoticeIsland({
             aria-label={collapsed ? title : undefined}
             aria-labelledby={collapsed ? undefined : titleID}
             className={cx(
-                "floating-notice-morph island-glass app-region-no-drag fixed z-50 border shadow-[var(--shadow-island-1)]",
+                "floating-notice-morph app-region-no-drag fixed z-50",
+                islandSurfaceClassName(1),
                 collapsed
                     ? cx(
                           "floating-notice-collapsed grid h-12 w-12 place-items-center overflow-hidden rounded-[var(--radius-m)] p-0",

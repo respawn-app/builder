@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import { initializeI18n } from "../../i18n/setup";
@@ -66,11 +66,30 @@ describe("WorkflowGraphCanvas", () => {
       />,
     );
 
+    expect(screen.getByTestId("workflow-graph-group-group")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-outline)",
+    });
     expect(screen.getByTestId("workflow-graph-node-start")).toHaveAttribute("data-kind", "start");
+    expect(screen.getByTestId("workflow-graph-node-start")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-primary)",
+    });
     expect(screen.getByTestId("workflow-graph-node-agent")).toHaveAttribute("data-kind", "agent");
+    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveClass("island-surface-3");
+    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-outline)",
+    });
     expect(screen.getByTestId("workflow-graph-node-terminal")).toHaveAttribute("data-kind", "terminal");
+    expect(screen.getByTestId("workflow-graph-node-terminal")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-success)",
+    });
     expect(screen.getByTestId("workflow-graph-node-join")).toHaveAttribute("data-kind", "join");
+    expect(screen.getByTestId("workflow-graph-node-join")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-secondary)",
+    });
     expect(screen.getByTestId("workflow-graph-node-error")).toHaveClass("workflow-editor-node-error");
+    expect(screen.getByTestId("workflow-graph-node-error")).toHaveStyle({
+      "--workflow-editor-node-outline-color": "var(--color-error)",
+    });
     fireEvent.click(screen.getByTestId("workflow-graph-node-start"));
     fireEvent.click(screen.getByTestId("workflow-graph-node-terminal"));
     expect(onNodeInspect).not.toHaveBeenCalled();
@@ -114,9 +133,103 @@ describe("WorkflowGraphCanvas", () => {
         }}
       />,
     );
+    expect(screen.getByText(longNodeID)).toHaveClass("break-all");
+    expect(screen.getByText(longNodeID)).not.toHaveClass("truncate");
     fireEvent.click(screen.getByRole("button", { name: "Copy Key backlog" }));
     fireEvent.click(screen.getByRole("button", { name: `Copy ID ${longNodeID}` }));
     expect(copied).toEqual(["backlog", longNodeID]);
+  });
+
+  it("adds nodes from the canvas toolbar and reserves plain plus for add", () => {
+    const onAddNode = vi.fn();
+    render(
+      <WorkflowGraphCanvas
+        graph={{ edges: [], nodes: [] }}
+        onAddNode={onAddNode}
+        onEdgeInspect={() => undefined}
+        onGroupInspect={() => undefined}
+        onNodeInspect={() => undefined}
+        onWorkflowInspect={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add node" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agent node" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add node" }));
+    fireEvent.click(screen.getByRole("button", { name: "Terminal node" }));
+
+    expect(onAddNode).toHaveBeenNthCalledWith(1, "agent");
+    expect(onAddNode).toHaveBeenNthCalledWith(2, "terminal");
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeEnabled();
+  });
+
+  it("selects graph entities for keyboard deletion and hides terminal source handles", () => {
+    const onDeleteSelection = vi.fn();
+    render(
+      <WorkflowGraphCanvas
+        graph={{
+          edges: [],
+          nodes: [
+            workflowGraphNode({ hasError: false, id: "agent", kind: "agent", label: "Agent", x: 0 }),
+            workflowGraphNode({ hasError: false, id: "terminal", kind: "terminal", label: "Done", x: 160 }),
+          ],
+        }}
+        onDeleteSelection={onDeleteSelection}
+        onEdgeInspect={() => undefined}
+        onGroupInspect={() => undefined}
+        onNodeInspect={() => undefined}
+        onWorkflowInspect={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-graph-node-agent"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(onDeleteSelection).toHaveBeenCalledWith({ kind: "node", nodeID: "agent" });
+    expect(within(screen.getByTestId("workflow-graph-node-agent")).queryAllByTestId("workflow-node-source-handle")).toHaveLength(1);
+    expect(within(screen.getByTestId("workflow-graph-node-terminal")).queryAllByTestId("workflow-node-source-handle")).toHaveLength(0);
+  });
+
+  it("creates node groups from context menu and drag-drops nodes onto groups", () => {
+    const onAddNodeToGroup = vi.fn();
+    const onCreateNodeGroup = vi.fn();
+    render(
+      <WorkflowGraphCanvas
+        graph={{
+          edges: [],
+          nodes: [
+            workflowGroupGraphNode({ hasError: false, id: "group", label: "Group", x: -140 }),
+            workflowGraphNode({ hasError: false, id: "agent", kind: "agent", label: "Agent", x: 0 }),
+          ],
+        }}
+        onAddNodeToGroup={onAddNodeToGroup}
+        onCreateNodeGroup={onCreateNodeGroup}
+        onEdgeInspect={() => undefined}
+        onGroupInspect={() => undefined}
+        onNodeInspect={() => undefined}
+        onWorkflowInspect={() => undefined}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("workflow-graph-node-agent"), { clientX: 24, clientY: 32 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create node group" }));
+    expect(onCreateNodeGroup).toHaveBeenCalledWith("agent");
+
+    const elementFromPoint = vi.fn<typeof document.elementFromPoint>(
+      () => screen.getByTestId("workflow-graph-group-group"),
+    );
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: elementFromPoint,
+    });
+    fireEvent.pointerDown(screen.getByLabelText("Drag node to group"), {
+      clientX: 12,
+      clientY: 18,
+    });
+    fireEvent.pointerUp(window, { clientX: 20, clientY: 24 });
+
+    expect(elementFromPoint).toHaveBeenCalledWith(20, 24);
+    expect(onAddNodeToGroup).toHaveBeenCalledWith("agent", "group");
   });
 });
 
@@ -155,6 +268,7 @@ function workflowGraphNode({
     data: {
       entityID: id,
       entityKind: "node",
+      groupID: "",
       hasError,
       key: nodeKey,
       kind,

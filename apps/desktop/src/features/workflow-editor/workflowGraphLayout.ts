@@ -10,6 +10,7 @@ export type WorkflowGraphNodeData = Readonly<{
   [key: string]: unknown;
   entityID: string;
   entityKind: "node";
+  groupID: string;
   key: string;
   kind: string;
   label: string;
@@ -290,6 +291,7 @@ function workflowNode(
       key: node.key,
       entityID: node.id,
       entityKind: "node",
+      groupID: node.groupID,
       label: node.name,
       role: node.subagentRole,
       hasError: options.errorMarkers.nodeIDs.has(node.id) || options.errorMarkers.relatedIDs.has(node.id),

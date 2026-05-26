@@ -1,6 +1,7 @@
 import { EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import type { MouseEvent } from "react";
 
+import { IslandSurface } from "../../ui";
 import { cx } from "../../ui/classes";
 import { workflowEdgePath } from "./workflowEdgePath";
 import { workflowEdgeColor } from "./workflowGraphColors";
@@ -51,12 +52,14 @@ export function WorkflowGraphEdge(
       />
       {label.length > 0 ? (
         <EdgeLabelRenderer>
-          <div
+          <IslandSurface
+            as="div"
             className={cx(
-              "workflow-editor-edge-label absolute max-w-[180px] truncate rounded-full border bg-[var(--color-island-3)] px-[var(--space-2)] py-[2px] text-xs font-semibold text-[var(--color-on-background)] shadow-[var(--shadow-island-1)] backdrop-blur-[18px]",
+              "workflow-editor-edge-label absolute max-w-[180px] truncate rounded-full px-[var(--space-2)] py-[2px] text-xs font-semibold text-[var(--color-on-background)]",
               props.data?.hasError === true ? "border-[var(--color-error)]" : "border-[var(--color-outline)]",
             )}
             data-testid={`workflow-edge-label-${props.id}`}
+            level={3}
             onClick={inspect}
             style={{
               transform: `translate(-50%, -50%) translate(${edgePath.labelPoint.x.toString()}px, ${edgePath.labelPoint.y.toString()}px)`,
@@ -64,7 +67,7 @@ export function WorkflowGraphEdge(
             title={label}
           >
             {label}
-          </div>
+          </IslandSurface>
         </EdgeLabelRenderer>
       ) : null}
     </>

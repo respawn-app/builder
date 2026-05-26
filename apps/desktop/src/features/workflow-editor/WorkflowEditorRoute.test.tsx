@@ -51,7 +51,7 @@ describe("WorkflowEditorRoute", () => {
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/workflows/workflow-1/editor");
     expect(window.location.search).toContain("projectId=project-1");
-    expect(await screen.findAllByTestId("workflow-node-source-handle")).toHaveLength(3);
+    expect(await screen.findAllByTestId("workflow-node-source-handle")).toHaveLength(2);
     expect(await screen.findAllByTestId("workflow-node-target-handle")).toHaveLength(3);
     const issues = await screen.findByRole("complementary", { name: "Workflow issues" });
     expect(within(issues).getAllByRole("list").length).toBeGreaterThan(0);
@@ -141,6 +141,106 @@ describe("WorkflowEditorRoute", () => {
 
     fireEvent.click(screen.getByTestId("workflow-join-diamond"));
     expect(await screen.findByRole("complementary", { name: "Inspect node" })).toBeInTheDocument();
+  });
+
+  it("adds and deletes an unconnected agent node from the canvas toolbar", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Add node" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agent node" }));
+
+    expect(await screen.findByText("New agent")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("New agent"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    await waitFor(() => {
+      expect(screen.queryByText("New agent")).not.toBeInTheDocument();
+    });
+  });
+
+  it("confirms local cascade deletes before removing connected graph rows", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByText("Implement"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    const confirmation = await screen.findByRole("complementary", { name: "Confirm graph delete" });
+    expect(within(confirmation).getByText("Nodes: 1")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Edges: 1")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Transition groups: 1")).toBeInTheDocument();
+    expect(within(canvas).getByText("Implement")).toBeInTheDocument();
+
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete selection" }));
+
+    await waitFor(() => {
+      expect(within(canvas).queryByText("Implement")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows local feedback when Start Node deletion is blocked", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponseWithStartNode },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByTestId("workflow-graph-node-start"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(await screen.findByText("The Start node is fixed and cannot be deleted.")).toBeInTheDocument();
+    expect(within(canvas).getByTestId("workflow-graph-node-start")).toBeInTheDocument();
+  });
+
+  it("shows local feedback when last Terminal Node deletion is blocked", async () => {
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <App
+        services={createTestServices([
+          ...startupRoutes,
+          { method: "workflow.get", result: workflowDefinitionResponse },
+          { method: "workflow.validate", result: invalidValidationResponse },
+          { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+        ])}
+      />,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByTestId("workflow-graph-node-done"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    expect(
+      await screen.findByText("At least one Terminal node must remain in the workflow."),
+    ).toBeInTheDocument();
+    expect(within(canvas).getByTestId("workflow-graph-node-done")).toBeInTheDocument();
   });
 
   it("keeps a legacy assignee selected when it is missing from configured readiness roles", async () => {
@@ -258,6 +358,105 @@ describe("WorkflowEditorRoute", () => {
 
     fireEvent.click(providerSelect);
     fireEvent.click(await within(nodeInspector).findByRole("option", { name: "Implement / done" }));
+  });
+
+  it("edits edge route and config facts from the draft inspector", async () => {
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponse },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          derived_wiring: graphValidationResponse.derived_wiring,
+          results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+        },
+      },
+      {
+        method: "workflow.graph.savePreview",
+        result: {
+          current_version: 1,
+          validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+          impact: graphSaveImpactResponse,
+          blockers: [],
+          can_save: true,
+          confirmation_required: false,
+        },
+      },
+      {
+        method: "workflow.graph.save",
+        result: {
+          saved: true,
+          definition: workflowDefinitionResponseWithRevision(2).definition,
+          current_version: 2,
+          validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+          impact: graphSaveImpactResponse,
+          blockers: [],
+          can_save: true,
+          confirmation_required: false,
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    expect(canvas).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
+
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition group" }), {
+      target: { value: "Review" },
+    });
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition ID" }), {
+      target: { value: "review" },
+    });
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Key" }), {
+      target: { value: "review_edge" },
+    });
+
+    fireEvent.click(within(inspector).getByRole("combobox", { name: "Context mode" }));
+    fireEvent.click(await within(inspector).findByRole("option", { name: "Continue session" }));
+    fireEvent.click(within(inspector).getByRole("combobox", { name: "Context source" }));
+    fireEvent.click(await within(inspector).findByRole("option", { name: "Join" }));
+    fireEvent.click(within(inspector).getByRole("checkbox", { name: "Requires approval" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const saveCall = services.transport.calls.find((call) => call.method === "workflow.graph.save");
+      const expectedTransitionGroups: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          id: "tg-2",
+          transition_id: "review",
+          display_name: "Review",
+        }),
+      ]);
+      const expectedEdges: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          id: "edge-2",
+          key: "review_edge",
+          requires_approval: false,
+          context_mode: "continue_session",
+          context_source: { kind: "selected_node", node_key: "join" },
+        }),
+      ]);
+      expect(saveCall?.params).toMatchObject({
+        graph: {
+          transition_groups: expectedTransitionGroups,
+          edges: expectedEdges,
+        },
+      });
+    });
   });
 
   it("keeps the graph canvas mounted while workflow metadata fields update", async () => {
@@ -574,6 +773,80 @@ describe("WorkflowEditorRoute", () => {
     });
   });
 
+  it("confirms destructive graph saves from the status island before saving", async () => {
+    const destructiveImpact = {
+      ...graphSaveImpactResponse,
+      removed_node_count: 1,
+      removed_edge_count: 2,
+      removed_transition_group_count: 1,
+      node_task_reference_count: 2,
+      edge_task_reference_count: 1,
+    };
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponse },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+        },
+      },
+      {
+        method: "workflow.graph.savePreview",
+        result: {
+          current_version: 1,
+          validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+          impact: destructiveImpact,
+          blockers: [{ code: "confirmation_required", message: "Confirm removal.", count: 3 }],
+          can_save: true,
+          confirmation_required: true,
+        },
+      },
+      {
+        method: "workflow.graph.save",
+        result: {
+          saved: true,
+          definition: workflowDefinitionResponseWithRevision(2).definition,
+          current_version: 2,
+          validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+          impact: destructiveImpact,
+          blockers: [],
+          can_save: true,
+          confirmation_required: false,
+        },
+      },
+    ]);
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(<App services={services} />);
+
+    await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Add node" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agent node" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText((_content, element) =>
+        element?.textContent === "3 tasks will be gone forever along with the node. Proceed?",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Removed nodes: 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm save" }));
+
+    await waitFor(() => {
+      const saveCall = services.transport.calls.find((call) => call.method === "workflow.graph.save");
+      expect(saveCall?.params).toMatchObject({
+        confirmation: {
+          expected_removed_node_count: 1,
+          expected_removed_transition_group_count: 1,
+          expected_removed_edge_count: 2,
+          expected_node_task_reference_count: 2,
+          expected_edge_task_reference_count: 1,
+        },
+      });
+    });
+  });
+
   it("scrolls the whole unsaved changes island when issue content exceeds the max height", async () => {
     const manyExecutionIssues = workflowValidationResponseWithMessages(
       Array.from({ length: 18 }, (_unused, index) => `Execution issue ${(index + 1).toString()}`),
@@ -768,6 +1041,25 @@ function OpenStandardSidebar() {
   );
 }
 
+function OpenEdgeInspectorButton() {
+  const { openSidebar } = useSidebar();
+  return (
+    <button
+      onClick={() => {
+        void openSidebar({
+          kind: "workflowInspect",
+          mode: "overlay",
+          selection: { kind: "edge", edgeID: "edge-2" },
+          workflowID: "workflow-1",
+        });
+      }}
+      type="button"
+    >
+      Open edge inspector
+    </button>
+  );
+}
+
 function sidebarWidthStyle(sidebar: HTMLElement): string {
   return sidebar.style.getPropertyValue("--app-sidebar-width");
 }
@@ -942,6 +1234,45 @@ const workflowDefinitionResponse = {
         context_mode: "compact_and_continue_session",
         context_source: { kind: "selected_node", node_key: "implement" },
       },
+    ],
+  },
+};
+
+const workflowDefinitionResponseWithStartNode = {
+  definition: {
+    ...workflowDefinitionResponse.definition,
+    nodes: [
+      {
+        id: "start",
+        workflow_id: "workflow-1",
+        key: "start",
+        kind: "start",
+        display_name: "Start",
+      },
+      ...workflowDefinitionResponse.definition.nodes,
+    ],
+    transition_groups: [
+      {
+        id: "tg-start",
+        workflow_id: "workflow-1",
+        source_node_id: "start",
+        transition_id: "implement",
+        display_name: "Implement",
+      },
+      ...workflowDefinitionResponse.definition.transition_groups,
+    ],
+    edges: [
+      {
+        id: "edge-start",
+        workflow_id: "workflow-1",
+        transition_group_id: "tg-start",
+        key: "implement",
+        target_node_id: "node-1",
+        requires_approval: false,
+        context_mode: "new_session",
+        context_source: { kind: "immediate_source" },
+      },
+      ...workflowDefinitionResponse.definition.edges,
     ],
   },
 };

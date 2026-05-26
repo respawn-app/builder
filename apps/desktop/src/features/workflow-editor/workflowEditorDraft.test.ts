@@ -42,6 +42,18 @@ describe("workflowEditorDraft", () => {
     expect(workflowDefinitionFromDraft(graph.draft).nodes[0]?.name).toBe("Edited agent");
   });
 
+  it("keeps draft versions stable when topology mutations are blocked", () => {
+    const initial = initializeWorkflowEditorDraft(workflowDefinition);
+    const blocked = workflowEditorDraftReducer(initial, {
+      nodeID: "missing-node",
+      type: "deleteNode",
+    });
+
+    expect(blocked.version).toBe(initial.version);
+    expect(blocked.graphVersion).toBe(initial.graphVersion);
+    expect(blocked.lastTopologyMutation?.warnings).toEqual(["node was not found"]);
+  });
+
   it("adds input fields at the top and serializes row ids away", () => {
     const added = workflowEditorDraftReducer(initializeWorkflowEditorDraft(workflowDefinition), {
       nodeID: "node-agent",
@@ -170,6 +182,37 @@ describe("workflowEditorDraft", () => {
 
     expect(kept.conflict).toBeNull();
     expect(kept.acknowledgedConflictVersion).toBe(2);
+  });
+
+  it("applies topology mutations through reducer and records mutation metadata", () => {
+    const added = workflowEditorDraftReducer(initializeWorkflowEditorDraft(workflowDefinition), {
+      input: { id: "workflow-node-review", kind: "agent", name: "Review" },
+      type: "addNode",
+    });
+    const connected = workflowEditorDraftReducer(added, {
+      input: {
+        edgeID: "workflow-edge-review",
+        sourceNodeID: "node-agent",
+        targetNodeID: "workflow-node-review",
+        transitionGroupID: "workflow-transition-group-review",
+      },
+      type: "connectNodes",
+    });
+    const deleted = workflowEditorDraftReducer(connected, {
+      edgeID: "workflow-edge-review",
+      type: "deleteEdge",
+    });
+
+    expect(added.lastTopologyMutation?.nextSelection).toEqual({
+      kind: "node",
+      nodeID: "workflow-node-review",
+    });
+    expect(connected.draft.edges.some((edge) => edge.id === "workflow-edge-review")).toBe(true);
+    expect(deleted.lastTopologyMutation?.summary).toEqual({
+      removedEdgeIDs: ["workflow-edge-review"],
+      removedNodeIDs: [],
+      removedTransitionGroupIDs: ["workflow-transition-group-review"],
+    });
   });
 });
 

@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 
 import type {
   ServerReadiness,
+  WorkflowContextSource,
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowNode,
@@ -29,7 +30,16 @@ import type {
 } from "../../api";
 import { queryKeys } from "../../app/queryKeys";
 import type { WorkflowInspectorSelection } from "../../app/sidebarContext";
-import { Button, MarkdownText, SelectField, TextArea, TextInput, type SelectFieldOption } from "../../ui";
+import {
+  Button,
+  fieldLabelClassName,
+  IslandSurface,
+  MarkdownText,
+  SelectField,
+  TextArea,
+  TextInput,
+  type SelectFieldOption,
+} from "../../ui";
 import { cx } from "../../ui/classes";
 import { fieldInputClassName } from "../../ui/Field";
 import {
@@ -127,7 +137,113 @@ function WorkflowDraftInspectorContent({
   return edge === undefined ? (
     <MissingEntity entityID={selection.edgeID} />
   ) : (
-    <EdgeDetails definition={definition} edge={edge} validation={validation} />
+    <EdgeDraftDetails controller={controller} definition={definition} edge={edge} validation={validation} />
+  );
+}
+
+function EdgeDraftDetails({
+  controller,
+  definition,
+  edge,
+  validation,
+}: Readonly<{
+  controller: WorkflowEditorDraftController;
+  definition: WorkflowDefinition;
+  edge: WorkflowEdge;
+  validation: WorkflowValidation;
+}>) {
+  const { t } = useTranslation();
+  const details = edgeDetails(definition, edge, validation);
+  const derivedEdge = derivedEdgeWiring(definition, edge.id);
+  const transitionGroup = transitionGroupByID(definition, edge.transitionGroupID);
+  return (
+    <InspectorStack>
+      <DetailSection>
+        <TextInput
+          label={t("workflowEditor.transitionGroup")}
+          onChange={(event) => {
+            controller.dispatch({
+              input: { edgeID: edge.id, transitionName: event.target.value },
+              type: "editEdgeRoute",
+            });
+          }}
+          value={transitionGroup?.name ?? ""}
+        />
+        <TextInput
+          label={t("workflowEditor.transitionID")}
+          onChange={(event) => {
+            controller.dispatch({
+              input: { edgeID: edge.id, transitionID: event.target.value.replaceAll("\n", " ") },
+              type: "editEdgeRoute",
+            });
+          }}
+          value={details.transitionID}
+        />
+        <TextInput
+          label={t("workflowEditor.key")}
+          onChange={(event) => {
+            controller.dispatch({
+              input: { edgeID: edge.id, edgeKey: event.target.value.replaceAll("\n", " ") },
+              type: "editEdgeRoute",
+            });
+          }}
+          value={edge.key}
+        />
+        <DetailRow label={t("workflowEditor.id")} mono value={edge.id} />
+      </DetailSection>
+      <DetailSection title={t("workflowEditor.route")}>
+        <DetailRow label={t("workflowEditor.sourceNode")} value={details.sourceLabel} />
+        <SelectField
+          label={t("workflowEditor.targetNode")}
+          onValueChange={(value) => {
+            controller.dispatch({ input: { edgeID: edge.id, targetNodeID: value }, type: "editEdgeRoute" });
+          }}
+          options={targetNodeOptions(definition, edge.targetNodeID)}
+          value={edge.targetNodeID}
+        />
+        <SelectField
+          label={t("workflowEditor.contextMode")}
+          onValueChange={(value) => {
+            controller.dispatch({ input: { contextMode: value, edgeID: edge.id }, type: "editEdgeRoute" });
+          }}
+          options={contextModeOptions(t)}
+          value={edge.contextMode}
+        />
+        <SelectField
+          label={t("workflowEditor.contextSource")}
+          onValueChange={(value) => {
+            controller.dispatch({
+              input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
+              type: "editEdgeRoute",
+            });
+          }}
+          options={contextSourceOptions(definition, edge.contextSource, t)}
+          value={contextSourceSelectValue(definition, edge.contextSource)}
+        />
+        <ApprovalToggle
+          checked={edge.requiresApproval}
+          checkedLabel={t("workflowEditor.required")}
+          label={t("workflowEditor.requiresApproval")}
+          onCheckedChange={(checked) => {
+            controller.dispatch({ input: { edgeID: edge.id, requiresApproval: checked }, type: "editEdgeRoute" });
+          }}
+          uncheckedLabel={t("workflowEditor.none")}
+        />
+      </DetailSection>
+      <Bindings bindings={derivedEdge.inputBindings} />
+      <FieldSummary
+        fields={derivedEdge.requiredProvisionFields}
+        title={t("workflowEditor.derivedProvisionRequirements")}
+      />
+      {derivedEdge.requiredProviderFields.length === 0 ? null : (
+        <FieldSummary
+          fields={derivedEdge.requiredProviderFields}
+          title={t("workflowEditor.providerRequirements")}
+        />
+      )}
+      <ValidationDetails errors={details.directErrors} title={t("workflowEditor.edgeErrors")} />
+      <ValidationDetails errors={details.groupErrors} title={t("workflowEditor.transitionGroupErrors")} />
+    </InspectorStack>
   );
 }
 
@@ -353,10 +469,12 @@ function SortableInputField({
     transition,
   };
   return (
-    <div
-      className="workflow-editor-input-field relative grid gap-[var(--space-2)] rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-3)]"
+    <IslandSurface
+      as="div"
+      className="workflow-editor-input-field relative grid gap-[var(--space-2)] rounded-[var(--radius-m)] p-[var(--space-3)]"
       data-input-field-name={field.name}
       data-testid="workflow-input-field"
+      level={1}
       ref={setNodeRef}
       style={style}
     >
@@ -442,7 +560,7 @@ function SortableInputField({
           />
         </div>
       </div>
-    </div>
+    </IslandSurface>
   );
 }
 
@@ -691,6 +809,129 @@ function EdgeDetails({
   );
 }
 
+function ApprovalToggle({
+  checked,
+  checkedLabel,
+  label,
+  onCheckedChange,
+  uncheckedLabel,
+}: Readonly<{
+  checked: boolean;
+  checkedLabel: string;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+  uncheckedLabel: string;
+}>) {
+  const inputID = useId();
+  return (
+    <div className="grid gap-[var(--space-3)]">
+      <label className={fieldLabelClassName} htmlFor={inputID}>
+        {label}
+      </label>
+      <div className="flex min-w-0 items-center gap-[var(--space-3)] text-sm text-[var(--color-on-island)]">
+        <input
+          checked={checked}
+          className="app-region-no-drag size-4 accent-[var(--color-primary)]"
+          id={inputID}
+          onChange={(event) => {
+            onCheckedChange(event.target.checked);
+          }}
+          type="checkbox"
+        />
+        <span>{checked ? checkedLabel : uncheckedLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function targetNodeOptions(
+  definition: WorkflowDefinition,
+  selectedNodeID: string,
+): readonly SelectFieldOption[] {
+  const options = definition.nodes.map((node) => ({
+    label: fallbackLabel(node.id, node.name, node.key),
+    textValue: fallbackLabel(node.id, node.name, node.key),
+    value: node.id,
+  }));
+  if (selectedNodeID.length === 0 || options.some((option) => option.value === selectedNodeID)) {
+    return options;
+  }
+  return [...options, { disabled: true, label: selectedNodeID, textValue: selectedNodeID, value: selectedNodeID }];
+}
+
+function contextModeOptions(translate: Translate): readonly SelectFieldOption[] {
+  return [
+    {
+      label: translate("workflowEditor.contextModeNewSession"),
+      textValue: translate("workflowEditor.contextModeNewSession"),
+      value: "new_session",
+    },
+    {
+      label: translate("workflowEditor.contextModeContinueSession"),
+      textValue: translate("workflowEditor.contextModeContinueSession"),
+      value: "continue_session",
+    },
+    {
+      label: translate("workflowEditor.contextModeCompactContinueSession"),
+      textValue: translate("workflowEditor.contextModeCompactContinueSession"),
+      value: "compact_and_continue_session",
+    },
+  ];
+}
+
+const immediateContextSourceOption = "__immediate_context_source__";
+const missingContextSourceOption = "__missing_context_source__";
+
+function contextSourceOptions(
+  definition: WorkflowDefinition,
+  source: WorkflowContextSource,
+  translate: Translate,
+): readonly SelectFieldOption[] {
+  const nodeOptions = definition.nodes.map((node) => ({
+    label: fallbackLabel(node.key, node.name, node.key),
+    textValue: fallbackLabel(node.key, node.name, node.key),
+    value: node.id,
+  }));
+  const options: SelectFieldOption[] = [
+    {
+      label: translate("workflowEditor.contextSourceImmediate"),
+      textValue: translate("workflowEditor.contextSourceImmediate"),
+      value: immediateContextSourceOption,
+    },
+    ...nodeOptions,
+  ];
+  if (
+    source.kind === "selected_node" &&
+    !definition.nodes.some((node) => node.key === source.nodeKey)
+  ) {
+    options.push({
+      disabled: true,
+      label: source.nodeKey.length > 0 ? source.nodeKey : translate("workflowEditor.contextSourceSelected"),
+      textValue: source.nodeKey,
+      value: missingContextSourceOption,
+    });
+  }
+  return options;
+}
+
+function contextSourceSelectValue(definition: WorkflowDefinition, source: WorkflowContextSource): string {
+  if (source.kind !== "selected_node") {
+    return immediateContextSourceOption;
+  }
+  return definition.nodes.find((node) => node.key === source.nodeKey)?.id ?? missingContextSourceOption;
+}
+
+function contextSourceFromSelectValue(
+  definition: WorkflowDefinition,
+  value: string,
+): WorkflowContextSource {
+  if (value === immediateContextSourceOption) {
+    return { kind: "immediate_source", nodeKey: "" };
+  }
+  const node = definition.nodes.find((item) => item.id === value);
+  return { kind: "selected_node", nodeKey: node?.key ?? "" };
+}
+
 function FieldSummary({
   fields,
   title,
@@ -773,9 +1014,9 @@ function PromptPreview({ prompt }: Readonly<{ prompt: string }>) {
       <span className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-muted)]">
         {t("workflowEditor.prompt")}
       </span>
-      <div className="rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] p-[var(--space-2)] text-sm">
+      <IslandSurface as="div" className="rounded-[var(--radius-m)] p-[var(--space-2)] text-sm" level={1}>
         <MarkdownText value={prompt} />
-      </div>
+      </IslandSurface>
     </div>
   );
 }

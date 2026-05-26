@@ -705,6 +705,50 @@ func TestFanoutJoinTopology(t *testing.T) {
 	}
 }
 
+func TestNodeGroupV1ParallelGroupValidation(t *testing.T) {
+	t.Run("valid group has branches join fanout and branch join edges", func(t *testing.T) {
+		def := fanoutWorkflow()
+		addV1NodeGroup(&def)
+
+		result := validateForTask(def)
+
+		assertNoCode(t, result, workflow.CodeInvalidNodeGroup)
+	})
+
+	t.Run("one branch draft group is invalid but non-blocking", func(t *testing.T) {
+		def := fanoutWorkflow()
+		addV1NodeGroup(&def)
+		def.Nodes = setNodeGroup(def.Nodes, "node_impl_b", "")
+
+		result := workflow.ValidateDefinition(def, workflow.ValidationOptions{Context: workflow.ValidationContextDraft, RoleResolver: workflow.StaticRoleResolver{"coder": true}})
+
+		assertHasCodes(t, result, workflow.CodeInvalidNodeGroup)
+		if !result.HasBlockingErrors() {
+			t.Fatalf("invalid draft node group shape should block graph save")
+		}
+	})
+
+	t.Run("missing join is invalid", func(t *testing.T) {
+		def := fanoutWorkflow()
+		addV1NodeGroup(&def)
+		def.Nodes = setNodeGroup(def.Nodes, "node_join", "")
+
+		result := validateForTask(def)
+
+		assertHasCodes(t, result, workflow.CodeInvalidNodeGroup)
+	})
+
+	t.Run("missing fanout is invalid", func(t *testing.T) {
+		def := fanoutWorkflow()
+		addV1NodeGroup(&def)
+		def.Edges = def.Edges[:1]
+
+		result := validateForTask(def)
+
+		assertHasCodes(t, result, workflow.CodeInvalidNodeGroup)
+	})
+}
+
 func TestContextSourceValidation(t *testing.T) {
 	t.Run("default immediate source preserves existing workflows", func(t *testing.T) {
 		def := validWorkflow()
@@ -1036,6 +1080,28 @@ func nodeByKeyForValidationTest(t *testing.T, def *workflow.Definition, key work
 	}
 	t.Fatalf("node %q not found", key)
 	return nil
+}
+
+func addV1NodeGroup(def *workflow.Definition) {
+	def.NodeGroups = append(def.NodeGroups, workflow.NodeGroup{
+		WorkflowID:  def.ID,
+		ID:          "group_parallel",
+		Key:         "parallel",
+		DisplayName: "Parallel",
+	})
+	def.Nodes = setNodeGroup(def.Nodes, "node_impl_a", "group_parallel")
+	def.Nodes = setNodeGroup(def.Nodes, "node_impl_b", "group_parallel")
+	def.Nodes = setNodeGroup(def.Nodes, "node_join", "group_parallel")
+}
+
+func setNodeGroup(nodes []workflow.Node, nodeID workflow.NodeID, groupID string) []workflow.Node {
+	out := append([]workflow.Node(nil), nodes...)
+	for index := range out {
+		if out[index].ID == nodeID {
+			out[index].GroupID = groupID
+		}
+	}
+	return out
 }
 
 func addAgentLoop(def *workflow.Definition, source workflow.NodeID, groupSuffix string, edgeID workflow.EdgeID, transitionID string) {
