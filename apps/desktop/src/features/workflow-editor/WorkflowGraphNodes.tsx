@@ -280,12 +280,16 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
       />
       <IslandSurface
         as="div"
-        className={cx("workflow-editor-join-diamond", selected ? "workflow-editor-node-selected" : undefined)}
+        className={cx(
+          "workflow-editor-join-diamond relative",
+          selected ? "workflow-editor-node-selected" : undefined,
+        )}
         data-kind={data.kind}
         data-testid={`workflow-graph-node-${data.entityID}`}
         level={3}
         style={workflowNodeOutlineStyle(data.kind, data.hasError)}
       >
+        <span aria-hidden="true" className="absolute inset-0" data-testid="workflow-join-diamond" />
         <span className="sr-only">{data.label}</span>
       </IslandSurface>
     </div>
