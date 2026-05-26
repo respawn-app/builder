@@ -182,6 +182,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
       className="app-region-no-drag fixed inset-0 z-0 h-screen min-h-0 w-screen overflow-hidden"
       data-testid="workflow-editor-route"
     >
+      <WorkflowEditorTopChromeBlur />
       <WorkflowGraphCanvas
         graph={viewState.graph}
         onCopyText={async (value) => copyWorkflowNodeText(value, nativeBridge)}
@@ -276,6 +277,16 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
       setSaving(false);
     }
   }
+}
+
+function WorkflowEditorTopChromeBlur() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-x-0 top-0 z-10 h-[var(--native-titlebar-height)] backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_0%,transparent_100%)]"
+      data-testid="workflow-editor-top-chrome-blur"
+    />
+  );
 }
 
 async function copyWorkflowNodeText(

@@ -66,6 +66,14 @@ describe("WorkflowEditorRoute", () => {
       screen.getByTestId("workflow-editor-route"),
     );
     expect(screen.getByTestId("workflow-editor-route")).not.toHaveClass("p-[var(--space-2)]");
+    expect(screen.getByTestId("workflow-editor-top-chrome-blur")).toHaveClass(
+      "fixed",
+      "top-0",
+      "h-[var(--native-titlebar-height)]",
+      "pointer-events-none",
+      "backdrop-blur-md",
+      "[mask-image:linear-gradient(to_bottom,black_0%,transparent_100%)]",
+    );
     const legend = screen.getByRole("complementary", { name: "Legend" });
     expect(legend).toHaveClass(
       "floating-notice-expanded",
