@@ -329,7 +329,7 @@ function workflowNode(
     position: { x: (layoutNode.x ?? 0) - offset.x, y: (layoutNode.y ?? 0) - offset.y },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
-    draggable: false,
+    draggable: node.kind === "agent",
     data: {
       kind: node.kind,
       key: node.key,

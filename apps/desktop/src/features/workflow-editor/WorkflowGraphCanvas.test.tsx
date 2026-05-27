@@ -3,6 +3,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 
 import { initializeI18n } from "../../i18n/setup";
 import { WorkflowGraphCanvas, WorkflowNodeInfoTooltipContent } from "./WorkflowGraphCanvas";
+import { groupIDFromPoint } from "./workflowGraphCanvasInteractions";
 import type { WorkflowGraphNode } from "./workflowGraphLayout";
 
 void initializeI18n();
@@ -75,7 +76,7 @@ describe("WorkflowGraphCanvas", () => {
       "--workflow-editor-node-outline-color": "var(--color-primary)",
     });
     expect(screen.getByTestId("workflow-graph-node-agent")).toHaveAttribute("data-kind", "agent");
-    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveClass("island-surface-1", "nopan");
+    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveClass("island-surface-1", "nopan", "cursor-grab");
     expect(screen.getByTestId("workflow-graph-node-agent")).not.toHaveAttribute("draggable", "true");
     expect(screen.getByTestId("workflow-graph-node-agent")).toHaveStyle({
       "--workflow-editor-node-outline-color": "var(--color-outline)",
@@ -126,7 +127,7 @@ describe("WorkflowGraphCanvas", () => {
       "top-[calc(var(--native-titlebar-height)+var(--space-2))]",
       "z-30",
     );
-    expect(screen.getAllByLabelText("Drag node to group")).toHaveLength(2);
+    expect(screen.getAllByTitle("Drag node to group")).toHaveLength(2);
 
     unmount();
     const longNodeID = "node_0123456789abcdef0123456789abcdef";
@@ -196,7 +197,7 @@ describe("WorkflowGraphCanvas", () => {
     expect(within(screen.getByTestId("workflow-graph-node-terminal")).queryAllByTestId("workflow-node-source-handle")).toHaveLength(0);
   });
 
-  it("creates node groups from context menu and drag-drops nodes onto groups", () => {
+  it("creates node groups from context menu and drag-drops nodes onto groups", async () => {
     const onAddNodeToGroup = vi.fn();
     const onCreateNodeGroup = vi.fn();
     const onNodeInspect = vi.fn();
@@ -222,24 +223,40 @@ describe("WorkflowGraphCanvas", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Create node group" }));
     expect(onCreateNodeGroup).toHaveBeenCalledWith("agent");
 
-    const elementFromPoint = vi.fn<typeof document.elementFromPoint>(
-      () => screen.getByTestId("workflow-graph-group-group"),
-    );
+    const card = screen.getByTestId("workflow-graph-node-agent");
+    const eventView = card.ownerDocument.defaultView;
+    if (eventView === null) {
+      throw new Error("Expected test document to have a default window");
+    }
+    const elementFromPoint = vi.fn<typeof document.elementFromPoint>(() => card);
     Object.defineProperty(document, "elementFromPoint", {
       configurable: true,
       value: elementFromPoint,
     });
-    const card = screen.getByTestId("workflow-graph-node-agent");
-    const dragHandle = screen.getByLabelText("Drag node to group");
-    fireEvent.pointerDown(dragHandle, { clientX: 12, clientY: 18 });
-    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveTextContent("Agent");
-    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveAttribute("data-drop-target", "none");
-    fireEvent.pointerMove(window, { clientX: 16, clientY: 20 });
-    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveAttribute("data-drop-target", "group");
-    expect(screen.getByTestId("workflow-graph-group-group")).toHaveAttribute("data-drop-state", "active");
-    fireEvent.pointerUp(window, { clientX: 20, clientY: 24 });
+    dispatchMouseEvent(within(card).getByTestId("workflow-node-source-handle"), eventView, "mousedown", {
+      button: 0,
+      clientX: 12,
+      clientY: 18,
+    });
+    dispatchMouseEvent(eventView, eventView, "mousemove", { buttons: 1, clientX: 30, clientY: 34 });
+    dispatchMouseEvent(eventView, eventView, "mouseup", { clientX: 36, clientY: 40 });
+    expect(screen.queryByTestId("workflow-group-drag-preview")).not.toBeInTheDocument();
+    expect(onAddNodeToGroup).not.toHaveBeenCalled();
 
-    expect(elementFromPoint).toHaveBeenCalledWith(20, 24);
+    dispatchMouseEvent(card, eventView, "mousedown", { button: 0, clientX: 12, clientY: 18 });
+    dispatchMouseEvent(eventView, eventView, "mousemove", { buttons: 1, clientX: 24, clientY: 28 });
+    dispatchMouseEvent(eventView, eventView, "mousemove", { buttons: 1, clientX: 30, clientY: 34 });
+    await waitFor(() => {
+      expect(screen.getByTestId("workflow-group-drag-preview")).toHaveTextContent("Agent");
+    });
+    Object.defineProperty(screen.getByTestId("workflow-graph-group-group"), "getBoundingClientRect", {
+      configurable: true,
+      value: () => new eventView.DOMRect(0, 0, 100, 100),
+    });
+    expect(groupIDFromPoint(36, 40)).toBe("group");
+    dispatchMouseEvent(eventView, eventView, "mouseup", { clientX: 36, clientY: 40 });
+
+    expect(elementFromPoint).toHaveBeenCalledWith(36, 40);
     expect(onAddNodeToGroup).toHaveBeenCalledWith("agent", "group");
     expect(screen.queryByTestId("workflow-group-drag-preview")).not.toBeInTheDocument();
 
@@ -260,6 +277,17 @@ class MockResizeObserver implements ResizeObserver {
   disconnect(): void {
     return;
   }
+}
+
+function dispatchMouseEvent(
+  target: Document | Element | Window,
+  view: Window & typeof globalThis,
+  type: "mousedown" | "mousemove" | "mouseup",
+  options: MouseEventInit,
+): void {
+  const event = new view.MouseEvent(type, { bubbles: true, cancelable: true, ...options });
+  Object.defineProperty(event, "view", { value: view });
+  fireEvent(target, event);
 }
 
 function workflowGraphNode({
@@ -290,7 +318,7 @@ function workflowGraphNode({
       label,
       role: kind === "agent" ? "coder" : "",
     },
-    draggable: false,
+    draggable: kind === "agent",
     id,
     position: { x, y: 0 },
     style: { height: 92, width: 220 },

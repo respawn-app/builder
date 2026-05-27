@@ -39,9 +39,11 @@ export function selectionFromEdge(edge: Edge): WorkflowGraphSelection | null {
 }
 
 export function groupIDFromPoint(x: number, y: number): string | null {
-  const element = document.elementFromPoint(x, y);
-  const group = element instanceof Element ? element.closest("[data-workflow-group-id]") : null;
-  return group instanceof HTMLElement ? group.dataset.workflowGroupId ?? null : null;
+  const directGroupID = groupIDFromElement(document.elementFromPoint(x, y));
+  if (directGroupID !== null) {
+    return directGroupID;
+  }
+  return groupIDFromBounds(x, y);
 }
 
 export function inspectNode(
@@ -99,6 +101,33 @@ function isWorkflowGraphGroupData(data: Node["data"]): data is WorkflowGraphGrou
 
 function isWorkflowGraphEdgeData(data: Edge["data"]): data is WorkflowGraphEdgeData {
   return data?.entityKind === "edge" && typeof data.entityID === "string";
+}
+
+function groupIDFromElement(element: Element | null): string | null {
+  const group = element?.closest("[data-workflow-group-id]");
+  return group instanceof HTMLElement ? group.dataset.workflowGroupId ?? null : null;
+}
+
+function groupIDFromBounds(x: number, y: number): string | null {
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>("[data-workflow-group-id]"))
+    .map((group) => {
+      const bounds = group.getBoundingClientRect();
+      return {
+        bounds,
+        groupID: group.dataset.workflowGroupId ?? "",
+        area: bounds.width * bounds.height,
+      };
+    })
+    .filter(
+      (candidate) =>
+        candidate.groupID.length > 0 &&
+        x >= candidate.bounds.left &&
+        x <= candidate.bounds.right &&
+        y >= candidate.bounds.top &&
+        y <= candidate.bounds.bottom,
+    )
+    .sort((left, right) => left.area - right.area);
+  return candidates[0]?.groupID ?? null;
 }
 
 function isEditableWorkflowNodeKind(kind: string): boolean {

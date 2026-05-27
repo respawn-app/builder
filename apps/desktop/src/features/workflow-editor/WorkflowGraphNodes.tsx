@@ -136,18 +136,17 @@ const NODE_METADATA_TOOLTIP_CLASS =
 
 export const WorkflowNode = memo(function WorkflowNode({
   data,
+  dragging,
   onCopyText,
   onCreateNodeGroup,
   onDeleteSelection,
   onRemoveNodeFromGroup,
   onSelectContextMenu,
-  onStartGroupDrag,
   selected,
 }: NodeProps<WorkflowGraphWorkflowNode> &
   Readonly<
     {
       onCopyText: CopyText;
-      onStartGroupDrag: (drag: WorkflowGroupDragState) => void;
     } & WorkflowNodeContextMenuCallbacks
   >) {
   const { t } = useTranslation();
@@ -156,6 +155,8 @@ export const WorkflowNode = memo(function WorkflowNode({
       as="div"
       className={cx(
         "workflow-editor-node nopan relative grid h-full min-w-0 grid-rows-[minmax(0,1fr)_auto] rounded-[var(--radius-l)] p-[var(--space-3)]",
+        data.kind === "agent" ? "cursor-grab" : undefined,
+        dragging ? "cursor-grabbing" : undefined,
         data.hasError ? "workflow-editor-node-error" : undefined,
         selected ? "workflow-editor-node-selected" : undefined,
       )}
@@ -163,6 +164,7 @@ export const WorkflowNode = memo(function WorkflowNode({
       data-testid={`workflow-graph-node-${data.entityID}`}
       level={1}
       style={workflowNodeOutlineStyle(data.kind, data.hasError)}
+      title={data.kind === "agent" ? t("workflowEditor.dragNodeToGroup") : undefined}
     >
       <Handle
         aria-label="Incoming transitions"
@@ -183,30 +185,7 @@ export const WorkflowNode = memo(function WorkflowNode({
       <strong className="line-clamp-2 min-w-0 text-[0.95rem] leading-snug text-[var(--color-on-island)]">
         {data.label}
       </strong>
-      <span className="flex min-w-0 items-center gap-[var(--space-2)]">
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-[var(--color-muted)]">{data.role}</span>
-        {data.kind === "agent" ? (
-          <button
-            aria-label={t("workflowEditor.dragNodeToGroup")}
-            className="nodrag shrink-0 cursor-grab rounded-[var(--radius-s)] border border-[var(--color-outline)] bg-[var(--color-island-2)] px-[var(--space-2)] py-[1px] font-mono text-xs font-bold tracking-[-0.2em] text-[var(--color-muted)] outline-none hover:border-[var(--color-primary)] hover:text-[var(--color-on-island)] focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)] active:cursor-grabbing"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onStartGroupDrag({
-                label: data.label,
-                nodeID: data.entityID,
-                targetGroupID: null,
-                x: event.clientX,
-                y: event.clientY,
-              });
-            }}
-            title={t("workflowEditor.dragNodeToGroup")}
-            type="button"
-          >
-            ::::
-          </button>
-        ) : null}
-      </span>
+      <span className="min-w-0 truncate font-mono text-sm text-[var(--color-muted)]">{data.role}</span>
     </IslandSurface>
   );
   const tooltip = !isEditableWorkflowNodeKind(data.kind) ? (

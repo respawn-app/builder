@@ -20,6 +20,15 @@ export type Node<Data extends Record<string, unknown> = Record<string, unknown>>
   style?: CSSProperties;
 }>;
 
+export type NodeChange<NodeType extends Node = Node> = Readonly<{
+  dragging?: boolean;
+  id: string;
+  item?: NodeType;
+  position?: XYPosition;
+  selected?: boolean;
+  type: string;
+}>;
+
 export type Edge<Data extends Record<string, unknown> = Record<string, unknown>> = Readonly<{
   id: string;
   source: string;
@@ -37,6 +46,7 @@ export type Connection = Readonly<{
 
 export type NodeProps<NodeType extends Node = Node> = Readonly<{
   data: NodeType["data"];
+  dragging?: boolean;
   selected: boolean;
 }>;
 
@@ -67,11 +77,16 @@ export declare const ReactFlow: ComponentType<
     nodes?: readonly Node[];
     nodesConnectable?: boolean;
     nodesDraggable?: boolean;
+    nodeDragThreshold?: number;
     nodeTypes?: NodeTypes;
     onConnect?: (connection: Connection) => void;
     onEdgeClick?: (event: unknown, edge: Edge) => void;
     onNodeClick?: (event: unknown, node: Node) => void;
     onNodeContextMenu?: (event: MouseEvent, node: Node) => void;
+    onNodeDrag?: (event: MouseEvent, node: Node, nodes: readonly Node[]) => void;
+    onNodeDragStart?: (event: MouseEvent, node: Node, nodes: readonly Node[]) => void;
+    onNodeDragStop?: (event: MouseEvent, node: Node, nodes: readonly Node[]) => void;
+    onNodesChange?: (changes: readonly NodeChange[]) => void;
     panOnScroll?: boolean;
     proOptions?: Readonly<{ hideAttribution?: boolean }>;
     selectionOnDrag?: boolean;
@@ -89,6 +104,11 @@ export declare const MarkerType: Readonly<{ ArrowClosed: string }>;
 export declare const Position: Readonly<{ Bottom: "bottom"; Left: "left"; Right: "right"; Top: "top" }>;
 
 export declare function getBezierPath(props: EdgeProps): [string, number, number];
+
+export declare function applyNodeChanges<NodeType extends Node>(
+  changes: readonly NodeChange<NodeType>[],
+  nodes: readonly NodeType[],
+): NodeType[];
 
 export declare function useReactFlow(): Readonly<{
   fitView(options?: Readonly<{ padding?: number }>): Promise<boolean>;

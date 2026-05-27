@@ -1,10 +1,12 @@
 import {
+  applyNodeChanges,
   Background,
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   type EdgeProps,
+  type Node,
   type NodeProps,
   type NodeTypes,
 } from "@xyflow/react";
@@ -57,6 +59,11 @@ export type WorkflowGraphCanvasProps = Readonly<{
   onGroupInspect: (groupID: string) => void;
   onNodeInspect: (nodeID: string) => void;
   onWorkflowInspect: () => void;
+}>;
+
+type RenderNodesState = Readonly<{
+  nodes: Node[];
+  sourceNodes: readonly WorkflowGraphNode[];
 }>;
 
 export function WorkflowGraphCanvas({
@@ -127,6 +134,11 @@ function WorkflowGraphCanvasInner({
 }>) {
   const instance = useReactFlow();
   const [selection, setSelection] = useState<WorkflowGraphSelection | null>(null);
+  const [renderNodesState, setRenderNodesState] = useState<RenderNodesState>(() => ({
+    nodes: [...nodes],
+    sourceNodes: nodes,
+  }));
+  const renderNodes = renderNodesState.sourceNodes === nodes ? renderNodesState.nodes : [...nodes];
   const [groupDrag, setGroupDrag] = useState<WorkflowGroupDragState | null>(null);
   const edgeTypes = useMemo(
     () => ({
@@ -167,9 +179,6 @@ function WorkflowGraphCanvasInner({
           onSelectContextMenu={(nodeID) => {
             setSelection({ kind: "node", nodeID });
           }}
-          onStartGroupDrag={(drag) => {
-            setGroupDrag(drag);
-          }}
         />
       ),
     }) satisfies NodeTypes,
@@ -206,43 +215,17 @@ function WorkflowGraphCanvasInner({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [edges, instance, nodes, onDeleteSelection, selection]);
-  useEffect(() => {
-    if (groupDrag === null) {
-      return undefined;
-    }
-    const activeDrag = groupDrag;
-    function onPointerMove(event: PointerEvent): void {
-      const targetGroupID = groupIDFromPoint(event.clientX, event.clientY);
-      setGroupDrag((current) =>
-        current === null ? current : { ...current, targetGroupID, x: event.clientX, y: event.clientY },
-      );
-    }
-    function onPointerUp(event: PointerEvent): void {
-      const groupID = groupIDFromPoint(event.clientX, event.clientY);
-      if (groupID !== null) {
-        onAddNodeToGroup?.(activeDrag.nodeID, groupID);
-      }
-      setGroupDrag(null);
-    }
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-  }, [groupDrag, onAddNodeToGroup]);
   return (
     <div className="workflow-editor-canvas h-full min-h-0 w-full" data-testid="workflow-editor-canvas">
       <ReactFlow
         colorMode="system"
-        defaultEdges={edges}
-        defaultNodes={nodes}
         edges={edges}
         edgeTypes={edgeTypes}
         fitView
         maxZoom={2}
         minZoom={0.15}
-        nodes={nodes}
+        nodeDragThreshold={6}
+        nodes={renderNodes}
         nodesConnectable={onConnectNodes !== undefined}
         nodesDraggable={false}
         nodeTypes={nodeTypes}
@@ -256,6 +239,47 @@ function WorkflowGraphCanvasInner({
         onNodeClick={(_event, node) => {
           setSelection(selectionFromNode(node));
           inspectNode(node, onGroupInspect, onNodeInspect);
+        }}
+        onNodeDrag={(event, node) => {
+          if (!isWorkflowAgentGraphNode(node)) {
+            return;
+          }
+          setGroupDrag({
+            label: node.data.label,
+            nodeID: node.data.entityID,
+            targetGroupID: groupIDFromPoint(event.clientX, event.clientY),
+            x: event.clientX,
+            y: event.clientY,
+          });
+        }}
+        onNodeDragStart={(event, node) => {
+          if (!isWorkflowAgentGraphNode(node)) {
+            return;
+          }
+          setGroupDrag({
+            label: node.data.label,
+            nodeID: node.data.entityID,
+            targetGroupID: null,
+            x: event.clientX,
+            y: event.clientY,
+          });
+        }}
+        onNodeDragStop={(event, node) => {
+          setGroupDrag(null);
+          setRenderNodesState({ nodes: [...nodes], sourceNodes: nodes });
+          if (!isWorkflowAgentGraphNode(node)) {
+            return;
+          }
+          const groupID = groupIDFromPoint(event.clientX, event.clientY);
+          if (groupID !== null && groupID !== node.data.groupID) {
+            onAddNodeToGroup?.(node.data.entityID, groupID);
+          }
+        }}
+        onNodesChange={(changes) => {
+          setRenderNodesState((current) => {
+            const currentNodes = current.sourceNodes === nodes ? current.nodes : [...nodes];
+            return { nodes: applyNodeChanges(changes, currentNodes), sourceNodes: nodes };
+          });
         }}
         panOnScroll
         proOptions={{ hideAttribution: true }}
@@ -298,4 +322,8 @@ function applyViewportShortcut(key: string, instance: ReturnType<typeof useReact
     return true;
   }
   return false;
+}
+
+function isWorkflowAgentGraphNode(node: Node): node is WorkflowGraphWorkflowNode {
+  return node.data.entityKind === "node" && node.data.kind === "agent";
 }
