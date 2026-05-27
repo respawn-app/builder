@@ -69,14 +69,14 @@ describe("WorkflowGraphCanvas", () => {
     expect(screen.getByTestId("workflow-graph-group-group")).toHaveStyle({
       "--workflow-editor-node-outline-color": "var(--color-outline)",
     });
-    expect(screen.getByTestId("workflow-graph-group-group")).toHaveClass("island-surface-1");
+    expect(screen.getByTestId("workflow-graph-group-group")).toHaveClass("island-surface-1", "nopan");
     expect(screen.getByTestId("workflow-graph-node-start")).toHaveAttribute("data-kind", "start");
     expect(screen.getByTestId("workflow-graph-node-start")).toHaveStyle({
       "--workflow-editor-node-outline-color": "var(--color-primary)",
     });
     expect(screen.getByTestId("workflow-graph-node-agent")).toHaveAttribute("data-kind", "agent");
-    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveClass("island-surface-1");
-    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveAttribute("draggable", "true");
+    expect(screen.getByTestId("workflow-graph-node-agent")).toHaveClass("island-surface-1", "nopan");
+    expect(screen.getByTestId("workflow-graph-node-agent")).not.toHaveAttribute("draggable", "true");
     expect(screen.getByTestId("workflow-graph-node-agent")).toHaveStyle({
       "--workflow-editor-node-outline-color": "var(--color-outline)",
     });
@@ -126,7 +126,7 @@ describe("WorkflowGraphCanvas", () => {
       "top-[calc(var(--native-titlebar-height)+var(--space-2))]",
       "z-30",
     );
-    expect(screen.queryByRole("button", { name: "Drag node to group" })).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Drag node to group")).toHaveLength(2);
 
     unmount();
     const longNodeID = "node_0123456789abcdef0123456789abcdef";
@@ -229,17 +229,19 @@ describe("WorkflowGraphCanvas", () => {
       configurable: true,
       value: elementFromPoint,
     });
-    const dataTransfer = new TestDataTransfer();
     const card = screen.getByTestId("workflow-graph-node-agent");
-    fireEvent.dragStart(card, { dataTransfer });
-    fireEvent.dragOver(screen.getByTestId("workflow-graph-group-group"), { dataTransfer });
-    fireEvent.drop(screen.getByTestId("workflow-graph-group-group"), { dataTransfer });
+    const dragHandle = screen.getByLabelText("Drag node to group");
+    fireEvent.pointerDown(dragHandle, { clientX: 12, clientY: 18 });
+    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveTextContent("Agent");
+    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveAttribute("data-drop-target", "none");
+    fireEvent.pointerMove(window, { clientX: 16, clientY: 20 });
+    expect(screen.getByTestId("workflow-group-drag-preview")).toHaveAttribute("data-drop-target", "group");
+    expect(screen.getByTestId("workflow-graph-group-group")).toHaveAttribute("data-drop-state", "active");
+    fireEvent.pointerUp(window, { clientX: 20, clientY: 24 });
 
-    expect(dataTransfer.getData("text/workflow-node-id")).toBe("agent");
-    expect(dataTransfer.effectAllowed).toBe("move");
-    expect(dataTransfer.dropEffect).toBe("move");
-    expect(elementFromPoint).not.toHaveBeenCalled();
+    expect(elementFromPoint).toHaveBeenCalledWith(20, 24);
     expect(onAddNodeToGroup).toHaveBeenCalledWith("agent", "group");
+    expect(screen.queryByTestId("workflow-group-drag-preview")).not.toBeInTheDocument();
 
     fireEvent.click(card);
     expect(onNodeInspect).toHaveBeenCalledWith("agent");
@@ -257,20 +259,6 @@ class MockResizeObserver implements ResizeObserver {
 
   disconnect(): void {
     return;
-  }
-}
-
-class TestDataTransfer {
-  readonly #values = new Map<string, string>();
-  effectAllowed = "all";
-  dropEffect = "none";
-
-  setData(type: string, value: string): void {
-    this.#values.set(type, value);
-  }
-
-  getData(type: string): string {
-    return this.#values.get(type) ?? "";
   }
 }
 

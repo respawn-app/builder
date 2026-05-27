@@ -46,6 +46,13 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 32%, transparent);
 }
 
+.workflow-editor-group-drop-active {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 28%, transparent),
+    var(--shadow-island-1);
+}
+
 .workflow-editor-edge-label {
   pointer-events: all;
 }

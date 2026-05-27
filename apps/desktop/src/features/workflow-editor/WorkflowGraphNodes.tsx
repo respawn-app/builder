@@ -13,10 +13,7 @@ import {
   TooltipTrigger,
 } from "../../ui";
 import { cx } from "../../ui/classes";
-import {
-  WorkflowNodeInfoTooltipContent,
-  type CopyText,
-} from "./WorkflowGraphNodeMetadata";
+import { WorkflowNodeInfoTooltipContent, type CopyText } from "./WorkflowGraphNodeMetadata";
 import type { WorkflowGraphSelection } from "./workflowGraphSelection";
 import type {
   WorkflowGraphGroupNode,
@@ -26,15 +23,39 @@ import type {
 
 export type { CopyText } from "./WorkflowGraphNodeMetadata";
 
-const workflowNodeDragPayloadType = "text/workflow-node-id";
+export type WorkflowGroupDragState = Readonly<{
+  label: string;
+  nodeID: string;
+  targetGroupID: string | null;
+  x: number;
+  y: number;
+}>;
 
 type WorkflowNodeContextMenuCallbacks = Readonly<{
-  onAddNodeToGroup: ((nodeID: string, groupID: string) => void) | undefined;
   onCreateNodeGroup: ((nodeID: string) => void) | undefined;
   onDeleteSelection: ((selection: WorkflowGraphSelection) => void) | undefined;
   onRemoveNodeFromGroup: ((nodeID: string) => void) | undefined;
   onSelectContextMenu: (nodeID: string) => void;
 }>;
+
+export function WorkflowGroupDragPreview({ drag }: Readonly<{ drag: WorkflowGroupDragState }>) {
+  return (
+    <IslandSurface
+      as="div"
+      className="pointer-events-none fixed z-50 grid max-w-[260px] rounded-[var(--radius-l)] px-[var(--space-3)] py-[var(--space-2)] text-sm font-semibold text-[var(--color-on-island)]"
+      data-drop-target={drag.targetGroupID === null ? "none" : "group"}
+      data-testid="workflow-group-drag-preview"
+      level={3}
+      style={{
+        borderColor: drag.targetGroupID === null ? "var(--color-outline)" : "var(--color-primary)",
+        left: drag.x + 10,
+        top: drag.y + 10,
+      }}
+    >
+      <span className="truncate">{drag.label}</span>
+    </IslandSurface>
+  );
+}
 
 function WorkflowNodeContextMenuShell({
   children,
@@ -116,40 +137,31 @@ const NODE_METADATA_TOOLTIP_CLASS =
 export const WorkflowNode = memo(function WorkflowNode({
   data,
   onCopyText,
-  onAddNodeToGroup,
   onCreateNodeGroup,
   onDeleteSelection,
   onRemoveNodeFromGroup,
   onSelectContextMenu,
+  onStartGroupDrag,
   selected,
 }: NodeProps<WorkflowGraphWorkflowNode> &
   Readonly<
     {
       onCopyText: CopyText;
+      onStartGroupDrag: (drag: WorkflowGroupDragState) => void;
     } & WorkflowNodeContextMenuCallbacks
   >) {
-  const canDragToGroup = data.kind === "agent";
+  const { t } = useTranslation();
   const nodeCard = (
     <IslandSurface
       as="div"
       className={cx(
-        "workflow-editor-node relative grid h-full min-w-0 grid-rows-[minmax(0,1fr)_auto] rounded-[var(--radius-l)] p-[var(--space-3)]",
+        "workflow-editor-node nopan relative grid h-full min-w-0 grid-rows-[minmax(0,1fr)_auto] rounded-[var(--radius-l)] p-[var(--space-3)]",
         data.hasError ? "workflow-editor-node-error" : undefined,
         selected ? "workflow-editor-node-selected" : undefined,
       )}
       data-kind={data.kind}
       data-testid={`workflow-graph-node-${data.entityID}`}
-      draggable={canDragToGroup}
       level={1}
-      onDragStart={(event) => {
-        if (!canDragToGroup) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer.setData(workflowNodeDragPayloadType, data.entityID);
-        event.dataTransfer.setData("text/plain", data.entityID);
-        event.dataTransfer.effectAllowed = "move";
-      }}
       style={workflowNodeOutlineStyle(data.kind, data.hasError)}
     >
       <Handle
@@ -171,10 +183,33 @@ export const WorkflowNode = memo(function WorkflowNode({
       <strong className="line-clamp-2 min-w-0 text-[0.95rem] leading-snug text-[var(--color-on-island)]">
         {data.label}
       </strong>
-      <span className="min-w-0 truncate font-mono text-sm text-[var(--color-muted)]">{data.role}</span>
+      <span className="flex min-w-0 items-center gap-[var(--space-2)]">
+        <span className="min-w-0 flex-1 truncate font-mono text-sm text-[var(--color-muted)]">{data.role}</span>
+        {data.kind === "agent" ? (
+          <button
+            aria-label={t("workflowEditor.dragNodeToGroup")}
+            className="nodrag shrink-0 cursor-grab rounded-[var(--radius-s)] border border-[var(--color-outline)] bg-[var(--color-island-2)] px-[var(--space-2)] py-[1px] font-mono text-xs font-bold tracking-[-0.2em] text-[var(--color-muted)] outline-none hover:border-[var(--color-primary)] hover:text-[var(--color-on-island)] focus-visible:border-[var(--color-primary)] focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_26%,transparent)] active:cursor-grabbing"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onStartGroupDrag({
+                label: data.label,
+                nodeID: data.entityID,
+                targetGroupID: null,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
+            title={t("workflowEditor.dragNodeToGroup")}
+            type="button"
+          >
+            ::::
+          </button>
+        ) : null}
+      </span>
     </IslandSurface>
   );
-  const tooltip = usesCompactNodeTooltip(data.kind) ? (
+  const tooltip = !isEditableWorkflowNodeKind(data.kind) ? (
     <WorkflowNodeInfoTooltipContent
       nodeID={data.entityID}
       nodeKey={data.key}
@@ -184,7 +219,6 @@ export const WorkflowNode = memo(function WorkflowNode({
   return (
     <WorkflowNodeContextMenuShell
       data={data}
-      onAddNodeToGroup={onAddNodeToGroup}
       onCreateNodeGroup={onCreateNodeGroup}
       onDeleteSelection={onDeleteSelection}
       onRemoveNodeFromGroup={onRemoveNodeFromGroup}
@@ -197,35 +231,23 @@ export const WorkflowNode = memo(function WorkflowNode({
 });
 
 export const WorkflowGroupNode = memo(function WorkflowGroupNode({
+  activeDropTarget,
   data,
-  onAddNodeToGroup,
 }: NodeProps<WorkflowGraphGroupNode> &
-  Readonly<{ onAddNodeToGroup: ((nodeID: string, groupID: string) => void) | undefined }>) {
+  Readonly<{ activeDropTarget: boolean }>) {
   const { t } = useTranslation();
   return (
     <IslandSurface
       as="div"
       className={cx(
-        "workflow-editor-group h-full rounded-[var(--radius-xl)] p-[var(--space-3)]",
+        "workflow-editor-group nopan h-full rounded-[var(--radius-xl)] p-[var(--space-3)]",
+        activeDropTarget ? "workflow-editor-group-drop-active" : undefined,
         data.hasError ? "workflow-editor-node-error" : undefined,
       )}
+      data-drop-state={activeDropTarget ? "active" : "idle"}
       data-testid={`workflow-graph-group-${data.entityID}`}
       data-workflow-group-id={data.entityID}
       level={1}
-      onDragOver={(event) => {
-        if (onAddNodeToGroup === undefined) {
-          return;
-        }
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        const nodeID = event.dataTransfer.getData(workflowNodeDragPayloadType);
-        if (nodeID.length > 0) {
-          onAddNodeToGroup?.(nodeID, data.entityID);
-        }
-      }}
       style={workflowNodeOutlineStyle(data.kind, data.hasError)}
     >
       <div className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-muted)]">
@@ -255,7 +277,7 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
   const nodeCard = (
     <div
       className={cx(
-        "workflow-editor-join-node grid h-full w-full place-items-center",
+        "workflow-editor-join-node nopan grid h-full w-full place-items-center",
         data.hasError ? "workflow-editor-node-error" : undefined,
       )}
       style={workflowNodeOutlineStyle(data.kind, data.hasError)}
@@ -301,7 +323,6 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
   return (
     <WorkflowNodeContextMenuShell
       data={data}
-      onAddNodeToGroup={undefined}
       onCreateNodeGroup={undefined}
       onDeleteSelection={onDeleteSelection}
       onRemoveNodeFromGroup={undefined}
@@ -313,8 +334,7 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
   );
 });
 
-type WorkflowNodeOutlineStyle = CSSProperties &
-  Readonly<Record<"--workflow-editor-node-outline-color", string>>;
+type WorkflowNodeOutlineStyle = CSSProperties & Readonly<Record<"--workflow-editor-node-outline-color", string>>;
 
 function workflowNodeOutlineStyle(kind: string, hasError: boolean): WorkflowNodeOutlineStyle {
   if (hasError) {
@@ -330,10 +350,6 @@ function workflowNodeOutlineStyle(kind: string, hasError: boolean): WorkflowNode
     return { "--workflow-editor-node-outline-color": "var(--color-secondary)" };
   }
   return { "--workflow-editor-node-outline-color": "var(--color-outline)" };
-}
-
-function usesCompactNodeTooltip(kind: string): boolean {
-  return !isEditableWorkflowNodeKind(kind);
 }
 
 function isEditableWorkflowNodeKind(kind: string): boolean {

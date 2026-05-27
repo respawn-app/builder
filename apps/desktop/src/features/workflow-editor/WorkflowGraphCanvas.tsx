@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { TooltipProvider } from "../../ui";
 import {
   connectWorkflowGraphNodes,
+  groupIDFromPoint,
   inspectEdge,
   inspectNode,
   isFormTarget,
@@ -22,9 +23,11 @@ import {
 } from "./workflowGraphCanvasInteractions";
 import { WorkflowGraphEdge as WorkflowGraphEdgeRenderer } from "./WorkflowGraphEdge";
 import {
+  WorkflowGroupDragPreview,
   WorkflowGroupNode,
   WorkflowJoinNode,
   WorkflowNode,
+  type WorkflowGroupDragState,
 } from "./WorkflowGraphNodes";
 import type { CopyText } from "./WorkflowGraphNodeMetadata";
 import { WorkflowGraphToolbar } from "./WorkflowGraphToolbar";
@@ -124,6 +127,7 @@ function WorkflowGraphCanvasInner({
 }>) {
   const instance = useReactFlow();
   const [selection, setSelection] = useState<WorkflowGraphSelection | null>(null);
+  const [groupDrag, setGroupDrag] = useState<WorkflowGroupDragState | null>(null);
   const edgeTypes = useMemo(
     () => ({
       workflow: (props: EdgeProps<WorkflowGraphEdge>) => (
@@ -141,7 +145,7 @@ function WorkflowGraphCanvasInner({
   const nodeTypes = useMemo(
     () => ({
       workflowGroup: (props: NodeProps<WorkflowGraphGroupNode>) => (
-        <WorkflowGroupNode {...props} onAddNodeToGroup={onAddNodeToGroup} />
+        <WorkflowGroupNode {...props} activeDropTarget={groupDrag?.targetGroupID === props.data.entityID} />
       ),
       workflowJoin: (props: NodeProps<WorkflowGraphWorkflowNode>) => (
         <WorkflowJoinNode
@@ -156,7 +160,6 @@ function WorkflowGraphCanvasInner({
       workflowNode: (props: NodeProps<WorkflowGraphWorkflowNode>) => (
         <WorkflowNode
           {...props}
-          onAddNodeToGroup={onAddNodeToGroup}
           onCopyText={onCopyText}
           onCreateNodeGroup={onCreateNodeGroup}
           onDeleteSelection={onDeleteSelection}
@@ -164,10 +167,13 @@ function WorkflowGraphCanvasInner({
           onSelectContextMenu={(nodeID) => {
             setSelection({ kind: "node", nodeID });
           }}
+          onStartGroupDrag={(drag) => {
+            setGroupDrag(drag);
+          }}
         />
       ),
     }) satisfies NodeTypes,
-    [onAddNodeToGroup, onCopyText, onCreateNodeGroup, onDeleteSelection, onRemoveNodeFromGroup],
+    [groupDrag?.targetGroupID, onCopyText, onCreateNodeGroup, onDeleteSelection, onRemoveNodeFromGroup],
   );
   const didFitInitialView = useRef(false);
   useEffect(() => {
@@ -200,6 +206,31 @@ function WorkflowGraphCanvasInner({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [edges, instance, nodes, onDeleteSelection, selection]);
+  useEffect(() => {
+    if (groupDrag === null) {
+      return undefined;
+    }
+    const activeDrag = groupDrag;
+    function onPointerMove(event: PointerEvent): void {
+      const targetGroupID = groupIDFromPoint(event.clientX, event.clientY);
+      setGroupDrag((current) =>
+        current === null ? current : { ...current, targetGroupID, x: event.clientX, y: event.clientY },
+      );
+    }
+    function onPointerUp(event: PointerEvent): void {
+      const groupID = groupIDFromPoint(event.clientX, event.clientY);
+      if (groupID !== null) {
+        onAddNodeToGroup?.(activeDrag.nodeID, groupID);
+      }
+      setGroupDrag(null);
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [groupDrag, onAddNodeToGroup]);
   return (
     <div className="workflow-editor-canvas h-full min-h-0 w-full" data-testid="workflow-editor-canvas">
       <ReactFlow
@@ -239,6 +270,7 @@ function WorkflowGraphCanvasInner({
           variant={BackgroundVariant.Dots}
         />
         <WorkflowGraphToolbar onAddNode={onAddNode} onWorkflowInspect={onWorkflowInspect} />
+        {groupDrag === null ? null : <WorkflowGroupDragPreview drag={groupDrag} />}
       </ReactFlow>
     </div>
   );
