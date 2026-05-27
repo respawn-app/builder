@@ -1,6 +1,8 @@
 import type { ComponentType, CSSProperties, ReactNode } from "react";
 import type { MouseEvent } from "react";
 
+// Version-locked lightweight declaration shim for @xyflow/react 12.10.x.
+// On @xyflow/react upgrades, verify the node-drag API surface below against upstream before bumping.
 export type XYPosition = Readonly<{ x: number; y: number }>;
 
 export type PositionValue = "left" | "right" | "top" | "bottom";

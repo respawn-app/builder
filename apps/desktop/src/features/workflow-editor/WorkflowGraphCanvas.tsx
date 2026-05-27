@@ -134,6 +134,8 @@ function WorkflowGraphCanvasInner({
 }>) {
   const instance = useReactFlow();
   const [selection, setSelection] = useState<WorkflowGraphSelection | null>(null);
+  // React Flow owns the drag gesture, but workflow layout stays ELK/server-authored.
+  // This transient snapshot lets cards move during drag without persisting canvas positions.
   const [renderNodesState, setRenderNodesState] = useState<RenderNodesState>(() => ({
     nodes: [...nodes],
     sourceNodes: nodes,
