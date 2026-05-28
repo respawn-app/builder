@@ -20,7 +20,7 @@ describe("ValidationDetails", () => {
     expect(within(routeSection).getByRole("button", { name: "Target node" })).toBeInTheDocument();
   });
 
-  it("shows structured validation details in inspector cards", () => {
+  it("shows structured validation details as a plain bullet list", () => {
     render(
       <ValidationDetails
         errors={[
@@ -44,6 +44,14 @@ describe("ValidationDetails", () => {
       />,
     );
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    const section = screen.getByRole("region", { name: "Validation errors" });
+    const list = within(section).getByRole("list");
+    const item = within(list).getByRole("listitem");
+
+    expect(list).toHaveClass("list-disc");
+    expect(item).not.toHaveClass("rounded-[var(--radius-m)]", "border");
+    expect(within(item).getByText("Join input provider is invalid.")).toBeInTheDocument();
+    expect(within(item).getByText("Input: summary · Provider edge: edge-provider")).toBeInTheDocument();
+    expect(screen.queryByText("workflow.validation.invalid_join_input_provider")).not.toBeInTheDocument();
   });
 });

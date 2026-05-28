@@ -380,6 +380,58 @@ func TestGraphReachabilityAndCycles(t *testing.T) {
 	})
 }
 
+func TestValidationMessagesIncludeNodeDisplayName(t *testing.T) {
+	t.Run("input fields identify the node and field ordinal", func(t *testing.T) {
+		def := validWorkflow()
+		node := nodeByKeyForValidationTest(t, &def, "implement")
+		node.DisplayName = "Planning Recon"
+		node.InputFields = []workflow.InputField{
+			{Name: "Bad Field", Description: "Field with invalid identifier."},
+			{Name: "missing_description", Description: " "},
+			{Name: "long_description", Description: stringOf("a", workflow.MaxInputFieldDescriptionChars+1)},
+		}
+
+		result := validateForTask(def)
+
+		assertValidationMessage(t, result, workflow.CodeInvalidInputField, "node_agent", "Node Planning Recon: input field #1 field name is invalid")
+		assertValidationMessage(t, result, workflow.CodeInputFieldDescriptionRequired, "node_agent", "Node Planning Recon: input field #2 description is required")
+		assertValidationMessage(t, result, workflow.CodeInputSchemaTooLarge, "node_agent", "Node Planning Recon: input field #3 description is too large")
+	})
+
+	t.Run("output fields identify the node and field ordinal", func(t *testing.T) {
+		def := validWorkflow()
+		node := nodeByKeyForValidationTest(t, &def, "implement")
+		node.DisplayName = "Planning Recon"
+		node.OutputFields = []workflow.OutputField{
+			{Name: "Bad Field", Description: "Field with invalid identifier."},
+			{Name: "summary", Description: " "},
+		}
+
+		result := validateForTask(def)
+
+		assertValidationMessage(t, result, workflow.CodeInvalidOutputField, "node_agent", "Node Planning Recon: output field #1 field name is invalid")
+		assertValidationMessage(t, result, workflow.CodeOutputFieldDescriptionRequired, "node_agent", "Node Planning Recon: output field #2 description is required")
+	})
+
+	t.Run("reachability identifies the node", func(t *testing.T) {
+		def := validWorkflow()
+		def.Nodes = append(def.Nodes, workflow.Node{
+			WorkflowID:     def.ID,
+			ID:             "node_planning_recon",
+			Key:            "planning_recon",
+			DisplayName:    "Planning Recon",
+			Kind:           workflow.NodeKindAgent,
+			SubagentRole:   "coder",
+			PromptTemplate: "Plan the work.",
+		})
+
+		result := validateForTask(def)
+
+		assertValidationMessage(t, result, workflow.CodeNodeUnreachableFromStart, "node_planning_recon", "Node Planning Recon not reachable")
+		assertValidationMessage(t, result, workflow.CodeNonTerminalCannotReachTerminal, "node_planning_recon", "Node Planning Recon cannot reach a terminal")
+	})
+}
+
 func TestIdentifierAndReferenceRules(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1139,6 +1191,19 @@ func assertNoCode(t *testing.T, result workflow.ValidationResult, code workflow.
 	if slices.Contains(got, code) {
 		t.Fatalf("unexpected validation code %q in %v; errors: %+v", code, got, result.Errors)
 	}
+}
+
+func assertValidationMessage(t *testing.T, result workflow.ValidationResult, code workflow.ValidationErrorCode, nodeID workflow.NodeID, want string) {
+	t.Helper()
+	for _, err := range result.Errors {
+		if err.Code == code && err.NodeID == nodeID {
+			if err.Message != want {
+				t.Fatalf("message for %s on %s = %q, want %q", code, nodeID, err.Message, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing validation error %s on %s in %+v", code, nodeID, result.Errors)
 }
 
 func stringOf(value string, count int) string {

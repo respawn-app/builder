@@ -101,7 +101,16 @@ export declare const Background: ComponentType<Readonly<{ bgColor?: string; colo
 export declare const BackgroundVariant: Readonly<{ Dots: string }>;
 export declare const BaseEdge: ComponentType<Readonly<{ "data-testid"?: string; markerEnd?: string | Readonly<{ color?: string; type: string }>; path: string; style?: CSSProperties }>>;
 export declare const EdgeLabelRenderer: ComponentType<Readonly<{ children?: ReactNode }>>;
-export declare const Handle: ComponentType<Readonly<{ "aria-label"?: string; className?: string; "data-testid"?: string; position: PositionValue; type: "source" | "target" }>>;
+export declare const Handle: ComponentType<
+  Readonly<{
+    "aria-label"?: string;
+    className?: string;
+    "data-testid"?: string;
+    onClick?: (event: MouseEvent) => void;
+    position: PositionValue;
+    type: "source" | "target";
+  }>
+>;
 export declare const MarkerType: Readonly<{ ArrowClosed: string }>;
 export declare const Position: Readonly<{ Bottom: "bottom"; Left: "left"; Right: "right"; Top: "top" }>;
 

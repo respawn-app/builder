@@ -28,7 +28,7 @@
 - Edge color communicates context-preservation mode: `new_session` primary/blue, `continue_session` neutral/gray, and `compact_and_continue_session` secondary/yellow.
 - Validation-error red is reserved for invalid graph entities and overrides normal semantic colors.
 - Edge labels show transition group display name if present, otherwise `transition_id`; fan-out multi-edge groups append edge key only when needed to disambiguate.
-- Node groups render visually as grouped branch islands with labels and their join plumbing. Empty node groups are not a saved workflow concept.
+- Node groups render visually as labeled branch islands. The owned Join renders outside the island to the right, vertically centered with the island, while remaining owned by the node group. Branch-to-Join edge routes are normalized into root canvas coordinates before rendering. Empty node groups are not a saved workflow concept.
 - Canvas layout is deterministic client-side ELK layout from graph structure. Coordinates are not persisted.
 - Layout orientation is left-to-right.
 - Initial viewport fits the whole graph on first open. Live refetch preserves pan/zoom, clears stale selection through current React Flow state, and shows workflow-updated feedback.
@@ -54,8 +54,9 @@
 - Join provider selection points to an actual incoming edge into that join.
 - Source-node output fields, edge input bindings, and edge output requirements are not user-authored editor concepts. The server derives them from consuming-node required inputs, graph topology, and join provider selections.
 - Agent node inspectors show read-only `Provides` summaries so operators can understand what the server will ask an agent to produce.
-- Edge inspectors show route/config facts and read-only derived input bindings, derived provision requirements, provider requirements, and validation issues.
-- Edge inspectors edit route/config facts: transition group display name, transition ID, edge key, target node, approval flag, context-preservation mode, and context source.
+- Inspector validation sections keep their section header and render errors as plain bullet lists without card containers or code chips.
+- Edge inspectors show the source-to-target node relationship as an equal-width route graphic at the top of the route/config island, plus read-only derived input bindings, derived provision requirements, provider requirements, and validation issues.
+- Edge inspectors edit route/config facts: transition group display name, transition ID, edge key, approval flag, context-preservation mode, and context source. Context source remains visible but disabled for `new_session` edges. Context mode, context source, and approval remain visible but disabled for the edge emitted by the Start node. Disabled route controls explain that they are not applicable for the current edge configuration. Edge targets are assigned through canvas connections instead of inspector dropdowns.
 - Start/backlog and unsupported graph entities use read-only sidebar inspection with clear unavailable-editing behavior.
 - Topology editing includes adding and deleting agent/terminal nodes and edges, drag-connecting edges on the canvas, editing edge route/config facts, and creating/removing node group membership.
 - Add node is a canvas action, not a right-sidebar form. It creates unconnected agent or terminal nodes; draft/execution validation explains unreachable or incomplete graph states until the operator wires them.

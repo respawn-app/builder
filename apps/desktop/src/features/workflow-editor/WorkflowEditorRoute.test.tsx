@@ -438,6 +438,143 @@ describe("WorkflowEditorRoute", () => {
   });
 
   it("edits edge route and config facts from the draft inspector", async () => {
+    const copied: string[] = [];
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.get", result: workflowDefinitionResponse },
+        { method: "workflow.validate", result: { valid: true, errors: [] } },
+        {
+          method: "workflow.graph.validateDraft",
+          result: {
+            derived_wiring: graphValidationResponse.derived_wiring,
+            results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+          },
+        },
+        {
+          method: "workflow.graph.savePreview",
+          result: {
+            current_version: 1,
+            validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+            impact: graphSaveImpactResponse,
+            blockers: [],
+            can_save: true,
+            confirmation_required: false,
+          },
+        },
+        {
+          method: "workflow.graph.save",
+          result: {
+            saved: true,
+            definition: workflowDefinitionResponseWithRevision(2).definition,
+            current_version: 2,
+            validation_results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+            impact: graphSaveImpactResponse,
+            blockers: [],
+            can_save: true,
+            confirmation_required: false,
+          },
+        },
+      ],
+      nativeBridgeWithClipboard(copied),
+    );
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    expect(canvas).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
+    const edgeIDButton = within(inspector).getByRole("button", { name: "Copy edge ID edge-2" });
+    expect(edgeIDButton).toHaveClass("text-xs", "grid", "min-w-0", "justify-items-end");
+    expect(within(inspector).queryByText("ID")).not.toBeInTheDocument();
+    fireEvent.click(edgeIDButton);
+    await waitFor(() => {
+      expect(copied).toEqual(["edge-2"]);
+    });
+
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition group" }), {
+      target: { value: "Review" },
+    });
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition ID" }), {
+      target: { value: "review" },
+    });
+    fireEvent.change(within(inspector).getByRole("textbox", { name: "Key" }), {
+      target: { value: "review_edge" },
+    });
+
+    fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Continue session" }));
+    fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context source" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Join" }));
+
+    const routeSections = within(inspector).getAllByRole("region", { name: "Route" });
+    expect(routeSections).toHaveLength(1);
+    const routeSection = routeSections[0];
+    if (routeSection === undefined) {
+      throw new Error("Expected a merged edge route section.");
+    }
+    expect(within(routeSection).getByRole("textbox", { name: "Transition group" })).toBeInTheDocument();
+    expect(within(routeSection).getByRole("textbox", { name: "Transition ID" })).toBeInTheDocument();
+    expect(within(routeSection).getByRole("textbox", { name: "Key" })).toBeInTheDocument();
+    const routeControls = within(routeSection);
+    expect(routeControls.queryByRole("button", { name: "Target node" })).not.toBeInTheDocument();
+    expect(routeControls.queryByText("Source node")).not.toBeInTheDocument();
+    expect(routeControls.queryByText("Target node")).not.toBeInTheDocument();
+    const routeGraphic = within(inspector).getByTestId("workflow-edge-route-graphic");
+    expect(routeGraphic).toHaveAccessibleName("Join to Done");
+    expect(routeGraphic).toHaveClass("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
+    expect(within(routeGraphic).getByTestId("workflow-edge-route-source")).toHaveTextContent("Join");
+    expect(within(routeGraphic).getByTestId("workflow-edge-route-target")).toHaveTextContent("Done");
+    expect(within(routeGraphic).getByTestId("workflow-edge-route-arrow")).toHaveStyle({
+      color: "var(--color-outline)",
+    });
+    const requiresApproval = routeControls.getByRole("checkbox", { name: "Requires approval" });
+    expect(requiresApproval).toHaveAttribute("data-slot", "checkbox");
+    expect(routeControls.queryByText("None")).not.toBeInTheDocument();
+    expect(routeControls.queryByText("Required")).not.toBeInTheDocument();
+
+    fireEvent.click(requiresApproval);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const saveCall = services.transport.calls.find((call) => call.method === "workflow.graph.save");
+      const expectedTransitionGroups: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          id: "tg-2",
+          transition_id: "review",
+          display_name: "Review",
+        }),
+      ]);
+      const expectedEdges: unknown = expect.arrayContaining([
+        expect.objectContaining({
+          id: "edge-2",
+          key: "review_edge",
+          requires_approval: false,
+          context_mode: "continue_session",
+          context_source: { kind: "selected_node", node_key: "join" },
+        }),
+      ]);
+      expect(saveCall?.params).toMatchObject({
+        graph: {
+          transition_groups: expectedTransitionGroups,
+          edges: expectedEdges,
+        },
+      });
+    });
+  });
+
+  it("disables context source for new-session edges and saves immediate source", async () => {
     const services = createTestServices([
       ...startupRoutes,
       { method: "workflow.get", result: workflowDefinitionResponse },
@@ -486,62 +623,101 @@ describe("WorkflowEditorRoute", () => {
       </AppProviders>,
     );
 
-    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
-    expect(canvas).toBeInTheDocument();
+    expect(await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
     const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
 
-    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition group" }), {
-      target: { value: "Review" },
-    });
-    fireEvent.change(within(inspector).getByRole("textbox", { name: "Transition ID" }), {
-      target: { value: "review" },
-    });
-    fireEvent.change(within(inspector).getByRole("textbox", { name: "Key" }), {
-      target: { value: "review_edge" },
-    });
-
     fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Continue session" }));
-    fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context source" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Join" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "New session" }));
 
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
-    const routeControls = within(routeSection);
-    const requiresApproval = routeControls.getByRole("checkbox", { name: "Requires approval" });
-    expect(requiresApproval).toHaveAttribute("data-slot", "checkbox");
-    expect(routeControls.queryByText("None")).not.toBeInTheDocument();
-    expect(routeControls.queryByText("Required")).not.toBeInTheDocument();
-
-    fireEvent.click(requiresApproval);
+    const contextSource = within(routeSection).getByRole("button", { name: "Context source" });
+    expect(contextSource).toBeDisabled();
+    expect(within(routeSection).getByText("Immediate source")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const saveCall = services.transport.calls.find((call) => call.method === "workflow.graph.save");
-      const expectedTransitionGroups: unknown = expect.arrayContaining([
-        expect.objectContaining({
-          id: "tg-2",
-          transition_id: "review",
-          display_name: "Review",
-        }),
-      ]);
       const expectedEdges: unknown = expect.arrayContaining([
         expect.objectContaining({
           id: "edge-2",
-          key: "review_edge",
-          requires_approval: false,
-          context_mode: "continue_session",
-          context_source: { kind: "selected_node", node_key: "join" },
+          context_mode: "new_session",
+          context_source: { kind: "immediate_source", node_key: "" },
         }),
       ]);
       expect(saveCall?.params).toMatchObject({
         graph: {
-          transition_groups: expectedTransitionGroups,
           edges: expectedEdges,
         },
       });
     });
+  });
+
+  it("disables route controls that do not apply to the start edge", async () => {
+    const user = userEvent.setup();
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponseWithStartNode },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          derived_wiring: graphValidationResponse.derived_wiring,
+          results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton edgeID="edge-start" />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    expect(await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
+    const routeSection = within(inspector).getByRole("region", { name: "Route" });
+    const contextMode = within(routeSection).getByRole("button", { name: "Context mode" });
+    const contextSource = within(routeSection).getByRole("button", { name: "Context source" });
+    const requiresApproval = within(routeSection).getByRole("checkbox", { name: "Requires approval" });
+
+    expect(contextMode).toBeDisabled();
+    expect(contextSource).toBeDisabled();
+    expect(requiresApproval).toBeDisabled();
+
+    await user.hover(contextMode);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("N/A for current edge configuration");
+    await user.unhover(contextMode);
+
+    fireEvent.pointerDown(contextMode);
+    expect(screen.queryByRole("menuitemradio", { name: "Continue session" })).not.toBeInTheDocument();
+    fireEvent.pointerDown(contextSource);
+    expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
+    fireEvent.click(requiresApproval);
+    expect(requiresApproval).not.toBeChecked();
+
+    within(inspector).getByRole("textbox", { name: "Key" }).focus();
+    await user.tab();
+    expect(contextMode).not.toHaveFocus();
+    expect(contextSource).not.toHaveFocus();
+    expect(requiresApproval).not.toHaveFocus();
+
+    fireEvent.keyDown(contextMode, { code: "Enter", key: "Enter" });
+    fireEvent.keyDown(contextMode, { code: "Space", key: " " });
+    expect(screen.queryByRole("menuitemradio", { name: "Continue session" })).not.toBeInTheDocument();
+    fireEvent.keyDown(contextSource, { code: "Enter", key: "Enter" });
+    fireEvent.keyDown(contextSource, { code: "Space", key: " " });
+    expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
+    fireEvent.keyDown(requiresApproval, { code: "Enter", key: "Enter" });
+    fireEvent.keyDown(requiresApproval, { code: "Space", key: " " });
+    expect(requiresApproval).not.toBeChecked();
   });
 
   it("serializes enabled edge approval and reloads it from the saved graph", async () => {
@@ -591,6 +767,7 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
     const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
     const routeSection = within(inspector).getByRole("region", { name: "Route" });
+    expect(within(routeSection).getByRole("button", { name: "Context source" })).toBeDisabled();
     const requiresApproval = within(routeSection).getByRole("checkbox", { name: "Requires approval" });
     expect(requiresApproval).not.toBeChecked();
 

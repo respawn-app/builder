@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { groupIDFromPoint } from "./workflowGraphCanvasInteractions";
+import { connectWorkflowGraphNodes, groupIDFromPoint } from "./workflowGraphCanvasInteractions";
 
 describe("workflowGraphCanvasInteractions", () => {
   afterEach(() => {
@@ -27,6 +27,14 @@ describe("workflowGraphCanvasInteractions", () => {
 
     expect(groupIDFromPoint(75, 75)).toBe("inner-group");
     expect(groupIDFromPoint(25, 25)).toBe("outer-group");
+  });
+
+  it("forwards React Flow handle-drag connections to the workflow connection callback", () => {
+    const onConnectNodes = vi.fn();
+
+    connectWorkflowGraphNodes({ source: "agent", target: "join" }, onConnectNodes);
+
+    expect(onConnectNodes).toHaveBeenCalledWith("agent", "join");
   });
 });
 

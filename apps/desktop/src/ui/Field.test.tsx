@@ -37,4 +37,60 @@ describe("Field", () => {
 
     expect(onValueChange).toHaveBeenCalledWith("workspace-2");
   });
+
+  it("closes an open SelectField menu when the field becomes disabled", async () => {
+    const onValueChange = vi.fn();
+    const options = [
+      { label: "Main", value: "workspace-1" },
+      { label: "Docs", value: "workspace-2" },
+    ];
+
+    const { rerender } = render(
+      <SelectField
+        label="Source"
+        onValueChange={onValueChange}
+        options={options}
+        value="workspace-1"
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Source" }));
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+    rerender(
+      <SelectField
+        disabled
+        label="Source"
+        onValueChange={onValueChange}
+        options={options}
+        value="workspace-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Source" })).toBeDisabled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it("does not open a disabled SelectField", () => {
+    const onValueChange = vi.fn();
+
+    render(
+      <SelectField
+        disabled
+        label="Source"
+        onValueChange={onValueChange}
+        options={[
+          { label: "Main", value: "workspace-1" },
+          { label: "Docs", value: "workspace-2" },
+        ]}
+        value="workspace-1"
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Source" }));
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
 });

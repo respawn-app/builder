@@ -33,12 +33,14 @@ import type { WorkflowInspectorSelection } from "../../app/sidebarContext";
 import {
   Button,
   Checkbox,
+  DisabledInteractionGuard,
   identifierInputAttributes,
   IslandSurface,
   MarkdownText,
   SelectField,
   TextArea,
   TextInput,
+  TooltipProvider,
   type SelectFieldOption,
 } from "../../ui";
 import { cx } from "../../ui/classes";
@@ -50,6 +52,7 @@ import {
   MissingEntity,
   ValidationDetails,
 } from "./WorkflowInspectorPrimitives";
+import { WorkflowEdgeRouteGraphic } from "./WorkflowEdgeRouteGraphic";
 import { fallbackLabel, nodeByID, transitionGroupByID } from "./workflowInspectorModel";
 import { workflowDefinitionFromDraft, type DraftWorkflowNode } from "./workflowEditorDraft";
 import {
@@ -157,9 +160,24 @@ function EdgeDraftDetails({
   const details = edgeDetails(definition, edge, validation);
   const derivedEdge = derivedEdgeWiring(definition, edge.id);
   const transitionGroup = transitionGroupByID(definition, edge.transitionGroupID);
+  const startEdge = details.sourceKind === "start";
+  const disabledReason = t("workflowEditor.edgeControlNotApplicable");
+  const contextModeDisabled = startEdge;
+  const contextSourceDisabled = startEdge || edge.contextMode === "new_session";
+  const requiresApprovalDisabled = startEdge;
   return (
     <InspectorStack>
-      <DetailSection>
+      <DetailSection
+        leading={
+          <WorkflowEdgeRouteGraphic
+            contextMode={edge.contextMode}
+            hasError={details.hasErrors}
+            sourceLabel={details.sourceLabel}
+            targetLabel={details.targetLabel}
+          />
+        }
+        title={t("workflowEditor.route")}
+      >
         <TextInput
           label={t("workflowEditor.transitionGroup")}
           onChange={(event) => {
@@ -192,44 +210,50 @@ function EdgeDraftDetails({
           }}
           value={edge.key}
         />
-        <DetailRow label={t("workflowEditor.id")} mono value={edge.id} />
-      </DetailSection>
-      <DetailSection title={t("workflowEditor.route")}>
-        <DetailRow label={t("workflowEditor.sourceNode")} value={details.sourceLabel} />
-        <SelectField
-          label={t("workflowEditor.targetNode")}
-          onValueChange={(value) => {
-            controller.dispatch({ input: { edgeID: edge.id, targetNodeID: value }, type: "editEdgeRoute" });
-          }}
-          options={targetNodeOptions(definition, edge.targetNodeID)}
-          value={edge.targetNodeID}
-        />
-        <SelectField
-          label={t("workflowEditor.contextMode")}
-          onValueChange={(value) => {
-            controller.dispatch({ input: { contextMode: value, edgeID: edge.id }, type: "editEdgeRoute" });
-          }}
-          options={contextModeOptions(t)}
-          value={edge.contextMode}
-        />
-        <SelectField
-          label={t("workflowEditor.contextSource")}
-          onValueChange={(value) => {
-            controller.dispatch({
-              input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
-              type: "editEdgeRoute",
-            });
-          }}
-          options={contextSourceOptions(definition, edge.contextSource, t)}
-          value={contextSourceSelectValue(definition, edge.contextSource)}
-        />
-        <ApprovalToggle
-          checked={edge.requiresApproval}
-          label={t("workflowEditor.requiresApproval")}
-          onCheckedChange={(checked) => {
-            controller.dispatch({ input: { edgeID: edge.id, requiresApproval: checked }, type: "editEdgeRoute" });
-          }}
-        />
+        <TooltipProvider delayDuration={0}>
+          <DisabledInteractionGuard disabled={contextModeDisabled} reason={disabledReason}>
+            <SelectField
+              disabled={contextModeDisabled}
+              label={t("workflowEditor.contextMode")}
+              onValueChange={(value) => {
+                controller.dispatch({
+                  input: {
+                    contextMode: value,
+                    contextSource: value === "new_session" ? immediateContextSource : edge.contextSource,
+                    edgeID: edge.id,
+                  },
+                  type: "editEdgeRoute",
+                });
+              }}
+              options={contextModeOptions(t)}
+              value={edge.contextMode}
+            />
+          </DisabledInteractionGuard>
+          <DisabledInteractionGuard disabled={contextSourceDisabled} reason={disabledReason}>
+            <SelectField
+              disabled={contextSourceDisabled}
+              label={t("workflowEditor.contextSource")}
+              onValueChange={(value) => {
+                controller.dispatch({
+                  input: { contextSource: contextSourceFromSelectValue(definition, value), edgeID: edge.id },
+                  type: "editEdgeRoute",
+                });
+              }}
+              options={contextSourceOptions(definition, edge.contextSource, t)}
+              value={contextSourceSelectValue(definition, edge.contextSource)}
+            />
+          </DisabledInteractionGuard>
+          <DisabledInteractionGuard disabled={requiresApprovalDisabled} reason={disabledReason}>
+            <ApprovalToggle
+              checked={edge.requiresApproval}
+              disabled={requiresApprovalDisabled}
+              label={t("workflowEditor.requiresApproval")}
+              onCheckedChange={(checked) => {
+                controller.dispatch({ input: { edgeID: edge.id, requiresApproval: checked }, type: "editEdgeRoute" });
+              }}
+            />
+          </DisabledInteractionGuard>
+        </TooltipProvider>
       </DetailSection>
       <Bindings bindings={derivedEdge.inputBindings} />
       <FieldSummary
@@ -776,15 +800,20 @@ function EdgeDetails({
   const derivedEdge = derivedEdgeWiring(definition, edge.id);
   return (
     <InspectorStack>
-      <DetailSection title={t("workflowEditor.inspectorIdentity")}>
+      <DetailSection
+        leading={
+          <WorkflowEdgeRouteGraphic
+            contextMode={edge.contextMode}
+            hasError={details.hasErrors}
+            sourceLabel={details.sourceLabel}
+            targetLabel={details.targetLabel}
+          />
+        }
+        title={t("workflowEditor.route")}
+      >
         <DetailRow label={t("workflowEditor.key")} mono value={edge.key} />
-        <DetailRow label={t("workflowEditor.id")} mono value={edge.id} />
         <DetailRow label={t("workflowEditor.transitionID")} mono value={details.transitionID} />
         <DetailRow label={t("workflowEditor.transitionGroup")} value={details.transitionGroupLabel} />
-      </DetailSection>
-      <DetailSection title={t("workflowEditor.route")}>
-        <DetailRow label={t("workflowEditor.sourceNode")} value={details.sourceLabel} />
-        <DetailRow label={t("workflowEditor.targetNode")} value={details.targetLabel} />
         <DetailRow
           label={t("workflowEditor.contextMode")}
           value={formatContextModeLabel(edge.contextMode, t)}
@@ -814,10 +843,12 @@ function EdgeDetails({
 
 function ApprovalToggle({
   checked,
+  disabled = false,
   label,
   onCheckedChange,
 }: Readonly<{
   checked: boolean;
+  disabled?: boolean | undefined;
   label: string;
   onCheckedChange: (checked: boolean) => void;
 }>) {
@@ -828,31 +859,24 @@ function ApprovalToggle({
       <Checkbox
         aria-labelledby={labelID}
         checked={checked}
+        disabled={disabled}
         id={checkboxID}
         onCheckedChange={(value) => {
+          if (disabled) {
+            return;
+          }
           onCheckedChange(value === true);
         }}
       />
-      <label className="min-w-0 cursor-pointer select-none" htmlFor={checkboxID} id={labelID}>
+      <label
+        className={cx("min-w-0 select-none", disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer")}
+        htmlFor={checkboxID}
+        id={labelID}
+      >
         {label}
       </label>
     </div>
   );
-}
-
-function targetNodeOptions(
-  definition: WorkflowDefinition,
-  selectedNodeID: string,
-): readonly SelectFieldOption[] {
-  const options = definition.nodes.map((node) => ({
-    label: fallbackLabel(node.id, node.name, node.key),
-    textValue: fallbackLabel(node.id, node.name, node.key),
-    value: node.id,
-  }));
-  if (selectedNodeID.length === 0 || options.some((option) => option.value === selectedNodeID)) {
-    return options;
-  }
-  return [...options, { disabled: true, label: selectedNodeID, textValue: selectedNodeID, value: selectedNodeID }];
 }
 
 function contextModeOptions(translate: Translate): readonly SelectFieldOption[] {
@@ -877,6 +901,7 @@ function contextModeOptions(translate: Translate): readonly SelectFieldOption[] 
 
 const immediateContextSourceOption = "__immediate_context_source__";
 const missingContextSourceOption = "__missing_context_source__";
+const immediateContextSource: WorkflowContextSource = { kind: "immediate_source", nodeKey: "" };
 
 function contextSourceOptions(
   definition: WorkflowDefinition,
@@ -922,7 +947,7 @@ function contextSourceFromSelectValue(
   value: string,
 ): WorkflowContextSource {
   if (value === immediateContextSourceOption) {
-    return { kind: "immediate_source", nodeKey: "" };
+    return immediateContextSource;
   }
   const node = definition.nodes.find((item) => item.id === value);
   return { kind: "selected_node", nodeKey: node?.key ?? "" };
@@ -1021,11 +1046,15 @@ function edgeDetails(definition: WorkflowDefinition, edge: WorkflowEdge, validat
   const group = transitionGroupByID(definition, edge.transitionGroupID);
   const source = group === undefined ? undefined : nodeByID(definition, group.sourceNodeID);
   const target = nodeByID(definition, edge.targetNodeID);
+  const directErrors = validation.errors.filter((error) => error.edgeID === edge.id);
+  const groupErrors = validation.errors.filter(
+    (error) => error.edgeID !== edge.id && error.transitionGroupID === edge.transitionGroupID,
+  );
   return {
-    directErrors: validation.errors.filter((error) => error.edgeID === edge.id),
-    groupErrors: validation.errors.filter(
-      (error) => error.edgeID !== edge.id && error.transitionGroupID === edge.transitionGroupID,
-    ),
+    directErrors,
+    groupErrors,
+    hasErrors: directErrors.length + groupErrors.length > 0,
+    sourceKind: source?.kind ?? "",
     sourceLabel: fallbackLabel("", source?.name, source?.key),
     targetLabel: fallbackLabel("", target?.name, target?.key),
     transitionGroupLabel: fallbackLabel("", group?.name, group?.id),

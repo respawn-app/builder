@@ -373,46 +373,48 @@ func (s *validationState) validateEdges() {
 
 func (s *validationState) validateOutputFields(node Node) {
 	seen := map[string]bool{}
-	for _, field := range node.OutputFields {
+	for index, field := range node.OutputFields {
+		ordinal := index + 1
 		name := strings.TrimSpace(field.Name)
 		ref := ValidationError{WorkflowID: s.def.ID, NodeID: node.ID, FieldName: name}
 		if name == "" || !validModelKey(name) || len(name) > MaxOutputFieldNameChars || reservedOutputFieldNames[name] {
-			s.addHard(CodeInvalidOutputField, "output field name is invalid", ref)
+			s.addHard(CodeInvalidOutputField, nodeFieldMessage(node, "output", ordinal, "field name is invalid"), ref)
 		}
 		if seen[name] {
-			s.addHard(CodeDuplicateOutputField, "output field name must be unique per node", ref)
+			s.addHard(CodeDuplicateOutputField, nodeFieldMessage(node, "output", ordinal, "field name must be unique per node"), ref)
 		}
 		seen[name] = true
 		description := strings.TrimSpace(field.Description)
 		if description == "" {
-			s.addHard(CodeOutputFieldDescriptionRequired, "output field description is required", ref)
+			s.addHard(CodeOutputFieldDescriptionRequired, nodeFieldMessage(node, "output", ordinal, "description is required"), ref)
 		} else if len(description) > MaxOutputFieldDescriptionChars {
-			s.addHard(CodeOutputSchemaTooLarge, "output field description is too large", ref)
+			s.addHard(CodeOutputSchemaTooLarge, nodeFieldMessage(node, "output", ordinal, "description is too large"), ref)
 		}
 	}
 }
 
 func (s *validationState) validateInputFields(node Node) {
 	if len(node.InputFields) > 0 && node.Kind != NodeKindAgent {
-		s.addHard(CodeInvalidInputField, "only agent nodes can declare input fields", ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
+		s.addHard(CodeInvalidInputField, fmt.Sprintf("%s cannot declare input fields; only agent nodes can", nodeMessageSubject(node)), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
 		return
 	}
 	seen := map[string]bool{}
-	for _, field := range node.InputFields {
+	for index, field := range node.InputFields {
+		ordinal := index + 1
 		name := strings.TrimSpace(field.Name)
 		ref := ValidationError{WorkflowID: s.def.ID, NodeID: node.ID, InputName: name}
 		if name == "" || !validModelKey(name) || len(name) > MaxInputFieldNameChars || reservedOutputFieldNames[name] {
-			s.addHard(CodeInvalidInputField, "input field name is invalid", ref)
+			s.addHard(CodeInvalidInputField, nodeFieldMessage(node, "input", ordinal, "field name is invalid"), ref)
 		}
 		if seen[name] {
-			s.addHard(CodeDuplicateInputField, "input field name must be unique per node", ref)
+			s.addHard(CodeDuplicateInputField, nodeFieldMessage(node, "input", ordinal, "field name must be unique per node"), ref)
 		}
 		seen[name] = true
 		description := strings.TrimSpace(field.Description)
 		if description == "" {
-			s.addHard(CodeInputFieldDescriptionRequired, "input field description is required", ref)
+			s.addHard(CodeInputFieldDescriptionRequired, nodeFieldMessage(node, "input", ordinal, "description is required"), ref)
 		} else if len(description) > MaxInputFieldDescriptionChars {
-			s.addHard(CodeInputSchemaTooLarge, "input field description is too large", ref)
+			s.addHard(CodeInputSchemaTooLarge, nodeFieldMessage(node, "input", ordinal, "description is too large"), ref)
 		}
 	}
 }
@@ -469,10 +471,10 @@ func (s *validationState) validateGraph() {
 	reachable := s.reachableFrom(s.startNodes[0].ID)
 	for nodeID, node := range s.nodesByID {
 		if !reachable[nodeID] {
-			s.addSemantic(CodeNodeUnreachableFromStart, "node is not reachable from start", ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
+			s.addSemantic(CodeNodeUnreachableFromStart, fmt.Sprintf("%s not reachable", nodeMessageSubject(node)), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
 		}
 		if node.Kind != NodeKindTerminal && !s.canReachTerminal(nodeID) {
-			s.addSemantic(CodeNonTerminalCannotReachTerminal, "non-terminal node cannot reach a terminal node", ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
+			s.addSemantic(CodeNonTerminalCannotReachTerminal, fmt.Sprintf("%s cannot reach a terminal", nodeMessageSubject(node)), ValidationError{WorkflowID: s.def.ID, NodeID: node.ID})
 		}
 	}
 	s.validatePromptPlaceholders()
@@ -850,6 +852,27 @@ func (s *validationState) addSemantic(code ValidationErrorCode, message string, 
 	ref.Message = message
 	ref.BlocksContext = s.context != ValidationContextDraft
 	s.errors = append(s.errors, ref)
+}
+
+func nodeFieldMessage(node Node, fieldKind string, ordinal int, message string) string {
+	return fmt.Sprintf("%s: %s field #%d %s", nodeMessageSubject(node), fieldKind, ordinal, message)
+}
+
+func nodeMessageSubject(node Node) string {
+	return fmt.Sprintf("Node %s", nodeDisplayName(node))
+}
+
+func nodeDisplayName(node Node) string {
+	if name := strings.TrimSpace(node.DisplayName); name != "" {
+		return name
+	}
+	if key := strings.TrimSpace(string(node.Key)); key != "" {
+		return key
+	}
+	if id := strings.TrimSpace(string(node.ID)); id != "" {
+		return id
+	}
+	return "unknown"
 }
 
 func validDisplayName(value string) bool {

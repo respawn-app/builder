@@ -23,39 +23,13 @@ import type {
 
 export type { CopyText } from "./WorkflowGraphNodeMetadata";
 
-export type WorkflowGroupDragState = Readonly<{
-  label: string;
-  nodeID: string;
-  targetGroupID: string | null;
-  x: number;
-  y: number;
-}>;
-
 type WorkflowNodeContextMenuCallbacks = Readonly<{
   onCreateNodeGroup: ((nodeID: string) => void) | undefined;
   onDeleteSelection: ((selection: WorkflowGraphSelection) => void) | undefined;
+  onInspectNode: (nodeID: string) => void;
   onRemoveNodeFromGroup: ((nodeID: string) => void) | undefined;
   onSelectContextMenu: (nodeID: string) => void;
 }>;
-
-export function WorkflowGroupDragPreview({ drag }: Readonly<{ drag: WorkflowGroupDragState }>) {
-  return (
-    <IslandSurface
-      as="div"
-      className="pointer-events-none fixed z-50 grid max-w-[260px] rounded-[var(--radius-l)] px-[var(--space-3)] py-[var(--space-2)] text-sm font-semibold text-[var(--color-on-island)]"
-      data-drop-target={drag.targetGroupID === null ? "none" : "group"}
-      data-testid="workflow-group-drag-preview"
-      level={3}
-      style={{
-        borderColor: drag.targetGroupID === null ? "var(--color-outline)" : "var(--color-primary)",
-        left: drag.x + 10,
-        top: drag.y + 10,
-      }}
-    >
-      <span className="truncate">{drag.label}</span>
-    </IslandSurface>
-  );
-}
 
 function WorkflowNodeContextMenuShell({
   children,
@@ -140,6 +114,7 @@ export const WorkflowNode = memo(function WorkflowNode({
   onCopyText,
   onCreateNodeGroup,
   onDeleteSelection,
+  onInspectNode,
   onRemoveNodeFromGroup,
   onSelectContextMenu,
   selected,
@@ -170,6 +145,9 @@ export const WorkflowNode = memo(function WorkflowNode({
         aria-label="Incoming transitions"
         className="workflow-editor-handle"
         data-testid="workflow-node-target-handle"
+        onClick={(event) => {
+          inspectEditableNodeFromHandle(event, data, onInspectNode);
+        }}
         position={Position.Left}
         type="target"
       />
@@ -178,6 +156,9 @@ export const WorkflowNode = memo(function WorkflowNode({
           aria-label="Outgoing transitions"
           className="workflow-editor-handle"
           data-testid="workflow-node-source-handle"
+          onClick={(event) => {
+            inspectEditableNodeFromHandle(event, data, onInspectNode);
+          }}
           position={Position.Right}
           type="source"
         />
@@ -200,6 +181,7 @@ export const WorkflowNode = memo(function WorkflowNode({
       data={data}
       onCreateNodeGroup={onCreateNodeGroup}
       onDeleteSelection={onDeleteSelection}
+      onInspectNode={onInspectNode}
       onRemoveNodeFromGroup={onRemoveNodeFromGroup}
       onSelectContextMenu={onSelectContextMenu}
       tooltip={tooltip}
@@ -245,13 +227,14 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
   data,
   onCopyText,
   onDeleteSelection,
+  onInspectNode,
   onSelectContextMenu,
   selected,
 }: NodeProps<WorkflowGraphWorkflowNode> &
   Readonly<
     {
       onCopyText: CopyText;
-    } & Pick<WorkflowNodeContextMenuCallbacks, "onDeleteSelection" | "onSelectContextMenu">
+    } & Pick<WorkflowNodeContextMenuCallbacks, "onDeleteSelection" | "onInspectNode" | "onSelectContextMenu">
   >) {
   const nodeCard = (
     <div
@@ -266,6 +249,9 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
         aria-label="Incoming transitions"
         className="workflow-editor-handle"
         data-testid="workflow-node-target-handle"
+        onClick={(event) => {
+          inspectEditableNodeFromHandle(event, data, onInspectNode);
+        }}
         position={Position.Left}
         type="target"
       />
@@ -273,6 +259,9 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
         aria-label="Outgoing transitions"
         className="workflow-editor-handle"
         data-testid="workflow-node-source-handle"
+        onClick={(event) => {
+          inspectEditableNodeFromHandle(event, data, onInspectNode);
+        }}
         position={Position.Right}
         type="source"
       />
@@ -304,6 +293,7 @@ export const WorkflowJoinNode = memo(function WorkflowJoinNode({
       data={data}
       onCreateNodeGroup={undefined}
       onDeleteSelection={onDeleteSelection}
+      onInspectNode={onInspectNode}
       onRemoveNodeFromGroup={undefined}
       onSelectContextMenu={onSelectContextMenu}
       tooltip={tooltip}
@@ -333,6 +323,17 @@ function workflowNodeOutlineStyle(kind: string, hasError: boolean): WorkflowNode
 
 function isEditableWorkflowNodeKind(kind: string): boolean {
   return kind === "agent" || kind === "join";
+}
+
+function inspectEditableNodeFromHandle(
+  event: MouseEvent,
+  data: WorkflowGraphNodeData,
+  onInspectNode: (nodeID: string) => void,
+): void {
+  event.stopPropagation();
+  if (isEditableWorkflowNodeKind(data.kind)) {
+    onInspectNode(data.entityID);
+  }
 }
 
 function stopPropagation(event: MouseEvent): void {

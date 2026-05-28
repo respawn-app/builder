@@ -44,7 +44,6 @@ export type EditWorkflowEdgeRouteInput = Readonly<{
   transitionID?: string | undefined;
   transitionName?: string | undefined;
   edgeKey?: string | undefined;
-  targetNodeID?: string | undefined;
   requiresApproval?: boolean | undefined;
   contextMode?: string | undefined;
   contextSource?: WorkflowContextSource | undefined;

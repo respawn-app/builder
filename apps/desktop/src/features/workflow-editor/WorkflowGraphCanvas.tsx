@@ -25,12 +25,11 @@ import {
 } from "./workflowGraphCanvasInteractions";
 import { WorkflowGraphEdge as WorkflowGraphEdgeRenderer } from "./WorkflowGraphEdge";
 import {
-  WorkflowGroupDragPreview,
   WorkflowGroupNode,
   WorkflowJoinNode,
   WorkflowNode,
-  type WorkflowGroupDragState,
 } from "./WorkflowGraphNodes";
+import { WorkflowGroupDragPreview, type WorkflowGroupDragState } from "./WorkflowGroupDragPreview";
 import type { CopyText } from "./WorkflowGraphNodeMetadata";
 import { WorkflowGraphToolbar } from "./WorkflowGraphToolbar";
 import type { WorkflowGraphSelection } from "./workflowGraphSelection";
@@ -166,6 +165,10 @@ function WorkflowGraphCanvasInner({
           {...props}
           onCopyText={onCopyText}
           onDeleteSelection={onDeleteSelection}
+          onInspectNode={(nodeID) => {
+            setSelection({ kind: "node", nodeID });
+            onNodeInspect(nodeID);
+          }}
           onSelectContextMenu={(nodeID) => {
             setSelection({ kind: "node", nodeID });
           }}
@@ -177,6 +180,10 @@ function WorkflowGraphCanvasInner({
           onCopyText={onCopyText}
           onCreateNodeGroup={onCreateNodeGroup}
           onDeleteSelection={onDeleteSelection}
+          onInspectNode={(nodeID) => {
+            setSelection({ kind: "node", nodeID });
+            onNodeInspect(nodeID);
+          }}
           onRemoveNodeFromGroup={onRemoveNodeFromGroup}
           onSelectContextMenu={(nodeID) => {
             setSelection({ kind: "node", nodeID });
@@ -184,7 +191,7 @@ function WorkflowGraphCanvasInner({
         />
       ),
     }) satisfies NodeTypes,
-    [groupDrag?.targetGroupID, onCopyText, onCreateNodeGroup, onDeleteSelection, onRemoveNodeFromGroup],
+    [groupDrag?.targetGroupID, onCopyText, onCreateNodeGroup, onDeleteSelection, onNodeInspect, onRemoveNodeFromGroup],
   );
   const didFitInitialView = useRef(false);
   useEffect(() => {

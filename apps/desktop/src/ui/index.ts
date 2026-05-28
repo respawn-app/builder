@@ -2,6 +2,8 @@ export { Badge } from "./Badge";
 export type { BadgeTone } from "./Badge";
 export { Button } from "./Button";
 export type { ButtonVariant } from "./Button";
+export { DisabledInteractionGuard } from "./DisabledInteractionGuard";
+export type { DisabledInteractionGuardProps } from "./DisabledInteractionGuard";
 export { Dialog } from "./Dialog";
 export { TextArea, TextInput } from "./Field";
 export { fieldLabelClassName } from "./fieldStyles";

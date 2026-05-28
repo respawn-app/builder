@@ -98,7 +98,6 @@ export function editWorkflowEdgeRoute(
               contextSource: input.contextSource ?? item.contextSource,
               key: input.edgeKey ?? item.key,
               requiresApproval: input.requiresApproval ?? item.requiresApproval,
-              targetNodeID: input.targetNodeID ?? item.targetNodeID,
             }
           : item,
       ),

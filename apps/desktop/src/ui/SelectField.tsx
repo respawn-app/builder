@@ -39,6 +39,7 @@ export function SelectField({
   const inputId = useId();
   const hintId = `${inputId}-hint`;
   const errorId = `${inputId}-error`;
+  const controlMode = disabled || options.length === 0 ? "disabled" : "enabled";
 
   return (
     <FieldShell error={error} errorId={errorId} hint={hint} hintId={hintId} inputId={inputId} label={label}>
@@ -49,6 +50,7 @@ export function SelectField({
         errorId={errorId}
         hintId={hintId}
         inputId={inputId}
+        key={controlMode}
         name={name}
         onValueChange={onValueChange}
         options={options}
@@ -92,7 +94,13 @@ function SelectFieldControl({
   const interactiveDisabled = disabled || options.length === 0;
 
   return (
-    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
+    <DropdownMenu
+      modal={false}
+      onOpenChange={(nextOpen) => {
+        setOpen(interactiveDisabled ? false : nextOpen);
+      }}
+      open={interactiveDisabled ? false : open}
+    >
       <DropdownMenuTrigger asChild>
         <SelectTrigger
           className={className}
@@ -102,21 +110,23 @@ function SelectFieldControl({
           hintId={hintId}
           inputId={inputId}
           menuId={menuId}
-          open={open}
+          open={interactiveDisabled ? false : open}
           placeholder={placeholder}
           selectedOption={selectedOption}
         />
       </DropdownMenuTrigger>
       {name === undefined ? null : <input name={name} type="hidden" value={value} />}
-      <SelectOptionsList
-        menuId={menuId}
-        onValueChange={(nextValue) => {
-          onValueChange(nextValue);
-          setOpen(false);
-        }}
-        options={options}
-        value={value}
-      />
+      {interactiveDisabled ? null : (
+        <SelectOptionsList
+          menuId={menuId}
+          onValueChange={(nextValue) => {
+            onValueChange(nextValue);
+            setOpen(false);
+          }}
+          options={options}
+          value={value}
+        />
+      )}
     </DropdownMenu>
   );
 }

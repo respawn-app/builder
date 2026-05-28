@@ -119,7 +119,6 @@ describe("workflowEditorGraphMutations", () => {
       edgeID: "edge-start",
       edgeKey: "implement_again",
       requiresApproval: true,
-      targetNodeID: "node-agent",
       transitionID: "start_work",
       transitionName: "Start work",
     });

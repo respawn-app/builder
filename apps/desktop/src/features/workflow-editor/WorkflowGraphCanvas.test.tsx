@@ -102,6 +102,8 @@ describe("WorkflowGraphCanvas", () => {
     expect(onNodeInspect).toHaveBeenCalledWith("join");
     fireEvent.click(screen.getByTestId("workflow-graph-node-agent"));
     expect(onNodeInspect).toHaveBeenCalledWith("agent");
+    fireEvent.click(within(screen.getByTestId("workflow-graph-node-agent")).getByTestId("workflow-node-source-handle"));
+    expect(onNodeInspect).toHaveBeenLastCalledWith("agent");
     for (const element of [
       screen.getByTestId("workflow-graph-group-group"),
       screen.getByTestId("workflow-graph-node-start"),

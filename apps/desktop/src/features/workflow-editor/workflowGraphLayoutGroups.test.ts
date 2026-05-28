@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { emptyWorkflowDerivedWiring, type WorkflowDefinition, type WorkflowValidation } from "../../api";
-import type { WorkflowGraphNode } from "./workflowGraphLayout";
+import type { WorkflowGraphEdge, WorkflowGraphNode, WorkflowGraphPoint } from "./workflowGraphLayout";
 import { layoutWorkflowGraph } from "./workflowGraphLayout";
 
 describe("layoutWorkflowGraph node group bounds", () => {
@@ -14,6 +14,39 @@ describe("layoutWorkflowGraph node group bounds", () => {
       expect(rectsOverlap(group, node)).toBe(false);
     }
   });
+
+  it("keeps the group Join outside and vertically centered to the right of the group island", async () => {
+    const graph = await layoutWorkflowGraph(threeBranchGroupWorkflow, emptyValidation);
+    const group = requiredNodeByID(graph.nodes, "workflow-group-group-1");
+    const join = requiredNodeByID(graph.nodes, "join");
+
+    expect(join.parentId).toBeUndefined();
+    expect(requiredNodeByID(graph.nodes, "node-a").parentId).toBe(group.id);
+    expect(requiredNodeByID(graph.nodes, "node-b").parentId).toBe(group.id);
+    expect(requiredNodeByID(graph.nodes, "node-c").parentId).toBe(group.id);
+    expect(rectRight(group)).toBeLessThan(join.position.x);
+    expect(rectCenterY(join)).toBeCloseTo(rectCenterY(group), 6);
+    expect(rectsOverlap(group, join)).toBe(false);
+  });
+
+  it("routes group branch Edges into the centered Join instead of stale in-group coordinates", async () => {
+    const graph = await layoutWorkflowGraph(threeBranchGroupJoinWorkflow, emptyValidation);
+    const group = requiredNodeByID(graph.nodes, "workflow-group-group-1");
+    const branch = requiredNodeByID(graph.nodes, "node-a");
+    const join = requiredNodeByID(graph.nodes, "join");
+    const edge = requiredEdgeByID(graph.edges, "edge-a-join");
+    const outgoingEdge = requiredEdgeByID(graph.edges, "edge-join-done");
+    const branchRect = absoluteNodeRect(branch, graph.nodes);
+    const joinRect = absoluteNodeRect(join, graph.nodes);
+    const points = requiredRoutePoints(edge);
+    const outgoingPoints = requiredRoutePoints(outgoingEdge);
+
+    expectPointCloseTo(points[0], { x: branchRect.x + branchRect.width, y: rectCenterY(branchRect) });
+    expectPointCloseTo(points[points.length - 1], { x: joinRect.x, y: rectCenterY(joinRect) });
+    expectPointCloseTo(outgoingPoints[0], { x: joinRect.x + joinRect.width, y: rectCenterY(joinRect) });
+    expect(points.some((point) => point.x > rectRight(group) && point.x < joinRect.x)).toBe(true);
+    expect(points.every((point) => point.x >= branchRect.x + branchRect.width)).toBe(true);
+  });
 });
 
 function requiredNodeByID(nodes: readonly WorkflowGraphNode[], id: string): WorkflowGraphNode {
@@ -22,6 +55,22 @@ function requiredNodeByID(nodes: readonly WorkflowGraphNode[], id: string): Work
     throw new Error(`Node ${id} not found`);
   }
   return node;
+}
+
+function requiredEdgeByID(edges: readonly WorkflowGraphEdge[], id: string): WorkflowGraphEdge {
+  const edge = edges.find((item) => item.id === id);
+  if (edge === undefined) {
+    throw new Error(`Edge ${id} not found`);
+  }
+  return edge;
+}
+
+function requiredRoutePoints(edge: WorkflowGraphEdge): readonly WorkflowGraphPoint[] {
+  const points = edge.data?.routePoints ?? [];
+  if (points.length < 2) {
+    throw new Error(`Edge ${edge.id} has no routed points`);
+  }
+  return points;
 }
 
 function rectsOverlap(left: WorkflowGraphNode, right: WorkflowGraphNode): boolean {
@@ -35,6 +84,45 @@ function rectsOverlap(left: WorkflowGraphNode, right: WorkflowGraphNode): boolea
     left.position.y < right.position.y + rightHeight &&
     left.position.y + leftHeight > right.position.y
   );
+}
+
+function absoluteNodeRect(
+  node: WorkflowGraphNode,
+  nodes: readonly WorkflowGraphNode[],
+): Readonly<{ height: number; width: number; x: number; y: number }> {
+  const parent = node.parentId === undefined ? undefined : requiredNodeByID(nodes, node.parentId);
+  return {
+    height: rectHeight(node),
+    width: rectWidth(node),
+    x: (parent?.position.x ?? 0) + node.position.x,
+    y: (parent?.position.y ?? 0) + node.position.y,
+  };
+}
+
+function rectRight(rect: Readonly<{ position: Readonly<{ x: number }>; style?: WorkflowGraphNode["style"] }>): number {
+  return rect.position.x + Number(rect.style?.width ?? 0);
+}
+
+function rectCenterY(
+  rect: Readonly<{ height?: number; position?: Readonly<{ y: number }>; style?: WorkflowGraphNode["style"]; y?: number }>,
+): number {
+  return (rect.position?.y ?? rect.y ?? 0) + (rect.height ?? Number(rect.style?.height ?? 0)) / 2;
+}
+
+function rectWidth(node: WorkflowGraphNode): number {
+  return Number(node.style?.width ?? 0);
+}
+
+function rectHeight(node: WorkflowGraphNode): number {
+  return Number(node.style?.height ?? 0);
+}
+
+function expectPointCloseTo(actual: WorkflowGraphPoint | undefined, expected: WorkflowGraphPoint): void {
+  if (actual === undefined) {
+    throw new Error("Expected route point to exist");
+  }
+  expect(actual.x).toBeCloseTo(expected.x, 6);
+  expect(actual.y).toBeCloseTo(expected.y, 6);
 }
 
 const emptyValidation: WorkflowValidation = { valid: true, errors: [] };
@@ -64,6 +152,22 @@ const threeBranchGroupWorkflow: WorkflowDefinition = {
   edges: [],
 };
 
+const threeBranchGroupJoinWorkflow: WorkflowDefinition = {
+  ...threeBranchGroupWorkflow,
+  transitionGroups: [
+    workflowTransitionGroup("tg-a-join", "node-a", "join", "Join"),
+    workflowTransitionGroup("tg-b-join", "node-b", "join", "Join"),
+    workflowTransitionGroup("tg-c-join", "node-c", "join", "Join"),
+    workflowTransitionGroup("tg-join-done", "join", "done", "Done"),
+  ],
+  edges: [
+    workflowEdge("edge-a-join", "tg-a-join", "join"),
+    workflowEdge("edge-b-join", "tg-b-join", "join"),
+    workflowEdge("edge-c-join", "tg-c-join", "join"),
+    workflowEdge("edge-join-done", "tg-join-done", "done"),
+  ],
+};
+
 function workflowNode(id: string, name: string, kind: string, groupID: string) {
   return {
     groupID,
@@ -77,6 +181,25 @@ function workflowNode(id: string, name: string, kind: string, groupID: string) {
     outputFields: [],
     promptTemplate: "",
     subagentRole: kind === "agent" ? "coder" : "",
+    workflowID: "workflow-1",
+  };
+}
+
+function workflowTransitionGroup(id: string, sourceNodeID: string, transitionID: string, name: string) {
+  return { id, workflowID: "workflow-1", sourceNodeID, transitionID, name };
+}
+
+function workflowEdge(id: string, transitionGroupID: string, targetNodeID: string) {
+  return {
+    contextMode: "new_session",
+    contextSource: { kind: "immediate_source", nodeKey: "" },
+    id,
+    inputBindings: [],
+    key: id,
+    outputRequirements: [],
+    requiresApproval: false,
+    targetNodeID,
+    transitionGroupID,
     workflowID: "workflow-1",
   };
 }
