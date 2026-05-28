@@ -10,10 +10,12 @@ export function useWorkflowGraphDeleteConfirmationListener<
 >({
   nativeBridge,
   onConfirmed,
+  onListenerError,
   pendingDeleteRef,
 }: Readonly<{
   nativeBridge: NativeBridge;
   onConfirmed: (deleteRequest: TPending) => void;
+  onListenerError?: ((error: unknown) => void) | undefined;
   pendingDeleteRef: { current: TPending | null };
 }>): void {
   useEffect(() => {
@@ -34,10 +36,12 @@ export function useWorkflowGraphDeleteConfirmationListener<
         }
         unlisten = nextUnlisten;
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        onListenerError?.(error);
+      });
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [nativeBridge.workflowEditor, onConfirmed, pendingDeleteRef]);
+  }, [nativeBridge.workflowEditor, onConfirmed, onListenerError, pendingDeleteRef]);
 }

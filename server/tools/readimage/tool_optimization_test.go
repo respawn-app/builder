@@ -112,7 +112,7 @@ func TestCall_OptimizesTransparentPNGToJPEGOutput(t *testing.T) {
 	if format != "jpeg" {
 		t.Fatalf("expected jpeg decode format, got %q", format)
 	}
-	r, g, b, _ := decoded.At(0, 0).RGBA()
+	r, g, b := averageRGB16(decoded, image.Rect(0, 0, 8, 8))
 	if r < 0xd000 || g < 0xd000 || b < 0xd000 {
 		t.Fatalf("expected transparent pixels to flatten against white, got rgba16=(%d,%d,%d)", r, g, b)
 	}
@@ -349,8 +349,32 @@ func generatedTransparentHighEntropyImage(size int) image.Image {
 			})
 		}
 	}
-	img.SetRGBA(0, 0, color.RGBA{A: 0})
+	for y := 0; y < 16 && y < size; y++ {
+		for x := 0; x < 16 && x < size; x++ {
+			img.SetRGBA(x, y, color.RGBA{A: 0})
+		}
+	}
 	return img
+}
+
+func averageRGB16(img image.Image, bounds image.Rectangle) (uint32, uint32, uint32) {
+	clipped := bounds.Intersect(img.Bounds())
+	if clipped.Empty() {
+		return 0, 0, 0
+	}
+	var rTotal uint64
+	var gTotal uint64
+	var bTotal uint64
+	count := uint64(clipped.Dx() * clipped.Dy())
+	for y := clipped.Min.Y; y < clipped.Max.Y; y++ {
+		for x := clipped.Min.X; x < clipped.Max.X; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			rTotal += uint64(r)
+			gTotal += uint64(g)
+			bTotal += uint64(b)
+		}
+	}
+	return uint32(rTotal / count), uint32(gTotal / count), uint32(bTotal / count)
 }
 
 func encodedGIF(t *testing.T, frames int) []byte {

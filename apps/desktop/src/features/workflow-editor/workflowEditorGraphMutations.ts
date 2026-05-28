@@ -8,6 +8,7 @@ export {
   addWorkflowNodeToGroup,
   createWorkflowNodeGroupFromNode,
   deleteWorkflowNode,
+  deleteWorkflowNodeGroup,
   removeWorkflowNodeFromGroup,
 } from "./workflowEditorGraphNodeMutations";
 export {

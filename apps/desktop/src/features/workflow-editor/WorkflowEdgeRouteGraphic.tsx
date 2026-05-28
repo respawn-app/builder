@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { workflowEdgeColor } from "./workflowGraphColors";
 
@@ -15,9 +16,10 @@ export function WorkflowEdgeRouteGraphic({
   sourceLabel,
   targetLabel,
 }: WorkflowEdgeRouteGraphicProps) {
+  const { t } = useTranslation();
   return (
     <div
-      aria-label={`${sourceLabel} to ${targetLabel}`}
+      aria-label={t("workflowEditor.edgeRouteAriaLabel", { source: sourceLabel, target: targetLabel })}
       className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-[var(--space-2)]"
       data-testid="workflow-edge-route-graphic"
       role="group"

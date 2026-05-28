@@ -303,6 +303,49 @@ describe("WorkflowEditorRoute", () => {
     });
   });
 
+  it("rejects stale native graph delete confirmations after draft graph changes", async () => {
+    const opened: NativeDialogWindowOptions[] = [];
+    const nativeBridge = nativeWorkflowDeleteDialogBridge(opened);
+    const services = createTestServices(
+      [
+        ...startupRoutes,
+        { method: "workflow.get", result: workflowDefinitionResponse },
+        { method: "workflow.validate", result: invalidValidationResponse },
+        { method: "workflow.graph.validateDraft", result: graphValidationResponse },
+      ],
+      nativeBridge,
+    );
+    window.history.pushState(null, "", "/workflows/workflow-1/editor");
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <StaleNativeGraphDeleteDriver />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    const canvas = await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 });
+    fireEvent.click(within(canvas).getByText("Implement"));
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    await waitFor(() => {
+      expect(opened).toHaveLength(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add stale edge" }));
+    expect(screen.getByTestId("stale-native-delete-driver-edges")).toHaveTextContent("edge-stale");
+
+    await act(async () => {
+      await nativeBridge.workflowEditor.confirmGraphDelete({ requestID: "workflow-1-delete-1" });
+    });
+
+    expect(await screen.findByText("The graph changed before confirmation. Review the graph and delete again.")).toBeInTheDocument();
+    expect(within(canvas).getByText("Implement")).toBeInTheDocument();
+    expect(screen.getByTestId("stale-native-delete-driver-edges")).toHaveTextContent("edge-stale");
+  });
+
   it("shows local feedback when Start Node deletion is blocked", async () => {
     window.history.pushState(null, "", "/workflows/workflow-1/editor");
     render(
@@ -1745,6 +1788,36 @@ function EdgeContextMenuDeleteDriver() {
           type="workflow"
         />
       </svg>
+    </div>
+  );
+}
+
+function StaleNativeGraphDeleteDriver() {
+  const controller = useWorkflowEditorDraftController("workflow-1");
+  if (controller === null) {
+    return null;
+  }
+  return (
+    <div>
+      <span data-testid="stale-native-delete-driver-edges">
+        {controller.draft.edges.map((edge) => edge.id).join(",")}
+      </span>
+      <button
+        onClick={() => {
+          controller.dispatch({
+            input: {
+              edgeID: "edge-stale",
+              sourceNodeID: "node-1",
+              targetNodeID: "done",
+              transitionGroupID: "tg-stale",
+            },
+            type: "connectNodes",
+          });
+        }}
+        type="button"
+      >
+        Add stale edge
+      </button>
     </div>
   );
 }

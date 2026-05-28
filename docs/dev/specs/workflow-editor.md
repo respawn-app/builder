@@ -59,7 +59,7 @@
 - Edge inspectors show the source-to-target node relationship as an equal-width route graphic at the top of the route/config island, plus read-only derived input bindings, derived provision requirements, provider requirements, and validation issues.
 - Edge inspectors edit route/config facts: transition group display name, transition ID, edge key, approval flag, context-preservation mode, and context source. Context source remains visible but disabled for `new_session` edges. Context mode, context source, and approval remain visible but disabled for the edge emitted by the Start node. Disabled route controls explain that they are not applicable for the current edge configuration. Edge targets are assigned through canvas connections instead of inspector dropdowns.
 - Unsupported graph entities use read-only sidebar inspection with clear unavailable-editing behavior.
-- Topology editing includes adding and deleting agent/terminal nodes and edges, drag-connecting edges on the canvas, editing edge route/config facts, and creating/removing node group membership.
+- Topology editing includes adding and deleting agent/terminal nodes, node groups, and edges, drag-connecting edges on the canvas, editing edge route/config facts, and creating/removing node group membership.
 - Add node is a canvas action, not a right-sidebar form. It creates unconnected agent or terminal nodes; draft/execution validation explains unreachable or incomplete graph states until the operator wires them.
 - Drag-connecting from a source node to a target node creates a new transition group by default, with one edge to the target node.
 - Adding an edge to an existing transition group is an explicit fan-out/group action, not the default drag-connect behavior.

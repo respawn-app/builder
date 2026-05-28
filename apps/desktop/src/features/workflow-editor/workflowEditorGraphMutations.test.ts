@@ -14,6 +14,7 @@ import {
   createWorkflowNodeGroupFromNode,
   deleteWorkflowEdge,
   deleteWorkflowNode,
+  deleteWorkflowNodeGroup,
   editWorkflowEdgeRoute,
   removeWorkflowNodeFromGroup,
 } from "./workflowEditorGraphMutations";
@@ -226,5 +227,31 @@ describe("workflowEditorGraphMutations", () => {
 
     expect(removed.warnings).toEqual(["node group membership can be changed for agent nodes only"]);
     expect(removed.draft).toBe(created.draft);
+  });
+
+  it("deletes node groups by ungrouping branch nodes and cascading owned join rows", () => {
+    const created = createWorkflowNodeGroupFromNode(draftDefinitionFromSource(joinWorkflowDefinition), {
+      groupID: "workflow-node-group-parallel",
+      joinNodeID: "workflow-node-join-parallel",
+      nodeID: "node-branch-a",
+    });
+    const expanded = addWorkflowNodeToGroup(created.draft, {
+      groupID: "workflow-node-group-parallel",
+      nodeID: "node-branch-b",
+    });
+
+    const deleted = deleteWorkflowNodeGroup(expanded.draft, "workflow-node-group-parallel");
+
+    expect(deleted.draft.nodeGroups.some((group) => group.id === "workflow-node-group-parallel")).toBe(false);
+    expect(deleted.draft.nodes.find((node) => node.id === "node-branch-a")).toMatchObject({
+      groupID: "",
+      groupKey: "",
+    });
+    expect(deleted.draft.nodes.find((node) => node.id === "node-branch-b")).toMatchObject({
+      groupID: "",
+      groupKey: "",
+    });
+    expect(deleted.draft.nodes.some((node) => node.id === "workflow-node-join-parallel")).toBe(false);
+    expect(deleted.summary.removedNodeIDs).toEqual(["workflow-node-join-parallel"]);
   });
 });

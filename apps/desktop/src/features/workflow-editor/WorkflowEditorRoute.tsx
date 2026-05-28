@@ -48,6 +48,7 @@ import {
 import {
   deleteWorkflowEdge,
   deleteWorkflowNode,
+  deleteWorkflowNodeGroup,
   workflowEditorGraphMutationWarnings,
   type WorkflowEditorCascadeSummary,
 } from "./workflowEditorGraphMutations";
@@ -168,14 +169,37 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
   useEffect(() => {
     pendingDeleteRef.current = pendingDelete;
   }, [pendingDelete]);
-  const confirmPendingGraphDelete = useCallback((deleteRequest: PendingGraphDelete) => {
-    dispatchGraphDeletion(deleteRequest.selection, dispatch);
-    pendingDeleteRef.current = null;
-    setPendingDelete(null);
-  }, []);
+  const confirmPendingGraphDelete = useCallback(
+    (deleteRequest: PendingGraphDelete) => {
+      pendingDeleteRef.current = null;
+      setPendingDelete(null);
+      if (draftState === null) {
+        return;
+      }
+      const currentPlan = planGraphDeletion(draftState.draft, deleteRequest.selection);
+      if (
+        currentPlan.kind !== "ready" ||
+        !cascadeSummaryEquals(currentPlan.summary, deleteRequest.summary)
+      ) {
+        setDeleteWarning(t("workflowEditor.deleteConfirmationStale"));
+        return;
+      }
+      dispatchGraphDeletion(deleteRequest.selection, dispatch);
+    },
+    [draftState, t],
+  );
+  const handleGraphDeleteConfirmationListenerError = useCallback(
+    (error: unknown) => {
+      setDeleteWarning(
+        t("workflowEditor.deleteConfirmationListenerFailed", { message: errorMessage(error) }),
+      );
+    },
+    [t],
+  );
   useWorkflowGraphDeleteConfirmationListener({
     nativeBridge,
     onConfirmed: confirmPendingGraphDelete,
+    onListenerError: handleGraphDeleteConfirmationListenerError,
     pendingDeleteRef,
   });
   const deleteConfirmation = useNativeDialogFallback<PendingGraphDelete>({
@@ -199,8 +223,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
           close();
         }}
         onConfirm={() => {
-          dispatchGraphDeletion(deleteRequest.selection, dispatch);
-          setPendingDelete(null);
+          confirmPendingGraphDelete(deleteRequest);
           close();
         }}
       />
@@ -523,7 +546,8 @@ function planGraphDeletion(
     const mutation = deleteWorkflowNode(draft, selection.nodeID);
     return graphDeletionPlanFromMutation(mutation.warnings, mutation.summary);
   }
-  return { kind: "blocked", warning: "node group deletion is not available from keyboard delete yet" };
+  const mutation = deleteWorkflowNodeGroup(draft, selection.groupID);
+  return graphDeletionPlanFromMutation(mutation.warnings, mutation.summary);
 }
 
 function graphDeletionPlanFromMutation(
@@ -547,7 +571,9 @@ function dispatchGraphDeletion(
   }
   if (selection.kind === "node") {
     dispatch({ nodeID: selection.nodeID, type: "deleteNode" });
+    return;
   }
+  dispatch({ groupID: selection.groupID, type: "deleteNodeGroup" });
 }
 
 function cascadeRowCount(summary: WorkflowEditorCascadeSummary): number {
@@ -556,6 +582,24 @@ function cascadeRowCount(summary: WorkflowEditorCascadeSummary): number {
     summary.removedEdgeIDs.length +
     summary.removedTransitionGroupIDs.length
   );
+}
+
+function cascadeSummaryEquals(
+  left: WorkflowEditorCascadeSummary,
+  right: WorkflowEditorCascadeSummary,
+): boolean {
+  return (
+    stringListEquals(left.removedNodeIDs, right.removedNodeIDs) &&
+    stringListEquals(left.removedEdgeIDs, right.removedEdgeIDs) &&
+    stringListEquals(left.removedTransitionGroupIDs, right.removedTransitionGroupIDs)
+  );
+}
+
+function stringListEquals(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
 }
 
 function nextGraphDeleteRequestID(workflowID: string, indexRef: { current: number }): string {

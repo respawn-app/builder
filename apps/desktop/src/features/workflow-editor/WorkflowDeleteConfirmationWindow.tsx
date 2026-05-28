@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { errorMessage } from "../../api/errors";
 import { useAppServices } from "../../app/useAppServices";
 import { Button, Dialog, NativeDialogWindow } from "../../ui";
 import type {
@@ -36,15 +38,23 @@ export function WorkflowDeleteConfirmationWindowRoute({
 }: WorkflowDeleteConfirmationWindowTarget) {
   const { t } = useTranslation();
   const { nativeBridge } = useAppServices();
+  const [actionError, setActionError] = useState("");
   return (
     <NativeDialogWindow contentMaxWidth="420px" title={t("workflowEditor.deleteCascadeTitle")}>
       <WorkflowDeleteConfirmationContent
+        actionError={actionError}
         counts={counts}
         onCancel={() => {
-          void nativeBridge.window.closeCurrent();
+          setActionError("");
+          void nativeBridge.window.closeCurrent().catch((error: unknown) => {
+            setActionError(errorMessage(error));
+          });
         }}
         onConfirm={() => {
-          void confirmWorkflowGraphDelete(nativeBridge, requestID);
+          setActionError("");
+          void confirmWorkflowGraphDelete(nativeBridge, requestID).catch((error: unknown) => {
+            setActionError(errorMessage(error));
+          });
         }}
       />
     </NativeDialogWindow>
@@ -52,10 +62,12 @@ export function WorkflowDeleteConfirmationWindowRoute({
 }
 
 function WorkflowDeleteConfirmationContent({
+  actionError,
   counts,
   onCancel,
   onConfirm,
 }: Readonly<{
+  actionError?: string | undefined;
   counts: WorkflowDeleteConfirmationCounts;
   onCancel: () => void;
   onConfirm: () => void;
@@ -66,6 +78,9 @@ function WorkflowDeleteConfirmationContent({
       <p className="m-0 text-sm text-[var(--color-on-island)]">
         {t("workflowEditor.deleteCascadeBody")}
       </p>
+      {actionError === undefined || actionError.length === 0 ? null : (
+        <p className="m-0 text-sm text-[var(--color-error)]">{actionError}</p>
+      )}
       <ul className="m-0 grid gap-[var(--space-1)] p-0 text-sm text-[var(--color-muted)]">
         <li className="list-none">{t("workflowEditor.deleteCascadeNodes", { count: counts.nodeCount })}</li>
         <li className="list-none">{t("workflowEditor.deleteCascadeEdges", { count: counts.edgeCount })}</li>

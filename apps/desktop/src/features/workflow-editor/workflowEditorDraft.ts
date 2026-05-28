@@ -17,6 +17,7 @@ import {
   createWorkflowNodeGroupFromNode,
   deleteWorkflowEdge,
   deleteWorkflowNode,
+  deleteWorkflowNodeGroup,
   editWorkflowEdgeRoute,
   removeWorkflowNodeFromGroup,
   type AddWorkflowNodeInput,
@@ -94,6 +95,7 @@ export type WorkflowEditorDraftAction =
   | Readonly<{ type: "editEdgeRoute"; input: EditWorkflowEdgeRouteInput }>
   | Readonly<{ type: "createNodeGroupFromNode"; input: CreateWorkflowNodeGroupInput }>
   | Readonly<{ type: "addNodeToGroup"; input: AddWorkflowNodeToGroupInput }>
+  | Readonly<{ type: "deleteNodeGroup"; groupID: string }>
   | Readonly<{ type: "removeNodeFromGroup"; nodeID: string }>;
 
 export type WorkflowEditorDirtyState = Readonly<{
@@ -204,6 +206,8 @@ export function workflowEditorDraftReducer(
       return applyTopologyMutation(state, createWorkflowNodeGroupFromNode(state.draft, action.input));
     case "addNodeToGroup":
       return applyTopologyMutation(state, addWorkflowNodeToGroup(state.draft, action.input));
+    case "deleteNodeGroup":
+      return applyTopologyMutation(state, deleteWorkflowNodeGroup(state.draft, action.groupID));
     case "removeNodeFromGroup":
       return applyTopologyMutation(state, removeWorkflowNodeFromGroup(state.draft, action.nodeID));
   }

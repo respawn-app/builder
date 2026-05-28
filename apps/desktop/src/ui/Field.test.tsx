@@ -74,23 +74,35 @@ describe("Field", () => {
 
   it("does not open a disabled SelectField", () => {
     const onValueChange = vi.fn();
+    const submitted = vi.fn();
 
     render(
-      <SelectField
-        disabled
-        label="Source"
-        onValueChange={onValueChange}
-        options={[
-          { label: "Main", value: "workspace-1" },
-          { label: "Docs", value: "workspace-2" },
-        ]}
-        value="workspace-1"
-      />,
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted(Object.fromEntries(new FormData(event.currentTarget)));
+        }}
+      >
+        <SelectField
+          disabled
+          label="Source"
+          name="source"
+          onValueChange={onValueChange}
+          options={[
+            { label: "Main", value: "workspace-1" },
+            { label: "Docs", value: "workspace-2" },
+          ]}
+          value="workspace-1"
+        />
+        <button type="submit">Submit</button>
+      </form>,
     );
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(submitted).toHaveBeenCalledWith({});
     expect(onValueChange).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 
+import { initializeI18n } from "../../i18n/setup";
 import { WorkflowEdgeRouteGraphic } from "./WorkflowEdgeRouteGraphic";
+
+void initializeI18n();
 
 describe("WorkflowEdgeRouteGraphic", () => {
   it("renders equal-width route labels with a fixed-size context-colored arrow", () => {
