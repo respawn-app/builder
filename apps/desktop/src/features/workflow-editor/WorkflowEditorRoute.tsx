@@ -1,5 +1,5 @@
 /* eslint-disable complexity, max-lines -- The route coordinates data loading, draft lifecycle, save, and floating islands. */
-import { useEffect, useMemo, useReducer, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
@@ -16,11 +16,18 @@ import { errorMessage } from "../../api/errors";
 import { useSidebar } from "../../app/sidebarContext";
 import { queryKeys } from "../../app/queryKeys";
 import { useAppServices } from "../../app/useAppServices";
+import { useNativeDialogFallback } from "../../app/useNativeDialogFallback";
 import { useWindowChromeTitle } from "../../app/windowChromeTitle";
 import { Button, ErrorState, FloatingNoticeIsland, LoadingState } from "../../ui";
 import { cx } from "../../ui/classes";
 import { WorkflowValidationIssues } from "../workflow/WorkflowValidationIssues";
 import { WorkflowGraphCanvas } from "./WorkflowGraphCanvas";
+import { WorkflowDeleteConfirmationFallbackDialog } from "./WorkflowDeleteConfirmationWindow";
+import {
+  workflowDeleteConfirmationCountsFromSummary,
+  workflowDeleteConfirmationWindowOptions,
+} from "./workflowDeleteConfirmationModel";
+import { useWorkflowGraphDeleteConfirmationListener } from "./useWorkflowGraphDeleteConfirmationListener";
 import { layoutWorkflowGraph, type WorkflowGraphLayout } from "./workflowGraphLayout";
 import { useWorkflowEditorData, type WorkflowEditorData } from "./useWorkflowEditorData";
 import {
@@ -80,6 +87,8 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     );
   }
   const [pendingDelete, setPendingDelete] = useState<PendingGraphDelete | null>(null);
+  const pendingDeleteRef = useRef<PendingGraphDelete | null>(null);
+  const deleteRequestIndexRef = useRef(0);
   const [deleteWarning, setDeleteWarning] = useState("");
   const draftDefinition =
     draftState === null ? data.workflowQuery.data : workflowDefinitionFromDraft(draftState.draft);
@@ -156,6 +165,47 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
     ],
   );
   useRegisterWorkflowEditorDraftController(controller);
+  useEffect(() => {
+    pendingDeleteRef.current = pendingDelete;
+  }, [pendingDelete]);
+  const confirmPendingGraphDelete = useCallback((deleteRequest: PendingGraphDelete) => {
+    dispatchGraphDeletion(deleteRequest.selection, dispatch);
+    pendingDeleteRef.current = null;
+    setPendingDelete(null);
+  }, []);
+  useWorkflowGraphDeleteConfirmationListener({
+    nativeBridge,
+    onConfirmed: confirmPendingGraphDelete,
+    pendingDeleteRef,
+  });
+  const deleteConfirmation = useNativeDialogFallback<PendingGraphDelete>({
+    errorNoticeID: "workflow-delete-confirmation-window-error",
+    errorTitle: t("workflowEditor.deleteCascadeTitle"),
+    nativeAvailable: nativeBridge.capabilities.dialogWindows,
+    openNative: async (deleteRequest) => {
+      await nativeBridge.dialogs.openWindow(
+        workflowDeleteConfirmationWindowOptions({
+          counts: workflowDeleteConfirmationCountsFromSummary(deleteRequest.summary),
+          requestID: deleteRequest.requestID,
+          title: t("workflowEditor.deleteCascadeTitle"),
+        }),
+      );
+    },
+    renderFallback: (deleteRequest, close) => (
+      <WorkflowDeleteConfirmationFallbackDialog
+        counts={workflowDeleteConfirmationCountsFromSummary(deleteRequest.summary)}
+        onCancel={() => {
+          setPendingDelete(null);
+          close();
+        }}
+        onConfirm={() => {
+          dispatchGraphDeletion(deleteRequest.selection, dispatch);
+          setPendingDelete(null);
+          close();
+        }}
+      />
+    ),
+  });
 
   const viewState = workflowEditorViewState(data, layoutQuery);
   if (viewState.kind === "loading") {
@@ -276,7 +326,13 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
           }
           setDeleteWarning("");
           if (cascadeRowCount(plannedDelete.summary) > 1) {
-            setPendingDelete({ selection, summary: plannedDelete.summary });
+            const deleteRequest = {
+              requestID: nextGraphDeleteRequestID(workflowID, deleteRequestIndexRef),
+              selection,
+              summary: plannedDelete.summary,
+            };
+            setPendingDelete(deleteRequest);
+            void deleteConfirmation.open(deleteRequest);
             return;
           }
           dispatchGraphDeletion(selection, dispatch);
@@ -333,18 +389,7 @@ export function WorkflowEditorRoute({ projectID, workflowID }: WorkflowEditorRou
           dispatch({ source: controller.state.source, type: "reset" });
         }}
       />
-      {pendingDelete !== null ? (
-        <WorkflowDeleteConfirmationIsland
-          onCancel={() => {
-            setPendingDelete(null);
-          }}
-          onConfirm={() => {
-            dispatchGraphDeletion(pendingDelete.selection, dispatch);
-            setPendingDelete(null);
-          }}
-          summary={pendingDelete.summary}
-        />
-      ) : null}
+      {deleteConfirmation.fallback}
       {deleteWarning.length > 0 ? (
         <WorkflowDeleteBlockedIsland
           message={deleteWarning}
@@ -457,6 +502,7 @@ function confirmationFromImpact(impact: WorkflowGraphSaveImpact): WorkflowGraphS
 }
 
 type PendingGraphDelete = Readonly<{
+  requestID: string;
   selection: WorkflowGraphSelection;
   summary: WorkflowEditorCascadeSummary;
 }>;
@@ -512,6 +558,11 @@ function cascadeRowCount(summary: WorkflowEditorCascadeSummary): number {
   );
 }
 
+function nextGraphDeleteRequestID(workflowID: string, indexRef: { current: number }): string {
+  indexRef.current += 1;
+  return `${workflowID}-delete-${indexRef.current.toString()}`;
+}
+
 function deleteWarningTranslationKey(warning: string): string {
   if (warning === workflowEditorGraphMutationWarnings.startNodeDelete) {
     return "workflowEditor.startNodeDeleteBlocked";
@@ -531,57 +582,6 @@ async function copyWorkflowNodeText(
     return;
   }
   await navigator.clipboard.writeText(value);
-}
-
-function WorkflowDeleteConfirmationIsland({
-  onCancel,
-  onConfirm,
-  summary,
-}: Readonly<{
-  onCancel: () => void;
-  onConfirm: () => void;
-  summary: WorkflowEditorCascadeSummary;
-}>) {
-  const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <FloatingNoticeIsland
-      collapsed={collapsed}
-      collapseLabel={t("app.collapse")}
-      expandedClassName="floating-notice-expanded grid w-[min(360px,calc(100vw-32px))] gap-[var(--space-3)] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]"
-      expandLabel={t("app.expand")}
-      level={3}
-      onCollapsedChange={setCollapsed}
-      positionClassName="right-[var(--space-4)] top-[calc(var(--space-4)+48px)]"
-      title={t("workflowEditor.deleteCascadeTitle")}
-      tone="danger"
-    >
-      <div className="grid gap-[var(--space-3)] pt-[6px]">
-        <p className="m-0 text-sm text-[var(--color-on-island)]">
-          {t("workflowEditor.deleteCascadeBody")}
-        </p>
-        <ul className="m-0 grid gap-[var(--space-1)] p-0 text-sm text-[var(--color-muted)]">
-          <li className="list-none">{t("workflowEditor.deleteCascadeNodes", { count: summary.removedNodeIDs.length })}</li>
-          <li className="list-none">
-            {t("workflowEditor.deleteCascadeEdges", { count: summary.removedEdgeIDs.length })}
-          </li>
-          <li className="list-none">
-            {t("workflowEditor.deleteCascadeTransitionGroups", {
-              count: summary.removedTransitionGroupIDs.length,
-            })}
-          </li>
-        </ul>
-        <div className="grid grid-cols-2 gap-[var(--space-2)]">
-          <Button className="w-full" onClick={onCancel} variant="secondary">
-            {t("app.cancel")}
-          </Button>
-          <Button className="w-full" onClick={onConfirm} variant="danger">
-            {t("workflowEditor.deleteCascadeConfirm")}
-          </Button>
-        </div>
-      </div>
-    </FloatingNoticeIsland>
-  );
 }
 
 function WorkflowDeleteBlockedIsland({

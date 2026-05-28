@@ -5,6 +5,7 @@ export type { ButtonVariant } from "./Button";
 export { Dialog } from "./Dialog";
 export { TextArea, TextInput } from "./Field";
 export { fieldLabelClassName } from "./fieldStyles";
+export { identifierInputAttributes } from "./inputAttributes";
 export { SelectField } from "./SelectField";
 export type { SelectFieldOption, SelectFieldProps } from "./SelectField";
 export { EmptyState, ErrorState, LoadingState } from "./StateViews";
@@ -22,6 +23,7 @@ export { NativeDialogWindow } from "./NativeDialogWindow";
 export { Spinner } from "./Spinner";
 export type { SpinnerProps } from "./Spinner";
 export { Switch } from "../components/ui/switch";
+export { Checkbox } from "../components/ui/checkbox";
 export {
   ContextMenu,
   ContextMenuContent,
@@ -29,6 +31,22 @@ export {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../components/ui/context-menu";
+export {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 export { Toaster } from "./Sonner";
 export { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";

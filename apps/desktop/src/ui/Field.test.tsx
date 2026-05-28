@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import { SelectField } from "./SelectField";
 
 describe("Field", () => {
-  it("renders SelectField without native select markup", () => {
+  it("renders SelectField through an island dropdown portal without native select markup", async () => {
     const onValueChange = vi.fn();
 
     render(
@@ -19,12 +19,21 @@ describe("Field", () => {
       />,
     );
 
-    const trigger = screen.getByRole("combobox", { name: "Source" });
+    const trigger = screen.getByRole("button", { name: "Source" });
     expect(trigger).toHaveAttribute("data-slot", "select-trigger");
     expect(trigger).toHaveAttribute("type", "button");
 
-    fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("option", { name: "Docs" }));
+    fireEvent.pointerDown(trigger);
+    const menu = await screen.findByRole("menu");
+    expect(menu).toHaveClass(
+      "island-surface",
+      "island-surface-3",
+      "w-[var(--radix-dropdown-menu-trigger-width)]",
+      "overflow-y-auto",
+    );
+    expect(document.body).toContainElement(menu);
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Docs" }));
 
     expect(onValueChange).toHaveBeenCalledWith("workspace-2");
   });

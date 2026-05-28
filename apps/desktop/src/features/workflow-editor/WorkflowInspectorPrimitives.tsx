@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { WorkflowValidationError } from "../../api";
@@ -6,13 +6,19 @@ import { Badge, IslandSurface } from "../../ui";
 import { WorkflowValidationErrorDetailsLine } from "../workflow/WorkflowValidationIssues";
 
 export function DetailSection({ children, title }: Readonly<{ children: ReactNode; title?: string }>) {
+  const titleID = useId();
   return (
     <IslandSurface
+      aria-labelledby={title === undefined ? undefined : titleID}
       as="section"
       className="grid gap-[var(--space-2)] rounded-[var(--radius-l)] p-[var(--space-3)]"
       level={1}
     >
-      {title === undefined ? null : <h3 className="m-0 text-sm font-bold">{title}</h3>}
+      {title === undefined ? null : (
+        <h3 className="m-0 text-sm font-bold" id={titleID}>
+          {title}
+        </h3>
+      )}
       {children}
     </IslandSurface>
   );

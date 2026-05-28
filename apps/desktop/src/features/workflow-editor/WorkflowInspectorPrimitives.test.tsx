@@ -1,12 +1,25 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { initializeI18n } from "../../i18n/setup";
-import { ValidationDetails } from "./WorkflowInspectorPrimitives";
+import { DetailSection, ValidationDetails } from "./WorkflowInspectorPrimitives";
 
 void initializeI18n();
 
 describe("ValidationDetails", () => {
+  it("exposes titled inspector sections as named regions", () => {
+    render(
+      <DetailSection title="Route">
+        <button type="button">Target node</button>
+      </DetailSection>,
+    );
+
+    const routeSection = screen.getByRole("region", { name: "Route" });
+
+    expect(within(routeSection).getByRole("heading", { level: 3, name: "Route" })).toBeInTheDocument();
+    expect(within(routeSection).getByRole("button", { name: "Target node" })).toBeInTheDocument();
+  });
+
   it("shows structured validation details in inspector cards", () => {
     render(
       <ValidationDetails

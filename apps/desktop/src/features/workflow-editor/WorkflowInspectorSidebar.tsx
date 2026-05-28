@@ -32,7 +32,8 @@ import { queryKeys } from "../../app/queryKeys";
 import type { WorkflowInspectorSelection } from "../../app/sidebarContext";
 import {
   Button,
-  fieldLabelClassName,
+  Checkbox,
+  identifierInputAttributes,
   IslandSurface,
   MarkdownText,
   SelectField,
@@ -170,6 +171,7 @@ function EdgeDraftDetails({
           value={transitionGroup?.name ?? ""}
         />
         <TextInput
+          {...identifierInputAttributes}
           label={t("workflowEditor.transitionID")}
           onChange={(event) => {
             controller.dispatch({
@@ -180,6 +182,7 @@ function EdgeDraftDetails({
           value={details.transitionID}
         />
         <TextInput
+          {...identifierInputAttributes}
           label={t("workflowEditor.key")}
           onChange={(event) => {
             controller.dispatch({
@@ -222,12 +225,10 @@ function EdgeDraftDetails({
         />
         <ApprovalToggle
           checked={edge.requiresApproval}
-          checkedLabel={t("workflowEditor.required")}
           label={t("workflowEditor.requiresApproval")}
           onCheckedChange={(checked) => {
             controller.dispatch({ input: { edgeID: edge.id, requiresApproval: checked }, type: "editEdgeRoute" });
           }}
-          uncheckedLabel={t("workflowEditor.none")}
         />
       </DetailSection>
       <Bindings bindings={derivedEdge.inputBindings} />
@@ -323,6 +324,7 @@ function AgentNodeDraftDetails({
           value={node.name}
         />
         <TextInput
+          {...identifierInputAttributes}
           label={t("workflowEditor.key")}
           onChange={(event) => {
             controller.dispatch({
@@ -495,6 +497,7 @@ function SortableInputField({
           />
           {isEditingName ? (
             <input
+              {...identifierInputAttributes}
               aria-label={t("workflowEditor.inputFieldName")}
               autoFocus
               className="app-region-no-drag pointer-events-auto min-w-0 flex-1 rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[var(--space-2)] py-[var(--space-1)] font-bold text-[var(--color-on-island)] outline-none focus:border-[var(--color-primary)]"
@@ -811,35 +814,28 @@ function EdgeDetails({
 
 function ApprovalToggle({
   checked,
-  checkedLabel,
   label,
   onCheckedChange,
-  uncheckedLabel,
 }: Readonly<{
   checked: boolean;
-  checkedLabel: string;
   label: string;
   onCheckedChange: (checked: boolean) => void;
-  uncheckedLabel: string;
 }>) {
-  const inputID = useId();
+  const checkboxID = useId();
+  const labelID = `${checkboxID}-label`;
   return (
-    <div className="grid gap-[var(--space-3)]">
-      <label className={fieldLabelClassName} htmlFor={inputID}>
+    <div className="flex min-h-9 min-w-0 items-center gap-[var(--space-2)] rounded-[var(--radius-m)] text-sm font-semibold text-[var(--color-on-island)]">
+      <Checkbox
+        aria-labelledby={labelID}
+        checked={checked}
+        id={checkboxID}
+        onCheckedChange={(value) => {
+          onCheckedChange(value === true);
+        }}
+      />
+      <label className="min-w-0 cursor-pointer select-none" htmlFor={checkboxID} id={labelID}>
         {label}
       </label>
-      <div className="flex min-w-0 items-center gap-[var(--space-3)] text-sm text-[var(--color-on-island)]">
-        <input
-          checked={checked}
-          className="app-region-no-drag size-4 accent-[var(--color-primary)]"
-          id={inputID}
-          onChange={(event) => {
-            onCheckedChange(event.target.checked);
-          }}
-          type="checkbox"
-        />
-        <span>{checked ? checkedLabel : uncheckedLabel}</span>
-      </div>
     </div>
   );
 }
