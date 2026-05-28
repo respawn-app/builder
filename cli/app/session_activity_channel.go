@@ -42,6 +42,11 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				if err != nil {
 					if errors.Is(err, serverapi.ErrStreamGap) {
 						emitSessionActivityGap(pollCtx, out)
+						lastSequence = 0
+						current, err = resubscribeSessionActivity(pollCtx, subscribe, lastSequence)
+						if err == nil {
+							continue
+						}
 					}
 					return
 				}
@@ -94,7 +99,7 @@ func resubscribeSessionActivity(ctx context.Context, subscribe sessionActivitySu
 		if err == nil {
 			return sub, nil
 		}
-		if errors.Is(err, serverapi.ErrStreamGap) {
+		if errors.Is(err, serverapi.ErrStreamGap) && afterSequence > 0 {
 			return nil, err
 		}
 		if (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) && ctx.Err() != nil {
