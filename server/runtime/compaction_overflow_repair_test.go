@@ -20,7 +20,7 @@ func TestCompactionOverflowRepairCollapsesShellOutputAndPreservesInput(t *testin
 		{Type: llm.ResponseItemTypeFunctionCallOutput, CallID: "call-shell", Name: string(toolspec.ToolExecCommand), Output: json.RawMessage(`{"output":"` + strings.Repeat("x", 120_000) + `"}`)},
 	}
 
-	repaired, stats := collapseCompactionOverflowToolPayloads(items, 1)
+	repaired, stats := collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items, 1)
 	if !stats.Collapsed() {
 		t.Fatalf("expected repair stats, got %+v", stats)
 	}
@@ -51,7 +51,7 @@ func TestCompactionOverflowRepairCollapsesWriteStdinOutput(t *testing.T) {
 		{Type: llm.ResponseItemTypeFunctionCallOutput, CallID: "call-stdin", Name: string(toolspec.ToolWriteStdin), Output: json.RawMessage(`{"output":"` + strings.Repeat("x", 120_000) + `"}`)},
 	}
 
-	repaired, stats := collapseCompactionOverflowToolPayloads(items, 1)
+	repaired, stats := collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items, 1)
 	if stats.ShellOutputsCollapsed != 1 {
 		t.Fatalf("shell outputs collapsed = %d, want 1", stats.ShellOutputsCollapsed)
 	}
@@ -70,7 +70,7 @@ func TestCompactionOverflowRepairCollapsesPatchInputAndPreservesPair(t *testing.
 		{Type: llm.ResponseItemTypeCustomToolOutput, CallID: "call-patch", Name: string(toolspec.ToolPatch), Output: json.RawMessage(`{"ok":true}`)},
 	}
 
-	repaired, stats := collapseCompactionOverflowToolPayloads(items, 1)
+	repaired, stats := collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items, 1)
 	if stats.PatchInputsCollapsed != 1 {
 		t.Fatalf("patch inputs collapsed = %d, want 1", stats.PatchInputsCollapsed)
 	}
@@ -95,7 +95,7 @@ func TestCompactionOverflowRepairLeavesUnsupportedToolsUnchanged(t *testing.T) {
 		{Type: llm.ResponseItemTypeCustomToolCall, ID: "call-custom", CallID: "call-custom", Name: "custom", CustomInput: strings.Repeat("z", 80_000)},
 	}
 
-	repaired, stats := collapseCompactionOverflowToolPayloads(items, 1)
+	repaired, stats := collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items, 1)
 	if stats.Collapsed() {
 		t.Fatalf("did not expect unsupported repair stats, got %+v", stats)
 	}
@@ -111,7 +111,7 @@ func TestCompactionOverflowRepairUsesCumulativeAttemptCapOldestFirst(t *testing.
 		shellOutputRepairItem("call-3", strings.Repeat("c", 48_000)),
 	}
 
-	first, firstStats := collapseCompactionOverflowToolPayloads(items, 1)
+	first, firstStats := collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items, 1)
 	if firstStats.ShellOutputsCollapsed != 2 {
 		t.Fatalf("first attempt collapsed %d shell outputs, want 2", firstStats.ShellOutputsCollapsed)
 	}
@@ -122,12 +122,27 @@ func TestCompactionOverflowRepairUsesCumulativeAttemptCapOldestFirst(t *testing.
 		t.Fatalf("expected third output to remain for first attempt")
 	}
 
-	second, secondStats := collapseCompactionOverflowToolPayloadsAfterSavings(first, 2, firstStats.EstimatedSavedTokens)
+	second, secondStats := collapseCompactionOverflowToolPayloadsAfterSavings(first, compactionOverflowRepairTargetTokens(defaultContextWindowTokens, 2), firstStats.EstimatedSavedTokens)
 	if secondStats.ShellOutputsCollapsed != 1 {
 		t.Fatalf("second attempt newly collapsed %d shell outputs, want 1", secondStats.ShellOutputsCollapsed)
 	}
 	if bytes.Contains(second[2].Output, []byte("ccc")) {
 		t.Fatalf("expected third output collapsed by second attempt")
+	}
+}
+
+func TestCompactionOverflowRepairTargetsUseContextWindow(t *testing.T) {
+	if got, want := compactionOverflowRepairTargetTokens(100_000, 1), 10_000; got != want {
+		t.Fatalf("first repair target = %d, want %d", got, want)
+	}
+	if got, want := compactionOverflowRepairTargetTokens(100_000, 2), 20_000; got != want {
+		t.Fatalf("second repair target = %d, want %d", got, want)
+	}
+	if got, want := compactionOverflowRepairTargetTokens(100_000, 3), 40_000; got != want {
+		t.Fatalf("third repair target = %d, want %d", got, want)
+	}
+	if got := compactionOverflowRepairTargetTokens(100_000, 4); got != 0 {
+		t.Fatalf("fourth repair target = %d, want 0", got)
 	}
 }
 
@@ -200,7 +215,7 @@ func TestLocalCompactionCollapsesToolPayloadAfterOverflow(t *testing.T) {
 	}
 }
 
-func TestLocalCompactionContinuesRepairPastFortyThousandTokens(t *testing.T) {
+func TestLocalCompactionUsesTenTwentyFortyPercentRepairScheduleFromConfiguredContextWindow(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -218,12 +233,18 @@ func TestLocalCompactionContinuesRepairPastFortyThousandTokens(t *testing.T) {
 			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
 		}},
 	}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", CompactionMode: "local", ContextWindowTokens: 100_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ReasoningItems: []llm.ReasoningItem{{
+		ID:               "rs-keep",
+		EncryptedContent: strings.Repeat("reasoning", 2_000),
+	}}}); err != nil {
+		t.Fatalf("append reasoning item: %v", err)
 	}
 	for idx := 0; idx < 5; idx++ {
 		callID := fmt.Sprintf("call-shell-%d", idx)
@@ -250,14 +271,33 @@ func TestLocalCompactionContinuesRepairPastFortyThousandTokens(t *testing.T) {
 	if len(client.calls) != 4 {
 		t.Fatalf("local compaction model calls = %d, want 4", len(client.calls))
 	}
+	wantCollapsedByCall := []int{0, 1, 2, 4}
+	for callIdx, call := range client.calls {
+		collapsed := 0
+		reasoningPreserved := false
+		for _, item := range call.Items {
+			if item.Type == llm.ResponseItemTypeFunctionCallOutput && isCollapsedCompactionOverflowShellOutput(item.Output) {
+				collapsed++
+			}
+			if item.Type == llm.ResponseItemTypeReasoning && item.ID == "rs-keep" {
+				reasoningPreserved = item.EncryptedContent == strings.Repeat("reasoning", 2_000)
+			}
+		}
+		if collapsed != wantCollapsedByCall[callIdx] {
+			t.Fatalf("collapsed shell outputs on call %d = %d, want %d", callIdx+1, collapsed, wantCollapsedByCall[callIdx])
+		}
+		if !reasoningPreserved {
+			t.Fatalf("reasoning item changed or missing on compaction repair call %d: %+v", callIdx+1, call.Items)
+		}
+	}
 	collapsed := 0
 	for _, item := range client.calls[3].Items {
 		if item.Type == llm.ResponseItemTypeFunctionCallOutput && isCollapsedCompactionOverflowShellOutput(item.Output) {
 			collapsed++
 		}
 	}
-	if collapsed != 5 {
-		t.Fatalf("collapsed shell outputs on fourth attempt = %d, want 5", collapsed)
+	if collapsed != 4 {
+		t.Fatalf("collapsed shell outputs on fourth attempt = %d, want 4", collapsed)
 	}
 }
 
@@ -299,6 +339,10 @@ func shellOutputRepairItem(callID string, output string) llm.ResponseItem {
 		Name:   string(toolspec.ToolExecCommand),
 		Output: json.RawMessage(`{"output":"` + output + `"}`),
 	}
+}
+
+func collapseCompactionOverflowToolPayloadsForDefaultWindowRepairAttempt(items []llm.ResponseItem, repairAttempt int) ([]llm.ResponseItem, compactionOverflowRepairStats) {
+	return collapseCompactionOverflowToolPayloadsAfterSavings(items, compactionOverflowRepairTargetTokens(defaultContextWindowTokens, repairAttempt), 0)
 }
 
 func mustMarshalItemsForRepairTest(t *testing.T, items []llm.ResponseItem) string {

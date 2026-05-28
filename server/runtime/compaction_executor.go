@@ -72,8 +72,9 @@ func (e *Engine) compactWithContextRepairRetry(
 ) (llm.CompactionResponse, []llm.ResponseItem, compactionOverflowRepairStats, error) {
 	currentInput := llm.CloneResponseItems(request.InputItems)
 	repairStats := compactionOverflowRepairStats{}
+	contextWindowTokens := e.contextWindowTokens()
 
-	for attempt := 0; attempt <= compactOverflowRetries; attempt++ {
+	for attempt := 0; attempt <= len(compactionOverflowRepairTargetPercents); attempt++ {
 		req := request
 		req.InputItems = llm.CloneResponseItems(currentInput)
 
@@ -81,11 +82,12 @@ func (e *Engine) compactWithContextRepairRetry(
 		if err == nil {
 			return resp, currentInput, repairStats, nil
 		}
-		if !isCompactionContextOverflow(err) || attempt == compactOverflowRetries {
+		if !isCompactionContextOverflow(err) || attempt == len(compactionOverflowRepairTargetPercents) {
 			return llm.CompactionResponse{}, nil, repairStats, err
 		}
 
-		nextInput, repaired := collapseCompactionOverflowToolPayloadsAfterSavings(currentInput, attempt+1, repairStats.EstimatedSavedTokens)
+		targetSavedTokens := compactionOverflowRepairTargetTokens(contextWindowTokens, attempt+1)
+		nextInput, repaired := collapseCompactionOverflowToolPayloadsAfterSavings(currentInput, targetSavedTokens, repairStats.EstimatedSavedTokens)
 		if !repaired.Collapsed() {
 			return llm.CompactionResponse{}, nil, repairStats, err
 		}
@@ -230,15 +232,17 @@ func (e *Engine) localCompactionSummaryWithRepair(ctx context.Context, input []l
 	requestTools := e.requestTools(ctx, workflowMode)
 	window := localCompactionWindow(input)
 	repairStats := compactionOverflowRepairStats{}
-	for repairAttempt := 0; repairAttempt <= compactOverflowRetries; repairAttempt++ {
+	contextWindowTokens := e.contextWindowTokens()
+	for repairAttempt := 0; repairAttempt <= len(compactionOverflowRepairTargetPercents); repairAttempt++ {
 		summary, err := e.localCompactionSummaryFromWindow(ctx, locked, systemPrompt, window, instructions, requestTools, mode)
 		if err == nil {
 			return summary, repairStats, nil
 		}
-		if !isCompactionContextOverflow(err) || repairAttempt == compactOverflowRetries {
+		if !isCompactionContextOverflow(err) || repairAttempt == len(compactionOverflowRepairTargetPercents) {
 			return "", repairStats, err
 		}
-		nextWindow, repaired := collapseCompactionOverflowToolPayloadsAfterSavings(window, repairAttempt+1, repairStats.EstimatedSavedTokens)
+		targetSavedTokens := compactionOverflowRepairTargetTokens(contextWindowTokens, repairAttempt+1)
+		nextWindow, repaired := collapseCompactionOverflowToolPayloadsAfterSavings(window, targetSavedTokens, repairStats.EstimatedSavedTokens)
 		if !repaired.Collapsed() {
 			return "", repairStats, err
 		}

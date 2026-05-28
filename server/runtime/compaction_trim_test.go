@@ -142,6 +142,13 @@ func TestRemoteCompactionCollapsesToolPayloadAfterOverflowAndWarnsOnCacheBreak(t
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
+	reasoningPayload := strings.Repeat("encrypted-reasoning", 4_000)
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ReasoningItems: []llm.ReasoningItem{{
+		ID:               "rs-preserve",
+		EncryptedContent: reasoningPayload,
+	}}}); err != nil {
+		t.Fatalf("append reasoning message: %v", err)
+	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
 		t.Fatalf("append assistant tool call: %v", err)
 	}
@@ -191,6 +198,7 @@ func TestRemoteCompactionCollapsesToolPayloadAfterOverflowAndWarnsOnCacheBreak(t
 	hasCall := false
 	hasOutput := false
 	outputCollapsed := false
+	reasoningPreserved := false
 	for _, item := range secondInput {
 		switch item.Type {
 		case llm.ResponseItemTypeFunctionCall:
@@ -205,10 +213,17 @@ func TestRemoteCompactionCollapsesToolPayloadAfterOverflowAndWarnsOnCacheBreak(t
 				hasOutput = true
 				outputCollapsed = isCollapsedCompactionOverflowShellOutput(item.Output)
 			}
+		case llm.ResponseItemTypeReasoning:
+			if item.ID == "rs-preserve" {
+				reasoningPreserved = item.EncryptedContent == reasoningPayload
+			}
 		}
 	}
 	if !hasCall || !hasOutput {
 		t.Fatalf("expected retry repair to preserve function_call/function_call_output pair, got %+v", secondInput)
+	}
+	if !reasoningPreserved {
+		t.Fatalf("expected retry repair to preserve encrypted reasoning item byte-for-byte, got %+v", secondInput)
 	}
 	if !outputCollapsed {
 		t.Fatalf("expected retry repair to collapse shell output, got %+v", secondInput)

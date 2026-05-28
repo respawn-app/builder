@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	compactionOverflowRepairAttemptTokens = 20_000
-	compactionOverflowCollapsedText       = "<collapsed>"
+	compactionOverflowCollapsedText = "<collapsed>"
 )
+
+var compactionOverflowRepairTargetPercents = []int{10, 20, 40}
 
 type compactionOverflowRepairStats struct {
 	ShellOutputsCollapsed int
@@ -41,16 +42,11 @@ func compactionOverflowRepairDiagnosticText(stats compactionOverflowRepairStats)
 	)
 }
 
-func collapseCompactionOverflowToolPayloads(items []llm.ResponseItem, attemptNumber int) ([]llm.ResponseItem, compactionOverflowRepairStats) {
-	return collapseCompactionOverflowToolPayloadsAfterSavings(items, attemptNumber, 0)
-}
-
-func collapseCompactionOverflowToolPayloadsAfterSavings(items []llm.ResponseItem, attemptNumber int, existingSavedTokens int) ([]llm.ResponseItem, compactionOverflowRepairStats) {
+func collapseCompactionOverflowToolPayloadsAfterSavings(items []llm.ResponseItem, targetSavedTokens int, existingSavedTokens int) ([]llm.ResponseItem, compactionOverflowRepairStats) {
 	out := llm.CloneResponseItems(items)
-	if attemptNumber <= 0 || len(out) == 0 {
+	if targetSavedTokens <= 0 || len(out) == 0 {
 		return out, compactionOverflowRepairStats{}
 	}
-	targetSavedTokens := attemptNumber * compactionOverflowRepairAttemptTokens
 	currentSavedTokens := existingSavedTokens
 	if currentSavedTokens >= targetSavedTokens {
 		return out, compactionOverflowRepairStats{}
@@ -91,6 +87,16 @@ func collapseCompactionOverflowToolPayloadsAfterSavings(items []llm.ResponseItem
 		}
 	}
 	return out, stats
+}
+
+func compactionOverflowRepairTargetTokens(contextWindowTokens int, repairAttempt int) int {
+	if repairAttempt <= 0 || repairAttempt > len(compactionOverflowRepairTargetPercents) {
+		return 0
+	}
+	if contextWindowTokens <= 0 {
+		contextWindowTokens = defaultContextWindowTokens
+	}
+	return (contextWindowTokens * compactionOverflowRepairTargetPercents[repairAttempt-1]) / 100
 }
 
 func compactionOverflowRepairCallTools(items []llm.ResponseItem) map[string]toolspec.ID {
