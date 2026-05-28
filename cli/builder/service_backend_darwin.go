@@ -95,11 +95,20 @@ func (launchdServiceBackend) Stop(ctx context.Context, spec serviceSpec) error {
 }
 
 func (launchdServiceBackend) Restart(ctx context.Context, spec serviceSpec) error {
+	path, err := launchdPlistPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("Builder background service is not installed; run `builder service install`")
+		}
+		return fmt.Errorf("stat launchd plist: %w", err)
+	}
 	if loaded, _ := launchdLoaded(ctx); !loaded {
 		return launchdServiceBackend{}.Start(ctx, spec)
 	}
-	_, err := runServiceCommand(ctx, "launchctl", "kickstart", "-k", launchdDomain()+"/"+serviceLaunchdLabel)
-	return err
+	return reloadLaunchdService(ctx, spec, path)
 }
 
 func (launchdServiceBackend) Status(ctx context.Context, spec serviceSpec) (serviceStatus, error) {
