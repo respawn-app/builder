@@ -75,6 +75,8 @@
 - Workspace boundary checks apply after symlink resolution; symlink escapes are blocked by default.
 - Outside-workspace file reads are approval-gated through the same approver contract as `patch`.
 - Approved outside-workspace reads are written to run logs with requested/resolved path metadata.
+- Default `view_image` raster attachment materialization optimizes performance and minimizes provider-bound data transfer by validating then attempting to re-encode every supported non-raw raster image with source bytes `>= 100 KiB` into JPEG. If JPEG optimization fails or does not reduce payload size, Builder preserves the original validated image bytes and enforces the attachment size cap.
+- WebP input and WebP transcoding are disabled while Builder lacks a reliable maintained WebP encoder. Re-enabling WebP requires a provider-compatible encoder and regression coverage against issue #308's invalid compressed-alpha output.
 
 ## Tool Output And Failures
 
