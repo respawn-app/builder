@@ -21,6 +21,8 @@ describe("WorkflowEdgeRouteGraphic", () => {
     expect(graphic).toHaveClass("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
     expect(source).toHaveClass("min-w-0", "place-items-center", "text-center");
     expect(target).toHaveClass("min-w-0", "place-items-center", "text-center");
+    expect(source).not.toHaveClass("border", "bg-[var(--color-island-1)]");
+    expect(target).not.toHaveClass("border", "bg-[var(--color-island-1)]");
     expect(within(source).getByText("Backlog")).toHaveClass("truncate");
     expect(within(target).getByText("Planning Preparation")).toHaveClass("truncate");
     expect(arrow).toHaveClass("size-5");

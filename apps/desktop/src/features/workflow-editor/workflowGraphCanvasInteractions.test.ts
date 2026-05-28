@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { connectWorkflowGraphNodes, groupIDFromPoint } from "./workflowGraphCanvasInteractions";
+import { connectWorkflowGraphNodes, groupIDFromPoint, inspectNode } from "./workflowGraphCanvasInteractions";
 
 describe("workflowGraphCanvasInteractions", () => {
   afterEach(() => {
@@ -35,6 +35,29 @@ describe("workflowGraphCanvasInteractions", () => {
     connectWorkflowGraphNodes({ source: "agent", target: "join" }, onConnectNodes);
 
     expect(onConnectNodes).toHaveBeenCalledWith("agent", "join");
+  });
+
+  it("opens inspectors for editable workflow node kinds", () => {
+    const onGroupInspect = vi.fn();
+    const onNodeInspect = vi.fn();
+
+    for (const kind of ["start", "agent", "join", "terminal"]) {
+      inspectNode(
+        {
+          data: { entityID: `node-${kind}`, entityKind: "node", kind },
+          id: `node-${kind}`,
+          position: { x: 0, y: 0 },
+        },
+        onGroupInspect,
+        onNodeInspect,
+      );
+    }
+
+    expect(onNodeInspect).toHaveBeenNthCalledWith(1, "node-start");
+    expect(onNodeInspect).toHaveBeenNthCalledWith(2, "node-agent");
+    expect(onNodeInspect).toHaveBeenNthCalledWith(3, "node-join");
+    expect(onNodeInspect).toHaveBeenNthCalledWith(4, "node-terminal");
+    expect(onGroupInspect).not.toHaveBeenCalled();
   });
 });
 

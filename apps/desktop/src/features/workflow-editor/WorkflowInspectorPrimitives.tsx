@@ -7,9 +7,15 @@ import { WorkflowValidationErrorDetailsLine } from "../workflow/WorkflowValidati
 
 export function DetailSection({
   children,
+  hideTitle = false,
   leading,
   title,
-}: Readonly<{ children: ReactNode; leading?: ReactNode | undefined; title?: string | undefined }>) {
+}: Readonly<{
+  children: ReactNode;
+  hideTitle?: boolean | undefined;
+  leading?: ReactNode | undefined;
+  title?: string | undefined;
+}>) {
   const titleID = useId();
   return (
     <IslandSurface
@@ -20,7 +26,7 @@ export function DetailSection({
     >
       {leading}
       {title === undefined ? null : (
-        <h3 className="m-0 text-sm font-bold" id={titleID}>
+        <h3 className={hideTitle ? "sr-only" : "m-0 text-sm font-bold"} id={titleID}>
           {title}
         </h3>
       )}

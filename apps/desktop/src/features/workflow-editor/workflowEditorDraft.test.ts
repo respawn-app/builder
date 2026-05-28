@@ -42,6 +42,61 @@ describe("workflowEditorDraft", () => {
     expect(workflowDefinitionFromDraft(graph.draft).nodes[0]?.name).toBe("Edited agent");
   });
 
+  it("edits fixed node identity without exposing execution fields", () => {
+    const source = {
+      ...workflowDefinition,
+      nodes: [
+        {
+          groupID: "",
+          groupKey: "",
+          id: "node-start",
+          inputFields: [],
+          joinInputProviders: [],
+          key: "backlog",
+          kind: "start",
+          name: "Backlog",
+          outputFields: [],
+          promptTemplate: "",
+          subagentRole: "",
+          workflowID: "workflow-1",
+        },
+        {
+          groupID: "",
+          groupKey: "",
+          id: "node-terminal",
+          inputFields: [],
+          joinInputProviders: [],
+          key: "done",
+          kind: "terminal",
+          name: "Done",
+          outputFields: [],
+          promptTemplate: "",
+          subagentRole: "",
+          workflowID: "workflow-1",
+        },
+      ],
+    };
+    const renamedStart = workflowEditorDraftReducer(initializeWorkflowEditorDraft(source), {
+      nodeID: "node-start",
+      patch: { key: "incoming", name: "Incoming" },
+      type: "editNodeIdentity",
+    });
+    const renamedTerminal = workflowEditorDraftReducer(renamedStart, {
+      nodeID: "node-terminal",
+      patch: { key: "archived", name: "Archived" },
+      type: "editNodeIdentity",
+    });
+
+    expect(workflowDefinitionFromDraft(renamedTerminal.draft).nodes).toMatchObject([
+      { key: "incoming", kind: "start", name: "Incoming", promptTemplate: "", subagentRole: "" },
+      { key: "archived", kind: "terminal", name: "Archived", promptTemplate: "", subagentRole: "" },
+    ]);
+    expect(workflowEditorDraftGraph(renamedTerminal).nodes).toEqual([
+      expect.objectContaining({ key: "incoming", kind: "start", name: "Incoming" }),
+      expect.objectContaining({ key: "archived", kind: "terminal", name: "Archived" }),
+    ]);
+  });
+
   it("keeps draft versions stable when topology mutations are blocked", () => {
     const initial = initializeWorkflowEditorDraft(workflowDefinition);
     const blocked = workflowEditorDraftReducer(initial, {
@@ -166,6 +221,45 @@ describe("workflowEditorDraft", () => {
     expect(workflowDefinitionFromDraft(duplicateChanged.draft).edges[0]?.contextSource.nodeKey).toBe(
       "implement",
     );
+  });
+
+  it("cascades selected-node context source references for fixed node key edits", () => {
+    const edge = workflowDefinition.edges[0];
+    if (edge === undefined) {
+      throw new Error("Expected workflow fixture to include an edge.");
+    }
+    const terminalSource = {
+      ...workflowDefinition,
+      nodes: [
+        {
+          groupID: "",
+          groupKey: "",
+          id: "node-terminal",
+          inputFields: [],
+          joinInputProviders: [],
+          key: "done",
+          kind: "terminal",
+          name: "Done",
+          outputFields: [],
+          promptTemplate: "",
+          subagentRole: "",
+          workflowID: "workflow-1",
+        },
+      ],
+      edges: [
+        {
+          ...edge,
+          contextSource: { kind: "selected_node", nodeKey: "done" },
+        },
+      ],
+    } satisfies WorkflowDefinition;
+    const changed = workflowEditorDraftReducer(initializeWorkflowEditorDraft(terminalSource), {
+      nodeID: "node-terminal",
+      patch: { key: "archived" },
+      type: "editNodeIdentity",
+    });
+
+    expect(workflowDefinitionFromDraft(changed.draft).edges[0]?.contextSource.nodeKey).toBe("archived");
   });
 
   it("acknowledges a dirty remote conflict until another remote revision arrives", () => {

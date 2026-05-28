@@ -146,14 +146,18 @@ function WorkflowGraphCanvasInner({
       workflow: (props: EdgeProps<WorkflowGraphEdge>) => (
         <WorkflowGraphEdgeRenderer
           {...props}
+          onDeleteSelection={onDeleteSelection}
           onInspect={(edgeID) => {
             setSelection({ edgeID, kind: "edge" });
             onEdgeInspect(edgeID);
           }}
+          onSelectContextMenu={(edgeID) => {
+            setSelection({ edgeID, kind: "edge" });
+          }}
         />
       ),
     }),
-    [onEdgeInspect],
+    [onDeleteSelection, onEdgeInspect],
   );
   const nodeTypes = useMemo(
     () => ({

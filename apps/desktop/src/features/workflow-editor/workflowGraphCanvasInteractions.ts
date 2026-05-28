@@ -8,6 +8,7 @@ import type {
   WorkflowGraphNode,
   WorkflowGraphNodeData,
 } from "./workflowGraphLayout";
+import { isInspectableWorkflowNodeKind } from "./workflowGraphNodeKinds";
 
 export function connectWorkflowGraphNodes(
   connection: Connection,
@@ -57,7 +58,7 @@ export function inspectNode(
     return;
   }
   if (isWorkflowGraphNodeData(data)) {
-    if (!isEditableWorkflowNodeKind(data.kind)) {
+    if (!isInspectableWorkflowNodeKind(data.kind)) {
       return;
     }
     onNodeInspect(data.entityID);
@@ -128,8 +129,4 @@ function groupIDFromBounds(x: number, y: number): string | null {
     )
     .sort((left, right) => left.area - right.area);
   return candidates[0]?.groupID ?? null;
-}
-
-function isEditableWorkflowNodeKind(kind: string): boolean {
-  return kind === "agent" || kind === "join";
 }

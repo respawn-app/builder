@@ -68,6 +68,11 @@ export type WorkflowEditorDraftAction =
   | Readonly<{ type: "reloadConflict" }>
   | Readonly<{ type: "editWorkflowMetadata"; name: string; description: string }>
   | Readonly<{
+      type: "editNodeIdentity";
+      nodeID: string;
+      patch: Partial<Pick<WorkflowNode, "key" | "name">>;
+    }>
+  | Readonly<{
       type: "editAgentNode";
       nodeID: string;
       patch: Partial<Pick<WorkflowNode, "key" | "name" | "subagentRole" | "promptTemplate">>;
@@ -135,6 +140,13 @@ export function workflowEditorDraftReducer(
         },
         false,
       );
+    case "editNodeIdentity":
+      return editDraftNode(state, action.nodeID, (node) => {
+        if (node.kind !== "start" && node.kind !== "terminal" && node.kind !== "agent") {
+          return node;
+        }
+        return { ...node, ...action.patch };
+      });
     case "editAgentNode":
       return editDraftNode(state, action.nodeID, (node) => {
         if (node.kind !== "agent") {

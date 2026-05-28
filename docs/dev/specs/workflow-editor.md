@@ -43,6 +43,7 @@
 - Draft state owns workflow metadata, agent-node editable fields, required inputs, join provider selections, dirty state, remote conflicts, and draft version counters.
 - Workflow metadata editing includes workflow name and description through the workflow inspector/settings sidebar.
 - Agent node editing includes display name, key, assignee role, prompt template, and required input fields.
+- Start/backlog and terminal node editing includes display name and key. Their kind, execution config, and required inputs stay fixed by domain validation.
 - Required input fields are consuming-node-owned, draggable sidebar islands.
 - New required inputs insert at the top of the node input list.
 - Required input names render as bold ellipsized inline titles that become compact inputs when clicked.
@@ -57,7 +58,7 @@
 - Inspector validation sections keep their section header and render errors as plain bullet lists without card containers or code chips.
 - Edge inspectors show the source-to-target node relationship as an equal-width route graphic at the top of the route/config island, plus read-only derived input bindings, derived provision requirements, provider requirements, and validation issues.
 - Edge inspectors edit route/config facts: transition group display name, transition ID, edge key, approval flag, context-preservation mode, and context source. Context source remains visible but disabled for `new_session` edges. Context mode, context source, and approval remain visible but disabled for the edge emitted by the Start node. Disabled route controls explain that they are not applicable for the current edge configuration. Edge targets are assigned through canvas connections instead of inspector dropdowns.
-- Start/backlog and unsupported graph entities use read-only sidebar inspection with clear unavailable-editing behavior.
+- Unsupported graph entities use read-only sidebar inspection with clear unavailable-editing behavior.
 - Topology editing includes adding and deleting agent/terminal nodes and edges, drag-connecting edges on the canvas, editing edge route/config facts, and creating/removing node group membership.
 - Add node is a canvas action, not a right-sidebar form. It creates unconnected agent or terminal nodes; draft/execution validation explains unreachable or incomplete graph states until the operator wires them.
 - Drag-connecting from a source node to a target node creates a new transition group by default, with one edge to the target node.

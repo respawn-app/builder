@@ -20,6 +20,21 @@ describe("ValidationDetails", () => {
     expect(within(routeSection).getByRole("button", { name: "Target node" })).toBeInTheDocument();
   });
 
+  it("can preserve region naming while visually hiding a section title", () => {
+    render(
+      <DetailSection hideTitle title="Route">
+        <button type="button">Context mode</button>
+      </DetailSection>,
+    );
+
+    const routeSection = screen.getByRole("region", { name: "Route" });
+    const hiddenHeading = within(routeSection).getByRole("heading", { level: 3, name: "Route" });
+
+    expect(hiddenHeading).toHaveClass("sr-only");
+    expect(within(routeSection).queryByText("Route", { selector: "h3:not(.sr-only)" })).not.toBeInTheDocument();
+    expect(within(routeSection).getByRole("button", { name: "Context mode" })).toBeInTheDocument();
+  });
+
   it("shows structured validation details as a plain bullet list", () => {
     render(
       <ValidationDetails

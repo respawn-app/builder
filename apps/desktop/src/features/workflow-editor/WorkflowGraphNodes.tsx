@@ -14,6 +14,7 @@ import {
 } from "../../ui";
 import { cx } from "../../ui/classes";
 import { WorkflowNodeInfoTooltipContent, type CopyText } from "./WorkflowGraphNodeMetadata";
+import { isInspectableWorkflowNodeKind } from "./workflowGraphNodeKinds";
 import type { WorkflowGraphSelection } from "./workflowGraphSelection";
 import type {
   WorkflowGraphGroupNode,
@@ -169,7 +170,7 @@ export const WorkflowNode = memo(function WorkflowNode({
       <span className="min-w-0 truncate font-mono text-sm text-[var(--color-muted)]">{data.role}</span>
     </IslandSurface>
   );
-  const tooltip = !isEditableWorkflowNodeKind(data.kind) ? (
+  const tooltip = data.kind === "join" ? (
     <WorkflowNodeInfoTooltipContent
       nodeID={data.entityID}
       nodeKey={data.key}
@@ -321,17 +322,13 @@ function workflowNodeOutlineStyle(kind: string, hasError: boolean): WorkflowNode
   return { "--workflow-editor-node-outline-color": "var(--color-outline)" };
 }
 
-function isEditableWorkflowNodeKind(kind: string): boolean {
-  return kind === "agent" || kind === "join";
-}
-
 function inspectEditableNodeFromHandle(
   event: MouseEvent,
   data: WorkflowGraphNodeData,
   onInspectNode: (nodeID: string) => void,
 ): void {
   event.stopPropagation();
-  if (isEditableWorkflowNodeKind(data.kind)) {
+  if (isInspectableWorkflowNodeKind(data.kind)) {
     onInspectNode(data.entityID);
   }
 }

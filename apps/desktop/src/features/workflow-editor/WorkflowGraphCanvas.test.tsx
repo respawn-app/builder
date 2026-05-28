@@ -96,8 +96,9 @@ describe("WorkflowGraphCanvas", () => {
       "--workflow-editor-node-outline-color": "var(--color-error)",
     });
     fireEvent.click(screen.getByTestId("workflow-graph-node-start"));
+    expect(onNodeInspect).toHaveBeenLastCalledWith("start");
     fireEvent.click(screen.getByTestId("workflow-graph-node-terminal"));
-    expect(onNodeInspect).not.toHaveBeenCalled();
+    expect(onNodeInspect).toHaveBeenLastCalledWith("terminal");
     fireEvent.click(screen.getByTestId("workflow-graph-node-join"));
     expect(onNodeInspect).toHaveBeenCalledWith("join");
     fireEvent.click(screen.getByTestId("workflow-graph-node-agent"));
@@ -115,13 +116,21 @@ describe("WorkflowGraphCanvas", () => {
       expect(element.className).not.toContain("border-l");
     }
 
-    fireEvent.pointerMove(screen.getByTestId("workflow-graph-node-start"), { pointerType: "mouse" });
+    fireEvent.pointerMove(screen.getByTestId("workflow-graph-node-join"), { pointerType: "mouse" });
     await waitFor(() => {
       expect(screen.getByTestId("workflow-node-metadata-tooltip")).toHaveClass("w-[420px]");
     });
     expect(screen.getByTestId("workflow-node-metadata-tooltip")).toHaveClass(
       "max-w-[calc(100vw-var(--space-4)*2)]",
     );
+    fireEvent.pointerMove(screen.getByTestId("workflow-graph-node-start"), { pointerType: "mouse" });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Copy Key backlog" })).not.toBeInTheDocument();
+    });
+    fireEvent.pointerMove(screen.getByTestId("workflow-graph-node-terminal"), { pointerType: "mouse" });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Copy Key done" })).not.toBeInTheDocument();
+    });
     expect(screen.getByTestId("workflow-editor-tools")).toHaveClass(
       "island-surface-3",
       "fixed",

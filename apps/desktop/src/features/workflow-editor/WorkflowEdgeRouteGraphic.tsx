@@ -39,7 +39,7 @@ export function WorkflowEdgeRouteGraphic({
 function WorkflowEdgeRouteGraphicNode({ label, testID }: Readonly<{ label: string; testID: string }>) {
   return (
     <span
-      className="grid min-h-10 min-w-0 place-items-center rounded-[var(--radius-m)] border border-[var(--color-outline)] bg-[var(--color-island-1)] px-[var(--space-2)] py-[var(--space-2)] text-center text-sm font-semibold text-[var(--color-on-island)]"
+      className="grid min-h-10 min-w-0 place-items-center px-[var(--space-2)] py-[var(--space-2)] text-center text-sm font-semibold text-[var(--color-on-island)]"
       data-testid={testID}
     >
       <span className="block max-w-full truncate">{label}</span>

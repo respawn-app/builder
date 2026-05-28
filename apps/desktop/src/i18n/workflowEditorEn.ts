@@ -16,6 +16,7 @@ export const workflowEditorEnglish = {
   createNodeGroup: "Create node group",
   ungroupNode: "Ungroup",
   deleteNode: "Delete node",
+  deleteEdge: "Delete edge",
   dragNodeToGroup: "Drag node to group",
   inspectWorkflow: "Inspect workflow",
   inspectNode: "Inspect node",

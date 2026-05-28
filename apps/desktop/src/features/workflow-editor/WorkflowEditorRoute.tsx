@@ -619,7 +619,7 @@ function WorkflowEditorLegendIsland() {
     <FloatingNoticeIsland
       collapsed={collapsed}
       collapseLabel={t("app.collapse")}
-      expandedClassName="floating-notice-expanded grid h-[204px] w-[min(300px,calc(100vw-var(--space-2)*2))] gap-[6px] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-3)]"
+      expandedClassName="floating-notice-expanded grid h-[204px] w-[min(300px,calc(100vw-var(--space-2)*2))] gap-[6px] overflow-hidden rounded-[var(--radius-xl)] p-[var(--space-2)]"
       expandLabel={t("app.expand")}
       level={3}
       onCollapsedChange={setCollapsed}

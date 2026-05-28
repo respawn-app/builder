@@ -103,31 +103,14 @@ function WorkflowDraftInspectorContent({
     return <WorkflowDraftDetails controller={controller} />;
   }
   if (selection.kind === "node") {
-    const node = controller.draft.nodes.find((item) => item.id === selection.nodeID);
-    if (node === undefined) {
-      return <MissingEntity entityID={selection.nodeID} />;
-    }
-    if (node.kind === "agent") {
-      return (
-        <AgentNodeDraftDetails
-          controller={controller}
-          definition={definition}
-          node={node}
-          validation={validation}
-        />
-      );
-    }
-    if (node.kind === "join") {
-      return (
-        <JoinNodeDraftDetails
-          controller={controller}
-          definition={definition}
-          node={node}
-          validation={validation}
-        />
-      );
-    }
-    return <NodeDetails definition={definition} node={{ ...node, outputFields: [] }} validation={validation} />;
+    return (
+      <WorkflowDraftNodeDetails
+        controller={controller}
+        definition={definition}
+        nodeID={selection.nodeID}
+        validation={validation}
+      />
+    );
   }
   if (selection.kind === "group") {
     const group = definition.nodeGroups.find((item) => item.id === selection.groupID);
@@ -143,6 +126,47 @@ function WorkflowDraftInspectorContent({
   ) : (
     <EdgeDraftDetails controller={controller} definition={definition} edge={edge} validation={validation} />
   );
+}
+
+function WorkflowDraftNodeDetails({
+  controller,
+  definition,
+  nodeID,
+  validation,
+}: Readonly<{
+  controller: WorkflowEditorDraftController;
+  definition: WorkflowDefinition;
+  nodeID: string;
+  validation: WorkflowValidation;
+}>) {
+  const node = controller.draft.nodes.find((item) => item.id === nodeID);
+  if (node === undefined) {
+    return <MissingEntity entityID={nodeID} />;
+  }
+  if (node.kind === "agent") {
+    return (
+      <AgentNodeDraftDetails
+        controller={controller}
+        definition={definition}
+        node={node}
+        validation={validation}
+      />
+    );
+  }
+  if (node.kind === "join") {
+    return (
+      <JoinNodeDraftDetails
+        controller={controller}
+        definition={definition}
+        node={node}
+        validation={validation}
+      />
+    );
+  }
+  if (node.kind === "start" || node.kind === "terminal") {
+    return <FixedNodeDraftDetails controller={controller} node={node} validation={validation} />;
+  }
+  return <NodeDetails definition={definition} node={{ ...node, outputFields: [] }} validation={validation} />;
 }
 
 function EdgeDraftDetails({
@@ -168,6 +192,7 @@ function EdgeDraftDetails({
   return (
     <InspectorStack>
       <DetailSection
+        hideTitle
         leading={
           <WorkflowEdgeRouteGraphic
             contextMode={edge.contextMode}
@@ -255,11 +280,13 @@ function EdgeDraftDetails({
           </DisabledInteractionGuard>
         </TooltipProvider>
       </DetailSection>
-      <Bindings bindings={derivedEdge.inputBindings} />
-      <FieldSummary
-        fields={derivedEdge.requiredProvisionFields}
-        title={t("workflowEditor.derivedProvisionRequirements")}
-      />
+      {derivedEdge.inputBindings.length === 0 ? null : <Bindings bindings={derivedEdge.inputBindings} />}
+      {derivedEdge.requiredProvisionFields.length === 0 ? null : (
+        <FieldSummary
+          fields={derivedEdge.requiredProvisionFields}
+          title={t("workflowEditor.derivedProvisionRequirements")}
+        />
+      )}
       {derivedEdge.requiredProviderFields.length === 0 ? null : (
         <FieldSummary
           fields={derivedEdge.requiredProviderFields}
@@ -389,6 +416,51 @@ function AgentNodeDraftDetails({
         fields={derivedNodeWiring(definition, node.id).possibleProvisionFields}
         title={t("workflowEditor.provides")}
       />
+      <ValidationDetails errors={errors} />
+    </InspectorStack>
+  );
+}
+
+function FixedNodeDraftDetails({
+  controller,
+  node,
+  validation,
+}: Readonly<{
+  controller: WorkflowEditorDraftController;
+  node: DraftWorkflowNode;
+  validation: WorkflowValidation;
+}>) {
+  const { t } = useTranslation();
+  const errors = validation.errors.filter(
+    (error) => error.nodeID === node.id || error.relatedIDs.includes(node.id),
+  );
+  return (
+    <InspectorStack>
+      <DetailSection>
+        <TextInput
+          label={t("workflowEditor.displayName")}
+          onChange={(event) => {
+            controller.dispatch({
+              nodeID: node.id,
+              patch: { name: event.target.value },
+              type: "editNodeIdentity",
+            });
+          }}
+          value={node.name}
+        />
+        <TextInput
+          {...identifierInputAttributes}
+          label={t("workflowEditor.key")}
+          onChange={(event) => {
+            controller.dispatch({
+              nodeID: node.id,
+              patch: { key: event.target.value },
+              type: "editNodeIdentity",
+            });
+          }}
+          value={node.key}
+        />
+      </DetailSection>
       <ValidationDetails errors={errors} />
     </InspectorStack>
   );
@@ -801,6 +873,7 @@ function EdgeDetails({
   return (
     <InspectorStack>
       <DetailSection
+        hideTitle
         leading={
           <WorkflowEdgeRouteGraphic
             contextMode={edge.contextMode}
@@ -824,11 +897,13 @@ function EdgeDetails({
           value={edge.requiresApproval ? t("workflowEditor.required") : t("workflowEditor.none")}
         />
       </DetailSection>
-      <Bindings bindings={derivedEdge.inputBindings} />
-      <FieldSummary
-        fields={derivedEdge.requiredProvisionFields}
-        title={t("workflowEditor.derivedProvisionRequirements")}
-      />
+      {derivedEdge.inputBindings.length === 0 ? null : <Bindings bindings={derivedEdge.inputBindings} />}
+      {derivedEdge.requiredProvisionFields.length === 0 ? null : (
+        <FieldSummary
+          fields={derivedEdge.requiredProvisionFields}
+          title={t("workflowEditor.derivedProvisionRequirements")}
+        />
+      )}
       {derivedEdge.requiredProviderFields.length === 0 ? null : (
         <FieldSummary
           fields={derivedEdge.requiredProviderFields}
