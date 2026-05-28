@@ -188,7 +188,7 @@ export function removeWorkflowNodeFromGroup(
   const remainingBranches = ungroupedNodes.filter(
     (item) => item.groupID === groupID && item.kind === "agent",
   );
-  if (remainingBranches.length > 0) {
+  if (remainingBranches.length > 1) {
     return {
       draft: {
         ...draft,
@@ -200,7 +200,7 @@ export function removeWorkflowNodeFromGroup(
       warnings: [],
     };
   }
-  return removeLastBranchNodeGroup(draft, groupID, nodeID, ungroupedNodes);
+  return dissolveWorkflowNodeGroup(draft, groupID, { nodeID, kind: "node" });
 }
 
 export function deleteWorkflowNodeGroup(
@@ -211,42 +211,17 @@ export function deleteWorkflowNodeGroup(
   if (group === undefined) {
     return unchanged(draft, workflowEditorGraphMutationWarnings.nodeGroupNotFound);
   }
-  const joinIDs = new Set(
-    draft.nodes.filter((item) => item.groupID === groupID && item.kind === "join").map((item) => item.id),
-  );
-  const removedJoinTransitionGroupIDs = new Set(
-    draft.transitionGroups.filter((item) => joinIDs.has(item.sourceNodeID)).map((item) => item.id),
-  );
-  const removedEdgeIDs = draft.edges
-    .filter((edge) => joinIDs.has(edge.targetNodeID) || removedJoinTransitionGroupIDs.has(edge.transitionGroupID))
-    .map((edge) => edge.id);
+  return dissolveWorkflowNodeGroup(draft, group.id, workflowSelection);
+}
+
+function dissolveWorkflowNodeGroup(
+  draft: DraftWorkflowDefinition,
+  groupID: string,
+  nextSelection: WorkflowEditorGraphMutationResult["nextSelection"],
+): WorkflowEditorGraphMutationResult {
   const ungroupedNodes = draft.nodes.map((node) =>
     node.groupID === groupID && node.kind !== "join" ? { ...node, groupID: "", groupKey: "" } : node,
   );
-  const afterJoinDeletes =
-    joinIDs.size === 0 ? { ...draft, nodes: ungroupedNodes } : deleteNodeIDsInternal({ ...draft, nodes: ungroupedNodes }, joinIDs);
-  const nextDraft = {
-    ...afterJoinDeletes,
-    nodeGroups: afterJoinDeletes.nodeGroups.filter((item) => item.id !== groupID),
-  };
-  return {
-    draft: nextDraft,
-    nextSelection: workflowSelection,
-    summary: {
-      removedEdgeIDs,
-      removedNodeIDs: [...joinIDs],
-      removedTransitionGroupIDs: transitionGroupDifference(draft, nextDraft),
-    },
-    warnings: [],
-  };
-}
-
-function removeLastBranchNodeGroup(
-  draft: DraftWorkflowDefinition,
-  groupID: string,
-  nodeID: string,
-  ungroupedNodes: readonly DraftWorkflowNode[],
-): WorkflowEditorGraphMutationResult {
   const joinIDs = new Set(
     ungroupedNodes.filter((item) => item.groupID === groupID && item.kind === "join").map((item) => item.id),
   );
@@ -263,7 +238,7 @@ function removeLastBranchNodeGroup(
       ...afterJoinDeletes,
       nodeGroups: afterJoinDeletes.nodeGroups.filter((group) => group.id !== groupID),
     },
-    nextSelection: workflowSelection,
+    nextSelection,
     summary: {
       removedEdgeIDs,
       removedNodeIDs: [...joinIDs],

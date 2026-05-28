@@ -163,11 +163,9 @@ describe("workflowEditorGraphMutations", () => {
       "node-branch-b",
       "workflow-node-join-parallel",
     ]);
+    expect(removed.draft.nodes.find((node) => node.id === "node-branch-a")?.groupID).toBe("");
     expect(removed.draft.nodes.find((node) => node.id === "node-branch-b")?.groupID).toBe("");
-    expect(removed.draft.nodeGroups.find((group) => group.id === "workflow-node-group-parallel")?.nodeIDs).toEqual([
-      "node-branch-a",
-      "workflow-node-join-parallel",
-    ]);
+    expect(removed.draft.nodeGroups.some((group) => group.id === "workflow-node-group-parallel")).toBe(false);
   });
 
   it("safely infers v1 node group fan-out and join topology when adding an unconnected branch", () => {
@@ -216,6 +214,61 @@ describe("workflowEditorGraphMutations", () => {
     });
   });
 
+  it("infers v1 node group topology when adding another branch to an existing valid group", () => {
+    const withReview = addWorkflowNode(draftDefinitionFromSource(groupableWorkflowDefinition), {
+      id: "node-review",
+      kind: "agent",
+      name: "Review",
+    });
+    const created = createWorkflowNodeGroupFromNode(withReview.draft, {
+      groupID: "workflow-node-group-parallel",
+      joinNodeID: "node-join",
+      nodeID: "node-agent",
+    });
+    const withTwoBranches = addWorkflowNodeToGroup(created.draft, {
+      groupID: "workflow-node-group-parallel",
+      inferredTopologyIDs: {
+        addedBranchJoinEdgeID: "edge-review-join",
+        addedBranchJoinTransitionGroupID: "group-review-join",
+        existingBranchJoinEdgeID: "edge-implement-join",
+        existingBranchJoinTransitionGroupID: "group-implement-join",
+        fanoutEdgeID: "edge-start-review",
+      },
+      nodeID: "node-review",
+    });
+    const withAudit = addWorkflowNode(withTwoBranches.draft, {
+      id: "node-audit",
+      kind: "agent",
+      name: "Audit",
+    });
+
+    const withThreeBranches = addWorkflowNodeToGroup(withAudit.draft, {
+      groupID: "workflow-node-group-parallel",
+      inferredTopologyIDs: {
+        addedBranchJoinEdgeID: "edge-audit-join",
+        addedBranchJoinTransitionGroupID: "group-audit-join",
+        existingBranchJoinEdgeID: "edge-unused-existing-join",
+        existingBranchJoinTransitionGroupID: "group-unused-existing-join",
+        fanoutEdgeID: "edge-start-audit",
+      },
+      nodeID: "node-audit",
+    });
+
+    expect(edgesForTransition(withThreeBranches.draft, "group-source-agent").map((edge) => edge.targetNodeID).sort()).toEqual([
+      "node-agent",
+      "node-audit",
+      "node-review",
+    ]);
+    expect(edgesForTransition(withThreeBranches.draft, "group-audit-join")).toMatchObject([
+      { id: "edge-audit-join", targetNodeID: "node-join" },
+    ]);
+    expect(withThreeBranches.draft.transitionGroups.find((group) => group.id === "group-audit-join")).toMatchObject({
+      sourceNodeID: "node-audit",
+      transitionID: "implement_parallel_join",
+    });
+    expect(withThreeBranches.draft.edges.some((edge) => edge.id === "edge-unused-existing-join")).toBe(false);
+  });
+
   it("guards join nodes from ungrouping", () => {
     const created = createWorkflowNodeGroupFromNode(draftDefinitionFromSource(workflowDefinition), {
       groupID: "workflow-node-group-parallel",
@@ -253,5 +306,43 @@ describe("workflowEditorGraphMutations", () => {
     });
     expect(deleted.draft.nodes.some((node) => node.id === "workflow-node-join-parallel")).toBe(false);
     expect(deleted.summary.removedNodeIDs).toEqual(["workflow-node-join-parallel"]);
+  });
+
+  it("dissolves node groups instead of leaving a single remaining branch", () => {
+    const withBranch = addWorkflowNode(draftDefinitionFromSource(groupableWorkflowDefinition), {
+      id: "node-review",
+      kind: "agent",
+      name: "Review",
+    });
+    const created = createWorkflowNodeGroupFromNode(withBranch.draft, {
+      groupID: "workflow-node-group-parallel",
+      joinNodeID: "node-join",
+      nodeID: "node-agent",
+    });
+    const expanded = addWorkflowNodeToGroup(created.draft, {
+      groupID: "workflow-node-group-parallel",
+      inferredTopologyIDs: {
+        addedBranchJoinEdgeID: "edge-review-join",
+        addedBranchJoinTransitionGroupID: "group-review-join",
+        existingBranchJoinEdgeID: "edge-implement-join",
+        existingBranchJoinTransitionGroupID: "group-implement-join",
+        fanoutEdgeID: "edge-start-review",
+      },
+      nodeID: "node-review",
+    });
+
+    const removed = removeWorkflowNodeFromGroup(expanded.draft, "node-review");
+
+    expect(removed.draft.nodeGroups.some((group) => group.id === "workflow-node-group-parallel")).toBe(false);
+    expect(removed.draft.nodes.find((node) => node.id === "node-agent")).toMatchObject({
+      groupID: "",
+      groupKey: "",
+    });
+    expect(removed.draft.nodes.find((node) => node.id === "node-review")).toMatchObject({
+      groupID: "",
+      groupKey: "",
+    });
+    expect(removed.draft.nodes.some((node) => node.id === "node-join")).toBe(false);
+    expect(removed.summary.removedNodeIDs).toEqual(["node-join"]);
   });
 });
