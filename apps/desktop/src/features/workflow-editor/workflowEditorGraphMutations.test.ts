@@ -269,6 +269,51 @@ describe("workflowEditorGraphMutations", () => {
     });
   });
 
+  it("resets rehomed downstream routes to new session when inferring node group topology", () => {
+    const draft = draftDefinitionFromSource({
+      ...groupableWorkflowDefinition,
+      edges: groupableWorkflowDefinition.edges.map((edge) =>
+        edge.id === "edge-done"
+          ? {
+              ...edge,
+              contextMode: "continue_session",
+              contextSource: { kind: "immediate_source", nodeKey: "" },
+            }
+          : edge,
+      ),
+    });
+    const withBranch = addWorkflowNode(draft, {
+      id: "node-review",
+      kind: "agent",
+      name: "Review",
+    });
+    const created = createWorkflowNodeGroupFromNode(withBranch.draft, {
+      groupID: "workflow-node-group-parallel",
+      joinNodeID: "node-join",
+      nodeID: "node-agent",
+    });
+
+    const expanded = addWorkflowNodeToGroup(created.draft, {
+      groupID: "workflow-node-group-parallel",
+      inferredTopologyIDs: {
+        addedBranchJoinEdgeID: "edge-review-join",
+        addedBranchJoinTransitionGroupID: "group-review-join",
+        existingBranchJoinEdgeID: "edge-implement-join",
+        existingBranchJoinTransitionGroupID: "group-implement-join",
+        fanoutEdgeID: "edge-start-review",
+      },
+      nodeID: "node-review",
+    });
+
+    expect(expanded.draft.transitionGroups.find((group) => group.id === "group-done")).toMatchObject({
+      sourceNodeID: "node-join",
+    });
+    expect(expanded.draft.edges.find((edge) => edge.id === "edge-done")).toMatchObject({
+      contextMode: "new_session",
+      contextSource: { kind: "immediate_source", nodeKey: "" },
+    });
+  });
+
   it("blocks adding a branch when node group topology cannot be inferred safely", () => {
     const withBranch = addWorkflowNode(draftDefinitionFromSource(workflowDefinition), {
       id: "node-review",

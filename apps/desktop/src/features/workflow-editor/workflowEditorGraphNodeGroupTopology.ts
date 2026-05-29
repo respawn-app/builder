@@ -1,3 +1,4 @@
+import type { WorkflowEdge } from "../../api";
 import type { DraftWorkflowDefinition, DraftWorkflowNode } from "./workflowEditorDraft";
 import { uniqueWorkflowModelKey } from "./workflowEditorGraphKeys";
 import {
@@ -166,7 +167,7 @@ function applyNodeGroupV1Topology(
 ): DraftWorkflowDefinition {
   return {
     ...draft,
-    edges: [...draft.edges, ...nodeGroupV1TopologyEdges(draft, ids, topology)],
+    edges: [...nodeGroupV1TopologyExistingEdges(draft, topology), ...nodeGroupV1TopologyEdges(draft, ids, topology)],
     transitionGroups: [
       ...draft.transitionGroups.map((group) =>
         topology.kind === "initial" && group.id === topology.downstreamGroup.id
@@ -175,6 +176,25 @@ function applyNodeGroupV1Topology(
       ),
       ...nodeGroupV1TopologyTransitionGroups(draft, ids, topology),
     ],
+  };
+}
+
+function nodeGroupV1TopologyExistingEdges(
+  draft: DraftWorkflowDefinition,
+  topology: InferredNodeGroupTopology,
+): readonly WorkflowEdge[] {
+  return topology.kind === "initial"
+    ? draft.edges.map((edge) =>
+        edge.transitionGroupID === topology.downstreamGroup.id ? resetEdgeToNewSession(edge) : edge,
+      )
+    : draft.edges;
+}
+
+function resetEdgeToNewSession(edge: WorkflowEdge): WorkflowEdge {
+  return {
+    ...edge,
+    contextMode: "new_session",
+    contextSource: { kind: "immediate_source", nodeKey: "" },
   };
 }
 
