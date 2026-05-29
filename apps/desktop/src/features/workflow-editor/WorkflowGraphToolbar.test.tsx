@@ -40,11 +40,11 @@ describe("WorkflowGraphToolbar", () => {
       ]),
     ).toEqual([
       ["Add node", "Add node"],
-      ["Inspect workflow", "Edit workflow"],
-      ["Actual size", "Actual size"],
-      ["Zoom in", "Zoom +"],
-      ["Zoom out", "Zoom -"],
-      ["Fit view", "Fit view"],
+      ["Inspect workflow", null],
+      ["Actual size", null],
+      ["Zoom in", null],
+      ["Zoom out", null],
+      ["Fit view", null],
     ]);
 
     const addNode = toolbar.getByRole("button", { name: "Add node" });

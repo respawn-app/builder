@@ -296,7 +296,6 @@ function CanvasTool({
           aria-label={label}
           className="grid size-9 place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent text-[var(--color-on-island)] transition-colors hover:bg-[var(--color-island-1)] focus-visible:border-[var(--color-primary)] focus-visible:outline-none"
           onClick={onClick}
-          title={tooltip}
           type="button"
         >
           {children}

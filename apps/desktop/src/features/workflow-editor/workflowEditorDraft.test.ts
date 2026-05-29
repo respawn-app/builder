@@ -126,6 +126,18 @@ describe("workflowEditorDraft", () => {
     expect(graph.nodes[0]?.inputFields).toEqual([{ description: "Plan", name: "plan" }]);
   });
 
+  it("preserves source output fields when serializing draft graph saves", () => {
+    const renamed = workflowEditorDraftReducer(initializeWorkflowEditorDraft(workflowDefinition), {
+      nodeID: "node-agent",
+      patch: { name: "Edited agent" },
+      type: "editAgentNode",
+    });
+
+    expect(workflowDefinitionFromDraft(renamed.draft).nodes[0]?.outputFields).toEqual([
+      { description: "Summary", name: "summary" },
+    ]);
+  });
+
   it("assigns one join provider per input", () => {
     const baseNode = workflowDefinition.nodes[0];
     if (baseNode === undefined) {
