@@ -506,9 +506,11 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 	if targetWorktree.git.IsMain {
 		return serverapi.WorktreeDeleteResponse{}, fmt.Errorf("cannot delete main workspace worktree: %w", serverapi.ErrWorktreeBlocked)
 	}
-	if err := s.ensureDeletionUnblocked(ctx, workspaceCtx.sessionID, targetWorktree.record.ID, targetWorktree.record.CanonicalRoot); err != nil {
+	releaseDeletionSessionLeases, err := s.ensureDeletionUnblocked(ctx, workspaceCtx.sessionID, targetWorktree.record.ID, targetWorktree.record.CanonicalRoot)
+	if err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
 	}
+	defer releaseDeletionSessionLeases()
 	if workspaceCtx.target.WorktreeID == targetWorktree.record.ID {
 		mainWorktree, mainFound := findMainWorktree(synced)
 		if !mainFound {
@@ -521,6 +523,9 @@ func (s *Service) DeleteWorktree(ctx context.Context, req serverapi.WorktreeDele
 		if err != nil {
 			return serverapi.WorktreeDeleteResponse{}, err
 		}
+	}
+	if err := s.retargetActiveSessionsFromDeletedWorktree(ctx, workspaceCtx.workspaceID, workspaceCtx.workspaceRoot, targetWorktree.record, workspaceCtx.sessionID); err != nil {
+		return serverapi.WorktreeDeleteResponse{}, err
 	}
 	if err := s.git.Prune(ctx, workspaceCtx.workspaceRoot); err != nil {
 		return serverapi.WorktreeDeleteResponse{}, err
@@ -733,7 +738,41 @@ func (s *Service) syncWorkspace(ctx context.Context, workspaceID string, workspa
 	return synced, nil
 }
 
+type worktreeSessionRetargetFilter func(metadata.WorktreeSessionBlocker) bool
+
+type worktreeReminderFactory func(metadata.WorktreeRecord, clientui.SessionExecutionTarget) (session.WorktreeReminderState, error)
+
+type worktreeSessionRetargetOptions struct {
+	filter          worktreeSessionRetargetFilter
+	reminder        worktreeReminderFactory
+	rollbackOnError bool
+}
+
+type pendingWorktreeSessionRetarget struct {
+	sessionID      string
+	previousTarget clientui.SessionExecutionTarget
+}
+
 func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord) error {
+	return s.retargetSessionsFromWorktree(ctx, workspaceID, workspaceRoot, worktree, worktreeSessionRetargetOptions{reminder: worktreeReminderStateForMissingWorktree})
+}
+
+func (s *Service) retargetActiveSessionsFromDeletedWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord, currentSessionID string) error {
+	trimmedCurrentSessionID := strings.TrimSpace(currentSessionID)
+	return s.retargetSessionsFromWorktree(ctx, workspaceID, workspaceRoot, worktree, worktreeSessionRetargetOptions{
+		filter: func(blocker metadata.WorktreeSessionBlocker) bool {
+			sessionID := strings.TrimSpace(blocker.SessionID)
+			if sessionID == "" || sessionID == trimmedCurrentSessionID {
+				return false
+			}
+			return s.active != nil && s.active.IsSessionRuntimeActive(sessionID)
+		},
+		reminder:        worktreeReminderStateForDeletedWorktree,
+		rollbackOnError: true,
+	})
+}
+
+func (s *Service) retargetSessionsFromWorktree(ctx context.Context, workspaceID string, workspaceRoot string, worktree metadata.WorktreeRecord, options worktreeSessionRetargetOptions) error {
 	if s == nil || s.metadata == nil || s.runtime == nil {
 		return errors.New("worktree service dependencies are required")
 	}
@@ -747,16 +786,19 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 	if err != nil {
 		return err
 	}
-	type pendingRuntimeSync struct {
-		sessionID      string
-		previousTarget clientui.SessionExecutionTarget
+	reminderFactory := options.reminder
+	if reminderFactory == nil {
+		reminderFactory = worktreeReminderStateForMissingWorktree
 	}
-	pending := make([]pendingRuntimeSync, 0, len(blockers))
+	pending := make([]pendingWorktreeSessionRetarget, 0, len(blockers))
 	collected := make([]error, 0)
 	appendErr := func(sessionID string, err error) {
-		collected = append(collected, fmt.Errorf("retarget session %q from missing worktree %q: %w", strings.TrimSpace(sessionID), trimmedWorktreeID, err))
+		collected = append(collected, fmt.Errorf("retarget session %q from worktree %q: %w", strings.TrimSpace(sessionID), trimmedWorktreeID, err))
 	}
 	for _, blocker := range blockers {
+		if options.filter != nil && !options.filter(blocker) {
+			continue
+		}
 		previousTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, blocker.SessionID)
 		if err != nil {
 			appendErr(blocker.SessionID, err)
@@ -765,22 +807,35 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 		cwdRelpath := clampCwdRelpath(previousTarget.CwdRelpath, trimmedWorkspaceRoot)
 		if err := s.metadata.UpdateSessionExecutionTargetByID(ctx, blocker.SessionID, trimmedWorkspaceID, "", cwdRelpath); err != nil {
 			appendErr(blocker.SessionID, err)
+			if options.rollbackOnError {
+				return errors.Join(errors.Join(collected...), s.rollbackRetargetedSessions(ctx, trimmedWorkspaceID, pending))
+			}
 			continue
 		}
-		pending = append(pending, pendingRuntimeSync{sessionID: blocker.SessionID, previousTarget: previousTarget})
+		pending = append(pending, pendingWorktreeSessionRetarget{sessionID: blocker.SessionID, previousTarget: previousTarget})
 	}
 	for _, item := range pending {
 		nextTarget, err := s.metadata.ResolveSessionExecutionTarget(ctx, item.sessionID)
 		if err != nil {
 			appendErr(item.sessionID, err)
+			if options.rollbackOnError {
+				return errors.Join(errors.Join(collected...), s.rollbackRetargetedSessions(ctx, trimmedWorkspaceID, pending))
+			}
 			continue
 		}
-		reminder, err := worktreeReminderStateForMissingWorktree(worktree, nextTarget)
+		reminder, err := reminderFactory(worktree, nextTarget)
 		if err != nil {
 			appendErr(item.sessionID, err)
+			if options.rollbackOnError {
+				return errors.Join(errors.Join(collected...), s.rollbackRetargetedSessions(ctx, trimmedWorkspaceID, pending))
+			}
 			continue
 		}
 		if err := s.runtime.SyncExecutionTarget(ctx, item.sessionID, nextTarget, &reminder); err != nil {
+			appendErr(item.sessionID, err)
+			if options.rollbackOnError {
+				return errors.Join(errors.Join(collected...), s.rollbackRetargetedSessions(ctx, trimmedWorkspaceID, pending))
+			}
 			rollbackCtx, cancel := liveRollbackContext(ctx)
 			rollbackErr := s.metadata.UpdateSessionExecutionTargetByID(rollbackCtx, item.sessionID, trimmedWorkspaceID, item.previousTarget.WorktreeID, item.previousTarget.CwdRelpath)
 			cancel()
@@ -788,9 +843,32 @@ func (s *Service) retargetSessionsFromMissingWorktree(ctx context.Context, works
 				appendErr(item.sessionID, errors.Join(err, fmt.Errorf("rollback execution target after runtime sync failure: %w", rollbackErr)))
 				continue
 			}
-			appendErr(item.sessionID, err)
 			continue
 		}
+	}
+	return errors.Join(collected...)
+}
+
+func (s *Service) rollbackRetargetedSessions(ctx context.Context, workspaceID string, pending []pendingWorktreeSessionRetarget) error {
+	if len(pending) == 0 {
+		return nil
+	}
+	collected := make([]error, 0)
+	for i := len(pending) - 1; i >= 0; i-- {
+		item := pending[i]
+		sessionID := strings.TrimSpace(item.sessionID)
+		rollbackCtx, cancel := liveRollbackContext(ctx)
+		if err := s.metadata.UpdateSessionExecutionTargetByID(rollbackCtx, sessionID, workspaceID, item.previousTarget.WorktreeID, item.previousTarget.CwdRelpath); err != nil {
+			collected = append(collected, fmt.Errorf("rollback session %q execution target: %w", sessionID, err))
+			cancel()
+			continue
+		}
+		if s.active != nil && s.active.IsSessionRuntimeActive(sessionID) {
+			if err := s.runtime.SyncExecutionTarget(rollbackCtx, sessionID, item.previousTarget, nil); err != nil {
+				collected = append(collected, fmt.Errorf("rollback session %q runtime target: %w", sessionID, err))
+			}
+		}
+		cancel()
 	}
 	return errors.Join(collected...)
 }
@@ -888,6 +966,14 @@ func worktreeReminderStateForTransition(previous *syncedWorktree, previousTarget
 }
 
 func worktreeReminderStateForMissingWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
+	return worktreeReminderStateForExitedWorktree(worktree, nextTarget)
+}
+
+func worktreeReminderStateForDeletedWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
+	return worktreeReminderStateForExitedWorktree(worktree, nextTarget)
+}
+
+func worktreeReminderStateForExitedWorktree(worktree metadata.WorktreeRecord, nextTarget clientui.SessionExecutionTarget) (session.WorktreeReminderState, error) {
 	gitMetadata, err := worktreeGitMetadataFromRecord(worktree)
 	if err != nil {
 		return session.WorktreeReminderState{}, err
@@ -918,29 +1004,52 @@ func worktreeGitMetadataFromRecord(worktree metadata.WorktreeRecord) (GitWorktre
 	return gitMetadata, nil
 }
 
-func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID string, worktreeID string, worktreeRoot string) error {
+func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID string, worktreeID string, worktreeRoot string) (func(), error) {
 	taskBlockers, err := s.metadata.Queries().CountNonTerminalTasksByManagedWorktree(ctx, sql.NullString{String: strings.TrimSpace(worktreeID), Valid: true})
 	if err != nil {
-		return err
+		return func() {}, err
 	}
 	if taskBlockers > 0 {
-		return errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree is still managed by %d non-terminal workflow task(s)", taskBlockers))
+		return func() {}, errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree is still managed by %d non-terminal workflow task(s)", taskBlockers))
 	}
 	blockers, err := s.metadata.ListSessionsTargetingWorktree(ctx, worktreeID)
 	if err != nil {
-		return err
+		return func() {}, err
 	}
 	otherSessions := make([]metadata.WorktreeSessionBlocker, 0, len(blockers))
+	leases := make([]primaryrun.Lease, 0, len(blockers))
+	releaseLeases := func() {
+		for i := len(leases) - 1; i >= 0; i-- {
+			if leases[i] != nil {
+				leases[i].Release()
+			}
+		}
+	}
 	for _, blocker := range blockers {
-		if strings.TrimSpace(blocker.SessionID) == strings.TrimSpace(currentSessionID) {
+		sessionID := strings.TrimSpace(blocker.SessionID)
+		if sessionID == "" || sessionID == strings.TrimSpace(currentSessionID) {
 			continue
 		}
-		if s.active != nil && !s.active.IsSessionRuntimeActive(blocker.SessionID) {
+		if s.active == nil {
+			otherSessions = append(otherSessions, blocker)
 			continue
 		}
-		otherSessions = append(otherSessions, blocker)
+		if !s.active.IsSessionRuntimeActive(sessionID) {
+			continue
+		}
+		lease, err := s.gate.AcquirePrimaryRun(sessionID)
+		if err != nil {
+			if errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+				otherSessions = append(otherSessions, blocker)
+				continue
+			}
+			releaseLeases()
+			return func() {}, err
+		}
+		leases = append(leases, lease)
 	}
 	if len(otherSessions) > 0 {
+		releaseLeases()
 		sort.Slice(otherSessions, func(i int, j int) bool {
 			return otherSessions[i].UpdatedAt.After(otherSessions[j].UpdatedAt)
 		})
@@ -952,13 +1061,14 @@ func (s *Service) ensureDeletionUnblocked(ctx context.Context, currentSessionID 
 			}
 			names = append(names, name)
 		}
-		return errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree is still targeted by sessions: %s", strings.Join(names, ", ")))
+		return func() {}, errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree is still targeted by active runs: %s", strings.Join(names, ", ")))
 	}
 	processBlockers := s.backgroundProcessBlockers(worktreeRoot)
 	if len(processBlockers) > 0 {
-		return errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree has active background processes: %s", strings.Join(processBlockers, ", ")))
+		releaseLeases()
+		return func() {}, errors.Join(serverapi.ErrWorktreeBlocked, fmt.Errorf("worktree has active background processes: %s", strings.Join(processBlockers, ", ")))
 	}
-	return nil
+	return releaseLeases, nil
 }
 
 func (s *Service) backgroundProcessBlockers(worktreeRoot string) []string {
