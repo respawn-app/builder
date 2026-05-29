@@ -40,60 +40,8 @@ describe("workflowEditorDraft", () => {
     expect(graph.version).toBe(initial.version + 1);
     expect(graph.graphVersion).toBe(initial.graphVersion + 1);
     expect(workflowDefinitionFromDraft(graph.draft).nodes[0]?.name).toBe("Edited agent");
-  });
-
-  it("edits fixed node identity without exposing execution fields", () => {
-    const source = {
-      ...workflowDefinition,
-      nodes: [
-        {
-          groupID: "",
-          groupKey: "",
-          id: "node-start",
-          inputFields: [],
-          joinInputProviders: [],
-          key: "backlog",
-          kind: "start",
-          name: "Backlog",
-          outputFields: [],
-          promptTemplate: "",
-          subagentRole: "",
-          workflowID: "workflow-1",
-        },
-        {
-          groupID: "",
-          groupKey: "",
-          id: "node-terminal",
-          inputFields: [],
-          joinInputProviders: [],
-          key: "done",
-          kind: "terminal",
-          name: "Done",
-          outputFields: [],
-          promptTemplate: "",
-          subagentRole: "",
-          workflowID: "workflow-1",
-        },
-      ],
-    };
-    const renamedStart = workflowEditorDraftReducer(initializeWorkflowEditorDraft(source), {
-      nodeID: "node-start",
-      patch: { key: "incoming", name: "Incoming" },
-      type: "editNodeIdentity",
-    });
-    const renamedTerminal = workflowEditorDraftReducer(renamedStart, {
-      nodeID: "node-terminal",
-      patch: { key: "archived", name: "Archived" },
-      type: "editNodeIdentity",
-    });
-
-    expect(workflowDefinitionFromDraft(renamedTerminal.draft).nodes).toMatchObject([
-      { key: "incoming", kind: "start", name: "Incoming", promptTemplate: "", subagentRole: "" },
-      { key: "archived", kind: "terminal", name: "Archived", promptTemplate: "", subagentRole: "" },
-    ]);
-    expect(workflowEditorDraftGraph(renamedTerminal).nodes).toEqual([
-      expect.objectContaining({ key: "incoming", kind: "start", name: "Incoming" }),
-      expect.objectContaining({ key: "archived", kind: "terminal", name: "Archived" }),
+    expect(workflowDefinitionFromDraft(graph.draft).nodes[0]?.outputFields).toEqual([
+      { description: "Summary", name: "summary" },
     ]);
   });
 
@@ -126,15 +74,28 @@ describe("workflowEditorDraft", () => {
     expect(graph.nodes[0]?.inputFields).toEqual([{ description: "Plan", name: "plan" }]);
   });
 
-  it("preserves source output fields when serializing draft graph saves", () => {
-    const renamed = workflowEditorDraftReducer(initializeWorkflowEditorDraft(workflowDefinition), {
-      nodeID: "node-agent",
-      patch: { name: "Edited agent" },
-      type: "editAgentNode",
+  it("edits fixed node identity without exposing execution fields", () => {
+    const source = {
+      ...workflowDefinition,
+      nodes: [
+        fixedWorkflowNode("node-start", "backlog", "Backlog", "start"),
+        fixedWorkflowNode("node-terminal", "done", "Done", "terminal"),
+      ],
+    };
+    const renamedStart = workflowEditorDraftReducer(initializeWorkflowEditorDraft(source), {
+      nodeID: "node-start",
+      patch: { key: "incoming", name: "Incoming" },
+      type: "editNodeIdentity",
+    });
+    const renamedTerminal = workflowEditorDraftReducer(renamedStart, {
+      nodeID: "node-terminal",
+      patch: { key: "archived", name: "Archived" },
+      type: "editNodeIdentity",
     });
 
-    expect(workflowDefinitionFromDraft(renamed.draft).nodes[0]?.outputFields).toEqual([
-      { description: "Summary", name: "summary" },
+    expect(workflowDefinitionFromDraft(renamedTerminal.draft).nodes).toMatchObject([
+      { key: "incoming", kind: "start", name: "Incoming", promptTemplate: "", subagentRole: "" },
+      { key: "archived", kind: "terminal", name: "Archived", promptTemplate: "", subagentRole: "" },
     ]);
   });
 
@@ -324,6 +285,12 @@ describe("workflowEditorDraft", () => {
 
 function withVersion(source: WorkflowDefinition, version: number): WorkflowDefinition {
   return { ...source, workflow: { ...source.workflow, version } };
+}
+
+function fixedWorkflowNode(id: string, key: string, name: string, kind: "start" | "terminal") {
+  const source = workflowDefinition.nodes[0];
+  if (source === undefined) throw new Error("Expected workflow fixture to include a node.");
+  return { ...source, id, inputFields: [], key, kind, name, outputFields: [], promptTemplate: "", subagentRole: "" };
 }
 
 const workflowDefinition: WorkflowDefinition = {
