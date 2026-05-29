@@ -21,16 +21,17 @@ import (
 )
 
 type serviceTestRuntime struct {
-	mu             sync.Mutex
-	requireCalls   []serviceRuntimeCall
-	rebindCalls    []serviceRuntimeCall
-	reminderCalls  []session.WorktreeReminderState
-	activeSessions map[string]bool
-	rebindErr      error
-	rebindErrRoot  string
-	rebindHook     func(context.Context, string, string, string)
-	requireErr     error
-	controllerSeen bool
+	mu              sync.Mutex
+	requireCalls    []serviceRuntimeCall
+	rebindCalls     []serviceRuntimeCall
+	reminderCalls   []session.WorktreeReminderState
+	activeSessions  map[string]bool
+	syncErrSessions map[string]error
+	rebindErr       error
+	rebindErrRoot   string
+	rebindHook      func(context.Context, string, string, string)
+	requireErr      error
+	controllerSeen  bool
 }
 
 type serviceRuntimeCall struct {
@@ -70,13 +71,17 @@ func (r *serviceTestRuntime) RecordWorktreeTransition(_ context.Context, _ strin
 func (r *serviceTestRuntime) SyncExecutionTarget(_ context.Context, sessionID string, target clientui.SessionExecutionTarget, reminder *session.WorktreeReminderState) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	trimmedSessionID := strings.TrimSpace(sessionID)
 	if reminder != nil {
 		r.reminderCalls = append(r.reminderCalls, *reminder)
 	}
-	if !r.activeSessions[strings.TrimSpace(sessionID)] {
+	if !r.activeSessions[trimmedSessionID] {
 		return nil
 	}
 	r.rebindCalls = append(r.rebindCalls, serviceRuntimeCall{sessionID: sessionID, root: strings.TrimSpace(target.EffectiveWorkdir)})
+	if err := r.syncErrSessions[trimmedSessionID]; err != nil {
+		return err
+	}
 	if r.rebindErr != nil && (strings.TrimSpace(r.rebindErrRoot) == "" || strings.TrimSpace(r.rebindErrRoot) == strings.TrimSpace(target.EffectiveWorkdir)) {
 		return r.rebindErr
 	}
@@ -90,10 +95,14 @@ func (r *serviceTestRuntime) IsSessionRuntimeActive(sessionID string) bool {
 }
 
 type serviceTestGate struct {
-	err error
+	err  error
+	busy map[string]bool
 }
 
-func (g serviceTestGate) AcquirePrimaryRun(string) (primaryrun.Lease, error) {
+func (g serviceTestGate) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
+	if g.busy[strings.TrimSpace(sessionID)] {
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
 	if g.err != nil {
 		return nil, g.err
 	}
@@ -769,6 +778,7 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
 	}
 	env.runtime.activeSessions[otherSession.Meta().SessionID] = true
+	env.service.gate = serviceTestGate{busy: map[string]bool{otherSession.Meta().SessionID: true}}
 
 	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-blocked-session",
@@ -778,6 +788,98 @@ func TestDeleteWorktreeBlocksWhenAnotherSessionTargetsIt(t *testing.T) {
 	})
 	if !errors.Is(err, serverapi.ErrWorktreeBlocked) {
 		t.Fatalf("DeleteWorktree error = %v, want ErrWorktreeBlocked", err)
+	}
+}
+
+func TestDeleteWorktreeRetargetsActiveIdleSessionsTargetingIt(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-active-idle-session")
+	otherSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	dormantSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, otherSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID other session: %v", err)
+	}
+	if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, dormantSession.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+		t.Fatalf("UpdateSessionExecutionTargetByID dormant session: %v", err)
+	}
+	env.runtime.activeSessions[otherSession.Meta().SessionID] = true
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-active-idle-session",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	target, err := env.store.ResolveSessionExecutionTarget(env.ctx, otherSession.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget other session: %v", err)
+	}
+	if target.WorktreeID != "" || target.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected active idle session retargeted to main workspace, got %+v", target)
+	}
+	dormantTarget, err := env.store.ResolveSessionExecutionTarget(env.ctx, dormantSession.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolveSessionExecutionTarget dormant session: %v", err)
+	}
+	if dormantTarget.WorktreeID != "" || dormantTarget.EffectiveWorkdir != env.workspaceRoot {
+		t.Fatalf("expected dormant stale session retargeted by worktree deletion cleanup, got %+v", dormantTarget)
+	}
+	foundRebind := false
+	for _, call := range env.runtime.rebindCalls {
+		if call.sessionID == otherSession.Meta().SessionID && call.root == env.workspaceRoot {
+			foundRebind = true
+		}
+	}
+	if !foundRebind {
+		t.Fatalf("expected active idle session runtime rebind to main workspace, got %+v", env.runtime.rebindCalls)
+	}
+}
+
+func TestDeleteWorktreeRollsBackActiveIdleSessionRetargetsOnRuntimeSyncError(t *testing.T) {
+	env := newServiceTestEnv(t)
+	created := mustCreateWorktree(t, env, "feature/delete-active-idle-rollback")
+	firstSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	secondSession := createServiceTestSession(t, env.store, env.cfg, env.binding)
+	for _, sess := range []*session.Store{firstSession, secondSession} {
+		if err := env.store.UpdateSessionExecutionTargetByID(env.ctx, sess.Meta().SessionID, env.binding.WorkspaceID, created.WorktreeID, "."); err != nil {
+			t.Fatalf("UpdateSessionExecutionTargetByID %s: %v", sess.Meta().SessionID, err)
+		}
+		env.runtime.activeSessions[sess.Meta().SessionID] = true
+	}
+	env.runtime.syncErrSessions = map[string]error{secondSession.Meta().SessionID: errors.New("runtime sync failed")}
+
+	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
+		ClientRequestID:   "req-delete-active-idle-rollback",
+		SessionID:         env.session.Meta().SessionID,
+		ControllerLeaseID: env.leaseID,
+		WorktreeID:        created.WorktreeID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime sync failed") {
+		t.Fatalf("DeleteWorktree error = %v, want runtime sync failed", err)
+	}
+	for _, sess := range []*session.Store{firstSession, secondSession} {
+		target, err := env.store.ResolveSessionExecutionTarget(env.ctx, sess.Meta().SessionID)
+		if err != nil {
+			t.Fatalf("ResolveSessionExecutionTarget %s: %v", sess.Meta().SessionID, err)
+		}
+		if target.WorktreeID != created.WorktreeID || target.EffectiveWorkdir != created.CanonicalRoot {
+			t.Fatalf("expected %s target rolled back to worktree, got %+v", sess.Meta().SessionID, target)
+		}
+	}
+	if _, err := os.Stat(created.CanonicalRoot); err != nil {
+		t.Fatalf("expected worktree root kept after retarget rollback, stat err=%v", err)
+	}
+	foundFirstRollback := false
+	for _, call := range env.runtime.rebindCalls {
+		if call.sessionID == firstSession.Meta().SessionID && call.root == created.CanonicalRoot {
+			foundFirstRollback = true
+		}
+	}
+	if !foundFirstRollback {
+		t.Fatalf("expected first session runtime rolled back to deleted worktree, calls=%+v", env.runtime.rebindCalls)
 	}
 }
 
@@ -899,6 +1001,7 @@ func TestDeleteWorktreeBlocksOnlyActiveSessionsTargetingIt(t *testing.T) {
 		t.Fatalf("UpdateSessionExecutionTargetByID active session: %v", err)
 	}
 	env.runtime.activeSessions[activeSession.Meta().SessionID] = true
+	env.service.gate = serviceTestGate{busy: map[string]bool{activeSession.Meta().SessionID: true}}
 
 	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-mixed-session-blockers",
@@ -929,6 +1032,7 @@ func TestDeleteWorktreeAllowsSessionAfterRuntimeRegistryCleanup(t *testing.T) {
 	engine := &runtimepkg.Engine{}
 	runtimes.Register(otherSession.Meta().SessionID, engine)
 	env.service.active = runtimes
+	env.service.gate = serviceTestGate{busy: map[string]bool{otherSession.Meta().SessionID: true}}
 
 	_, err := env.service.DeleteWorktree(env.ctx, serverapi.WorktreeDeleteRequest{
 		ClientRequestID:   "req-delete-before-runtime-cleanup",

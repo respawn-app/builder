@@ -36,7 +36,7 @@ export type DraftInputField = Readonly<{
   description: string;
 }>;
 
-export type DraftWorkflowNode = Omit<WorkflowNode, "inputFields" | "outputFields"> &
+export type DraftWorkflowNode = Omit<WorkflowNode, "inputFields"> &
   Readonly<{
     inputFields: readonly DraftInputField[];
   }>;
@@ -232,7 +232,7 @@ export function workflowDefinitionFromDraft(draft: DraftWorkflowDefinition): Wor
     nodes: draft.nodes.map((node) => ({
       ...node,
       inputFields: node.inputFields.map(({ name, description }) => ({ name, description })),
-      outputFields: [],
+      outputFields: node.outputFields,
     })),
   };
 }
