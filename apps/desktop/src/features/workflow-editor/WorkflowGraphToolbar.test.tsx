@@ -48,8 +48,14 @@ describe("WorkflowGraphToolbar", () => {
     ]);
 
     const addNode = toolbar.getByRole("button", { name: "Add node" });
-    fireEvent.click(addNode);
-    expect(screen.queryByRole("button", { name: "Agent node" })).not.toBeInTheDocument();
+    await user.click(addNode);
+    expect(await screen.findByRole("button", { name: "Agent node" })).toBeInTheDocument();
+    await user.click(addNode);
+    expect(screen.getByRole("button", { name: "Agent node" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Agent node" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Agent node" })).not.toBeInTheDocument();
+    });
 
     await user.hover(toolbar.getByRole("button", { name: "Zoom in" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Zoom +");

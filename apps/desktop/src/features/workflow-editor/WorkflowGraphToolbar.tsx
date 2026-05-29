@@ -132,6 +132,15 @@ function AddNodeTool({
     event.preventDefault();
     event.stopPropagation();
   }, []);
+  const handleTriggerClick = useCallback(
+    (event: StoppableEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      focusInsideMenuRef.current = true;
+      openMenu("focus");
+    },
+    [openMenu],
+  );
   const preventDefault = useCallback((event: CancelableEvent) => {
     event.preventDefault();
   }, []);
@@ -218,7 +227,7 @@ function AddNodeTool({
           aria-label={t("workflowEditor.addNode")}
           className="grid size-9 place-items-center rounded-[var(--radius-m)] border border-transparent bg-transparent text-[var(--color-on-island)] transition-colors hover:bg-[var(--color-island-1)] focus-visible:border-[var(--color-primary)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled}
-          onClick={handleClickOnlyInteraction}
+          onClick={handleTriggerClick}
           onBlur={handleTriggerBlur}
           onFocus={handleTriggerFocus}
           onKeyDown={handleTriggerKeyDown}
