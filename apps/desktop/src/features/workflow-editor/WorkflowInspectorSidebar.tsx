@@ -1039,7 +1039,67 @@ function contextSourceFromSelectValue(
 }
 
 function validContextSourceNodes(definition: WorkflowDefinition, edge: WorkflowEdge): WorkflowDefinition["nodes"] {
-  return definition.nodes.filter((node) => node.kind === "agent" && node.id !== edge.targetNodeID);
+  return definition.nodes.filter(
+    (node) =>
+      node.kind === "agent" &&
+      node.id !== edge.targetNodeID &&
+      contextSourceNodeIsGuaranteedBeforeEdgeSource(definition, edge, node.id),
+  );
+}
+
+function contextSourceNodeIsGuaranteedBeforeEdgeSource(
+  definition: WorkflowDefinition,
+  edge: WorkflowEdge,
+  nodeID: string,
+): boolean {
+  const sourceNodeID = transitionGroupByID(definition, edge.transitionGroupID)?.sourceNodeID;
+  const startNodes = definition.nodes.filter((node) => node.kind === "start");
+  if (sourceNodeID === undefined || startNodes.length !== 1) {
+    return true;
+  }
+  return nodeDominates(definition, nodeID, sourceNodeID);
+}
+
+function nodeDominates(definition: WorkflowDefinition, candidateID: string, targetID: string): boolean {
+  if (candidateID === targetID) {
+    return true;
+  }
+  const startNodeID = definition.nodes.find((node) => node.kind === "start")?.id;
+  if (startNodeID === undefined) {
+    return false;
+  }
+  return !reachableFromSkipping(definition, startNodeID, candidateID).has(targetID);
+}
+
+function reachableFromSkipping(
+  definition: WorkflowDefinition,
+  startNodeID: string,
+  skippedNodeID: string,
+): ReadonlySet<string> {
+  const visited = new Set<string>();
+  const stack = startNodeID === skippedNodeID ? [] : [startNodeID];
+  while (stack.length > 0) {
+    const nodeID = stack.pop();
+    if (nodeID === undefined || visited.has(nodeID) || nodeID === skippedNodeID) {
+      continue;
+    }
+    visited.add(nodeID);
+    for (const targetNodeID of outgoingTargetNodeIDs(definition, nodeID)) {
+      if (!visited.has(targetNodeID) && targetNodeID !== skippedNodeID) {
+        stack.push(targetNodeID);
+      }
+    }
+  }
+  return visited;
+}
+
+function outgoingTargetNodeIDs(definition: WorkflowDefinition, sourceNodeID: string): readonly string[] {
+  const outgoingTransitionGroupIDs = new Set(
+    definition.transitionGroups.filter((group) => group.sourceNodeID === sourceNodeID).map((group) => group.id),
+  );
+  return definition.edges
+    .filter((edge) => outgoingTransitionGroupIDs.has(edge.transitionGroupID))
+    .map((edge) => edge.targetNodeID);
 }
 
 function FieldSummary({

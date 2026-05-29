@@ -914,6 +914,45 @@ describe("WorkflowEditorRoute", () => {
     });
   });
 
+  it("filters context source choices to guaranteed agent predecessors", async () => {
+    const services = createTestServices([
+      ...startupRoutes,
+      { method: "workflow.get", result: workflowDefinitionResponseWithUnrelatedAgent },
+      { method: "workflow.validate", result: { valid: true, errors: [] } },
+      {
+        method: "workflow.graph.validateDraft",
+        result: {
+          derived_wiring: graphValidationResponse.derived_wiring,
+          results: { draft: { valid: true, errors: [] }, execution: { valid: true, errors: [] } },
+        },
+      },
+    ]);
+    render(
+      <AppProviders services={services}>
+        <SidebarProvider>
+          <WorkflowEditorDraftBridgeProvider>
+            <WorkflowEditorRoute projectID="" workflowID="workflow-1" />
+            <OpenEdgeInspectorButton />
+            <SidebarHost />
+          </WorkflowEditorDraftBridgeProvider>
+        </SidebarProvider>
+      </AppProviders>,
+    );
+
+    expect(await screen.findByTestId("workflow-editor-canvas", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open edge inspector" }));
+    const inspector = await screen.findByRole("complementary", { name: "Inspect edge" });
+    const routeSection = within(inspector).getByRole("region", { name: "Route" });
+
+    fireEvent.pointerDown(within(routeSection).getByRole("button", { name: "Context source" }));
+
+    expect(await screen.findByRole("menuitemradio", { name: "Implement" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Start" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Done" })).not.toBeInTheDocument();
+  });
+
   it("disables route controls that do not apply to the start edge", async () => {
     const user = userEvent.setup();
     const services = createTestServices([
@@ -2028,6 +2067,24 @@ const workflowDefinitionResponseWithStartNode = {
         context_source: { kind: "immediate_source" },
       },
       ...workflowDefinitionResponse.definition.edges,
+    ],
+  },
+};
+
+const workflowDefinitionResponseWithUnrelatedAgent = {
+  definition: {
+    ...workflowDefinitionResponseWithStartNode.definition,
+    nodes: [
+      ...workflowDefinitionResponseWithStartNode.definition.nodes,
+      {
+        id: "review",
+        workflow_id: "workflow-1",
+        key: "review",
+        kind: "agent",
+        display_name: "Review",
+        subagent_role: "coder",
+        prompt_template: "Review the task.",
+      },
     ],
   },
 };
