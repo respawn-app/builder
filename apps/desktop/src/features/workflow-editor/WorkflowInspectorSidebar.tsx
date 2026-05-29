@@ -264,8 +264,8 @@ function EdgeDraftDetails({
                   type: "editEdgeRoute",
                 });
               }}
-              options={contextSourceOptions(definition, edge.contextSource, t)}
-              value={contextSourceSelectValue(definition, edge.contextSource)}
+              options={contextSourceOptions(definition, edge, t)}
+              value={contextSourceSelectValue(definition, edge)}
             />
           </DisabledInteractionGuard>
           <DisabledInteractionGuard disabled={requiresApprovalDisabled} reason={disabledReason}>
@@ -980,14 +980,18 @@ const immediateContextSource: WorkflowContextSource = { kind: "immediate_source"
 
 function contextSourceOptions(
   definition: WorkflowDefinition,
-  source: WorkflowContextSource,
+  edge: WorkflowEdge,
   translate: Translate,
 ): readonly SelectFieldOption[] {
-  const nodeOptions = definition.nodes.map((node) => ({
-    label: fallbackLabel(node.key, node.name, node.key),
-    textValue: fallbackLabel(node.key, node.name, node.key),
-    value: node.id,
-  }));
+  const validNodes = validContextSourceNodes(definition, edge);
+  const nodeOptions = validNodes.map((node) => {
+    const label = fallbackLabel(node.key, node.name, node.key);
+    return {
+      label,
+      textValue: label,
+      value: node.id,
+    };
+  });
   const options: SelectFieldOption[] = [
     {
       label: translate("workflowEditor.contextSourceImmediate"),
@@ -997,24 +1001,30 @@ function contextSourceOptions(
     ...nodeOptions,
   ];
   if (
-    source.kind === "selected_node" &&
-    !definition.nodes.some((node) => node.key === source.nodeKey)
+    edge.contextSource.kind === "selected_node" &&
+    !validNodes.some((node) => node.key === edge.contextSource.nodeKey)
   ) {
     options.push({
       disabled: true,
-      label: source.nodeKey.length > 0 ? source.nodeKey : translate("workflowEditor.contextSourceSelected"),
-      textValue: source.nodeKey,
+      label:
+        edge.contextSource.nodeKey.length > 0
+          ? edge.contextSource.nodeKey
+          : translate("workflowEditor.contextSourceSelected"),
+      textValue: edge.contextSource.nodeKey,
       value: missingContextSourceOption,
     });
   }
   return options;
 }
 
-function contextSourceSelectValue(definition: WorkflowDefinition, source: WorkflowContextSource): string {
-  if (source.kind !== "selected_node") {
+function contextSourceSelectValue(definition: WorkflowDefinition, edge: WorkflowEdge): string {
+  if (edge.contextSource.kind !== "selected_node") {
     return immediateContextSourceOption;
   }
-  return definition.nodes.find((node) => node.key === source.nodeKey)?.id ?? missingContextSourceOption;
+  return (
+    validContextSourceNodes(definition, edge).find((node) => node.key === edge.contextSource.nodeKey)?.id ??
+    missingContextSourceOption
+  );
 }
 
 function contextSourceFromSelectValue(
@@ -1026,6 +1036,10 @@ function contextSourceFromSelectValue(
   }
   const node = definition.nodes.find((item) => item.id === value);
   return { kind: "selected_node", nodeKey: node?.key ?? "" };
+}
+
+function validContextSourceNodes(definition: WorkflowDefinition, edge: WorkflowEdge): WorkflowDefinition["nodes"] {
+  return definition.nodes.filter((node) => node.kind === "agent" && node.id !== edge.targetNodeID);
 }
 
 function FieldSummary({

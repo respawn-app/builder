@@ -769,7 +769,9 @@ describe("WorkflowEditorRoute", () => {
     fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context mode" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Continue session" }));
     fireEvent.pointerDown(within(inspector).getByRole("button", { name: "Context source" }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Join" }));
+    expect(screen.queryByRole("menuitemradio", { name: "Join" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Done" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Implement" }));
 
     const routeSections = within(inspector).getAllByRole("region", { name: "Route" });
     expect(routeSections).toHaveLength(1);
@@ -820,7 +822,7 @@ describe("WorkflowEditorRoute", () => {
           key: "review_edge",
           requires_approval: false,
           context_mode: "continue_session",
-          context_source: { kind: "selected_node", node_key: "join" },
+          context_source: { kind: "selected_node", node_key: "implement" },
         }),
       ]);
       expect(saveCall?.params).toMatchObject({
