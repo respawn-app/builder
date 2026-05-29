@@ -264,7 +264,7 @@ func waitForLaunchdServiceStartup(ctx context.Context, spec serviceSpec) error {
 		loaded, output := launchdLoaded(ctx)
 		launchdPID := launchdPID(output)
 		healthStatus, healthPID := probeServiceHealth(ctx, spec)
-		healthOwnedByLaunchd := healthStatus == "" || (healthStatus == "ok" && (healthPID == 0 || healthPID == launchdPID))
+		healthOwnedByLaunchd := healthStatus == "ok" && (healthPID == 0 || healthPID == launchdPID)
 		if loaded && launchdPID > 0 && healthOwnedByLaunchd {
 			return nil
 		}

@@ -23,7 +23,8 @@ import (
 func TestLaunchdInstallReloadsLoadedServiceBeforeBootstrap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := testLaunchdServiceSpec(t)
-	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
 		switch strings.Join(append([]string{name}, args...), "\x00") {
 		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
 			return serviceCommandResult{Stdout: "state = running\npid = 42\n"}, nil
@@ -60,7 +61,8 @@ func TestLaunchdStartBootstrapsUnloadedServiceWithoutKickstart(t *testing.T) {
 	if err := os.WriteFile(path, []byte(renderLaunchdPlist(spec)), 0o644); err != nil {
 		t.Fatalf("write plist: %v", err)
 	}
-	calls := captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
 		switch strings.Join(append([]string{name}, args...), "\x00") {
 		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
 			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
@@ -324,14 +326,19 @@ func TestLaunchdReloadStopsUnloadedHealthyServerBeforeBootstrap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	serverRequests := 0
 	serverStopped := false
+	bootstrapped := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {
 			http.NotFound(w, r)
 			return
 		}
 		serverRequests++
-		if serverStopped {
+		if serverStopped && !bootstrapped {
 			http.Error(w, "stopped", http.StatusServiceUnavailable)
+			return
+		}
+		if bootstrapped {
+			_, _ = fmt.Fprint(w, `{"status":"ok","pid":77}`)
 			return
 		}
 		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
@@ -365,6 +372,7 @@ func TestLaunchdReloadStopsUnloadedHealthyServerBeforeBootstrap(t *testing.T) {
 			if serverRequests < 2 {
 				t.Fatalf("bootstrap happened before old server health went down")
 			}
+			bootstrapped = true
 			return serviceCommandResult{}, nil
 		default:
 			return serviceCommandResult{}, errors.New("unexpected command")
@@ -385,6 +393,67 @@ func TestLaunchdReloadStopsUnloadedHealthyServerBeforeBootstrap(t *testing.T) {
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("calls = %#v, want %#v", *calls, want)
+	}
+}
+
+func TestLaunchdReloadDoesNotAcceptLaunchdPIDWithoutHealthyServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	originalTimeout := launchdServiceShutdownTimeout
+	originalInterval := launchdServiceShutdownPollInterval
+	launchdServiceShutdownTimeout = time.Millisecond
+	launchdServiceShutdownPollInterval = time.Millisecond
+	t.Cleanup(func() {
+		launchdServiceShutdownTimeout = originalTimeout
+		launchdServiceShutdownPollInterval = originalInterval
+	})
+	serverStopped := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		if serverStopped {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
+	}))
+	t.Cleanup(server.Close)
+	spec := testLaunchdServiceSpec(t)
+	spec.Endpoint = server.URL
+	path := mustLaunchdPlistPath(t)
+	originalSignal := signalLaunchdServiceProcess
+	signalLaunchdServiceProcess = func(pid int) error {
+		serverStopped = true
+		return nil
+	}
+	t.Cleanup(func() { signalLaunchdServiceProcess = originalSignal })
+	originalAlive := launchdServiceProcessAlive
+	launchdServiceProcessAlive = func(pid int) (bool, error) {
+		return !serverStopped, nil
+	}
+	t.Cleanup(func() { launchdServiceProcessAlive = originalAlive })
+	var calls *[][]string
+	calls = captureLaunchdServiceCommands(t, func(_ context.Context, name string, args ...string) (serviceCommandResult, error) {
+		switch strings.Join(append([]string{name}, args...), "\x00") {
+		case "launchctl\x00print\x00gui/" + currentUIDText() + "/" + serviceLaunchdLabel:
+			if countLaunchdCommand(*calls, "bootstrap") > 0 {
+				return serviceCommandResult{Stdout: "state = running\npid = 77\n"}, nil
+			}
+			return serviceCommandResult{Stderr: "not found", Code: 113}, serviceCommandError{Name: name, Args: args, Result: serviceCommandResult{Stderr: "not found", Code: 113}}
+		case "launchctl\x00bootstrap\x00gui/" + currentUIDText() + "\x00" + path:
+			return serviceCommandResult{}, nil
+		default:
+			return serviceCommandResult{}, errors.New("unexpected command")
+		}
+	})
+
+	err := reloadLaunchdService(context.Background(), spec, path)
+	if err == nil {
+		t.Fatal("expected reload to wait for healthy launchd server")
+	}
+	if !strings.Contains(err.Error(), "did not become healthy") {
+		t.Fatalf("error = %v, want healthy startup timeout", err)
 	}
 }
 
