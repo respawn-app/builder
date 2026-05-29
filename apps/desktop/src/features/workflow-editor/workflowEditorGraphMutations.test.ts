@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Graph mutation scenarios share compact fixtures and regression setup. */
 import { describe, expect, it } from "vitest";
 
 import { draftDefinitionFromSource } from "./workflowEditorDraft";
@@ -337,6 +338,46 @@ describe("workflowEditorGraphMutations", () => {
     expect(deleted.summary.removedNodeIDs).toEqual(["workflow-node-join-parallel"]);
   });
 
+  it("deletes inferred node groups while preserving downstream wiring through one branch", () => {
+    const withBranch = addWorkflowNode(draftDefinitionFromSource(groupableWorkflowDefinition), {
+      id: "node-review",
+      kind: "agent",
+      name: "Review",
+    });
+    const created = createWorkflowNodeGroupFromNode(withBranch.draft, {
+      groupID: "workflow-node-group-parallel",
+      joinNodeID: "node-join",
+      nodeID: "node-agent",
+    });
+    const expanded = addWorkflowNodeToGroup(created.draft, {
+      groupID: "workflow-node-group-parallel",
+      inferredTopologyIDs: {
+        addedBranchJoinEdgeID: "edge-review-join",
+        addedBranchJoinTransitionGroupID: "group-review-join",
+        existingBranchJoinEdgeID: "edge-implement-join",
+        existingBranchJoinTransitionGroupID: "group-implement-join",
+        fanoutEdgeID: "edge-start-review",
+      },
+      nodeID: "node-review",
+    });
+
+    const deleted = deleteWorkflowNodeGroup(expanded.draft, "workflow-node-group-parallel");
+
+    expect(edgesForTransition(deleted.draft, "group-source-agent")).toMatchObject([
+      { targetNodeID: "node-agent" },
+    ]);
+    expect(deleted.draft.transitionGroups.find((group) => group.id === "group-done")).toMatchObject({
+      sourceNodeID: "node-agent",
+    });
+    expect(deleted.draft.nodes.some((node) => node.id === "node-join")).toBe(false);
+    expect(deleted.draft.edges.some((edge) => edge.targetNodeID === "node-join")).toBe(false);
+    expect([...deleted.summary.removedEdgeIDs].sort()).toEqual([
+      "edge-implement-join",
+      "edge-review-join",
+      "edge-start-review",
+    ]);
+  });
+
   it("dissolves node groups instead of leaving a single remaining branch", () => {
     const withBranch = addWorkflowNode(draftDefinitionFromSource(groupableWorkflowDefinition), {
       id: "node-review",
@@ -372,6 +413,12 @@ describe("workflowEditorGraphMutations", () => {
       groupKey: "",
     });
     expect(removed.draft.nodes.some((node) => node.id === "node-join")).toBe(false);
+    expect(edgesForTransition(removed.draft, "group-source-agent")).toMatchObject([
+      { targetNodeID: "node-agent" },
+    ]);
+    expect(removed.draft.transitionGroups.find((group) => group.id === "group-done")).toMatchObject({
+      sourceNodeID: "node-agent",
+    });
     expect(removed.summary.removedNodeIDs).toEqual(["node-join"]);
   });
 });
