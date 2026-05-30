@@ -201,10 +201,7 @@ func TestOnboardingSpinnerTickReschedulesWhileFinalizing(t *testing.T) {
 func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T) {
 	newAppTestHome(t)
 	workspace := t.TempDir()
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load defaults: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{
 		settings:         cfg.Settings,
 		baselineSettings: cfg.Settings,
@@ -232,10 +229,7 @@ func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T)
 func TestOnboardingCustomPathPersistsExplicitReviewerOverrides(t *testing.T) {
 	newAppTestHome(t)
 	workspace := t.TempDir()
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load defaults: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	state := onboardingFlowState{
 		settings:               cfg.Settings,
 		baselineSettings:       cfg.Settings,
@@ -272,10 +266,7 @@ func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T
 	home := newAppTestHome(t)
 	globalRoot := t.TempDir()
 	workspace := t.TempDir()
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load defaults: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	sourceDir := filepath.Join(home, ".claude", "skills")
 	if err := os.MkdirAll(filepath.Join(sourceDir, "demo-skill"), 0o755); err != nil {
 		t.Fatalf("mkdir skill source: %v", err)

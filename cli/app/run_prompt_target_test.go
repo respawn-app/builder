@@ -102,17 +102,14 @@ func TestStartRunPromptClientDefaultAliasBlocksNonCallableContextRole(t *testing
 	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	registerAppWorkspace(t, cfg.WorkspaceRoot)
 	parent := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err := parent.SetContinuationContext(session.ContinuationContext{AgentRole: "blocked"}); err != nil {
 		t.Fatalf("SetContinuationContext: %v", err)
 	}
 
-	_, _, err = startRunPromptClient(context.Background(), Options{
+	_, _, err := startRunPromptClient(context.Background(), Options{
 		WorkspaceRoot:             cfg.WorkspaceRoot,
 		WorkspaceRootExplicit:     true,
 		WorkspaceContextSessionID: parent.Meta().SessionID,

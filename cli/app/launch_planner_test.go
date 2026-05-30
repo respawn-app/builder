@@ -220,10 +220,7 @@ func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationCont
 func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	binding := mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
 
@@ -289,10 +286,7 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 func TestSessionLaunchPlannerMarksNoOtherSessionsForDirectSingleSessionResume(t *testing.T) {
 	_, workspace := newRegisteredAppWorkspace(t)
 
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	binding := mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
 	single := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)

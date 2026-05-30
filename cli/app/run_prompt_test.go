@@ -62,10 +62,7 @@ func apiKeyMemoryAuthState(key string) auth.State {
 
 func saveReadyAppAuthState(t *testing.T, workspace string) {
 	t.Helper()
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load auth config: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
 	if err := store.Save(context.Background(), readyMemoryAuthHandler().state); err != nil {
 		t.Fatalf("save auth state: %v", err)
@@ -80,10 +77,7 @@ func TestLoadRemoteAttachConfigUsesSessionWorkspaceWhenWorkspaceImplicit(t *test
 		t.Fatalf("mkdir worktree: %v", err)
 	}
 	configureAppTestServerPort(t)
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load workspace: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	store := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 
 	got, err := loadRemoteAttachConfig(Options{
@@ -110,9 +104,7 @@ func TestLoadRemoteAttachConfigRejectsStaleWorkspaceContextSession(t *testing.T)
 	newAppTestHome(t)
 	workspace := t.TempDir()
 	configureAppTestServerPort(t)
-	if _, err := config.Load(workspace, config.LoadOptions{}); err != nil {
-		t.Fatalf("config.Load workspace: %v", err)
-	}
+	_ = loadAppTestConfig(t, workspace, config.LoadOptions{})
 
 	_, err := loadRemoteAttachConfig(Options{
 		WorkspaceRoot:             workspace,
@@ -148,10 +140,7 @@ func TestRunPromptFromWorktreeUsesBuilderSessionWorkspaceContext(t *testing.T) {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
 	configureAppTestServerPort(t)
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load workspace: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	parent := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	saveReadyAppAuthState(t, workspace)
 
@@ -448,10 +437,7 @@ func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup
 
 func waitForConfiguredRunPromptDaemon(t *testing.T, workspace string) {
 	t.Helper()
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	loadCfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
 	deadline := time.Now().Add(5 * time.Second)
 	client := &http.Client{Timeout: 250 * time.Millisecond}

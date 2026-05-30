@@ -56,10 +56,7 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 		t.Fatalf("expected subagent session name, got %q", result.SessionName)
 	}
 
-	cfg, err := config.Load(workspace, config.LoadOptions{OpenAIBaseURL: server.URL})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{OpenAIBaseURL: server.URL})
 	store := openAuthoritativeAppSession(t, cfg.PersistenceRoot, result.SessionID)
 	meta := store.Meta()
 	wantWorkspaceRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
@@ -117,10 +114,7 @@ func TestRunPromptWorkspaceContextCreatesChildWithParentWorktreeContext(t *testi
 		t.Fatalf("mkdir worktree subdir: %v", err)
 	}
 	configureAppTestServerPort(t)
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load workspace: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	parent := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
 	if err != nil {
@@ -397,10 +391,7 @@ func openAuthoritativeWorkspaceSessionStore(t *testing.T, workspaceRoot, openAIB
 	if strings.TrimSpace(openAIBaseURL) != "" {
 		loadOpts.OpenAIBaseURL = openAIBaseURL
 	}
-	cfg, err := config.Load(workspaceRoot, loadOpts)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspaceRoot, loadOpts)
 	return openAuthoritativeAppSession(t, cfg.PersistenceRoot, sessionID)
 }
 

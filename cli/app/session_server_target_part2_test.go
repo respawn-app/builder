@@ -25,10 +25,7 @@ import (
 func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *testing.T) {
 	newAppTestHome(t)
 	workspace := t.TempDir()
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	cfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
 	if err := store.Save(context.Background(), auth.State{
 		Scope: auth.ScopeGlobal,
@@ -386,10 +383,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	loadCfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 	store := auth.NewFileStore(config.GlobalAuthConfigPath(loadCfg))
 	if err := store.Save(context.Background(), auth.State{
 		Scope: auth.ScopeGlobal,
@@ -512,10 +506,7 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	loadCfg := loadAppTestConfig(t, workspace, config.LoadOptions{})
 
 	called := false
 	originalLaunch := launchSessionServerDaemon
