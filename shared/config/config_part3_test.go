@@ -1,19 +1,15 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestLoadRejectsUnknownLegacyTimeoutSettingNames(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	writeConfigTestFile(t, configPath, `[timeouts]
+	if err := loadConfigTestFileError(t, `[timeouts]
 bash_default_seconds = 42
-`)
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+`, LoadOptions{}); err == nil {
 		t.Fatal("expected unknown bash_default_seconds settings key error")
 	}
 }
@@ -141,9 +137,7 @@ func TestLoadExpandsTildePersistenceRootFromEnv(t *testing.T) {
 
 func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte(`openai_base_url = "http://file.local/v1"`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, `openai_base_url = "http://file.local/v1"`)
 
 	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://env.local/v1")
 	cfg, err := Load(workspace, LoadOptions{OpenAIBaseURL: "http://cli.local/v1"})
@@ -210,9 +204,7 @@ func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
 
 func TestLoadStorePrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte(`store = true`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, `store = true`)
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if !cfg.Settings.Store {
@@ -253,21 +245,14 @@ func TestLoadIgnoresUnknownBuilderEnvVars(t *testing.T) {
 }
 
 func TestLoadRejectsRemovedReviewerMaxSuggestionsFileKey(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("[reviewer]\nmax_suggestions = 15\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "[reviewer]\nmax_suggestions = 15\n", LoadOptions{}); err == nil {
 		t.Fatal("expected removed reviewer.max_suggestions file key to be rejected")
 	}
 }
 
 func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte(`allow_non_cwd_edits = true`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, `allow_non_cwd_edits = true`)
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if !cfg.Settings.AllowNonCwdEdits {
@@ -359,9 +344,7 @@ func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 
 func TestLoadCompactionModePrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("compaction_mode = \"local\"\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, "compaction_mode = \"local\"\n")
 
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	if cfg.Settings.CompactionMode != CompactionModeLocal {
@@ -382,23 +365,13 @@ func TestLoadCompactionModePrecedence(t *testing.T) {
 }
 
 func TestLoadRejectsRemovedUseNativeCompactionSetting(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("use_native_compaction = true\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "use_native_compaction = true\n", LoadOptions{}); err == nil {
 		t.Fatal("expected unsupported use_native_compaction settings key error")
 	}
 }
 
 func TestLoadRejectsUnrelatedUnknownSettingKeys(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("model = \"gpt-5\"\nfoo = 1\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "model = \"gpt-5\"\nfoo = 1\n", LoadOptions{}); err == nil {
 		t.Fatal("expected unknown settings key error")
 	} else if !strings.Contains(err.Error(), "foo") {
 		t.Fatalf("expected unknown key name in error, got %v", err)
@@ -406,21 +379,14 @@ func TestLoadRejectsUnrelatedUnknownSettingKeys(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidCompactionMode(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("compaction_mode = \"remote\"\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "compaction_mode = \"remote\"\n", LoadOptions{}); err == nil {
 		t.Fatal("expected invalid compaction_mode validation error")
 	}
 }
 
 func TestLoadModelContextWindowPrecedence(t *testing.T) {
 	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("model_context_window = 350000\ncontext_compaction_threshold_tokens = 250000\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, "model_context_window = 350000\ncontext_compaction_threshold_tokens = 250000\n")
 
 	t.Setenv("BUILDER_MODEL_CONTEXT_WINDOW", "420000")
 	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
@@ -433,23 +399,13 @@ func TestLoadModelContextWindowPrecedence(t *testing.T) {
 }
 
 func TestLoadRejectsCompactionThresholdNotBelowContextWindow(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 300000\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "model_context_window = 300000\ncontext_compaction_threshold_tokens = 300000\n", LoadOptions{}); err == nil {
 		t.Fatal("expected threshold/window validation error")
 	}
 }
 
 func TestLoadRejectsCompactionThresholdBelowHalfWindow(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 149999\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "model_context_window = 300000\ncontext_compaction_threshold_tokens = 149999\n", LoadOptions{}); err == nil {
 		t.Fatal("expected threshold minimum-window-percent validation error")
 	} else if !strings.Contains(err.Error(), "context_compaction_threshold_tokens must be >= 150000") {
 		t.Fatalf("expected threshold minimum-window-percent validation detail, got %v", err)
@@ -457,12 +413,7 @@ func TestLoadRejectsCompactionThresholdBelowHalfWindow(t *testing.T) {
 }
 
 func TestLoadRejectsPreSubmitLeadBandBelowHalfWindow(t *testing.T) {
-	_, workspace, configPath := newConfigTestFile(t)
-	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 200000\npre_submit_compaction_lead_tokens = 100000\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "model_context_window = 300000\ncontext_compaction_threshold_tokens = 200000\npre_submit_compaction_lead_tokens = 100000\n", LoadOptions{}); err == nil {
 		t.Fatal("expected pre-submit effective threshold validation error")
 	} else if !strings.Contains(err.Error(), "effective pre-submit threshold 100000, below 150000") {
 		t.Fatalf("expected pre-submit effective threshold validation detail, got %v", err)
