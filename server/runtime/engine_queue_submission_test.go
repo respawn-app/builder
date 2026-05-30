@@ -18,7 +18,7 @@ func TestSubmitQueuedUserMessagesStartsTurnFromQueuedInjection(t *testing.T) {
 	}}}
 
 	var flushed Event
-	eng, err := New(store, client, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed {
@@ -26,9 +26,6 @@ func TestSubmitQueuedUserMessagesStartsTurnFromQueuedInjection(t *testing.T) {
 			}
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	eng.QueueUserMessage("steer now")
 
@@ -65,10 +62,7 @@ func TestSubmitQueuedUserMessagesRetriesTransientBusyErrors(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after queued steer"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
 
 	attempts := 0
 	eng.stepLifecycle = &stubExclusiveStepLifecycle{runFn: func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
@@ -108,10 +102,7 @@ func TestSubmitQueuedUserMessagesRetriesTransientBusyErrors(t *testing.T) {
 func TestSubmitQueuedUserMessagesStopsRetryingWhenContextIsCanceled(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
 
 	attempts := 0
 	eng.stepLifecycle = &stubExclusiveStepLifecycle{runFn: func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
@@ -135,10 +126,7 @@ func TestSubmitQueuedUserMessagesStopsRetryingWhenContextIsCanceled(t *testing.T
 func TestHasQueuedUserWorkDetectsBackgroundNotices(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
 	steps := &stubExclusiveStepLifecycle{busy: true}
 	eng.stepLifecycle = steps
 	eng.backgroundFlow = &defaultBackgroundNoticeScheduler{engine: eng, steps: steps}

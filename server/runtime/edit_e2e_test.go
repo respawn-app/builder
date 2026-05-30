@@ -49,7 +49,7 @@ func TestEditAliasCompletionDiffAndReviewerEditsFlow(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(editTool), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(editTool), Config{
 		Model:        "claude",
 		EnabledTools: []toolspec.ID{toolspec.ToolEdit},
 		Reviewer: ReviewerConfig{
@@ -59,9 +59,6 @@ func TestEditAliasCompletionDiffAndReviewerEditsFlow(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	msg, err := eng.SubmitUserMessage(context.Background(), "edit file")
 	if err != nil {
 		t.Fatalf("submit: %v", err)

@@ -23,10 +23,7 @@ func TestGenerateWithRetryPropagatesContextCancellation(t *testing.T) {
 	store := mustCreateTestSession(t)
 	started := make(chan struct{})
 	client := cancelAwareModelClient{started: started}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

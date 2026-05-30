@@ -32,10 +32,7 @@ func (t cancelAwareTool) Call(ctx context.Context, c tools.Call) (tools.Result, 
 func TestExecuteToolCallsPropagatesContextCancellation(t *testing.T) {
 	store := mustCreateTestSession(t)
 	started := make(chan struct{})
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(cancelAwareTool{name: toolspec.ToolExecCommand, started: started}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(cancelAwareTool{name: toolspec.ToolExecCommand, started: started}), Config{Model: "gpt-5"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

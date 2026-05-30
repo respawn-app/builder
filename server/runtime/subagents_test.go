@@ -180,15 +180,12 @@ func TestCompactionReinjectsSubagentsMetaContext(t *testing.T) {
 			},
 		},
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                   "gpt-5.5",
 		ThinkingLevel:           "medium",
 		EnabledTools:            []toolspec.ID{toolspec.ToolExecCommand},
 		SubagentCatalogSettings: settings,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	messages, err := eng.compactionReinjectedBaseMessages()
 	if err != nil {
@@ -228,10 +225,7 @@ func TestManualCompactionPersistsSubagentCatalogInCanonicalTranscript(t *testing
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -247,10 +241,7 @@ func TestManualCompactionPersistsSubagentCatalogInCanonicalTranscript(t *testing
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if !hasSubagentCatalog(restored.snapshotMessages(), "- `worker`: Callable helper.") {
 		t.Fatalf("expected persisted canonical transcript to keep subagent catalog, got %+v", restored.snapshotMessages())
 	}

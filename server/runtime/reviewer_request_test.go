@@ -55,10 +55,7 @@ func TestReviewerSuggestions_ReusesStableMetaForPromptCachePrefix(t *testing.T) 
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}, Usage: llm.Usage{InputTokens: 10}},
 		},
 	}
-	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
 
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
 		t.Fatalf("first reviewer suggestions: %v", err)
@@ -82,7 +79,7 @@ func TestReviewerSuggestions_ReusesStableMetaForPromptCachePrefix(t *testing.T) 
 
 func TestBuildReviewerRequestUsesReviewerModelCapabilities(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Model: "local-reviewer",
@@ -91,9 +88,6 @@ func TestBuildReviewerRequestUsesReviewerModelCapabilities(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	req, err := eng.buildReviewerRequest(context.Background(), &fakeClient{})
 	if err != nil {
@@ -107,13 +101,10 @@ func TestBuildReviewerRequestUsesReviewerModelCapabilities(t *testing.T) {
 func TestBuildReviewerRequestPreservesTranscriptBytes(t *testing.T) {
 	seedContent := "review raw \x1b[31mansi\x1b[0m"
 	store := mustCreateTestSession(t)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 		Model:    "gpt-5",
 		Reviewer: ReviewerConfig{Model: "gpt-5"},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendUserMessage("seed-step", seedContent); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -143,10 +134,7 @@ func TestReviewerSuggestions_ReopenKeepsPromptCachePrefixStable(t *testing.T) {
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}, Usage: llm.Usage{InputTokens: 10}},
 		},
 	}
-	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
 	t.Cleanup(func() { _ = eng.Close() })
 	if err := eng.appendUserMessage("prep-1", "first request"); err != nil {
 		t.Fatalf("append first message: %v", err)
@@ -162,10 +150,7 @@ func TestReviewerSuggestions_ReopenKeepsPromptCachePrefixStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	reopenedEng, err := New(reopened, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
-	if err != nil {
-		t.Fatalf("new reopened engine: %v", err)
-	}
+	reopenedEng := mustNewTestEngine(t, reopened, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
 	t.Cleanup(func() { _ = reopenedEng.Close() })
 	if err := reopenedEng.appendUserMessage("prep-2", "second request"); err != nil {
 		t.Fatalf("append second message: %v", err)

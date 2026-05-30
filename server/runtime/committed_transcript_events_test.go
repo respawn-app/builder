@@ -14,13 +14,10 @@ import (
 func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testing.T) {
 	store := mustCreateTestSession(t)
 	events := make([]Event, 0, 16)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	start := len(events)
 	eng.AppendLocalEntry("assistant", "transient local note")
@@ -101,13 +98,10 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 func TestToolResultMirrorMessageDoesNotEmitGenericCommittedAdvance(t *testing.T) {
 	store := mustCreateTestSession(t)
 	events := make([]Event, 0, 16)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	call := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}
 	if err := eng.appendAssistantMessage("step-1", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
