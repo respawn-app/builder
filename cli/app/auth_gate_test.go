@@ -11,7 +11,6 @@ import (
 	"builder/cli/app/internal/oauthadapter"
 	"builder/server/auth"
 	"builder/server/authflow"
-	"builder/server/session"
 	"builder/shared/config"
 )
 
@@ -191,10 +190,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	store, err := session.Create(root, "workspace-x", "/tmp/work")
-	if err != nil {
-		t.Fatalf("create session store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, root, "workspace-x", "/tmp/work")
 
 	resolved, err := resolveSessionAction(
 		ctx,

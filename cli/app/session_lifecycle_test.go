@@ -907,10 +907,7 @@ func TestReviewTeleportLifecyclePreservesParentWorktreeContext(t *testing.T) {
 
 func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T) {
 	root := t.TempDir()
-	store, err := session.Create(root, "workspace-x", "/tmp/work")
-	if err != nil {
-		t.Fatalf("create session store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, root, "workspace-x", "/tmp/work")
 	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -951,10 +948,7 @@ func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T)
 
 func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing.T) {
 	root := t.TempDir()
-	store, err := session.Create(root, "workspace-x", "/tmp/work")
-	if err != nil {
-		t.Fatalf("create source store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, root, "workspace-x", "/tmp/work")
 	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
