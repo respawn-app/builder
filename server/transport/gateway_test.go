@@ -383,6 +383,57 @@ func TestGatewayExplicitReleaseRemovesOwnedRuntimeLeaseBeforeConnectionClose(t *
 	}
 }
 
+func TestGatewayActiveOnlyIfIdleReleaseKeepsOwnedRuntimeLeaseForCloseCleanup(t *testing.T) {
+	appCore, _ := newGatewayTestCore(t, true, true)
+	counter := &countingSessionRuntimeClient{SessionRuntimeClient: appCore.SessionRuntimeClient()}
+	gateway, err := NewGateway(&gatewayRuntimeClientOverride{Core: appCore, runtimeClient: counter}, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer func() { _ = appCore.Close() }()
+	defer server.Close()
+	store := createGatewayAuthoritativeSession(t, appCore)
+	appCore.RegisterSessionStore(store)
+
+	conn := dialGateway(t, server)
+	handshakeGateway(t, conn)
+	var activation serverapi.SessionRuntimeActivateResponse
+	callGateway(t, conn, "activate-runtime", protocol.MethodSessionRuntimeActivate, gatewayRuntimeActivateRequest(appCore, store.Meta().SessionID, "activate-runtime"), &activation)
+	if strings.TrimSpace(activation.LeaseID) == "" {
+		t.Fatalf("activation response missing lease: %+v", activation)
+	}
+	active, err := appCore.AcquirePrimaryRun(store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun: %v", err)
+	}
+	defer active.Release()
+	var release serverapi.SessionRuntimeReleaseResponse
+	callGateway(t, conn, "release-runtime", protocol.MethodSessionRuntimeRelease, serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "release-runtime",
+		SessionID:       store.Meta().SessionID,
+		LeaseID:         activation.LeaseID,
+		OnlyIfIdle:      true,
+	}, &release)
+	if !release.Active || release.Released {
+		t.Fatalf("release response = %+v, want active and unreleased", release)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close gateway connection: %v", err)
+	}
+	waitForGatewayCondition(t, "close cleanup release retry", func() bool {
+		return counter.releaseCount.Load() >= 2
+	})
+	metadataStore, err := metadata.Open(appCore.Config().PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	if _, err := metadataStore.ValidateRuntimeLease(context.Background(), store.Meta().SessionID, activation.LeaseID); err != nil {
+		t.Fatalf("active runtime lease should remain valid after close cleanup retry: %v", err)
+	}
+}
+
 func TestGatewayFailedActivationDoesNotRecordOwnedRuntimeLease(t *testing.T) {
 	appCore, _ := newGatewayTestCore(t, true, true)
 	counter := &countingSessionRuntimeClient{SessionRuntimeClient: appCore.SessionRuntimeClient(), activateErr: errors.New("activation failed before lease")}

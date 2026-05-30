@@ -70,7 +70,10 @@ type runtimeIdleTimer struct {
 	timer      *time.Timer
 }
 
-const defaultRuntimeIdleUnloadDelay = 5 * time.Second
+const (
+	defaultRuntimeIdleUnloadDelay        = 5 * time.Second
+	bestEffortRuntimeLeaseReleaseTimeout = 2 * time.Second
+)
 
 type runtimeTakeover struct {
 	requestID string
@@ -214,7 +217,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			cleanup()
 		}
 		if strings.TrimSpace(leaseID) != "" {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+			s.releaseRuntimeLeaseBestEffort(sessionID, leaseID)
 		}
 		s.failActivation(sessionID, handle, err)
 	}()
@@ -884,13 +887,13 @@ func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requ
 	ok, completeErr := s.completeTakeover(ctx, sessionID, handle, takeover, requestID, leaseID)
 	if completeErr != nil {
 		if strings.TrimSpace(leaseID) != "" {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+			s.releaseRuntimeLeaseBestEffort(sessionID, leaseID)
 		}
 		return serverapi.SessionRuntimeActivateResponse{}, completeErr
 	}
 	if !ok {
 		if strings.TrimSpace(leaseID) != "" {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+			s.releaseRuntimeLeaseBestEffort(sessionID, leaseID)
 		}
 		err := errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 		finishRuntimeTakeover(takeover, "", err)
@@ -949,13 +952,23 @@ func (s *Service) completeTakeover(ctx context.Context, sessionID string, handle
 		return false, nil
 	}
 	previousLeaseID := strings.TrimSpace(current.controllerLeaseID)
+	s.mu.Unlock()
 	if previousLeaseID != "" {
 		if _, err := s.releaseRuntimeLease(ctx, trimmedSessionID, previousLeaseID); err != nil {
-			current.takeover = nil
+			s.mu.Lock()
+			if s.handles[trimmedSessionID] == current && current.takeover == takeover {
+				current.takeover = nil
+			}
 			s.mu.Unlock()
 			finishRuntimeTakeover(takeover, "", err)
 			return false, err
 		}
+	}
+	s.mu.Lock()
+	current = s.handles[trimmedSessionID]
+	if current == nil || current != handle || current.takeover != takeover {
+		s.mu.Unlock()
+		return false, nil
 	}
 	current.controllerRequestID = strings.TrimSpace(requestID)
 	current.controllerLeaseID = trimmedLeaseID
@@ -1054,6 +1067,12 @@ func (s *Service) releaseRuntimeLease(ctx context.Context, sessionID string, lea
 		return metadata.RuntimeLeaseRecord{}, err
 	}
 	return record, nil
+}
+
+func (s *Service) releaseRuntimeLeaseBestEffort(sessionID string, leaseID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), bestEffortRuntimeLeaseReleaseTimeout)
+	defer cancel()
+	_, _ = s.releaseRuntimeLease(ctx, sessionID, leaseID)
 }
 
 func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {
