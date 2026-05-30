@@ -10,7 +10,6 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
-	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 
@@ -430,19 +429,13 @@ func TestCtrlTDeferredDetailLoadDoesNotMutateNativeHistoryState(t *testing.T) {
 
 func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing.T) {
 	workspace := t.TempDir()
-	store, err := session.Create(workspace, "ws", workspace)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, workspace, "ws", workspace)
 	appendTranscriptMessage(t, store, llm.RoleUser, "u1")
 	appendTranscriptMessage(t, store, llm.RoleAssistant, "a1")
 	appendTranscriptMessage(t, store, llm.RoleUser, "u2")
 	appendTranscriptMessage(t, store, llm.RoleAssistant, "a2 tail")
 
-	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := newAppRuntimeEngineWithStore(t, store, statusLineFakeClient{}, runtime.Config{})
 	m := setTestUITerminalSize(newProjectedEngineUIModel(eng), 90, 16)
 	m.syncViewport()
 
@@ -462,10 +455,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	eng2, err := runtime.New(reopened, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine after restart: %v", err)
-	}
+	eng2 := newAppRuntimeEngineWithStore(t, reopened, statusLineFakeClient{}, runtime.Config{})
 	m2 := setTestUITerminalSize(newProjectedEngineUIModel(eng2), 90, 16)
 	m2.syncViewport()
 
@@ -487,10 +477,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 
 func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *testing.T) {
 	workspace := t.TempDir()
-	store, err := session.Create(workspace, "ws", workspace)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, workspace, "ws", workspace)
 	if _, err := store.AppendEvent("legacy-step", "local_entry", map[string]any{
 		"role":         "reviewer_suggestions",
 		"text":         "Supervisor suggested:\n1. Add final verification notes.",
@@ -509,10 +496,7 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	eng, err := runtime.New(reopened, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine after restart: %v", err)
-	}
+	eng := newAppRuntimeEngineWithStore(t, reopened, statusLineFakeClient{}, runtime.Config{})
 	m := setTestUITerminalSize(newProjectedEngineUIModel(eng), 90, 16)
 	m.syncViewport()
 
@@ -530,24 +514,15 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 
 func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) {
 	workspace := t.TempDir()
-	storeA, err := session.Create(workspace, "ws", workspace)
-	if err != nil {
-		t.Fatalf("create store A: %v", err)
-	}
+	storeA := createAppRuntimeSessionAt(t, workspace, "ws", workspace)
 	appendTranscriptMessage(t, storeA, llm.RoleUser, "session-a-user")
 	appendTranscriptMessage(t, storeA, llm.RoleAssistant, "session-a-tail")
 
-	storeB, err := session.Create(workspace, "ws", workspace)
-	if err != nil {
-		t.Fatalf("create store B: %v", err)
-	}
+	storeB := createAppRuntimeSessionAt(t, workspace, "ws", workspace)
 	appendTranscriptMessage(t, storeB, llm.RoleUser, "session-b-user")
 	appendTranscriptMessage(t, storeB, llm.RoleAssistant, "session-b-tail")
 
-	engA, err := runtime.New(storeA, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine A: %v", err)
-	}
+	engA := newAppRuntimeEngineWithStore(t, storeA, statusLineFakeClient{}, runtime.Config{})
 	modelA := setTestUITerminalSize(newProjectedEngineUIModel(engA), 80, 14)
 	modelA.syncViewport()
 	viewA := stripANSIAndTrimRight(modelA.view.OngoingSnapshot())
@@ -555,10 +530,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 		t.Fatalf("expected session A tail, got %q", viewA)
 	}
 
-	engB, err := runtime.New(storeB, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine B: %v", err)
-	}
+	engB := newAppRuntimeEngineWithStore(t, storeB, statusLineFakeClient{}, runtime.Config{})
 	modelB := setTestUITerminalSize(newProjectedEngineUIModel(engB), 80, 14)
 	modelB.syncViewport()
 	viewB := stripANSIAndTrimRight(modelB.view.OngoingSnapshot())
@@ -570,10 +542,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("reopen A: %v", err)
 	}
-	engA2, err := runtime.New(reopenA, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine A2: %v", err)
-	}
+	engA2 := newAppRuntimeEngineWithStore(t, reopenA, statusLineFakeClient{}, runtime.Config{})
 	modelA2 := setTestUITerminalSize(newProjectedEngineUIModel(engA2), 80, 14)
 	modelA2.syncViewport()
 	viewA2 := stripANSIAndTrimRight(modelA2.view.OngoingSnapshot())

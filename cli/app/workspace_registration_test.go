@@ -81,7 +81,12 @@ func newAppRuntimeEngine(t *testing.T, client llm.Client, cfg runtime.Config, ha
 func createAppRuntimeSession(t *testing.T) *session.Store {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
+	return createAppRuntimeSessionAt(t, dir, "ws", dir)
+}
+
+func createAppRuntimeSessionAt(t *testing.T, root string, workspaceContainerName string, workspaceRoot string) *session.Store {
+	t.Helper()
+	store, err := session.Create(root, workspaceContainerName, workspaceRoot)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
