@@ -20,6 +20,24 @@ import (
 	"time"
 )
 
+func newLaunchdHealthTestServer(t *testing.T, health func() (string, int)) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		body, code := health()
+		if code != http.StatusOK {
+			http.Error(w, body, code)
+			return
+		}
+		_, _ = fmt.Fprint(w, body)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func TestLaunchdInstallReloadsLoadedServiceBeforeBootstrap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := testLaunchdServiceSpec(t)
@@ -129,23 +147,16 @@ func TestLaunchdRestartReloadsUnloadedHealthyServerBeforeBootstrap(t *testing.T)
 	serverRequests := 0
 	serverStopped := false
 	bootstrapped := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
+	server := newLaunchdHealthTestServer(t, func() (string, int) {
 		serverRequests++
 		if serverStopped && !bootstrapped {
-			http.Error(w, "stopped", http.StatusServiceUnavailable)
-			return
+			return "stopped", http.StatusServiceUnavailable
 		}
 		if bootstrapped {
-			_, _ = fmt.Fprint(w, `{"status":"ok","pid":77}`)
-			return
+			return `{"status":"ok","pid":77}`, http.StatusOK
 		}
-		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
-	}))
-	t.Cleanup(server.Close)
+		return `{"status":"ok","pid":42}`, http.StatusOK
+	})
 	spec := testLaunchdServiceSpec(t)
 	spec.Endpoint = server.URL
 	path := mustLaunchdPlistPath(t)
@@ -356,19 +367,13 @@ func TestLaunchdRestartIfInstalledBootstrapRecoveryFailsWhenRetryBootstrapFails(
 func TestLaunchdReloadWaitsForOldServerBeforeBootstrap(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	serverRequests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
+	server := newLaunchdHealthTestServer(t, func() (string, int) {
 		serverRequests++
 		if serverRequests == 1 {
-			_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
-			return
+			return `{"status":"ok","pid":42}`, http.StatusOK
 		}
-		http.Error(w, "stopped", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(server.Close)
+		return "stopped", http.StatusServiceUnavailable
+	})
 	spec := testLaunchdServiceSpec(t)
 	spec.Endpoint = server.URL
 	path := mustLaunchdPlistPath(t)
@@ -408,23 +413,16 @@ func TestLaunchdReloadStopsUnloadedHealthyServerBeforeBootstrap(t *testing.T) {
 	serverRequests := 0
 	serverStopped := false
 	bootstrapped := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
+	server := newLaunchdHealthTestServer(t, func() (string, int) {
 		serverRequests++
 		if serverStopped && !bootstrapped {
-			http.Error(w, "stopped", http.StatusServiceUnavailable)
-			return
+			return "stopped", http.StatusServiceUnavailable
 		}
 		if bootstrapped {
-			_, _ = fmt.Fprint(w, `{"status":"ok","pid":77}`)
-			return
+			return `{"status":"ok","pid":77}`, http.StatusOK
 		}
-		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
-	}))
-	t.Cleanup(server.Close)
+		return `{"status":"ok","pid":42}`, http.StatusOK
+	})
 	spec := testLaunchdServiceSpec(t)
 	spec.Endpoint = server.URL
 	path := mustLaunchdPlistPath(t)
@@ -488,18 +486,12 @@ func TestLaunchdReloadDoesNotAcceptLaunchdPIDWithoutHealthyServer(t *testing.T) 
 		launchdServiceShutdownPollInterval = originalInterval
 	})
 	serverStopped := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
+	server := newLaunchdHealthTestServer(t, func() (string, int) {
 		if serverStopped {
-			http.Error(w, "starting", http.StatusServiceUnavailable)
-			return
+			return "starting", http.StatusServiceUnavailable
 		}
-		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
-	}))
-	t.Cleanup(server.Close)
+		return `{"status":"ok","pid":42}`, http.StatusOK
+	})
 	spec := testLaunchdServiceSpec(t)
 	spec.Endpoint = server.URL
 	path := mustLaunchdPlistPath(t)
@@ -557,14 +549,7 @@ func TestLaunchdReloadExplainsOldServerStillRunningInsteadOfBootstrapCodeFive(t 
 		killLaunchdServiceProcess = originalKill
 		launchdServiceProcessAlive = originalAlive
 	})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = fmt.Fprint(w, `{"status":"ok","pid":42}`)
-	}))
-	t.Cleanup(server.Close)
+	server := newServiceHealthTestServer(t, `{"status":"ok","pid":42}`)
 	spec := testLaunchdServiceSpec(t)
 	spec.Endpoint = server.URL
 	path := mustLaunchdPlistPath(t)
