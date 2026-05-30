@@ -304,6 +304,15 @@ func callPatch(t *testing.T, tool *Tool, id, patchText string) tools.Result {
 	return result
 }
 
+func newPatchTestTool(t *testing.T, workspace string, opts ...Option) *Tool {
+	t.Helper()
+	tool, err := New(workspace, true, opts...)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+	return tool
+}
+
 func toolError(t *testing.T, result tools.Result) string {
 	t.Helper()
 	var payload struct {
