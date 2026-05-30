@@ -8,9 +8,7 @@ import (
 )
 
 func TestLoadWorkflowConfigDefaults(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newConfigTestEnv(t)
 
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
@@ -48,9 +46,7 @@ func TestDefaultSettingsTOMLRendersWorkflowDefaults(t *testing.T) {
 }
 
 func TestLoadWorkflowConfigFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -103,9 +99,7 @@ func TestLoadWorkflowConfigValidation(t *testing.T) {
 }
 
 func TestLoadSubagentRoleWorkflowConfigValidation(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

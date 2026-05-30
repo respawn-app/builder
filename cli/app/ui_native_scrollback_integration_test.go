@@ -193,12 +193,6 @@ func (m *observedUIModel) waitFor(t *testing.T, timeout time.Duration, descripti
 	waitForSignal(t, timeout, description, m.readyWhen(check))
 }
 
-func (m *observedUIModel) snapshot() observedUISnapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.latest
-}
-
 func (m *observedUIModel) readyWhen(check func(observedUISnapshot) bool) <-chan struct{} {
 	ready := make(chan struct{})
 	m.mu.Lock()
@@ -279,13 +273,6 @@ type asyncLateDeltaStreamClient struct {
 	delay   time.Duration
 }
 
-type gatedStreamClient struct {
-	started chan struct{}
-	release chan struct{}
-	mu      sync.Mutex
-	lastReq llm.Request
-}
-
 type deferredFinalQueuedInjectionStreamClient struct {
 	mu           sync.Mutex
 	calls        int
@@ -318,16 +305,6 @@ type gatedRefreshRuntimeClient struct {
 	refreshStarted chan struct{}
 	releaseRefresh chan struct{}
 	refreshOnce    sync.Once
-}
-
-type countingRuntimeClient struct {
-	inner        clientui.RuntimeClient
-	loadCalls    atomic.Int32
-	refreshCalls atomic.Int32
-}
-
-type localCompactionSummaryClient struct {
-	summary string
 }
 
 func (c *staleTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -379,125 +356,6 @@ func (c *gatedRefreshRuntimeClient) RefreshTranscriptPage(req clientui.Transcrip
 	return c.LoadTranscriptPage(req)
 }
 
-func (c *countingRuntimeClient) MainView() clientui.RuntimeMainView { return c.inner.MainView() }
-
-func (c *countingRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
-	return c.inner.RefreshMainView()
-}
-
-func (c *countingRuntimeClient) Transcript() clientui.TranscriptPage { return c.inner.Transcript() }
-
-func (c *countingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
-	return c.inner.RefreshTranscript()
-}
-
-func (c *countingRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
-	c.refreshCalls.Add(1)
-	return c.inner.RefreshTranscriptPage(req)
-}
-
-func (c *countingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
-	c.loadCalls.Add(1)
-	return c.inner.LoadTranscriptPage(req)
-}
-
-func (c *countingRuntimeClient) Status() clientui.RuntimeStatus { return c.inner.Status() }
-
-func (c *countingRuntimeClient) SessionView() clientui.RuntimeSessionView {
-	return c.inner.SessionView()
-}
-
-func (c *countingRuntimeClient) SetSessionName(name string) error {
-	return c.inner.SetSessionName(name)
-}
-
-func (c *countingRuntimeClient) SetThinkingLevel(level string) error {
-	return c.inner.SetThinkingLevel(level)
-}
-
-func (c *countingRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
-	return c.inner.SetFastModeEnabled(enabled)
-}
-
-func (c *countingRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
-	return c.inner.SetReviewerEnabled(enabled)
-}
-
-func (c *countingRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
-	return c.inner.SetAutoCompactionEnabled(enabled)
-}
-
-func (c *countingRuntimeClient) ShowGoal() (*clientui.RuntimeGoal, error) {
-	return c.inner.ShowGoal()
-}
-
-func (c *countingRuntimeClient) SetGoal(objective string) (*clientui.RuntimeGoal, error) {
-	return c.inner.SetGoal(objective)
-}
-
-func (c *countingRuntimeClient) PauseGoal() (*clientui.RuntimeGoal, error) {
-	return c.inner.PauseGoal()
-}
-
-func (c *countingRuntimeClient) ResumeGoal() (*clientui.RuntimeGoal, error) {
-	return c.inner.ResumeGoal()
-}
-
-func (c *countingRuntimeClient) ClearGoal() (*clientui.RuntimeGoal, error) {
-	return c.inner.ClearGoal()
-}
-
-func (c *countingRuntimeClient) AppendLocalEntry(role, text string) error {
-	return c.inner.AppendLocalEntry(role, text)
-}
-
-func (c *countingRuntimeClient) SubmitUserMessage(ctx context.Context, text string) (string, error) {
-	return c.inner.SubmitUserMessage(ctx, text)
-}
-
-func (c *countingRuntimeClient) SubmitUserShellCommand(ctx context.Context, command string) error {
-	return c.inner.SubmitUserShellCommand(ctx, command)
-}
-
-func (c *countingRuntimeClient) CompactContext(ctx context.Context, args string) error {
-	return c.inner.CompactContext(ctx, args)
-}
-
-func (c *countingRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }
-
-func (c *countingRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
-	return c.inner.SubmitQueuedUserMessages(ctx)
-}
-
-func (c *countingRuntimeClient) Interrupt() error { return c.inner.Interrupt() }
-
-func (c *countingRuntimeClient) QueueUserMessage(text string) (clientui.QueuedUserMessage, error) {
-	return c.inner.QueueUserMessage(text)
-}
-
-func (c *countingRuntimeClient) DiscardQueuedUserMessage(queueItemID string) bool {
-	return c.inner.DiscardQueuedUserMessage(queueItemID)
-}
-
-func (c *countingRuntimeClient) RecordPromptHistory(text string) error {
-	return c.inner.RecordPromptHistory(text)
-}
-
-func (c *countingRuntimeClient) LoadCalls() int { return int(c.loadCalls.Load()) }
-
-func (c *countingRuntimeClient) RefreshCalls() int { return int(c.refreshCalls.Load()) }
-
-func (c localCompactionSummaryClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
-	return llm.Response{
-		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.summary, Phase: llm.MessagePhaseFinal},
-		Usage:     llm.Usage{WindowTokens: 200_000},
-	}, nil
-}
-
-func (c localCompactionSummaryClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
-	return llm.ProviderCapabilities{ProviderID: "test-local", SupportsResponsesAPI: false}, nil
-}
-
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -542,25 +400,6 @@ func (c asyncLateDeltaStreamClient) GenerateStream(_ context.Context, _ llm.Requ
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.initial},
-		Usage:     llm.Usage{WindowTokens: 200_000},
-	}, nil
-}
-
-func (c *gatedStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
-	return llm.Response{}, errors.New("not implemented")
-}
-
-func (c *gatedStreamClient) GenerateStream(_ context.Context, req llm.Request, onDelta func(string)) (llm.Response, error) {
-	c.mu.Lock()
-	c.lastReq = req
-	c.mu.Unlock()
-	close(c.started)
-	<-c.release
-	if onDelta != nil {
-		onDelta("assistant")
-	}
-	return llm.Response{
-		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "assistant"},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
 }

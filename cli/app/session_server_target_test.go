@@ -13,7 +13,6 @@ import (
 	"builder/shared/serverapi"
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"io"
 	"os"
 	"os/signal"
@@ -22,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestStartSessionServerHelperDaemonProcess(t *testing.T) {
@@ -720,33 +721,6 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 	}
 
 	return fixture
-}
-
-func waitForPromptAnswerResult(t *testing.T, results <-chan promptAnswerResult) promptAnswerResult {
-	t.Helper()
-	select {
-	case result := <-results:
-		return result
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for prompt answer result")
-		return promptAnswerResult{}
-	}
-}
-
-func requireExactlyOnePromptWinner(t *testing.T, first promptAnswerResult, second promptAnswerResult) (promptAnswerResult, promptAnswerResult) {
-	t.Helper()
-	if first.err == nil && second.err != nil {
-		return first, second
-	}
-	if second.err == nil && first.err != nil {
-		return second, first
-	}
-	t.Fatalf("expected exactly one prompt answer winner, got first=%+v second=%+v", first, second)
-	return promptAnswerResult{}, promptAnswerResult{}
-}
-
-func isTerminalPromptAnswerError(err error) bool {
-	return errors.Is(err, serverapi.ErrPromptNotFound) || errors.Is(err, serverapi.ErrPromptAlreadyResolved)
 }
 
 func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.T) {

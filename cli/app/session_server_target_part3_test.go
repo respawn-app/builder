@@ -12,8 +12,6 @@ import (
 	"builder/shared/serverapi"
 	"context"
 	"errors"
-	"github.com/google/uuid"
-	"golang.org/x/net/websocket"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -21,6 +19,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"golang.org/x/net/websocket"
 )
 
 func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersistence(t *testing.T) {
@@ -429,25 +430,6 @@ func waitForRemoteAskEvent(t *testing.T, events <-chan askEvent) askEvent {
 	}
 }
 
-func waitForRemoteRuntimeEvent(t *testing.T, events <-chan clientui.Event, description string, predicate func(clientui.Event) bool) clientui.Event {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case evt, ok := <-events:
-			if !ok {
-				t.Fatalf("runtime event channel closed while waiting for %s", description)
-			}
-			if predicate == nil || predicate(evt) {
-				return evt
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for %s", description)
-			return clientui.Event{}
-		}
-	}
-}
-
 func waitForSessionActivitySubscriptionEvent(t *testing.T, sub serverapi.SessionActivitySubscription, description string, predicate func(clientui.Event) bool) clientui.Event {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -459,17 +441,6 @@ func waitForSessionActivitySubscriptionEvent(t *testing.T, sub serverapi.Session
 		}
 		if predicate == nil || predicate(evt) {
 			return evt
-		}
-	}
-}
-
-func waitForSessionActivityGap(sub serverapi.SessionActivitySubscription, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	for {
-		_, err := sub.Next(ctx)
-		if err != nil {
-			return err
 		}
 	}
 }
@@ -495,39 +466,9 @@ func waitForRemoteTranscriptPage(t *testing.T, views client.SessionViewClient, s
 	return clientui.TranscriptPage{}
 }
 
-func waitForRemoteProjectSessions(t *testing.T, views client.ProjectViewClient, projectID string, predicate func([]clientui.SessionSummary) bool) []clientui.SessionSummary {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := views.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: projectID})
-		if err != nil {
-			t.Fatalf("ListSessionsByProject: %v", err)
-		}
-		if predicate == nil || predicate(resp.Sessions) {
-			return resp.Sessions
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	resp, err := views.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: projectID})
-	if err != nil {
-		t.Fatalf("ListSessionsByProject final: %v", err)
-	}
-	t.Fatalf("timed out waiting for project session list match for project %s: %+v", projectID, resp.Sessions)
-	return nil
-}
-
 func transcriptPageContainsAssistantText(page clientui.TranscriptPage, want string) bool {
 	for _, entry := range page.Entries {
 		if entry.Role == "assistant" && entry.Text == want {
-			return true
-		}
-	}
-	return false
-}
-
-func sessionSummariesContainID(summaries []clientui.SessionSummary, sessionID string) bool {
-	for _, summary := range summaries {
-		if summary.SessionID == sessionID {
 			return true
 		}
 	}

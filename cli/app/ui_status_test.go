@@ -9,15 +9,16 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"context"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 type stubStatusCollector struct {
@@ -88,12 +89,6 @@ func withStatusWorkspaceRoot(root string) statusRequestOption {
 func withStatusAuthManager(manager *auth.Manager) statusRequestOption {
 	return func(req *uiStatusRequest) {
 		req.AuthCacheIdentity = statusAuthCacheIdentity(manager)
-	}
-}
-
-func withStatusSettings(settings config.Settings) statusRequestOption {
-	return func(req *uiStatusRequest) {
-		req.Settings = settings
 	}
 }
 

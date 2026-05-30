@@ -75,7 +75,7 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 		},
 		errs: []error{errors.New("temporary refresh failure"), nil},
 	}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m := newProjectedClosedUIModel(client)
 
 	firstMsg, ok := startupCmdMessage[runtimeTranscriptRefreshedMsg](m.startupCmds)
 	if !ok {
@@ -409,7 +409,7 @@ func TestInvalidateTransientTranscriptStateClearsDeferredCommittedTail(t *testin
 
 func TestApplyRuntimeTranscriptPageRejectsStaleAuthoritativePageWhileDeferredCommittedTailExists(t *testing.T) {
 	client := &runtimeControlFakeClient{}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m := newProjectedClosedUIModel(client)
 	m.sessionID = "session-1"
 	m.setBusy(true)
 	m.sawAssistantDelta = true
@@ -687,7 +687,7 @@ func TestApplyRuntimeTranscriptPagePreservesLiveOngoingForEqualRevisionDetailPag
 
 func TestRuntimeTranscriptRefreshPreservesLiveOngoingForEqualRevisionDetailPage(t *testing.T) {
 	client := &runtimeControlFakeClient{}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m := newProjectedClosedUIModel(client)
 	m.startupCmds = nil
 	m.termWidth = 100
 	m.termHeight = 20

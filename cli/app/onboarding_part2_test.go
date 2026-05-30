@@ -589,11 +589,3 @@ func workflowIncludesStep(steps []onboardingStepDefinition, id string) bool {
 	}
 	return false
 }
-
-func workflowStepIDs(steps []onboardingStepDefinition) []string {
-	ids := make([]string, 0, len(steps))
-	for _, step := range steps {
-		ids = append(ids, step.ID())
-	}
-	return ids
-}

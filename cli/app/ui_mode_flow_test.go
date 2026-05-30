@@ -36,9 +36,7 @@ func (c *recordingTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.Tr
 }
 
 func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 100
-	m.termHeight = 18
+	m := setTestUITerminalSize(newProjectedStaticUIModel(), 100, 18)
 	m.input = "/"
 	m.refreshSlashCommandFilterFromInput()
 	m.syncViewport()
@@ -61,9 +59,7 @@ func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 	if ongoing.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected ongoing mode, got %q", ongoing.view.Mode())
 	}
-	ongoing.termWidth = 100
-	ongoing.termHeight = 18
-	ongoing.windowSizeKnown = true
+	ongoing = sizedTestUIModel(ongoing, 100, 18)
 	ongoing.syncViewport()
 
 	view := stripANSIAndTrimRight(ongoing.view.OngoingSnapshot())
@@ -77,9 +73,7 @@ func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 }
 
 func TestCtrlTTogglesTranscriptModeLikeShiftTab(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 100
-	m.termHeight = 16
+	m := setTestUITerminalSize(newProjectedStaticUIModel(), 100, 16)
 	m.syncViewport()
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
@@ -94,9 +88,7 @@ func TestCtrlTTogglesTranscriptModeLikeShiftTab(t *testing.T) {
 }
 
 func TestCtrlTShowsLatestDetailTailWithoutResolvingMetricsEagerly(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedStaticUIModel(), 100, 12)
 	m.syncViewport()
 
 	for i := 0; i < 24; i++ {
@@ -130,13 +122,7 @@ func TestCtrlTPrimesDetailFromCurrentTailWhenPreviousDetailPageIsStale(t *testin
 	currentPage := clientui.TranscriptPage{SessionID: "session-1", Offset: 0, TotalEntries: 1}
 	currentPage.Entries = append(currentPage.Entries, clientui.ChatEntry{Role: "assistant", Text: "fresh ongoing tail"})
 	client := &recordingTranscriptRuntimeClient{loadPage: currentPage}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	m.sessionID = "session-1"
 	m.transcriptBaseOffset = currentPage.Offset
 	m.transcriptTotalEntries = currentPage.TotalEntries
@@ -165,9 +151,7 @@ func TestCtrlTPrimesDetailFromCurrentTailWhenPreviousDetailPageIsStale(t *testin
 }
 
 func TestCtrlTPrimesDetailFromCurrentTailAfterOngoingAdvancedSincePreviousDetail(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedStaticUIModel(), 100, 12)
 	m.syncViewport()
 	m = updateUIModel(t, m, tui.AppendTranscriptMsg{Role: "assistant", Text: "old detail tail", Committed: true})
 
@@ -199,13 +183,7 @@ func TestCtrlTPreservesLoadedDetailWindowWhenNoLocalTailIsKnown(t *testing.T) {
 		stalePage.Entries = append(stalePage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("history %03d", 100+i)})
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: stalePage}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	m.sessionID = "session-1"
 	m.detailTranscript.replace(stalePage)
 	m.syncViewport()
@@ -229,9 +207,7 @@ func TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics(t *testing.T) {
 	client := &recordingTranscriptRuntimeClient{
 		loadPage: clientui.TranscriptPage{SessionID: "session-1"},
 	}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	m.syncViewport()
 
 	page := clientui.TranscriptPage{SessionID: "session-1", Offset: 100, TotalEntries: 500}
@@ -285,13 +261,7 @@ func TestCtrlTDeferredDetailLoadSkipsDuplicateSeededPageRequest(t *testing.T) {
 		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
 	m.syncViewport()
 
@@ -335,13 +305,7 @@ func TestCtrlTDeferredDetailLoadSkippedKeepsDetailMetricsLazyEndToEnd(t *testing
 		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
 	m.syncViewport()
 
@@ -376,13 +340,7 @@ func TestDeferredDetailLoadRefreshesWhenTranscriptDirty(t *testing.T) {
 		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: seed}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
 	m.syncViewport()
 
@@ -428,13 +386,7 @@ func TestCtrlTDeferredDetailLoadDoesNotMutateNativeHistoryState(t *testing.T) {
 		detailPage.Entries = append(detailPage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("history %03d", i)})
 	}
 	client := &recordingTranscriptRuntimeClient{loadPage: detailPage}
-	m := newProjectedTestUIModel(
-		client,
-		closedProjectedRuntimeEvents(),
-		closedAskEvents(),
-	)
-	m.termWidth = 100
-	m.termHeight = 12
+	m := setTestUITerminalSize(newProjectedClosedUIModel(client), 100, 12)
 	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
@@ -491,9 +443,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := newProjectedEngineUIModel(eng)
-	m.termWidth = 90
-	m.termHeight = 16
+	m := setTestUITerminalSize(newProjectedEngineUIModel(eng), 90, 16)
 	m.syncViewport()
 
 	first := stripANSIAndTrimRight(m.view.OngoingSnapshot())
@@ -516,9 +466,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	if err != nil {
 		t.Fatalf("new engine after restart: %v", err)
 	}
-	m2 := newProjectedEngineUIModel(eng2)
-	m2.termWidth = 90
-	m2.termHeight = 16
+	m2 := setTestUITerminalSize(newProjectedEngineUIModel(eng2), 90, 16)
 	m2.syncViewport()
 
 	afterRestart := stripANSIAndTrimRight(m2.view.OngoingSnapshot())
@@ -565,9 +513,7 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 	if err != nil {
 		t.Fatalf("new engine after restart: %v", err)
 	}
-	m := newProjectedEngineUIModel(eng)
-	m.termWidth = 90
-	m.termHeight = 16
+	m := setTestUITerminalSize(newProjectedEngineUIModel(eng), 90, 16)
 	m.syncViewport()
 
 	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
@@ -602,9 +548,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine A: %v", err)
 	}
-	modelA := newProjectedEngineUIModel(engA)
-	modelA.termWidth = 80
-	modelA.termHeight = 14
+	modelA := setTestUITerminalSize(newProjectedEngineUIModel(engA), 80, 14)
 	modelA.syncViewport()
 	viewA := stripANSIAndTrimRight(modelA.view.OngoingSnapshot())
 	if !strings.Contains(viewA, "session-a-tail") {
@@ -615,9 +559,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine B: %v", err)
 	}
-	modelB := newProjectedEngineUIModel(engB)
-	modelB.termWidth = 80
-	modelB.termHeight = 14
+	modelB := setTestUITerminalSize(newProjectedEngineUIModel(engB), 80, 14)
 	modelB.syncViewport()
 	viewB := stripANSIAndTrimRight(modelB.view.OngoingSnapshot())
 	if !strings.Contains(viewB, "session-b-tail") || strings.Contains(viewB, "session-a-tail") {
@@ -632,9 +574,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine A2: %v", err)
 	}
-	modelA2 := newProjectedEngineUIModel(engA2)
-	modelA2.termWidth = 80
-	modelA2.termHeight = 14
+	modelA2 := setTestUITerminalSize(newProjectedEngineUIModel(engA2), 80, 14)
 	modelA2.syncViewport()
 	viewA2 := stripANSIAndTrimRight(modelA2.view.OngoingSnapshot())
 	if !strings.Contains(viewA2, "session-a-tail") || strings.Contains(viewA2, "session-b-tail") {
@@ -643,9 +583,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 }
 
 func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
-	m := newProjectedStaticUIModel()
-	m.termWidth = 80
-	m.termHeight = 10
+	m := setTestUITerminalSize(newProjectedStaticUIModel(), 80, 10)
 	m.syncViewport()
 
 	for i := 1; i <= 40; i++ {
@@ -704,7 +642,7 @@ func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
 			},
 		},
 	}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m := newProjectedClosedUIModel(client)
 
 	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	updated := next.(*uiModel)
@@ -762,7 +700,7 @@ func TestStartupHydrationKeepsDefaultCacheWarningDetailOnly(t *testing.T) {
 			},
 		},
 	}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m := newProjectedClosedUIModel(client)
 
 	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	updated := next.(*uiModel)
