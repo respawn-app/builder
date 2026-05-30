@@ -601,14 +601,11 @@ func TestContextUsageDoesNotInflateInlineImagePayloadByBase64Length(t *testing.T
 func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   410_000,
 		AutoCompactTokenLimit: 300,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	eng.setLastUsage(llm.Usage{InputTokens: 120, OutputTokens: 0, WindowTokens: 410_000})
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("stale-usage-gap-", 120)}); err != nil {
 		t.Fatalf("append message: %v", err)
@@ -623,14 +620,11 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 900,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -665,15 +659,12 @@ func TestPreSubmitCompactionTokenLimitUsesFixedRunwayReserve(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := mustCreateTestSession(t)
 
-			eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+			eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 				Model:                         "gpt-5",
 				AutoCompactTokenLimit:         tt.limit,
 				ContextWindowTokens:           1_000_000,
 				PreSubmitCompactionLeadTokens: tt.runway,
 			})
-			if err != nil {
-				t.Fatalf("new engine: %v", err)
-			}
 
 			if got := eng.preSubmitCompactionTokenLimit(context.Background()); got != tt.expected {
 				t.Fatalf("unexpected pre-submit compaction threshold: got %d want %d", got, tt.expected)
@@ -686,15 +677,12 @@ func TestShouldCompactBeforeUserMessageUsesPromptGrowthBelowPreSubmitBand(t *tes
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{
 		Model:                         "gpt-5",
 		AutoCompactTokenLimit:         950,
 		ContextWindowTokens:           1000,
 		PreSubmitCompactionLeadTokens: 50,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -716,15 +704,12 @@ func TestShouldCompactBeforeUserMessageFallsBackWhenExactCountUnsupported(t *tes
 
 	supported := false
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000, countSupported: &supported}
-	eng, err := New(store, client, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{
 		Model:                         "gpt-5",
 		AutoCompactTokenLimit:         950,
 		ContextWindowTokens:           1000,
 		PreSubmitCompactionLeadTokens: 50,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}

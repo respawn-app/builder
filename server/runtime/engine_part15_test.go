@@ -73,14 +73,11 @@ func TestLocalCompactionCarryoverUsesSublinearPreciseTokenCountCalls(t *testing.
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		ContextWindowTokens: 400_000,
 		CompactionMode:      "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	for i := 0; i < 512; i++ {
 		if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "u"}); err != nil {
 			t.Fatalf("append user message %d: %v", i, err)
@@ -326,13 +323,10 @@ func TestEmitCompactionStatusStillPublishesFailureEventWhenErrorPersistenceFails
 	localEntryErr := errors.New("injected compaction error persistence failure")
 	store := mustCreateTestSession(t)
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
 		if entry.Role == "error" {
 			return localEntryErr
@@ -340,7 +334,7 @@ func TestEmitCompactionStatusStillPublishesFailureEventWhenErrorPersistenceFails
 		return nil
 	}
 
-	err = eng.emitCompactionStatus("step-1", EventCompactionFailed, compactionModeAuto, "remote", "openai", 0, 2, "quota exceeded")
+	err := eng.emitCompactionStatus("step-1", EventCompactionFailed, compactionModeAuto, "remote", "openai", 0, 2, "quota exceeded")
 	if !errors.Is(err, localEntryErr) {
 		t.Fatalf("emitCompactionStatus error = %v, want %v", err, localEntryErr)
 	}
@@ -804,10 +798,7 @@ func TestAutoCompactionRetries400ByCollapsingShellOutput(t *testing.T) {
 	}
 
 	largeOutput := json.RawMessage(`{"output":"` + strings.Repeat("x", 120_000) + `"}`)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand, out: largeOutput}), Config{Model: "gpt-5.3-codex"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand, out: largeOutput}), Config{Model: "gpt-5.3-codex"})
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
 	if err != nil {

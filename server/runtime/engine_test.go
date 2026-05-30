@@ -612,16 +612,13 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: true,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -661,7 +658,7 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "high",
@@ -669,9 +666,6 @@ func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
 		HeadlessMode:  true,
 		ToolPreambles: true,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -692,14 +686,11 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: false,
 	})
-	if err != nil {
-		t.Fatalf("new first engine: %v", err)
-	}
 	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
@@ -711,14 +702,11 @@ func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:         "gpt-5",
 		EnabledTools:  []toolspec.ID{toolspec.ToolExecCommand},
 		ToolPreambles: true,
 	})
-	if err != nil {
-		t.Fatalf("new resumed engine: %v", err)
-	}
 	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
@@ -734,14 +722,11 @@ func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 272_000},
 	}}}
-	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, firstClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 272_000,
 	})
-	if err != nil {
-		t.Fatalf("new first engine: %v", err)
-	}
 	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
@@ -765,14 +750,11 @@ func TestLockedContextWindowKeepsSystemPromptToolCallEstimateStableAcrossResume(
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 400_000},
 	}}}
-	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	resumedEngine := mustNewTestEngine(t, store, resumedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 400_000,
 	})
-	if err != nil {
-		t.Fatalf("new resumed engine: %v", err)
-	}
 	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
@@ -818,15 +800,12 @@ func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *te
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                "gpt-5",
 		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens:  272_000,
 		TranscriptWorkingDir: workspace,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
@@ -851,15 +830,12 @@ func TestSystemPromptSnapshotUsesLocalFileAndSurvivesMidSessionFileChanges(t *te
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
 		Usage:     llm.Usage{WindowTokens: 400000},
 	}}}
-	reopenedEngine, err := New(reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	reopenedEngine := mustNewTestEngine(t, reopened, reopenedClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                "gpt-5",
 		EnabledTools:         []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens:  400_000,
 		TranscriptWorkingDir: workspace,
 	})
-	if err != nil {
-		t.Fatalf("new reopened engine: %v", err)
-	}
 	if _, err := reopenedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}

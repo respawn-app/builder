@@ -316,13 +316,10 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 	store := mustCreateNamedTestSessionAt(t, storeRoot, "ws", workspace)
 
 	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:          "gpt-5",
 		DisabledSkills: map[string]bool{"workspace skill": true},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -488,15 +485,12 @@ func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5.3-codex",
 		ThinkingLevel:         "high",
 		AutoCompactTokenLimit: 1_000_000_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -649,10 +643,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new interactive engine: %v", err)
-	}
+	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "regular start"); err != nil {
 		t.Fatalf("interactive submit: %v", err)
 	}
@@ -679,10 +670,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
-	if err != nil {
-		t.Fatalf("new headless engine: %v", err)
-	}
+	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
 
 	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "continue headlessly"); err != nil {
 		t.Fatalf("headless submit 1: %v", err)
@@ -745,10 +733,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
-	if err != nil {
-		t.Fatalf("new headless engine: %v", err)
-	}
+	headlessEngine := mustNewTestEngine(t, store, headlessClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5", HeadlessMode: true})
 	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "run headless"); err != nil {
 		t.Fatalf("headless submit: %v", err)
 	}
@@ -775,10 +760,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new interactive engine: %v", err)
-	}
+	interactiveEngine := mustNewTestEngine(t, store, interactiveClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 
 	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "continue interactively"); err != nil {
 		t.Fatalf("interactive submit 1: %v", err)

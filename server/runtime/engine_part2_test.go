@@ -396,14 +396,11 @@ func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
 		t.Fatalf("mark locked: %v", err)
 	}
 
-	firstEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	firstEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 272_000,
 	})
-	if err != nil {
-		t.Fatalf("new first engine: %v", err)
-	}
 	locked := store.Meta().Locked
 	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
 		t.Fatalf("expected legacy lock backfilled from first resume config, got %+v", locked)
@@ -412,14 +409,11 @@ func TestLegacyLockedSessionBackfillsContextBudgetOnce(t *testing.T) {
 		t.Fatalf("first estimated tool calls = %d, want 185", got)
 	}
 
-	secondEngine, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	secondEngine := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:               "gpt-5",
 		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
 		ContextWindowTokens: 400_000,
 	})
-	if err != nil {
-		t.Fatalf("new second engine: %v", err)
-	}
 	locked = store.Meta().Locked
 	if locked == nil || locked.ContextWindow != 272_000 || locked.ContextPercent != 95 {
 		t.Fatalf("expected legacy lock backfill to stay pinned, got %+v", locked)
@@ -668,13 +662,10 @@ func TestSetAutoCompactionDisabledConcurrentWithBusyStepSkipsCompactionForCurren
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 350000,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	submitDone := make(chan error, 1)
 	go func() {
@@ -713,10 +704,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 			Client:        &fakeClient{},
 		},
 	}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	changed, mode, err := eng.SetReviewerEnabled(true)
 	if err != nil {
 		t.Fatalf("enable reviewer: %v", err)
@@ -728,10 +716,7 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 		t.Fatalf("reviewer frequency = %q, want edits", got)
 	}
 
-	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
-	if err != nil {
-		t.Fatalf("new restarted engine: %v", err)
-	}
+	restarted := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), cfg)
 	if got := restarted.ReviewerFrequency(); got != "off" {
 		t.Fatalf("reviewer frequency after restart = %q, want off", got)
 	}
@@ -749,9 +734,6 @@ func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 			Client:        nil,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	changed, mode, err := eng.SetReviewerEnabled(true)
 	if err == nil {
 		t.Fatal("expected enable reviewer error when reviewer client is missing")
@@ -767,7 +749,7 @@ func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 	dir := t.TempDir()
 	store := mustCreateTestSessionAt(t, dir)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "off",
@@ -779,9 +761,6 @@ func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	changed, mode, err := eng.SetReviewerEnabled(true)
 	if err != nil {
 		t.Fatalf("enable reviewer with lazy client init: %v", err)
