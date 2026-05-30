@@ -12,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -47,6 +48,18 @@ func applyRunPromptOverridesNoWarnings(t *testing.T, plan SessionPlan, overrides
 		t.Fatalf("unexpected warnings: %+v", warnings)
 	}
 	return updated
+}
+
+func newLoadedConfigPlan(t *testing.T, workspace string, loaded config.App) SessionPlan {
+	t.Helper()
+	return SessionPlan{
+		Store:               createTestSessionInContainer(t, filepath.Join(t.TempDir(), "projects", "project-a", "sessions"), "workspace-a", workspace),
+		ActiveSettings:      loaded.Settings,
+		EnabledTools:        []toolspec.ID{toolspec.ToolExecCommand},
+		ConfiguredModelName: loaded.Settings.Model,
+		WorkspaceRoot:       workspace,
+		Source:              loaded.Source,
+	}
 }
 
 func loadLaunchConfig(t *testing.T, workspace string, configLines ...string) config.App {

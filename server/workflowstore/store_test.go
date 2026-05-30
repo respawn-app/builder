@@ -272,10 +272,7 @@ func (p *recordingWorkflowEventPublisher) PublishWorkflowEvent(_ context.Context
 func TestTaskCreateStartCancelAndComments(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 
 	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Implement feature", Body: "Body"})
 	if err != nil {
@@ -292,10 +289,7 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 		t.Fatalf("placements after create = %+v", placements)
 	}
 
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	started := startTask(t, ctx, store, task.ID)
 	if started.RunID == "" || started.PlacementID == "" {
 		t.Fatalf("start result missing run/placement ids: %+v", started)
 	}
@@ -388,10 +382,7 @@ func TestTaskCreateStartCancelAndComments(t *testing.T) {
 func TestTaskCreatePersistsSourceWorkspaceAndOptionalBody(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	source, err := store.metadata.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject source: %v", err)
@@ -423,10 +414,7 @@ func TestTaskCreatePersistsSourceWorkspaceAndOptionalBody(t *testing.T) {
 func TestTaskUpdateEditsTitleAndBodyAfterAutomationStarts(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	source, err := store.metadata.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
 	if err != nil {
 		t.Fatalf("AttachWorkspaceToProject source: %v", err)
@@ -451,9 +439,7 @@ func TestTaskUpdateEditsTitleAndBodyAfterAutomationStarts(t *testing.T) {
 	if renamed.Title != "Renamed" || renamed.Body != "after body" || renamed.SourceWorkspaceID != source.WorkspaceID {
 		t.Fatalf("title-only update = %+v, want previous body and source workspace preserved", renamed)
 	}
-	if _, err := store.StartTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	startTask(t, ctx, store, task.ID)
 	startedBody := " updated after start "
 	startedUpdate, err := store.UpdateTask(ctx, UpdateTaskRequest{TaskID: task.ID, Title: " After start ", Body: &startedBody})
 	if err != nil {
@@ -489,18 +475,9 @@ func TestTaskUpdateEditsTitleAndBodyAfterAutomationStarts(t *testing.T) {
 func TestCompleteRunUsesRunStartSnapshotAfterGraphChanges(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	beforeEdit := currentWorkflowRevision(t, ctx, store, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
@@ -588,17 +565,9 @@ func TestCompleteRunBuildsChildSnapshotFromParentRevision(t *testing.T) {
 	if _, err := store.AddEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-review-done-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: workflow.TransitionGroupID("group-review-done-" + string(workflowID)), Key: "review_done", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession, OutputRequirements: []workflow.OutputRequirement{{FieldName: "summary"}}}); err != nil {
 		t.Fatalf("AddEdge review done: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	archiveID := workflow.NodeID("node-archive-" + string(workflowID))
 	forceWorkflowGraphRowsForSnapshotTest(t, ctx, store, workflowID,
 		[]NodeRecord{{ID: archiveID, WorkflowID: workflowID, Key: "archive", Kind: workflow.NodeKindTerminal, DisplayName: "Archive"}},
@@ -624,10 +593,7 @@ func TestCompleteRunBuildsChildSnapshotFromParentRevision(t *testing.T) {
 func TestStartTaskRejectsCanceledAndAlreadyStartedTasks(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	canceled, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Canceled", Body: "Body"})
 	if err != nil {
 		t.Fatalf("CreateTask canceled: %v", err)
@@ -661,21 +627,12 @@ func TestStartTaskRejectsCanceledAndAlreadyStartedTasks(t *testing.T) {
 func TestWorkflowTransitionsRefreshTaskUpdatedAt(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	if _, err := store.db.ExecContext(ctx, `UPDATE tasks SET updated_at_unix_ms = 1 WHERE id = ?`, string(task.ID)); err != nil {
 		t.Fatalf("force stale task timestamp: %v", err)
 	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	started := startTask(t, ctx, store, task.ID)
 	afterStart, err := store.queries.GetTask(ctx, string(task.ID))
 	if err != nil {
 		t.Fatalf("GetTask after start: %v", err)
@@ -701,14 +658,8 @@ func TestWorkflowTransitionsRefreshTaskUpdatedAt(t *testing.T) {
 func TestStartTaskConcurrentCallsCreateOneRun(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -808,17 +759,9 @@ func TestCompleteRunCreatesTargetRunForContinueSessionContextMode(t *testing.T) 
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeContinueSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": "plan done"}})
 	if err != nil {
@@ -873,17 +816,9 @@ func TestRunStartContextResolvesPromptNodeReferenceOutputs(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createPromptNodeReferenceWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"summary": "plan summary"}})
 	if err != nil {
@@ -919,17 +854,9 @@ func TestPromptNodeReferenceDerivesOutputRequirement(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createPromptNodeReferenceWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	sourceContext, err := store.GetRunStartContext(ctx, started.RunID)
 	if err != nil {
 		t.Fatalf("GetRunStartContext source: %v", err)
@@ -959,17 +886,9 @@ func TestPromptNodeReferenceApprovalFreezesOutputValue(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateEdge approval: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	pending, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"summary": "approval summary"}})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1011,17 +930,9 @@ func TestRunStartContextUsesSelectedPriorNodeSession(t *testing.T) {
 	}
 	implementationNode := nodeByKey(t, def, "implementation")
 	acceptanceNode := nodeByKey(t, def, "acceptance")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "implement", OutputValues: map[string]string{"summary": "plan done"}}); err != nil {
 		t.Fatalf("CompleteRun plan: %v", err)
 	}
@@ -1106,17 +1017,9 @@ func TestSelectedContextSourceUsesLatestCompletedPriorNodeRun(t *testing.T) {
 	if _, err := store.AddEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-rework-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: reworkGroup, Key: "rework", TargetNodeID: implementationNode.ID, ContextMode: workflow.ContextModeNewSession, OutputRequirements: []workflow.OutputRequirement{{FieldName: "decision"}}}); err != nil {
 		t.Fatalf("AddEdge rework: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "implement", OutputValues: map[string]string{"summary": "plan done"}}); err != nil {
 		t.Fatalf("CompleteRun plan: %v", err)
 	}
@@ -1183,17 +1086,9 @@ func TestPendingApprovalResolvesSelectedContextSourceOnApproval(t *testing.T) {
 	}
 	implementationNode := nodeByKey(t, def, "implementation")
 	acceptanceNode := nodeByKey(t, def, "acceptance")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "implement", OutputValues: map[string]string{"summary": "plan done"}}); err != nil {
 		t.Fatalf("CompleteRun plan: %v", err)
 	}
@@ -1260,17 +1155,9 @@ func TestSelectedContextSourceMissingPriorRunFailsClearly(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createSelectedContextSourceWorkflow(t, ctx, store, workflow.ContextModeContinueSession)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	row, err := store.queries.GetTaskRun(ctx, string(started.RunID))
 	if err != nil {
 		t.Fatalf("GetTaskRun: %v", err)
@@ -1300,17 +1187,9 @@ func TestCompleteRunCreatesPendingApprovalTransition(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 
 	result, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
@@ -1346,17 +1225,9 @@ func TestApprovePendingTransitionStartsStoredTargetEdgeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1404,17 +1275,9 @@ func TestApprovePendingAgentTransitionRetryPreservesRunIDs(t *testing.T) {
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "next")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": "done"}})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1441,17 +1304,9 @@ func TestApprovePendingAgentTransitionRejectsLegacySnapshotWithoutFrozenTarget(t
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "next")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -1480,17 +1335,9 @@ func TestApprovePendingTransitionIsConcurrentIdempotent(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1522,9 +1369,7 @@ func TestApprovePendingJoinEdgesProgressesJoin(t *testing.T) {
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_a")
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_b")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
@@ -1572,9 +1417,7 @@ func TestApprovePendingJoinWaitsForAllBranchApprovals(t *testing.T) {
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_a")
 	requireApprovalOnWorkflowEdge(t, ctx, store, workflowID, "join_b")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
@@ -1623,17 +1466,9 @@ func TestRejectPendingApprovalTransitionMarksRejected(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1669,17 +1504,9 @@ func TestApprovalTransitionGroupWaitsAsWholeWhenAnyEdgeRequiresApproval(t *testi
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	row, err := store.queries.GetTaskRun(ctx, string(started.RunID))
 	if err != nil {
 		t.Fatalf("GetTaskRun: %v", err)
@@ -1722,17 +1549,9 @@ func TestCompleteRunFanoutCreatesParallelBranchPlacements(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 
 	result, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}})
 	if err != nil {
@@ -1774,18 +1593,9 @@ ORDER BY parallel_branch_edge_id ASC`, string(result.PlacementIDs[0]), string(re
 func TestSerialCompletionDoesNotCreateParallelBranchPlacement(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -1803,17 +1613,9 @@ func TestJoinWaitsForAllBranchesAndRoutesSelectedProvider(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	split, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}})
 	if err != nil {
 		t.Fatalf("CompleteRun split: %v", err)
@@ -1874,9 +1676,7 @@ func TestJoinArrivalsKeepMultipleJoinEdgesForOneBranchPlacement(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	task, branchRunsByNode := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
@@ -1963,17 +1763,9 @@ func TestJoinDownstreamCanUseSelectedPriorContextSource(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateEdge join synth: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimedPlan, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun plan: %v", err)
@@ -2023,17 +1815,9 @@ func TestDuplicateBranchArrivalIsRejectedAndDoesNotDuplicateJoin(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}}); err != nil {
 		t.Fatalf("CompleteRun split: %v", err)
 	}
@@ -2085,9 +1869,7 @@ func TestUnrelatedFanoutBatchDoesNotSatisfyWaitingJoin(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	waitingTask, waitingRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	otherTask, otherRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
@@ -2132,22 +1914,14 @@ func TestApprovalUsesStoredEdgeSnapshotAfterGraphEdit(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createApprovalWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
 	}
 	originalDone := nodeByKind(t, def, workflow.NodeKindTerminal)
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	completed, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -2184,17 +1958,9 @@ WHERE edge_key = 'done'
 func TestManualMoveToTerminalArchivesWithoutOutputValues(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	if _, err := store.StartTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	startTask(t, ctx, store, task.ID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2227,18 +1993,9 @@ func TestManualMoveToTerminalArchivesWithoutOutputValues(t *testing.T) {
 func TestManualMoveFromTerminalToStartResetsTaskToBacklog(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -2289,17 +2046,9 @@ func TestManualMoveBackwardReusesStoredOutputValues(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": "reused"}}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -2329,13 +2078,8 @@ func TestManualMoveMissingEdgeOverrideValidatesTargetInputFields(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2363,13 +2107,8 @@ func TestManualMoveMissingEdgeOverrideWithInputsCreatesPendingAgentTransition(t 
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2439,16 +2178,9 @@ func TestManualMoveContinueSessionRequiresSourceSession(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeContinueSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	if _, err := store.StartTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	startTask(t, ctx, store, task.ID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2465,17 +2197,9 @@ func TestManualMoveRejectsSelectedContextSourceV1(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createSelectedContextSourceWorkflow(t, ctx, store, workflow.ContextModeContinueSession)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "implement", OutputValues: map[string]string{"summary": "plan done"}}); err != nil {
 		t.Fatalf("CompleteRun plan: %v", err)
 	}
@@ -2508,17 +2232,9 @@ func TestBackwardManualMoveRejectsHistoricalSelectedContextSourceV1(t *testing.T
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createSelectedContextSourceWorkflow(t, ctx, store, workflow.ContextModeContinueSession)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "implement", OutputValues: map[string]string{"summary": "plan done"}}); err != nil {
 		t.Fatalf("CompleteRun plan: %v", err)
 	}
@@ -2546,14 +2262,8 @@ func TestBackwardManualMoveRejectsHistoricalSelectedContextSourceV1(t *testing.T
 func TestManualMovePendingApprovalRequiresSourceRun(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2577,16 +2287,9 @@ func TestManualMoveExecutableTargetRequiresApprovalBeforeAutomation(t *testing.T
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	if _, err := store.StartTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	startTask(t, ctx, store, task.ID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -2606,9 +2309,7 @@ func TestManualMoveRejectsActiveParallelBatch(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
@@ -2627,9 +2328,7 @@ func TestStartTaskRejectsCrossRoleContinueSessionContextMode(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeContinueSession, "reviewer")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 
 	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
 	if err != nil {
@@ -2655,17 +2354,9 @@ func TestCompleteRunValidatesOutputRequirements(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": "  "}}); err == nil || !strings.Contains(err.Error(), "required output") {
 		t.Fatalf("expected missing required output error, got %v", err)
 	}
@@ -2688,18 +2379,9 @@ func TestCompleteRunValidatesOutputRequirements(t *testing.T) {
 func TestCompleteRunInfersSingleTransitionID(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID}); err != nil {
 		t.Fatalf("CompleteRun inferred transition: %v", err)
 	}
@@ -2721,17 +2403,9 @@ func TestCompleteRunRejectsMissingTransitionIDWhenAmbiguous(t *testing.T) {
 	if _, err := store.AddEdge(ctx, EdgeRecord{ID: workflow.EdgeID("edge-blocked-" + string(workflowID)), WorkflowID: workflowID, TransitionGroupID: workflow.TransitionGroupID("group-blocked-" + string(workflowID)), Key: "blocked", TargetNodeID: done.ID, ContextMode: workflow.ContextModeNewSession}); err != nil {
 		t.Fatalf("AddEdge blocked: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID}); err == nil || !strings.Contains(err.Error(), "transition id is required") {
 		t.Fatalf("expected missing transition id error, got %v", err)
 	}
@@ -2740,18 +2414,9 @@ func TestCompleteRunRejectsMissingTransitionIDWhenAmbiguous(t *testing.T) {
 func TestCompleteRunRejectsUnknownOutputField(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done", OutputValues: map[string]string{"extra": "nope"}}); err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("expected unknown output error, got %v", err)
 	}
@@ -2761,18 +2426,10 @@ func TestCompleteRunReturnsStructuredValidationIssues(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
-	_, err = store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"extra": "nope"}})
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
+	_, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"extra": "nope"}})
 	validation, ok := err.(CompletionValidationError)
 	if !ok {
 		t.Fatalf("error = %T %v, want CompletionValidationError", err, err)
@@ -2790,18 +2447,10 @@ func TestCompleteRunRejectsOversizedCompletionFields(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createChainedContextModeWorkflow(t, ctx, store, workflow.ContextModeNewSession, "coder")
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
-	_, err = store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": strings.Repeat("a", workflow.MaxOutputValueBytes+1)}})
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
+	_, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "next", OutputValues: map[string]string{"prior_summary": strings.Repeat("a", workflow.MaxOutputValueBytes+1)}})
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("expected oversized output error, got %v", err)
 	}
@@ -2814,18 +2463,9 @@ func TestCompleteRunRejectsOversizedCompletionFields(t *testing.T) {
 func TestRecordProtocolViolationInterruptsAtCap(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	first, err := store.RecordProtocolViolation(ctx, RecordProtocolViolationRequest{RunID: started.RunID, Kind: ProtocolViolationFinalAnswer, MaxCount: 2, Detail: `{"detail":"first"}`})
 	if err != nil {
 		t.Fatalf("RecordProtocolViolation first: %v", err)
@@ -2852,18 +2492,9 @@ func TestRecordProtocolViolationInterruptsAtCap(t *testing.T) {
 func TestCompleteRunRejectsStaleGeneration(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -2879,18 +2510,9 @@ func TestCompleteRunRejectsStaleGeneration(t *testing.T) {
 func TestRunStartContextHandlesMissingInputEdgeAndRejectsNonArrayInputJSON(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_transition_edges WHERE target_placement_id = ?`, string(started.PlacementID)); err != nil {
 		t.Fatalf("delete transition edge snapshot: %v", err)
 	}
@@ -2939,19 +2561,10 @@ func TestRunStartContextHandlesMissingInputEdgeAndRejectsNonArrayInputJSON(t *te
 func TestAttachRunSessionGenerationGuard(t *testing.T) {
 	ctx := context.Background()
 	store, binding, cfg := newTestStoreWithConfig(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	sessionID := createTestSession(t, ctx, store, binding, cfg)
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -2977,19 +2590,10 @@ func TestAttachRunSessionGenerationGuard(t *testing.T) {
 func TestSetAndClearRunWaitingAskGenerationGuard(t *testing.T) {
 	ctx := context.Background()
 	store, binding, cfg := newTestStoreWithConfig(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
 	sessionID := createTestSession(t, ctx, store, binding, cfg)
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -3035,18 +2639,9 @@ func TestSetAndClearRunWaitingAskGenerationGuard(t *testing.T) {
 func TestInterruptRunGenerationGuard(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -3079,18 +2674,9 @@ func TestInterruptRunGenerationGuard(t *testing.T) {
 func TestResumeTaskRunRequeuesInterruptedRunWithSameSession(t *testing.T) {
 	ctx := context.Background()
 	store, binding, cfg := newTestStoreWithConfig(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -3129,18 +2715,9 @@ func TestResumeTaskRunRequeuesInterruptedRunWithSameSession(t *testing.T) {
 func TestResumeTaskRunRejectsRoleDrift(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.ClaimRun(ctx, started.RunID, 0); err != nil {
 		t.Fatalf("ClaimRun: %v", err)
 	}
@@ -3166,17 +2743,9 @@ func TestResumeTaskRunAllowsDefaultAgentRoleWithoutResolver(t *testing.T) {
 	if _, err := store.UpdateNode(ctx, NodeRecord{ID: agent.ID, WorkflowID: workflowID, Key: agent.Key, Kind: agent.Kind, DisplayName: agent.DisplayName, SubagentRole: workflow.DefaultAgentRole, PromptTemplate: agent.PromptTemplate, OutputFields: agent.OutputFields}); err != nil {
 		t.Fatalf("UpdateNode default role: %v", err)
 	}
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.ClaimRun(ctx, started.RunID, 0); err != nil {
 		t.Fatalf("ClaimRun: %v", err)
 	}
@@ -3197,18 +2766,9 @@ func TestResumeTaskRunAllowsDefaultAgentRoleWithoutResolver(t *testing.T) {
 func TestResumeTaskRunCanResumeInterruptedWaitingAskRun(t *testing.T) {
 	ctx := context.Background()
 	store, binding, cfg := newTestStoreWithConfig(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	claimed, err := store.ClaimRun(ctx, started.RunID, 0)
 	if err != nil {
 		t.Fatalf("ClaimRun: %v", err)
@@ -3237,9 +2797,7 @@ func TestInterruptAndResumeTaskRunCanTargetSpecificRun(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
 	task, branchRuns := startFanoutTask(t, ctx, store, binding.ProjectID, workflowID)
 	runIDs := make([]workflow.RunID, 0, len(branchRuns))
 	for _, runID := range branchRuns {
@@ -3281,14 +2839,8 @@ func TestInterruptAndResumeTaskRunCanTargetSpecificRun(t *testing.T) {
 func TestTaskStartRejectsCurrentInvalidWorkflow(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	def, _, err := store.GetDefinition(ctx, workflowID)
 	if err != nil {
 		t.Fatalf("GetDefinition: %v", err)
@@ -3403,10 +2955,7 @@ func TestProjectWorkflowUnlinkHardDeletesUnusedLinksAndBlocksTaskReferences(t *t
 		t.Fatalf("links after valid replacement = %+v, want replacement default", links)
 	}
 	link = otherLink
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 	blocked, err := store.UnlinkProjectWorkflow(ctx, link.ID, "")
 	if err != nil {
 		t.Fatalf("task reference unlink guard should return typed blockers, got error: %v", err)
@@ -3414,9 +2963,7 @@ func TestProjectWorkflowUnlinkHardDeletesUnusedLinksAndBlocksTaskReferences(t *t
 	if blocked.Unlinked || !hasProjectWorkflowUnlinkBlocker(blocked.Blockers, "task_references", 1) {
 		t.Fatalf("blocked unlink = %+v, want task reference blocker", blocked)
 	}
-	if _, err := store.StartTask(ctx, task.ID); err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	startTask(t, ctx, store, task.ID)
 }
 
 func TestProjectWorkflowUnlinkBlocksTerminalTaskHistory(t *testing.T) {
@@ -3427,14 +2974,8 @@ func TestProjectWorkflowUnlinkBlocksTerminalTaskHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LinkWorkflow: %v", err)
 	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -3469,14 +3010,8 @@ func hasProjectWorkflowUnlinkBlocker(blockers []ProjectWorkflowUnlinkBlocker, co
 func TestWorkflowDeletePreviewAndConfirmedApplyDeleteDatabaseRows(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
 
 	impact, err := store.PreviewWorkflowDelete(ctx, workflowID)
 	if err != nil {
@@ -3534,18 +3069,9 @@ func TestWorkflowDeletePreviewAndConfirmedApplyDeleteDatabaseRows(t *testing.T) 
 func TestWorkflowDeleteBlocksRunnableAndActiveRuns(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 
 	runnableImpact, err := store.PreviewWorkflowDelete(ctx, workflowID)
 	if err != nil {
@@ -4174,18 +3700,9 @@ func TestWorkflowGraphSaveEditPolicyBlocksLastTerminalRemovalOrKindChange(t *tes
 func TestWorkflowGraphSaveEditPolicyBlocksTaskReferencedNodeKindChange(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -4278,18 +3795,9 @@ func TestWorkflowPerEntityMutationsUseGraphEditPolicy(t *testing.T) {
 func TestWorkflowGraphSaveBlocksRemovedTaskReferences(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "done"}); err != nil {
 		t.Fatalf("CompleteRun: %v", err)
 	}
@@ -4332,17 +3840,9 @@ func TestWorkflowGraphSaveBlocksRemovedParallelBranchEdgeReferences(t *testing.T
 	ctx := context.Background()
 	store, binding := newTestStore(t)
 	workflowID := createFanoutJoinWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	linkWorkflow(t, ctx, store, binding.ProjectID, workflowID, true)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	result, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}})
 	if err != nil {
 		t.Fatalf("CompleteRun split: %v", err)
@@ -4576,18 +4076,9 @@ func forceWorkflowGraphRowsForSnapshotTest(t *testing.T, ctx context.Context, st
 func TestGuardedGraphDeletesRespectTaskHistory(t *testing.T) {
 	ctx := context.Background()
 	store, binding := newTestStore(t)
-	workflowID := createValidWorkflow(t, ctx, store)
-	if _, err := store.LinkWorkflow(ctx, binding.ProjectID, workflowID, true); err != nil {
-		t.Fatalf("LinkWorkflow: %v", err)
-	}
-	task, err := store.CreateTask(ctx, CreateTaskRequest{ProjectID: binding.ProjectID, Title: "Task", Body: "Body"})
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	workflowID := createLinkedValidWorkflow(t, ctx, store, binding.ProjectID)
+	task := createDefaultTask(t, ctx, store, binding.ProjectID)
+	started := startTask(t, ctx, store, task.ID)
 	agentID := workflow.NodeID("node-agent-" + string(workflowID))
 	if err := store.DeleteNode(ctx, agentID); !workflowGraphEditPolicyErrorHasBlocker(err, "active_node_placements") {
 		t.Fatalf("expected active node delete policy guard, got %v", err)
@@ -4711,6 +4202,43 @@ func createTestSession(t *testing.T, ctx context.Context, store *Store, binding 
 		t.Fatalf("ResolvePersistedSession: %v", err)
 	}
 	return sessionStore.Meta().SessionID
+}
+
+func linkWorkflow(t *testing.T, ctx context.Context, store *Store, projectID string, workflowID workflow.WorkflowID, isDefault bool) {
+	t.Helper()
+	if _, err := store.LinkWorkflow(ctx, projectID, workflowID, isDefault); err != nil {
+		t.Fatalf("LinkWorkflow: %v", err)
+	}
+}
+
+func createLinkedValidWorkflow(t *testing.T, ctx context.Context, store *Store, projectID string) workflow.WorkflowID {
+	t.Helper()
+	workflowID := createValidWorkflow(t, ctx, store)
+	linkWorkflow(t, ctx, store, projectID, workflowID, true)
+	return workflowID
+}
+
+func createTask(t *testing.T, ctx context.Context, store *Store, req CreateTaskRequest) TaskRecord {
+	t.Helper()
+	task, err := store.CreateTask(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	return task
+}
+
+func createDefaultTask(t *testing.T, ctx context.Context, store *Store, projectID string) TaskRecord {
+	t.Helper()
+	return createTask(t, ctx, store, CreateTaskRequest{ProjectID: projectID, Title: "Task", Body: "Body"})
+}
+
+func startTask(t *testing.T, ctx context.Context, store *Store, taskID workflow.TaskID) StartTaskResult {
+	t.Helper()
+	started, err := store.StartTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	return started
 }
 
 func createValidWorkflow(t *testing.T, ctx context.Context, store *Store) workflow.WorkflowID {
@@ -4995,10 +4523,7 @@ func startFanoutTask(t *testing.T, ctx context.Context, store *Store, projectID 
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	started, err := store.StartTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("StartTask: %v", err)
-	}
+	started := startTask(t, ctx, store, task.ID)
 	if _, err := store.CompleteRun(ctx, CompleteRunRequest{RunID: started.RunID, TransitionID: "split", OutputValues: map[string]string{"summary": "plan"}}); err != nil {
 		t.Fatalf("CompleteRun split: %v", err)
 	}
