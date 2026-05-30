@@ -546,12 +546,7 @@ func TestServiceSetSessionNameReplaysSuccessfulRetryAfterLeaseInvalidation(t *te
 func TestServiceSubmitUserMessageDedupesSuccessfulRetry(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, _, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
-	req := serverapi.RuntimeSubmitUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	req := runtimeControlUserMessageRequest(store, "req-1", "hello")
 
 	first, err := service.SubmitUserMessage(context.Background(), req)
 	if err != nil {
@@ -575,12 +570,7 @@ func TestServiceSubmitUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t 
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
 		WithControllerLeaseVerifier(verifier)
-	req := serverapi.RuntimeSubmitUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	req := runtimeControlUserMessageRequest(store, "req-1", "hello")
 
 	first, err := service.SubmitUserMessage(context.Background(), req)
 	if err != nil {
@@ -605,12 +595,7 @@ func TestServiceSubmitUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t 
 func TestServiceSubmitUserMessageRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, _, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
-	first := serverapi.RuntimeSubmitUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	first := runtimeControlUserMessageRequest(store, "req-1", "hello")
 	if _, err := service.SubmitUserMessage(context.Background(), first); err != nil {
 		t.Fatalf("SubmitUserMessage first: %v", err)
 	}
@@ -628,12 +613,7 @@ func TestServiceSubmitUserTurnRecordsPromptHistoryAndSubmits(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, _, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
 
-	resp, err := service.SubmitUserTurn(context.Background(), serverapi.RuntimeSubmitUserTurnRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	})
+	resp, err := service.SubmitUserTurn(context.Background(), runtimeControlUserTurnRequest(store, "req-1", "hello"))
 	if err != nil {
 		t.Fatalf("SubmitUserTurn: %v", err)
 	}
@@ -651,12 +631,7 @@ func TestServiceSubmitUserTurnRecordsPromptHistoryAndSubmits(t *testing.T) {
 func TestServiceSubmitUserTurnDedupesSuccessfulRetry(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, _, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
-	req := serverapi.RuntimeSubmitUserTurnRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	req := runtimeControlUserTurnRequest(store, "req-1", "hello")
 
 	first, err := service.SubmitUserTurn(context.Background(), req)
 	if err != nil {
@@ -679,12 +654,7 @@ func TestServiceSubmitUserTurnDedupesSuccessfulRetry(t *testing.T) {
 
 func TestServiceSubmitUserShellCommandDedupesSuccessfulRetry(t *testing.T) {
 	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
-	req := serverapi.RuntimeSubmitUserShellCommandRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Command:           "pwd",
-	}
+	req := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 
 	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
 		t.Fatalf("SubmitUserShellCommand first: %v", err)
@@ -707,12 +677,7 @@ func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidati
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
 		WithControllerLeaseVerifier(verifier)
-	req := serverapi.RuntimeSubmitUserShellCommandRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Command:           "pwd",
-	}
+	req := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 
 	if err := service.SubmitUserShellCommand(context.Background(), req); err != nil {
 		t.Fatalf("SubmitUserShellCommand first: %v", err)
@@ -731,12 +696,7 @@ func TestServiceSubmitUserShellCommandReplaysSuccessfulRetryAfterLeaseInvalidati
 
 func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	store, _, service := newRuntimeControlTestService(t, nil, tools.NewRegistry(fakeShellHandler{}), runtime.Config{})
-	first := serverapi.RuntimeSubmitUserShellCommandRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Command:           "pwd",
-	}
+	first := runtimeControlShellCommandRequest(store, "req-1", "pwd")
 	if err := service.SubmitUserShellCommand(context.Background(), first); err != nil {
 		t.Fatalf("SubmitUserShellCommand first: %v", err)
 	}
@@ -753,12 +713,7 @@ func TestServiceSubmitUserShellCommandRejectsClientRequestIDPayloadMismatch(t *t
 func TestServiceQueueUserMessageDedupesSuccessfulRetry(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, engine, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
-	req := serverapi.RuntimeQueueUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	req := runtimeControlQueueUserMessageRequest(store, "req-1", "hello")
 
 	firstQueue, err := service.QueueUserMessage(context.Background(), req)
 	if err != nil {
@@ -788,12 +743,7 @@ func TestServiceQueueUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t *
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
 		WithControllerLeaseVerifier(verifier)
-	req := serverapi.RuntimeQueueUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	req := runtimeControlQueueUserMessageRequest(store, "req-1", "hello")
 
 	firstQueue, err := service.QueueUserMessage(context.Background(), req)
 	if err != nil {
@@ -821,12 +771,7 @@ func TestServiceQueueUserMessageReplaysSuccessfulRetryAfterLeaseInvalidation(t *
 func TestServiceQueueUserMessageRejectsClientRequestIDPayloadMismatch(t *testing.T) {
 	client := finalResponseRuntimeControlClient()
 	store, engine, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
-	first := serverapi.RuntimeQueueUserMessageRequest{
-		ClientRequestID:   "req-1",
-		SessionID:         store.Meta().SessionID,
-		ControllerLeaseID: "lease-1",
-		Text:              "hello",
-	}
+	first := runtimeControlQueueUserMessageRequest(store, "req-1", "hello")
 	if _, err := service.QueueUserMessage(context.Background(), first); err != nil {
 		t.Fatalf("QueueUserMessage first: %v", err)
 	}
@@ -913,4 +858,40 @@ func countUserMessagesWithContent(t *testing.T, store *session.Store, content st
 		}
 	}
 	return count
+}
+
+func runtimeControlUserMessageRequest(store *session.Store, requestID string, text string) serverapi.RuntimeSubmitUserMessageRequest {
+	return serverapi.RuntimeSubmitUserMessageRequest{
+		ClientRequestID:   requestID,
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              text,
+	}
+}
+
+func runtimeControlUserTurnRequest(store *session.Store, requestID string, text string) serverapi.RuntimeSubmitUserTurnRequest {
+	return serverapi.RuntimeSubmitUserTurnRequest{
+		ClientRequestID:   requestID,
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              text,
+	}
+}
+
+func runtimeControlShellCommandRequest(store *session.Store, requestID string, command string) serverapi.RuntimeSubmitUserShellCommandRequest {
+	return serverapi.RuntimeSubmitUserShellCommandRequest{
+		ClientRequestID:   requestID,
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Command:           command,
+	}
+}
+
+func runtimeControlQueueUserMessageRequest(store *session.Store, requestID string, text string) serverapi.RuntimeQueueUserMessageRequest {
+	return serverapi.RuntimeQueueUserMessageRequest{
+		ClientRequestID:   requestID,
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Text:              text,
+	}
 }
