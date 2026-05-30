@@ -62,12 +62,7 @@ func (o *reentrantPersistenceObserver) ObservePersistedStore(_ context.Context, 
 func TestOpenByIDUsesResolverWhenSessionMetaFileIsMissing(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
-		t.Fatalf("write events file: %v", err)
-	}
+	writeSessionFixtureEvents(t, sessionDir, nil)
 	now := time.Now().UTC()
 	store, err := OpenByID(
 		root,
@@ -97,12 +92,7 @@ func TestOpenByIDUsesResolverWhenSessionMetaFileIsMissing(t *testing.T) {
 func TestFilelessMetadataPersistenceSkipsSessionFileAndPublishesObserver(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
-		t.Fatalf("write events file: %v", err)
-	}
+	writeSessionFixtureEvents(t, sessionDir, nil)
 	now := time.Now().UTC()
 	observer := &recordingPersistenceObserver{}
 	store, err := Open(
@@ -172,12 +162,7 @@ func TestForkAtUserMessagePreservesPersistenceOptions(t *testing.T) {
 func TestOpenByIDRejectsResolverRecordWithoutMetadata(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
-		t.Fatalf("write events file: %v", err)
-	}
+	writeSessionFixtureEvents(t, sessionDir, nil)
 	_, err := OpenByID(
 		root,
 		"session-1",
