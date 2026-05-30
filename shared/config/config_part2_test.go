@@ -9,10 +9,7 @@ import (
 )
 
 func TestLoadCapabilityOverridesFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 
 [model_capabilities]
 supports_reasoning_effort = true
@@ -28,9 +25,7 @@ supports_native_web_search = true
 supports_reasoning_encrypted = false
 supports_server_side_context_edit = false
 is_openai_first_party = false
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
 		t.Fatalf("expected model capability overrides from file, got %+v", cfg.Settings.ModelCapabilities)
 	}
@@ -87,10 +82,7 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 }
 
 func TestLoadReviewerCapabilityOverridesFromFileAndEnv(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, workspace, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 model_verbosity = "high"
 model_context_window = 272000
 
@@ -107,9 +99,7 @@ supports_vision_inputs = true
 provider_id = "local-reviewer"
 supports_responses_api = true
 supports_prompt_cache_key = true
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ModelVerbosity != ModelVerbosityLow {
 		t.Fatalf("expected reviewer.model_verbosity=low, got %q", cfg.Settings.Reviewer.ModelVerbosity)
 	}
@@ -158,10 +148,7 @@ supports_prompt_cache_key = true
 }
 
 func TestLoadReviewerCapabilitiesInheritMainWhenUnset(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 model_verbosity = "high"
 model_context_window = 128000
 context_compaction_threshold_tokens = 121600
@@ -172,9 +159,7 @@ supports_reasoning_effort = true
 [provider_capabilities]
 provider_id = "main-provider"
 supports_responses_api = true
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ModelVerbosity != ModelVerbosityHigh {
 		t.Fatalf("expected reviewer.model_verbosity to inherit main, got %q", cfg.Settings.Reviewer.ModelVerbosity)
 	}
@@ -190,10 +175,7 @@ supports_responses_api = true
 }
 
 func TestEffectiveReviewerSettingsPreservesLoadedExplicitFalseCapabilities(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 
 [model_capabilities]
 supports_reasoning_effort = true
@@ -212,9 +194,7 @@ supports_vision_inputs = false
 provider_id = "reviewer-provider"
 supports_responses_api = false
 supports_prompt_cache_key = false
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	reviewer := EffectiveReviewerSettings(cfg.Settings)
 	if reviewer.ModelCapabilities.SupportsReasoningEffort || reviewer.ModelCapabilities.SupportsVisionInputs {
 		t.Fatalf("expected explicit false reviewer model capabilities to survive effective helper, got %+v", reviewer.ModelCapabilities)
@@ -225,14 +205,9 @@ supports_prompt_cache_key = false
 }
 
 func TestLoadReviewerModelContextWindowRejectsNegative(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `[reviewer]
+	err := loadConfigTestFileError(t, `[reviewer]
 model_context_window = -1
-`)
-
-	_, err := Load(workspace, LoadOptions{})
+`, LoadOptions{})
 	if err == nil {
 		t.Fatal("expected negative reviewer.model_context_window to fail")
 	}
@@ -242,10 +217,7 @@ model_context_window = -1
 }
 
 func TestLoadReviewerModelCapabilityFalseOverrideDoesNotInheritMainTrue(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 
 [model_capabilities]
 supports_reasoning_effort = true
@@ -257,9 +229,7 @@ model = "local-reviewer"
 [reviewer.model_capabilities]
 supports_reasoning_effort = false
 supports_vision_inputs = false
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ModelCapabilities.SupportsReasoningEffort || cfg.Settings.Reviewer.ModelCapabilities.SupportsVisionInputs {
 		t.Fatalf("expected explicit false reviewer model capabilities to be preserved, got %+v", cfg.Settings.Reviewer.ModelCapabilities)
 	}
@@ -393,10 +363,7 @@ func TestValidateSettingsWithSourcesAllowsSubagentReviewerAnthropicOverride(t *t
 }
 
 func TestLoadReviewerProviderCapabilitiesDoNotInheritMainForSeparateEndpoint(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 
 [provider_capabilities]
 provider_id = "main-provider"
@@ -406,19 +373,14 @@ supports_responses_api = true
 model = "local-reviewer"
 provider_override = "openai"
 openai_base_url = "http://127.0.0.1:11434/v1"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ProviderCapabilities.ProviderID != "" || cfg.Settings.Reviewer.ProviderCapabilities.SupportsResponsesAPI {
 		t.Fatalf("expected separate reviewer endpoint not to inherit main provider capabilities, got %+v", cfg.Settings.Reviewer.ProviderCapabilities)
 	}
 }
 
 func TestLoadReviewerProviderCapabilitiesInheritMainForNoOpOpenAIProviderOverride(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 openai_base_url = "http://127.0.0.1:8080/v1"
 
 [provider_capabilities]
@@ -428,9 +390,7 @@ supports_prompt_cache_key = true
 
 [reviewer]
 provider_override = "openai"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.OpenAIBaseURL != "http://127.0.0.1:8080/v1" {
 		t.Fatalf("expected reviewer to inherit main base URL, got %q", cfg.Settings.Reviewer.OpenAIBaseURL)
 	}
@@ -442,43 +402,28 @@ provider_override = "openai"
 }
 
 func TestLoadReviewerProviderInheritsAnthropicProvider(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "claude-test"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "claude-test"
 provider_override = "anthropic"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ProviderOverride != "anthropic" {
 		t.Fatalf("expected reviewer provider to inherit anthropic, got %q", cfg.Settings.Reviewer.ProviderOverride)
 	}
 }
 
 func TestLoadReviewerProviderAllowsExplicitAnthropicProvider(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "gpt-5.5"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "gpt-5.5"
 
 [reviewer]
 model = "claude-test"
 provider_override = "anthropic"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.ProviderOverride != "anthropic" {
 		t.Fatalf("expected reviewer provider override anthropic, got %q", cfg.Settings.Reviewer.ProviderOverride)
 	}
 }
 
 func TestLoadProviderOverrideFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model = \"my-team-alias\"\nprovider_override = \"OpenAI\"\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "model = \"my-team-alias\"\nprovider_override = \"OpenAI\"\n", LoadOptions{})
 	if cfg.Settings.ProviderOverride != "openai" {
 		t.Fatalf("expected normalized provider_override from file, got %q", cfg.Settings.ProviderOverride)
 	}
@@ -488,12 +433,7 @@ func TestLoadProviderOverrideFromFile(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "provider_override = \"openai\"\n")
-
-	_, err := Load(workspace, LoadOptions{})
+	err := loadConfigTestFileError(t, "provider_override = \"openai\"\n", LoadOptions{})
 	if err == nil {
 		t.Fatal("expected provider_override without model override to fail")
 	}
@@ -503,12 +443,7 @@ func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model = \"my-team-alias\"\nprovider_override = \"openrouter\"\n")
-
-	_, err := Load(workspace, LoadOptions{})
+	err := loadConfigTestFileError(t, "model = \"my-team-alias\"\nprovider_override = \"openrouter\"\n", LoadOptions{})
 	if err == nil {
 		t.Fatal("expected invalid provider_override to fail")
 	}
@@ -518,12 +453,7 @@ func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model = \"my-team-alias\"\nprovider_override = \"anthropic\"\nopenai_base_url = \"https://example.openrouter.ai/api/v1\"\n")
-
-	_, err := Load(workspace, LoadOptions{})
+	err := loadConfigTestFileError(t, "model = \"my-team-alias\"\nprovider_override = \"anthropic\"\nopenai_base_url = \"https://example.openrouter.ai/api/v1\"\n", LoadOptions{})
 	if err == nil {
 		t.Fatal("expected provider_override/openai_base_url conflict to fail")
 	}
@@ -533,11 +463,7 @@ func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
 }
 
 func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model = \"my-team-alias\"\n")
-
+	_, workspace, _ := loadConfigTestFileApp(t, "model = \"my-team-alias\"\n", LoadOptions{})
 	cfg, err := Load(workspace, LoadOptions{ProviderOverride: "openai"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -577,12 +503,7 @@ func TestLoadRequestInputTokenCountCapabilityRequiresProviderID(t *testing.T) {
 }
 
 func TestLoadPriorityRequestModeFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "priority_request_mode = true\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "priority_request_mode = true\n", LoadOptions{})
 	if !cfg.Settings.PriorityRequestMode {
 		t.Fatal("expected priority_request_mode=true from file")
 	}
@@ -592,12 +513,7 @@ func TestLoadPriorityRequestModeFromFile(t *testing.T) {
 }
 
 func TestLoadModelVerbosityFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model_verbosity = \"high\"\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "model_verbosity = \"high\"\n", LoadOptions{})
 	if cfg.Settings.ModelVerbosity != ModelVerbosityHigh {
 		t.Fatalf("expected model_verbosity=high from file, got %q", cfg.Settings.ModelVerbosity)
 	}
@@ -607,12 +523,7 @@ func TestLoadModelVerbosityFromFile(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidModelVerbosityFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "model_verbosity = \"verbose\"\n")
-
-	_, err := Load(workspace, LoadOptions{})
+	err := loadConfigTestFileError(t, "model_verbosity = \"verbose\"\n", LoadOptions{})
 	if err == nil {
 		t.Fatal("expected validation error for invalid model_verbosity")
 	}
@@ -653,10 +564,7 @@ func TestProjectIDForWorkspaceRootCanonicalizesSymlinkedWorkspace(t *testing.T) 
 }
 
 func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `[reviewer]
+	home, workspace, cfg := loadConfigTestFileApp(t, `[reviewer]
 frequency = "all"
 model = "gpt-file-reviewer"
 thinking_level = "medium"
@@ -666,9 +574,7 @@ openai_base_url = "http://127.0.0.1:11434/v1"
 auth = "none"
 timeout_seconds = 45
 verbose_output = true
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.Frequency != "all" {
 		t.Fatalf("expected file reviewer.frequency=all, got %q", cfg.Settings.Reviewer.Frequency)
 	}
@@ -784,12 +690,7 @@ verbose_output = true
 }
 
 func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "web_search = \"native\"\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, workspace, cfg := loadConfigTestFileApp(t, "web_search = \"native\"\n", LoadOptions{})
 	if cfg.Settings.WebSearch != "native" {
 		t.Fatalf("expected file web_search=native, got %q", cfg.Settings.WebSearch)
 	}
@@ -819,12 +720,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "web_search = \"native\"\n[tools]\nweb_search = false\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "web_search = \"native\"\n[tools]\nweb_search = false\n", LoadOptions{})
 	if cfg.Settings.EnabledTools[toolspec.ToolWebSearch] {
 		t.Fatalf("expected explicit tools.web_search=false to stay disabled")
 	}
@@ -834,12 +730,7 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 }
 
 func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "[tools]\ntrigger_handoff = true\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "[tools]\ntrigger_handoff = true\n", LoadOptions{})
 	if !cfg.Settings.EnabledTools[toolspec.ToolTriggerHandoff] {
 		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
 	}
@@ -849,12 +740,7 @@ func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
 }
 
 func TestLoadSkillTogglesFromFile(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "[skills]\nApiResult = false\n\"Local Helper\" = true\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, _, cfg := loadConfigTestFileApp(t, "[skills]\nApiResult = false\n\"Local Helper\" = true\n", LoadOptions{})
 	if cfg.Settings.SkillToggles["apiresult"] {
 		t.Fatalf("expected apiresult skill to be explicitly disabled, got %+v", cfg.Settings.SkillToggles)
 	}
@@ -870,12 +756,7 @@ func TestLoadSkillTogglesFromFile(t *testing.T) {
 }
 
 func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "[skills]\napiresult = \"off\"\n")
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "[skills]\napiresult = \"off\"\n", LoadOptions{}); err == nil {
 		t.Fatal("expected invalid skills type error")
 	} else if !strings.Contains(err.Error(), "skills.apiresult") {
 		t.Fatalf("expected skills.apiresult in error, got %v", err)
@@ -883,12 +764,7 @@ func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
 }
 
 func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "[skills]\nApiResult = false\napiresult = true\n")
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
+	if err := loadConfigTestFileError(t, "[skills]\nApiResult = false\napiresult = true\n", LoadOptions{}); err == nil {
 		t.Fatal("expected duplicate normalized skills key error")
 	} else {
 		for _, want := range []string{"ApiResult", "apiresult", "both normalize to"} {
@@ -900,12 +776,7 @@ func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
 }
 
 func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "notification_method = \"bel\"\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, workspace, cfg := loadConfigTestFileApp(t, "notification_method = \"bel\"\n", LoadOptions{})
 	if cfg.Settings.NotificationMethod != "bel" {
 		t.Fatalf("expected file notification_method=bel, got %q", cfg.Settings.NotificationMethod)
 	}
@@ -929,12 +800,7 @@ func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestLoadToolPreamblesPrecedence(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "tool_preambles = false\n")
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+	_, workspace, cfg := loadConfigTestFileApp(t, "tool_preambles = false\n", LoadOptions{})
 	if cfg.Settings.ToolPreambles {
 		t.Fatalf("expected file tool_preambles=false")
 	}
@@ -958,60 +824,40 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 }
 
 func TestLoadAllowsReviewerAuthNoneWithoutBaseURL(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `[reviewer]
+	_, _, cfg := loadConfigTestFileApp(t, `[reviewer]
 auth = "none"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.Auth != "none" {
 		t.Fatalf("expected reviewer.auth=none, got %q", cfg.Settings.Reviewer.Auth)
 	}
 }
 
 func TestLoadAllowsReviewerAuthNoneWithFirstPartyOpenAIBaseURL(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `[reviewer]
+	_, _, cfg := loadConfigTestFileApp(t, `[reviewer]
 openai_base_url = "https://api.openai.com/v1"
 auth = "none"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.Auth != "none" {
 		t.Fatalf("expected reviewer.auth=none, got %q", cfg.Settings.Reviewer.Auth)
 	}
 }
 
 func TestLoadAllowsReviewerAuthNoneWithInheritedCompatibleBaseURL(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, `model = "local-model"
+	_, _, cfg := loadConfigTestFileApp(t, `model = "local-model"
 provider_override = "openai"
 openai_base_url = "http://127.0.0.1:11434/v1"
 
 [reviewer]
 provider_override = "openai"
 auth = "none"
-`)
-
-	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
+`, LoadOptions{})
 	if cfg.Settings.Reviewer.OpenAIBaseURL != "http://127.0.0.1:11434/v1" {
 		t.Fatalf("expected reviewer to inherit compatible base URL, got %q", cfg.Settings.Reviewer.OpenAIBaseURL)
 	}
 }
 
 func TestLoadRejectsRemovedTUIAlternateScreenSetting(t *testing.T) {
-	home, workspace := newConfigTestEnv(t)
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	writeConfigTestFile(t, configPath, "tui_alternate_screen = \"always\"\n")
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil || !strings.Contains(err.Error(), "tui_alternate_screen") {
+	if err := loadConfigTestFileError(t, "tui_alternate_screen = \"always\"\n", LoadOptions{}); err == nil || !strings.Contains(err.Error(), "tui_alternate_screen") {
 		t.Fatalf("expected removed tui_alternate_screen setting error, got %v", err)
 	}
 }

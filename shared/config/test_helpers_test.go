@@ -37,6 +37,21 @@ func writeConfigTestFile(t *testing.T, path string, contents string) {
 	}
 }
 
+func loadConfigTestFileApp(t *testing.T, contents string, opts LoadOptions) (string, string, App) {
+	t.Helper()
+	home, workspace, configPath := newConfigTestFile(t)
+	writeConfigTestFile(t, configPath, contents)
+	return home, workspace, loadConfigTestApp(t, workspace, opts)
+}
+
+func loadConfigTestFileError(t *testing.T, contents string, opts LoadOptions) error {
+	t.Helper()
+	_, workspace, configPath := newConfigTestFile(t)
+	writeConfigTestFile(t, configPath, contents)
+	_, err := Load(workspace, opts)
+	return err
+}
+
 func loadConfigTestApp(t *testing.T, workspace string, opts LoadOptions) App {
 	t.Helper()
 	cfg, err := Load(workspace, opts)
