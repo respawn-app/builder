@@ -132,6 +132,15 @@ func (b *promptActivityBroker) Publish(evt clientui.PendingPromptEvent) {
 	}
 }
 
+func (b *promptActivityBroker) SubscriberCount() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subscribers)
+}
+
 func (b *promptActivityBroker) canReplayLocked(afterSequence uint64) bool {
 	if afterSequence == 0 || afterSequence == b.nextSeq {
 		return true

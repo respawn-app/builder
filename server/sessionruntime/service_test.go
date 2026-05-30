@@ -147,7 +147,8 @@ func TestClaimActivationReusesPendingTakeoverRequest(t *testing.T) {
 	if reusedTakeover != takeover {
 		t.Fatal("expected pending retry to return same takeover state")
 	}
-	if !svc.completeTakeover("session-1", handle, takeover, "req-2", "lease-2") {
+	handle.controllerLeaseID = ""
+	if ok, err := svc.completeTakeover(context.Background(), "session-1", handle, takeover, "req-2", "lease-2"); err != nil || !ok {
 		t.Fatal("expected completeTakeover to succeed")
 	}
 	resp, err := activationResponseForTakeover(reusedTakeover)
@@ -386,6 +387,57 @@ func TestActivateSessionRuntimeReissuesControllerLeaseForTakeover(t *testing.T) 
 	if handle.controllerLeaseID != resp.LeaseID {
 		t.Fatalf("controller lease id = %q, want %q", handle.controllerLeaseID, resp.LeaseID)
 	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("old takeover lease validation error = %v, want invalid controller lease", err)
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, resp.LeaseID); err != nil {
+		t.Fatalf("new takeover lease should validate: %v", err)
+	}
+}
+
+func TestCompleteTakeoverDoesNotMutateHandleWhenPreviousLeaseReleaseFails(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	takeover := &runtimeTakeover{requestID: "req-2", ready: make(chan struct{})}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		takeover:            takeover,
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ok, err := fixture.service.completeTakeover(ctx, fixture.store.Meta().SessionID, handle, takeover, "req-2", "lease-new")
+	if err == nil || errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("completeTakeover error = %v, want operational error without invalid controller lease marker", err)
+	}
+	if ok {
+		t.Fatal("completeTakeover ok = true, want false when previous lease release fails")
+	}
+	if handle.controllerRequestID != "req-1" || handle.controllerLeaseID != lease.LeaseID || handle.takeover != nil {
+		t.Fatalf("handle mutated after failed takeover completion: %+v", handle)
+	}
+	select {
+	case <-takeover.ready:
+		if !errors.Is(takeover.err, context.Canceled) {
+			t.Fatalf("takeover error = %v, want context canceled", takeover.err)
+		}
+	default:
+		t.Fatal("takeover waiter was not signaled after failed takeover completion")
+	}
+	_, retryTakeover, claim, err := fixture.service.claimActivation(fixture.store.Meta().SessionID, "req-3")
+	if err != nil {
+		t.Fatalf("claimActivation retry: %v", err)
+	}
+	if claim != activationClaimTakeover || retryTakeover == nil || retryTakeover == takeover {
+		t.Fatalf("retry claim = %v takeover=%+v, want fresh takeover", claim, retryTakeover)
+	}
 }
 
 func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *testing.T) {
@@ -398,6 +450,25 @@ func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *te
 	}
 	if len(fixture.service.handles) != 0 {
 		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
+	}
+}
+
+func TestActivateSessionRuntimeReleasesLeaseOnActivationFailure(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	_, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		EnabledToolIDs:  []string{"not-a-tool"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown tool id") {
+		t.Fatalf("ActivateSessionRuntime error = %v, want unknown tool id", err)
+	}
+	var leaseID string
+	if err := fixture.metadata.DB().QueryRowContext(context.Background(), `SELECT id FROM runtime_leases WHERE session_id = ?`, fixture.store.Meta().SessionID).Scan(&leaseID); err != nil {
+		t.Fatalf("query activation failure lease: %v", err)
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, leaseID); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("activation failure lease validation error = %v, want invalid controller lease", err)
 	}
 }
 
@@ -580,6 +651,272 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 	}
 }
 
+func TestReleaseSessionRuntimeOnlyIfIdleKeepsActivePrimaryRun(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	fixture.service.runtimes = runtimeRegistry
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	active, err := runtimeRegistry.AcquirePrimaryRun(fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun: %v", err)
+	}
+	defer active.Release()
+
+	resp, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+		OnlyIfIdle:      true,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseSessionRuntime OnlyIfIdle: %v", err)
+	}
+	if !resp.Active || resp.Released {
+		t.Fatalf("release response = %+v, want active not released", resp)
+	}
+	if closed.Load() != 0 {
+		t.Fatalf("runtime close count = %d, want 0", closed.Load())
+	}
+	if got := fixture.service.handles[fixture.store.Meta().SessionID]; got != handle {
+		t.Fatalf("runtime handle = %+v, want preserved active handle", got)
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("active runtime lease should remain valid: %v", err)
+	}
+}
+
+func TestReleaseSessionRuntimeOnlyIfIdleClosesIdleRuntime(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.runtimes = registry.NewRuntimeRegistry()
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	resp, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+		OnlyIfIdle:      true,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseSessionRuntime OnlyIfIdle: %v", err)
+	}
+	if !resp.Released || resp.Active {
+		t.Fatalf("release response = %+v, want released not active", resp)
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("runtime close count = %d, want 1", closed.Load())
+	}
+	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
+		t.Fatal("expected runtime handle removed after idle release")
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("released runtime lease validation error = %v, want invalid controller lease", err)
+	}
+}
+
+func TestIdleRuntimeUnloadReleasesOrphanedRuntimeAfterPrimaryRunFinishes(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.SetInterestObserver(fixture.service.runtimeInterestChanged)
+	fixture.service.runtimes = runtimeRegistry
+	fixture.service.idleUnloadDelay = 10 * time.Millisecond
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           0,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	active, err := runtimeRegistry.AcquirePrimaryRun(fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun: %v", err)
+	}
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	select {
+	case <-closed:
+		t.Fatal("idle reaper closed runtime while primary run was active")
+	case <-time.After(30 * time.Millisecond):
+	}
+	active.Release()
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for idle reaper to close orphaned runtime")
+	}
+}
+
+func TestIdleRuntimeUnloadWaitsForTransientSubscriberReconnect(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.SetInterestObserver(fixture.service.runtimeInterestChanged)
+	fixture.service.runtimes = runtimeRegistry
+	fixture.service.idleUnloadDelay = 30 * time.Millisecond
+	engine, err := runtimepkg.New(fixture.store, &sessionRuntimeTestLLMClient{}, tools.NewRegistry(), runtimepkg.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	t.Cleanup(func() { _ = engine.Close() })
+	runtimeRegistry.Register(fixture.store.Meta().SessionID, engine)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           0,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	sub, err := runtimeRegistry.SubscribeSessionActivity(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	select {
+	case <-closed:
+		t.Fatal("idle reaper closed runtime while subscriber was connected")
+	case <-time.After(60 * time.Millisecond):
+	}
+	if err := sub.Close(); err != nil {
+		t.Fatalf("close subscription: %v", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for idle reaper to close after subscriber disconnect")
+	}
+}
+
+func TestIdleRuntimeUnloadWaitsForSubscriberReconnectBeforeDebounce(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.SetInterestObserver(fixture.service.runtimeInterestChanged)
+	fixture.service.runtimes = runtimeRegistry
+	fixture.service.idleUnloadDelay = 40 * time.Millisecond
+	engine, err := runtimepkg.New(fixture.store, &sessionRuntimeTestLLMClient{}, tools.NewRegistry(), runtimepkg.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	t.Cleanup(func() { _ = engine.Close() })
+	runtimeRegistry.Register(fixture.store.Meta().SessionID, engine)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           0,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	time.Sleep(15 * time.Millisecond)
+	sub, err := runtimeRegistry.SubscribeSessionActivity(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity reconnect: %v", err)
+	}
+	select {
+	case <-closed:
+		t.Fatal("idle reaper closed runtime despite subscriber reconnect before debounce")
+	case <-time.After(80 * time.Millisecond):
+	}
+	if err := sub.Close(); err != nil {
+		t.Fatalf("close subscription: %v", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for idle reaper to close after reconnected subscriber disconnect")
+	}
+}
+
+func TestIdleRuntimeUnloadIgnoresStaleTimerAfterOwnerReconnect(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.runtimes = registry.NewRuntimeRegistry()
+	fixture.service.idleUnloadDelay = 30 * time.Millisecond
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           0,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.mu.Lock()
+	handle.ownerRefs = 1
+	fixture.service.mu.Unlock()
+	fixture.service.cancelScheduledIdleUnload(fixture.store.Meta().SessionID)
+
+	select {
+	case <-closed:
+		t.Fatal("idle reaper closed runtime after owner reconnected")
+	case <-time.After(90 * time.Millisecond):
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("owner reconnect should keep runtime lease valid: %v", err)
+	}
+}
+
 func TestReleaseSessionRuntimeClosesHandleWhenLeaseValidatedAndWaitCanceled(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
@@ -680,12 +1017,59 @@ func TestReleaseSessionRuntimeValidatesPersistedLeaseWhenHandleAlreadyMissing(t 
 		t.Fatalf("ReleaseSessionRuntime: %v", err)
 	}
 
-	validated, err := fixture.metadata.ValidateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
-	if err != nil {
-		t.Fatalf("ValidateRuntimeLease verification: %v", err)
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("released lease validation error = %v, want invalid controller lease", err)
 	}
-	if validated.LeaseID != lease.LeaseID || validated.SessionID != lease.SessionID {
-		t.Fatalf("validated lease = %+v, want %+v", validated, lease)
+}
+
+func TestReleasedRuntimeLeaseCannotBeValidatedAgain(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+		close:               func() {},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("released runtime lease still validates: %v", err)
+	}
+	if _, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-2",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime retry should be idempotent: %v", err)
+	}
+}
+
+func TestOperationalLeaseErrorsAreNotClassifiedAsInvalidControllerLease(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := fixture.service.validateRuntimeLease(ctx, fixture.store.Meta().SessionID, lease.LeaseID); err == nil || errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("validateRuntimeLease canceled error = %v, want operational error without invalid controller lease marker", err)
+	}
+	if _, err := fixture.service.releaseRuntimeLease(ctx, fixture.store.Meta().SessionID, lease.LeaseID); err == nil || errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("releaseRuntimeLease canceled error = %v, want operational error without invalid controller lease marker", err)
 	}
 }
 

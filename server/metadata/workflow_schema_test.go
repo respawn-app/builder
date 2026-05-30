@@ -162,6 +162,9 @@ func TestOpenCreatesWorkflowSchemaAndForeignKeys(t *testing.T) {
 			t.Fatalf("runtime_leases.%s should not exist; runtime leases store durable token facts only", column)
 		}
 	}
+	if !columnExists(t, store.db, "runtime_leases", "released_at_unix_ms") {
+		t.Fatal("runtime_leases.released_at_unix_ms should exist for released-lease invalidation")
+	}
 	var foreignKeys int
 	if err := store.db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
 		t.Fatalf("PRAGMA foreign_keys: %v", err)

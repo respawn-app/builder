@@ -71,6 +71,47 @@ func (c *blockingRuntimeControlClient) Generate(ctx context.Context, req llm.Req
 	return llm.Response{}, ctx.Err()
 }
 
+type cancelObservingRuntimeControlClient struct {
+	started     chan struct{}
+	release     chan struct{}
+	ctxCanceled chan struct{}
+}
+
+func newCancelObservingRuntimeControlClient() *cancelObservingRuntimeControlClient {
+	return &cancelObservingRuntimeControlClient{
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		ctxCanceled: make(chan struct{}),
+	}
+}
+
+func (c *cancelObservingRuntimeControlClient) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
+	_ = req
+	select {
+	case <-c.started:
+	default:
+		close(c.started)
+	}
+	if done := ctx.Done(); done != nil {
+		go func() {
+			<-done
+			close(c.ctxCanceled)
+		}()
+	}
+	<-c.release
+	if err := ctx.Err(); err != nil {
+		return llm.Response{}, err
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
+}
+
+func (c *cancelObservingRuntimeControlClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{}, nil
+}
+
 type fakeShellHandler struct{}
 
 func (fakeShellHandler) Name() toolspec.ID { return toolspec.ToolExecCommand }
@@ -155,6 +196,67 @@ func TestServiceSubmitUserMessageReturnsTypedRuntimeUnavailable(t *testing.T) {
 	_, err := service.SubmitUserMessage(context.Background(), req)
 	if !errors.Is(err, serverapi.ErrRuntimeUnavailable) {
 		t.Fatalf("SubmitUserMessage error = %v, want ErrRuntimeUnavailable", err)
+	}
+}
+
+func TestServiceSubmitUserMessageDetachesRunFromCallerCancellation(t *testing.T) {
+	client := newCancelObservingRuntimeControlClient()
+	store, _, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.SubmitUserMessage(ctx, runtimeControlUserMessageRequest(store, "req-detached", "hello"))
+		done <- err
+	}()
+
+	select {
+	case <-client.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for submit to start")
+	}
+	cancel()
+	select {
+	case <-client.ctxCanceled:
+		t.Fatal("runtime context was canceled by caller cancellation")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("submit returned before runtime was released: %v", err)
+	default:
+	}
+
+	close(client.release)
+	if err := <-done; err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+}
+
+func TestServiceSubmitUserMessageStillCancelsOnExplicitInterrupt(t *testing.T) {
+	client := newCancelObservingRuntimeControlClient()
+	store, engine, service := newRuntimeControlTestService(t, client, nil, runtime.Config{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.SubmitUserMessage(context.Background(), runtimeControlUserMessageRequest(store, "req-interrupt", "hello"))
+		done <- err
+	}()
+
+	select {
+	case <-client.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for submit to start")
+	}
+	if err := engine.Interrupt(); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	select {
+	case <-client.ctxCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runtime context was not canceled by explicit interrupt")
+	}
+	close(client.release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubmitUserMessage error = %v, want context canceled", err)
 	}
 }
 

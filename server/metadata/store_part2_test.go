@@ -242,7 +242,7 @@ func TestResolvePersistedSessionUsesReboundWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
+func TestRuntimeLeaseReleaseInvalidatesControllerToken(t *testing.T) {
 	ctx := context.Background()
 	store, cfg, binding := newMetadataTestStore(t)
 	sess := createMetadataTestSession(t, store, cfg, binding)
@@ -253,6 +253,9 @@ func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
 	}
 	if lease.LeaseID == "" || lease.SessionID != sess.Meta().SessionID || lease.CreatedAt.IsZero() {
 		t.Fatalf("unexpected lease record: %+v", lease)
+	}
+	if !lease.ReleasedAt.IsZero() {
+		t.Fatalf("new lease released at = %v, want zero", lease.ReleasedAt)
 	}
 
 	validated, err := store.ValidateRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
@@ -269,6 +272,24 @@ func TestRuntimeLeaseRecordsAreDurableControllerTokensOnly(t *testing.T) {
 	}
 	if again.LeaseID != lease.LeaseID || again.SessionID != lease.SessionID {
 		t.Fatalf("retry validated lease = %+v, want %+v", again, lease)
+	}
+
+	released, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	}
+	if released.LeaseID != lease.LeaseID || released.SessionID != lease.SessionID || released.ReleasedAt.IsZero() {
+		t.Fatalf("released lease = %+v, want released %+v", released, lease)
+	}
+	if _, err := store.ValidateRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID); err == nil || !strings.Contains(err.Error(), "released") {
+		t.Fatalf("ValidateRuntimeLease after release err = %v, want released error", err)
+	}
+	releasedAgain, err := store.ReleaseRuntimeLease(ctx, sess.Meta().SessionID, lease.LeaseID)
+	if err != nil {
+		t.Fatalf("ReleaseRuntimeLease retry: %v", err)
+	}
+	if releasedAgain.ReleasedAt.IsZero() || !releasedAgain.ReleasedAt.Equal(released.ReleasedAt) {
+		t.Fatalf("retry released lease = %+v, want released_at %v", releasedAgain, released.ReleasedAt)
 	}
 }
 

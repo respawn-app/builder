@@ -71,6 +71,9 @@ func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
 	}
 	return clientui.RuntimeMainView{Status: f.status, Session: f.sessionView}
 }
+func (f *runtimeControlFakeClient) CachedMainView() (clientui.RuntimeMainView, bool) {
+	return f.MainView(), true
+}
 func (f *runtimeControlFakeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
 	f.refreshMainViewCalls++
 	return f.MainView(), f.err

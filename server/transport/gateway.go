@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"builder/server/auth"
 	"builder/server/metadata"
@@ -17,6 +18,8 @@ import (
 	"builder/shared/rpccontract"
 	"builder/shared/rpcwire"
 	"builder/shared/serverapi"
+
+	"github.com/google/uuid"
 )
 
 type Gateway struct {
@@ -115,6 +118,12 @@ type connectionState struct {
 	attachedWorkspaceID   string
 	attachedWorkspaceRoot string
 	attachedSession       string
+	ownedRuntimeLeases    map[string]connectionOwnedRuntimeLease
+}
+
+type connectionOwnedRuntimeLease struct {
+	SessionID string
+	LeaseID   string
 }
 
 type gatewaySubscriptionHandler func(g *Gateway, conn rpcwire.Conn, ctx context.Context, state *connectionState, route rpccontract.Route, req protocol.Request)
@@ -192,6 +201,7 @@ func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
 		cancel()
 	}()
 	state := &connectionState{}
+	defer g.cleanupConnectionRuntimeLeases(state)
 	for {
 		req, err := receiveRequest(connCtx, conn)
 		if err != nil {
@@ -211,6 +221,29 @@ func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
 		if !sendResponse(connCtx, conn, resp) {
 			return
 		}
+	}
+}
+
+const gatewayRuntimeCleanupTimeout = 3 * time.Second
+
+func (g *Gateway) cleanupConnectionRuntimeLeases(state *connectionState) {
+	owned := state.takeOwnedRuntimeLeases()
+	if len(owned) == 0 || g == nil || isNilGatewayDependencies(g.deps) {
+		return
+	}
+	client := g.deps.SessionRuntimeClient()
+	if client == nil {
+		return
+	}
+	for _, lease := range owned {
+		ctx, cancel := context.WithTimeout(context.Background(), gatewayRuntimeCleanupTimeout)
+		_, _ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       lease.SessionID,
+			LeaseID:         lease.LeaseID,
+			OnlyIfIdle:      true,
+		})
+		cancel()
 	}
 }
 

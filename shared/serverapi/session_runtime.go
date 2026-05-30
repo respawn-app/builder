@@ -24,9 +24,13 @@ type SessionRuntimeReleaseRequest struct {
 	ClientRequestID string `json:"client_request_id"`
 	SessionID       string `json:"session_id"`
 	LeaseID         string `json:"lease_id"`
+	OnlyIfIdle      bool   `json:"only_if_idle,omitempty"`
 }
 
-type SessionRuntimeReleaseResponse struct{}
+type SessionRuntimeReleaseResponse struct {
+	Released bool `json:"released"`
+	Active   bool `json:"active,omitempty"`
+}
 
 func (r SessionRuntimeActivateRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {

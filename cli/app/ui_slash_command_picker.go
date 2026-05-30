@@ -164,7 +164,7 @@ func (m *uiModel) resumeCommandAvailable() bool {
 }
 
 func (m *uiModel) hasParentSession() bool {
-	return strings.TrimSpace(m.runtimeStatus().ParentSessionID) != ""
+	return strings.TrimSpace(m.cachedRuntimeStatus().ParentSessionID) != ""
 }
 
 func (m *uiModel) clampSlashCommandSelection() {

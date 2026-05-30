@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"builder/server/primaryrun"
 	"builder/server/runtime"
@@ -18,8 +19,10 @@ const (
 )
 
 type RuntimeRegistry struct {
-	directory *runtimeDirectory
-	leases    *primaryRunLeaseStore
+	directory  *runtimeDirectory
+	leases     *primaryRunLeaseStore
+	observerMu sync.Mutex
+	observer   func(sessionID string)
 }
 
 func NewRuntimeRegistry() *RuntimeRegistry {
@@ -72,6 +75,9 @@ func (r *RuntimeRegistry) PublishRuntimeEvent(sessionID string, evt runtime.Even
 		return
 	}
 	entry.sessionActivity.Publish(runtimeview.EventFromRuntime(evt))
+	if evt.RunState != nil {
+		r.notifyInterestChanged(sessionID)
+	}
 }
 
 func (r *RuntimeRegistry) SubscribeSessionActivity(_ context.Context, sessionID string) (serverapi.SessionActivitySubscription, error) {
@@ -87,7 +93,14 @@ func (r *RuntimeRegistry) SubscribeSessionActivityFrom(_ context.Context, req se
 	if entry == nil || entry.sessionActivity == nil {
 		return nil, fmt.Errorf("session activity stream for %q is unavailable: %w", id, serverapi.ErrSessionActivityUnavailable)
 	}
-	return entry.sessionActivity.Subscribe(req.AfterSequence)
+	sub, err := entry.sessionActivity.Subscribe(req.AfterSequence)
+	if err != nil {
+		return nil, err
+	}
+	r.notifyInterestChanged(id)
+	return &notifyingSessionActivitySubscription{SessionActivitySubscription: sub, onClose: func() {
+		r.notifyInterestChanged(id)
+	}}, nil
 }
 
 func (r *RuntimeRegistry) SubscribePromptActivity(_ context.Context, sessionID string) (serverapi.PromptActivitySubscription, error) {
@@ -104,7 +117,14 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
 	if req.AfterSequence == 0 {
-		return entry.SubscribePromptActivityInitial(id, nil)
+		sub, err := entry.SubscribePromptActivityInitial(id, nil)
+		if err != nil {
+			return nil, err
+		}
+		r.notifyInterestChanged(id)
+		return &notifyingPromptActivitySubscription{PromptActivitySubscription: sub, onClose: func() {
+			r.notifyInterestChanged(id)
+		}}, nil
 	}
 	sub, err := entry.promptActivity.Subscribe(nil, req.AfterSequence)
 	if err != nil {
@@ -113,7 +133,10 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 	if sub == nil {
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
-	return sub, nil
+	r.notifyInterestChanged(id)
+	return &notifyingPromptActivitySubscription{PromptActivitySubscription: sub, onClose: func() {
+		r.notifyInterestChanged(id)
+	}}, nil
 }
 
 func (r *RuntimeRegistry) BeginPendingPrompt(sessionID string, req askquestion.Request) {
@@ -191,4 +214,78 @@ func (r *RuntimeRegistry) AcquirePrimaryRun(sessionID string) (primaryrun.Lease,
 		return nil, primaryrun.ErrActivePrimaryRun
 	}
 	return r.leases.Acquire(sessionID)
+}
+
+func (r *RuntimeRegistry) SetInterestObserver(observer func(sessionID string)) {
+	if r == nil {
+		return
+	}
+	r.observerMu.Lock()
+	r.observer = observer
+	r.observerMu.Unlock()
+}
+
+func (r *RuntimeRegistry) HasRuntimeSubscribers(sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	entry := r.directory.Entry(sessionID)
+	if entry == nil {
+		return false
+	}
+	return entry.sessionActivity.SubscriberCount() > 0 || entry.promptActivity.SubscriberCount() > 0
+}
+
+func (r *RuntimeRegistry) notifyInterestChanged(sessionID string) {
+	if r == nil {
+		return
+	}
+	id := normalizeRegistrySessionID(sessionID)
+	if id == "" {
+		return
+	}
+	r.observerMu.Lock()
+	observer := r.observer
+	r.observerMu.Unlock()
+	if observer != nil {
+		observer(id)
+	}
+}
+
+type notifyingSessionActivitySubscription struct {
+	serverapi.SessionActivitySubscription
+	once    sync.Once
+	onClose func()
+}
+
+func (s *notifyingSessionActivitySubscription) Close() error {
+	var err error
+	if s != nil && s.SessionActivitySubscription != nil {
+		err = s.SessionActivitySubscription.Close()
+	}
+	s.once.Do(func() {
+		if s.onClose != nil {
+			s.onClose()
+		}
+	})
+	return err
+}
+
+type notifyingPromptActivitySubscription struct {
+	serverapi.PromptActivitySubscription
+	once    sync.Once
+	onClose func()
+}
+
+func (s *notifyingPromptActivitySubscription) Close() error {
+	var err error
+	if s != nil && s.PromptActivitySubscription != nil {
+		err = s.PromptActivitySubscription.Close()
+	}
+	s.once.Do(func() {
+		if s.onClose != nil {
+			s.onClose()
+		}
+	})
+	return err
 }
