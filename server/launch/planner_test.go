@@ -113,9 +113,7 @@ func TestPlannerHeadlessUsesDefaultGPT55ModelAndOpenAIProviderInference(t *testi
 func TestPlannerInteractiveRequiresExplicitOpenOrCreateIntent(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	if _, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a"); err != nil {
-		t.Fatalf("create existing session: %v", err)
-	}
+	createTestSessionInContainer(t, containerDir, "workspace-a", "/tmp/workspace-a")
 	planner := Planner{
 		Config: config.App{
 			WorkspaceRoot:   "/tmp/workspace-a",
@@ -134,17 +132,11 @@ func TestPlannerInteractiveRequiresExplicitOpenOrCreateIntent(t *testing.T) {
 func TestPlannerInteractiveReopensSelectedSessionID(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	first, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create first session: %v", err)
-	}
+	first := createTestSessionInContainer(t, containerDir, "workspace-a", "/tmp/workspace-a")
 	if err := first.SetName("first"); err != nil {
 		t.Fatalf("persist first session meta: %v", err)
 	}
-	second, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create second session: %v", err)
-	}
+	second := createTestSessionInContainer(t, containerDir, "workspace-a", "/tmp/workspace-a")
 	if err := second.SetName("second"); err != nil {
 		t.Fatalf("persist second session meta: %v", err)
 	}
@@ -173,10 +165,7 @@ func TestPlannerReappliesPersistedSubagentRoleSettingsOnResume(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	store, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := store.SetContinuationContext(session.ContinuationContext{AgentRole: "smart_reviewer"}); err != nil {
 		t.Fatalf("SetContinuationContext: %v", err)
 	}
@@ -239,10 +228,7 @@ func TestPlannerIgnoresMissingPersistedSubagentRoleOnResume(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	store, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := store.SetContinuationContext(session.ContinuationContext{AgentRole: "deleted_role"}); err != nil {
 		t.Fatalf("SetContinuationContext: %v", err)
 	}
@@ -279,10 +265,7 @@ func TestPlannerKeepsRoleBaseURLOutOfBaseSettingsOnResume(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	store, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := store.SetContinuationContext(session.ContinuationContext{
 		OpenAIBaseURL: "https://worker.example/v1",
 		AgentRole:     "worker",
@@ -642,10 +625,7 @@ func TestPlannerNewChildSessionPreservesParentWorktreeContext(t *testing.T) {
 		t.Fatalf("RegisterWorkspaceBinding: %v", err)
 	}
 	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
-	parent, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.AuthoritativeSessionStoreOptions()...)
-	if err != nil {
-		t.Fatalf("create parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.AuthoritativeSessionStoreOptions()...)
 	if err := parent.EnsureDurable(); err != nil {
 		t.Fatalf("EnsureDurable parent: %v", err)
 	}
@@ -793,10 +773,7 @@ func TestPlannerHeadlessChildWithRoleUsesFreshSystemPromptSnapshot(t *testing.T)
 		},
 	}
 	containerDir := filepath.Join(cfg.PersistenceRoot, "projects", "project-a", "sessions")
-	parent, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := parent.MarkModelDispatchLocked(session.LockedContract{
 		Model:           "locked-parent-model",
 		EnabledTools:    []string{"shell"},
@@ -847,10 +824,7 @@ func TestPlannerHeadlessChildWithRoleUsesFreshSystemPromptSnapshot(t *testing.T)
 func TestPlannerNewChildSessionFallsBackWhenParentExecutionTargetIsNotMetadataBacked(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	parent, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerDir, "workspace-a", "/tmp/workspace-a")
 	if err := parent.SetWorktreeReminderState(&session.WorktreeReminderState{
 		Mode:                  session.WorktreeReminderModeEnter,
 		Branch:                "feature/file-backed",
@@ -894,10 +868,7 @@ func TestPlannerNewChildSessionIgnoresParentOutsideActiveContainer(t *testing.T)
 	root := t.TempDir()
 	containerA := filepath.Join(root, "projects", "project-a", "sessions")
 	containerB := filepath.Join(root, "projects", "project-b", "sessions")
-	parent, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
-	if err != nil {
-		t.Fatalf("create foreign parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerB, "workspace-b", "/tmp/workspace-b")
 	if err := parent.MarkModelDispatchLocked(session.LockedContract{Model: "foreign-parent-model"}); err != nil {
 		t.Fatalf("MarkModelDispatchLocked parent: %v", err)
 	}
@@ -954,10 +925,7 @@ func TestPlannerNewChildSessionRollsBackDurableChildWhenExecutionTargetCopyFails
 		t.Fatalf("RegisterWorkspaceBinding: %v", err)
 	}
 	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
-	parent, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.SessionStoreOptions()...)
-	if err != nil {
-		t.Fatalf("create parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot, metadataStore.SessionStoreOptions()...)
 	if err := parent.EnsureDurable(); err != nil {
 		t.Fatalf("EnsureDurable parent: %v", err)
 	}
@@ -1051,10 +1019,7 @@ func TestPlannerNewSessionHonorsCanceledContextBeforeDurableCreation(t *testing.
 func TestPlannerNewChildSessionHonorsCanceledContextBeforeParentCopy(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	parent, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create parent session: %v", err)
-	}
+	parent := createTestSessionInContainer(t, containerDir, "workspace-a", "/tmp/workspace-a")
 	planner := Planner{
 		Config: config.App{
 			WorkspaceRoot:   "/tmp/workspace-a",
@@ -1065,7 +1030,7 @@ func TestPlannerNewChildSessionHonorsCanceledContextBeforeParentCopy(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = planner.PlanSession(ctx, SessionRequest{
+	_, err := planner.PlanSession(ctx, SessionRequest{
 		Mode:            ModeInteractive,
 		ForceNewSession: true,
 		ParentSessionID: parent.Meta().SessionID,
@@ -1490,10 +1455,7 @@ func TestPlannerResumeFastRoleUsesProviderOverrideForHeuristic(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	store, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := store.SetContinuationContext(session.ContinuationContext{AgentRole: config.BuiltInSubagentRoleFast}); err != nil {
 		t.Fatalf("SetContinuationContext: %v", err)
 	}
@@ -1540,10 +1502,7 @@ func TestPlannerResumeFastRoleUsesOpenAIBaseURLForHeuristic(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	containerDir := filepath.Join(root, "projects", "project-a", "sessions")
-	store, err := session.Create(containerDir, "workspace-a", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createTestSessionInContainer(t, containerDir, "workspace-a", workspace)
 	if err := store.SetContinuationContext(session.ContinuationContext{AgentRole: config.BuiltInSubagentRoleFast}); err != nil {
 		t.Fatalf("SetContinuationContext: %v", err)
 	}
