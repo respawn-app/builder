@@ -33,6 +33,30 @@ func decodeStringToolOutput(t *testing.T, result tools.Result) string {
 	return wrapped.Output
 }
 
+type shellToolCaller interface {
+	Call(context.Context, tools.Call) (tools.Result, error)
+}
+
+func callShellTestTool(t *testing.T, tool shellToolCaller, id string, name toolspec.ID, input map[string]any) tools.Result {
+	t.Helper()
+	rawInput, _ := json.Marshal(input)
+	result, err := tool.Call(context.Background(), tools.Call{ID: id, Name: name, Input: rawInput})
+	if err != nil {
+		t.Fatalf("%s call error: %v", name, err)
+	}
+	return result
+}
+
+func callExecCommand(t *testing.T, tool *ExecCommandTool, id string, input map[string]any) tools.Result {
+	t.Helper()
+	return callShellTestTool(t, tool, id, toolspec.ToolExecCommand, input)
+}
+
+func callWriteStdin(t *testing.T, tool *WriteStdinTool, id string, input map[string]any) tools.Result {
+	t.Helper()
+	return callShellTestTool(t, tool, id, toolspec.ToolWriteStdin, input)
+}
+
 func waitForManagerCount(t *testing.T, manager *Manager, want int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -499,16 +523,12 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "bg-1", map[string]any{
 		"cmd":           "sleep 0.3; echo done",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -516,14 +536,10 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("manager count = %d, want 1", manager.Count())
 	}
 
-	pollInput, _ := json.Marshal(map[string]any{
+	pollResult := callWriteStdin(t, pollTool, "bg-2", map[string]any{
 		"session_id":    1000,
 		"yield_time_ms": 800,
 	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
-	}
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
@@ -641,16 +657,12 @@ func TestExecCommandExportsAgentEnv(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "agent-env", map[string]any{
 		"cmd":           "printf '%s' \"$AGENT\"",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 1_000,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "agent-env", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -665,16 +677,12 @@ func TestExecCommandBackgroundProcessExportsAgentEnv(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "agent-env-bg-start", map[string]any{
 		"cmd":           "sleep 0.35; printf '%s' \"$AGENT\"",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "agent-env-bg-start", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -682,14 +690,10 @@ func TestExecCommandBackgroundProcessExportsAgentEnv(t *testing.T) {
 		t.Fatalf("expected background transition, got %q", got)
 	}
 
-	pollInput, _ := json.Marshal(map[string]any{
+	pollResult := callWriteStdin(t, pollTool, "agent-env-bg-poll", map[string]any{
 		"session_id":    1000,
 		"yield_time_ms": 800,
 	})
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "agent-env-bg-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
-	}
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
@@ -712,16 +716,12 @@ func TestExecCommandAppliesUserHookOutput(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Close() })
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "hooked", map[string]any{
 		"cmd":           "printf raw",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 5_000,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "hooked", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -739,16 +739,12 @@ func TestExecCommandFileReadPostprocessorHandlesDirectCommandOnly(t *testing.T) 
 	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	directInput, _ := json.Marshal(map[string]any{
+	directResult := callExecCommand(t, execTool, "file-read-direct", map[string]any{
 		"cmd":           "sed -n '1,1p' " + shellSingleQuote(path),
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 1_000,
 	})
-	directResult, err := execTool.Call(context.Background(), tools.Call{ID: "file-read-direct", Name: toolspec.ToolExecCommand, Input: directInput})
-	if err != nil {
-		t.Fatalf("direct exec_command call error: %v", err)
-	}
 	if directResult.IsError {
 		t.Fatalf("unexpected direct exec_command error: %s", string(directResult.Output))
 	}
@@ -756,16 +752,12 @@ func TestExecCommandFileReadPostprocessorHandlesDirectCommandOnly(t *testing.T) 
 		t.Fatalf("direct output = %q", got)
 	}
 
-	pipelineInput, _ := json.Marshal(map[string]any{
+	pipelineResult := callExecCommand(t, execTool, "file-read-pipeline", map[string]any{
 		"cmd":           "nl -ba " + shellSingleQuote(path) + " | sed -n '1,1p'",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 1_000,
 	})
-	pipelineResult, err := execTool.Call(context.Background(), tools.Call{ID: "file-read-pipeline", Name: toolspec.ToolExecCommand, Input: pipelineInput})
-	if err != nil {
-		t.Fatalf("pipeline exec_command call error: %v", err)
-	}
 	if pipelineResult.IsError {
 		t.Fatalf("unexpected pipeline exec_command error: %s", string(pipelineResult.Output))
 	}
@@ -786,16 +778,12 @@ func TestExecCommandReportsNonZeroExitCode(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	input, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "nonzero-1", map[string]any{
 		"cmd":           "printf 'bad\\n'; exit 7",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 1_000,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "nonzero-1", Name: toolspec.ToolExecCommand, Input: input})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -891,16 +879,12 @@ func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Close() })
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "clamp-1", map[string]any{
 		"cmd":           fmt.Sprintf("sleep %.1f; echo done", commandDelay.Seconds()),
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": requestedYield,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -968,31 +952,24 @@ func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "poll-duration-exec", map[string]any{
 		"cmd":           "sleep 0.8",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "poll-duration-exec", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 
-	pollInput, _ := json.Marshal(map[string]any{
+	pollInput := map[string]any{
 		"session_id":        1000,
 		"yield_time_ms":     300,
 		"max_output_tokens": 32,
-	})
-	start := time.Now()
-	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "poll-duration-poll", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
 	}
+	start := time.Now()
+	pollResult := callWriteStdin(t, pollTool, "poll-duration-poll", pollInput)
+	elapsed := time.Since(start)
 	if pollResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
 	}
