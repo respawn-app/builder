@@ -552,23 +552,7 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 	}
 	_ = opened
 
-	authSupport := newGatewayTestAuthSupport(t, true)
-	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
-	if err != nil {
-		t.Fatalf("BuildRuntimeSupport: %v", err)
-	}
-	defer func() { _ = runtimeSupport.Background.Close() }()
-	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
-	if err != nil {
-		t.Fatalf("core.New: %v", err)
-	}
-	defer func() { _ = appCore.Close() }()
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
-	if err != nil {
-		t.Fatalf("NewGateway: %v", err)
-	}
-	server := httptest.NewServer(gateway.Handler())
-	defer server.Close()
+	_, server := newGatewayTestServerForConfig(t, resolvedA.Config)
 
 	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], bindingA.ProjectID)
 	if err != nil {
@@ -680,23 +664,7 @@ func TestGatewayAllowsOptionalSessionLifecycleRequestsWithoutSessionID(t *testin
 	if err != nil {
 		t.Fatalf("ResolveBinding: %v", err)
 	}
-	authSupport := newGatewayTestAuthSupport(t, true)
-	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
-	if err != nil {
-		t.Fatalf("BuildRuntimeSupport: %v", err)
-	}
-	defer func() { _ = runtimeSupport.Background.Close() }()
-	appCore, err := core.New(resolved.Config, authSupport, runtimeSupport)
-	if err != nil {
-		t.Fatalf("core.New: %v", err)
-	}
-	defer func() { _ = appCore.Close() }()
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
-	if err != nil {
-		t.Fatalf("NewGateway: %v", err)
-	}
-	server := httptest.NewServer(gateway.Handler())
-	defer server.Close()
+	_, server := newGatewayTestServerForConfig(t, resolved.Config)
 
 	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], binding.ProjectID)
 	if err != nil {
@@ -742,25 +710,9 @@ func TestGatewayProjectReattachClearsStaleSessionAttachment(t *testing.T) {
 	resolvedB := resolveGatewayTestConfig(t, workspaceB)
 	bindingB := registerGatewayTestBinding(t, resolvedB.Config)
 
-	authSupport := newGatewayTestAuthSupport(t, true)
-	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
-	if err != nil {
-		t.Fatalf("BuildRuntimeSupport: %v", err)
-	}
-	defer func() { _ = runtimeSupport.Background.Close() }()
-	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
-	if err != nil {
-		t.Fatalf("core.New: %v", err)
-	}
-	defer func() { _ = appCore.Close() }()
+	appCore, server := newGatewayTestServerForConfig(t, resolvedA.Config)
 	storeA := createGatewayAuthoritativeSession(t, appCore)
 	appCore.RegisterSessionStore(storeA)
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
-	if err != nil {
-		t.Fatalf("NewGateway: %v", err)
-	}
-	server := httptest.NewServer(gateway.Handler())
-	defer server.Close()
 
 	conn := dialGateway(t, server)
 	defer func() { _ = conn.Close() }()
@@ -786,23 +738,7 @@ func TestGatewayRejectsAttachProjectWorkspaceOutsideProject(t *testing.T) {
 	resolvedB := resolveGatewayTestConfig(t, workspaceB)
 	registerGatewayTestBinding(t, resolvedB.Config)
 
-	authSupport := newGatewayTestAuthSupport(t, true)
-	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
-	if err != nil {
-		t.Fatalf("BuildRuntimeSupport: %v", err)
-	}
-	defer func() { _ = runtimeSupport.Background.Close() }()
-	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
-	if err != nil {
-		t.Fatalf("core.New: %v", err)
-	}
-	defer func() { _ = appCore.Close() }()
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
-	if err != nil {
-		t.Fatalf("NewGateway: %v", err)
-	}
-	server := httptest.NewServer(gateway.Handler())
-	defer server.Close()
+	_, server := newGatewayTestServerForConfig(t, resolvedA.Config)
 
 	conn := dialGateway(t, server)
 	defer func() { _ = conn.Close() }()
