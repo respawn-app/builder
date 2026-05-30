@@ -344,13 +344,7 @@ func TestEnsureManagedRGConfigFilePreservesExistingContents(t *testing.T) {
 }
 
 func TestLoadSubagentRoleFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
+	home, workspace, configPath := newConfigTestFile(t)
 	contents := strings.Join([]string{
 		"model = \"gpt-5.5\"",
 		"",
@@ -364,14 +358,9 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 		"[subagents.fast.tools]",
 		"patch = false",
 	}, "\n")
-	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, contents)
 
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	role, ok := cfg.Settings.Subagents[BuiltInSubagentRoleFast]
 	if !ok {
 		t.Fatalf("expected fast subagent role, got %+v", cfg.Settings.Subagents)
@@ -397,27 +386,16 @@ func TestLoadSubagentRoleFromFile(t *testing.T) {
 }
 
 func TestLoadSubagentRoleMetadataFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
+	_, workspace, configPath := newConfigTestFile(t)
 	contents := strings.Join([]string{
 		"[subagents.research]",
 		"description = \"  Deep    repo\\nresearch  \"",
 		"agent_callable = false",
 		"thinking_level = \"high\"",
 	}, "\n")
-	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, contents)
 
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 	role := cfg.Settings.Subagents["research"]
 	if role.Description != "Deep repo research" {
 		t.Fatalf("description = %q, want normalized description", role.Description)
@@ -575,13 +553,7 @@ func TestParseSubagentRoleSystemPromptFileResolvesConfigRelativePath(t *testing.
 }
 
 func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
+	_, workspace, configPath := newConfigTestFile(t)
 	contents := strings.Join([]string{
 		"model = \"gpt-5.5\"",
 		"",
@@ -591,9 +563,7 @@ func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
 		"[subagents.fast.subagents.worker]",
 		"thinking_level = \"high\"",
 	}, "\n")
-	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, contents)
 
 	_, err := Load(workspace, LoadOptions{})
 	if err == nil {
@@ -605,13 +575,7 @@ func TestLoadSubagentRoleRejectsNestedSubagentsTable(t *testing.T) {
 }
 
 func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
+	_, workspace, configPath := newConfigTestFile(t)
 	contents := strings.Join([]string{
 		"model = \"gpt-5.5\"",
 		"",
@@ -619,9 +583,7 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 		"thinking_level = \"low\"",
 		"unknown_toggle = true",
 	}, "\n")
-	if err := os.WriteFile(configPath, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, contents)
 
 	_, err := Load(workspace, LoadOptions{})
 	if err == nil {
@@ -633,13 +595,7 @@ func TestLoadSubagentRoleRejectsUnknownKeys(t *testing.T) {
 }
 
 func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configDir := filepath.Join(home, ".builder")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
+	home, workspace, configPath := newConfigTestFile(t)
 	configText := strings.Join([]string{
 		"persistence_root = \"~/custom-builder\"",
 		"",
@@ -648,14 +604,9 @@ func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 		"setup_script = \"scripts/setup-worktree.sh\"",
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configText), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigTestFile(t, configPath, configText)
 
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	cfg := loadConfigTestApp(t, workspace, LoadOptions{})
 
 	if got, want := cfg.PersistenceRoot, filepath.Join(home, "custom-builder"); got != want {
 		t.Fatalf("persistence root = %q, want %q", got, want)
