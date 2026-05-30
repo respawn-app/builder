@@ -27,7 +27,7 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -37,9 +37,6 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
 	if err != nil {
@@ -67,7 +64,7 @@ func TestReviewerSystemPromptFileIsLazyLockedAndReused(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:        "all",
@@ -76,9 +73,6 @@ func TestReviewerSystemPromptFileIsLazyLockedAndReused(t *testing.T) {
 			Client:           reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -101,7 +95,7 @@ func TestReviewerSystemPromptFileIsLazyLockedAndReused(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	reopenedEngine, err := New(reopened, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	reopenedEngine := mustNewTestEngine(t, reopened, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Model:            "gpt-5",
@@ -131,16 +125,13 @@ func TestReviewerSystemPromptFileResolvesTilde(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Model:            "gpt-5",
 			SystemPromptFile: "~/reviewer-prompt.md",
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
 		t.Fatalf("run reviewer suggestions: %v", err)
 	}
@@ -153,20 +144,17 @@ func TestReviewerSystemPromptFileMissingFailsWithoutSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	missingPromptPath := filepath.Join(dir, "missing-reviewer-prompt.md")
 	store := mustCreateTestSessionAt(t, dir)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Model:            "gpt-5",
 			SystemPromptFile: missingPromptPath,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.ensureLocked(); err != nil {
 		t.Fatalf("ensure locked: %v", err)
 	}
-	_, err = eng.runReviewerSuggestions(context.Background(), "step-1", &fakeClient{})
+	_, err := eng.runReviewerSuggestions(context.Background(), "step-1", &fakeClient{})
 	if err == nil {
 		t.Fatal("expected missing reviewer system prompt file error")
 	}
@@ -190,7 +178,7 @@ func TestReviewerFrequencyOffDoesNotReadSystemPromptFile(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:        "off",
@@ -199,9 +187,6 @@ func TestReviewerFrequencyOffDoesNotReadSystemPromptFile(t *testing.T) {
 			Client:           reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -225,7 +210,7 @@ func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:           "gpt-5",
 		FastModeEnabled: true,
 		Reviewer: ReviewerConfig{
@@ -235,9 +220,6 @@ func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -266,7 +248,7 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -280,9 +262,6 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
 	if err != nil {
@@ -361,7 +340,7 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "edits",
@@ -370,9 +349,6 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "edit file")
 	if err != nil {
@@ -427,7 +403,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -442,9 +418,6 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -631,7 +604,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -641,9 +614,6 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -688,7 +658,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -698,9 +668,6 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -749,7 +716,7 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -758,9 +725,6 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -805,7 +769,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -820,9 +784,6 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -915,10 +876,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		t.Fatalf("expected original final -> reviewer suggestions -> updated final -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	restoredSnapshot := restored.ChatSnapshot()
 	foundRestoredSuggestions := false
 	for _, entry := range restoredSnapshot.Entries {

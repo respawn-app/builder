@@ -44,7 +44,7 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusStateWithoutTransc
 		snapshotAtReviewerComplete ChatSnapshot
 		eng                        *Engine
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng = mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
@@ -71,9 +71,6 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusStateWithoutTransc
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -128,15 +125,12 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusStateWithoutTransc
 func TestAppendPersistedLocalEntryEmitsRealtimeLocalEntryEvent(t *testing.T) {
 	store := mustCreateTestSession(t)
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			events = append(events, evt)
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	if err := eng.appendPersistedLocalEntryWithOngoingText("step-1", "reviewer_suggestions", "Supervisor suggested:\n1. Add verification notes.", "Supervisor made 1 suggestion."); err != nil {
 		t.Fatalf("append persisted local entry: %v", err)
@@ -160,13 +154,10 @@ func TestAppendPersistedLocalEntryEmitsRealtimeLocalEntryEvent(t *testing.T) {
 
 func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(t *testing.T) {
 	store := mustCreateTestSession(t)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:    "gpt-5",
 		Reviewer: ReviewerConfig{Model: "gpt-5"},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendUserMessage("prep-1", "first request"); err != nil {
 		t.Fatalf("append first message: %v", err)
 	}
@@ -225,7 +216,7 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 1_000_000,
 		OnEvent: func(evt Event) {
@@ -239,9 +230,6 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 			Client:    reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	eng.beforePersistMessage = func(msg llm.Message) error {
 		if msg.MessageType == llm.MessageTypeReviewerFeedback {
 			return reviewerInstructionErr
@@ -258,7 +246,7 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 		t.Fatalf("append user message: %v", err)
 	}
 
-	_, err = eng.runStepLoop(context.Background(), "step-1")
+	_, err := eng.runStepLoop(context.Background(), "step-1")
 	if err == nil {
 		t.Fatal("expected runStepLoop to fail when reviewer status persistence fails")
 	}
@@ -316,7 +304,7 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 		eventsMu sync.Mutex
 		events   []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			eventsMu.Lock()
@@ -331,9 +319,6 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
 		if entry.Role == "reviewer_status" {
 			return localEntryErr
@@ -341,7 +326,7 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 		return nil
 	}
 
-	_, err = eng.SubmitUserMessage(context.Background(), "do task")
+	_, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err == nil {
 		t.Fatal("expected submit to fail when reviewer status persistence fails")
 	}
@@ -375,10 +360,7 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 		t.Fatalf("append legacy reviewer_status: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	snapshot := restored.ChatSnapshot()
 	if len(snapshot.Entries) != 2 {
 		t.Fatalf("expected 2 restored entries, got %+v", snapshot.Entries)
@@ -401,10 +383,7 @@ func TestRestoreMessagesPreservesStoredLocalEntryNoticeID(t *testing.T) {
 		t.Fatalf("append local entry: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	snapshot := restored.ChatSnapshot()
 	if len(snapshot.Entries) != 1 {
 		t.Fatalf("expected 1 restored entry, got %+v", snapshot.Entries)
@@ -438,13 +417,10 @@ func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *test
 func TestAppendLocalEntryWithOngoingTextSkipsBlankEntries(t *testing.T) {
 	store := mustCreateTestSession(t)
 	var events []Event
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	eng.AppendLocalEntryWithOngoingText("user", "   ", "ignored")
 	if len(events) != 0 {
@@ -478,10 +454,7 @@ func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 		t.Fatalf("append assistant tool call message: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	snapshot := restored.ChatSnapshot()
 	if len(snapshot.Entries) != 2 {
 		t.Fatalf("expected assistant and tool call entries, got %+v", snapshot.Entries)
@@ -605,7 +578,7 @@ func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -614,9 +587,6 @@ func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -653,7 +623,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -663,9 +633,6 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 			Client:        reviewerClient,
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
 	if err != nil {
@@ -694,10 +661,7 @@ func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConci
 		t.Fatalf("expected concise reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
+	restored := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 	restoredSnapshot := restored.ChatSnapshot()
 	foundRestoredVerboseSuggestions := false
 	foundRestoredConciseStatus := false

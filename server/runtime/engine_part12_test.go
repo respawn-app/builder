@@ -16,7 +16,7 @@ func TestShouldCompactBeforeUserMessageSkipsExactCountWhenProviderOverrideDisabl
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{
 		Model:                 "gpt-5",
 		AutoCompactTokenLimit: 950,
 		ContextWindowTokens:   1000,
@@ -33,9 +33,6 @@ func TestShouldCompactBeforeUserMessageSkipsExactCountWhenProviderOverrideDisabl
 		},
 		PreSubmitCompactionLeadTokens: 50,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -66,15 +63,12 @@ func TestShouldCompactBeforeUserMessageSkipsExactCountWhenLockedContractDisables
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{
 		Model:                         "gpt-5",
 		AutoCompactTokenLimit:         950,
 		ContextWindowTokens:           1000,
 		PreSubmitCompactionLeadTokens: 50,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -95,14 +89,11 @@ func TestShouldAutoCompactRechecksProviderBeforeCompactingOnLargeEstimate(t *tes
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 1, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 2,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call-1",
@@ -124,14 +115,11 @@ func TestShouldAutoCompactPrefersConfiguredThresholdOverResolvedContextWindow(t 
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 950, contextWindow: 1000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 360_000,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -153,15 +141,12 @@ func TestShouldAutoCompactAccountsForReservedOutputBudget(t *testing.T) {
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 850, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 900,
 		MaxTokens:             100,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -175,14 +160,11 @@ func TestShouldAutoCompactSkipsPreciseCountWhenFarBelowThreshold(t *testing.T) {
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 999999, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 100_000,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
 		t.Fatalf("append message: %v", err)
 	}
@@ -199,14 +181,11 @@ func TestShouldAutoCompactMemoizesPreciseCountForUnchangedRequest(t *testing.T) 
 	store := mustCreateTestSession(t)
 
 	client := &preciseCompactionClient{inputTokenCount: 96000, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   400_000,
 		AutoCompactTokenLimit: 100_000,
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	eng.setLastUsage(llm.Usage{InputTokens: 95_000, WindowTokens: 400_000})
 
 	if eng.shouldAutoCompact() {
@@ -223,15 +202,12 @@ func TestShouldAutoCompactMemoizesPreciseCountForUnchangedRequest(t *testing.T) 
 func TestCompactionSoonReminderStaysSingleShotAfterReEnablingAutoCompactionAboveReminderBand(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -296,15 +272,12 @@ func TestCompactionSoonReminderStaysSingleShotAfterReEnablingAutoCompactionAbove
 func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -316,15 +289,12 @@ func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
 	restored.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
 	if !restored.compactionRuntimeState().SoonReminderIssued() {
 		t.Fatal("expected reopened session to restore reminder-issued state")
@@ -343,15 +313,12 @@ func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) 
 func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -366,7 +333,7 @@ func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T)
 	if forkedStore.Meta().CompactionSoonReminderIssued {
 		t.Fatal("expected fork before reminder to clear reminder-issued state")
 	}
-	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	forked := mustNewTestEngine(t, forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
@@ -413,15 +380,12 @@ func TestForkedSessionDoesNotCopyPersistedUsageState(t *testing.T) {
 func TestForkedSessionAfterReminderPreservesCompactionSoonReminderIssuedState(t *testing.T) {
 	store := mustCreateTestSession(t)
 
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -451,15 +415,12 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
 		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
 	}}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -482,15 +443,12 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	if err != nil {
 		t.Fatalf("re-open store: %v", err)
 	}
-	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	restored := mustNewTestEngine(t, reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
-	}
 	if restored.compactionRuntimeState().SoonReminderIssued() {
 		t.Fatal("expected reopened compacted session to start with cleared reminder-issued state")
 	}
@@ -505,15 +463,12 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	if forkedStore.Meta().CompactionSoonReminderIssued {
 		t.Fatal("expected fork of compacted session to inherit cleared reminder-issued state")
 	}
-	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	forked := mustNewTestEngine(t, forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("restore forked engine: %v", err)
-	}
 	if forked.compactionRuntimeState().SoonReminderIssued() {
 		t.Fatal("expected forked compacted session to start with cleared reminder-issued state")
 	}
@@ -563,15 +518,12 @@ func TestCompactionSoonReminderSkipsPreciseCountingWhenSuppressed(t *testing.T) 
 			store := mustCreateTestSession(t)
 
 			client := &preciseCompactionClient{inputTokenCount: 890, contextWindow: 2_000}
-			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+			eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 				Model:                 "gpt-5",
 				ContextWindowTokens:   2_000,
 				AutoCompactTokenLimit: 1_000,
 				CompactionMode:        tt.compactionMode,
 			})
-			if err != nil {
-				t.Fatalf("new engine: %v", err)
-			}
 			if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 				t.Fatalf("append seed message: %v", err)
 			}
@@ -616,16 +568,13 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   20_000,
 		AutoCompactTokenLimit: 10_000,
 		MaxTokens:             20,
 		CompactionMode:        "native",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -665,15 +614,12 @@ func TestRunStepLoopInjectsCompactionSoonReminderBeforeFinalAnswerRequest(t *tes
 		}},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
@@ -750,15 +696,12 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterToolOutputBound
 		},
 	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model:                 "gpt-5",
 		ContextWindowTokens:   2_000,
 		AutoCompactTokenLimit: 1_000,
 		CompactionMode:        "local",
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}

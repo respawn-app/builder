@@ -269,10 +269,7 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 		},
 	}}
 	registry := tools.NewRegistry(shelltool.NewExecCommandTool(dir, 16_000, manager, ""))
-	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	eng := mustNewTestEngine(t, store, client, registry, Config{Model: "gpt-5"})
 	manager.SetEventHandler(func(evt shelltool.Event) {
 		eng.HandleBackgroundShellEvent(BackgroundShellEvent{
 			Type:    string(evt.Type),
@@ -336,7 +333,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -344,9 +341,6 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	submitDone := make(chan struct {
 		assistant llm.Message
@@ -459,7 +453,7 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -473,9 +467,6 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	submitDone := make(chan struct {
 		assistant llm.Message
@@ -551,7 +542,7 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -565,9 +556,6 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	eng.QueueUserMessage("steer now")
 	result, err := eng.SubmitUserMessage(context.Background(), "run task")
@@ -646,7 +634,7 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewTestEngine(t, store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -660,9 +648,6 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	eng.QueueUserMessage("steer now")
 	result, err := eng.SubmitUserMessage(context.Background(), "run task")
@@ -730,7 +715,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
+	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(blockingTool{name: toolspec.ToolExecCommand, started: started, release: release}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -738,9 +723,6 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 			mu.Unlock()
 		},
 	})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	submitDone := make(chan struct {
 		assistant llm.Message
