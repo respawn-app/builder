@@ -493,10 +493,27 @@ func assertProjectSessionListingCount(t *testing.T, ctx context.Context, store *
 
 func newMetadataTestStore(t *testing.T) (*Store, config.App, Binding) {
 	t.Helper()
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	return newMetadataTestStoreForBoundWorkspace(t, t.TempDir())
+}
 
+func newMetadataTestStoreForBoundWorkspace(t *testing.T, workspace string) (*Store, config.App, Binding) {
+	t.Helper()
+	store, cfg := newMetadataTestStoreForWorkspace(t, workspace)
+	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	return store, cfg, binding
+}
+
+func newMetadataTestStoreWithoutBinding(t *testing.T) (*Store, config.App) {
+	t.Helper()
+	return newMetadataTestStoreForWorkspace(t, t.TempDir())
+}
+
+func newMetadataTestStoreForWorkspace(t *testing.T, workspace string) (*Store, config.App) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -506,9 +523,5 @@ func newMetadataTestStore(t *testing.T) (*Store, config.App, Binding) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("RegisterWorkspaceBinding: %v", err)
-	}
-	return store, cfg, binding
+	return store, cfg
 }
