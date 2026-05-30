@@ -15,11 +15,8 @@ import (
 )
 
 func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "reauthed-key")
-	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -69,11 +66,8 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 }
 
 func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "reauthed-key")
-	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -141,10 +135,7 @@ func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testi
 }
 
 func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -203,11 +194,8 @@ func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *
 }
 
 func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("OPENAI_API_KEY", "reauthed-key")
-	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {

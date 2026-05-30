@@ -448,10 +448,7 @@ func (s *stubEmbeddedProcessControlClient) GetInlineOutput(context.Context, serv
 }
 
 func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -486,10 +483,7 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 }
 
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -548,10 +542,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 }
 
 func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -617,10 +608,7 @@ func waitForPendingApprovalResources(t *testing.T, client client.ApprovalViewCli
 }
 
 func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -716,10 +704,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 }
 
 func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -855,10 +840,7 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 }
 
 func TestEmbeddedAppServerRoutesBackgroundCompletionToOwningSessionOnly(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {

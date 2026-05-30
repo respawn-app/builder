@@ -21,10 +21,7 @@ import (
 )
 
 func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -79,10 +76,7 @@ func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
 }
 
 func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -130,10 +124,7 @@ func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t 
 }
 
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -175,10 +166,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 }
 
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -202,10 +190,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 }
 
 func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -297,10 +282,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 }
 
 func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -365,10 +347,7 @@ func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 }
 
 func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -432,10 +411,7 @@ func TestEmbeddedAppServerProcessOutputStreamsAndInlineSnapshot(t *testing.T) {
 }
 
 func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, readyMemoryAuthHandler())
 	if err != nil {
@@ -468,10 +444,7 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 }
 
 func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunInFlight(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	firstStarted := make(chan struct{})
 	firstRelease := make(chan struct{})

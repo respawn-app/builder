@@ -23,9 +23,8 @@ import (
 )
 
 func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *testing.T) {
-	home := t.TempDir()
+	newAppTestHome(t)
 	workspace := t.TempDir()
-	t.Setenv("HOME", home)
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -101,10 +100,7 @@ func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *t
 }
 
 func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -158,10 +154,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 }
 
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -219,10 +212,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 }
 
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -282,10 +272,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability
 }
 
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -345,10 +332,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability
 }
 
 func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapability(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -407,10 +391,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 }
 
 func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	originalFetcher := authstatus.DefaultUsagePayloadFetcher
 	defer func() { authstatus.DefaultUsagePayloadFetcher = originalFetcher }()
@@ -521,10 +502,7 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 }
 
 func TestStartSessionServerRemoteReadyAuthDoesNotOpenStartupPicker(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -578,10 +556,7 @@ func TestStartSessionServerRemoteReadyAuthDoesNotOpenStartupPicker(t *testing.T)
 }
 
 func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -656,10 +631,7 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("helper daemon process signal probe is unix-only")
 	}
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 	t.Setenv("GO_WANT_HELPER_DAEMON", "1")
 	t.Setenv("GO_HELPER_WORKSPACE_ROOT", workspace)
 
@@ -703,10 +675,7 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 }
 
 func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	defaultResponses, defaultHits := newFakeResponsesServer(t, []string{"interactive daemon default"})
 	defer defaultResponses.Close()
@@ -784,10 +753,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 }
 
 func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -844,10 +810,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 }
 
 func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
+	_, workspace := newRegisteredAppWorkspace(t)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,

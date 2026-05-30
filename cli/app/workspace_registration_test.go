@@ -23,6 +23,21 @@ func registerAppWorkspace(t *testing.T, workspace string) {
 	_ = mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 }
 
+func newAppTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+func newRegisteredAppWorkspace(t *testing.T) (home string, workspace string) {
+	t.Helper()
+	home = newAppTestHome(t)
+	workspace = t.TempDir()
+	registerAppWorkspace(t, workspace)
+	return home, workspace
+}
+
 func configureAppTestServerPort(t *testing.T) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
