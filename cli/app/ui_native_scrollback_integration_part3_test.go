@@ -4,7 +4,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
-	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
@@ -21,26 +20,16 @@ import (
 )
 
 func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	runtimeEvents := make(chan runtime.Event, 256)
-	eng, err := runtime.New(
-		store,
+	_, eng := newAppRuntimeEngine(
+		t,
 		noopFinalStreamClient{},
-		tools.NewRegistry(),
 		runtime.Config{
-			Model: "gpt-5",
 			OnEvent: func(evt runtime.Event) {
 				runtimeEvents <- evt
 			},
 		},
 	)
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
 
 	out := &bytes.Buffer{}
 	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())

@@ -6,8 +6,6 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
 	"builder/server/runtimeview"
-	"builder/server/session"
-	"builder/server/tools"
 	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -685,23 +683,16 @@ func TestRuntimeClientLeaseRecoveryWarningFailureDoesNotBlockSubmit(t *testing.T
 
 func TestRuntimeClientServerRestartFirstPromptRecoversAndWarnsOngoing(t *testing.T) {
 	runtimeEvents := make(chan clientui.Event, 128)
-	store, err := session.Create(t.TempDir(), "workspace-x", t.TempDir())
-	if err != nil {
-		t.Fatalf("create session store: %v", err)
-	}
+	store := createAppRuntimeSessionAt(t, t.TempDir(), "workspace-x", t.TempDir())
 	client := &runtimeClientFakeLLM{responses: []llm.Response{{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	engine, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
-		Model: "gpt-5",
+	engine := newAppRuntimeEngineWithStore(t, store, client, runtime.Config{
 		OnEvent: func(evt runtime.Event) {
 			runtimeEvents <- runtimeview.EventFromRuntime(evt)
 		},
 	})
-	if err != nil {
-		t.Fatalf("create runtime engine: %v", err)
-	}
 	resolver := &mutableRuntimeResolver{}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(resolver, nil))
 	runtimeClient := newUIRuntimeClientWithReads(store.Meta().SessionID, &countingSessionViewClient{}, controls).(*sessionRuntimeClient)
