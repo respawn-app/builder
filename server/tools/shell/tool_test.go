@@ -825,14 +825,11 @@ func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 		t.Fatalf("rename log away: %v", err)
 	}
 
-	pollInput, _ := json.Marshal(map[string]any{
+	pollInput := map[string]any{
 		"session_id":    sessionID,
 		"yield_time_ms": 20,
-	})
-	first, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-1", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	if err != nil {
-		t.Fatalf("first write_stdin call error: %v", err)
 	}
+	first := callWriteStdin(t, pollTool, "log-missing-1", pollInput)
 	if first.IsError {
 		t.Fatalf("unexpected first write_stdin error: %s", string(first.Output))
 	}
@@ -844,10 +841,7 @@ func TestWriteStdinWarnsAndRetriesWhenFullLogReadFails(t *testing.T) {
 	if err := os.Rename(backupPath, logPath); err != nil {
 		t.Fatalf("restore log: %v", err)
 	}
-	second, err := pollTool.Call(context.Background(), tools.Call{ID: "log-missing-2", Name: toolspec.ToolWriteStdin, Input: pollInput})
-	if err != nil {
-		t.Fatalf("second write_stdin call error: %v", err)
-	}
+	second := callWriteStdin(t, pollTool, "log-missing-2", pollInput)
 	if second.IsError {
 		t.Fatalf("unexpected second write_stdin error: %s", string(second.Output))
 	}
@@ -998,17 +992,13 @@ func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
 	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "fg-trunc-1", map[string]any{
 		"cmd":               "i=0; while [ $i -lt 400 ]; do printf x; i=$((i+1)); done",
 		"shell":             "/bin/sh",
 		"login":             false,
 		"yield_time_ms":     2_000,
 		"max_output_tokens": 10,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "fg-trunc-1", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -1036,17 +1026,13 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	stdinTool := NewWriteStdinTool(16_000, manager)
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "tty-1", map[string]any{
 		"cmd":           "read line; echo $line",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"tty":           true,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-1", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
@@ -1054,15 +1040,11 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("manager count = %d, want 1", manager.Count())
 	}
 
-	stdinInput, _ := json.Marshal(map[string]any{
+	stdinResult := callWriteStdin(t, stdinTool, "tty-2", map[string]any{
 		"session_id":    1000,
 		"chars":         "hello builder\n",
 		"yield_time_ms": 800,
 	})
-	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-2", Name: toolspec.ToolWriteStdin, Input: stdinInput})
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
-	}
 	if stdinResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
 	}
@@ -1088,31 +1070,23 @@ func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	stdinTool := NewWriteStdinTool(16_000, manager)
 
-	execInput, _ := json.Marshal(map[string]any{
+	result := callExecCommand(t, execTool, "tty-trunc-1", map[string]any{
 		"cmd":           "read line; printf '%s' \"$line\"",
 		"shell":         "/bin/sh",
 		"login":         false,
 		"tty":           true,
 		"yield_time_ms": 250,
 	})
-	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-trunc-1", Name: toolspec.ToolExecCommand, Input: execInput})
-	if err != nil {
-		t.Fatalf("exec_command call error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 
-	stdinInput, _ := json.Marshal(map[string]any{
+	stdinResult := callWriteStdin(t, stdinTool, "tty-trunc-2", map[string]any{
 		"session_id":        1000,
 		"chars":             strings.Repeat("x", 400) + "\n",
 		"yield_time_ms":     2_000,
 		"max_output_tokens": 10,
 	})
-	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-trunc-2", Name: toolspec.ToolWriteStdin, Input: stdinInput})
-	if err != nil {
-		t.Fatalf("write_stdin call error: %v", err)
-	}
 	if stdinResult.IsError {
 		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
 	}
