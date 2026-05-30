@@ -49,8 +49,7 @@ func waitWorkflowProjectActions(t *testing.T, sub serverapi.WorkflowProjectSubsc
 }
 
 func TestServiceCreatesValidatesLinksAndStartsDefaultWorkflowTask(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 
 	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
 	if err != nil {
@@ -102,8 +101,7 @@ func TestServiceCreatesValidatesLinksAndStartsDefaultWorkflowTask(t *testing.T) 
 }
 
 func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
-	ctx := context.Background()
-	service, binding, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)
+	ctx, service, binding, metadataStore := newWorkflowServiceTestContextWithMetadata(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	source, err := metadataStore.AttachWorkspaceToProject(ctx, binding.ProjectID, t.TempDir())
@@ -159,8 +157,7 @@ func TestServiceCreatesAndUpdatesTaskSourceWorkspaceBeforeStart(t *testing.T) {
 }
 
 func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -202,8 +199,7 @@ func TestServiceCommentMutationsUpdateActivityAndPublishInvalidations(t *testing
 }
 
 func TestServiceAnswersTaskQuestionWithoutControllerLease(t *testing.T) {
-	ctx := context.Background()
-	service, binding, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)
+	ctx, service, binding, metadataStore := newWorkflowServiceTestContextWithMetadata(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createWorkflowServiceTask(t, ctx, service, serverapi.WorkflowTaskCreateRequest{ProjectID: binding.ProjectID, Title: "Question", Body: "Body"})
@@ -245,8 +241,7 @@ func TestServiceAnswersTaskQuestionWithoutControllerLease(t *testing.T) {
 }
 
 func TestServiceTaskStartValidatesCurrentGraph(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -264,8 +259,7 @@ func TestServiceTaskStartValidatesCurrentGraph(t *testing.T) {
 }
 
 func TestServiceTaskStartEnsuresTaskWorktreeBeforeRun(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -286,8 +280,7 @@ func TestServiceTaskStartEnsuresTaskWorktreeBeforeRun(t *testing.T) {
 }
 
 func TestServiceAllowsInvalidDefaultBacklogButRejectsUnlinkedWorkflow(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	unlinked, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Unlinked"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow unlinked: %v", err)
@@ -303,8 +296,7 @@ func TestServiceAllowsInvalidDefaultBacklogButRejectsUnlinkedWorkflow(t *testing
 }
 
 func TestServiceStartTaskAutomationValidatesEnsuresWorktreeAndRecordsRunnableRun(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -351,8 +343,7 @@ func TestServiceStartTaskAutomationValidatesEnsuresWorktreeAndRecordsRunnableRun
 }
 
 func TestServiceStartTaskAutomationNotifiesScheduler(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -368,8 +359,7 @@ func TestServiceStartTaskAutomationNotifiesScheduler(t *testing.T) {
 }
 
 func TestServiceMoveTaskAutoApprovesMissingEdgeOverrideAndStartsAgent(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceChainedWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -401,8 +391,7 @@ func TestServiceMoveTaskAutoApprovesMissingEdgeOverrideAndStartsAgent(t *testing
 }
 
 func TestServiceMoveTaskAutoApproveSurfacesCommittedPendingMoveWhenApprovalFails(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceChainedWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -432,8 +421,7 @@ func TestServiceMoveTaskAutoApproveSurfacesCommittedPendingMoveWhenApprovalFails
 }
 
 func TestServiceMoveTaskAutoApproveDoesNotBypassApprovalGatedEdge(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -466,8 +454,7 @@ func TestServiceMoveTaskAutoApproveDoesNotBypassApprovalGatedEdge(t *testing.T) 
 }
 
 func TestServiceInterruptTaskTargetsRunAndCancelsRuntime(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -488,8 +475,7 @@ func TestServiceInterruptTaskTargetsRunAndCancelsRuntime(t *testing.T) {
 }
 
 func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -508,8 +494,7 @@ func TestServiceCancelTaskCancelsActiveRuntime(t *testing.T) {
 }
 
 func TestServiceResumeTaskRequeuesRunAndNotifiesScheduler(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -586,8 +571,7 @@ func (e *recordingTaskWorktreeEnsurer) EnsureTaskWorktree(ctx context.Context, t
 }
 
 func TestServiceDefaultWorkflowResolvesWithinProjectOnly(t *testing.T) {
-	ctx := context.Background()
-	service, bindingA, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)
+	ctx, service, bindingA, metadataStore := newWorkflowServiceTestContextWithMetadata(t)
 	workspaceB := t.TempDir()
 	cfgB, err := config.Load(workspaceB, config.LoadOptions{})
 	if err != nil {
@@ -608,8 +592,7 @@ func TestServiceDefaultWorkflowResolvesWithinProjectOnly(t *testing.T) {
 }
 
 func TestServiceWorkflowListPaginatesAndCreateLinkIsAtomic(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	for _, name := range []string{"Gamma", "Alpha", "Beta"} {
 		if _, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: name}); err != nil {
 			t.Fatalf("CreateWorkflow %q: %v", name, err)
@@ -657,8 +640,7 @@ func TestServiceWorkflowListPaginatesAndCreateLinkIsAtomic(t *testing.T) {
 }
 
 func TestServiceWorkflowLinkFirstDefaultAndDuplicateIdempotency(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowA, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow A"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow A: %v", err)
@@ -694,8 +676,7 @@ func TestServiceWorkflowLinkFirstDefaultAndDuplicateIdempotency(t *testing.T) {
 }
 
 func TestServiceWorkflowUnlinkRejectsTaskReferencesAndHardDeletesUnusedLinks(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	link := linkWorkflowServiceProject(t, ctx, service, serverapi.WorkflowLinkProjectRequest{ProjectID: binding.ProjectID, WorkflowID: workflowID, Default: true})
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -744,8 +725,7 @@ func TestServiceWorkflowUnlinkRejectsTaskReferencesAndHardDeletesUnusedLinks(t *
 }
 
 func TestServiceWorkflowDeletePreviewsBlocksAndPublishesDeletion(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -826,8 +806,7 @@ func hasWorkflowDeleteBlocker(blockers []serverapi.WorkflowDeleteBlocker, code s
 }
 
 func TestServiceCommentsAndReadModels(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -876,8 +855,7 @@ func TestServiceCommentsAndReadModels(t *testing.T) {
 }
 
 func TestServiceWorkflowProjectSubscriptionEmitsLiveEvents(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
@@ -903,8 +881,7 @@ func TestServiceWorkflowProjectSubscriptionEmitsLiveEvents(t *testing.T) {
 }
 
 func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	task := createDefaultWorkflowServiceTask(t, ctx, service, binding.ProjectID)
@@ -935,8 +912,7 @@ func TestServiceWorkflowProjectSubscriptionEmitsRunCompletionEvent(t *testing.T)
 }
 
 func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	created, err := service.CreateWorkflow(ctx, serverapi.WorkflowCreateRequest{Name: "Workflow"})
 	if err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
@@ -973,8 +949,7 @@ func TestServiceWorkflowGraphMutationsPublishInvalidations(t *testing.T) {
 }
 
 func TestServiceWorkflowGraphValidatePreviewAndSave(t *testing.T) {
-	ctx := context.Background()
-	service, binding := newWorkflowServiceTestService(t)
+	ctx, service, binding := newWorkflowServiceTestContext(t)
 	workflowID := createWorkflowServiceValidWorkflow(t, ctx, service)
 	linkDefaultWorkflowServiceProject(t, ctx, service, binding.ProjectID, workflowID)
 	source, err := service.GetWorkflow(ctx, serverapi.WorkflowGetRequest{WorkflowID: workflowID})
@@ -1085,6 +1060,18 @@ func newWorkflowServiceTestService(t *testing.T) (*Service, metadata.Binding) {
 	t.Helper()
 	service, binding, _ := newWorkflowServiceTestServiceWithMetadata(t)
 	return service, binding
+}
+
+func newWorkflowServiceTestContext(t *testing.T) (context.Context, *Service, metadata.Binding) {
+	t.Helper()
+	service, binding := newWorkflowServiceTestService(t)
+	return context.Background(), service, binding
+}
+
+func newWorkflowServiceTestContextWithMetadata(t *testing.T) (context.Context, *Service, metadata.Binding, *metadata.Store) {
+	t.Helper()
+	service, binding, metadataStore := newWorkflowServiceTestServiceWithMetadata(t)
+	return context.Background(), service, binding, metadataStore
 }
 
 func newWorkflowServiceTestServiceWithMetadata(t *testing.T) (*Service, metadata.Binding, *metadata.Store) {
