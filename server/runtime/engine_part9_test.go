@@ -16,11 +16,7 @@ import (
 )
 
 func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
 	if err != nil {
@@ -56,11 +52,7 @@ func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
 }
 
 func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	client := &fakeCompactionClient{inputTokenCountFn: func(req llm.Request) int {
 		for _, item := range req.Items {
@@ -111,11 +103,7 @@ func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *test
 }
 
 func TestCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	patchInput := "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n"
 	client := &fakeClient{responses: []llm.Response{
@@ -188,11 +176,7 @@ func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			store, err := session.Create(dir, "ws", dir)
-			if err != nil {
-				t.Fatalf("create store: %v", err)
-			}
+			store := mustCreateTestSession(t)
 			client := &fakeClient{caps: tt.caps}
 			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolPatch}), Config{Model: "gpt-5", EnabledTools: []toolspec.ID{toolspec.ToolPatch}})
 			if err != nil {
@@ -218,11 +202,7 @@ func TestRequestToolsExposePatchAsCustomToolOnlyForFirstPartyResponsesProvider(t
 }
 
 func TestRequestToolsUseActiveProviderCapsForCustomPatchTool(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 	if err := store.MarkModelDispatchLocked(session.LockedContract{
 		Model:        "gpt-5",
 		EnabledTools: []string{string(toolspec.ToolPatch)},
@@ -258,11 +238,7 @@ func TestRequestToolsUseActiveProviderCapsForCustomPatchTool(t *testing.T) {
 }
 
 func TestFailedCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	client := &fakeClient{responses: []llm.Response{
 		{
@@ -309,11 +285,7 @@ func TestFailedCustomToolResultPersistsAsCustomToolCallOutput(t *testing.T) {
 }
 
 func TestRestoreMessagesPreservesRecoveredMultiToolProviderOrder(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 	call1 := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"pwd"}`)}
 	call2 := llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolExecCommand), Input: json.RawMessage(`{"command":"ls"}`)}
 	if _, err := store.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
@@ -432,11 +404,7 @@ func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	withGenerateRetryDelays(t, []time.Duration{time.Millisecond})
 
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	client := &fakeStreamClient{}
 
@@ -497,11 +465,7 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 }
 
 func TestStreamingEmitsReasoningSummaryDeltaEvents(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	var (
 		mu     sync.Mutex
@@ -538,11 +502,7 @@ func TestStreamingEmitsReasoningSummaryDeltaEvents(t *testing.T) {
 }
 
 func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	var (
 		mu     sync.Mutex
@@ -582,11 +542,7 @@ func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
 }
 
 func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	var (
 		mu     sync.Mutex
@@ -650,11 +606,7 @@ func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
 }
 
 func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	var (
 		mu                   sync.Mutex
@@ -662,7 +614,7 @@ func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
 		conversationWithLive int
 	)
 	var eng *Engine
-	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng, err := New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -695,18 +647,14 @@ func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
 }
 
 func TestChatSnapshotOngoingTracksStreamingAndClearsOnCommit(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	var (
 		mu             sync.Mutex
 		deltaSnapshots []string
 	)
 	var eng *Engine
-	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng, err := New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind != EventAssistantDelta || eng == nil {
@@ -743,11 +691,7 @@ func TestChatSnapshotOngoingTracksStreamingAndClearsOnCommit(t *testing.T) {
 }
 
 func TestAuthErrorsAreNotRetried(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	client := &authFailClient{}
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
@@ -769,11 +713,7 @@ func TestAuthErrorsAreNotRetried(t *testing.T) {
 func TestNonRetriableStatusCodesAreNotRetried(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 404} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			dir := t.TempDir()
-			store, err := session.Create(dir, "ws", dir)
-			if err != nil {
-				t.Fatalf("create store: %v", err)
-			}
+			store := mustCreateTestSession(t)
 
 			client := &statusFailClient{status: status}
 			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
@@ -795,16 +735,12 @@ func TestNonRetriableStatusCodesAreNotRetried(t *testing.T) {
 }
 
 func TestProviderContractErrorsAreNotRetried(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := mustCreateTestSession(t)
 
 	client := &providerContractFailClient{}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{Model: "gpt-5"})
 
-	_, err = eng.SubmitUserMessage(context.Background(), "trigger provider contract error")
+	_, err := eng.SubmitUserMessage(context.Background(), "trigger provider contract error")
 	if err == nil {
 		t.Fatal("expected provider contract failure")
 	}
