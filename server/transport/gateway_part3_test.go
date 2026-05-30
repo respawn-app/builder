@@ -23,11 +23,29 @@ func newGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
 
 func newGatewayTestServerWithAuth(t *testing.T, ready bool) (*core.Core, *httptest.Server, serverbootstrap.AuthSupport) {
 	t.Helper()
+	appCore, authSupport := newGatewayTestCore(t, true, ready)
+	return appCore, newGatewayHTTPTestServer(t, appCore), authSupport
+}
+
+func newUnboundGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
+	t.Helper()
+	appCore, _ := newGatewayTestCore(t, false, true)
+	if appCore.ProjectID() != "" {
+		t.Fatalf("unbound core project id = %q, want empty", appCore.ProjectID())
+	}
+	return appCore, newGatewayHTTPTestServer(t, appCore)
+}
+
+func newGatewayTestCore(t *testing.T, bindWorkspace bool, ready bool) (*core.Core, serverbootstrap.AuthSupport) {
+	t.Helper()
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	registerGatewayWorkspace(t, workspace)
-
+	if bindWorkspace {
+		registerGatewayWorkspace(t, workspace)
+	} else {
+		configureGatewayTestServerPort(t)
+	}
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("ResolveConfig: %v", err)
@@ -42,41 +60,16 @@ func newGatewayTestServerWithAuth(t *testing.T, ready bool) (*core.Core, *httpte
 	if err != nil {
 		t.Fatalf("core.New: %v", err)
 	}
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
-	if err != nil {
-		t.Fatalf("NewGateway: %v", err)
-	}
-	return appCore, httptest.NewServer(gateway.Handler()), authSupport
+	return appCore, authSupport
 }
 
-func newUnboundGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
+func newGatewayHTTPTestServer(t *testing.T, appCore *core.Core) *httptest.Server {
 	t.Helper()
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	configureGatewayTestServerPort(t)
-	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
-	if err != nil {
-		t.Fatalf("ResolveConfig: %v", err)
-	}
-	authSupport := newGatewayTestAuthSupport(t, true)
-	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
-	if err != nil {
-		t.Fatalf("BuildRuntimeSupport: %v", err)
-	}
-	t.Cleanup(func() { _ = runtimeSupport.Background.Close() })
-	appCore, err := core.New(resolved.Config, authSupport, runtimeSupport)
-	if err != nil {
-		t.Fatalf("core.New: %v", err)
-	}
-	if appCore.ProjectID() != "" {
-		t.Fatalf("unbound core project id = %q, want empty", appCore.ProjectID())
-	}
 	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
-	return appCore, httptest.NewServer(gateway.Handler())
+	return httptest.NewServer(gateway.Handler())
 }
 
 func createGatewayAuthoritativeSession(t *testing.T, appCore *core.Core) *session.Store {
