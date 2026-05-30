@@ -31,15 +31,8 @@ func TestRemoteAppServerReauthenticateConfiguresServerOwnedAuth(t *testing.T) {
 		t.Fatalf("serve.Start: %v", err)
 	}
 	defer func() { _ = srv.Close() }()
-	serveCtx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(serveCtx) }()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
@@ -76,26 +69,13 @@ func TestRemoteAppServerReauthenticatePromptsWhenServerAuthAlreadyReady(t *testi
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, memoryAuthHandler{state: auth.State{
-		Scope: auth.ScopeGlobal,
-		Method: auth.Method{
-			Type:   auth.MethodAPIKey,
-			APIKey: &auth.APIKeyMethod{Key: "old-key"},
-		},
-	}}, autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding{})
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
 	defer func() { _ = srv.Close() }()
-	serveCtx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(serveCtx) }()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
@@ -144,26 +124,13 @@ func TestRemoteAppServerEnsureAuthReadySkipsPickerWhenServerAuthAlreadyReady(t *
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, memoryAuthHandler{state: auth.State{
-		Scope: auth.ScopeGlobal,
-		Method: auth.Method{
-			Type:   auth.MethodAPIKey,
-			APIKey: &auth.APIKeyMethod{Key: "ready-key"},
-		},
-	}}, autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("ready-key"), autoOnboarding{})
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
 	defer func() { _ = srv.Close() }()
-	serveCtx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(serveCtx) }()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))
@@ -204,26 +171,13 @@ func TestRemoteLoginTransitionWaitsForAuthChoiceWhenServerAuthAlreadyReady(t *te
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
-	}, memoryAuthHandler{state: auth.State{
-		Scope: auth.ScopeGlobal,
-		Method: auth.Method{
-			Type:   auth.MethodAPIKey,
-			APIKey: &auth.APIKeyMethod{Key: "old-key"},
-		},
-	}}, autoOnboarding{})
+	}, apiKeyMemoryAuthHandlerWithoutTimestamp("old-key"), autoOnboarding{})
 	if err != nil {
 		t.Fatalf("serve.Start: %v", err)
 	}
 	defer func() { _ = srv.Close() }()
-	serveCtx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(serveCtx) }()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	remote, err := client.DialRemoteURL(context.Background(), config.ServerRPCURL(cfg))

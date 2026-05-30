@@ -41,14 +41,23 @@ func readyMemoryAuthHandler() memoryAuthHandler {
 }
 
 func apiKeyMemoryAuthHandler(key string) memoryAuthHandler {
-	return memoryAuthHandler{state: auth.State{
+	state := apiKeyMemoryAuthState(key)
+	state.UpdatedAt = time.Now().UTC()
+	return memoryAuthHandler{state: state}
+}
+
+func apiKeyMemoryAuthHandlerWithoutTimestamp(key string) memoryAuthHandler {
+	return memoryAuthHandler{state: apiKeyMemoryAuthState(key)}
+}
+
+func apiKeyMemoryAuthState(key string) auth.State {
+	return auth.State{
 		Scope: auth.ScopeGlobal,
 		Method: auth.Method{
 			Type:   auth.MethodAPIKey,
 			APIKey: &auth.APIKeyMethod{Key: key},
 		},
-		UpdatedAt: time.Now().UTC(),
-	}}
+	}
 }
 
 func saveReadyAppAuthState(t *testing.T, workspace string) {

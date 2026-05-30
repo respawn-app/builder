@@ -10,7 +10,6 @@ import (
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -36,12 +35,8 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
@@ -83,10 +78,6 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 		t.Fatalf("unexpected resolved transition: %+v", resolved)
 	}
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
 
 func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.T) {
@@ -102,12 +93,8 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
@@ -183,10 +170,6 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	waitForPendingAskResources(t, promptViews.AskViewClient(), plan.SessionID, 0)
 	waitForPendingApprovalResources(t, promptViews.ApprovalViewClient(), plan.SessionID, 0)
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
 
 func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
@@ -203,12 +186,8 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	defer func() { _ = srv.Close() }()
 	srv.Background().SetMinimumExecToBgTime(time.Millisecond)
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
@@ -273,10 +252,6 @@ func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	}
 	waitForRemoteProcessExit(t, processes.ProcessViewClient(), result.SessionID)
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
 
 func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
@@ -315,12 +290,8 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		}
 		defer func() { _ = srv.Close() }()
 
-		serveCtx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- srv.Serve(serveCtx)
-		}()
+		stopServing := serveAppServer(t, srv)
+		defer stopServing()
 		waitForConfiguredRemoteIdentity(t, workspace)
 
 		server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
@@ -330,10 +301,6 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		defer func() { _ = server.Close() }()
 		runInteractiveWorkflowScenario(t, server, "parity reply")
 
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
 	})
 }
 

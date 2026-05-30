@@ -422,18 +422,8 @@ func TestRemoteSessionStatusDoesNotReuseLocalAuthState(t *testing.T) {
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
@@ -525,18 +515,8 @@ func TestStartSessionServerRemoteReadyAuthDoesNotOpenStartupPicker(t *testing.T)
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	interactor := &interactiveAuthInteractor{
@@ -568,17 +548,8 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
-	defer func() {
-		cancel()
-		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-			t.Fatalf("Serve error = %v, want context canceled", serveErr)
-		}
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
@@ -687,12 +658,8 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{
@@ -732,10 +699,6 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 		t.Fatalf("expected daemon default llm endpoint unused, got %d", defaultHits.Load())
 	}
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
 
 func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *testing.T) {
@@ -751,12 +714,8 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{
@@ -782,10 +741,6 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 		t.Fatalf("enabled tools = %+v, want only shell", plan.EnabledTools)
 	}
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
 
 func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) {
@@ -801,12 +756,8 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 	}
 	defer func() { _ = srv.Close() }()
 
-	serveCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(serveCtx)
-	}()
+	stopServing := serveAppServer(t, srv)
+	defer stopServing()
 	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, readyMemoryAuthHandler())
@@ -897,8 +848,4 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 	}
 	waitForPendingApprovalResources(t, promptViews.ApprovalViewClient(), plan.SessionID, 0)
 
-	cancel()
-	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
-		t.Fatalf("Serve error = %v, want context canceled", serveErr)
-	}
 }
