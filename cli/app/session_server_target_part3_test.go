@@ -45,15 +45,7 @@ func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersisten
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "session lifecycle draft persistence")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "session lifecycle draft persistence")
 	defer runtimePlan.Close()
 	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID, ControllerLeaseID: runtimePlan.ControllerLeaseID, Input: "saved draft"}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
@@ -107,15 +99,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	}
 	promptViews := requirePromptViewServer(t, server)
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote prompt snapshot reads")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test remote prompt snapshot reads")
 	defer runtimePlan.Close()
 
 	askDone := make(chan error, 1)
@@ -455,15 +439,7 @@ func waitForRemoteInlineOutput(t *testing.T, controls client.ProcessControlClien
 
 func runInteractiveWorkflowScenario(t *testing.T, server interactiveSessionServer, wantReply string) {
 	t.Helper()
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "workflow parity")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "workflow parity")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello parity")

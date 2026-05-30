@@ -130,15 +130,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 		t.Fatal("expected incompatible configured daemon to be rejected")
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded fallback runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through embedded fallback")
@@ -188,15 +180,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 		t.Fatal("expected configured daemon without process capability to be rejected")
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded fallback runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after capability fallback")
@@ -248,15 +232,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutAuthBootstrapCapability
 		t.Fatal("expected configured daemon without auth bootstrap capability to be rejected")
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded fallback runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after auth bootstrap fallback")
@@ -308,15 +284,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProjectAttachCapability
 		t.Fatal("expected configured daemon without project attach capability to be rejected")
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test project attach fallback runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test project attach fallback runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after project attach fallback")
@@ -367,15 +335,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 		t.Fatal("expected configured daemon without transcript paging capability to be rejected")
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded fallback runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello after transcript paging fallback")
@@ -674,15 +634,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote interactive runtime override")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test remote interactive runtime override")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through interactive override")
@@ -767,15 +719,7 @@ func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) 
 	defer func() { _ = server.Close() }()
 	promptViews := requirePromptViewServer(t, server)
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote prompt round trip")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test remote prompt round trip")
 	defer runtimePlan.Close()
 
 	askDone := make(chan struct {

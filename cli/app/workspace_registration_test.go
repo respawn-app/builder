@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -52,6 +53,20 @@ func serveAppServer(t *testing.T, srv *serve.Server) func() {
 			t.Fatalf("Serve error = %v, want context canceled", serveErr)
 		}
 	}
+}
+
+func prepareAppRuntimePlan(t *testing.T, server launchPlannerServer, req sessionLaunchRequest, diagnosticWriter io.Writer, startLogLine string) (sessionLaunchPlan, *runtimeLaunchPlan) {
+	t.Helper()
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, diagnosticWriter, startLogLine)
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	return plan, runtimePlan
 }
 
 func configureAppTestServerPort(t *testing.T) {

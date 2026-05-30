@@ -434,15 +434,7 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, &bytes.Buffer{}, "test background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, &bytes.Buffer{}, "test background completion while idle")
 	defer runtimePlan.Close()
 
 	out := &bytes.Buffer{}
@@ -500,15 +492,7 @@ func TestNativeProgramRendersBackgroundCompletionFromShellManagerWhileIdle(t *te
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, &bytes.Buffer{}, "test shell-manager background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, &bytes.Buffer{}, "test shell-manager background completion while idle")
 	defer runtimePlan.Close()
 
 	manager := server.inner.Background()

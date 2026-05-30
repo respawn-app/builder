@@ -79,15 +79,7 @@ func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) 
 		t.Fatalf("expected remote app server, got %T", server)
 	}
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote interactive runtime")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test remote interactive runtime")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through interactive daemon")
@@ -194,15 +186,7 @@ func TestConfiguredDaemonEnvironmentContextUsesSessionWorkspaceRootForCWD(t *tes
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test daemon environment cwd")
-	if err != nil {
-		t.Fatalf("PrepareRuntime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test daemon environment cwd")
 	defer runtimePlan.Close()
 
 	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through interactive daemon")
@@ -639,15 +623,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		t.Fatalf("expected distinct workspace roots across clients, both=%q", fixture.serverA.Config().WorkspaceRoot)
 	}
 
-	plannerA := newSessionLaunchPlanner(fixture.serverA)
-	fixture.planA, err = plannerA.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("PlanSession A: %v", err)
-	}
-	fixture.runtimePlanA, err = plannerA.PrepareRuntime(context.Background(), fixture.planA, io.Discard, "test remote multi-client runtime A")
-	if err != nil {
-		t.Fatalf("PrepareRuntime A: %v", err)
-	}
+	fixture.planA, fixture.runtimePlanA = prepareAppRuntimePlan(t, fixture.serverA, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test remote multi-client runtime A")
 
 	plannerB := newSessionLaunchPlanner(fixture.serverB)
 	fixture.planB, err = plannerB.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: fixture.planA.SessionID})

@@ -28,15 +28,7 @@ func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
 		t.Fatalf("start embedded server: %v", err)
 	}
 	defer func() { _ = server.Close() }()
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test background completion while idle")
 	defer runtimePlan.Close()
 
 	activity := server.inner.SessionActivityClient()
@@ -84,15 +76,7 @@ func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t 
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test projected background completion while idle")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test projected background completion while idle")
 	defer runtimePlan.Close()
 
 	processID := "bg-1001"
@@ -132,15 +116,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process control")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test prepare runtime process control")
 	defer runtimePlan.Close()
 	if runtimePlan.Wiring.processControls == nil {
 		t.Fatal("expected PrepareRuntime to wire process control client")
@@ -174,15 +150,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process output")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test prepare runtime process output")
 	defer runtimePlan.Close()
 	if runtimePlan.Wiring.processOutput == nil {
 		t.Fatal("expected PrepareRuntime to wire process output client")
@@ -198,15 +166,7 @@ func TestEmbeddedAppServerPromptActivityStreamsAndHydratesPendingResources(t *te
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded prompt activity parity")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded prompt activity parity")
 	defer runtimePlan.Close()
 
 	askDone := make(chan struct {
@@ -290,15 +250,7 @@ func TestEmbeddedAppServerPendingPromptsNotifyUIAskHook(t *testing.T) {
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded ask notification")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true}, io.Discard, "test embedded ask notification")
 	defer runtimePlan.Close()
 
 	ringer := &countRinger{}
@@ -419,15 +371,7 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime primary run gate")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	plan, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test prepare runtime primary run gate")
 	defer runtimePlan.Close()
 	if runtimePlan.Wiring.runtimeClient == nil {
 		t.Fatal("expected PrepareRuntime to wire guarded runtime client")
@@ -485,15 +429,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	}
 	defer func() { _ = server.Close() }()
 
-	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
-	if err != nil {
-		t.Fatalf("plan session: %v", err)
-	}
-	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime in-flight primary run gate")
-	if err != nil {
-		t.Fatalf("prepare runtime: %v", err)
-	}
+	_, runtimePlan := prepareAppRuntimePlan(t, server, sessionLaunchRequest{Mode: launchModeInteractive}, io.Discard, "test prepare runtime in-flight primary run gate")
 	defer runtimePlan.Close()
 
 	type submitResult struct {
