@@ -287,17 +287,8 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	callGateway(t, conn, "subscribe", protocol.MethodSessionSubscribeActivity, serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID}, nil)
 
 	appCore.PublishRuntimeEvent(store.Meta().SessionID, runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
-	var notif protocol.Request
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive notification: %v", err)
-	}
-	if notif.Method != protocol.MethodSessionActivityEvent {
-		t.Fatalf("notification method = %q", notif.Method)
-	}
 	var event protocol.SessionActivityEventParams
-	if err := json.Unmarshal(notif.Params, &event); err != nil {
-		t.Fatalf("decode event params: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodSessionActivityEvent, "notification", &event)
 	if event.Event.Kind != "conversation_updated" || event.Event.StepID != "step-1" {
 		t.Fatalf("unexpected event: %+v", event.Event)
 	}
@@ -306,15 +297,7 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 		Kind:     runtime.EventToolCallStarted,
 		ToolCall: &llm.ToolCall{ID: "call-1", Name: "shell"},
 	})
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive tool event: %v", err)
-	}
-	if notif.Method != protocol.MethodSessionActivityEvent {
-		t.Fatalf("tool event method = %q", notif.Method)
-	}
-	if err := json.Unmarshal(notif.Params, &event); err != nil {
-		t.Fatalf("decode tool event params: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodSessionActivityEvent, "tool event", &event)
 	if len(event.Event.TranscriptEntries) != 1 {
 		t.Fatalf("tool transcript entries len = %d, want 1", len(event.Event.TranscriptEntries))
 	}
@@ -326,16 +309,8 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	}
 
 	appCore.UnregisterRuntime(store.Meta().SessionID, engine)
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive completion: %v", err)
-	}
-	if notif.Method != protocol.MethodSessionActivityComplete {
-		t.Fatalf("completion method = %q", notif.Method)
-	}
 	var complete protocol.StreamCompleteParams
-	if err := json.Unmarshal(notif.Params, &complete); err != nil {
-		t.Fatalf("decode completion: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodSessionActivityComplete, "completion", &complete)
 	if complete.Code != 0 || complete.Message != "" {
 		t.Fatalf("unexpected completion params: %+v", complete)
 	}
@@ -691,31 +666,14 @@ func TestGatewayProcessOutputSubscriptionStreamsOutputAndCompletion(t *testing.T
 	handshakeGateway(t, conn)
 	callGateway(t, conn, "subscribe", protocol.MethodProcessSubscribeOutput, serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID, OffsetBytes: 0}, nil)
 
-	var notif protocol.Request
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive output: %v", err)
-	}
-	if notif.Method != protocol.MethodProcessOutputEvent {
-		t.Fatalf("output method = %q", notif.Method)
-	}
 	var chunk protocol.ProcessOutputEventParams
-	if err := json.Unmarshal(notif.Params, &chunk); err != nil {
-		t.Fatalf("decode output: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodProcessOutputEvent, "output", &chunk)
 	if chunk.Chunk.ProcessID != result.SessionID || chunk.Chunk.OffsetBytes != 0 || chunk.Chunk.Text != "hello\n" {
 		t.Fatalf("unexpected process output chunk: %+v", chunk.Chunk)
 	}
 
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive completion: %v", err)
-	}
-	if notif.Method != protocol.MethodProcessOutputComplete {
-		t.Fatalf("completion method = %q", notif.Method)
-	}
 	var complete protocol.StreamCompleteParams
-	if err := json.Unmarshal(notif.Params, &complete); err != nil {
-		t.Fatalf("decode completion: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodProcessOutputComplete, "completion", &complete)
 	if complete.Code != 0 || complete.Message != "" {
 		t.Fatalf("unexpected completion params: %+v", complete)
 	}
@@ -738,61 +696,28 @@ func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t 
 	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: store.Meta().SessionID}, nil)
 	callGateway(t, conn, "subscribe", protocol.MethodPromptSubscribeActivity, serverapi.PromptActivitySubscribeRequest{SessionID: store.Meta().SessionID}, nil)
 
-	var notif protocol.Request
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive prompt pending: %v", err)
-	}
-	if notif.Method != protocol.MethodPromptActivityEvent {
-		t.Fatalf("prompt event method = %q", notif.Method)
-	}
 	var pending protocol.PromptActivityEventParams
-	if err := json.Unmarshal(notif.Params, &pending); err != nil {
-		t.Fatalf("decode prompt pending: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodPromptActivityEvent, "prompt pending", &pending)
 	if pending.Event.Type != clientui.PendingPromptEventPending || pending.Event.PromptID != "ask-1" || pending.Event.Question != "Proceed?" {
 		t.Fatalf("unexpected pending prompt event: %+v", pending.Event)
 	}
 
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive prompt snapshot complete: %v", err)
-	}
-	if notif.Method != protocol.MethodPromptActivityEvent {
-		t.Fatalf("snapshot prompt method = %q", notif.Method)
-	}
 	var snapshot protocol.PromptActivityEventParams
-	if err := json.Unmarshal(notif.Params, &snapshot); err != nil {
-		t.Fatalf("decode prompt snapshot: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodPromptActivityEvent, "prompt snapshot", &snapshot)
 	if snapshot.Event.Type != clientui.PendingPromptEventSnapshot {
 		t.Fatalf("unexpected prompt snapshot event: %+v", snapshot.Event)
 	}
 
 	appCore.CompletePendingPrompt(store.Meta().SessionID, "ask-1")
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive prompt resolved: %v", err)
-	}
-	if notif.Method != protocol.MethodPromptActivityEvent {
-		t.Fatalf("resolved prompt method = %q", notif.Method)
-	}
 	var resolved protocol.PromptActivityEventParams
-	if err := json.Unmarshal(notif.Params, &resolved); err != nil {
-		t.Fatalf("decode prompt resolved: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodPromptActivityEvent, "prompt resolved", &resolved)
 	if resolved.Event.Type != clientui.PendingPromptEventResolved || resolved.Event.PromptID != "ask-1" {
 		t.Fatalf("unexpected resolved prompt event: %+v", resolved.Event)
 	}
 
 	appCore.UnregisterRuntime(store.Meta().SessionID, engine)
-	if err := websocket.JSON.Receive(conn, &notif); err != nil {
-		t.Fatalf("receive prompt completion: %v", err)
-	}
-	if notif.Method != protocol.MethodPromptActivityComplete {
-		t.Fatalf("prompt completion method = %q", notif.Method)
-	}
 	var complete protocol.StreamCompleteParams
-	if err := json.Unmarshal(notif.Params, &complete); err != nil {
-		t.Fatalf("decode prompt completion: %v", err)
-	}
+	receiveGatewayNotification(t, conn, protocol.MethodPromptActivityComplete, "prompt completion", &complete)
 	if complete.Code != 0 || complete.Message != "" {
 		t.Fatalf("unexpected prompt completion params: %+v", complete)
 	}

@@ -143,6 +143,22 @@ func callGatewayExpectError(t *testing.T, conn *websocket.Conn, id string, metho
 	return resp.Error
 }
 
+func receiveGatewayNotification(t *testing.T, conn *websocket.Conn, method string, label string, out any) {
+	t.Helper()
+	var notif protocol.Request
+	if err := websocket.JSON.Receive(conn, &notif); err != nil {
+		t.Fatalf("receive %s: %v", label, err)
+	}
+	if notif.Method != method {
+		t.Fatalf("%s method = %q", label, notif.Method)
+	}
+	if out != nil {
+		if err := json.Unmarshal(notif.Params, out); err != nil {
+			t.Fatalf("decode %s params: %v", label, err)
+		}
+	}
+}
+
 func TestGatewayGoalRPCDoesNotRequireProjectAttachment(t *testing.T) {
 	_, server := newUnboundGatewayTestServer(t)
 	defer server.Close()
