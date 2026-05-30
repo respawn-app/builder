@@ -48,9 +48,7 @@ func TestPreparePersistenceRootAllowsIsolatedTempHomeUnderGoTest(t *testing.T) {
 }
 
 func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -215,9 +213,7 @@ func TestWriteManagedRGConfigFileForSettingsPathRejectsEmptyPath(t *testing.T) {
 }
 
 func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
@@ -232,9 +228,7 @@ func TestLoadHonorsHOMEEnvironmentForDefaultConfigRoot(t *testing.T) {
 }
 
 func TestLoadTrimsWorkspaceRootBeforeResolving(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newConfigTestEnv(t)
 
 	cfg, err := Load("  "+workspace+"  ", LoadOptions{})
 	if err != nil {
@@ -246,9 +240,7 @@ func TestLoadTrimsWorkspaceRootBeforeResolving(t *testing.T) {
 }
 
 func TestLoadAppliesWorkspaceConfigBeforeEnvBeforeCLI(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	t.Setenv("BUILDER_MODEL", "env-model")
 	if err := os.MkdirAll(filepath.Join(home, ".builder"), 0o755); err != nil {
 		t.Fatalf("create home config dir: %v", err)
@@ -620,9 +612,7 @@ func TestLoadResolvesWorktreeBaseDirRelativeToPersistenceRoot(t *testing.T) {
 }
 
 func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configDir := filepath.Join(home, ".builder")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -646,9 +636,7 @@ func TestLoadDerivesDefaultWorktreeBaseDirFromPersistenceRoot(t *testing.T) {
 }
 
 func TestLoadCreatesWorktreeBaseDir(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configDir := filepath.Join(home, ".builder")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -677,9 +665,7 @@ func TestLoadCreatesWorktreeBaseDir(t *testing.T) {
 }
 
 func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -704,9 +690,7 @@ func TestLoadSubagentRoleRejectsInvalidValues(t *testing.T) {
 }
 
 func TestLoadSubagentRoleAllowsReviewerAuthNoneToInheritParentBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -733,9 +717,7 @@ func TestLoadSubagentRoleAllowsReviewerAuthNoneToInheritParentBaseURL(t *testing
 }
 
 func TestLoadSubagentRoleAllowsReviewerAuthNoneWithExplicitFirstPartyBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -762,9 +744,7 @@ func TestLoadSubagentRoleAllowsReviewerAuthNoneWithExplicitFirstPartyBaseURL(t *
 }
 
 func TestLoadSubagentRoleRejectsPersistenceRoot(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -862,9 +842,7 @@ func TestValidateThemeAllowsAutoAndEmpty(t *testing.T) {
 }
 
 func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -914,9 +892,7 @@ func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 }
 
 func TestLoadReviewerOpenAIProviderOverrideInheritsMainOpenAIBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {

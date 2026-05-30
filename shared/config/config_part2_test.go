@@ -9,9 +9,7 @@ import (
 )
 
 func TestLoadCapabilityOverridesFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -62,9 +60,7 @@ is_openai_first_party = false
 }
 
 func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newConfigTestEnv(t)
 	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "true")
 	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
@@ -102,9 +98,7 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 }
 
 func TestLoadReviewerCapabilityOverridesFromFileAndEnv(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -186,9 +180,7 @@ supports_prompt_cache_key = true
 }
 
 func TestLoadReviewerCapabilitiesInheritMainWhenUnset(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -228,9 +220,7 @@ supports_responses_api = true
 }
 
 func TestEffectiveReviewerSettingsPreservesLoadedExplicitFalseCapabilities(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -273,9 +263,7 @@ supports_prompt_cache_key = false
 }
 
 func TestLoadReviewerModelContextWindowRejectsNegative(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -297,9 +285,7 @@ model_context_window = -1
 }
 
 func TestLoadReviewerModelCapabilityFalseOverrideDoesNotInheritMainTrue(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -458,9 +444,7 @@ func TestValidateSettingsWithSourcesAllowsSubagentReviewerAnthropicOverride(t *t
 }
 
 func TestLoadReviewerProviderCapabilitiesDoNotInheritMainForSeparateEndpoint(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -490,9 +474,7 @@ openai_base_url = "http://127.0.0.1:11434/v1"
 }
 
 func TestLoadReviewerProviderCapabilitiesInheritMainForNoOpOpenAIProviderOverride(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -527,9 +509,7 @@ provider_override = "openai"
 }
 
 func TestLoadReviewerProviderInheritsAnthropicProvider(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -551,9 +531,7 @@ provider_override = "anthropic"
 }
 
 func TestLoadReviewerProviderAllowsExplicitAnthropicProvider(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -578,9 +556,7 @@ provider_override = "anthropic"
 }
 
 func TestLoadProviderOverrideFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -603,9 +579,7 @@ func TestLoadProviderOverrideFromFile(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -625,9 +599,7 @@ func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -647,9 +619,7 @@ func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
 }
 
 func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -669,9 +639,7 @@ func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
 }
 
 func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -694,9 +662,7 @@ func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
 }
 
 func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newConfigTestEnv(t)
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
 
 	_, err := Load(workspace, LoadOptions{})
@@ -709,9 +675,7 @@ func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 }
 
 func TestLoadRequestInputTokenCountCapabilityRequiresProviderID(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	_, workspace := newConfigTestEnv(t)
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "true")
 
 	_, err := Load(workspace, LoadOptions{})
@@ -724,9 +688,7 @@ func TestLoadRequestInputTokenCountCapabilityRequiresProviderID(t *testing.T) {
 }
 
 func TestLoadPriorityRequestModeFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -749,9 +711,7 @@ func TestLoadPriorityRequestModeFromFile(t *testing.T) {
 }
 
 func TestLoadModelVerbosityFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -774,9 +734,7 @@ func TestLoadModelVerbosityFromFile(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidModelVerbosityFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -827,9 +785,7 @@ func TestProjectIDForWorkspaceRootCanonicalizesSymlinkedWorkspace(t *testing.T) 
 }
 
 func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -974,9 +930,7 @@ verbose_output = true
 }
 
 func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1022,9 +976,7 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1047,9 +999,7 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 }
 
 func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1072,9 +1022,7 @@ func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
 }
 
 func TestLoadSkillTogglesFromFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1103,9 +1051,7 @@ func TestLoadSkillTogglesFromFile(t *testing.T) {
 }
 
 func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1123,9 +1069,7 @@ func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
 }
 
 func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1147,9 +1091,7 @@ func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
 }
 
 func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1189,9 +1131,7 @@ func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestLoadToolPreamblesPrecedence(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1231,9 +1171,7 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 }
 
 func TestLoadAllowsReviewerAuthNoneWithoutBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1255,9 +1193,7 @@ auth = "none"
 }
 
 func TestLoadAllowsReviewerAuthNoneWithFirstPartyOpenAIBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1280,9 +1216,7 @@ auth = "none"
 }
 
 func TestLoadAllowsReviewerAuthNoneWithInheritedCompatibleBaseURL(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1309,9 +1243,7 @@ auth = "none"
 }
 
 func TestLoadRejectsRemovedTUIAlternateScreenSetting(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -1327,9 +1259,7 @@ func TestLoadRejectsRemovedTUIAlternateScreenSetting(t *testing.T) {
 }
 
 func TestLoadPrecedenceCLIOverEnvOverFile(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	home, workspace := newConfigTestEnv(t)
 
 	configPath := filepath.Join(home, ".builder", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
