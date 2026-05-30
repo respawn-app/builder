@@ -7,6 +7,8 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/server/workflowruntime"
+	"builder/shared/toolspec"
 )
 
 func mustCreateTestSession(t *testing.T, workspaceRoot ...string) *session.Store {
@@ -51,6 +53,42 @@ func mustNewTestEngine(t *testing.T, store *session.Store, client llm.Client, re
 		t.Fatalf("new engine: %v", err)
 	}
 	return engine
+}
+
+func mustNewFakeToolEngine(t *testing.T, store *session.Store, client llm.Client, cfg Config, toolIDs ...toolspec.ID) *Engine {
+	t.Helper()
+	handlers := make([]tools.Handler, 0, len(toolIDs))
+	for _, id := range toolIDs {
+		handlers = append(handlers, fakeTool{name: id})
+	}
+	return mustNewTestEngine(t, store, client, tools.NewRegistry(handlers...), cfg)
+}
+
+func mustNewExecTestEngine(t *testing.T, store *session.Store, client llm.Client, cfg Config) *Engine {
+	t.Helper()
+	return mustNewFakeToolEngine(t, store, client, cfg, toolspec.ToolExecCommand)
+}
+
+func mustNewHandoffTestEngine(t *testing.T, store *session.Store, client llm.Client, cfg Config) *Engine {
+	t.Helper()
+	if cfg.CompactionMode == "" {
+		cfg.CompactionMode = "local"
+	}
+	cfg.EnabledTools = []toolspec.ID{toolspec.ToolExecCommand, toolspec.ToolTriggerHandoff}
+	return mustNewExecTestEngine(t, store, client, cfg)
+}
+
+func mustNewWorkflowTestEngine(t *testing.T, store *session.Store, client llm.Client, workflowCfg *workflowruntime.Config, cfg Config) *Engine {
+	t.Helper()
+	cfg.WorkflowRun = workflowCfg
+	return mustNewExecTestEngine(t, store, client, cfg)
+}
+
+func mustSetWorktreeReminderState(t *testing.T, store *session.Store, state session.WorktreeReminderState) {
+	t.Helper()
+	if err := store.SetWorktreeReminderState(&state); err != nil {
+		t.Fatalf("SetWorktreeReminderState: %v", err)
+	}
 }
 
 func finalTextResponse(content string) llm.Response {

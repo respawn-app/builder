@@ -89,9 +89,8 @@ func TestWorkflowToolModeExposesCompleteNodeDespiteEnabledTools(t *testing.T) {
 	store := mustCreateTestSession(t)
 	workflowCfg := testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeTool)
 	workflowCfg.Contract.OutputFields = append(workflowCfg.Contract.OutputFields, workflow.OutputField{Name: "details", Description: "Detailed evidence."})
-	eng := mustNewTestEngine(t, store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewWorkflowTestEngine(t, store, &fakeClient{}, workflowCfg, Config{
 		EnabledTools: []toolspec.ID{toolspec.ToolAskQuestion},
-		WorkflowRun:  workflowCfg,
 	})
 	req, err := eng.buildRequest(context.Background(), "step", true)
 	if err != nil {
@@ -139,9 +138,8 @@ func TestWorkflowModePromptInjectedWithoutHeadlessOrUserPrompt(t *testing.T) {
 			Input: json.RawMessage(`{"transition_id":"done","commentary":"complete","summary":"done"}`),
 		},
 	)}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{
 		HeadlessMode: true,
-		WorkflowRun:  testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
 	})
 	if _, err := eng.SubmitWorkflowTurn(context.Background()); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -179,9 +177,7 @@ func TestWorkflowModePromptReinjectedForNewRunAfterExistingWorkflowPrompt(t *tes
 	client := &fakeClient{responses: []llm.Response{commentaryResponse("complete",
 		completeNodeCall("call_complete", json.RawMessage(`{"transition_id":"done","commentary":"complete","summary":"done"}`)),
 	)}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{})
 	if _, err := eng.SubmitWorkflowTurn(context.Background()); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -208,9 +204,7 @@ func TestWorkflowStructuredModeUsesStructuredOutput(t *testing.T) {
 	workflowCfg := testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeStructuredOutput)
 	workflowCfg.Contract.OutputFields = append(workflowCfg.Contract.OutputFields, workflow.OutputField{Name: "details", Description: "Detailed evidence."})
 	client := &fakeClient{responses: []llm.Response{structuredFinalResponse(`{"transition_id":"done","commentary":"complete","summary":"done","details":"evidence"}`)}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: workflowCfg,
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, workflowCfg, Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "node prompt"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -243,9 +237,8 @@ func TestWorkflowStructuredModeUsesStructuredOutput(t *testing.T) {
 func TestWorkflowAutoFallsBackToToolModeWhenStructuredOutputUnsupported(t *testing.T) {
 	store := mustCreateTestSession(t)
 	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "legacy"}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		Model:       "legacy",
-		WorkflowRun: testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeAuto),
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeAuto), Config{
+		Model: "legacy",
 	})
 	req, err := eng.buildRequest(context.Background(), "step", true)
 	if err != nil {
@@ -265,9 +258,8 @@ func TestWorkflowAutoFallsBackToToolModeWhenStructuredOutputUnsupported(t *testi
 func TestWorkflowForcedStructuredOutputFailsWhenUnsupported(t *testing.T) {
 	store := mustCreateTestSession(t)
 	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "legacy"}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		Model:       "legacy",
-		WorkflowRun: testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeStructuredOutput),
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(&fakeWorkflowController{}, config.WorkflowCompletionModeStructuredOutput), Config{
+		Model: "legacy",
 	})
 	_, err := eng.buildRequest(context.Background(), "step", true)
 	if err == nil || !strings.Contains(err.Error(), "structured output") {
@@ -334,9 +326,7 @@ func TestWorkflowDuplicateCompleteNodePreflightSkipsSideEffects(t *testing.T) {
 		),
 		commentaryResponse("complete", completeNodeCall("call_complete_3", json.RawMessage(`{"transition_id":"done","commentary":"complete","summary":"done"}`))),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -355,9 +345,7 @@ func TestWorkflowStructuredCompletionStopsWithoutAnotherTurn(t *testing.T) {
 		structuredFinalResponse(`{"transition_id":"done","commentary":"complete","summary":"done"}`),
 		structuredFinalResponse("unexpected"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeStructuredOutput),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeStructuredOutput), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -375,9 +363,7 @@ func TestWorkflowInvalidCompletionAttemptsInterruptAtCap(t *testing.T) {
 		commentaryResponse("bad", completeNodeCall("call_bad_2", json.RawMessage(`{"summary":1}`))),
 		structuredFinalResponse("unexpected"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -396,9 +382,7 @@ func TestWorkflowFinalAnswerViolationsInterruptAtCap(t *testing.T) {
 		structuredFinalResponse("done 3"),
 		structuredFinalResponse("unexpected"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -417,9 +401,7 @@ func TestWorkflowEmptyFinalAnswerViolationsInterruptAtCap(t *testing.T) {
 		structuredFinalResponse(""),
 		structuredFinalResponse("unexpected"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeTool),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeTool), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -437,9 +419,7 @@ func TestWorkflowStructuredEmptyFinalInterruptsAtInvalidCompletionCap(t *testing
 		structuredFinalResponse(""),
 		structuredFinalResponse("unexpected"),
 	}}
-	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{
-		WorkflowRun: testWorkflowConfig(controller, config.WorkflowCompletionModeStructuredOutput),
-	})
+	eng := mustNewWorkflowTestEngine(t, store, client, testWorkflowConfig(controller, config.WorkflowCompletionModeStructuredOutput), Config{})
 	if _, err := eng.SubmitUserMessage(context.Background(), "run"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}

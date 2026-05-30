@@ -47,15 +47,13 @@ func TestFirstMetaInjectionUsesPendingWorktreeCWD(t *testing.T) {
 	writeTestFile(t, filepath.Join(workspace, agentsFileName), "stale workspace instruction")
 	writeTestFile(t, filepath.Join(worktree, agentsFileName), "active worktree instruction")
 	store := mustCreateTestSession(t, workspace)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/new",
 		WorktreePath:  worktree,
 		WorkspaceRoot: workspace,
 		EffectiveCwd:  worktreeSubdir,
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
@@ -93,15 +91,13 @@ func TestSubmitUserMessageInjectsPendingWorktreeEnterReminder(t *testing.T) {
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/enter",
 		WorktreePath:  "/tmp/wt-enter",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-enter/pkg",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
@@ -154,15 +150,13 @@ func TestRunStepLoopMaterializesPendingWorktreeReminder(t *testing.T) {
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/direct",
 		WorktreePath:  "/tmp/wt-direct",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-direct",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
 
@@ -195,15 +189,13 @@ func TestRunStepLoopCountsPendingWorktreeReminderBeforeAutoCompaction(t *testing
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/compact",
 		WorktreePath:  "/tmp/wt-compact",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-compact",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	sawReminderDuringPreCompactionCount := false
 	client := &fakeCompactionClient{
@@ -281,15 +273,13 @@ func TestWorktreeReminderPersistFailureDoesNotDuplicateMaterializedReminder(t *t
 
 	observer := &failOnIssuedWorktreeReminderObservation{}
 	store := mustCreateNamedTestSession(t, "ws", t.TempDir(), session.WithPersistenceObserver(observer))
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/fail",
 		WorktreePath:  "/tmp/wt-fail",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-fail",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
 
@@ -325,15 +315,13 @@ func TestSubmitUserMessageInjectsPendingWorktreeExitReminder(t *testing.T) {
 	defer func() { prompts.WorktreeModeExitPrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeExit,
 		Branch:        "feature/exit",
 		WorktreePath:  "/tmp/wt-exit",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/workspace/pkg",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
@@ -364,15 +352,13 @@ func TestSubmitUserMessageMaterializesWorktreeReminderBeforeModelFailure(t *test
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/retry",
 		WorktreePath:  "/tmp/wt-retry",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-retry",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	failingClient := &hookClient{beforeReturn: func() error { return context.DeadlineExceeded }}
 	eng := mustNewTestEngine(t, store, failingClient, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
@@ -409,24 +395,20 @@ func TestSubmitUserMessageUsesLatestPendingWorktreeReminder(t *testing.T) {
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/old",
 		WorktreePath:  "/tmp/wt-old",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-old",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState first: %v", err)
-	}
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	})
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:          session.WorktreeReminderModeEnter,
 		Branch:        "feature/new",
 		WorktreePath:  "/tmp/wt-new",
 		WorkspaceRoot: "/tmp/workspace",
 		EffectiveCwd:  "/tmp/wt-new",
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState second: %v", err)
-	}
+	})
 
 	client := &fakeClient{responses: []llm.Response{finalOutputItemResponse("ok")}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
@@ -456,7 +438,7 @@ func TestSubmitUserMessageReinjectsWorktreeReminderAfterCompactionGenerationChan
 	defer func() { prompts.WorktreeModePrompt = prevPrompt }()
 
 	store := mustCreateTestSession(t)
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{
 		Mode:                  session.WorktreeReminderModeEnter,
 		Branch:                "feature/reinject",
 		WorktreePath:          "/tmp/wt-reinject",
@@ -464,9 +446,7 @@ func TestSubmitUserMessageReinjectsWorktreeReminderAfterCompactionGenerationChan
 		EffectiveCwd:          "/tmp/wt-reinject",
 		HasIssuedInGeneration: true,
 		IssuedCompactionCount: 0,
-	}); err != nil {
-		t.Fatalf("SetWorktreeReminderState: %v", err)
-	}
+	})
 
 	client := &fakeClient{responses: []llm.Response{
 		finalOutputItemResponse("ok-1"),
@@ -525,15 +505,11 @@ func TestSubmitUserMessagePreservesHistoricalWorktreeRemindersInRequest(t *testi
 	}}
 	eng := mustNewTestEngine(t, store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolExecCommand}), Config{})
 
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{Mode: session.WorktreeReminderModeEnter, Branch: "feature/enter", WorktreePath: "/tmp/wt-enter", WorkspaceRoot: "/tmp/workspace", EffectiveCwd: "/tmp/wt-enter"}); err != nil {
-		t.Fatalf("SetWorktreeReminderState enter: %v", err)
-	}
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{Mode: session.WorktreeReminderModeEnter, Branch: "feature/enter", WorktreePath: "/tmp/wt-enter", WorkspaceRoot: "/tmp/workspace", EffectiveCwd: "/tmp/wt-enter"})
 	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
-	if err := store.SetWorktreeReminderState(&session.WorktreeReminderState{Mode: session.WorktreeReminderModeExit, Branch: "feature/exit", WorktreePath: "/tmp/wt-exit", WorkspaceRoot: "/tmp/workspace", EffectiveCwd: "/tmp/workspace"}); err != nil {
-		t.Fatalf("SetWorktreeReminderState exit: %v", err)
-	}
+	mustSetWorktreeReminderState(t, store, session.WorktreeReminderState{Mode: session.WorktreeReminderModeExit, Branch: "feature/exit", WorktreePath: "/tmp/wt-exit", WorkspaceRoot: "/tmp/workspace", EffectiveCwd: "/tmp/workspace"})
 	if _, err := eng.SubmitUserMessage(context.Background(), "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}

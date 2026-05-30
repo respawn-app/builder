@@ -47,17 +47,15 @@ func (transportStaticAuth) AuthorizationHeader(context.Context) (string, error) 
 	return "Bearer token", nil
 }
 
+func newCacheWarningTestEngine(t *testing.T, client llm.Client, mode config.CacheWarningMode) (*session.Store, *Engine) {
+	t.Helper()
+	store := mustCreateTestSession(t)
+	return store, mustNewTestEngine(t, store, client, tools.NewRegistry(), Config{CacheWarningMode: mode})
+}
+
 func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMode(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 7}}, {Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 0}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeDefault)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -82,19 +80,11 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 }
 
 func TestGenerateWithRetryClient_SuppressesExactNonPostfixWarningWhenProviderReuseIncreases(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{
 		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 2_432}},
 		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 12_160}},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeDefault)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -112,19 +102,11 @@ func TestGenerateWithRetryClient_SuppressesExactNonPostfixWarningWhenProviderReu
 }
 
 func TestGenerateWithRetryClient_SuppressesExactNonPostfixWarningWithoutProviderCacheMetadata(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{
 		{Usage: llm.Usage{InputTokens: 10}},
 		{Usage: llm.Usage{InputTokens: 12}},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeDefault)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -150,16 +132,8 @@ func TestNew_RejectsInvalidCacheWarningMode(t *testing.T) {
 }
 
 func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeOff})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeOff)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -177,16 +151,8 @@ func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *test
 func TestGenerateWithRetryClient_FailedRequestDoesNotAdvanceLineage(t *testing.T) {
 	withGenerateRetryDelays(t, []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond})
 
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeDefault)
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
@@ -204,16 +170,8 @@ func TestGenerateWithRetryClient_FailedRequestDoesNotAdvanceLineage(t *testing.T
 }
 
 func TestGenerateWithRetryClient_PersistsVerboseReuseDropWarning(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 4}}, {Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 0}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeVerbose)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -235,16 +193,8 @@ func TestGenerateWithRetryClient_PersistsVerboseReuseDropWarning(t *testing.T) {
 }
 
 func TestGenerateWithRetryClient_DoesNotWarnAcrossDistinctCacheKeys(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeVerbose)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -746,21 +696,13 @@ func TestReviewerSuggestions_PromptCacheKeyStaysOnReviewerSessionAfterConversati
 }
 
 func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{
 		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 8}},
 		{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 6}},
 		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 10}},
 		{Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 0}},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeVerbose)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("conversation first generate: %v", err)
@@ -788,16 +730,8 @@ func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 }
 
 func TestGenerateWithRetryClient_CompactionRotatesConversationCacheKeyWithoutWarning(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeDefault)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -864,16 +798,8 @@ func (f *failingCacheClient) ProviderCapabilities(context.Context) (llm.Provider
 }
 
 func TestGenerateWithRetryClient_RestorePreservesRotatedCompactionKeyWithoutWarning(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
+	store, eng := newCacheWarningTestEngine(t, client, config.CacheWarningModeVerbose)
 
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
