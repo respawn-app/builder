@@ -148,7 +148,7 @@ func TestClaimActivationReusesPendingTakeoverRequest(t *testing.T) {
 		t.Fatal("expected pending retry to return same takeover state")
 	}
 	handle.controllerLeaseID = ""
-	if ok, err := svc.completeTakeover(context.Background(), "session-1", handle, takeover, "req-2", "lease-2"); err != nil || !ok {
+	if ok, err := svc.completeTakeover(context.Background(), "session-1", handle, takeover, "req-2", "lease-2", ""); err != nil || !ok {
 		t.Fatal("expected completeTakeover to succeed")
 	}
 	resp, err := activationResponseForTakeover(reusedTakeover)
@@ -500,6 +500,53 @@ func TestActivateSessionRuntimeReissuesControllerLeaseForTakeover(t *testing.T) 
 	}
 }
 
+func TestActivateSessionRuntimeTakeoverResetsOwnerIDs(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	oldLease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease old: %v", err)
+	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   oldLease.LeaseID,
+		ownerRefs:           1,
+		ownerIDs:            map[string]struct{}{"owner-old": {}},
+		ready:               make(chan struct{}),
+		close:               func() {},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-2",
+		SessionID:       fixture.store.Meta().SessionID,
+		OwnerID:         "owner-new",
+	})
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime takeover: %v", err)
+	}
+	if strings.TrimSpace(resp.LeaseID) == "" || resp.LeaseID == oldLease.LeaseID {
+		t.Fatalf("takeover response = %+v, want new lease", resp)
+	}
+	if handle.ownerRefs != 1 {
+		t.Fatalf("owner refs after takeover = %d, want 1", handle.ownerRefs)
+	}
+	if _, ok := handle.ownerIDs["owner-new"]; !ok || len(handle.ownerIDs) != 1 {
+		t.Fatalf("owner ids after takeover = %+v, want only new owner", handle.ownerIDs)
+	}
+
+	if _, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-2",
+		SessionID:       fixture.store.Meta().SessionID,
+		OwnerID:         "owner-new",
+	}); err != nil {
+		t.Fatalf("ActivateSessionRuntime takeover replay: %v", err)
+	}
+	if handle.ownerRefs != 1 {
+		t.Fatalf("owner refs after takeover replay = %d, want 1", handle.ownerRefs)
+	}
+}
+
 func TestCompleteTakeoverDoesNotMutateHandleWhenPreviousLeaseReleaseFails(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
@@ -518,7 +565,7 @@ func TestCompleteTakeoverDoesNotMutateHandleWhenPreviousLeaseReleaseFails(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ok, err := fixture.service.completeTakeover(ctx, fixture.store.Meta().SessionID, handle, takeover, "req-2", "lease-new")
+	ok, err := fixture.service.completeTakeover(ctx, fixture.store.Meta().SessionID, handle, takeover, "req-2", "lease-new", "")
 	if err == nil || errors.Is(err, serverapi.ErrInvalidControllerLease) {
 		t.Fatalf("completeTakeover error = %v, want operational error without invalid controller lease marker", err)
 	}

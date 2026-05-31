@@ -211,7 +211,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		return activationResponseForTakeover(takeover)
 	}
 	if claim == activationClaimTakeover {
-		return s.takeOverActivation(ctx, sessionID, requestID, handle, takeover)
+		return s.takeOverActivation(ctx, sessionID, requestID, ownerID, handle, takeover)
 	}
 	var leaseID string
 	var cleanup func()
@@ -957,7 +957,7 @@ func newRuntimeHandle(requestID string, ownerID string) *runtimeHandle {
 	return handle
 }
 
-func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requestID string, handle *runtimeHandle, takeover *runtimeTakeover) (serverapi.SessionRuntimeActivateResponse, error) {
+func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requestID string, ownerID string, handle *runtimeHandle, takeover *runtimeTakeover) (serverapi.SessionRuntimeActivateResponse, error) {
 	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 		s.failTakeover(sessionID, handle, takeover, err)
 		return serverapi.SessionRuntimeActivateResponse{}, err
@@ -972,7 +972,7 @@ func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requ
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	leaseID := strings.TrimSpace(lease.LeaseID)
-	ok, completeErr := s.completeTakeover(ctx, sessionID, handle, takeover, requestID, leaseID)
+	ok, completeErr := s.completeTakeover(ctx, sessionID, handle, takeover, requestID, leaseID, ownerID)
 	if completeErr != nil {
 		if strings.TrimSpace(leaseID) != "" {
 			s.releaseRuntimeLeaseBestEffort(sessionID, leaseID)
@@ -1027,7 +1027,7 @@ func (s *Service) completeActivation(handle *runtimeHandle, leaseID string, clos
 	close(handle.ready)
 }
 
-func (s *Service) completeTakeover(ctx context.Context, sessionID string, handle *runtimeHandle, takeover *runtimeTakeover, requestID string, leaseID string) (bool, error) {
+func (s *Service) completeTakeover(ctx context.Context, sessionID string, handle *runtimeHandle, takeover *runtimeTakeover, requestID string, leaseID string, ownerID string) (bool, error) {
 	if handle == nil || takeover == nil {
 		return false, nil
 	}
@@ -1061,6 +1061,10 @@ func (s *Service) completeTakeover(ctx context.Context, sessionID string, handle
 	current.controllerRequestID = strings.TrimSpace(requestID)
 	current.controllerLeaseID = trimmedLeaseID
 	current.ownerRefs = 1
+	current.ownerIDs = nil
+	if trimmedOwnerID := strings.TrimSpace(ownerID); trimmedOwnerID != "" {
+		current.ownerIDs = map[string]struct{}{trimmedOwnerID: {}}
+	}
 	current.takeover = nil
 	s.mu.Unlock()
 	s.cancelScheduledIdleUnload(trimmedSessionID)
