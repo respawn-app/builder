@@ -1346,6 +1346,29 @@ func TestRequireControllerLeaseAcceptsActiveController(t *testing.T) {
 	}
 }
 
+func TestRequireControllerLeaseRejectsReleasedControllerLease(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	if _, err := fixture.metadata.ReleaseRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("ReleaseRuntimeLease: %v", err)
+	}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ready:               make(chan struct{}),
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	err = fixture.service.RequireControllerLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID)
+	if !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("RequireControllerLease error = %v, want invalid controller lease", err)
+	}
+}
+
 func TestRequireControllerLeaseRejectsUnknownLease(t *testing.T) {
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {

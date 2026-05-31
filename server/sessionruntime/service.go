@@ -671,6 +671,11 @@ func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, 
 	if controllerLeaseID != trimmedLeaseID {
 		return invalidControllerLeaseError(trimmedSessionID)
 	}
+	if s.metadataStore != nil {
+		if _, err := s.validateRuntimeLease(ctx, trimmedSessionID, trimmedLeaseID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
