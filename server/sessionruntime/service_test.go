@@ -744,6 +744,62 @@ func TestReleaseSessionRuntimeOnlyIfIdleDropsOwnerWhenRequested(t *testing.T) {
 	}
 }
 
+func TestReleaseSessionRuntimeOnlyIfIdleKeepsSubscriberRuntime(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	fixture.service.runtimes = runtimeRegistry
+	engine, err := runtimepkg.New(fixture.store, &sessionRuntimeTestLLMClient{}, tools.NewRegistry(), runtimepkg.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	t.Cleanup(func() { _ = engine.Close() })
+	runtimeRegistry.Register(fixture.store.Meta().SessionID, engine)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           1,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	sub, err := runtimeRegistry.SubscribeSessionActivity(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	resp, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+		OnlyIfIdle:      true,
+		DropOwner:       true,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseSessionRuntime OnlyIfIdle with subscriber: %v", err)
+	}
+	if resp.Released {
+		t.Fatalf("release response = %+v, want unreleased while subscriber is connected", resp)
+	}
+	if closed.Load() != 0 {
+		t.Fatalf("runtime close count = %d, want 0", closed.Load())
+	}
+	if handle.ownerRefs != 0 {
+		t.Fatalf("owner refs = %d, want dropped owner", handle.ownerRefs)
+	}
+	if _, err := fixture.service.validateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, lease.LeaseID); err != nil {
+		t.Fatalf("subscriber runtime lease should remain valid: %v", err)
+	}
+}
+
 func TestReleaseSessionRuntimeOnlyIfIdleClosesIdleRuntime(t *testing.T) {
 	fixture := newSessionRuntimeFixture(t)
 	fixture.service.runtimes = registry.NewRuntimeRegistry()

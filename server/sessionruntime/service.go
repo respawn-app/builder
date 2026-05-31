@@ -404,6 +404,15 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 			}
 			return serverapi.SessionRuntimeReleaseResponse{Active: true}, nil
 		}
+		if s.runtimeHasSubscribers(sessionID) {
+			if primaryLease != nil {
+				primaryLease.Release()
+			}
+			if req.DropOwner {
+				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID)
+			}
+			return serverapi.SessionRuntimeReleaseResponse{}, nil
+		}
 		s.mu.Lock()
 		current = s.handles[sessionID]
 		if current == nil || current != handle || strings.TrimSpace(current.controllerLeaseID) != leaseID {
