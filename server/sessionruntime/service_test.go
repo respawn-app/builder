@@ -77,7 +77,7 @@ func TestClaimActivationReusesDuplicateRequest(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, takeover, claim, err := svc.claimActivation("session-1", "req-1")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-1", "")
 	if err != nil {
 		t.Fatalf("claimActivation: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestClaimActivationAllowsTakeoverAfterReady(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation: %v", err)
 	}
@@ -127,14 +127,14 @@ func TestClaimActivationReusesPendingTakeoverRequest(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation first takeover: %v", err)
 	}
 	if claim != activationClaimTakeover {
 		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	reusedHandle, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	reusedHandle, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation pending retry: %v", err)
 	}
@@ -170,14 +170,14 @@ func TestPendingTakeoverRetryUnblocksWhenTakeoverFails(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation first takeover: %v", err)
 	}
 	if claim != activationClaimTakeover {
 		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation pending retry: %v", err)
 	}
@@ -213,14 +213,14 @@ func TestCloseReleasedRuntimeHandleSignalsPendingTakeoverWaiters(t *testing.T) {
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2")
+	handle, takeover, claim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation first takeover: %v", err)
 	}
 	if claim != activationClaimTakeover {
 		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2")
+	_, reusedTakeover, reusedClaim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation pending retry: %v", err)
 	}
@@ -261,14 +261,14 @@ func TestClaimActivationRejectsConcurrentDifferentTakeoverRequest(t *testing.T) 
 	}}
 	close(svc.handles["session-1"].ready)
 
-	_, _, claim, err := svc.claimActivation("session-1", "req-2")
+	_, _, claim, err := svc.claimActivation("session-1", "req-2", "")
 	if err != nil {
 		t.Fatalf("claimActivation first takeover: %v", err)
 	}
 	if claim != activationClaimTakeover {
 		t.Fatalf("first claimActivation claim = %v, want takeover", claim)
 	}
-	_, _, _, err = svc.claimActivation("session-1", "req-3")
+	_, _, _, err = svc.claimActivation("session-1", "req-3", "")
 	if !errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
 		t.Fatalf("claimActivation competing takeover error = %v, want session already controlled", err)
 	}
@@ -371,6 +371,7 @@ func TestActivateSessionRuntimeReplayOwnerSurvivesOriginalDisconnect(t *testing.
 		controllerRequestID: "req-1",
 		controllerLeaseID:   lease.LeaseID,
 		ownerRefs:           1,
+		ownerIDs:            map[string]struct{}{"owner-1": {}},
 		ready:               make(chan struct{}),
 		close: func() {
 			closed.Add(1)
@@ -382,6 +383,7 @@ func TestActivateSessionRuntimeReplayOwnerSurvivesOriginalDisconnect(t *testing.
 	resp, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
 		ClientRequestID: "req-1",
 		SessionID:       fixture.store.Meta().SessionID,
+		OwnerID:         "owner-2",
 	})
 	if err != nil {
 		t.Fatalf("ActivateSessionRuntime replay: %v", err)
@@ -395,6 +397,7 @@ func TestActivateSessionRuntimeReplayOwnerSurvivesOriginalDisconnect(t *testing.
 		LeaseID:         lease.LeaseID,
 		OnlyIfIdle:      true,
 		DropOwner:       true,
+		OwnerID:         "owner-1",
 	})
 	if err != nil {
 		t.Fatalf("ReleaseSessionRuntime original disconnect: %v", err)
@@ -407,6 +410,55 @@ func TestActivateSessionRuntimeReplayOwnerSurvivesOriginalDisconnect(t *testing.
 	}
 	if handle.ownerRefs != 1 {
 		t.Fatalf("owner refs after original disconnect = %d, want replay owner", handle.ownerRefs)
+	}
+}
+
+func TestActivateSessionRuntimeIdempotentReplayDoesNotDoubleCountSameOwner(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           1,
+		ownerIDs:            map[string]struct{}{"owner-1": {}},
+		ready:               make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	if _, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		OwnerID:         "owner-1",
+	}); err != nil {
+		t.Fatalf("ActivateSessionRuntime replay: %v", err)
+	}
+	if handle.ownerRefs != 1 {
+		t.Fatalf("owner refs after same-owner replay = %d, want 1", handle.ownerRefs)
+	}
+	release, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         lease.LeaseID,
+		OnlyIfIdle:      true,
+		DropOwner:       true,
+		OwnerID:         "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+	if !release.Released {
+		t.Fatalf("release response = %+v, want released after single owner disconnect", release)
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("runtime close count = %d, want 1", closed.Load())
 	}
 }
 
@@ -484,7 +536,7 @@ func TestCompleteTakeoverDoesNotMutateHandleWhenPreviousLeaseReleaseFails(t *tes
 	default:
 		t.Fatal("takeover waiter was not signaled after failed takeover completion")
 	}
-	_, retryTakeover, claim, err := fixture.service.claimActivation(fixture.store.Meta().SessionID, "req-3")
+	_, retryTakeover, claim, err := fixture.service.claimActivation(fixture.store.Meta().SessionID, "req-3", "")
 	if err != nil {
 		t.Fatalf("claimActivation retry: %v", err)
 	}

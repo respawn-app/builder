@@ -118,12 +118,14 @@ type connectionState struct {
 	attachedWorkspaceID   string
 	attachedWorkspaceRoot string
 	attachedSession       string
+	runtimeOwnerID        string
 	ownedRuntimeLeases    map[string]connectionOwnedRuntimeLease
 }
 
 type connectionOwnedRuntimeLease struct {
 	SessionID string
 	LeaseID   string
+	OwnerID   string
 }
 
 type gatewaySubscriptionHandler func(g *Gateway, conn rpcwire.Conn, ctx context.Context, state *connectionState, route rpccontract.Route, req protocol.Request)
@@ -200,7 +202,7 @@ func (g *Gateway) handleConn(ctx context.Context, conn rpcwire.Conn) {
 		}
 		cancel()
 	}()
-	state := &connectionState{}
+	state := &connectionState{runtimeOwnerID: uuid.NewString()}
 	defer g.cleanupConnectionRuntimeLeases(state)
 	for {
 		req, err := receiveRequest(connCtx, conn)
@@ -243,6 +245,7 @@ func (g *Gateway) cleanupConnectionRuntimeLeases(state *connectionState) {
 			LeaseID:         lease.LeaseID,
 			OnlyIfIdle:      true,
 			DropOwner:       true,
+			OwnerID:         lease.OwnerID,
 		})
 		cancel()
 	}

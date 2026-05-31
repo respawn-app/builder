@@ -10,6 +10,7 @@ import (
 type SessionRuntimeActivateRequest struct {
 	ClientRequestID string              `json:"client_request_id"`
 	SessionID       string              `json:"session_id"`
+	OwnerID         string              `json:"owner_id,omitempty"`
 	ActiveSettings  config.Settings     `json:"active_settings"`
 	EnabledToolIDs  []string            `json:"enabled_tool_ids"`
 	Source          config.SourceReport `json:"source"`
@@ -26,6 +27,7 @@ type SessionRuntimeReleaseRequest struct {
 	LeaseID         string `json:"lease_id"`
 	OnlyIfIdle      bool   `json:"only_if_idle,omitempty"`
 	DropOwner       bool   `json:"drop_owner,omitempty"`
+	OwnerID         string `json:"owner_id,omitempty"`
 }
 
 type SessionRuntimeReleaseResponse struct {

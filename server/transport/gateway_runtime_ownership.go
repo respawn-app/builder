@@ -14,7 +14,7 @@ func (s *connectionState) recordOwnedRuntimeLease(sessionID string, leaseID stri
 	if s.ownedRuntimeLeases == nil {
 		s.ownedRuntimeLeases = make(map[string]connectionOwnedRuntimeLease)
 	}
-	s.ownedRuntimeLeases[trimmedSessionID] = connectionOwnedRuntimeLease{SessionID: trimmedSessionID, LeaseID: trimmedLeaseID}
+	s.ownedRuntimeLeases[trimmedSessionID] = connectionOwnedRuntimeLease{SessionID: trimmedSessionID, LeaseID: trimmedLeaseID, OwnerID: strings.TrimSpace(s.runtimeOwnerID)}
 }
 
 func (s *connectionState) removeOwnedRuntimeLease(sessionID string, leaseID string) {

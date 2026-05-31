@@ -56,6 +56,7 @@ type runtimeHandle struct {
 	controllerRequestID string
 	controllerLeaseID   string
 	ownerRefs           int
+	ownerIDs            map[string]struct{}
 	activationErr       error
 	closing             bool
 	takeover            *runtimeTakeover
@@ -176,6 +177,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
+	ownerID := strings.TrimSpace(req.OwnerID)
 	var handle *runtimeHandle
 	var takeover *runtimeTakeover
 	var claim activationClaim
@@ -184,7 +186,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		if s.confirmExternalSessionRuntimeActive(ctx, sessionID) {
 			return serverapi.SessionRuntimeActivateResponse{ReadOnly: true}, nil
 		}
-		handle, takeover, claim, err = s.claimActivation(sessionID, requestID)
+		handle, takeover, claim, err = s.claimActivation(sessionID, requestID, ownerID)
 		if err != nil {
 			return serverapi.SessionRuntimeActivateResponse{}, err
 		}
@@ -199,7 +201,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
 			return serverapi.SessionRuntimeActivateResponse{}, err
 		}
-		s.addRuntimeHandleOwnerRef(sessionID, handle)
+		s.addRuntimeHandleOwnerRef(sessionID, handle, ownerID)
 		return activationResponseForHandle(handle)
 	}
 	if claim == activationClaimTakeoverReuse {
@@ -390,7 +392,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 		lease, err := s.acquirePrimaryRunLease(sessionID)
 		if errors.Is(err, primaryrun.ErrActivePrimaryRun) {
 			if req.DropOwner {
-				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID)
+				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID, req.OwnerID)
 			}
 			return serverapi.SessionRuntimeReleaseResponse{Active: true}, nil
 		}
@@ -410,7 +412,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 				primaryLease.Release()
 			}
 			if req.DropOwner {
-				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID)
+				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID, req.OwnerID)
 			}
 			return serverapi.SessionRuntimeReleaseResponse{Active: true}, nil
 		}
@@ -419,7 +421,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 				primaryLease.Release()
 			}
 			if req.DropOwner {
-				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID)
+				s.markRuntimeHandleOrphaned(sessionID, handle, leaseID, req.OwnerID)
 			}
 			return serverapi.SessionRuntimeReleaseResponse{}, nil
 		}
@@ -475,7 +477,7 @@ func (s *Service) runtimeHasActiveRun(ctx context.Context, sessionID string) (bo
 	return engine.ActiveRun() != nil, nil
 }
 
-func (s *Service) markRuntimeHandleOrphaned(sessionID string, handle *runtimeHandle, leaseID string) {
+func (s *Service) markRuntimeHandleOrphaned(sessionID string, handle *runtimeHandle, leaseID string, ownerID string) {
 	if s == nil || handle == nil {
 		return
 	}
@@ -484,7 +486,15 @@ func (s *Service) markRuntimeHandleOrphaned(sessionID string, handle *runtimeHan
 	s.mu.Lock()
 	current := s.handles[trimmedSessionID]
 	if current == handle && strings.TrimSpace(current.controllerLeaseID) == trimmedLeaseID {
-		if current.ownerRefs > 0 {
+		trimmedOwnerID := strings.TrimSpace(ownerID)
+		if trimmedOwnerID != "" && len(current.ownerIDs) > 0 {
+			if _, ok := current.ownerIDs[trimmedOwnerID]; ok {
+				delete(current.ownerIDs, trimmedOwnerID)
+				if current.ownerRefs > 0 {
+					current.ownerRefs--
+				}
+			}
+		} else if current.ownerRefs > 0 {
 			current.ownerRefs--
 		}
 	}
@@ -492,7 +502,7 @@ func (s *Service) markRuntimeHandleOrphaned(sessionID string, handle *runtimeHan
 	s.scheduleIdleUnload(trimmedSessionID, s.defaultIdleUnloadDelay())
 }
 
-func (s *Service) addRuntimeHandleOwnerRef(sessionID string, handle *runtimeHandle) {
+func (s *Service) addRuntimeHandleOwnerRef(sessionID string, handle *runtimeHandle, ownerID string) {
 	if s == nil || handle == nil {
 		return
 	}
@@ -502,7 +512,17 @@ func (s *Service) addRuntimeHandleOwnerRef(sessionID string, handle *runtimeHand
 	}
 	s.mu.Lock()
 	if current := s.handles[trimmedSessionID]; current == handle {
-		current.ownerRefs++
+		if trimmedOwnerID := strings.TrimSpace(ownerID); trimmedOwnerID != "" {
+			if current.ownerIDs == nil {
+				current.ownerIDs = make(map[string]struct{})
+			}
+			if _, exists := current.ownerIDs[trimmedOwnerID]; !exists {
+				current.ownerIDs[trimmedOwnerID] = struct{}{}
+				current.ownerRefs++
+			}
+		} else {
+			current.ownerRefs++
+		}
 	}
 	s.mu.Unlock()
 	s.cancelScheduledIdleUnload(trimmedSessionID)
@@ -893,7 +913,7 @@ func (s *Service) activeRuntimeHandle(ctx context.Context, sessionID string) (*r
 // Phase 2 temporarily allows many attached readers, but exactly one controlling
 // client per session. A second activation must fail explicitly instead of
 // joining the active runtime.
-func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeHandle, *runtimeTakeover, activationClaim, error) {
+func (s *Service) claimActivation(sessionID string, requestID string, ownerID string) (*runtimeHandle, *runtimeTakeover, activationClaim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
@@ -919,18 +939,22 @@ func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeH
 		}
 		return nil, nil, activationClaimOwner, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 	}
-	handle := newRuntimeHandle(requestID)
+	handle := newRuntimeHandle(requestID, ownerID)
 	s.handles[sessionID] = handle
 	return handle, nil, activationClaimOwner, nil
 }
 
-func newRuntimeHandle(requestID string) *runtimeHandle {
-	return &runtimeHandle{
+func newRuntimeHandle(requestID string, ownerID string) *runtimeHandle {
+	handle := &runtimeHandle{
 		controllerRequestID: strings.TrimSpace(requestID),
 		ownerRefs:           1,
 		ready:               make(chan struct{}),
 		closed:              make(chan struct{}),
 	}
+	if trimmedOwnerID := strings.TrimSpace(ownerID); trimmedOwnerID != "" {
+		handle.ownerIDs = map[string]struct{}{trimmedOwnerID: {}}
+	}
+	return handle
 }
 
 func (s *Service) takeOverActivation(ctx context.Context, sessionID string, requestID string, handle *runtimeHandle, takeover *runtimeTakeover) (serverapi.SessionRuntimeActivateResponse, error) {
