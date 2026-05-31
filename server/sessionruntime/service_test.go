@@ -746,7 +746,8 @@ func TestIdleRuntimeUnloadReleasesOrphanedRuntimeAfterPrimaryRunFinishes(t *test
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	runtimeRegistry.SetInterestObserver(fixture.service.runtimeInterestChanged)
 	fixture.service.runtimes = runtimeRegistry
-	fixture.service.idleUnloadDelay = 10 * time.Millisecond
+	fixture.service.idleUnloadDelay = 100 * time.Millisecond
+	fixture.service.runFinishedUnloadDelay = 40 * time.Millisecond
 	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("CreateRuntimeLease: %v", err)
@@ -767,18 +768,60 @@ func TestIdleRuntimeUnloadReleasesOrphanedRuntimeAfterPrimaryRunFinishes(t *test
 	if err != nil {
 		t.Fatalf("AcquirePrimaryRun: %v", err)
 	}
-	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestChanged)
 	select {
 	case <-closed:
 		t.Fatal("idle reaper closed runtime while primary run was active")
 	case <-time.After(30 * time.Millisecond):
 	}
 	active.Release()
-	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestRunFinished)
 	select {
 	case <-closed:
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for idle reaper to close orphaned runtime")
+	}
+}
+
+func TestIdleRuntimeUnloadUsesThreeMinuteDefaultAfterRunFinishes(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	if fixture.service.runFinishedIdleUnloadDelay() != 3*time.Minute {
+		t.Fatalf("run finished idle unload delay = %s, want 3m", fixture.service.runFinishedIdleUnloadDelay())
+	}
+}
+
+func TestIdleRuntimeUnloadUsesRunFinishedDebounceInsteadOfDisconnectDebounce(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	fixture.service.runtimes = registry.NewRuntimeRegistry()
+	fixture.service.idleUnloadDelay = 10 * time.Millisecond
+	fixture.service.runFinishedUnloadDelay = 40 * time.Millisecond
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		controllerRequestID: "req-1",
+		controllerLeaseID:   lease.LeaseID,
+		ownerRefs:           0,
+		ready:               make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestRunFinished)
+	select {
+	case <-closed:
+		t.Fatal("idle reaper used disconnect debounce after run finished")
+	case <-time.After(25 * time.Millisecond):
+	}
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for run-finished idle reaper")
 	}
 }
 
@@ -814,7 +857,7 @@ func TestIdleRuntimeUnloadWaitsForTransientSubscriberReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubscribeSessionActivity: %v", err)
 	}
-	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestChanged)
 	select {
 	case <-closed:
 		t.Fatal("idle reaper closed runtime while subscriber was connected")
@@ -859,7 +902,7 @@ func TestIdleRuntimeUnloadWaitsForSubscriberReconnectBeforeDebounce(t *testing.T
 	close(handle.ready)
 	fixture.service.handles[fixture.store.Meta().SessionID] = handle
 
-	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestChanged)
 	time.Sleep(15 * time.Millisecond)
 	sub, err := runtimeRegistry.SubscribeSessionActivity(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
@@ -901,7 +944,7 @@ func TestIdleRuntimeUnloadIgnoresStaleTimerAfterOwnerReconnect(t *testing.T) {
 	close(handle.ready)
 	fixture.service.handles[fixture.store.Meta().SessionID] = handle
 
-	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID)
+	fixture.service.runtimeInterestChanged(fixture.store.Meta().SessionID, registry.RuntimeInterestChanged)
 	fixture.service.mu.Lock()
 	handle.ownerRefs = 1
 	fixture.service.mu.Unlock()

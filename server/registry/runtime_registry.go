@@ -22,8 +22,15 @@ type RuntimeRegistry struct {
 	directory  *runtimeDirectory
 	leases     *primaryRunLeaseStore
 	observerMu sync.Mutex
-	observer   func(sessionID string)
+	observer   func(sessionID string, reason RuntimeInterestReason)
 }
+
+type RuntimeInterestReason int
+
+const (
+	RuntimeInterestChanged RuntimeInterestReason = iota
+	RuntimeInterestRunFinished
+)
 
 func NewRuntimeRegistry() *RuntimeRegistry {
 	return &RuntimeRegistry{
@@ -76,7 +83,11 @@ func (r *RuntimeRegistry) PublishRuntimeEvent(sessionID string, evt runtime.Even
 	}
 	entry.sessionActivity.Publish(runtimeview.EventFromRuntime(evt))
 	if evt.RunState != nil {
-		r.notifyInterestChanged(sessionID)
+		reason := RuntimeInterestChanged
+		if evt.RunState.Lifecycle.Phase == runtime.RunLifecycleFinished {
+			reason = RuntimeInterestRunFinished
+		}
+		r.notifyInterestChanged(sessionID, reason)
 	}
 }
 
@@ -97,9 +108,9 @@ func (r *RuntimeRegistry) SubscribeSessionActivityFrom(_ context.Context, req se
 	if err != nil {
 		return nil, err
 	}
-	r.notifyInterestChanged(id)
+	r.notifyInterestChanged(id, RuntimeInterestChanged)
 	return &notifyingSessionActivitySubscription{SessionActivitySubscription: sub, onClose: func() {
-		r.notifyInterestChanged(id)
+		r.notifyInterestChanged(id, RuntimeInterestChanged)
 	}}, nil
 }
 
@@ -121,9 +132,9 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 		if err != nil {
 			return nil, err
 		}
-		r.notifyInterestChanged(id)
+		r.notifyInterestChanged(id, RuntimeInterestChanged)
 		return &notifyingPromptActivitySubscription{PromptActivitySubscription: sub, onClose: func() {
-			r.notifyInterestChanged(id)
+			r.notifyInterestChanged(id, RuntimeInterestChanged)
 		}}, nil
 	}
 	sub, err := entry.promptActivity.Subscribe(nil, req.AfterSequence)
@@ -133,9 +144,9 @@ func (r *RuntimeRegistry) SubscribePromptActivityFrom(_ context.Context, req ser
 	if sub == nil {
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
-	r.notifyInterestChanged(id)
+	r.notifyInterestChanged(id, RuntimeInterestChanged)
 	return &notifyingPromptActivitySubscription{PromptActivitySubscription: sub, onClose: func() {
-		r.notifyInterestChanged(id)
+		r.notifyInterestChanged(id, RuntimeInterestChanged)
 	}}, nil
 }
 
@@ -216,7 +227,7 @@ func (r *RuntimeRegistry) AcquirePrimaryRun(sessionID string) (primaryrun.Lease,
 	return r.leases.Acquire(sessionID)
 }
 
-func (r *RuntimeRegistry) SetInterestObserver(observer func(sessionID string)) {
+func (r *RuntimeRegistry) SetInterestObserver(observer func(sessionID string, reason RuntimeInterestReason)) {
 	if r == nil {
 		return
 	}
@@ -236,7 +247,7 @@ func (r *RuntimeRegistry) HasRuntimeSubscribers(sessionID string) bool {
 	return entry.sessionActivity.SubscriberCount() > 0 || entry.promptActivity.SubscriberCount() > 0
 }
 
-func (r *RuntimeRegistry) notifyInterestChanged(sessionID string) {
+func (r *RuntimeRegistry) notifyInterestChanged(sessionID string, reason RuntimeInterestReason) {
 	if r == nil {
 		return
 	}
@@ -248,7 +259,7 @@ func (r *RuntimeRegistry) notifyInterestChanged(sessionID string) {
 	observer := r.observer
 	r.observerMu.Unlock()
 	if observer != nil {
-		observer(id)
+		observer(id, reason)
 	}
 }
 

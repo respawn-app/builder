@@ -47,8 +47,9 @@ type Service struct {
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
 
-	idleUnloadDelay time.Duration
-	idleTimers      map[string]*runtimeIdleTimer
+	idleUnloadDelay        time.Duration
+	runFinishedUnloadDelay time.Duration
+	idleTimers             map[string]*runtimeIdleTimer
 }
 
 type runtimeHandle struct {
@@ -72,6 +73,7 @@ type runtimeIdleTimer struct {
 
 const (
 	defaultRuntimeIdleUnloadDelay        = 5 * time.Second
+	defaultRunFinishedIdleUnloadDelay    = 3 * time.Minute
 	bestEffortRuntimeLeaseReleaseTimeout = 2 * time.Second
 )
 
@@ -95,18 +97,19 @@ const (
 
 func NewService(persistenceRoot string, metadataStore *metadata.Store, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	svc := &Service{
-		persistenceRoot:  strings.TrimSpace(persistenceRoot),
-		metadataStore:    metadataStore,
-		authManager:      authManager,
-		fastModeState:    fastModeState,
-		background:       background,
-		backgroundRouter: backgroundRouter,
-		runtimes:         runtimes,
-		sessionStores:    sessionStores,
-		storeOptions:     append([]session.StoreOption(nil), storeOptions...),
-		handles:          make(map[string]*runtimeHandle),
-		idleUnloadDelay:  defaultRuntimeIdleUnloadDelay,
-		idleTimers:       make(map[string]*runtimeIdleTimer),
+		persistenceRoot:        strings.TrimSpace(persistenceRoot),
+		metadataStore:          metadataStore,
+		authManager:            authManager,
+		fastModeState:          fastModeState,
+		background:             background,
+		backgroundRouter:       backgroundRouter,
+		runtimes:               runtimes,
+		sessionStores:          sessionStores,
+		storeOptions:           append([]session.StoreOption(nil), storeOptions...),
+		handles:                make(map[string]*runtimeHandle),
+		idleUnloadDelay:        defaultRuntimeIdleUnloadDelay,
+		runFinishedUnloadDelay: defaultRunFinishedIdleUnloadDelay,
+		idleTimers:             make(map[string]*runtimeIdleTimer),
 	}
 	if runtimes != nil {
 		runtimes.SetInterestObserver(svc.runtimeInterestChanged)
@@ -464,11 +467,15 @@ func (s *Service) markRuntimeHandleOrphaned(sessionID string, handle *runtimeHan
 		current.ownerRefs = 0
 	}
 	s.mu.Unlock()
-	s.scheduleIdleUnload(trimmedSessionID)
+	s.scheduleIdleUnload(trimmedSessionID, s.defaultIdleUnloadDelay())
 }
 
-func (s *Service) runtimeInterestChanged(sessionID string) {
-	s.scheduleIdleUnload(sessionID)
+func (s *Service) runtimeInterestChanged(sessionID string, reason registry.RuntimeInterestReason) {
+	delay := s.defaultIdleUnloadDelay()
+	if reason == registry.RuntimeInterestRunFinished {
+		delay = s.runFinishedIdleUnloadDelay()
+	}
+	s.scheduleIdleUnload(sessionID, delay)
 }
 
 func (s *Service) cancelScheduledIdleUnload(sessionID string) {
@@ -507,12 +514,26 @@ func (s *Service) clearScheduledIdleUnload(sessionID string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) scheduleIdleUnload(sessionID string) {
+func (s *Service) defaultIdleUnloadDelay() time.Duration {
+	if s == nil || s.idleUnloadDelay <= 0 {
+		return defaultRuntimeIdleUnloadDelay
+	}
+	return s.idleUnloadDelay
+}
+
+func (s *Service) runFinishedIdleUnloadDelay() time.Duration {
+	if s == nil || s.runFinishedUnloadDelay <= 0 {
+		return defaultRunFinishedIdleUnloadDelay
+	}
+	return s.runFinishedUnloadDelay
+}
+
+func (s *Service) scheduleIdleUnload(sessionID string, delay time.Duration) {
 	if s == nil {
 		return
 	}
 	trimmedSessionID := strings.TrimSpace(sessionID)
-	if trimmedSessionID == "" || s.idleUnloadDelay <= 0 {
+	if trimmedSessionID == "" || delay <= 0 {
 		return
 	}
 	s.mu.Lock()
@@ -529,7 +550,6 @@ func (s *Service) scheduleIdleUnload(sessionID string) {
 	if state.timer != nil {
 		state.timer.Stop()
 	}
-	delay := s.idleUnloadDelay
 	state.timer = time.AfterFunc(delay, func() {
 		s.runScheduledIdleUnload(trimmedSessionID, generation)
 	})

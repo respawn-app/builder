@@ -144,6 +144,34 @@ func TestRuntimeRegistryReplaysSessionActivityFromCursor(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistryReportsRunFinishedInterestReason(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+	reasons := make(chan RuntimeInterestReason, 1)
+	registry.SetInterestObserver(func(sessionID string, reason RuntimeInterestReason) {
+		if sessionID == "session-1" {
+			reasons <- reason
+		}
+	})
+
+	registry.PublishRuntimeEvent("session-1", runtime.Event{
+		Kind:     runtime.EventRunStateChanged,
+		StepID:   "step-1",
+		RunState: &runtime.RunState{Lifecycle: runtime.FinishedRunLifecycle(runtime.RunModeTurn)},
+	})
+
+	select {
+	case reason := <-reasons:
+		if reason != RuntimeInterestRunFinished {
+			t.Fatalf("interest reason = %v, want run finished", reason)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for interest observer")
+	}
+}
+
 func TestRuntimeRegistryDeliversReplayBeforePostSubscribeLiveEvents(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	engine := &runtime.Engine{}
