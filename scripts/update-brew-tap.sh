@@ -170,7 +170,7 @@ mkdir -p "$(dirname "$formula_path")"
 cat >"$tmp_formula" <<EOF
 class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
-  homepage "https://github.com/respawn-app/builder"
+  homepage "https://github.com/respawn-llc/builder"
   url "$url"
   sha256 "$sha256"
   license "AGPL-3.0-only"

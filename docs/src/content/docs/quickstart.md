@@ -19,13 +19,13 @@ These versions are **not auto-updated**. Please keep them updated manually by re
 Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.sh | sh
 ```
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.ps1 | iex
 ```
 
 Check the installed version with: `builder --version`

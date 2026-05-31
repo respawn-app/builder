@@ -12,7 +12,7 @@ import (
 	"builder/shared/clientui"
 )
 
-const defaultLatestReleaseURL = "https://api.github.com/repos/respawn-app/builder/releases/latest"
+const defaultLatestReleaseURL = "https://api.github.com/repos/respawn-llc/builder/releases/latest"
 
 type Service struct {
 	currentVersion string

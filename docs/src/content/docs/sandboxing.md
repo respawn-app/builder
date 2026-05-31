@@ -92,7 +92,7 @@ RUN apt-get update \
   && chown -R builder:builder /workspace /home/builder
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh \
+RUN curl -fsSL https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.sh \
   | BUILDER_PREFIX=/usr/local BUILDER_VERSION="${BUILDER_VERSION}" sh
 
 USER builder

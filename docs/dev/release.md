@@ -68,14 +68,14 @@ Verify all of these before considering the release done:
 4. A standalone Unix install works and passes checksum verification when the release publishes `checksums.txt`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.sh | sh
 builder --version
 ```
 
 5. A standalone Windows install works and passes checksum verification:
 
 ```powershell
-irm https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/respawn-llc/builder/main/scripts/install.ps1 | iex
 builder --version
 ```
 

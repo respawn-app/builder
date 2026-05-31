@@ -11,7 +11,7 @@
   ·
   <a href="https://opensource.respawn.pro/builder/docs/">Docs</a>
   ·
-  <a href="https://github.com/respawn-app/builder/releases">Releases</a>
+  <a href="https://github.com/respawn-llc/builder/releases">Releases</a>
 </p>
 
 Builder is a coding agent for professional engineers. It gives frontier coding models the features that empower them to produce their best output: from contextual reminders and harness awareness to token-optimized searches and async execution loops, then wraps that in a UI built for engineers who want to ship real products and work across multiple large codebases.
